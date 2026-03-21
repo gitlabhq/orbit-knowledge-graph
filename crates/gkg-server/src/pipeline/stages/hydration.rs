@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::ArrowClickHouseClient;
+use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
 use futures::future::try_join_all;
 use query_engine::compiler::{
     DynamicColumnMode, HydrationPlan, HydrationTemplate, QueryType, compile,
@@ -13,11 +13,13 @@ use query_engine::compiler::{
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 use query_engine::types::QueryResult;
 
-use crate::pipeline::types::RedactionOutput;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
-use query_engine::shared::{DebugQuery, HydrationOutput};
+use query_engine::shared::RedactionOutput;
+use query_engine::shared::{
+    DebugQuery, HydrationOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
+};
 
 use query_engine::compiler::constants::{
     GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
@@ -41,7 +43,7 @@ impl HydrationStage {
         ctx: &QueryPipelineContext,
         templates: &[HydrationTemplate],
         query_result: &QueryResult,
-    ) -> Result<(PropertyMap, Vec<DebugQuery>), PipelineError> {
+    ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
         let futures: Vec<_> = templates
             .iter()
             .filter_map(|template| {
@@ -61,18 +63,20 @@ impl HydrationStage {
         let results = try_join_all(futures).await?;
         let mut merged = HashMap::new();
         let mut debug_queries = Vec::new();
-        for (props, debug) in results {
+        let mut executions = Vec::new();
+        for (props, debug, execution) in results {
             merged.extend(props);
             debug_queries.push(debug);
+            executions.push(execution);
         }
-        Ok((merged, debug_queries))
+        Ok((merged, debug_queries, executions))
     }
 
     /// Dynamic hydration: build search queries from scratch at runtime.
     async fn hydrate_dynamic(
         ctx: &QueryPipelineContext,
         refs: &HashMap<String, Vec<i64>>,
-    ) -> Result<(PropertyMap, Vec<DebugQuery>), PipelineError> {
+    ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
         let futures: Vec<_> = refs
             .iter()
             .filter(|(_, ids)| !ids.is_empty())
@@ -85,11 +89,13 @@ impl HydrationStage {
         let results = try_join_all(futures).await?;
         let mut merged = HashMap::new();
         let mut debug_queries = Vec::new();
-        for (props, debug) in results {
+        let mut executions = Vec::new();
+        for (props, debug, execution) in results {
             merged.extend(props);
             debug_queries.push(debug);
+            executions.push(execution);
         }
-        Ok((merged, debug_queries))
+        Ok((merged, debug_queries, executions))
     }
 
     /// Compile a hydration query JSON string, execute it, and parse the results.
@@ -97,27 +103,97 @@ impl HydrationStage {
         ctx: &QueryPipelineContext,
         entity_type: &str,
         query_json: String,
-    ) -> Result<(PropertyMap, DebugQuery), PipelineError> {
+    ) -> Result<(PropertyMap, DebugQuery, QueryExecution), PipelineError> {
         let client = Self::client(ctx)?;
+        let profiling = ctx
+            .server_extensions
+            .get::<ProfilingConfig>()
+            .cloned()
+            .unwrap_or_default();
         let compiled = compile(&query_json, &ctx.ontology, ctx.security_context()?)
             .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
+        let rendered_sql = compiled.base.render();
         let debug = DebugQuery {
             sql: compiled.base.sql.clone(),
-            rendered: compiled.base.render(),
+            rendered: rendered_sql.clone(),
+        };
+        let label = format!("hydration:{entity_type}");
+
+        let (batches, execution) = if profiling.enabled {
+            let http_params: Vec<(String, String)> = compiled
+                .base
+                .params
+                .iter()
+                .map(|(k, v)| (k.clone(), v.render_http_param()))
+                .collect();
+
+            let t = std::time::Instant::now();
+            let (batches, query_stats) = client
+                .profiler()
+                .execute_with_stats(&compiled.base.sql, &http_params, &[])
+                .await
+                .map_err(|e| PipelineError::Execution(e.to_string()))?;
+            let elapsed = t.elapsed();
+
+            let mut execution = QueryExecution {
+                label,
+                rendered_sql,
+                query_id: query_stats.query_id.clone(),
+                elapsed_ms: elapsed.as_secs_f64() * 1000.0,
+                stats: QueryExecutionStats {
+                    read_rows: query_stats.read_rows,
+                    read_bytes: query_stats.read_bytes,
+                    result_rows: query_stats.result_rows,
+                    result_bytes: query_stats.result_bytes,
+                    elapsed_ns: query_stats.elapsed_ns,
+                    memory_usage: query_stats.memory_usage,
+                },
+                explain_plan: None,
+                explain_pipeline: None,
+                query_log: None,
+                processors: None,
+            };
+
+            if profiling.explain {
+                execution.explain_plan = client.profiler().explain_plan(&debug.rendered).await.ok();
+            }
+
+            (batches, execution)
+        } else {
+            let t = std::time::Instant::now();
+            let mut query = client.query(&compiled.base.sql);
+            for (key, param) in &compiled.base.params {
+                query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
+            }
+            let batches = query
+                .fetch_arrow()
+                .await
+                .map_err(|e| PipelineError::Execution(e.to_string()))?;
+            let elapsed = t.elapsed();
+            let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
+
+            let execution = QueryExecution {
+                label,
+                rendered_sql,
+                query_id: String::new(),
+                elapsed_ms: elapsed.as_secs_f64() * 1000.0,
+                stats: QueryExecutionStats {
+                    result_rows,
+                    elapsed_ns: elapsed.as_nanos() as u64,
+                    ..Default::default()
+                },
+                explain_plan: None,
+                explain_pipeline: None,
+                query_log: None,
+                processors: None,
+            };
+
+            (batches, execution)
         };
 
-        let mut query = client.query(&compiled.base.sql);
-        for (key, param) in &compiled.base.params {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-        }
-        let batches = query
-            .fetch_arrow()
-            .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))?;
-
         let props = Self::parse_property_batches(entity_type, &batches)?;
-        Ok((props, debug))
+        Ok((props, debug, execution))
     }
 
     /// Collect entity IDs for a static template from `_gkg_{alias}_id` columns.
@@ -277,14 +353,28 @@ impl PipelineStage for HydrationStage {
         let redacted_count = input.redacted_count;
         let result_context = query_result.ctx().clone();
         let mut hydration_queries = Vec::new();
+        let hydration_plan = ctx.compiled()?.hydration.clone();
 
-        match &ctx.compiled()?.hydration {
+        match &hydration_plan {
             HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
-                let (property_map, debug) = Self::hydrate_static(ctx, templates, &query_result)
-                    .await
-                    .inspect_err(|e| obs.record_error(e))?;
+                let (property_map, debug, executions) =
+                    Self::hydrate_static(ctx, templates, &query_result)
+                        .await
+                        .inspect_err(|e| obs.record_error(e))?;
                 hydration_queries = debug;
+                for exec in &executions {
+                    obs.query_executed(
+                        &exec.label,
+                        exec.stats.read_rows,
+                        exec.stats.read_bytes,
+                        exec.stats.memory_usage,
+                    );
+                }
+                ctx.phases
+                    .get_or_insert_default::<QueryExecutionLog>()
+                    .0
+                    .extend(executions);
                 if !property_map.is_empty() {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
                 }
@@ -292,10 +382,22 @@ impl PipelineStage for HydrationStage {
             HydrationPlan::Dynamic => {
                 let refs = Self::extract_dynamic_refs(&query_result);
                 if !refs.is_empty() {
-                    let (property_map, debug) = Self::hydrate_dynamic(ctx, &refs)
+                    let (property_map, debug, executions) = Self::hydrate_dynamic(ctx, &refs)
                         .await
                         .inspect_err(|e| obs.record_error(e))?;
                     hydration_queries = debug;
+                    for exec in &executions {
+                        obs.query_executed(
+                            &exec.label,
+                            exec.stats.read_rows,
+                            exec.stats.read_bytes,
+                            exec.stats.memory_usage,
+                        );
+                    }
+                    ctx.phases
+                        .get_or_insert_default::<QueryExecutionLog>()
+                        .0
+                        .extend(executions);
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
                 }
             }

@@ -30,6 +30,14 @@ impl TypeMap {
             .and_then(|b| b.downcast_mut())
     }
 
+    pub fn get_or_insert_default<T: Send + Sync + Default + 'static>(&mut self) -> &mut T {
+        self.map
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::new(T::default()))
+            .downcast_mut()
+            .expect("type mismatch in TypeMap")
+    }
+
     pub fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
         self.map
             .remove(&TypeId::of::<T>())

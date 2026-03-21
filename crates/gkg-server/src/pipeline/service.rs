@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::auth::Claims;
 use crate::proto::ExecuteQueryMessage;
-use clickhouse_client::ArrowClickHouseClient;
+use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
@@ -21,11 +21,20 @@ use super::stages::{
 pub struct QueryPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
+    profiling: ProfilingConfig,
 }
 
 impl QueryPipelineService {
-    pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { ontology, client }
+    pub fn new(
+        ontology: Arc<Ontology>,
+        client: Arc<ArrowClickHouseClient>,
+        profiling: ProfilingConfig,
+    ) -> Self {
+        Self {
+            ontology,
+            client,
+            profiling,
+        }
     }
 
     pub async fn run_query(
@@ -39,6 +48,7 @@ impl QueryPipelineService {
 
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
+        server_extensions.insert(self.profiling.clone());
         server_extensions.insert(claims);
         server_extensions.insert(tx);
         server_extensions.insert(stream);

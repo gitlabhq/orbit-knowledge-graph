@@ -49,6 +49,7 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn new(schema_sqls: &[&str]) -> Self {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let t = std::time::Instant::now();
         let container = Self::start_container().await;
         let url = Self::extract_url(&container).await;
@@ -61,6 +62,8 @@ impl TestContext {
             url: url.clone(),
             username: TEST_USERNAME.to_string(),
             password: Some(TEST_PASSWORD.to_string()),
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         Self {
@@ -156,17 +159,17 @@ impl TestContext {
     }
 
     pub fn create_client(&self) -> ArrowClickHouseClient {
-        ArrowClickHouseClient::new(
-            &self.url,
-            &self.config.database,
-            TEST_USERNAME,
-            Some(TEST_PASSWORD),
-        )
+        self.config.build_client()
     }
 
     pub async fn fork(&self, name: &str) -> Self {
-        let admin =
-            ArrowClickHouseClient::new(&self.url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
+        let admin = ArrowClickHouseClient::new(
+            &self.url,
+            "default",
+            TEST_USERNAME,
+            Some(TEST_PASSWORD),
+            &std::collections::HashMap::new(),
+        );
         admin
             .execute(&format!("CREATE DATABASE IF NOT EXISTS `{name}`"))
             .await
@@ -182,6 +185,8 @@ impl TestContext {
                 url: self.url.clone(),
                 username: TEST_USERNAME.to_string(),
                 password: Some(TEST_PASSWORD.to_string()),
+                query_settings: std::collections::HashMap::new(),
+                profiling: Default::default(),
             },
             url: self.url.clone(),
             schema_sqls: Arc::clone(&self.schema_sqls),
@@ -281,7 +286,13 @@ impl TestContext {
 
     async fn wait_for_ready(url: &str) {
         let t = std::time::Instant::now();
-        let client = ArrowClickHouseClient::new(url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
+        let client = ArrowClickHouseClient::new(
+            url,
+            "default",
+            TEST_USERNAME,
+            Some(TEST_PASSWORD),
+            &std::collections::HashMap::new(),
+        );
 
         for attempt in 1..=MAX_CONNECTION_ATTEMPTS {
             if client.execute("SELECT 1").await.is_ok() {
@@ -297,7 +308,13 @@ impl TestContext {
 
     async fn run_schema_in(url: &str, database: &str, schema_sqls: &[&str]) {
         let t = std::time::Instant::now();
-        let client = ArrowClickHouseClient::new(url, database, TEST_USERNAME, Some(TEST_PASSWORD));
+        let client = ArrowClickHouseClient::new(
+            url,
+            database,
+            TEST_USERNAME,
+            Some(TEST_PASSWORD),
+            &std::collections::HashMap::new(),
+        );
 
         for schema_sql in schema_sqls {
             for statement in schema_sql.split(';') {

@@ -17,15 +17,23 @@ use tokio_util::io::SyncIoBridge;
 use tracing::warn;
 
 use crate::error::ClickHouseError;
+use crate::profiler::QueryProfiler;
 
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
     base_url: String,
+    profiler: QueryProfiler,
 }
 
 impl ArrowClickHouseClient {
-    pub fn new(url: &str, database: &str, username: &str, password: Option<&str>) -> Self {
+    pub fn new(
+        url: &str,
+        database: &str,
+        username: &str,
+        password: Option<&str>,
+        query_settings: &std::collections::HashMap<String, String>,
+    ) -> Self {
         let mut client = Client::default()
             .with_url(url)
             .with_database(database)
@@ -40,9 +48,16 @@ impl ArrowClickHouseClient {
             client = client.with_password(password);
         }
 
+        for (k, v) in query_settings {
+            client = client.with_option(k, v);
+        }
+
+        let profiler = QueryProfiler::new(url, database, username, password, query_settings);
+
         Self {
             client,
             base_url: url.to_string(),
+            profiler,
         }
     }
 
@@ -107,6 +122,14 @@ impl ArrowClickHouseClient {
 
     pub fn inner(&self) -> &Client {
         &self.client
+    }
+
+    pub fn profiler(&self) -> &QueryProfiler {
+        &self.profiler
+    }
+
+    pub fn new_query_id() -> String {
+        uuid::Uuid::new_v4().to_string()
     }
 
     /// Bind a named parameter to a query.
@@ -182,7 +205,13 @@ fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize)
 impl ArrowClickHouseClient {
     /// Unconfigured client for unit tests. Never connects to anything.
     pub fn dummy() -> Self {
-        Self::new("http://localhost:0", "default", "default", None)
+        Self::new(
+            "http://localhost:0",
+            "default",
+            "default",
+            None,
+            &std::collections::HashMap::new(),
+        )
     }
 }
 
@@ -201,6 +230,11 @@ pub struct ArrowQuery {
 impl ArrowQuery {
     pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
         self.inner = self.inner.param(name, value);
+        self
+    }
+
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.inner = self.inner.with_option(name, value);
         self
     }
 

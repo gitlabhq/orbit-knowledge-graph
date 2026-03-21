@@ -15,6 +15,9 @@ pre-commit:
     - name: fmt
       run: mise run lint:fmt
       glob: "**/*.rs"
+    - name: clippy
+      run: mise run lint:code
+      glob: "**/*.rs"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md
       glob:
@@ -36,10 +39,3 @@ pre-commit:
             run: helm template gkg helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
           - name: helm-template-observability
             run: helm template gkg-obs helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
-
-pre-push:
-  parallel: true
-  jobs:
-    - name: clippy
-      run: mise run lint:code
-      glob: "**/*.rs"

@@ -90,6 +90,10 @@ description = "Diff current branch against an origin branch (default: main)"
 usage = 'arg "[base]" default="main" help="Branch on origin to diff against"'
 
 
+[tasks."query:profile"]
+run = 'cargo run -p query-profiler -- "$@"'
+description = "Profile a GKG query against ClickHouse (use -- to pass args)"
+
 [tasks."perf:gtime"]
 run = "./scripts/devtools/gtime.sh"
 

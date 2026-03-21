@@ -23,7 +23,6 @@ pub(super) use crate::common::{
     run_redaction, test_security_context,
 };
 pub(super) use gkg_server::pipeline::HydrationStage;
-pub(super) use gkg_server::pipeline::types::RedactionOutput;
 pub(super) use gkg_server::redaction::QueryResult;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
 pub(super) use query_engine::compiler::{SecurityContext, compile};
@@ -31,6 +30,7 @@ pub(super) use query_engine::formatters::{GraphFormatter, ResultFormatter};
 pub(super) use query_engine::pipeline::{
     NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap,
 };
+pub(super) use query_engine::shared::RedactionOutput;
 pub(super) use serde_json::Value;
 
 pub(super) static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
@@ -100,6 +100,7 @@ pub(super) async fn run_query_with_security(
         compiled: Arc::clone(&compiled),
         query_result: hydration_output.query_result,
         result_context: hydration_output.result_context,
+        execution_log: vec![],
     };
 
     let value = GraphFormatter.format(&pipeline_output);

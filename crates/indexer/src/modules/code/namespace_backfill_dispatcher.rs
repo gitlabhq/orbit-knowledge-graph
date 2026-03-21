@@ -365,8 +365,20 @@ mod tests {
     }
 
     fn create_dispatcher(nats: Arc<MockNatsServices>) -> NamespaceCodeBackfillDispatcher {
-        let datalake = ArrowClickHouseClient::new("http://localhost:0", "default", "default", None);
-        let graph = ArrowClickHouseClient::new("http://localhost:0", "default", "default", None);
+        let datalake = ArrowClickHouseClient::new(
+            "http://localhost:0",
+            "default",
+            "default",
+            None,
+            &std::collections::HashMap::new(),
+        );
+        let graph = ArrowClickHouseClient::new(
+            "http://localhost:0",
+            "default",
+            "default",
+            None,
+            &std::collections::HashMap::new(),
+        );
         NamespaceCodeBackfillDispatcher::new(
             nats,
             datalake,
