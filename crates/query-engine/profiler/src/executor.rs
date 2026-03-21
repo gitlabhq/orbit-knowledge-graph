@@ -13,7 +13,6 @@ pub struct ProfilerOptions {
     pub explain: bool,
     pub profile: bool,
     pub processors: bool,
-    pub settings: Vec<(String, String)>,
 }
 
 pub struct ProfilerResult {
@@ -35,15 +34,9 @@ pub async fn execute_profiled_query(
     let mut executions = Vec::new();
     let rendered_sql = compiled.base.render();
 
-    let extra_settings: Vec<(&str, &str)> = opts
-        .settings
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-
     let t = Instant::now();
     let (batches, query_stats) = profiler
-        .execute_with_stats(&rendered_sql, &[], &extra_settings)
+        .execute_with_stats(&rendered_sql, &[], &[])
         .await
         .context("base query execution failed")?;
 
@@ -159,15 +152,9 @@ async fn execute_and_profile(
     rendered_sql: &str,
     opts: &ProfilerOptions,
 ) -> Result<QueryExecution> {
-    let extra_settings: Vec<(&str, &str)> = opts
-        .settings
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-
     let t = Instant::now();
     let (_batches, query_stats) = profiler
-        .execute_with_stats(rendered_sql, &[], &extra_settings)
+        .execute_with_stats(rendered_sql, &[], &[])
         .await
         .context(format!("{label} execution failed"))?;
 

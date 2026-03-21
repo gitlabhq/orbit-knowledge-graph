@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Cursor;
 
 use arrow::record_batch::RecordBatch;
@@ -9,7 +10,7 @@ use crate::stats::{
     DiskInfo, InstanceHealth, ProcessorProfile, QueryLogEntry, QueryStats, TablePartsInfo,
 };
 
-const CH_QUERY_OPTIONS: &[(&str, &str)] = &[
+const DEFAULT_QUERY_SETTINGS: &[(&str, &str)] = &[
     ("output_format_arrow_string_as_string", "1"),
     ("output_format_arrow_fixed_string_as_fixed_byte_array", "1"),
     ("join_algorithm", "full_sorting_merge,hash"),
@@ -23,16 +24,31 @@ pub struct QueryProfiler {
     database: String,
     username: String,
     password: Option<String>,
+    settings: HashMap<String, String>,
 }
 
 impl QueryProfiler {
-    pub fn new(url: &str, database: &str, username: &str, password: Option<&str>) -> Self {
+    pub fn new(
+        url: &str,
+        database: &str,
+        username: &str,
+        password: Option<&str>,
+        custom_settings: &HashMap<String, String>,
+    ) -> Self {
+        let mut settings: HashMap<String, String> = DEFAULT_QUERY_SETTINGS
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        for (k, v) in custom_settings {
+            settings.insert(k.clone(), v.clone());
+        }
         Self {
             http: once_cell::sync::OnceCell::new(),
             base_url: url.to_string(),
             database: database.to_string(),
             username: username.to_string(),
             password: password.map(String::from),
+            settings,
         }
     }
 
@@ -59,8 +75,8 @@ impl QueryProfiler {
             ("wait_end_of_query".into(), "1".into()),
             ("query_id".into(), query_id.clone()),
         ];
-        for (k, v) in CH_QUERY_OPTIONS {
-            url_params.push(((*k).into(), (*v).into()));
+        for (k, v) in &self.settings {
+            url_params.push((k.clone(), v.clone()));
         }
         for (k, v) in query_params {
             url_params.push((format!("param_{k}"), v.clone()));
@@ -453,6 +469,7 @@ impl Clone for QueryProfiler {
             database: self.database.clone(),
             username: self.username.clone(),
             password: self.password.clone(),
+            settings: self.settings.clone(),
         }
     }
 }

@@ -24,7 +24,13 @@ async fn parse_response(response: axum::response::Response) -> (StatusCode, serd
 
 #[tokio::test]
 async fn live_returns_ok() {
-    let client = ArrowClickHouseClient::new("http://127.0.0.1:1", "default", "x", None);
+    let client = ArrowClickHouseClient::new(
+        "http://127.0.0.1:1",
+        "default",
+        "x",
+        None,
+        &std::collections::HashMap::new(),
+    );
     let router = create_router(client);
 
     let (status, json) = parse_response(router.oneshot(live_request()).await.unwrap()).await;
@@ -52,7 +58,13 @@ async fn ready_returns_ok_when_clickhouse_healthy() {
 
 #[tokio::test]
 async fn ready_returns_503_when_clickhouse_unreachable() {
-    let client = ArrowClickHouseClient::new("http://127.0.0.1:1", "default", "x", None);
+    let client = ArrowClickHouseClient::new(
+        "http://127.0.0.1:1",
+        "default",
+        "x",
+        None,
+        &std::collections::HashMap::new(),
+    );
     let router = create_router(client);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;

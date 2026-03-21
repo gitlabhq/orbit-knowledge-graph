@@ -109,14 +109,7 @@ async fn main() -> Result<()> {
     let security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
 
-    let profiler = QueryProfiler::new(
-        &cli.ch_url,
-        &cli.ch_database,
-        &cli.ch_user,
-        cli.ch_password.as_deref(),
-    );
-
-    let settings: Vec<(String, String)> = cli
+    let custom_settings: std::collections::HashMap<String, String> = cli
         .settings
         .iter()
         .filter_map(|s| {
@@ -125,11 +118,18 @@ async fn main() -> Result<()> {
         })
         .collect();
 
+    let profiler = QueryProfiler::new(
+        &cli.ch_url,
+        &cli.ch_database,
+        &cli.ch_user,
+        cli.ch_password.as_deref(),
+        &custom_settings,
+    );
+
     let opts = ProfilerOptions {
         explain: cli.explain,
         profile: cli.profile,
         processors: cli.processors,
-        settings,
     };
 
     let result =

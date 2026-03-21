@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::arrow_client::ArrowClickHouseClient;
@@ -10,6 +12,8 @@ pub struct ClickHouseConfiguration {
     pub username: String,
     #[serde(default)]
     pub password: Option<String>,
+    #[serde(default)]
+    pub query_settings: HashMap<String, String>,
 }
 
 impl Default for ClickHouseConfiguration {
@@ -19,6 +23,7 @@ impl Default for ClickHouseConfiguration {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: HashMap::new(),
         }
     }
 }
@@ -46,6 +51,7 @@ impl ClickHouseConfiguration {
             &self.database,
             &self.username,
             self.password.as_deref(),
+            &self.query_settings,
         )
     }
 }
@@ -86,6 +92,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
         };
 
         assert!(config.validate().is_ok());
@@ -98,6 +105,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
         };
 
         let result = config.validate();
@@ -111,6 +119,7 @@ mod tests {
             url: "".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
         };
 
         let result = config.validate();
@@ -124,6 +133,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
         };
 
         let result = config.validate();
@@ -147,6 +157,7 @@ mod tests {
             url: "https://localhost:1".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
         };
 
         let client = config.build_client();

@@ -43,7 +43,13 @@ fn extract_histogram_points(
 }
 
 fn dummy_client() -> ArrowClickHouseClient {
-    ArrowClickHouseClient::new("http://127.0.0.1:1", "default", "x", None)
+    ArrowClickHouseClient::new(
+        "http://127.0.0.1:1",
+        "default",
+        "x",
+        None,
+        &std::collections::HashMap::new(),
+    )
 }
 
 #[tokio::test]

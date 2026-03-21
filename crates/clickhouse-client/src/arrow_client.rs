@@ -27,7 +27,13 @@ pub struct ArrowClickHouseClient {
 }
 
 impl ArrowClickHouseClient {
-    pub fn new(url: &str, database: &str, username: &str, password: Option<&str>) -> Self {
+    pub fn new(
+        url: &str,
+        database: &str,
+        username: &str,
+        password: Option<&str>,
+        query_settings: &std::collections::HashMap<String, String>,
+    ) -> Self {
         let mut client = Client::default()
             .with_url(url)
             .with_database(database)
@@ -42,7 +48,11 @@ impl ArrowClickHouseClient {
             client = client.with_password(password);
         }
 
-        let profiler = QueryProfiler::new(url, database, username, password);
+        for (k, v) in query_settings {
+            client = client.with_option(k, v);
+        }
+
+        let profiler = QueryProfiler::new(url, database, username, password, query_settings);
 
         Self {
             client,
@@ -191,7 +201,13 @@ fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize)
 impl ArrowClickHouseClient {
     /// Unconfigured client for unit tests. Never connects to anything.
     pub fn dummy() -> Self {
-        Self::new("http://localhost:0", "default", "default", None)
+        Self::new(
+            "http://localhost:0",
+            "default",
+            "default",
+            None,
+            &std::collections::HashMap::new(),
+        )
     }
 }
 
