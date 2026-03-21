@@ -1,0 +1,138 @@
+{
+  "01_cascading_sip_3node_chain": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "entity": "User", "node_ids": [42, 99, 137]},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+      {"id": "p", "entity": "Project", "filters": {"archived": false}}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "u", "to": "mr"},
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "limit": 50,
+    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"}
+  },
+
+  "02_cascading_sip_4node_fan_out": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p", "entity": "Project", "node_ids": [1001]},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "author", "entity": "User"},
+      {"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical", "state": "detected"}}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+      {"type": "AUTHORED", "from": "author", "to": "mr"},
+      {"type": "IN_PROJECT", "from": "v", "to": "p"}
+    ],
+    "limit": 30,
+    "order_by": {"node": "v", "property": "detected_at", "direction": "DESC"}
+  },
+
+  "03_neighbors_both_directions": {
+    "query_type": "neighbors",
+    "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [5000, 5001, 5002]},
+    "neighbors": {"node": "mr", "direction": "both"},
+    "limit": 100
+  },
+
+  "04_neighbors_both_with_rel_filter": {
+    "query_type": "neighbors",
+    "node": {"id": "p", "entity": "Project", "node_ids": [200]},
+    "neighbors": {"node": "p", "direction": "both", "rel_types": ["IN_PROJECT", "CONTAINS", "IN_GROUP"]},
+    "limit": 50
+  },
+
+  "05_path_hop_frontier_depth3": {
+    "query_type": "path_finding",
+    "nodes": [
+      {"id": "start", "entity": "Project", "node_ids": [100]},
+      {"id": "end", "entity": "Project", "node_ids": [999]}
+    ],
+    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+  },
+
+  "06_path_hop_frontier_depth5": {
+    "query_type": "path_finding",
+    "nodes": [
+      {"id": "start", "entity": "User", "node_ids": [42]},
+      {"id": "end", "entity": "Vulnerability", "node_ids": [7777]}
+    ],
+    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 5}
+  },
+
+  "07_target_sip_plus_countif": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged", "draft": false}},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "mr", "group_by": "p", "alias": "merged_mr_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+
+  "08_target_sip_sum_if_with_filters": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": "success", "duration": {"op": "gt", "value": 120}}},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "sum", "target": "pipe", "property": "duration", "group_by": "p", "alias": "total_pipeline_seconds"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 15
+  },
+
+  "09_cascading_sip_aggregation_vuln_chain": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "p", "entity": "Project", "node_ids": [100, 200, 300], "columns": ["name"]},
+      {"id": "v", "entity": "Vulnerability", "filters": {"severity": {"op": "in", "value": ["high", "critical"]}, "state": "detected"}}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "v", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "v", "group_by": "p", "alias": "critical_vuln_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 10
+  },
+
+  "10_multi_hop_traversal_with_sip": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "entity": "User", "node_ids": [42]},
+      {"id": "g", "entity": "Group"}
+    ],
+    "relationships": [{
+      "type": "MEMBER_OF",
+      "from": "u",
+      "to": "g",
+      "min_hops": 1,
+      "max_hops": 3
+    }],
+    "limit": 50
+  },
+
+  "11_path_depth1_no_backward": {
+    "query_type": "path_finding",
+    "nodes": [
+      {"id": "start", "entity": "User", "node_ids": [42]},
+      {"id": "end", "entity": "Project", "node_ids": [100]}
+    ],
+    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
+  }
+}

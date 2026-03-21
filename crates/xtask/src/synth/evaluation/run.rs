@@ -145,7 +145,12 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
     check_clickhouse_health(&client).await?;
     tracing::info!("ClickHouse is healthy");
 
-    let mut executor = QueryExecutor::new(client, ontology, config.evaluation.sample_size);
+    let mut executor = QueryExecutor::new(
+        client,
+        ontology,
+        config.evaluation.sample_size,
+        &config.evaluation.settings,
+    );
 
     if !config.evaluation.skip_cache_warm {
         tracing::info!("Warming parameter cache...");

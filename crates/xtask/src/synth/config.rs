@@ -627,6 +627,10 @@ pub struct EvaluationConfig {
     /// Directory to save run metadata (query plans, params, sample data).
     #[serde(default)]
     pub metadata_dir: Option<String>,
+    /// ClickHouse query-level SETTINGS appended to every evaluated query.
+    /// These override the built-in safe defaults (e.g. `join_algorithm`).
+    #[serde(default)]
+    pub settings: std::collections::HashMap<String, String>,
 }
 
 fn default_sample_size() -> usize {
@@ -652,6 +656,7 @@ impl Default for EvaluationConfig {
             filter: None,
             output: OutputConfig::default(),
             metadata_dir: None,
+            settings: std::collections::HashMap::new(),
         }
     }
 }
