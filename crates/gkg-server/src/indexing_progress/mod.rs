@@ -14,7 +14,7 @@ use crate::proto::{
     GetNamespaceIndexingProgressResponse, IndexingProgressDomain, IndexingProgressItem,
 };
 
-use self::store::IndexingProgressStore;
+use self::store::IndexingProgressReader;
 
 const SOURCE_CODE_DOMAIN: &str = "source_code";
 
@@ -61,7 +61,7 @@ impl fmt::Display for ItemStatus {
 // ─── Service ────────────────────────────────────────────────────────────────
 
 pub struct IndexingProgressService {
-    store: IndexingProgressStore,
+    store: IndexingProgressReader,
     graph_stats: GraphStatsService,
     ontology: Arc<Ontology>,
     sdlc_plan_names: HashSet<String>,
@@ -73,7 +73,7 @@ impl IndexingProgressService {
         datalake_client: Arc<ArrowClickHouseClient>,
         ontology: Arc<Ontology>,
     ) -> Self {
-        let store = IndexingProgressStore::new(Arc::clone(&graph_client), datalake_client);
+        let store = IndexingProgressReader::new(Arc::clone(&graph_client), datalake_client);
         let graph_stats = GraphStatsService::new(graph_client, Arc::clone(&ontology));
         let sdlc_plan_names = collect_sdlc_plan_names(&ontology);
         Self {

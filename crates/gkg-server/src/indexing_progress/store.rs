@@ -7,12 +7,12 @@ use clickhouse_client::ArrowClickHouseClient;
 use gkg_utils::arrow::ArrowUtils;
 use tonic::Status;
 
-pub struct IndexingProgressStore {
+pub struct IndexingProgressReader {
     graph_client: Arc<ArrowClickHouseClient>,
     datalake_client: Arc<ArrowClickHouseClient>,
 }
 
-impl IndexingProgressStore {
+impl IndexingProgressReader {
     pub fn new(
         graph_client: Arc<ArrowClickHouseClient>,
         datalake_client: Arc<ArrowClickHouseClient>,
