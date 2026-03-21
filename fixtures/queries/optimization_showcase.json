@@ -2,71 +2,69 @@
   "01_cascading_sip_3node_chain": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "u", "entity": "User", "node_ids": [42, 99, 137]},
-      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-      {"id": "p", "entity": "Project", "filters": {"archived": false}}
+      {"id": "u", "entity": "User", "node_ids": [1, 3, 5]},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "p", "entity": "Project"}
     ],
     "relationships": [
       {"type": "AUTHORED", "from": "u", "to": "mr"},
       {"type": "IN_PROJECT", "from": "mr", "to": "p"}
     ],
-    "limit": 50,
-    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"}
+    "limit": 50
   },
 
   "02_cascading_sip_4node_fan_out": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "p", "entity": "Project", "node_ids": [1001]},
+      {"id": "p", "entity": "Project", "node_ids": [20699]},
       {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
       {"id": "author", "entity": "User"},
-      {"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical", "state": "detected"}}
+      {"id": "note", "entity": "Note"}
     ],
     "relationships": [
       {"type": "IN_PROJECT", "from": "mr", "to": "p"},
       {"type": "AUTHORED", "from": "author", "to": "mr"},
-      {"type": "IN_PROJECT", "from": "v", "to": "p"}
+      {"type": "HAS_NOTE", "from": "mr", "to": "note"}
     ],
-    "limit": 30,
-    "order_by": {"node": "v", "property": "detected_at", "direction": "DESC"}
+    "limit": 30
   },
 
   "03_neighbors_both_directions": {
     "query_type": "neighbors",
-    "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [5000, 5001, 5002]},
+    "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9206503, 9605986, 9605991]},
     "neighbors": {"node": "mr", "direction": "both"},
     "limit": 100
   },
 
-  "04_neighbors_both_with_rel_filter": {
+  "04_neighbors_outgoing_with_rel_filter": {
     "query_type": "neighbors",
-    "node": {"id": "p", "entity": "Project", "node_ids": [200]},
-    "neighbors": {"node": "p", "direction": "both", "rel_types": ["IN_PROJECT", "CONTAINS", "IN_GROUP"]},
+    "node": {"id": "p", "entity": "Project", "node_ids": [13083]},
+    "neighbors": {"node": "p", "direction": "outgoing", "rel_types": ["IN_PROJECT"]},
     "limit": 50
   },
 
-  "05_path_hop_frontier_depth3": {
+  "05_path_finding_depth3": {
     "query_type": "path_finding",
     "nodes": [
-      {"id": "start", "entity": "Project", "node_ids": [100]},
-      {"id": "end", "entity": "Project", "node_ids": [999]}
+      {"id": "start", "entity": "Project", "node_ids": [13083]},
+      {"id": "end", "entity": "Project", "node_ids": [13764]}
     ],
     "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
   },
 
-  "06_path_hop_frontier_depth5": {
+  "06_path_finding_depth2_user_to_project": {
     "query_type": "path_finding",
     "nodes": [
-      {"id": "start", "entity": "User", "node_ids": [42]},
-      {"id": "end", "entity": "Vulnerability", "node_ids": [7777]}
+      {"id": "start", "entity": "User", "node_ids": [1]},
+      {"id": "end", "entity": "Project", "node_ids": [13083]}
     ],
-    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 5}
+    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
   },
 
-  "07_target_sip_plus_countif": {
+  "07_aggregation_count_merged_mrs": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged", "draft": false}},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
       {"id": "p", "entity": "Project", "columns": ["name"]}
     ],
     "relationships": [
@@ -79,10 +77,10 @@
     "limit": 20
   },
 
-  "08_target_sip_sum_if_with_filters": {
+  "08_aggregation_sum_pipeline_duration": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "pipe", "entity": "Pipeline", "filters": {"status": "success", "duration": {"op": "gt", "value": 120}}},
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": "success"}},
       {"id": "p", "entity": "Project", "columns": ["name"]}
     ],
     "relationships": [
@@ -95,44 +93,45 @@
     "limit": 15
   },
 
-  "09_cascading_sip_aggregation_vuln_chain": {
+  "09_cascading_sip_aggregation_mr_count_pinned": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "p", "entity": "Project", "node_ids": [100, 200, 300], "columns": ["name"]},
-      {"id": "v", "entity": "Vulnerability", "filters": {"severity": {"op": "in", "value": ["high", "critical"]}, "state": "detected"}}
+      {"id": "p", "entity": "Project", "node_ids": [13083, 13764, 14022], "columns": ["name"]},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}
     ],
     "relationships": [
-      {"type": "IN_PROJECT", "from": "v", "to": "p"}
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
     ],
     "aggregations": [
-      {"function": "count", "target": "v", "group_by": "p", "alias": "critical_vuln_count"}
+      {"function": "count", "target": "mr", "group_by": "p", "alias": "merged_mr_count"}
     ],
     "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
     "limit": 10
   },
 
-  "10_multi_hop_traversal_with_sip": {
+  "10_traversal_user_to_group": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "u", "entity": "User", "node_ids": [42]},
+      {"id": "u", "entity": "User", "node_ids": [1]},
       {"id": "g", "entity": "Group"}
     ],
-    "relationships": [{
-      "type": "MEMBER_OF",
-      "from": "u",
-      "to": "g",
-      "min_hops": 1,
-      "max_hops": 3
-    }],
+    "relationships": [
+      {"type": "MEMBER_OF", "from": "u", "to": "g"}
+    ],
     "limit": 50
   },
 
-  "11_path_depth1_no_backward": {
-    "query_type": "path_finding",
+  "11_traversal_project_pipelines_jobs": {
+    "query_type": "traversal",
     "nodes": [
-      {"id": "start", "entity": "User", "node_ids": [42]},
-      {"id": "end", "entity": "Project", "node_ids": [100]}
+      {"id": "p", "entity": "Project", "node_ids": [13083]},
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed"}},
+      {"id": "j", "entity": "Job", "filters": {"status": "failed"}}
     ],
-    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "pipe", "to": "p"},
+      {"type": "IN_PIPELINE", "from": "j", "to": "pipe"}
+    ],
+    "limit": 50
   }
 }

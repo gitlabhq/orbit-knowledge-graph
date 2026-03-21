@@ -309,9 +309,9 @@ mod tests {
 
         let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
 
-        // Non-recursive CTEs: forward + backward
+        // Non-recursive CTEs: hop frontier + forward + backward
         assert!(
-            result.base.sql.contains("WITH forward AS"),
+            result.base.sql.contains("forward AS"),
             "should have forward CTE"
         );
         assert!(
@@ -373,7 +373,7 @@ mod tests {
 
         // max_depth=3: both forward + backward CTEs
         assert!(
-            deep_result.base.sql.contains("WITH forward AS"),
+            deep_result.base.sql.contains("forward AS"),
             "deep should have forward CTE"
         );
         assert!(
