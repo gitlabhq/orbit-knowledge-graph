@@ -244,17 +244,29 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         }
 
         // Cascading SIP: chain CTEs through relationships so every edge AND
-        // node table scan gets narrowed. Only cascade when the root has a
-        // provably small set (node_ids, id_range, cursor). Broad filters
-        // (e.g. status IN ['success','failed'] matching 87% of rows) cause
-        // the cascade CTE to read nearly as many edge rows as the main query,
-        // effectively doubling the edge scan for no benefit.
-        let has_narrow_selectivity = has_cursor || has_node_ids || has_id_range;
-        if !has_narrow_selectivity || rel.max_hops > 1 {
+        // node table scan gets narrowed.
+        //
+        // For narrow roots (node_ids, id_range, cursor), cascade to all
+        // reachable nodes. For broad roots, only cascade when the target
+        // node is in SKIP_SECURITY_FILTER_TABLES — these tables get no
+        // traversal_path filter and read fully without a cascade (e.g.,
+        // gl_user with 1.5M rows, 747 granules).
+        if rel.max_hops > 1 {
             continue;
         }
 
+        let has_narrow_selectivity = has_cursor || has_node_ids || has_id_range;
+        let is_full_scan_table = |node_alias: &str| {
+            input
+                .nodes
+                .iter()
+                .find(|n| n.id == node_alias)
+                .and_then(|n| n.table.as_deref())
+                .is_some_and(|t| SKIP_SECURITY_FILTER_TABLES.contains(&t))
+        };
+
         if let (Some(parent), None) = (&from_cte, &to_cte)
+            && (has_narrow_selectivity || is_full_scan_table(&rel.to))
             && let Some(cte) =
                 build_cascade_for_node(input, &rel.to, end_col, start_col, parent, &rel.types)
         {
@@ -263,6 +275,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
             node_ctes.insert(rel.to.clone(), name);
         }
         if let (None, Some(parent)) = (&from_cte, &to_cte)
+            && (has_narrow_selectivity || is_full_scan_table(&rel.from))
             && let Some(cte) =
                 build_cascade_for_node(input, &rel.from, start_col, end_col, parent, &rel.types)
         {
@@ -588,15 +601,22 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
     for conjunct in conjuncts {
         let aliases = collect_column_aliases(&conjunct);
 
+        let is_cascade_sip = matches!(
+            &conjunct,
+            Expr::InSubquery { cte_name, .. } if cte_name.starts_with("_cascade_")
+        );
+
         // Keep in WHERE if:
         //   - references no columns (constant expression)
         //   - references multiple aliases (cross-table predicate)
         //   - references a group_by alias (group node filter must stay)
         //   - references an alias that isn't an aggregation target
+        //   - is a cascade CTE filter (must stay for table scan narrowing)
         let should_keep = aliases.is_empty()
             || aliases.len() > 1
             || aliases.iter().any(|a| group_aliases.contains(a.as_str()))
-            || aliases.iter().any(|a| !target_aliases.contains(a.as_str()));
+            || aliases.iter().any(|a| !target_aliases.contains(a.as_str()))
+            || is_cascade_sip;
 
         if should_keep {
             remaining.push(conjunct);
@@ -1473,6 +1493,119 @@ mod tests {
         assert!(
             root_cte.query.order_by.is_empty(),
             "aggregation CTE should NOT have ORDER BY"
+        );
+    }
+
+    #[test]
+    fn cascade_cte_filter_stays_in_where_not_folded_into_aggregate() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+        use crate::security::SecurityContext;
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "reviewer".into(),
+                    entity: Some("User".into()),
+                    table: Some("gl_user".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![
+                InputRelationship {
+                    types: vec!["REVIEWER".into()],
+                    from: "mr".into(),
+                    to: "reviewer".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+                InputRelationship {
+                    types: vec!["IN_PROJECT".into()],
+                    from: "mr".into(),
+                    to: "p".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+            ],
+            aggregations: vec![count_agg("reviewer", Some("p"))],
+            limit: 15,
+            ..Default::default()
+        };
+
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "id"), "p_id"),
+                SelectExpr::new(count_expr("reviewer", "id"), "reviewer_count"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::join(
+                        crate::ast::JoinType::Inner,
+                        TableRef::join(
+                            crate::ast::JoinType::Inner,
+                            TableRef::scan("gl_merge_request", "mr"),
+                            TableRef::scan("gl_edge", "e0"),
+                            Expr::eq(Expr::col("mr", "id"), Expr::col("e0", "source_id")),
+                        ),
+                        TableRef::scan("gl_user", "reviewer"),
+                        Expr::eq(Expr::col("e0", "target_id"), Expr::col("reviewer", "id")),
+                    ),
+                    TableRef::scan("gl_edge", "e1"),
+                    Expr::eq(Expr::col("mr", "id"), Expr::col("e1", "source_id")),
+                ),
+                TableRef::scan("gl_project", "p"),
+                Expr::eq(Expr::col("e1", "target_id"), Expr::col("p", "id")),
+            ),
+            group_by: vec![Expr::col("p", "id")],
+            ..Default::default()
+        }));
+
+        optimize(&mut node, &input, &ctx);
+
+        let Node::Query(q) = &node;
+
+        let has_cascade = q.ctes.iter().any(|c| c.name == "_cascade_reviewer");
+        assert!(
+            has_cascade,
+            "should create cascade CTE for gl_user (SKIP_SECURITY table)"
+        );
+
+        let where_has_cascade = q
+            .where_clause
+            .as_ref()
+            .map(|w| has_in_subquery(w, "_cascade_reviewer"))
+            .unwrap_or(false);
+        assert!(
+            where_has_cascade,
+            "cascade CTE filter must stay in WHERE for table scan narrowing, not folded into countIf"
+        );
+
+        let select_has_countif = q
+            .select
+            .iter()
+            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "countIf"));
+        assert!(
+            !select_has_countif,
+            "cascade-only aggregate should use COUNT, not countIf"
         );
     }
 
