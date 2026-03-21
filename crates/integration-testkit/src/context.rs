@@ -63,6 +63,7 @@ impl TestContext {
             username: TEST_USERNAME.to_string(),
             password: Some(TEST_PASSWORD.to_string()),
             query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         Self {
@@ -185,6 +186,7 @@ impl TestContext {
                 username: TEST_USERNAME.to_string(),
                 password: Some(TEST_PASSWORD.to_string()),
                 query_settings: std::collections::HashMap::new(),
+                profiling: Default::default(),
             },
             url: self.url.clone(),
             schema_sqls: Arc::clone(&self.schema_sqls),

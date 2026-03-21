@@ -14,6 +14,20 @@ pub struct ClickHouseConfiguration {
     pub password: Option<String>,
     #[serde(default)]
     pub query_settings: HashMap<String, String>,
+    #[serde(default)]
+    pub profiling: ProfilingConfig,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ProfilingConfig {
+    #[serde(default)]
+    pub explain: bool,
+    #[serde(default)]
+    pub query_log: bool,
+    #[serde(default)]
+    pub processors: bool,
+    #[serde(default)]
+    pub instance_health: bool,
 }
 
 impl Default for ClickHouseConfiguration {
@@ -24,6 +38,7 @@ impl Default for ClickHouseConfiguration {
             username: "default".to_string(),
             password: None,
             query_settings: HashMap::new(),
+            profiling: ProfilingConfig::default(),
         }
     }
 }
@@ -93,6 +108,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         assert!(config.validate().is_ok());
@@ -106,6 +122,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let result = config.validate();
@@ -120,6 +137,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let result = config.validate();
@@ -134,6 +152,7 @@ mod tests {
             username: "".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let result = config.validate();
@@ -158,6 +177,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let client = config.build_client();

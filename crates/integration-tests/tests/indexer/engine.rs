@@ -249,6 +249,7 @@ impl TestContext {
                     username: USERNAME.to_string(),
                     password: Some(PASSWORD.to_string()),
                     query_settings: std::collections::HashMap::new(),
+                    profiling: Default::default(),
                 },
                 Arc::new(EngineMetrics::default()),
             )

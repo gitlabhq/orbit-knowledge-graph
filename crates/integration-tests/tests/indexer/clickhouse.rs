@@ -166,6 +166,7 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
         query_settings: std::collections::HashMap::new(),
+        profiling: Default::default(),
     }
 }
 
@@ -254,6 +255,7 @@ async fn connection_failure_returns_error() {
         username: "default".to_string(),
         password: None,
         query_settings: std::collections::HashMap::new(),
+        profiling: Default::default(),
     };
 
     let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))
