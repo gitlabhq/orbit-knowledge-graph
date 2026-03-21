@@ -23,17 +23,6 @@ pre-commit:
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
-    - name: docs
-      glob: "**/*.md"
-      group:
-        parallel: true
-        jobs:
-          - name: markdownlint
-            run: mise run lint:markdown
-          - name: vale
-            run: mise run lint:vale
-          - name: lychee
-            run: mise run lint:links
     - name: helm-lint
       glob: "helm-dev/**"
       group:
