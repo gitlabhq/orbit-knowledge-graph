@@ -240,20 +240,24 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         let req = request.get_ref();
 
-        let traversal_path = self
+        let not_found = Ok(Response::new(GetNamespaceIndexingProgressResponse {
+            namespace_id: req.namespace_id,
+            status: "not_found".to_string(),
+            domains: vec![],
+        }));
+
+        let traversal_path = match self
             .indexing_progress
             .resolve_traversal_path(req.namespace_id)
-            .await?;
+            .await?
+        {
+            Some(path) => path,
+            None => return not_found,
+        };
 
-        if traversal_path.is_empty() {
-            return Ok(Response::new(GetNamespaceIndexingProgressResponse {
-                namespace_id: req.namespace_id,
-                status: "not_found".to_string(),
-                domains: vec![],
-            }));
+        if authorize_traversal_path(&claims, &traversal_path).is_err() {
+            return not_found;
         }
-
-        authorize_traversal_path(&claims, &traversal_path)?;
 
         info!(
             namespace_id = req.namespace_id,
