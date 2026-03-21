@@ -231,60 +231,14 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let forward_depth = max_depth.div_ceil(2); // ceil(max_depth / 2)
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
-    // Build hop frontier CTEs that materialize reachable IDs at each depth.
-    // These are referenced by deeper arms to trigger projection-based edge scans
-    // instead of full table scans on the self-joined edge table.
-    let mut hop_ctes = Vec::new();
-    for hop in 1..forward_depth {
-        let cte_name = format!("_fwd_hop{hop}");
-        let parent = if hop == 1 {
-            None
-        } else {
-            Some(format!("_fwd_hop{}", hop - 1))
-        };
-        hop_ctes.push(Cte::new(
-            &cte_name,
-            build_hop_frontier_cte(&start.node_ids, parent.as_deref(), true),
-        ));
-    }
-    for hop in 1..backward_depth {
-        let cte_name = format!("_bwd_hop{hop}");
-        let parent = if hop == 1 {
-            None
-        } else {
-            Some(format!("_bwd_hop{}", hop - 1))
-        };
-        hop_ctes.push(Cte::new(
-            &cte_name,
-            build_hop_frontier_cte(&end.node_ids, parent.as_deref(), false),
-        ));
-    }
-
-    let fwd_hop_names: Vec<String> = (1..forward_depth).map(|h| format!("_fwd_hop{h}")).collect();
-    let bwd_hop_names: Vec<String> = (1..backward_depth)
-        .map(|h| format!("_bwd_hop{h}"))
-        .collect();
-
     let forward_cte = Cte::new(
         "forward",
-        build_frontier(
-            &start.node_ids,
-            forward_depth,
-            &rel_type_filter,
-            true,
-            &fwd_hop_names,
-        ),
+        build_frontier(&start.node_ids, forward_depth, &rel_type_filter, true),
     );
     let backward_cte = if backward_depth > 0 {
         Some(Cte::new(
             "backward",
-            build_frontier(
-                &end.node_ids,
-                backward_depth,
-                &rel_type_filter,
-                false,
-                &bwd_hop_names,
-            ),
+            build_frontier(&end.node_ids, backward_depth, &rel_type_filter, false),
         ))
     } else {
         None
@@ -392,8 +346,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     // is needed: the edge anchors already filter by start/end node IDs.
     Ok(Node::Query(Box::new(Query {
         ctes: {
-            let mut ctes = hop_ctes;
-            ctes.push(forward_cte);
+            let mut ctes = vec![forward_cte];
             if let Some(bc) = backward_cte {
                 ctes.push(bc);
             }
@@ -419,23 +372,14 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 ///
 /// `is_forward=true`:  anchors on source_id, traverses source→target
 /// `is_forward=false`: anchors on target_id, traverses target→source
-/// `hop_cte_names`: CTE names for materialized hop frontiers (one per depth > 1)
 fn build_frontier(
     anchor_ids: &[i64],
     max_depth: u32,
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
-    hop_cte_names: &[String],
 ) -> Query {
     let arms: Vec<Query> = (1..=max_depth)
-        .map(|depth| {
-            let hop_cte = if depth >= 2 {
-                hop_cte_names.get((depth - 2) as usize).map(String::as_str)
-            } else {
-                None
-            };
-            build_frontier_arm(anchor_ids, depth, rel_type_filter, is_forward, hop_cte)
-        })
+        .map(|depth| build_frontier_arm(anchor_ids, depth, rel_type_filter, is_forward))
         .collect();
 
     // Wrap in a UNION ALL. For a single arm just return it directly.
@@ -457,16 +401,11 @@ fn build_frontier(
 ///   SELECT e2.target_id AS end_id, ...
 ///   FROM gl_edge e1 JOIN gl_edge e2 ON e1.target_id = e2.source_id
 ///   WHERE e1.source_id IN (start_ids)
-///     AND e2.source_id IN (SELECT id FROM _fwd_hop1)
-///
-/// The optional `hop_cte` filter on e{depth} triggers a projection-based scan
-/// instead of a full table scan on the self-joined edge table.
 fn build_frontier_arm(
     anchor_ids: &[i64],
     depth: u32,
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
-    hop_cte: Option<&str>,
 ) -> Query {
     // Column naming: forward traverses source→target, backward target→source.
     let (anchor_col, next_col, next_kind_col) = if is_forward {
@@ -544,14 +483,6 @@ fn build_frontier_arm(
         anchor_ids.iter().map(|id| Value::from(*id)).collect(),
     );
 
-    // SIP filter on the last edge when a hop frontier CTE is available.
-    // e.g. for depth=2: e2.source_id IN (SELECT id FROM _fwd_hop1)
-    let hop_sip = hop_cte.map(|cte_name| Expr::InSubquery {
-        expr: Box::new(Expr::col(&last, anchor_col)),
-        cte_name: cte_name.to_string(),
-        column: DEFAULT_PRIMARY_KEY.to_string(),
-    });
-
     Query {
         select: vec![
             SelectExpr::new(Expr::col("e1", anchor_col), "anchor_id"),
@@ -562,48 +493,7 @@ fn build_frontier_arm(
             SelectExpr::new(Expr::int(depth as i64), "depth"),
         ],
         from,
-        where_clause: Expr::and_all([anchor_cond, first_type_cond, hop_sip]),
-        ..Default::default()
-    }
-}
-
-/// Build a CTE that materializes the 1-hop frontier reachable from anchor IDs
-/// (or from a parent hop CTE). Used to add SIP filters to deeper path arms.
-///
-/// Forward: `SELECT e.target_id AS id FROM gl_edge e WHERE e.source_id IN (...)`
-/// Backward: `SELECT e.source_id AS id FROM gl_edge e WHERE e.target_id IN (...)`
-///
-/// Duplicates are acceptable: ClickHouse deduplicates when building the IN set.
-fn build_hop_frontier_cte(anchor_ids: &[i64], parent_cte: Option<&str>, is_forward: bool) -> Query {
-    let (anchor_col, next_col) = if is_forward {
-        ("source_id", "target_id")
-    } else {
-        ("target_id", "source_id")
-    };
-    let alias = "_he";
-
-    let anchor_filter = if let Some(parent) = parent_cte {
-        Some(Expr::InSubquery {
-            expr: Box::new(Expr::col(alias, anchor_col)),
-            cte_name: parent.to_string(),
-            column: DEFAULT_PRIMARY_KEY.to_string(),
-        })
-    } else {
-        Expr::col_in(
-            alias,
-            anchor_col,
-            ChType::Int64,
-            anchor_ids.iter().map(|id| Value::from(*id)).collect(),
-        )
-    };
-
-    Query {
-        select: vec![SelectExpr::new(
-            Expr::col(alias, next_col),
-            DEFAULT_PRIMARY_KEY,
-        )],
-        from: TableRef::scan(EDGE_TABLE, alias),
-        where_clause: anchor_filter,
+        where_clause: Expr::and_all([anchor_cond, first_type_cond]),
         ..Default::default()
     }
 }
@@ -1328,11 +1218,11 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Non-recursive CTEs: _fwd_hop1 + forward + backward
-        assert_eq!(q.ctes.len(), 3);
-        assert_eq!(q.ctes[0].name, "_fwd_hop1");
-        assert_eq!(q.ctes[1].name, "forward");
-        assert_eq!(q.ctes[2].name, "backward");
+        // Lowering produces forward + backward CTEs only.
+        // Hop frontier CTEs are added by the optimize pass.
+        assert_eq!(q.ctes.len(), 2);
+        assert_eq!(q.ctes[0].name, "forward");
+        assert_eq!(q.ctes[1].name, "backward");
         assert!(q.ctes.iter().all(|c| !c.recursive));
     }
 

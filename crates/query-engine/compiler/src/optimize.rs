@@ -40,6 +40,9 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
             }
+            if input.query_type == QueryType::PathFinding {
+                apply_path_hop_frontiers(q, input);
+            }
         }
     }
 }
@@ -740,6 +743,124 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
             collect_aliases_inner(expr, aliases);
         }
         Expr::Literal(_) | Expr::Param { .. } => {}
+    }
+}
+
+/// Path hop frontier optimization.
+///
+/// For path-finding queries with max_depth > 2, materializes the reachable
+/// IDs at each hop depth in CTEs (`_fwd_hop1`, `_bwd_hop1`, etc.) and injects
+/// SIP filters into the deeper UNION ALL arms of the forward/backward CTEs.
+/// This narrows edge scans at each depth instead of doing full self-joins.
+fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
+    let path = match &input.path {
+        Some(p) => p,
+        None => return,
+    };
+
+    let start = input.nodes.iter().find(|n| n.id == path.from);
+    let end = input.nodes.iter().find(|n| n.id == path.to);
+    let (start_ids, end_ids) = match (start, end) {
+        (Some(s), Some(e)) => (&s.node_ids, &e.node_ids),
+        _ => return,
+    };
+
+    let max_depth = path.max_depth;
+    let forward_depth = max_depth.div_ceil(2);
+    let backward_depth = max_depth / 2;
+
+    // Build hop frontier CTEs and inject SIP into frontier arms.
+    let mut new_ctes = Vec::new();
+    inject_hop_frontiers(q, "forward", start_ids, forward_depth, true, &mut new_ctes);
+    if backward_depth > 0 {
+        inject_hop_frontiers(q, "backward", end_ids, backward_depth, false, &mut new_ctes);
+    }
+
+    // Prepend hop CTEs before the forward/backward CTEs so they're available.
+    new_ctes.append(&mut q.ctes);
+    q.ctes = new_ctes;
+}
+
+/// Build hop frontier CTEs for one direction and inject SIP filters into
+/// the corresponding frontier CTE's UNION ALL arms.
+fn inject_hop_frontiers(
+    q: &mut Query,
+    cte_name: &str,
+    anchor_ids: &[i64],
+    max_depth: u32,
+    is_forward: bool,
+    new_ctes: &mut Vec<Cte>,
+) {
+    let prefix = if is_forward { "_fwd_hop" } else { "_bwd_hop" };
+    let anchor_col = if is_forward { "source_id" } else { "target_id" };
+    let next_col = if is_forward { "target_id" } else { "source_id" };
+
+    // Build hop frontier CTEs: _fwd_hop1 chains from anchor IDs,
+    // _fwd_hop2 chains from _fwd_hop1, etc.
+    for hop in 1..max_depth {
+        let hop_name = format!("{prefix}{hop}");
+        let parent = if hop == 1 {
+            None
+        } else {
+            Some(format!("{prefix}{}", hop - 1))
+        };
+        let alias = "_he";
+
+        let anchor_filter = if let Some(parent) = parent {
+            Some(Expr::InSubquery {
+                expr: Box::new(Expr::col(alias, anchor_col)),
+                cte_name: parent,
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            })
+        } else {
+            Expr::col_in(
+                alias,
+                anchor_col,
+                ChType::Int64,
+                anchor_ids
+                    .iter()
+                    .map(|id| serde_json::Value::from(*id))
+                    .collect(),
+            )
+        };
+
+        new_ctes.push(Cte::new(
+            &hop_name,
+            Query {
+                select: vec![SelectExpr::new(
+                    Expr::col(alias, next_col),
+                    DEFAULT_PRIMARY_KEY,
+                )],
+                from: TableRef::scan(EDGE_TABLE, alias),
+                where_clause: anchor_filter,
+                ..Default::default()
+            },
+        ));
+    }
+
+    // Inject SIP filters into the UNION ALL arms of the frontier CTE.
+    // Arms at depth >= 2 get: e{depth}.anchor_col IN (SELECT id FROM hop{depth-1})
+    let frontier_cte = match q.ctes.iter_mut().find(|c| c.name == cte_name) {
+        Some(c) => c,
+        None => return,
+    };
+
+    // The frontier CTE is either a single query (depth=1) or has union_all arms.
+    // Arm 0 is the base query (depth=1), arms 1+ are in union_all (depth=2+).
+    // Only depth >= 2 gets a SIP filter, so we only touch union_all entries.
+    for (i, arm) in frontier_cte.query.union_all.iter_mut().enumerate() {
+        let depth = (i + 2) as u32; // union_all[0] = depth 2
+        if depth > max_depth {
+            continue;
+        }
+        let hop_cte_name = format!("{prefix}{}", depth - 1);
+        let last_edge = format!("e{depth}");
+        let sip_filter = Expr::InSubquery {
+            expr: Box::new(Expr::col(&last_edge, anchor_col)),
+            cte_name: hop_cte_name,
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        };
+        arm.where_clause = Expr::and_all([arm.where_clause.take(), Some(sip_filter)]);
     }
 }
 
