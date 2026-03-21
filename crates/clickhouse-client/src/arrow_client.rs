@@ -170,7 +170,7 @@ impl ArrowClickHouseClient {
             .headers()
             .get("x-clickhouse-summary")
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| parse_summary(s))
+            .and_then(parse_summary)
             .unwrap_or_default();
 
         let body = resp.bytes().await.map_err(ClickHouseError::Http)?;
