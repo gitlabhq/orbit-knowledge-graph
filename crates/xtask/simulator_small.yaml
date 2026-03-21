@@ -150,7 +150,7 @@ generation:
       "WorkItem -> Label": 0.3
 
 evaluation:
-  queries_path: fixtures/queries/optimization_showcase.json
+  queries_path: fixtures/queries/sdlc_queries.yaml
   metadata_dir: ./evaluation_results_small
   sample_size: 10
   iterations: 1
