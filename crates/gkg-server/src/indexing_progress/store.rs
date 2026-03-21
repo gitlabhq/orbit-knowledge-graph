@@ -12,20 +12,6 @@ pub struct IndexingProgressStore {
     datalake_client: Arc<ArrowClickHouseClient>,
 }
 
-pub struct CodeIndexingCounts {
-    pub total_projects: i64,
-    pub indexed_projects: i64,
-}
-
-impl CodeIndexingCounts {
-    pub fn new(total_projects: i64, indexed_projects: i64) -> Self {
-        Self {
-            total_projects,
-            indexed_projects,
-        }
-    }
-}
-
 impl IndexingProgressStore {
     pub fn new(
         graph_client: Arc<ArrowClickHouseClient>,
