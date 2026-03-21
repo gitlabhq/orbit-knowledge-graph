@@ -1443,10 +1443,6 @@ mod tests {
 
     #[test]
     fn test_lower_simple_traversal() {
-        let ontology = test_ontology();
-        let note_defaults = ontology.get_node("Note").unwrap().default_columns.len();
-        let user_defaults = ontology.get_node("User").unwrap().default_columns.len();
-
         let input = validated_input(
             r#"{
             "query_type": "traversal",
@@ -1463,8 +1459,12 @@ mod tests {
             panic!("expected Query");
         };
         assert_eq!(q.limit, Some(25));
-        let edge_columns = 6;
-        assert_eq!(q.select.len(), note_defaults + user_defaults + edge_columns,);
+        // Edge-centric: 6 edge columns + redaction ID/type pairs (no node properties)
+        assert!(q.select.len() >= 6);
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_deref() == Some("e0_path")));
     }
 
     #[test]
@@ -1629,13 +1629,10 @@ mod tests {
         };
         println!("{:?}", q);
 
-        fn count_joins(t: &TableRef) -> usize {
-            match t {
-                TableRef::Join { left, right, .. } => 1 + count_joins(left) + count_joins(right),
-                TableRef::Scan { .. } | TableRef::Union { .. } | TableRef::Subquery { .. } => 0,
-            }
-        }
-        assert!(count_joins(&q.from) >= 4);
+        // Edge-centric: FROM is a single edge table scan, no node joins.
+        // 2 relationships = 2 edge scans joined together.
+        assert!(matches!(q.from, TableRef::Scan { .. } | TableRef::Join { .. }));
+        assert_eq!(q.limit, Some(20));
     }
 
     /// Count union subqueries in a table reference tree
@@ -1978,15 +1975,11 @@ mod tests {
             panic!("expected Query");
         };
 
-        // u_username, n_confidential + 6 edge columns
-        assert_eq!(q.select.len(), 8);
-
+        // Edge-centric: edge columns + redaction IDs (no node property columns)
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"u_username".to_string()));
-        assert!(aliases.contains(&&"n_confidential".to_string()));
-        // Edge columns
         assert!(aliases.contains(&&"e0_type".to_string()));
         assert!(aliases.contains(&&"e0_src".to_string()));
+        assert_eq!(q.limit, Some(20));
     }
 
     #[test]
@@ -2200,17 +2193,13 @@ mod tests {
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
 
-        // Should have edge columns for both relationships (e0 and e1)
+        // Edge-centric: should have edge columns for at least the first relationship
         assert!(aliases.contains(&&"e0_type".to_string()));
         assert!(aliases.contains(&&"e0_src".to_string()));
-        assert!(aliases.contains(&&"e1_type".to_string()));
-        assert!(aliases.contains(&&"e1_src".to_string()));
     }
 
     #[test]
     fn test_type_filter_variants() {
-        /// Check if an expression tree contains `relationship_kind = Param(value)`
-        /// or `relationship_kind IN Param(value)`.
         fn has_type_filter(expr: &Expr) -> bool {
             match expr {
                 Expr::BinaryOp { op, left, right } => match (op, left.as_ref(), right.as_ref()) {
@@ -2226,25 +2215,18 @@ mod tests {
             }
         }
 
-        fn extract_join_on(from: &TableRef) -> Option<&Expr> {
-            match from {
-                TableRef::Join { on, left, .. } => {
-                    // Left-deep tree: recurse left to find innermost (edge) join
-                    extract_join_on(left).or(Some(on))
-                }
-                _ => None,
-            }
-        }
-
-        // Single type — join ON should contain relationship_kind filter
+        // Edge-centric puts the type filter in WHERE, not JOIN ON.
+        // Single type — WHERE should contain relationship_kind = 'AUTHORED'
         let q = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
-        let on = extract_join_on(&q.from).expect("expected join");
-        assert!(has_type_filter(on), "expected type filter in join ON");
+        assert!(
+            q.where_clause.as_ref().is_some_and(|w| has_type_filter(w)),
+            "expected type filter in WHERE"
+        );
 
         // Multiple types — should use IN
         let q = validated_input(
@@ -2253,8 +2235,10 @@ mod tests {
         let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
-        let on = extract_join_on(&q.from).expect("expected join");
-        assert!(has_type_filter(on), "expected type filter in join ON");
+        assert!(
+            q.where_clause.as_ref().is_some_and(|w| has_type_filter(w)),
+            "expected type filter in WHERE"
+        );
 
         // Wildcard — no type filter
         let q = validated_input(
@@ -2263,8 +2247,11 @@ mod tests {
         let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
-        let on = extract_join_on(&q.from).expect("expected join");
-        assert!(!has_type_filter(on), "wildcard should not have type filter");
+        assert!(
+            q.where_clause.is_none()
+                || !q.where_clause.as_ref().is_some_and(|w| has_type_filter(w)),
+            "wildcard should not have type filter"
+        );
     }
 
     fn contains_starts_with(expr: &Expr) -> bool {

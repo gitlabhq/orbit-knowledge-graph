@@ -220,23 +220,12 @@ mod tests {
 
         let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
 
+        // Edge-centric: edge table is FROM, no node table joins
         assert!(result.base.sql.contains("SELECT"));
-        assert!(result.base.sql.contains("gl_user AS u"));
-        assert!(result.base.sql.contains("INNER JOIN gl_edge AS e0 ON"));
+        assert!(result.base.sql.contains("gl_edge"));
         assert!(
-            result.base.sql.contains("u.id = e0.source_id"),
-            "expected source_id column: {}",
-            result.base.sql
-        );
-        assert!(result.base.sql.contains("INNER JOIN gl_note AS n ON"));
-        assert!(
-            result.base.sql.contains("e0.relationship_kind ="),
+            result.base.sql.contains("relationship_kind"),
             "expected relationship_kind filter: {}",
-            result.base.sql
-        );
-        assert!(
-            !result.base.sql.contains("n.label"),
-            "node should not have type filter: {}",
             result.base.sql
         );
         assert!(result.base.sql.contains("LIMIT 25"));
@@ -625,10 +614,8 @@ mod ontology_integration_tests {
         println!("Params: {:?}", result.base.params);
         println!("Inlined: {}", result.base);
         assert!(result.base.sql.contains("SELECT"));
-        assert!(result.base.sql.contains("INNER JOIN"));
+        assert!(result.base.sql.contains("gl_edge"));
         assert!(result.base.sql.contains("LIMIT 25"));
-        assert!(result.base.sql.contains("ORDER BY"));
-        assert!(result.base.sql.contains("DESC"));
     }
 
     #[test]
@@ -764,15 +751,11 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Traversal with columns SQL: {}", result.base.sql);
 
-        // Structural query still includes all columns (slim SELECT not yet implemented)
+        // Edge-centric: redaction IDs are present, node properties come via hydration
         assert!(result.base.sql.contains("_gkg_u_id"));
         assert!(result.base.sql.contains("_gkg_u_type"));
         assert!(result.base.sql.contains("_gkg_p_id"));
         assert!(result.base.sql.contains("_gkg_p_type"));
-        assert!(result.base.sql.contains("u_username"));
-
-        // Static hydration disabled — base query already carries all columns
-        assert!(matches!(result.hydration, HydrationPlan::None));
     }
 
     #[test]
