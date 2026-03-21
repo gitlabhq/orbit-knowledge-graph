@@ -6,12 +6,12 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use clickhouse_client::profiler::QueryProfiler;
+use clickhouse_client::ArrowClickHouseClient;
 use compiler::SecurityContext;
 use ontology::Ontology;
 use tracing_subscriber::EnvFilter;
 
-use executor::{ProfilerOptions, execute_profiled_query};
+use executor::{ProfilerOptions, enrich_output, run_profiler_pipeline};
 use output::build_output;
 
 #[derive(Parser)]
@@ -118,25 +118,26 @@ async fn main() -> Result<()> {
         })
         .collect();
 
-    let profiler = QueryProfiler::new(
+    let client = Arc::new(ArrowClickHouseClient::new(
         &cli.ch_url,
         &cli.ch_database,
         &cli.ch_user,
         cli.ch_password.as_deref(),
         &custom_settings,
-    );
+    ));
+
+    let mut output =
+        run_profiler_pipeline(Arc::clone(&client), ontology, security_ctx, &query_json).await?;
 
     let opts = ProfilerOptions {
         explain: cli.explain,
         profile: cli.profile,
         processors: cli.processors,
     };
-
-    let result =
-        execute_profiled_query(&profiler, &ontology, &security_ctx, &query_json, &opts).await?;
+    enrich_output(&client, &mut output, &opts).await;
 
     let instance_health = if cli.health {
-        match profiler.fetch_instance_health().await {
+        match client.profiler().fetch_instance_health().await {
             Ok(health) => Some(serde_json::to_value(&health).unwrap_or_default()),
             Err(e) => {
                 tracing::warn!("failed to fetch instance health: {e}");
@@ -147,20 +148,20 @@ async fn main() -> Result<()> {
         None
     };
 
-    let output = build_output(
+    let profiler_output = build_output(
         &query_json,
         org_id,
         &cli.traversal_paths,
-        &result,
+        &output,
         instance_health,
     );
 
     match cli.format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string(&output)?);
+            println!("{}", serde_json::to_string(&profiler_output)?);
         }
         OutputFormat::Pretty => {
-            println!("{}", serde_json::to_string_pretty(&output)?);
+            println!("{}", serde_json::to_string_pretty(&profiler_output)?);
         }
     }
 

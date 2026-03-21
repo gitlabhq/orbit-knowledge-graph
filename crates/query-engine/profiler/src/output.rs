@@ -1,7 +1,5 @@
 use serde::Serialize;
-use shared::QueryExecution;
-
-use crate::executor::ProfilerResult;
+use shared::{PipelineOutput, QueryExecution};
 
 #[derive(Serialize)]
 pub struct ProfilerOutput {
@@ -42,25 +40,22 @@ pub fn build_output(
     query_json: &str,
     org_id: i64,
     traversal_paths: &[String],
-    result: &ProfilerResult,
+    output: &PipelineOutput,
     instance_health: Option<serde_json::Value>,
 ) -> ProfilerOutput {
     let query: serde_json::Value =
         serde_json::from_str(query_json).unwrap_or(serde_json::Value::String(query_json.into()));
 
-    let hydration_plan = match &result.compiled.hydration {
-        compiler::HydrationPlan::None => "None",
-        compiler::HydrationPlan::Static(_) => "Static",
-        compiler::HydrationPlan::Dynamic => "Dynamic",
-    };
+    let hydration_plan = format!("{:?}", output.compiled.hydration);
+    let execs = &output.execution_log;
 
     let summary = ExecutionSummary {
-        total_queries: result.executions.len(),
-        total_read_rows: result.executions.iter().map(|e| e.stats.read_rows).sum(),
-        total_read_bytes: result.executions.iter().map(|e| e.stats.read_bytes).sum(),
-        total_memory_usage: result.executions.iter().map(|e| e.stats.memory_usage).sum(),
-        total_elapsed_ms: result.executions.iter().map(|e| e.elapsed_ms).sum(),
-        result_rows: result.result_rows,
+        total_queries: execs.len(),
+        total_read_rows: execs.iter().map(|e| e.stats.read_rows).sum(),
+        total_read_bytes: execs.iter().map(|e| e.stats.read_bytes).sum(),
+        total_memory_usage: execs.iter().map(|e| e.stats.memory_usage).sum(),
+        total_elapsed_ms: execs.iter().map(|e| e.elapsed_ms).sum(),
+        result_rows: output.row_count,
     };
 
     ProfilerOutput {
@@ -70,12 +65,12 @@ pub fn build_output(
             traversal_paths: traversal_paths.to_vec(),
         },
         compilation: CompilationInfo {
-            query_type: result.compiled.query_type.to_string(),
-            parameterized_sql: result.compiled.base.sql.clone(),
-            rendered_sql: result.compiled.base.render(),
-            hydration_plan: hydration_plan.into(),
+            query_type: output.compiled.query_type.to_string(),
+            parameterized_sql: output.compiled.base.sql.clone(),
+            rendered_sql: output.compiled.base.render(),
+            hydration_plan,
         },
-        executions: result.executions.clone(),
+        executions: output.execution_log.clone(),
         summary,
         instance_health,
     }
