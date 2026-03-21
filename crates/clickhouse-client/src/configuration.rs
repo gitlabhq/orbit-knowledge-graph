@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::arrow_client::ArrowClickHouseClient;
@@ -10,6 +12,24 @@ pub struct ClickHouseConfiguration {
     pub username: String,
     #[serde(default)]
     pub password: Option<String>,
+    #[serde(default)]
+    pub query_settings: HashMap<String, String>,
+    #[serde(default)]
+    pub profiling: ProfilingConfig,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ProfilingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub explain: bool,
+    #[serde(default)]
+    pub query_log: bool,
+    #[serde(default)]
+    pub processors: bool,
+    #[serde(default)]
+    pub instance_health: bool,
 }
 
 impl Default for ClickHouseConfiguration {
@@ -19,6 +39,8 @@ impl Default for ClickHouseConfiguration {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: HashMap::new(),
+            profiling: ProfilingConfig::default(),
         }
     }
 }
@@ -46,6 +68,7 @@ impl ClickHouseConfiguration {
             &self.database,
             &self.username,
             self.password.as_deref(),
+            &self.query_settings,
         )
     }
 }
@@ -86,6 +109,8 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         assert!(config.validate().is_ok());
@@ -98,6 +123,8 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let result = config.validate();
@@ -111,6 +138,8 @@ mod tests {
             url: "".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let result = config.validate();
@@ -124,6 +153,8 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let result = config.validate();
@@ -147,6 +178,8 @@ mod tests {
             url: "https://localhost:1".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let client = config.build_client();

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 use serde_json::json;
 
-use crate::types::{HydrationOutput, PipelineOutput};
+use crate::types::{HydrationOutput, PipelineOutput, QueryExecutionLog};
 
 #[derive(Clone)]
 pub struct OutputStage;
@@ -29,6 +29,12 @@ impl PipelineStage for OutputStage {
             "hydration": input.hydration_queries,
         });
 
+        let execution_log = ctx
+            .phases
+            .get::<QueryExecutionLog>()
+            .map(|log| log.0.clone())
+            .unwrap_or_default();
+
         Ok(PipelineOutput {
             row_count: input.query_result.authorized_count(),
             redacted_count: input.redacted_count,
@@ -37,6 +43,7 @@ impl PipelineStage for OutputStage {
             compiled: Arc::clone(compiled),
             query_result: input.query_result.clone(),
             result_context: input.result_context.clone(),
+            execution_log,
         })
     }
 }

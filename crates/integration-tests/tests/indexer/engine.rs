@@ -205,7 +205,13 @@ impl TestContext {
 
     async fn connect_clickhouse_with_retry(endpoint: &str) -> ArrowClickHouseClient {
         for attempt in 1..=30 {
-            let client = ArrowClickHouseClient::new(endpoint, "default", USERNAME, Some(PASSWORD));
+            let client = ArrowClickHouseClient::new(
+                endpoint,
+                "default",
+                USERNAME,
+                Some(PASSWORD),
+                &std::collections::HashMap::new(),
+            );
 
             match client.execute("SELECT 1").await {
                 Ok(_) => return client,
@@ -242,6 +248,8 @@ impl TestContext {
                     url: self.clickhouse_endpoint.clone(),
                     username: USERNAME.to_string(),
                     password: Some(PASSWORD.to_string()),
+                    query_settings: std::collections::HashMap::new(),
+                    profiling: Default::default(),
                 },
                 Arc::new(EngineMetrics::default()),
             )
@@ -267,6 +275,7 @@ impl TestContext {
             DATABASE,
             USERNAME,
             Some(PASSWORD),
+            &std::collections::HashMap::new(),
         );
 
         let batches = client
