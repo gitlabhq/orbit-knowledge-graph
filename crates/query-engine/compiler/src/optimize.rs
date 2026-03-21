@@ -29,6 +29,7 @@ use crate::security::SecurityContext;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_TABLE, TRAVERSAL_PATH_COLUMN};
 
 const ROOT_SIP_CTE: &str = "_root_ids";
+const ROOT_NARROWED_CTE: &str = "_root_narrowed";
 const LIMIT_PUSHDOWN_MULTIPLIER: u32 = 3;
 
 /// Apply all optimization passes to the AST.
@@ -229,9 +230,22 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     };
     q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
 
+    // Multi-relationship root narrowing: when multiple single-hop relationships
+    // share the same root and the root isn't in GROUP BY, narrow the root SIP
+    // using the first relationship's edges. This filters subsequent edge scans
+    // to only root IDs that participate in the first relationship.
+    let effective_root = if should_narrow_root(input, root_alias) {
+        let (start_col, _) = first_rel.direction.edge_columns();
+        let narrowed = build_narrowed_root_cte(ROOT_SIP_CTE, start_col, &first_rel.types);
+        q.ctes.push(Cte::new(ROOT_NARROWED_CTE, narrowed));
+        ROOT_NARROWED_CTE
+    } else {
+        ROOT_SIP_CTE
+    };
+
     // Inject root SIP into edges adjacent to the root node.
     let mut node_ctes: HashMap<String, String> = HashMap::new();
-    node_ctes.insert(root_alias.clone(), ROOT_SIP_CTE.to_string());
+    node_ctes.insert(root_alias.clone(), effective_root.to_string());
 
     for (i, rel) in input.relationships.iter().enumerate() {
         let from_cte = node_ctes.get(&rel.from).cloned();
@@ -357,6 +371,67 @@ fn build_cascade_for_node(
         where_clause: Some(Expr::and(parent_filter, rel_filter)),
         ..Default::default()
     })
+}
+
+/// Check if root narrowing should be applied: multi-relationship aggregation
+/// from the same root where root is not in GROUP BY.
+fn should_narrow_root(input: &Input, root_alias: &str) -> bool {
+    if input.query_type != QueryType::Aggregation {
+        return false;
+    }
+    if input.relationships.len() < 2 {
+        return false;
+    }
+    if !input
+        .relationships
+        .iter()
+        .all(|r| r.from == root_alias && r.max_hops <= 1)
+    {
+        return false;
+    }
+    !input
+        .aggregations
+        .iter()
+        .any(|a| a.group_by.as_deref() == Some(root_alias))
+}
+
+/// Build a CTE that narrows the root SIP to only IDs that participate in
+/// a specific relationship: `SELECT start_col AS id FROM gl_edge WHERE
+/// start_col IN (parent) AND relationship_kind = ...`
+fn build_narrowed_root_cte(parent_cte: &str, start_col: &str, rel_types: &[String]) -> Query {
+    let alias = "_ne";
+    let parent_filter = Expr::InSubquery {
+        expr: Box::new(Expr::col(alias, start_col)),
+        cte_name: parent_cte.to_string(),
+        column: DEFAULT_PRIMARY_KEY.to_string(),
+    };
+    let rel_filter = if rel_types.len() == 1 {
+        Expr::eq(
+            Expr::col(alias, "relationship_kind"),
+            Expr::param(ChType::String, rel_types[0].clone()),
+        )
+    } else {
+        Expr::col_in(
+            alias,
+            "relationship_kind",
+            ChType::String,
+            rel_types
+                .iter()
+                .map(|t| serde_json::Value::String(t.clone()))
+                .collect(),
+        )
+        .unwrap_or_else(|| Expr::param(ChType::Bool, true))
+    };
+
+    Query {
+        select: vec![SelectExpr::new(
+            Expr::col(alias, start_col),
+            DEFAULT_PRIMARY_KEY,
+        )],
+        from: TableRef::scan(EDGE_TABLE, alias),
+        where_clause: Some(Expr::and(parent_filter, rel_filter)),
+        ..Default::default()
+    }
 }
 
 /// Reverse SIP: when a non-root node has explicit node_ids, trace edges
@@ -2059,5 +2134,127 @@ mod tests {
             }
             other => panic!("expected FuncCall in ORDER BY, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn multi_rel_root_narrowing_creates_cte() {
+        use crate::input::{Direction, InputAggregation, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "reviewer".into(),
+                    entity: Some("User".into()),
+                    table: Some("gl_user".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![
+                InputRelationship {
+                    types: vec!["REVIEWER".into()],
+                    from: "mr".into(),
+                    to: "reviewer".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+                InputRelationship {
+                    types: vec!["IN_PROJECT".into()],
+                    from: "mr".into(),
+                    to: "p".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+            ],
+            aggregations: vec![InputAggregation {
+                function: AggFunction::Count,
+                target: Some("reviewer".into()),
+                group_by: Some("p".into()),
+                property: None,
+                alias: Some("reviewer_count".into()),
+            }],
+            ..Default::default()
+        };
+
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let mut node = crate::lower::lower(&input).unwrap();
+        optimize(&mut node, &input, &ctx);
+
+        let q = match &node {
+            Node::Query(q) => q,
+        };
+
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_root_narrowed"),
+            "should create _root_narrowed CTE for multi-rel aggregation"
+        );
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_root_ids"),
+            "_root_ids should still exist as parent"
+        );
+
+        // WHERE should reference _root_narrowed for edge SIPs
+        let where_str = format!("{:?}", q.where_clause);
+        assert!(
+            where_str.contains("_root_narrowed"),
+            "edge SIPs should use _root_narrowed"
+        );
+    }
+
+    #[test]
+    fn multi_rel_root_narrowing_skips_when_root_in_group_by() {
+        assert!(
+            !should_narrow_root(
+                &Input {
+                    query_type: QueryType::Aggregation,
+                    relationships: vec![
+                        crate::input::InputRelationship {
+                            types: vec!["R1".into()],
+                            from: "mr".into(),
+                            to: "a".into(),
+                            min_hops: 1,
+                            max_hops: 1,
+                            direction: crate::input::Direction::Outgoing,
+                            filters: Default::default(),
+                        },
+                        crate::input::InputRelationship {
+                            types: vec!["R2".into()],
+                            from: "mr".into(),
+                            to: "b".into(),
+                            min_hops: 1,
+                            max_hops: 1,
+                            direction: crate::input::Direction::Outgoing,
+                            filters: Default::default(),
+                        },
+                    ],
+                    aggregations: vec![InputAggregation {
+                        function: AggFunction::Count,
+                        target: Some("a".into()),
+                        group_by: Some("mr".into()),
+                        property: None,
+                        alias: Some("cnt".into()),
+                    }],
+                    ..Default::default()
+                },
+                "mr"
+            ),
+            "should not narrow when root is in group_by"
+        );
     }
 }
