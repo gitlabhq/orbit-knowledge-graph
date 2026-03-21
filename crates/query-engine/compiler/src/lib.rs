@@ -1296,4 +1296,152 @@ mod ontology_integration_tests {
             "hydration query should not trigger further hydration"
         );
     }
+
+    #[test]
+    fn hydration_single_entity_no_union_all() {
+        let ctx = test_ctx();
+
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes: vec![InputNode {
+                id: "hydrate".to_string(),
+                entity: Some("User".to_string()),
+                table: Some("gl_user".to_string()),
+                columns: Some(ColumnSelection::List(vec!["id".into(), "username".into()])),
+                node_ids: vec![42],
+                ..InputNode::default()
+            }],
+            limit: 1,
+            ..Input::default()
+        };
+
+        let result = compile_input(input, &ctx).unwrap();
+        let sql = &result.base.sql;
+
+        assert!(
+            !sql.contains("UNION ALL"),
+            "single entity should not UNION ALL"
+        );
+        assert!(
+            sql.contains("toJSONString"),
+            "should still use toJSONString"
+        );
+        assert!(sql.contains("gl_user"), "should reference gl_user");
+    }
+
+    #[test]
+    fn hydration_uses_parameterized_ids() {
+        let ctx = test_ctx();
+
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes: vec![InputNode {
+                id: "hydrate".to_string(),
+                entity: Some("Note".to_string()),
+                table: Some("gl_note".to_string()),
+                columns: Some(ColumnSelection::List(vec![
+                    "id".into(),
+                    "confidential".into(),
+                    "created_at".into(),
+                ])),
+                node_ids: vec![100, 200, 300],
+                ..InputNode::default()
+            }],
+            limit: 3,
+            ..Input::default()
+        };
+
+        let result = compile_input(input, &ctx).unwrap();
+        let sql = &result.base.sql;
+
+        assert!(
+            sql.contains("Array(Int64)"),
+            "IDs should be parameterized as Array(Int64), got: {sql}"
+        );
+        assert!(
+            !sql.contains("100"),
+            "literal IDs should not appear in parameterized SQL"
+        );
+
+        let rendered = result.base.render();
+        assert!(
+            rendered.contains("100") && rendered.contains("200") && rendered.contains("300"),
+            "rendered SQL should inline the IDs"
+        );
+    }
+
+    #[test]
+    fn hydration_skips_security_context() {
+        let ctx = test_ctx();
+
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes: vec![InputNode {
+                id: "hydrate".to_string(),
+                entity: Some("Note".to_string()),
+                table: Some("gl_note".to_string()),
+                columns: Some(ColumnSelection::List(vec![
+                    "id".into(),
+                    "confidential".into(),
+                ])),
+                node_ids: vec![1],
+                ..InputNode::default()
+            }],
+            limit: 1,
+            ..Input::default()
+        };
+
+        let result = compile_input(input, &ctx).unwrap();
+        let sql = &result.base.sql;
+
+        assert!(
+            !sql.contains("traversal_path"),
+            "hydration should skip security filters, got: {sql}"
+        );
+        assert!(
+            !sql.contains("startsWith"),
+            "hydration should not have startsWith filter"
+        );
+    }
+
+    #[test]
+    fn hydration_id_column_excluded_from_map() {
+        let ctx = test_ctx();
+
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes: vec![InputNode {
+                id: "hydrate".to_string(),
+                entity: Some("User".to_string()),
+                table: Some("gl_user".to_string()),
+                columns: Some(ColumnSelection::List(vec![
+                    "id".into(),
+                    "username".into(),
+                    "state".into(),
+                ])),
+                node_ids: vec![1],
+                ..InputNode::default()
+            }],
+            limit: 1,
+            ..Input::default()
+        };
+
+        let result = compile_input(input, &ctx).unwrap();
+        let rendered = result.base.render();
+
+        assert!(
+            rendered.contains("'username'") && rendered.contains("'state'"),
+            "map should contain username and state"
+        );
+
+        let map_section = rendered
+            .split("map(")
+            .nth(1)
+            .and_then(|s| s.split(')').next())
+            .unwrap_or("");
+        assert!(
+            !map_section.contains("'id'"),
+            "map should not contain 'id' key (it's the PK, selected separately)"
+        );
+    }
 }

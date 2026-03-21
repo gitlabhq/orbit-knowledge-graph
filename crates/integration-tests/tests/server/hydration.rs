@@ -623,6 +623,183 @@ async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Consolidated Hydration Data Correctness
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The consolidated path User→Group→Project hydrates all three entity types
+/// in a single UNION ALL query. Verify each node has the correct property values.
+async fn consolidated_path_hydrates_all_entity_types(ctx: &TestContext) {
+    let (ontology, client) = make_test_resources(ctx);
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let (result, _ctx_ref, _plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
+
+    let row = result.authorized_rows().next().expect("should have a path");
+    let nodes = row.path_nodes();
+    assert_eq!(nodes.len(), 3, "path should be User→Group→Project");
+
+    let entity_types: Vec<&str> = nodes.iter().map(|n| n.entity_type.as_str()).collect();
+    assert_eq!(entity_types, vec!["User", "Group", "Project"]);
+
+    assert_eq!(
+        nodes[0]
+            .properties
+            .get("username")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
+        Some("alice")
+    );
+    assert_eq!(
+        nodes[1]
+            .properties
+            .get("name")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
+        Some("Public Group")
+    );
+    assert_eq!(
+        nodes[2]
+            .properties
+            .get("name")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
+        Some("Public Project")
+    );
+}
+
+/// Null values from ClickHouse (e.g. full_path=NULL) should be filtered out,
+/// not appear as empty strings or crash the parser.
+async fn consolidated_hydration_filters_null_properties(ctx: &TestContext) {
+    let (ontology, client) = make_test_resources(ctx);
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "neighbors": {"node": "u", "direction": "outgoing"}
+    }"#;
+
+    let (result, _ctx_ref, _plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
+
+    for row in result.authorized_rows() {
+        let neighbor = row.neighbor_node().expect("should have neighbor");
+        for (key, value) in &neighbor.properties {
+            assert!(
+                !value
+                    .as_string()
+                    .is_some_and(|s| s == "null" || s.is_empty()),
+                "property '{key}' should not be null or empty string, got: {value:?}"
+            );
+        }
+    }
+}
+
+/// When multiple IDs of the same entity type need hydration, all should be returned.
+async fn consolidated_hydration_multiple_ids_same_type(ctx: &TestContext) {
+    let (ontology, client) = make_test_resources(ctx);
+    let security_ctx = test_security_context();
+
+    // Both users 1 and 2 are members of groups, producing a path through both
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1, 2]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1001]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let (result, _ctx_ref, _plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
+
+    assert!(
+        result.authorized_count() >= 2,
+        "should find paths for both users"
+    );
+
+    let user_ids: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.path_nodes().first().map(|n| n.id))
+        .collect();
+    assert!(user_ids.contains(&1), "User 1 path should exist");
+    assert!(user_ids.contains(&2), "User 2 path should exist");
+
+    for row in result.authorized_rows() {
+        for node in row.path_nodes() {
+            assert!(
+                !node.properties.is_empty(),
+                "node {} ({}) should have hydrated properties",
+                node.id,
+                node.entity_type
+            );
+        }
+    }
+}
+
+/// Verify that the consolidated query produces exactly one ClickHouse query
+/// for hydration, regardless of how many entity types are discovered.
+async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
+    let (ontology, client) = make_test_resources(ctx);
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+
+    let compiled = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&compiled.base).await;
+    let result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+
+    let redaction_output = RedactionOutput {
+        query_result: result,
+        redacted_count: 0,
+    };
+
+    let mut server_extensions = TypeMap::default();
+    server_extensions.insert(Arc::clone(&client));
+    let mut pipeline_ctx = QueryPipelineContext {
+        query_json: String::new(),
+        compiled: Some(Arc::new(compiled)),
+        ontology: Arc::clone(&ontology),
+        security_context: Some(security_ctx.clone()),
+        server_extensions,
+        phases: TypeMap::default(),
+    };
+    pipeline_ctx.phases.insert(redaction_output);
+
+    let mut obs = NoOpObserver;
+    let output = HydrationStage
+        .execute(&mut pipeline_ctx, &mut obs)
+        .await
+        .expect("hydration should succeed");
+
+    assert_eq!(
+        output.hydration_queries.len(),
+        1,
+        "consolidated hydration should produce exactly 1 debug query entry, got {}",
+        output.hydration_queries.len()
+    );
+    assert!(
+        output.hydration_queries[0].sql.contains("UNION ALL")
+            || output.hydration_queries[0].rendered.contains("UNION ALL"),
+        "the single hydration query should be a UNION ALL"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Orchestrator
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -648,5 +825,10 @@ async fn hydration_integration() {
         path_finding_hydration_after_partial_redaction,
         neighbors_hydration_after_partial_redaction,
         path_finding_all_denied_then_hydrate,
+        // consolidated hydration data correctness
+        consolidated_path_hydrates_all_entity_types,
+        consolidated_hydration_filters_null_properties,
+        consolidated_hydration_multiple_ids_same_type,
+        consolidated_hydration_single_query_execution,
     );
 }
