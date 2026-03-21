@@ -231,60 +231,14 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let forward_depth = max_depth.div_ceil(2); // ceil(max_depth / 2)
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
-    // Build hop frontier CTEs that materialize reachable IDs at each depth.
-    // These are referenced by deeper arms to trigger projection-based edge scans
-    // instead of full table scans on the self-joined edge table.
-    let mut hop_ctes = Vec::new();
-    for hop in 1..forward_depth {
-        let cte_name = format!("_fwd_hop{hop}");
-        let parent = if hop == 1 {
-            None
-        } else {
-            Some(format!("_fwd_hop{}", hop - 1))
-        };
-        hop_ctes.push(Cte::new(
-            &cte_name,
-            build_hop_frontier_cte(&start.node_ids, parent.as_deref(), true),
-        ));
-    }
-    for hop in 1..backward_depth {
-        let cte_name = format!("_bwd_hop{hop}");
-        let parent = if hop == 1 {
-            None
-        } else {
-            Some(format!("_bwd_hop{}", hop - 1))
-        };
-        hop_ctes.push(Cte::new(
-            &cte_name,
-            build_hop_frontier_cte(&end.node_ids, parent.as_deref(), false),
-        ));
-    }
-
-    let fwd_hop_names: Vec<String> = (1..forward_depth).map(|h| format!("_fwd_hop{h}")).collect();
-    let bwd_hop_names: Vec<String> = (1..backward_depth)
-        .map(|h| format!("_bwd_hop{h}"))
-        .collect();
-
     let forward_cte = Cte::new(
         "forward",
-        build_frontier(
-            &start.node_ids,
-            forward_depth,
-            &rel_type_filter,
-            true,
-            &fwd_hop_names,
-        ),
+        build_frontier(&start.node_ids, forward_depth, &rel_type_filter, true),
     );
     let backward_cte = if backward_depth > 0 {
         Some(Cte::new(
             "backward",
-            build_frontier(
-                &end.node_ids,
-                backward_depth,
-                &rel_type_filter,
-                false,
-                &bwd_hop_names,
-            ),
+            build_frontier(&end.node_ids, backward_depth, &rel_type_filter, false),
         ))
     } else {
         None
@@ -392,8 +346,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     // is needed: the edge anchors already filter by start/end node IDs.
     Ok(Node::Query(Box::new(Query {
         ctes: {
-            let mut ctes = hop_ctes;
-            ctes.push(forward_cte);
+            let mut ctes = vec![forward_cte];
             if let Some(bc) = backward_cte {
                 ctes.push(bc);
             }
@@ -419,23 +372,14 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 ///
 /// `is_forward=true`:  anchors on source_id, traverses source→target
 /// `is_forward=false`: anchors on target_id, traverses target→source
-/// `hop_cte_names`: CTE names for materialized hop frontiers (one per depth > 1)
 fn build_frontier(
     anchor_ids: &[i64],
     max_depth: u32,
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
-    hop_cte_names: &[String],
 ) -> Query {
     let arms: Vec<Query> = (1..=max_depth)
-        .map(|depth| {
-            let hop_cte = if depth >= 2 {
-                hop_cte_names.get((depth - 2) as usize).map(String::as_str)
-            } else {
-                None
-            };
-            build_frontier_arm(anchor_ids, depth, rel_type_filter, is_forward, hop_cte)
-        })
+        .map(|depth| build_frontier_arm(anchor_ids, depth, rel_type_filter, is_forward))
         .collect();
 
     // Wrap in a UNION ALL. For a single arm just return it directly.
@@ -457,16 +401,16 @@ fn build_frontier(
 ///   SELECT e2.target_id AS end_id, ...
 ///   FROM gl_edge e1 JOIN gl_edge e2 ON e1.target_id = e2.source_id
 ///   WHERE e1.source_id IN (start_ids)
-///     AND e2.source_id IN (SELECT id FROM _fwd_hop1)
 ///
-/// The optional `hop_cte` filter on e{depth} triggers a projection-based scan
-/// instead of a full table scan on the self-joined edge table.
+/// Backward arm (depth=2, anchor=end):
+///   SELECT e2.source_id AS end_id, ...
+///   FROM gl_edge e1 JOIN gl_edge e2 ON e1.source_id = e2.target_id
+///   WHERE e1.target_id IN (end_ids)
 fn build_frontier_arm(
     anchor_ids: &[i64],
     depth: u32,
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
-    hop_cte: Option<&str>,
 ) -> Query {
     // Column naming: forward traverses source→target, backward target→source.
     let (anchor_col, next_col, next_kind_col) = if is_forward {
@@ -544,14 +488,6 @@ fn build_frontier_arm(
         anchor_ids.iter().map(|id| Value::from(*id)).collect(),
     );
 
-    // SIP filter on the last edge when a hop frontier CTE is available.
-    // e.g. for depth=2: e2.source_id IN (SELECT id FROM _fwd_hop1)
-    let hop_sip = hop_cte.map(|cte_name| Expr::InSubquery {
-        expr: Box::new(Expr::col(&last, anchor_col)),
-        cte_name: cte_name.to_string(),
-        column: DEFAULT_PRIMARY_KEY.to_string(),
-    });
-
     Query {
         select: vec![
             SelectExpr::new(Expr::col("e1", anchor_col), "anchor_id"),
@@ -562,46 +498,7 @@ fn build_frontier_arm(
             SelectExpr::new(Expr::int(depth as i64), "depth"),
         ],
         from,
-        where_clause: Expr::and_all([anchor_cond, first_type_cond, hop_sip]),
-        ..Default::default()
-    }
-}
-
-/// Build a CTE that materializes the 1-hop frontier reachable from anchor IDs
-/// (or from a parent hop CTE). Used to add SIP filters to deeper path arms.
-///
-/// Forward: `SELECT DISTINCT e.target_id AS id FROM gl_edge e WHERE e.source_id IN (...)`
-/// Backward: `SELECT DISTINCT e.source_id AS id FROM gl_edge e WHERE e.target_id IN (...)`
-fn build_hop_frontier_cte(anchor_ids: &[i64], parent_cte: Option<&str>, is_forward: bool) -> Query {
-    let (anchor_col, next_col) = if is_forward {
-        ("source_id", "target_id")
-    } else {
-        ("target_id", "source_id")
-    };
-    let alias = "_he";
-
-    let anchor_filter = if let Some(parent) = parent_cte {
-        Some(Expr::InSubquery {
-            expr: Box::new(Expr::col(alias, anchor_col)),
-            cte_name: parent.to_string(),
-            column: DEFAULT_PRIMARY_KEY.to_string(),
-        })
-    } else {
-        Expr::col_in(
-            alias,
-            anchor_col,
-            ChType::Int64,
-            anchor_ids.iter().map(|id| Value::from(*id)).collect(),
-        )
-    };
-
-    Query {
-        select: vec![SelectExpr::new(
-            Expr::col(alias, next_col),
-            DEFAULT_PRIMARY_KEY,
-        )],
-        from: TableRef::scan(EDGE_TABLE, alias),
-        where_clause: anchor_filter,
+        where_clause: Expr::and_all([anchor_cond, first_type_cond]),
         ..Default::default()
     }
 }
@@ -624,63 +521,11 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         .ok_or_else(|| QueryError::Lowering("center node entity missing".into()))?;
 
     let type_filter = type_filter(&neighbors_config.rel_types);
+
     let edge_alias = "e";
-    let where_clause = id_filter(&center_node.id, DEFAULT_PRIMARY_KEY, &center_node.node_ids);
-    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
-        vec![OrderExpr {
-            expr: Expr::col(&ob.node, &ob.property),
-            desc: ob.direction == OrderDirection::Desc,
-        }]
-    });
-    let (limit, offset) = pagination(input);
-
-    // For Direction::Both, split into UNION ALL of outgoing + incoming so
-    // ClickHouse can use by_source and by_target projections respectively.
-    // An OR join (source_id = X OR target_id = X) prevents projection use
-    // and forces a full edge table scan.
-    if neighbors_config.direction == Direction::Both {
-        let build_arm = |dir: Direction| -> Query {
-            let (edge_table, edge_type_cond) = edge_scan(edge_alias, &type_filter);
-            let mut join_cond =
-                source_join_cond_with_kind(&center_node.id, edge_alias, center_entity, dir);
-            if let Some(tc) = edge_type_cond {
-                join_cond = Expr::and(join_cond, tc);
-            }
-            let (neighbor_id, neighbor_type, is_outgoing) = match dir {
-                Direction::Outgoing => ("target_id", "target_kind", 1),
-                Direction::Incoming => ("source_id", "source_kind", 0),
-                Direction::Both => unreachable!(),
-            };
-            Query {
-                select: vec![
-                    SelectExpr::new(Expr::col(edge_alias, neighbor_id), NEIGHBOR_ID_COLUMN),
-                    SelectExpr::new(Expr::col(edge_alias, neighbor_type), NEIGHBOR_TYPE_COLUMN),
-                    SelectExpr::new(
-                        Expr::col(edge_alias, "relationship_kind"),
-                        RELATIONSHIP_TYPE_COLUMN,
-                    ),
-                    SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
-                ],
-                from: TableRef::join(
-                    JoinType::Inner,
-                    TableRef::scan(&center_table, &center_node.id),
-                    edge_table,
-                    join_cond,
-                ),
-                where_clause: where_clause.clone(),
-                ..Default::default()
-            }
-        };
-
-        let mut outgoing = build_arm(Direction::Outgoing);
-        outgoing.union_all = vec![build_arm(Direction::Incoming)];
-        outgoing.order_by = order_by;
-        outgoing.limit = limit;
-        outgoing.offset = offset;
-        return Ok(Node::Query(Box::new(outgoing)));
-    }
 
     let (edge_table, edge_type_cond) = edge_scan(edge_alias, &type_filter);
+
     let mut join_cond = source_join_cond_with_kind(
         &center_node.id,
         edge_alias,
@@ -690,28 +535,85 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
     if let Some(tc) = edge_type_cond {
         join_cond = Expr::and(join_cond, tc);
     }
-    let (neighbor_id, neighbor_type, is_outgoing) = match neighbors_config.direction {
-        Direction::Outgoing => ("target_id", "target_kind", 1i64),
-        Direction::Incoming => ("source_id", "source_kind", 0i64),
-        Direction::Both => unreachable!(),
+
+    let from = TableRef::join(
+        JoinType::Inner,
+        TableRef::scan(&center_table, &center_node.id),
+        edge_table,
+        join_cond,
+    );
+
+    let center_matches_source = Expr::and(
+        Expr::eq(
+            Expr::col(&center_node.id, DEFAULT_PRIMARY_KEY),
+            Expr::col(edge_alias, "source_id"),
+        ),
+        Expr::eq(
+            Expr::col(edge_alias, "source_kind"),
+            Expr::string(center_entity),
+        ),
+    );
+
+    let neighbor_id_expr = match neighbors_config.direction {
+        Direction::Outgoing => Expr::col(edge_alias, "target_id"),
+        Direction::Incoming => Expr::col(edge_alias, "source_id"),
+        Direction::Both => Expr::func(
+            "if",
+            vec![
+                center_matches_source.clone(),
+                Expr::col(edge_alias, "target_id"),
+                Expr::col(edge_alias, "source_id"),
+            ],
+        ),
     };
 
-    Ok(Node::Query(Box::new(Query {
-        select: vec![
-            SelectExpr::new(Expr::col(edge_alias, neighbor_id), NEIGHBOR_ID_COLUMN),
-            SelectExpr::new(Expr::col(edge_alias, neighbor_type), NEIGHBOR_TYPE_COLUMN),
-            SelectExpr::new(
-                Expr::col(edge_alias, "relationship_kind"),
-                RELATIONSHIP_TYPE_COLUMN,
-            ),
-            SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
-        ],
-        from: TableRef::join(
-            JoinType::Inner,
-            TableRef::scan(&center_table, &center_node.id),
-            edge_table,
-            join_cond,
+    let neighbor_type_expr = match neighbors_config.direction {
+        Direction::Outgoing => Expr::col(edge_alias, "target_kind"),
+        Direction::Incoming => Expr::col(edge_alias, "source_kind"),
+        Direction::Both => Expr::func(
+            "if",
+            vec![
+                center_matches_source.clone(),
+                Expr::col(edge_alias, "target_kind"),
+                Expr::col(edge_alias, "source_kind"),
+            ],
         ),
+    };
+
+    let select = vec![
+        SelectExpr::new(neighbor_id_expr, NEIGHBOR_ID_COLUMN),
+        SelectExpr::new(neighbor_type_expr, NEIGHBOR_TYPE_COLUMN),
+        SelectExpr::new(
+            Expr::col(edge_alias, "relationship_kind"),
+            RELATIONSHIP_TYPE_COLUMN,
+        ),
+        SelectExpr::new(
+            match neighbors_config.direction {
+                Direction::Outgoing => Expr::int(1),
+                Direction::Incoming => Expr::int(0),
+                Direction::Both => Expr::func(
+                    "if",
+                    vec![center_matches_source, Expr::int(1), Expr::int(0)],
+                ),
+            },
+            NEIGHBOR_IS_OUTGOING_COLUMN,
+        ),
+    ];
+
+    let where_clause = id_filter(&center_node.id, DEFAULT_PRIMARY_KEY, &center_node.node_ids);
+
+    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
+        vec![OrderExpr {
+            expr: Expr::col(&ob.node, &ob.property),
+            desc: ob.direction == OrderDirection::Desc,
+        }]
+    });
+
+    let (limit, offset) = pagination(input);
+
+    Ok(Node::Query(Box::new(Query {
+        select,
+        from,
         where_clause,
         order_by,
         limit,
@@ -1327,12 +1229,12 @@ mod tests {
             panic!("expected Query");
         };
 
-        // Non-recursive CTEs: _fwd_hop1 + forward + backward
-        assert_eq!(q.ctes.len(), 3);
-        assert_eq!(q.ctes[0].name, "_fwd_hop1");
-        assert_eq!(q.ctes[1].name, "forward");
-        assert_eq!(q.ctes[2].name, "backward");
-        assert!(q.ctes.iter().all(|c| !c.recursive));
+        // Non-recursive CTEs: forward + backward
+        assert_eq!(q.ctes.len(), 2);
+        assert_eq!(q.ctes[0].name, "forward");
+        assert_eq!(q.ctes[1].name, "backward");
+        assert!(!q.ctes[0].recursive);
+        assert!(!q.ctes[1].recursive);
     }
 
     #[test]

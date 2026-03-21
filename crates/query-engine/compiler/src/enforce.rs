@@ -186,8 +186,6 @@ fn enforce_return_columns(
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
 ) -> Result<()> {
-    let select_len_before = q.select.len();
-
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
 
@@ -252,19 +250,6 @@ fn enforce_return_columns(
             );
         }
     }
-
-    // Propagate added columns to UNION ALL arms so column counts match.
-    if !q.union_all.is_empty() {
-        let added: Vec<SelectExpr> = q.select[select_len_before..].to_vec();
-        for arm in &mut q.union_all {
-            for sel in &added {
-                if !arm.select.iter().any(|s| s.alias == sel.alias) {
-                    arm.select.push(sel.clone());
-                }
-            }
-        }
-    }
-
     Ok(())
 }
 
