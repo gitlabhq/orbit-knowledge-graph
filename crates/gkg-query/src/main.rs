@@ -36,11 +36,15 @@ struct Cli {
     #[arg(long, default_value = "true")]
     approve_all: bool,
 
+    /// Forge JWT without admin flag (use group_traversal_ids for security)
+    #[arg(long)]
+    no_admin: bool,
+
     /// JSON DSL query string
     query: String,
 }
 
-fn forge_jwt(key_b64: &str, traversal_paths: &[String]) -> Result<String> {
+fn forge_jwt(key_b64: &str, traversal_paths: &[String], admin: bool) -> Result<String> {
     let raw_key = STANDARD
         .decode(key_b64.trim())
         .context("JWT key is not valid base64")?;
@@ -60,7 +64,7 @@ fn forge_jwt(key_b64: &str, traversal_paths: &[String]) -> Result<String> {
         "exp": now + 3600,
         "user_id": 1,
         "username": "gkg-query-cli",
-        "admin": true,
+        "admin": admin,
         "organization_id": org_id,
         "group_traversal_ids": traversal_paths,
     });
@@ -77,7 +81,7 @@ fn forge_jwt(key_b64: &str, traversal_paths: &[String]) -> Result<String> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let token = forge_jwt(&cli.jwt_key, &cli.traversal_paths)?;
+    let token = forge_jwt(&cli.jwt_key, &cli.traversal_paths, !cli.no_admin)?;
 
     let mut client = KnowledgeGraphServiceClient::connect(cli.server.clone())
         .await
