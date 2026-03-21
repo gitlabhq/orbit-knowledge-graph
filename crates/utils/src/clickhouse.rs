@@ -87,6 +87,13 @@ impl ParamValue {
     pub fn render_literal(&self) -> String {
         render_value(&self.value)
     }
+
+    /// Render as a ClickHouse HTTP query parameter value.
+    /// Unlike `render_literal`, strings are NOT quoted — ClickHouse handles
+    /// typing via the `{name:Type}` placeholder in the SQL.
+    pub fn render_http_param(&self) -> String {
+        render_http_value(&self.value)
+    }
 }
 
 /// Render a JSON value as a ClickHouse SQL literal.
@@ -105,6 +112,26 @@ pub fn render_value(value: &Value) -> String {
             format!("[{}]", elements.join(", "))
         }
         other => quote(&other.to_string()),
+    }
+}
+
+fn render_http_value(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::Null => "\\N".to_string(),
+        Value::Array(arr) => {
+            let elements: Vec<String> = arr
+                .iter()
+                .map(|v| match v {
+                    Value::String(s) => format!("'{}'", s.replace('\'', "\\'")),
+                    other => render_http_value(other),
+                })
+                .collect();
+            format!("[{}]", elements.join(","))
+        }
+        other => other.to_string(),
     }
 }
 

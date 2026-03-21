@@ -33,7 +33,7 @@ impl PipelineStage for ClickHouseExecutor {
             .base
             .params
             .iter()
-            .map(|(k, v)| (k.clone(), v.render_literal()))
+            .map(|(k, v)| (k.clone(), v.render_http_param()))
             .collect();
 
         let (batches, query_stats) = client
