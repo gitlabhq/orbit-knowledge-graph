@@ -226,11 +226,14 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
             inject_sip_for_aliases(&mut q.from, &mut q.where_clause, end_col, cte, &aliases);
         }
 
-        // Cascading SIP: when the root is selective (node_ids, filters, etc.),
-        // chain CTEs through relationships so every edge AND node table scan
-        // gets narrowed. Skip cascades for broad roots (e.g. "all MRs") where
-        // the cascade CTE itself would scan as many edge rows as the main query.
-        if !has_explicit_selectivity || rel.max_hops > 1 {
+        // Cascading SIP: chain CTEs through relationships so every edge AND
+        // node table scan gets narrowed. Only cascade when the root has a
+        // provably small set (node_ids, id_range, cursor). Broad filters
+        // (e.g. status IN ['success','failed'] matching 87% of rows) cause
+        // the cascade CTE to read nearly as many edge rows as the main query,
+        // effectively doubling the edge scan for no benefit.
+        let has_narrow_selectivity = has_cursor || has_node_ids || has_id_range;
+        if !has_narrow_selectivity || rel.max_hops > 1 {
             continue;
         }
 
