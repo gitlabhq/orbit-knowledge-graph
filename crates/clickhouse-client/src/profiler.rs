@@ -390,7 +390,10 @@ impl QueryProfiler {
     }
 
     async fn fetch_text(&self, sql: &str) -> Result<String, ClickHouseError> {
-        let params = [("database", self.database.as_str())];
+        let mut params: Vec<(String, String)> = vec![("database".into(), self.database.clone())];
+        for (k, v) in &self.settings {
+            params.push((k.clone(), v.clone()));
+        }
         let url = reqwest::Url::parse_with_params(&self.base_url, &params).map_err(|e| {
             ClickHouseError::BadResponse {
                 status: 0,
