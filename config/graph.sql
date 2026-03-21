@@ -110,10 +110,11 @@ CREATE TABLE IF NOT EXISTS gl_note (
     INDEX idx_noteable_type noteable_type TYPE set(14) GRANULARITY 2,
     INDEX idx_internal internal TYPE minmax GRANULARITY 1,
     INDEX idx_confidential confidential TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_merge_request (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -138,10 +139,11 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     INDEX idx_draft draft TYPE minmax GRANULARITY 1,
     INDEX idx_squash squash TYPE minmax GRANULARITY 1,
     INDEX idx_discussion_locked discussion_locked TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -244,6 +246,22 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
+-- Edge table: adjacency-optimized layout.
+--
+-- PRIMARY KEY (source_id, relationship_kind, target_id) serves as an adjacency
+-- index for forward traversal — O(log N) to find all outgoing edges from a node.
+-- The by_target projection serves as the reverse adjacency index.
+--
+-- Sort key order matters: (id, relationship_kind, ...) ensures ClickHouse can use
+-- prefix-based primary index pruning for both the base table and projections.
+-- DO NOT put source_kind/target_kind before relationship_kind — it breaks prefix
+-- matching since queries rarely filter on entity kind.
+--
+-- Bloom filter indexes on source_id/target_id are intentionally omitted. They
+-- compete with projections for ClickHouse's cost optimizer and win despite being
+-- less efficient (bloom filters identify scattered granules; projections have
+-- contiguous sorted data). Without bloom filters, the optimizer correctly selects
+-- the projection.
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     source_id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -254,12 +272,11 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_relationship relationship_kind TYPE set(50) GRANULARITY 2,
-    PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind)),
-    PROJECTION by_source (SELECT * ORDER BY (source_id, relationship_kind))
+    PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, target_kind, source_id, traversal_path))
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind)
-PRIMARY KEY (traversal_path, relationship_kind)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)
+PRIMARY KEY (source_id, relationship_kind, target_id)
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 -- CI graph tables
 
@@ -281,10 +298,11 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     _deleted Bool DEFAULT false,
     INDEX idx_status status TYPE set(16) GRANULARITY 2,
     INDEX idx_tag tag TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_stage (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -323,10 +341,11 @@ CREATE TABLE IF NOT EXISTS gl_job (
     INDEX idx_status status TYPE set(16) GRANULARITY 2,
     INDEX idx_allow_failure allow_failure TYPE minmax GRANULARITY 1,
     INDEX idx_retried retried TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 -- Security graph tables
 
