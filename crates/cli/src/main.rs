@@ -364,7 +364,12 @@ fn run_query(
     for (label, input) in sorted_queries {
         let input_json = serde_json::to_string(&input).context("failed to serialize input")?;
 
-        match query_engine::compiler::compile(&input_json, &ontology, &security_ctx) {
+        match query_engine::compiler::compile(
+            &input_json,
+            &ontology,
+            &security_ctx,
+            &Default::default(),
+        ) {
             Ok(result) => {
                 let rendered_sql = result.base.render();
                 results.push(QueryOutput::Success(QueryResult {

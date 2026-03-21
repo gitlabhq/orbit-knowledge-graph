@@ -136,14 +136,13 @@ pub struct InputRange {
 /// Keyset pagination cursor. Encodes the last seen row's position in
 /// `(traversal_path, id)` sort order. Mutually exclusive with `range`.
 ///
-/// `traversal_path` is not user-facing (blocked by `additionalProperties: false`
-/// in the JSON schema). The server injects it for internal queries (e.g.
-/// hydration) where the exact PK position of the last row is known.
-/// When absent, falls back to the security context's traversal paths.
+/// `traversal_path` is not in the public JSON schema (`additionalProperties:
+/// false` rejects it). The server injects it via `CompileOptions::cursor_traversal_path`
+/// for exact PK seek in multi-path pagination. When absent, the optimizer
+/// falls back to the security context's traversal paths.
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputCursor {
     pub id: i64,
-    /// Server-injected only. Not exposed in the public query schema.
     #[serde(skip)]
     pub traversal_path: Option<String>,
 }

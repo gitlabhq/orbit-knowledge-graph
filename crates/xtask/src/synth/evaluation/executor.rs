@@ -573,7 +573,13 @@ impl QueryExecutor {
             }
         };
 
-        let compiled = match compile(&json_str, &self.ontology, &security_ctx) {
+        let compiled = match compile(
+            &json_str,
+            &self.ontology,
+            &security_ctx,
+            &Default::default(),
+            &Default::default(),
+        ) {
             Ok(c) => c,
             Err(e) => {
                 let error_msg = format!("Query compilation failed: {}", e);

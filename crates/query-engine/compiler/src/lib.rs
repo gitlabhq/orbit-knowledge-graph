@@ -11,7 +11,7 @@
 //! # Example
 //!
 //! ```rust
-//! use compiler::{compile, SecurityContext};
+//! use compiler::{compile, CompileSettings, SecurityContext};
 //! use ontology::{Ontology, DataType};
 //!
 //! let ontology = Ontology::new()
@@ -27,7 +27,7 @@
 //!     "limit": 10
 //! }"#;
 //!
-//! let result = compile(json, &ontology, &ctx).unwrap();
+//! let result = compile(json, &ontology, &ctx, &CompileSettings::default()).unwrap();
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
@@ -75,14 +75,27 @@ use metrics::CountErr;
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Server-side settings injected into compilation. Fields here are not
+/// user-facing -- they are set by the server before calling `compile`.
+#[derive(Debug, Clone, Default)]
+pub struct CompileSettings {
+    /// The `traversal_path` of the last row from the previous page.
+    /// Injected into `InputCursor` during normalization for exact PK seek.
+    pub cursor_traversal_path: Option<String>,
+}
+
 /// Validate and normalize a JSON query string into a typed `Input`.
-fn validated_input(json_input: &str, ontology: &Ontology) -> Result<Input> {
+fn validated_input(
+    json_input: &str,
+    ontology: &Ontology,
+    settings: &CompileSettings,
+) -> Result<Input> {
     let v = Validator::new(ontology);
     let value = v.check_json(json_input).count_err()?;
     v.check_ontology(&value).count_err()?;
     let input: Input = serde_json::from_value(value).count_err()?;
     v.check_references(&input).count_err()?;
-    normalize(input, ontology).count_err()
+    normalize(input, ontology, settings).count_err()
 }
 
 /// Compile a JSON query into a [`CompiledQueryContext`].
@@ -94,8 +107,9 @@ pub fn compile(
     json_input: &str,
     ontology: &Ontology,
     ctx: &SecurityContext,
+    settings: &CompileSettings,
 ) -> Result<CompiledQueryContext> {
-    let input = validated_input(json_input, ontology).count_err()?;
+    let input = validated_input(json_input, ontology, settings).count_err()?;
 
     let mut node = lower(&input).count_err()?;
     optimize(&mut node, &input, ctx);
@@ -179,9 +193,18 @@ mod tests {
         v.check_ontology(&value)?;
         let input: Input = serde_json::from_value(value)?;
         v.check_references(&input)?;
-        let input = normalize::normalize(input, ontology)?;
+        let input = normalize::normalize(input, ontology, &CompileSettings::default())?;
         let node = lower::lower(&input)?;
         Ok(node)
+    }
+
+    fn test_compile(json: &str) -> Result<CompiledQueryContext> {
+        compile(
+            json,
+            &test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
     }
 
     #[test]
@@ -214,7 +237,7 @@ mod tests {
             "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
         }"#;
 
-        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        let result = test_compile(json).unwrap();
 
         assert!(result.base.sql.contains("SELECT"));
         assert!(result.base.sql.contains("gl_user AS u"));
@@ -262,7 +285,7 @@ mod tests {
             "limit": 5
         }"#;
 
-        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        let result = test_compile(json).unwrap();
         assert!(
             result
                 .base
@@ -284,7 +307,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        let result = test_compile(json).unwrap();
         assert!(result.base.sql.contains("COUNT"));
         assert!(result.base.sql.contains("GROUP BY"));
     }
@@ -300,7 +323,7 @@ mod tests {
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#;
 
-        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        let result = test_compile(json).unwrap();
 
         // Non-recursive CTEs: forward + backward
         assert!(
@@ -351,8 +374,8 @@ mod tests {
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#;
 
-        let shallow_result = compile(shallow, &test_ontology(), &test_ctx()).unwrap();
-        let deep_result = compile(deep, &test_ontology(), &test_ctx()).unwrap();
+        let shallow_result = test_compile(shallow).unwrap();
+        let deep_result = test_compile(deep).unwrap();
 
         // max_depth=1: only forward CTE (no backward needed)
         assert!(
@@ -389,7 +412,7 @@ mod tests {
             "neighbors": {"node": "u", "direction": "both"}
         }"#;
 
-        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        let result = test_compile(json).unwrap();
         assert!(result.base.sql.contains("SELECT"));
         assert!(result.base.sql.contains("_gkg_neighbor_id"));
         assert!(result.base.sql.contains("_gkg_neighbor_type"));
@@ -419,7 +442,7 @@ mod tests {
             "limit": 30
         }"#;
 
-        let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+        let result = test_compile(json).unwrap();
         assert!(result.base.sql.contains("WHERE"));
         assert!(result.base.sql.contains(">="));
         assert!(result.base.sql.contains("IN"));
@@ -428,16 +451,12 @@ mod tests {
 
     #[test]
     fn invalid_json_rejected() {
-        assert!(compile("not valid json", &test_ontology(), &test_ctx()).is_err());
+        assert!(test_compile("not valid json").is_err());
     }
 
     #[test]
     fn missing_required_fields_rejected() {
-        let result = compile(
-            r#"{"query_type": "traversal"}"#,
-            &test_ontology(),
-            &test_ctx(),
-        );
+        let result = test_compile(r#"{"query_type": "traversal"}"#);
         assert!(result.is_err());
     }
 
@@ -445,7 +464,7 @@ mod tests {
     #[test]
     fn sql_injection_in_node_id() {
         let json = r#"{"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --"}]}"#;
-        let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+        let err = test_compile(json).unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)));
     }
 
@@ -456,20 +475,20 @@ mod tests {
             "nodes": [{"id": "a"}, {"id": "b"}],
             "relationships": [{"type": "REL", "from": "a' OR '1'='1", "to": "b"}]
         }"#;
-        let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+        let err = test_compile(json).unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)));
     }
 
     #[test]
     fn empty_node_id_rejected() {
         let json = r#"{"query_type": "traversal", "nodes": [{"id": ""}]}"#;
-        assert!(compile(json, &test_ontology(), &test_ctx()).is_err());
+        assert!(test_compile(json).is_err());
     }
 
     #[test]
     fn id_starting_with_number_rejected() {
         let json = r#"{"query_type": "traversal", "nodes": [{"id": "123abc"}]}"#;
-        let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+        let err = test_compile(json).unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)));
     }
 
@@ -479,7 +498,7 @@ mod tests {
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]
         }"#;
-        let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+        let err = test_compile(json).unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)));
     }
 
@@ -499,7 +518,7 @@ mod tests {
                 {"type": "MEMBER_OF", "from": "user_node", "to": "node123"}
             ]
         }"#;
-        assert!(compile(json, &test_ontology(), &test_ctx()).is_ok());
+        assert!(test_compile(json).is_ok());
     }
 }
 
@@ -524,7 +543,15 @@ mod ontology_integration_tests {
             "limit": 10,
             "order_by": {"node": "u", "property": "username", "direction": "ASC"}
         }"#;
-        assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
+        assert!(
+            compile(
+                json,
+                &load_test_ontology(),
+                &test_ctx(),
+                &CompileSettings::default()
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -535,7 +562,13 @@ mod ontology_integration_tests {
             "limit": 10,
             "order_by": {"node": "u", "property": "nonexistent_column", "direction": "ASC"}
         }"#;
-        let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
+        let err = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("does not exist"));
     }
 
@@ -546,7 +579,15 @@ mod ontology_integration_tests {
             "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}},
             "limit": 10
         }"#;
-        assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
+        assert!(
+            compile(
+                json,
+                &load_test_ontology(),
+                &test_ctx(),
+                &CompileSettings::default()
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -556,7 +597,13 @@ mod ontology_integration_tests {
             "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}},
             "limit": 10
         }"#;
-        let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
+        let err = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap_err();
         assert!(
             err.to_string().contains("nonexistent_column"),
             "expected error mentioning invalid column name, got: {err}"
@@ -571,7 +618,15 @@ mod ontology_integration_tests {
             "aggregations": [{"function": "count", "target": "p", "property": "name", "alias": "name_count"}],
             "limit": 10
         }"#;
-        assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
+        assert!(
+            compile(
+                json,
+                &load_test_ontology(),
+                &test_ctx(),
+                &CompileSettings::default()
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -582,7 +637,13 @@ mod ontology_integration_tests {
             "aggregations": [{"function": "sum", "target": "p", "property": "invalid_property", "alias": "total"}],
             "limit": 10
         }"#;
-        let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
+        let err = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("does not exist"));
     }
 
@@ -593,7 +654,13 @@ mod ontology_integration_tests {
             "node": {"id": "n", "entity": "NonexistentType", "columns": ["name"]},
             "limit": 10
         }"#;
-        let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
+        let err = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap_err();
         // Schema validation catches invalid entity types
         assert!(
             err.to_string().contains("NonexistentType")
@@ -616,7 +683,13 @@ mod ontology_integration_tests {
             "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Parameterized: {}", result.base.sql);
         println!("Params: {:?}", result.base.params);
         println!("Inlined: {}", result.base);
@@ -642,7 +715,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Search SQL: {}", result.base.sql);
         println!("Params: {:?}", result.base.params);
         println!("Inlined: {}", result.base);
@@ -676,7 +755,13 @@ mod ontology_integration_tests {
             "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Complex search SQL: {}", result.base.sql);
         println!("Params: {:?}", result.base.params);
         println!("Inlined: {}", result.base);
@@ -710,7 +795,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Search with columns SQL: {}", result.base.sql);
 
         // Structural query still includes all columns (slim SELECT not yet implemented)
@@ -734,7 +825,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Search with wildcard SQL: {}", result.base.sql);
 
         // Structural query still includes all columns (slim SELECT not yet implemented)
@@ -757,7 +854,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Traversal with columns SQL: {}", result.base.sql);
 
         // Structural query still includes all columns (slim SELECT not yet implemented)
@@ -784,7 +887,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Aggregation SQL: {}", result.base.sql);
 
         // Aggregation queries only add mandatory columns for group_by nodes (u)
@@ -810,7 +919,13 @@ mod ontology_integration_tests {
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Path finding SQL: {}", result.base.sql);
 
         // Path finding queries use _gkg_path column (Array of tuples)
@@ -833,7 +948,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
 
         assert_eq!(result.base.result_context.len(), 2);
 
@@ -871,7 +992,13 @@ mod ontology_integration_tests {
             "limit": 25
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Multi-hop SQL: {}", result.base.sql);
 
         // Should generate a union subquery with multiple arms (one per hop count)
@@ -912,7 +1039,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Min-hops SQL: {}", result.base.sql);
 
         // Should have depth >= 2 filter
@@ -941,7 +1074,13 @@ mod ontology_integration_tests {
             "limit": 25
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Single-hop SQL: {}", result.base.sql);
 
         // Should NOT generate a recursive CTE for single hop
@@ -971,7 +1110,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
         println!("Multi-hop aggregation SQL: {}", result.base.sql);
 
         // Should generate union subquery for multi-hop in aggregation queries
@@ -1000,7 +1145,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
 
         assert!(
             result.base.sql.contains("d.project_id AS _gkg_d_id"),
@@ -1018,7 +1169,13 @@ mod ontology_integration_tests {
             "limit": 10
         }"#;
 
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+        let result = compile(
+            json,
+            &load_test_ontology(),
+            &test_ctx(),
+            &CompileSettings::default(),
+        )
+        .unwrap();
 
         assert!(
             result.base.sql.contains("p.id AS _gkg_p_id"),
@@ -1041,6 +1198,7 @@ mod ontology_integration_tests {
             }"#,
             &ontology,
             &ctx,
+            &CompileSettings::default(),
         )
         .unwrap();
         assert!(result.base.sql.contains("LIMIT 10"), "{}", result.base.sql);
@@ -1060,6 +1218,7 @@ mod ontology_integration_tests {
             }"#,
             &ontology,
             &ctx,
+            &CompileSettings::default(),
         )
         .unwrap();
         assert!(result.base.sql.contains("LIMIT 30"), "{}", result.base.sql);
@@ -1077,6 +1236,7 @@ mod ontology_integration_tests {
             }"#,
             &ontology,
             &ctx,
+            &CompileSettings::default(),
         )
         .unwrap_err();
         assert!(matches!(err, QueryError::Validation(_)), "{err}");
@@ -1090,6 +1250,7 @@ mod ontology_integration_tests {
             }"#,
             &ontology,
             &ctx,
+            &CompileSettings::default(),
         )
         .unwrap_err();
         assert!(err.to_string().contains("must be greater than"), "{err}");
@@ -1103,6 +1264,7 @@ mod ontology_integration_tests {
             }"#,
             &ontology,
             &ctx,
+            &CompileSettings::default(),
         )
         .unwrap_err();
         assert!(err.to_string().contains("must not exceed 1000"), "{err}");
@@ -1117,6 +1279,7 @@ mod ontology_integration_tests {
             }"#,
                 &ontology,
                 &ctx,
+                &CompileSettings::default(),
             )
             .is_ok()
         );
@@ -1140,6 +1303,7 @@ mod ontology_integration_tests {
             }"#,
             &load_test_ontology(),
             &test_ctx(),
+            &CompileSettings::default(),
         )
         .unwrap()
         .base
@@ -1165,6 +1329,7 @@ mod ontology_integration_tests {
             }"#,
             &load_test_ontology(),
             &test_ctx(),
+            &CompileSettings::default(),
         )
         .unwrap()
         .base
@@ -1190,6 +1355,7 @@ mod ontology_integration_tests {
             }"#,
             &load_test_ontology(),
             &test_ctx(),
+            &CompileSettings::default(),
         )
         .unwrap()
         .base
@@ -1219,6 +1385,7 @@ mod ontology_integration_tests {
             }"#,
             &load_test_ontology(),
             &test_ctx(),
+            &CompileSettings::default(),
         )
         .unwrap();
 

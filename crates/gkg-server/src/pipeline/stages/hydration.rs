@@ -99,8 +99,14 @@ impl HydrationStage {
         query_json: String,
     ) -> Result<(PropertyMap, DebugQuery), PipelineError> {
         let client = Self::client(ctx)?;
-        let compiled = compile(&query_json, &ctx.ontology, ctx.security_context()?)
-            .map_err(|e| PipelineError::Compile(e.to_string()))?;
+        let compiled = compile(
+            &query_json,
+            &ctx.ontology,
+            ctx.security_context()?,
+            &Default::default(),
+            &Default::default(),
+        )
+        .map_err(|e| PipelineError::Compile(e.to_string()))?;
 
         let debug = DebugQuery {
             sql: compiled.base.sql.clone(),

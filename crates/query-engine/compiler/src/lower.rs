@@ -1092,7 +1092,7 @@ mod tests {
         validate::Validator::new(&ontology)
             .check_references(&input)
             .unwrap();
-        normalize::normalize(input, &ontology).unwrap()
+        normalize::normalize(input, &ontology, &Default::default()).unwrap()
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! - Filter values are coerced to match ontology types
 //! - Wildcard column selections are expanded to explicit column lists
 
+use crate::CompileSettings;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
@@ -60,7 +61,15 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
 /// - Resolves entity names to ClickHouse table names
 /// - Coerces filter values to match ontology field types (e.g., enum int → string)
 /// - Expands wildcard column selections ("*") to explicit column lists
-pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
+pub fn normalize(
+    mut input: Input,
+    ontology: &Ontology,
+    settings: &CompileSettings,
+) -> Result<Input> {
+    if let (Some(tp), Some(cursor)) = (&settings.cursor_traversal_path, &mut input.cursor) {
+        cursor.traversal_path = Some(tp.clone());
+    }
+
     input.entity_auth = build_entity_auth(ontology);
 
     for node in &mut input.nodes {
@@ -158,7 +167,7 @@ mod tests {
     fn normalize_query(json: &str) -> Input {
         let input = parse_input(json).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        normalize(input, &ontology).unwrap()
+        normalize(input, &ontology, &Default::default()).unwrap()
     }
 
     #[test]
@@ -326,7 +335,7 @@ mod tests {
             r#"{"query_type": "search", "node": {"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}}"#,
         ).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let err = normalize(input, &ontology).unwrap_err();
+        let err = normalize(input, &ontology, &Default::default()).unwrap_err();
         assert!(
             matches!(err, QueryError::AllowlistRejected(_)),
             "unknown entity should be AllowlistRejected, got: {err}"
