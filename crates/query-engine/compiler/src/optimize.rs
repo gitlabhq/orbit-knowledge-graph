@@ -36,8 +36,8 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
         Node::Query(q) => {
             apply_keyset_pagination(q, input, ctx);
             apply_sip_prefilter(q, input, ctx);
+            apply_filtered_node_sip(q, input);
             if input.query_type == QueryType::Aggregation {
-                apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
             }
             apply_query_settings(q, input);
@@ -320,56 +320,65 @@ fn build_cascade_for_node(
     })
 }
 
-/// Target-side SIP for aggregation queries.
+/// Filtered-node SIP for non-root nodes with explicit WHERE conditions.
 ///
-/// When an aggregation target node has filters, materializes the matching
-/// target IDs in a CTE and pushes them into the edge scan from the target
-/// side. This narrows the edge scan by the selectivity of the target filters,
-/// which is the common case for aggregations (e.g. "count merged MRs per project"
-/// where the target MR has `state = 'merged'`).
+/// For each relationship, checks if the `to` node has WHERE conjuncts that
+/// reference only that node. If so, materializes the matching IDs in a CTE
+/// and pushes them into the adjacent edge scan. This triggers ClickHouse's
+/// `by_target` projection, dramatically reducing edge granules read.
 ///
-/// Target conditions are intentionally kept in the main WHERE clause so that
-/// `fold_filters_into_aggregates` can still convert aggregates to `-If`
-/// combinators (e.g. `countIf`). The two optimizations serve different layers:
-/// SIP narrows the edge scan (I/O), while `-If` gives ClickHouse bounded
-/// aggregation memory per group regardless of data volume.
-fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
+/// Works for all query types (Traversal, Aggregation, Search). For
+/// aggregation, conditions are cloned (not moved) from WHERE so that
+/// `fold_filters_into_aggregates` can still convert them to `-If` combinators.
+///
+/// Skips nodes that already have a SIP CTE (e.g., the root node from
+/// `apply_sip_prefilter` or cascade CTEs).
+fn apply_filtered_node_sip(q: &mut Query, input: &Input) {
     if input.relationships.is_empty() {
         return;
     }
 
-    let target_aliases: HashSet<&str> = input
-        .aggregations
+    let root_alias = input
+        .relationships
+        .first()
+        .map(|r| r.from.as_str())
+        .unwrap_or("");
+    let has_root_sip = q.ctes.iter().any(|c| c.name == ROOT_SIP_CTE);
+
+    let cascade_nodes: HashSet<String> = q
+        .ctes
         .iter()
-        .filter_map(|agg| agg.target.as_deref())
+        .filter_map(|cte| cte.name.strip_prefix("_cascade_").map(String::from))
         .collect();
 
     let mut injected: HashSet<String> = HashSet::new();
 
     for (i, rel) in input.relationships.iter().enumerate() {
-        let target_node = match input
-            .nodes
-            .iter()
-            .find(|n| n.id == rel.to && target_aliases.contains(n.id.as_str()))
-        {
+        if rel.max_hops > 1 {
+            continue;
+        }
+
+        let to_node = match input.nodes.iter().find(|n| n.id == rel.to) {
             Some(n) => n,
             None => continue,
         };
 
-        let target_table = match &target_node.table {
+        if (has_root_sip && to_node.id == root_alias) || cascade_nodes.contains(&to_node.id) {
+            continue;
+        }
+
+        let to_table = match &to_node.table {
             Some(t) => t.clone(),
             None => continue,
         };
 
-        let target_alias = &target_node.id;
+        let to_alias = &to_node.id;
 
-        if !injected.insert(target_alias.clone()) {
+        if !injected.insert(to_alias.clone()) {
             continue;
         }
 
-        // Clone target-only conjuncts into the CTE; leave originals in WHERE
-        // so fold_filters can still convert them to -If combinators.
-        let target_only_conds: Vec<Expr> = q
+        let to_only_conds: Vec<Expr> = q
             .where_clause
             .as_ref()
             .map(|w| {
@@ -378,36 +387,32 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
                     .into_iter()
                     .filter(|c| {
                         let aliases = collect_column_aliases(c);
-                        !aliases.is_empty() && aliases.iter().all(|a| a == target_alias)
+                        !aliases.is_empty() && aliases.iter().all(|a| a == to_alias)
                     })
                     .collect()
             })
             .unwrap_or_default();
 
-        if target_only_conds.is_empty() {
+        if to_only_conds.is_empty() {
             continue;
         }
 
-        let cte_name = format!("_target_{target_alias}_ids");
-        let cte_where = Expr::and_all(target_only_conds.into_iter().map(Some));
+        let cte_name = format!("_filtered_{to_alias}_ids");
+        let cte_where = Expr::and_all(to_only_conds.into_iter().map(Some));
 
         let cte_query = Query {
             select: vec![SelectExpr::new(
-                Expr::col(target_alias, DEFAULT_PRIMARY_KEY),
+                Expr::col(to_alias, DEFAULT_PRIMARY_KEY),
                 DEFAULT_PRIMARY_KEY,
             )],
-            from: TableRef::scan(&target_table, target_alias),
+            from: TableRef::scan(&to_table, to_alias),
             where_clause: cte_where,
             ..Default::default()
         };
         q.ctes.push(Cte::new(&cte_name, cte_query));
 
         let (_, end_col) = rel.direction.edge_columns();
-        let edge_alias = if rel.max_hops > 1 {
-            format!("hop_e{i}")
-        } else {
-            format!("e{i}")
-        };
+        let edge_alias = format!("e{i}");
         let aliases = HashSet::from([edge_alias]);
         inject_sip_for_aliases(
             &mut q.from,
@@ -1037,16 +1042,16 @@ mod tests {
             ..Default::default()
         };
 
-        apply_target_sip_prefilter(&mut q, &input);
+        apply_filtered_node_sip(&mut q, &input);
 
-        // Should have created a _target_mr_ids CTE
+        // Should have created a _filtered_mr_ids CTE
         assert_eq!(q.ctes.len(), 1, "expected one CTE for target SIP");
-        assert_eq!(q.ctes[0].name, "_target_mr_ids");
+        assert_eq!(q.ctes[0].name, "_filtered_mr_ids");
 
         // The WHERE should now include an IN subquery referencing the CTE.
         assert!(
-            has_in_subquery(q.where_clause.as_ref().unwrap(), "_target_mr_ids"),
-            "WHERE should contain InSubquery referencing _target_mr_ids"
+            has_in_subquery(q.where_clause.as_ref().unwrap(), "_filtered_mr_ids"),
+            "WHERE should contain InSubquery referencing _filtered_mr_ids"
         );
     }
 
@@ -1105,14 +1110,14 @@ mod tests {
             ..Default::default()
         };
 
-        apply_target_sip_prefilter(&mut q, &input);
+        apply_filtered_node_sip(&mut q, &input);
 
         assert_eq!(
             q.ctes.len(),
             1,
             "should create exactly one CTE despite two relationships targeting 'mr'"
         );
-        assert_eq!(q.ctes[0].name, "_target_mr_ids");
+        assert_eq!(q.ctes[0].name, "_filtered_mr_ids");
     }
 
     #[test]
@@ -1158,11 +1163,82 @@ mod tests {
             ..Default::default()
         };
 
-        apply_target_sip_prefilter(&mut q, &input);
+        apply_filtered_node_sip(&mut q, &input);
 
         assert!(
             q.ctes.is_empty(),
             "no CTE should be created without target filters"
+        );
+    }
+
+    #[test]
+    fn filtered_node_sip_for_traversal_non_root_filters() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "author".into(),
+                    entity: Some("User".into()),
+                    table: Some("gl_user".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["AUTHORED".into()],
+                from: "author".into(),
+                to: "mr".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("mr", "id"), "mr_id"),
+                SelectExpr::new(Expr::col("author", "id"), "author_id"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_user", "author"),
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_edge", "e0"),
+                    TableRef::scan("gl_merge_request", "mr"),
+                    Expr::eq(Expr::col("e0", "target_id"), Expr::col("mr", "id")),
+                ),
+                Expr::eq(Expr::col("author", "id"), Expr::col("e0", "source_id")),
+            ),
+            where_clause: Some(Expr::and(
+                eq_filter("mr", "state", "opened"),
+                eq_filter("mr", "draft", "true"),
+            )),
+            ..Default::default()
+        };
+
+        apply_filtered_node_sip(&mut q, &input);
+
+        assert_eq!(
+            q.ctes.len(),
+            1,
+            "expected one CTE for filtered mr SIP; ctes: {:?}",
+            q.ctes
+        );
+        assert_eq!(q.ctes[0].name, "_filtered_mr_ids");
+
+        assert!(
+            has_in_subquery(q.where_clause.as_ref().unwrap(), "_filtered_mr_ids"),
+            "WHERE should contain InSubquery referencing _filtered_mr_ids"
         );
     }
 
