@@ -155,6 +155,7 @@ async fn run_webserver(
         validator,
         ontology,
         &config.graph,
+        &config.datalake,
         cluster_health,
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");

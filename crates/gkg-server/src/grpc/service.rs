@@ -11,12 +11,14 @@ use tracing::{info, instrument};
 use crate::auth::{Claims, JwtValidator};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_stats::GraphStatsService;
+use crate::indexing_progress::IndexingProgressService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
     GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
-    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
-    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
+    GetNamespaceIndexingProgressRequest, GetNamespaceIndexingProgressResponse, ListToolsRequest,
+    ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
+    SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
@@ -31,6 +33,7 @@ pub struct KnowledgeGraphServiceImpl {
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
     graph_stats: GraphStatsService,
+    indexing_progress: IndexingProgressService,
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -38,12 +41,19 @@ impl KnowledgeGraphServiceImpl {
         validator: Arc<JwtValidator>,
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
+        datalake_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
+        let datalake_client = Arc::new(datalake_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
         let pipeline = QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client));
-        let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
+        let graph_stats = GraphStatsService::new(Arc::clone(&client), Arc::clone(&ontology));
+        let indexing_progress = IndexingProgressService::new(
+            Arc::clone(&client),
+            datalake_client,
+            Arc::clone(&ontology),
+        );
         Self {
             validator,
             ontology,
@@ -51,6 +61,7 @@ impl KnowledgeGraphServiceImpl {
             pipeline,
             cluster_health,
             graph_stats,
+            indexing_progress,
         }
     }
 }
@@ -213,6 +224,41 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         let response = self.graph_stats.get_stats(&req.traversal_path).await?;
         Ok(Response::new(response))
+    }
+
+    #[instrument(skip(self, request), fields(user_id))]
+    async fn get_namespace_indexing_progress(
+        &self,
+        request: Request<GetNamespaceIndexingProgressRequest>,
+    ) -> Result<Response<GetNamespaceIndexingProgressResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+
+        let req = request.get_ref();
+
+        let traversal_path = self
+            .indexing_progress
+            .resolve_traversal_path(req.namespace_id)
+            .await?;
+
+        if traversal_path.is_empty() {
+            return Ok(Response::new(GetNamespaceIndexingProgressResponse {
+                namespace_id: req.namespace_id,
+                status: "not_found".to_string(),
+                domains: vec![],
+            }));
+        }
+
+        authorize_traversal_path(&claims, &traversal_path)?;
+
+        info!(
+            namespace_id = req.namespace_id,
+            "Fetching indexing progress for user"
+        );
+
+        self.indexing_progress
+            .get_progress(req.namespace_id, &traversal_path)
+            .await
     }
 }
 
@@ -404,6 +450,7 @@ mod tests {
             validator,
             test_ontology(),
             &test_config(),
+            &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
 
@@ -429,6 +476,7 @@ mod tests {
         let service = KnowledgeGraphServiceImpl::new(
             validator,
             test_ontology(),
+            &test_config(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -457,6 +505,7 @@ mod tests {
         let service = KnowledgeGraphServiceImpl::new(
             validator,
             test_ontology(),
+            &test_config(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -492,6 +541,7 @@ mod tests {
             validator,
             test_ontology(),
             &test_config(),
+            &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
 
@@ -514,6 +564,7 @@ mod tests {
             validator,
             test_ontology(),
             &test_config(),
+            &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
 
@@ -529,6 +580,7 @@ mod tests {
         let service = KnowledgeGraphServiceImpl::new(
             validator,
             test_ontology(),
+            &test_config(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -557,6 +609,7 @@ mod tests {
             validator,
             test_ontology(),
             &test_config(),
+            &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
 
@@ -578,6 +631,7 @@ mod tests {
         let service = KnowledgeGraphServiceImpl::new(
             validator,
             test_ontology(),
+            &test_config(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -604,6 +658,7 @@ mod tests {
         let service = KnowledgeGraphServiceImpl::new(
             validator,
             test_ontology(),
+            &test_config(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );
@@ -706,6 +761,7 @@ mod tests {
         let service = KnowledgeGraphServiceImpl::new(
             validator,
             Arc::clone(&ontology),
+            &test_config(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
         );

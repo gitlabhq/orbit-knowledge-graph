@@ -23,10 +23,16 @@ impl GrpcServer {
         validator: Arc<JwtValidator>,
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
+        datalake_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
     ) -> Self {
-        let service =
-            KnowledgeGraphServiceImpl::new(validator, ontology, clickhouse_config, cluster_health);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            ontology,
+            clickhouse_config,
+            datalake_config,
+            cluster_health,
+        );
         Self {
             addr,
             service: KnowledgeGraphServiceServer::new(service),
@@ -67,6 +73,7 @@ mod tests {
             addr,
             validator,
             ontology,
+            &clickhouse_config,
             &clickhouse_config,
             cluster_health,
         );
