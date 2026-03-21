@@ -189,7 +189,10 @@ impl IndexingProgressService {
         }
     }
 
-    pub async fn resolve_traversal_path(&self, namespace_id: i64) -> Result<String, Status> {
+    pub async fn resolve_traversal_path(
+        &self,
+        namespace_id: i64,
+    ) -> Result<Option<String>, Status> {
         self.store.resolve_traversal_path(namespace_id).await
     }
 }

@@ -23,7 +23,10 @@ impl IndexingProgressStore {
         }
     }
 
-    pub async fn resolve_traversal_path(&self, namespace_id: i64) -> Result<String, Status> {
+    pub async fn resolve_traversal_path(
+        &self,
+        namespace_id: i64,
+    ) -> Result<Option<String>, Status> {
         let batches = self
             .datalake_client
             .query(
@@ -47,12 +50,12 @@ impl IndexingProgressStore {
             if batch.num_rows() > 0 && !paths.is_null(0) {
                 let path = paths.value(0);
                 if !path.is_empty() {
-                    return Ok(path.to_string());
+                    return Ok(Some(path.to_string()));
                 }
             }
         }
 
-        Ok(String::new())
+        Ok(None)
     }
 
     pub async fn fetch_sdlc_checkpoint_statuses(
@@ -96,7 +99,8 @@ impl IndexingProgressStore {
                 } else {
                     cursors.value(row)
                 };
-                let completed = cursor_value.is_empty() || cursor_value == "null";
+                let trimmed = cursor_value.trim();
+                let completed = trimmed.is_empty() || trimmed == "null" || trimmed == "[]";
                 statuses.insert(plan_name.to_string(), completed);
             }
         }
@@ -133,7 +137,7 @@ fn extract_count(batches: &[RecordBatch]) -> i64 {
         if let Some(counts) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt")
             && !counts.is_null(0)
         {
-            return counts.value(0) as i64;
+            return i64::try_from(counts.value(0)).unwrap_or(i64::MAX);
         }
     }
     0
