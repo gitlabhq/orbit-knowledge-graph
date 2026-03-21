@@ -505,22 +505,12 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 
     let forward_cte = Cte::new(
         "forward",
-        build_frontier(
-            &start.node_ids,
-            forward_depth,
-            &rel_type_filter,
-            true,
-        ),
+        build_frontier(&start.node_ids, forward_depth, &rel_type_filter, true),
     );
     let backward_cte = if backward_depth > 0 {
         Some(Cte::new(
             "backward",
-            build_frontier(
-                &end.node_ids,
-                backward_depth,
-                &rel_type_filter,
-                false,
-            ),
+            build_frontier(&end.node_ids, backward_depth, &rel_type_filter, false),
         ))
     } else {
         None
@@ -1461,10 +1451,11 @@ mod tests {
         assert_eq!(q.limit, Some(25));
         // Edge-centric: 6 edge columns + redaction ID/type pairs (no node properties)
         assert!(q.select.len() >= 6);
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_deref() == Some("e0_path")));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("e0_path"))
+        );
     }
 
     #[test]
@@ -1483,10 +1474,11 @@ mod tests {
             panic!("expected Query");
         };
         assert!(!q.group_by.is_empty());
-        assert!(q
-            .select
-            .iter()
-            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT"))
+        );
     }
 
     #[test]
@@ -1631,7 +1623,10 @@ mod tests {
 
         // Edge-centric: FROM is a single edge table scan, no node joins.
         // 2 relationships = 2 edge scans joined together.
-        assert!(matches!(q.from, TableRef::Scan { .. } | TableRef::Join { .. }));
+        assert!(matches!(
+            q.from,
+            TableRef::Scan { .. } | TableRef::Join { .. }
+        ));
         assert_eq!(q.limit, Some(20));
     }
 
@@ -2224,7 +2219,7 @@ mod tests {
             panic!()
         };
         assert!(
-            q.where_clause.as_ref().is_some_and(|w| has_type_filter(w)),
+            q.where_clause.as_ref().is_some_and(has_type_filter),
             "expected type filter in WHERE"
         );
 
@@ -2236,7 +2231,7 @@ mod tests {
             panic!()
         };
         assert!(
-            q.where_clause.as_ref().is_some_and(|w| has_type_filter(w)),
+            q.where_clause.as_ref().is_some_and(has_type_filter),
             "expected type filter in WHERE"
         );
 
@@ -2248,8 +2243,7 @@ mod tests {
             panic!()
         };
         assert!(
-            q.where_clause.is_none()
-                || !q.where_clause.as_ref().is_some_and(|w| has_type_filter(w)),
+            q.where_clause.is_none() || !q.where_clause.as_ref().is_some_and(has_type_filter),
             "wildcard should not have type filter"
         );
     }
