@@ -51,7 +51,7 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
 /// relationships. This tells ClickHouse to auto-convert JOINs to IN
 /// subqueries when the right side is small, improving edge scan performance.
 fn apply_join_to_in_setting(q: &mut Query, input: &Input) {
-    if !input.relationships.is_empty() {
+    if !input.relationships.is_empty() && !q.ctes.is_empty() {
         q.settings
             .push(("query_plan_convert_join_to_in".into(), "1".into()));
     }
@@ -605,6 +605,20 @@ fn apply_filtered_node_sip(q: &mut Query, input: &Input) {
 
         if !injected.insert(target_alias.clone()) {
             continue;
+        }
+
+        // Skip when no user-specified filters AND a cascade CTE already covers
+        // this node. When there's no cascade, security-injected conditions
+        // (startsWith) are still worth materializing since they narrow edge
+        // scans that would otherwise be full table scans.
+        if target_node.filters.is_empty() && target_node.node_ids.is_empty() {
+            let has_cascade = q
+                .ctes
+                .iter()
+                .any(|c| c.name == format!("_cascade_{target_alias}"));
+            if has_cascade {
+                continue;
+            }
         }
 
         // Clone target-only conjuncts into the CTE; leave originals in WHERE
@@ -1437,8 +1451,63 @@ mod tests {
 
         assert!(
             q.ctes.is_empty(),
-            "no CTE should be created without target filters"
+            "no CTE should be created without target filters or WHERE conjuncts"
         );
+    }
+
+    #[test]
+    fn target_sip_skips_when_cascade_already_covers_node() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "pipe".into(),
+                    entity: Some("Pipeline".into()),
+                    table: Some("gl_pipeline".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "pipe".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![count_agg("pipe", Some("p"))],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(count_expr("pipe", "id"), "pipe_count"),
+            ],
+            from: TableRef::scan("gl_edge", "e0"),
+            where_clause: Some(eq_filter("p", "traversal_path", "1/")),
+            ctes: vec![Cte::new("_cascade_p", Query::default())],
+            group_by: vec![Expr::col("p", "name")],
+            ..Default::default()
+        };
+
+        apply_filtered_node_sip(&mut q, &input);
+
+        assert_eq!(
+            q.ctes.len(),
+            1,
+            "should not add target SIP when cascade already covers the node"
+        );
+        assert_eq!(q.ctes[0].name, "_cascade_p");
     }
 
     #[test]
@@ -1541,6 +1610,7 @@ mod tests {
         let mut q = Query {
             select: vec![SelectExpr::new(Expr::col("mr", "id"), "mr_id")],
             from: TableRef::scan("gl_merge_request", "mr"),
+            ctes: vec![Cte::new("_root_ids", Query::default())],
             ..Default::default()
         };
 
