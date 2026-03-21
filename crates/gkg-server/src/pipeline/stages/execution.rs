@@ -51,6 +51,9 @@ impl PipelineStage for ClickHouseExecutor {
         let elapsed = t.elapsed();
         obs.executed(elapsed, batches.len());
 
+        // TODO: capture read_rows/read_bytes/memory_usage stats here.
+        // The clickhouse-rs crate discards X-ClickHouse-Summary headers so we
+        // need a different approach. See https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/640
         let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
         ctx.phases
             .get_or_insert_default::<QueryExecutionLog>()
