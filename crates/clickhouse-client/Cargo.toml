@@ -11,10 +11,12 @@ testkit = []
 [dependencies]
 gkg-utils = { path = "../utils" }
 arrow = { workspace = true }
-arrow-ipc = { workspace = true }
+arrow-ipc = { workspace = true, features = ["lz4"] }
 bytes = { workspace = true }
 clickhouse = { workspace = true }
 futures = { workspace = true }
+once_cell = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -22,6 +24,7 @@ tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

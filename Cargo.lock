@@ -1018,6 +1018,8 @@ dependencies = [
  "clickhouse",
  "futures",
  "gkg-utils",
+ "once_cell",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1025,6 +1027,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -5267,6 +5270,25 @@ dependencies = [
  "formatters",
  "pipeline",
  "shared",
+ "types",
+]
+
+[[package]]
+name = "query-profiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clickhouse-client",
+ "compiler",
+ "ontology",
+ "rustls",
+ "serde",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
  "types",
 ]
 

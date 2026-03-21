@@ -1,11 +1,1 @@
-use query_engine::types::{QueryResult, ResourceAuthorization};
-
-pub struct AuthorizationOutput {
-    pub query_result: QueryResult,
-    pub authorizations: Vec<ResourceAuthorization>,
-}
-
-pub struct RedactionOutput {
-    pub query_result: QueryResult,
-    pub redacted_count: usize,
-}
+pub use query_engine::shared::{AuthorizationOutput, RedactionOutput};

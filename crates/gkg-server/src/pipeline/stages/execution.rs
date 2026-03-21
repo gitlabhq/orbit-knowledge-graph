@@ -6,7 +6,9 @@ use clickhouse_client::ArrowClickHouseClient;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
-use query_engine::shared::ExecutionOutput;
+use query_engine::shared::{
+    ExecutionOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
+};
 
 #[derive(Clone)]
 pub struct ClickHouseExecutor;
@@ -26,23 +28,52 @@ impl PipelineStage for ClickHouseExecutor {
             .get::<Arc<ArrowClickHouseClient>>()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
         let compiled = ctx.compiled()?;
-        let sql = &compiled.base.sql;
-        let params = &compiled.base.params;
+        let rendered_sql = compiled.base.render();
+        let result_context = compiled.base.result_context.clone();
 
-        let mut query = client.query(sql);
-        for (key, param) in params.iter() {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-        }
-        let batches = query
-            .fetch_arrow()
+        let (batches, query_stats) = client
+            .profiler()
+            .execute_with_stats(&rendered_sql, &[])
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;
 
-        obs.executed(t.elapsed(), batches.len());
+        let elapsed = t.elapsed();
+        obs.executed(elapsed, batches.len());
+        obs.query_executed(
+            "base",
+            query_stats.read_rows,
+            query_stats.read_bytes,
+            query_stats.memory_usage,
+        );
+
+        let execution = QueryExecution {
+            label: "base".into(),
+            rendered_sql,
+            query_id: query_stats.query_id.clone(),
+            elapsed_ms: elapsed.as_secs_f64() * 1000.0,
+            stats: QueryExecutionStats {
+                read_rows: query_stats.read_rows,
+                read_bytes: query_stats.read_bytes,
+                result_rows: query_stats.result_rows,
+                result_bytes: query_stats.result_bytes,
+                elapsed_ns: query_stats.elapsed_ns,
+                memory_usage: query_stats.memory_usage,
+            },
+            explain_plan: None,
+            explain_pipeline: None,
+            query_log: None,
+            processors: None,
+        };
+
+        ctx.phases
+            .get_or_insert_default::<QueryExecutionLog>()
+            .0
+            .push(execution);
+
         Ok(ExecutionOutput {
             batches,
-            result_context: compiled.base.result_context.clone(),
+            result_context,
         })
     }
 }

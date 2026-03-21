@@ -1,0 +1,27 @@
+[package]
+name = "query-profiler"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[[bin]]
+name = "query-profiler"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+clickhouse-client = { path = "../../clickhouse-client" }
+compiler = { path = "../compiler" }
+shared = { path = "../shared" }
+types = { path = "../types" }
+ontology = { path = "../../ontology" }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rustls = { workspace = true }

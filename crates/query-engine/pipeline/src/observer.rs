@@ -10,6 +10,9 @@ pub trait PipelineObserver: Send {
     fn authorized(&mut self, elapsed: Duration);
     fn hydrated(&mut self, elapsed: Duration);
 
+    /// Called for each ClickHouse query execution (base and hydration queries).
+    fn query_executed(&mut self, _label: &str, _read_rows: u64, _read_bytes: u64, _memory: i64) {}
+
     /// Record an error that occurred during pipeline execution.
     fn record_error(&self, error: &PipelineError);
 
