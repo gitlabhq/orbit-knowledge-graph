@@ -198,6 +198,9 @@ pub struct Query {
     pub union_all: Vec<Query>,
     /// ClickHouse SET statements prepended to the query (for recursive CTEs).
     pub set_statements: Vec<(String, String)>,
+    /// ClickHouse SETTINGS clause appended after LIMIT/OFFSET.
+    /// Applied per-query (not session-wide like SET).
+    pub settings: Vec<(String, String)>,
 }
 
 impl Default for Query {
@@ -217,6 +220,7 @@ impl Default for Query {
             offset: None,
             union_all: vec![],
             set_statements: vec![],
+            settings: vec![],
         }
     }
 }

@@ -40,7 +40,20 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
             }
+            apply_query_settings(q, input);
         }
+    }
+}
+
+/// Add ClickHouse SETTINGS that improve query performance.
+///
+/// `query_plan_convert_join_to_in = 1`: Lets ClickHouse auto-convert JOINs
+/// to IN subqueries when the right side is small. Complements SIP by catching
+/// joins that the compiler-level SIP doesn't cover (e.g. edge→target node).
+fn apply_query_settings(q: &mut Query, input: &Input) {
+    if !input.relationships.is_empty() {
+        q.settings
+            .push(("query_plan_convert_join_to_in".into(), "1".into()));
     }
 }
 
@@ -1150,6 +1163,89 @@ mod tests {
         assert!(
             q.ctes.is_empty(),
             "no CTE should be created without target filters"
+        );
+    }
+
+    #[test]
+    fn query_settings_added_for_queries_with_relationships() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+        use crate::security::SecurityContext;
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "p".into(),
+                to: "mr".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(Expr::col("p", "name"), "p_name")],
+            from: TableRef::scan("gl_project", "p"),
+            ..Default::default()
+        }));
+
+        optimize(&mut node, &input, &ctx);
+
+        let Node::Query(q) = &node;
+        assert!(
+            q.settings
+                .iter()
+                .any(|(k, v)| k == "query_plan_convert_join_to_in" && v == "1"),
+            "should have query_plan_convert_join_to_in setting"
+        );
+    }
+
+    #[test]
+    fn query_settings_not_added_for_single_table_queries() {
+        use crate::input::InputNode;
+        use crate::security::SecurityContext;
+
+        let input = Input {
+            query_type: QueryType::Search,
+            nodes: vec![InputNode {
+                id: "u".into(),
+                entity: Some("User".into()),
+                table: Some("gl_user".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(Expr::col("u", "username"), "username")],
+            from: TableRef::scan("gl_user", "u"),
+            ..Default::default()
+        }));
+
+        optimize(&mut node, &input, &ctx);
+
+        let Node::Query(q) = &node;
+        assert!(
+            q.settings.is_empty(),
+            "search queries without relationships should not have SETTINGS"
         );
     }
 }

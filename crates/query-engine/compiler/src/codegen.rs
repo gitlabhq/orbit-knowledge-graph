@@ -215,6 +215,16 @@ impl Context {
             parts.push(format!("OFFSET {offset}"));
         }
 
+        // SETTINGS clause (per-query, not session-wide)
+        if !q.settings.is_empty() {
+            let pairs: Vec<String> = q
+                .settings
+                .iter()
+                .map(|(k, v)| format!("{k} = {v}"))
+                .collect();
+            parts.push(format!("SETTINGS {}", pairs.join(", ")));
+        }
+
         Ok(parts.join(" "))
     }
 
@@ -964,5 +974,25 @@ mod tests {
         };
 
         assert_eq!(pq.render(), "SELECT {p0:String} AND {p1:Int64}");
+    }
+
+    #[test]
+    fn settings_clause_emitted_after_limit() {
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
+            from: TableRef::scan("nodes", "n"),
+            limit: Some(10),
+            settings: vec![("query_plan_convert_join_to_in".into(), "1".into())],
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result
+                .sql
+                .contains("LIMIT 10 SETTINGS query_plan_convert_join_to_in = 1"),
+            "SETTINGS should follow LIMIT: {}",
+            result.sql
+        );
     }
 }
