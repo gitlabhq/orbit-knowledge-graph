@@ -154,7 +154,6 @@ impl QueryProfiler {
                 ProfileEvents['ExternalAggregationCompressedBytes'] AS external_agg_bytes, \
                 ProfileEvents['ExternalJoinCompressedBytes'] AS external_join_bytes, \
                 read_rows, read_bytes, result_rows, result_bytes, \
-                peak_memory_usage, \
                 ProfileEvents.Names, ProfileEvents.Values \
             FROM system.query_log \
             WHERE query_id = '{query_id}' AND type = 'QueryFinish' \
@@ -178,7 +177,7 @@ impl QueryProfiler {
         Ok(Some(QueryLogEntry {
             query_duration_ms: v["query_duration_ms"].as_f64().unwrap_or(0.0),
             memory_usage: v["memory_usage"].as_u64().unwrap_or(0),
-            peak_memory_usage: v["peak_memory_usage"].as_u64().unwrap_or(0),
+            peak_memory_usage: 0,
             read_rows: v["read_rows"].as_u64().unwrap_or(0),
             read_bytes: v["read_bytes"].as_u64().unwrap_or(0),
             result_rows: v["result_rows"].as_u64().unwrap_or(0),
@@ -272,7 +271,7 @@ impl QueryProfiler {
                    sum(rows) AS total_rows, \
                    sum(bytes_on_disk) AS bytes_on_disk, \
                    uniq(partition_id) AS partition_count, \
-                   countIf(length(mutation_commands) > 0) AS active_mutations, \
+                   0 AS active_mutations, \
                    0 AS detached_parts, \
                    toString(max(modification_time)) AS last_modification_time \
             FROM system.parts \
