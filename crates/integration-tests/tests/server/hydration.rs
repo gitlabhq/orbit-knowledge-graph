@@ -12,12 +12,12 @@ use crate::common::{
     run_redaction, test_security_context,
 };
 use gkg_server::pipeline::HydrationStage;
-use gkg_server::pipeline::types::RedactionOutput;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::run_subtests_shared;
 use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
 use query_engine::formatters::row_to_json;
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
+use query_engine::shared::RedactionOutput;
 
 async fn setup_test_data(ctx: &TestContext) {
     ctx.execute(

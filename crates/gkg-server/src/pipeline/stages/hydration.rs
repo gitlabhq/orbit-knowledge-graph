@@ -13,10 +13,10 @@ use query_engine::compiler::{
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 use query_engine::types::QueryResult;
 
-use crate::pipeline::types::RedactionOutput;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
+use query_engine::shared::RedactionOutput;
 use query_engine::shared::{
     DebugQuery, HydrationOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
 };

@@ -12,12 +12,12 @@ use crate::common::{
     run_redaction, test_security_context,
 };
 use gkg_server::pipeline::HydrationStage;
-use gkg_server::pipeline::types::RedactionOutput;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
 use query_engine::compiler::compile;
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
+use query_engine::shared::RedactionOutput;
 use serde_json::Value;
 
 static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =

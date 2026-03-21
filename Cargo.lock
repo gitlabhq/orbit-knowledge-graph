@@ -3441,6 +3441,7 @@ dependencies = [
  "gkg-server",
  "gkg-utils",
  "query-engine",
+ "rustls",
  "serde_json",
  "testcontainers",
  "tokio",

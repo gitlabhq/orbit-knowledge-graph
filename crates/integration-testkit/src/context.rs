@@ -49,6 +49,7 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn new(schema_sqls: &[&str]) -> Self {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let t = std::time::Instant::now();
         let container = Self::start_container().await;
         let url = Self::extract_url(&container).await;

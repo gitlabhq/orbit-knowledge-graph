@@ -39,8 +39,9 @@ impl QueryProfiler {
     fn client(&self) -> &reqwest::Client {
         self.http.get_or_init(|| {
             reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
                 .build()
-                .unwrap_or_else(|_| reqwest::Client::new())
+                .expect("failed to build reqwest client")
         })
     }
 
@@ -82,6 +83,7 @@ impl QueryProfiler {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
+            let body = truncate_body(&body);
             return Err(ClickHouseError::BadResponse { status, body });
         }
 
@@ -135,6 +137,7 @@ impl QueryProfiler {
         &self,
         query_id: &str,
     ) -> Result<Option<QueryLogEntry>, ClickHouseError> {
+        validate_query_id(query_id)?;
         self.fetch_text("SYSTEM FLUSH LOGS").await?;
 
         let sql = format!(
@@ -203,6 +206,7 @@ impl QueryProfiler {
         &self,
         query_id: &str,
     ) -> Result<Vec<ProcessorProfile>, ClickHouseError> {
+        validate_query_id(query_id)?;
         self.fetch_text("SYSTEM FLUSH LOGS").await?;
 
         let sql = format!(
@@ -378,10 +382,33 @@ impl QueryProfiler {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
+            let body = truncate_body(&body);
             return Err(ClickHouseError::BadResponse { status, body });
         }
 
         resp.text().await.map_err(ClickHouseError::Http)
+    }
+}
+
+fn validate_query_id(query_id: &str) -> Result<(), ClickHouseError> {
+    if !query_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(ClickHouseError::BadResponse {
+            status: 0,
+            body: format!("invalid query_id format: {query_id}"),
+        });
+    }
+    Ok(())
+}
+
+fn truncate_body(body: &str) -> String {
+    const MAX_LEN: usize = 1024;
+    if body.len() <= MAX_LEN {
+        body.to_string()
+    } else {
+        format!("{}... (truncated)", &body[..MAX_LEN])
     }
 }
 

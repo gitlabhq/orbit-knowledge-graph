@@ -100,6 +100,7 @@ async fn main() -> Result<()> {
         Arc::new(Ontology::load_from_dir(&cli.ontology).context("failed to load ontology")?);
 
     let org_id = cli.traversal_paths[0]
+        .trim_start_matches('/')
         .split('/')
         .next()
         .and_then(|s| s.parse::<i64>().ok())
@@ -115,10 +116,20 @@ async fn main() -> Result<()> {
         cli.ch_password.as_deref(),
     );
 
+    let settings: Vec<(String, String)> = cli
+        .settings
+        .iter()
+        .filter_map(|s| {
+            let (k, v) = s.split_once('=')?;
+            Some((k.to_string(), v.to_string()))
+        })
+        .collect();
+
     let opts = ProfilerOptions {
         explain: cli.explain,
         profile: cli.profile,
         processors: cli.processors,
+        settings,
     };
 
     let result =
