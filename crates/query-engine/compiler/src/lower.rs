@@ -570,8 +570,10 @@ fn build_frontier_arm(
 /// Build a CTE that materializes the 1-hop frontier reachable from anchor IDs
 /// (or from a parent hop CTE). Used to add SIP filters to deeper path arms.
 ///
-/// Forward: `SELECT DISTINCT e.target_id AS id FROM gl_edge e WHERE e.source_id IN (...)`
-/// Backward: `SELECT DISTINCT e.source_id AS id FROM gl_edge e WHERE e.target_id IN (...)`
+/// Forward: `SELECT e.target_id AS id FROM gl_edge e WHERE e.source_id IN (...)`
+/// Backward: `SELECT e.source_id AS id FROM gl_edge e WHERE e.target_id IN (...)`
+///
+/// Duplicates are acceptable: ClickHouse deduplicates when building the IN set.
 fn build_hop_frontier_cte(anchor_ids: &[i64], parent_cte: Option<&str>, is_forward: bool) -> Query {
     let (anchor_col, next_col) = if is_forward {
         ("source_id", "target_id")
@@ -1235,11 +1237,10 @@ mod tests {
             panic!("expected Query");
         };
         assert!(!q.group_by.is_empty());
-        assert!(
-            q.select
-                .iter()
-                .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT"))
-        );
+        assert!(q
+            .select
+            .iter()
+            .any(|s| matches!(&s.expr, Expr::FuncCall { name, .. } if name == "COUNT")));
     }
 
     #[test]
