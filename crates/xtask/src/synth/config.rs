@@ -1,6 +1,6 @@
 //! Configuration for synthetic data generation and evaluation.
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -627,6 +627,10 @@ pub struct EvaluationConfig {
     /// Directory to save run metadata (query plans, params, sample data).
     #[serde(default)]
     pub metadata_dir: Option<String>,
+    /// ClickHouse query-level SETTINGS appended to every evaluated query.
+    /// These override the built-in safe defaults (e.g. `join_algorithm`).
+    #[serde(default)]
+    pub settings: std::collections::HashMap<String, String>,
 }
 
 fn default_sample_size() -> usize {
@@ -652,6 +656,7 @@ impl Default for EvaluationConfig {
             filter: None,
             output: OutputConfig::default(),
             metadata_dir: None,
+            settings: std::collections::HashMap::new(),
         }
     }
 }
@@ -1071,32 +1076,29 @@ strings:
         // Empty string pool.
         let mut cfg = minimal_fake_data_config();
         cfg.strings.pools.name_prefixes = vec![];
-        assert!(
-            cfg.validate()
-                .unwrap_err()
-                .to_string()
-                .contains("name_prefixes must not be empty")
-        );
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("name_prefixes must not be empty"));
 
         // Negative probability.
         let mut cfg = minimal_fake_data_config();
         cfg.bools.default = -0.1;
-        assert!(
-            cfg.validate()
-                .unwrap_err()
-                .to_string()
-                .contains("bools.default")
-        );
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("bools.default"));
 
         // Probability > 1.
         let mut cfg = minimal_fake_data_config();
         cfg.bools.fields.insert("bad".into(), 1.5);
-        assert!(
-            cfg.validate()
-                .unwrap_err()
-                .to_string()
-                .contains("bools.fields.bad")
-        );
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("bools.fields.bad"));
 
         // NaN probability.
         let mut cfg = minimal_fake_data_config();
@@ -1106,12 +1108,11 @@ strings:
         // Inverted int range.
         let mut cfg = minimal_fake_data_config();
         cfg.ints.default = [100, 1];
-        assert!(
-            cfg.validate()
-                .unwrap_err()
-                .to_string()
-                .contains("min (100) must be <= max (1)")
-        );
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("min (100) must be <= max (1)"));
 
         // Overflowing int range.
         let mut cfg = minimal_fake_data_config();
