@@ -346,6 +346,26 @@ docker-manifest:
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-arm64"
 
+docker-build-mr:
+  stage: build
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  tags:
+    - saas-linux-large-amd64
+  needs: []
+  services:
+    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    IMAGE_NAME: gkg
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  script:
+    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
+
 # Helm Charts
 
 .helm-base:
