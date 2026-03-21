@@ -136,31 +136,31 @@ async fn main() -> Result<()> {
                 bail!("[{}] {}", err.code, err.message);
             }
             Some(Content::Redaction(exchange)) => {
-                if cli.approve_all {
-                    if let Some(RedactionContent::Required(required)) = exchange.content {
-                        let authorizations = required
-                            .resources
-                            .iter()
-                            .map(|r| {
-                                let authorized: HashMap<i64, bool> =
-                                    r.resource_ids.iter().map(|id| (*id, true)).collect();
-                                ResourceAuthorization {
-                                    resource_type: r.resource_type.clone(),
-                                    authorized,
-                                }
-                            })
-                            .collect();
-
-                        tx.send(ExecuteQueryMessage {
-                            content: Some(Content::Redaction(RedactionExchange {
-                                content: Some(RedactionContent::Response(RedactionResponse {
-                                    result_id: required.result_id,
-                                    authorizations,
-                                })),
-                            })),
+                if cli.approve_all
+                    && let Some(RedactionContent::Required(required)) = exchange.content
+                {
+                    let authorizations = required
+                        .resources
+                        .iter()
+                        .map(|r| {
+                            let authorized: HashMap<i64, bool> =
+                                r.resource_ids.iter().map(|id| (*id, true)).collect();
+                            ResourceAuthorization {
+                                resource_type: r.resource_type.clone(),
+                                authorized,
+                            }
                         })
-                        .await?;
-                    }
+                        .collect();
+
+                    tx.send(ExecuteQueryMessage {
+                        content: Some(Content::Redaction(RedactionExchange {
+                            content: Some(RedactionContent::Response(RedactionResponse {
+                                result_id: required.result_id,
+                                authorizations,
+                            })),
+                        })),
+                    })
+                    .await?;
                 }
             }
             _ => {}
