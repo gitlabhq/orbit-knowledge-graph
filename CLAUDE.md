@@ -64,6 +64,7 @@ Integration tests need Docker: `mise test:integration`.
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Related repos and local paths | `/related-repositories` skill |
+| Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |
 
 ## Crate map
 
@@ -83,7 +84,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `code-parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
 | `code-graph` | Builds in-memory property graphs from parsed code |
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`) and Arrow extraction utilities |
-| `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming |
+| `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QueryProfiler` for per-query stats |
+| `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `siphon-proto` | Protobuf types for CDC replication events |
 | `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | K8s readiness/liveness probes |
