@@ -43,7 +43,7 @@ pub async fn execute_profiled_query(
 
     let t = Instant::now();
     let (batches, query_stats) = profiler
-        .execute_with_stats(&rendered_sql, &extra_settings)
+        .execute_with_stats(&rendered_sql, &[], &extra_settings)
         .await
         .context("base query execution failed")?;
 
@@ -167,7 +167,7 @@ async fn execute_and_profile(
 
     let t = Instant::now();
     let (_batches, query_stats) = profiler
-        .execute_with_stats(rendered_sql, &extra_settings)
+        .execute_with_stats(rendered_sql, &[], &extra_settings)
         .await
         .context(format!("{label} execution failed"))?;
 

@@ -113,11 +113,17 @@ impl HydrationStage {
             sql: compiled.base.sql.clone(),
             rendered: rendered_sql.clone(),
         };
+        let http_params: Vec<(String, String)> = compiled
+            .base
+            .params
+            .iter()
+            .map(|(k, v)| (k.clone(), v.render_literal()))
+            .collect();
 
         let t = std::time::Instant::now();
         let (batches, query_stats) = client
             .profiler()
-            .execute_with_stats(&rendered_sql, &[])
+            .execute_with_stats(&compiled.base.sql, &http_params, &[])
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))?;
 

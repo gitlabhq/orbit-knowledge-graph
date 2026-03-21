@@ -28,12 +28,17 @@ impl PipelineStage for ClickHouseExecutor {
             .get::<Arc<ArrowClickHouseClient>>()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
         let compiled = ctx.compiled()?;
-        let rendered_sql = compiled.base.render();
         let result_context = compiled.base.result_context.clone();
+        let http_params: Vec<(String, String)> = compiled
+            .base
+            .params
+            .iter()
+            .map(|(k, v)| (k.clone(), v.render_literal()))
+            .collect();
 
         let (batches, query_stats) = client
             .profiler()
-            .execute_with_stats(&rendered_sql, &[])
+            .execute_with_stats(&compiled.base.sql, &http_params, &[])
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;
@@ -49,7 +54,7 @@ impl PipelineStage for ClickHouseExecutor {
 
         let execution = QueryExecution {
             label: "base".into(),
-            rendered_sql,
+            rendered_sql: compiled.base.render(),
             query_id: query_stats.query_id.clone(),
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,
             stats: QueryExecutionStats {

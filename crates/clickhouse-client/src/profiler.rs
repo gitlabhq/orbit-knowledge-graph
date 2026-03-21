@@ -48,24 +48,28 @@ impl QueryProfiler {
     pub async fn execute_with_stats(
         &self,
         sql: &str,
+        query_params: &[(String, String)],
         extra_settings: &[(&str, &str)],
     ) -> Result<(Vec<RecordBatch>, QueryStats), ClickHouseError> {
         let query_id = Uuid::new_v4().to_string();
 
-        let mut params = vec![
-            ("database", self.database.as_str()),
-            ("default_format", "ArrowStream"),
-            ("wait_end_of_query", "1"),
-            ("query_id", query_id.as_str()),
+        let mut url_params: Vec<(String, String)> = vec![
+            ("database".into(), self.database.clone()),
+            ("default_format".into(), "ArrowStream".into()),
+            ("wait_end_of_query".into(), "1".into()),
+            ("query_id".into(), query_id.clone()),
         ];
         for (k, v) in CH_QUERY_OPTIONS {
-            params.push((k, v));
+            url_params.push(((*k).into(), (*v).into()));
+        }
+        for (k, v) in query_params {
+            url_params.push((format!("param_{k}"), v.clone()));
         }
         for (k, v) in extra_settings {
-            params.push((k, v));
+            url_params.push(((*k).into(), (*v).into()));
         }
 
-        let url = reqwest::Url::parse_with_params(&self.base_url, &params).map_err(|e| {
+        let url = reqwest::Url::parse_with_params(&self.base_url, &url_params).map_err(|e| {
             ClickHouseError::BadResponse {
                 status: 0,
                 body: format!("URL parse error: {e}"),
