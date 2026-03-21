@@ -59,6 +59,7 @@ pub fn lower(input: &Input) -> Result<Node> {
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
+        QueryType::Hydration => lower_hydration(input),
     }
 }
 
@@ -892,6 +893,79 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         offset,
         ..Default::default()
     })))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hydration
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn lower_hydration(input: &Input) -> Result<Node> {
+    if input.nodes.is_empty() {
+        return Err(QueryError::Lowering(
+            "hydration requires at least one node".into(),
+        ));
+    }
+
+    let first_node = &input.nodes[0];
+    let mut first_query = build_hydration_arm(first_node)?;
+
+    for node in &input.nodes[1..] {
+        first_query.union_all.push(build_hydration_arm(node)?);
+    }
+
+    first_query.limit = Some(input.limit);
+
+    Ok(Node::Query(Box::new(first_query)))
+}
+
+fn build_hydration_arm(node: &InputNode) -> Result<Query> {
+    let table = node
+        .table
+        .as_ref()
+        .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
+    let entity = node
+        .entity
+        .as_ref()
+        .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;
+    let alias = &node.id;
+    let pk = &node.id_property;
+
+    let columns: Vec<&str> = match &node.columns {
+        Some(ColumnSelection::List(cols)) => cols.iter().map(|s| s.as_str()).collect(),
+        _ => vec![],
+    };
+
+    let prop_columns: Vec<&str> = columns.iter().filter(|&&c| c != pk).copied().collect();
+
+    let json_expr = if prop_columns.is_empty() {
+        Expr::string("{}")
+    } else {
+        let map_args: Vec<Expr> = prop_columns
+            .iter()
+            .flat_map(|&col| {
+                [
+                    Expr::string(col),
+                    Expr::func("toString", vec![Expr::col(alias, col)]),
+                ]
+            })
+            .collect();
+        Expr::func("toJSONString", vec![Expr::func("map", map_args)])
+    };
+
+    let select = vec![
+        SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
+        SelectExpr::new(Expr::string(entity), format!("{alias}_entity_type")),
+        SelectExpr::new(json_expr, format!("{alias}_props")),
+    ];
+
+    let where_clause = id_filter(alias, pk, &node.node_ids);
+
+    Ok(Query {
+        select,
+        from: TableRef::scan(table, alias),
+        where_clause,
+        ..Default::default()
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

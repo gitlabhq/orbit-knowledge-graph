@@ -139,7 +139,7 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
         QueryType::Traversal | QueryType::Search | QueryType::Neighbors => {
             input.nodes.iter().map(|n| n.id.as_str()).collect()
         }
-        QueryType::PathFinding => HashSet::new(),
+        QueryType::PathFinding | QueryType::Hydration => HashSet::new(),
     };
 
     match node {
