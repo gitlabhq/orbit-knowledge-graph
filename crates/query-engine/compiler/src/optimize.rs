@@ -760,19 +760,21 @@ fn apply_filtered_node_sip(q: &mut Query, input: &Input) {
                 .table
                 .as_deref()
                 .is_some_and(|t| SKIP_SECURITY_FILTER_TABLES.contains(&t));
-            if is_from_skip && from_node.node_ids.is_empty() && from_node.filters.is_empty() {
-                if let Some(cascade) = build_cascade_for_node(
+            if is_from_skip
+                && from_node.node_ids.is_empty()
+                && from_node.filters.is_empty()
+                && let Some(cascade) = build_cascade_for_node(
                     input, &rel.from, start_col, end_col, &cte_name, &rel.types,
-                ) {
-                    let cascade_name = format!("_cascade_{}", rel.from);
-                    q.ctes.push(Cte::new(&cascade_name, cascade));
-                    let filter = Expr::InSubquery {
-                        expr: Box::new(Expr::col(&rel.from, DEFAULT_PRIMARY_KEY)),
-                        cte_name: cascade_name,
-                        column: DEFAULT_PRIMARY_KEY.to_string(),
-                    };
-                    q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
-                }
+                )
+            {
+                let cascade_name = format!("_cascade_{}", rel.from);
+                q.ctes.push(Cte::new(&cascade_name, cascade));
+                let filter = Expr::InSubquery {
+                    expr: Box::new(Expr::col(&rel.from, DEFAULT_PRIMARY_KEY)),
+                    cte_name: cascade_name,
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                };
+                q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
             }
         }
     }
@@ -1033,11 +1035,12 @@ fn rewrite_count_target(expr: &mut Expr, old_alias: &str, new_alias: &str, new_c
     match expr {
         Expr::FuncCall { name, args } if name == "COUNT" => {
             for arg in args.iter_mut() {
-                if let Expr::Column { table, column } = arg {
-                    if table == old_alias && column == DEFAULT_PRIMARY_KEY {
-                        *table = new_alias.to_string();
-                        *column = new_col.to_string();
-                    }
+                if let Expr::Column { table, column } = arg
+                    && table == old_alias
+                    && column == DEFAULT_PRIMARY_KEY
+                {
+                    *table = new_alias.to_string();
+                    *column = new_col.to_string();
                 }
             }
         }
@@ -2350,9 +2353,7 @@ mod tests {
         let mut node = crate::lower::lower(&input).unwrap();
         optimize(&mut node, &input, &ctx);
 
-        let q = match &node {
-            Node::Query(q) => q,
-        };
+        let Node::Query(q) = &node;
 
         assert!(
             q.ctes.iter().any(|c| c.name == "_root_narrowed"),
