@@ -220,31 +220,17 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
             continue;
         }
 
-        if from_cte.is_some()
-            && to_cte.is_none()
-            && let Some(cte) = build_cascade_for_node(
-                input,
-                &rel.to,
-                end_col,
-                start_col,
-                from_cte.as_ref().unwrap(),
-                &rel.types,
-            )
+        if let (Some(parent), None) = (&from_cte, &to_cte)
+            && let Some(cte) =
+                build_cascade_for_node(input, &rel.to, end_col, start_col, parent, &rel.types)
         {
             let name = format!("_cascade_{}", rel.to);
             q.ctes.push(Cte::new(&name, cte));
             node_ctes.insert(rel.to.clone(), name);
         }
-        if to_cte.is_some()
-            && from_cte.is_none()
-            && let Some(cte) = build_cascade_for_node(
-                input,
-                &rel.from,
-                start_col,
-                end_col,
-                to_cte.as_ref().unwrap(),
-                &rel.types,
-            )
+        if let (None, Some(parent)) = (&from_cte, &to_cte)
+            && let Some(cte) =
+                build_cascade_for_node(input, &rel.from, start_col, end_col, parent, &rel.types)
         {
             let name = format!("_cascade_{}", rel.from);
             q.ctes.push(Cte::new(&name, cte));
