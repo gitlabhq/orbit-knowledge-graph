@@ -23,7 +23,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
-use crate::input::{Input, QueryType};
+use crate::constants::SKIP_SECURITY_FILTER_TABLES;
+use crate::input::{Input, InputNode, QueryType};
 use crate::security::SecurityContext;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_TABLE, TRAVERSAL_PATH_COLUMN};
 
@@ -40,6 +41,9 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
+            }
+            if input.query_type == QueryType::PathFinding {
+                apply_path_hop_frontiers(q, input);
             }
         }
     }
@@ -130,16 +134,16 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     ) {
         return;
     }
+    if input.relationships.is_empty() {
+        return;
+    }
     // Edge-centric traversals handle all filtering via IN subqueries in
     // lower.rs. SIP would create redundant CTEs and try to inject into
-    // edge aliases (e1, e2...) that don't exist in the edge-centric FROM.
+    // edge aliases that don't exist in the edge-centric FROM.
     if input.query_type == QueryType::Traversal
         && !input.relationships.is_empty()
         && input.relationships.iter().all(|r| r.max_hops == 1)
     {
-        return;
-    }
-    if input.relationships.is_empty() {
         return;
     }
 
@@ -155,12 +159,16 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     let has_id_range = root_node.id_range.is_some();
     let has_explicit_selectivity = has_cursor || has_filters || has_node_ids || has_id_range;
 
-    // In edge-centric queries, only apply SIP when the root has actual
-    // selectivity (node_ids, filters, cursor). Security-only roots are
-    // redundant because the edge's traversal_path already provides namespace
-    // isolation. Scanning the entire root table (e.g. 8.1M jobs) just to
-    // build a HashSet with the same traversal_path filter is wasteful.
-    if !has_explicit_selectivity {
+    // Apply SIP when root node has explicit filters OR when its table will
+    // get a security filter (startsWith on traversal_path). Tables in
+    // SKIP_SECURITY_FILTER_TABLES (e.g. gl_user) won't get security filters,
+    // so an unfiltered SIP CTE would push all IDs — skip those.
+    let root_table_has_security_filter = root_node
+        .table
+        .as_deref()
+        .is_some_and(|t| !SKIP_SECURITY_FILTER_TABLES.contains(&t));
+
+    if !has_explicit_selectivity && !root_table_has_security_filter {
         return;
     }
 
@@ -217,35 +225,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         where_clause: cte_where,
         ..Default::default()
     };
-    // Skip if edge-centric lowering already created this CTE
-    if !q.ctes.iter().any(|c| c.name == ROOT_SIP_CTE) {
-        q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
-    }
-
-    // Edges where the non-root side has explicit node_ids — the literal filter
-    // (e.g. target_id=278964) will drive the by_target projection. Suppress
-    // cascade generation on these edges (cascade is redundant since we already
-    // have the exact IDs). SIP injection is kept because the IN subquery
-    // provides PREWHERE filtering that works with LIMIT pushdown.
-    let suppress_cascade_edges: HashSet<String> = input
-        .relationships
-        .iter()
-        .enumerate()
-        .filter_map(|(i, rel)| {
-            let opposite = if &rel.from == root_alias {
-                input.nodes.iter().find(|n| n.id == rel.to)
-            } else if &rel.to == root_alias {
-                input.nodes.iter().find(|n| n.id == rel.from)
-            } else {
-                None
-            };
-            if opposite.is_some_and(|n| !n.node_ids.is_empty()) && rel.max_hops == 1 {
-                Some(format!("e{i}"))
-            } else {
-                None
-            }
-        })
-        .collect();
+    q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
 
     // Inject root SIP into edges adjacent to the root node.
     let mut node_ctes: HashMap<String, String> = HashMap::new();
@@ -260,7 +240,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         } else {
             format!("e{i}")
         };
-        let aliases = HashSet::from([edge_alias.clone()]);
+        let aliases = HashSet::from([edge_alias]);
 
         if let Some(ref cte) = from_cte {
             inject_sip_for_aliases(&mut q.from, &mut q.where_clause, start_col, cte, &aliases);
@@ -269,11 +249,11 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
             inject_sip_for_aliases(&mut q.from, &mut q.where_clause, end_col, cte, &aliases);
         }
 
-        // Cascading SIP — only when root is truly narrow (node_ids, cursor,
-        // id_range). Filter-only roots (e.g. state='merged') can match millions
-        // of nodes, making the cascade scan as expensive as the main query.
-        let has_narrow_root = has_node_ids || has_cursor || has_id_range;
-        if !has_narrow_root || rel.max_hops > 1 || suppress_cascade_edges.contains(&edge_alias) {
+        // Cascading SIP: when the root is selective (node_ids, filters, etc.),
+        // chain CTEs through relationships so every edge AND node table scan
+        // gets narrowed. Skip cascades for broad roots (e.g. "all MRs") where
+        // the cascade CTE itself would scan as many edge rows as the main query.
+        if !has_explicit_selectivity || rel.max_hops > 1 {
             continue;
         }
 
@@ -312,49 +292,16 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     // Inject cascade CTE filters into node table scans. Each non-root node
     // with a cascade CTE gets `node.id IN (SELECT id FROM cascade_cte)`,
     // allowing ClickHouse to prewhere-filter large node tables (e.g. gl_job).
-    // For edge-centric queries (node tables not in FROM), inject on the
-    // corresponding edge column instead.
-    let from_aliases = crate::security::collect_node_aliases(&q.from);
     for (alias, cte_name) in &node_ctes {
         if cte_name == ROOT_SIP_CTE {
             continue;
         }
-        if from_aliases.iter().any(|a| a == alias) {
-            // Node table is in FROM — filter directly on node.id
-            let node_filter = Expr::InSubquery {
-                expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
-                cte_name: cte_name.clone(),
-                column: DEFAULT_PRIMARY_KEY.to_string(),
-            };
-            q.where_clause = Expr::and_all([q.where_clause.take(), Some(node_filter)]);
-        } else {
-            // Node table NOT in FROM (edge-centric) — find the edge column
-            // that connects to this node and filter on it instead.
-            for (i, rel) in input.relationships.iter().enumerate() {
-                if rel.max_hops > 1 {
-                    continue;
-                }
-                let edge_alias = format!("e{i}");
-                let (start_col, end_col) = rel.direction.edge_columns();
-                if &rel.to == alias {
-                    let filter = Expr::InSubquery {
-                        expr: Box::new(Expr::col(&edge_alias, end_col)),
-                        cte_name: cte_name.clone(),
-                        column: DEFAULT_PRIMARY_KEY.to_string(),
-                    };
-                    q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
-                    break;
-                } else if &rel.from == alias {
-                    let filter = Expr::InSubquery {
-                        expr: Box::new(Expr::col(&edge_alias, start_col)),
-                        cte_name: cte_name.clone(),
-                        column: DEFAULT_PRIMARY_KEY.to_string(),
-                    };
-                    q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
-                    break;
-                }
-            }
-        }
+        let node_filter = Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+            cte_name: cte_name.clone(),
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        };
+        q.where_clause = Expr::and_all([q.where_clause.take(), Some(node_filter)]);
     }
 }
 
@@ -609,112 +556,6 @@ fn inject_sip_first_edge(
     }
 }
 
-/// Push non-root node_ids into adjacent edge scans as literal filters.
-/// e.g. e0.target_id = 278964 when Project has node_ids=[278964].
-fn apply_nonroot_node_ids_to_edges(q: &mut Query, input: &Input) {
-    if !matches!(
-        input.query_type,
-        QueryType::Traversal | QueryType::Aggregation
-    ) {
-        return;
-    }
-    let root_alias = input
-        .relationships
-        .first()
-        .map(|r| &r.from)
-        .or_else(|| input.nodes.first().map(|n| &n.id));
-
-    for (i, rel) in input.relationships.iter().enumerate() {
-        if rel.max_hops > 1 {
-            continue;
-        }
-        let (start_col, end_col) = rel.direction.edge_columns();
-        let edge_alias = format!("e{i}");
-
-        if let Some(node) = input.nodes.iter().find(|n| n.id == rel.to)
-            && !node.node_ids.is_empty()
-            && root_alias != Some(&node.id)
-            && let Some(filter) = Expr::col_in(
-                &edge_alias,
-                end_col,
-                ChType::Int64,
-                node.node_ids
-                    .iter()
-                    .map(|&id| serde_json::Value::Number(id.into()))
-                    .collect(),
-            )
-        {
-            q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
-        }
-
-        if let Some(node) = input.nodes.iter().find(|n| n.id == rel.from)
-            && !node.node_ids.is_empty()
-            && root_alias != Some(&node.id)
-            && let Some(filter) = Expr::col_in(
-                &edge_alias,
-                start_col,
-                ChType::Int64,
-                node.node_ids
-                    .iter()
-                    .map(|&id| serde_json::Value::Number(id.into()))
-                    .collect(),
-            )
-        {
-            q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
-        }
-    }
-}
-
-/// Swap the innermost node-edge JOIN pair so edge becomes the driving table.
-/// This enables LIMIT pushdown: each edge row is checked against the node
-/// hash table and IN subquery PREWHERE filter in one pass.
-fn apply_edge_led_reorder(q: &mut Query, input: &Input) {
-    if !matches!(
-        input.query_type,
-        QueryType::Traversal | QueryType::Aggregation
-    ) {
-        return;
-    }
-    let root_id = input
-        .relationships
-        .first()
-        .map(|r| &r.from)
-        .or_else(|| input.nodes.first().map(|n| &n.id));
-    let has_selective = input.relationships.iter().any(|rel| {
-        let to_sel = input
-            .nodes
-            .iter()
-            .find(|n| n.id == rel.to)
-            .is_some_and(|n| !n.node_ids.is_empty() && root_id != Some(&n.id));
-        let from_sel = input
-            .nodes
-            .iter()
-            .find(|n| n.id == rel.from)
-            .is_some_and(|n| !n.node_ids.is_empty() && root_id != Some(&n.id));
-        (to_sel || from_sel) && rel.max_hops == 1
-    });
-    if !has_selective {
-        return;
-    }
-    let mut current = &mut q.from;
-    loop {
-        match current {
-            TableRef::Join { left, right, .. } => {
-                let r_edge =
-                    matches!(right.as_ref(), TableRef::Scan { table, .. } if is_edge_table(table));
-                let l_node =
-                    matches!(left.as_ref(), TableRef::Scan { table, .. } if !is_edge_table(table));
-                if r_edge && l_node {
-                    std::mem::swap(left, right);
-                    return;
-                }
-                current = left.as_mut();
-            }
-            _ => return,
-        }
-    }
-}
-
 fn is_edge_table(table: &str) -> bool {
     table == "gl_edge" || table.starts_with("gl_edge")
 }
@@ -913,6 +754,231 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
             collect_aliases_inner(expr, aliases);
         }
         Expr::Literal(_) | Expr::Param { .. } => {}
+    }
+}
+
+/// Path hop frontier optimization.
+///
+/// For path-finding queries with max_depth > 2, materializes the reachable
+/// IDs at each hop depth in CTEs (`_fwd_hop1`, `_bwd_hop1`, etc.) and injects
+/// SIP filters into the deeper UNION ALL arms of the forward/backward CTEs.
+/// This narrows edge scans at each depth instead of doing full self-joins.
+fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
+    let path = match &input.path {
+        Some(p) => p,
+        None => return,
+    };
+
+    let start = input.nodes.iter().find(|n| n.id == path.from);
+    let end = input.nodes.iter().find(|n| n.id == path.to);
+    let (start_ids, end_ids) = match (start, end) {
+        (Some(s), Some(e)) => (&s.node_ids, &e.node_ids),
+        _ => return,
+    };
+
+    let max_depth = path.max_depth;
+    let forward_depth = max_depth.div_ceil(2);
+    let backward_depth = max_depth / 2;
+
+    // Build hop frontier CTEs and inject SIP into frontier arms.
+    let mut new_ctes = Vec::new();
+    inject_hop_frontiers(q, "forward", start_ids, forward_depth, true, &mut new_ctes);
+    if backward_depth > 0 {
+        inject_hop_frontiers(q, "backward", end_ids, backward_depth, false, &mut new_ctes);
+    }
+
+    // Prepend hop CTEs before the forward/backward CTEs so they're available.
+    new_ctes.append(&mut q.ctes);
+    q.ctes = new_ctes;
+}
+
+/// Build hop frontier CTEs for one direction and inject SIP filters into
+/// the corresponding frontier CTE's UNION ALL arms.
+fn inject_hop_frontiers(
+    q: &mut Query,
+    cte_name: &str,
+    anchor_ids: &[i64],
+    max_depth: u32,
+    is_forward: bool,
+    new_ctes: &mut Vec<Cte>,
+) {
+    let prefix = if is_forward { "_fwd_hop" } else { "_bwd_hop" };
+    let anchor_col = if is_forward { "source_id" } else { "target_id" };
+    let next_col = if is_forward { "target_id" } else { "source_id" };
+
+    // Build hop frontier CTEs: _fwd_hop1 chains from anchor IDs,
+    // _fwd_hop2 chains from _fwd_hop1, etc.
+    for hop in 1..max_depth {
+        let hop_name = format!("{prefix}{hop}");
+        let parent = if hop == 1 {
+            None
+        } else {
+            Some(format!("{prefix}{}", hop - 1))
+        };
+        let alias = "_he";
+
+        let anchor_filter = if let Some(parent) = parent {
+            Some(Expr::InSubquery {
+                expr: Box::new(Expr::col(alias, anchor_col)),
+                cte_name: parent,
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            })
+        } else {
+            Expr::col_in(
+                alias,
+                anchor_col,
+                ChType::Int64,
+                anchor_ids
+                    .iter()
+                    .map(|id| serde_json::Value::from(*id))
+                    .collect(),
+            )
+        };
+
+        new_ctes.push(Cte::new(
+            &hop_name,
+            Query {
+                select: vec![SelectExpr::new(
+                    Expr::col(alias, next_col),
+                    DEFAULT_PRIMARY_KEY,
+                )],
+                from: TableRef::scan(EDGE_TABLE, alias),
+                where_clause: anchor_filter,
+                ..Default::default()
+            },
+        ));
+    }
+
+    // Inject SIP filters into the UNION ALL arms of the frontier CTE.
+    // Arms at depth >= 2 get: e{depth}.anchor_col IN (SELECT id FROM hop{depth-1})
+    let frontier_cte = match q.ctes.iter_mut().find(|c| c.name == cte_name) {
+        Some(c) => c,
+        None => return,
+    };
+
+    // The frontier CTE is either a single query (depth=1) or has union_all arms.
+    // Arm 0 is the base query (depth=1), arms 1+ are in union_all (depth=2+).
+    // Only depth >= 2 gets a SIP filter, so we only touch union_all entries.
+    for (i, arm) in frontier_cte.query.union_all.iter_mut().enumerate() {
+        let depth = (i + 2) as u32; // union_all[0] = depth 2
+        if depth > max_depth {
+            continue;
+        }
+        let hop_cte_name = format!("{prefix}{}", depth - 1);
+        let last_edge = format!("e{depth}");
+        let sip_filter = Expr::InSubquery {
+            expr: Box::new(Expr::col(&last_edge, anchor_col)),
+            cte_name: hop_cte_name,
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        };
+        arm.where_clause = Expr::and_all([arm.where_clause.take(), Some(sip_filter)]);
+    }
+}
+
+/// For non-root nodes with pinned `node_ids`, inject literal IN filters
+/// directly on the edge columns. This avoids a CTE round-trip for small
+/// literal sets that ClickHouse can push into PREWHERE immediately.
+fn apply_nonroot_node_ids_to_edges(q: &mut Query, input: &Input) {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return;
+    }
+    let root_alias = input
+        .relationships
+        .first()
+        .map(|r| &r.from)
+        .or_else(|| input.nodes.first().map(|n| &n.id));
+
+    for (i, rel) in input.relationships.iter().enumerate() {
+        if rel.max_hops > 1 {
+            continue;
+        }
+        let (start_col, end_col) = rel.direction.edge_columns();
+        let edge_alias = format!("e{i}");
+
+        if let Some(node) = input.nodes.iter().find(|n| n.id == rel.to)
+            && !node.node_ids.is_empty()
+            && root_alias != Some(&node.id)
+            && let Some(filter) = Expr::col_in(
+                &edge_alias,
+                end_col,
+                ChType::Int64,
+                node.node_ids
+                    .iter()
+                    .map(|&id| serde_json::Value::Number(id.into()))
+                    .collect(),
+            )
+        {
+            q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
+        }
+
+        if let Some(node) = input.nodes.iter().find(|n| n.id == rel.from)
+            && !node.node_ids.is_empty()
+            && root_alias != Some(&node.id)
+            && let Some(filter) = Expr::col_in(
+                &edge_alias,
+                start_col,
+                ChType::Int64,
+                node.node_ids
+                    .iter()
+                    .map(|&id| serde_json::Value::Number(id.into()))
+                    .collect(),
+            )
+        {
+            q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
+        }
+    }
+}
+
+/// Swap the innermost node-edge JOIN pair so edge becomes the driving table.
+/// This enables LIMIT pushdown: each edge row is checked against the node
+/// hash table and IN subquery PREWHERE filter in one pass.
+fn apply_edge_led_reorder(q: &mut Query, input: &Input) {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return;
+    }
+    let root_id = input
+        .relationships
+        .first()
+        .map(|r| &r.from)
+        .or_else(|| input.nodes.first().map(|n| &n.id));
+    let has_selective = input.relationships.iter().any(|rel| {
+        let to_sel = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.to)
+            .is_some_and(|n| !n.node_ids.is_empty() && root_id != Some(&n.id));
+        let from_sel = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.from)
+            .is_some_and(|n| !n.node_ids.is_empty() && root_id != Some(&n.id));
+        (to_sel || from_sel) && rel.max_hops == 1
+    });
+    if !has_selective {
+        return;
+    }
+    let mut current = &mut q.from;
+    loop {
+        match current {
+            TableRef::Join { left, right, .. } => {
+                let r_edge =
+                    matches!(right.as_ref(), TableRef::Scan { table, .. } if is_edge_table(table));
+                let l_node =
+                    matches!(left.as_ref(), TableRef::Scan { table, .. } if !is_edge_table(table));
+                if r_edge && l_node {
+                    std::mem::swap(left, right);
+                    return;
+                }
+                current = left.as_mut();
+            }
+            _ => return,
+        }
     }
 }
 
