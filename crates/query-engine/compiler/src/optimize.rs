@@ -42,6 +42,7 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
             apply_filtered_node_sip(q, input);
             if input.query_type == QueryType::Aggregation {
                 apply_edge_only_aggregation(q, input);
+                apply_target_only_count_elimination(q, input);
                 fold_filters_into_aggregates(q, input);
             }
             apply_join_to_in_setting(q, input);
@@ -872,6 +873,137 @@ fn apply_edge_only_aggregation(q: &mut Query, input: &Input) {
             .collect();
         q.where_clause = Expr::and_all(kept.into_iter().map(Some));
     }
+}
+
+/// Eliminate the target node table when it's only used as a COUNT target with
+/// no user filters. Rewrites COUNT(target.id) → COUNT(edge.end_col) and removes
+/// the target table JOIN. Applies to single-relationship aggregations where the
+/// COUNT target is the `to` node (not the root).
+fn apply_target_only_count_elimination(q: &mut Query, input: &Input) {
+    if input.relationships.len() != 1 {
+        return;
+    }
+    let rel = &input.relationships[0];
+    if rel.max_hops > 1 {
+        return;
+    }
+
+    let target_alias = &rel.to;
+
+    // Target must not be in GROUP BY
+    let group_by_nodes: HashSet<_> = input
+        .aggregations
+        .iter()
+        .filter_map(|a| a.group_by.as_deref())
+        .collect();
+    if group_by_nodes.contains(target_alias.as_str()) {
+        return;
+    }
+
+    // All aggregations must be COUNT targeting the target node
+    if !input.aggregations.iter().all(|a| {
+        a.function == crate::input::AggFunction::Count
+            && a.target.as_deref() == Some(target_alias.as_str())
+            && a.property.is_none()
+    }) {
+        return;
+    }
+
+    // Target node must have no user-specified filters
+    let target_node = match input.nodes.iter().find(|n| n.id == *target_alias) {
+        Some(n) => n,
+        None => return,
+    };
+    if !target_node.filters.is_empty() || !target_node.node_ids.is_empty() {
+        return;
+    }
+
+    let (_, end_col) = rel.direction.edge_columns();
+    let edge_alias = "e0";
+
+    // Rewrite COUNT(target.id) → COUNT(edge.end_col) in SELECT and ORDER BY
+    for sel in &mut q.select {
+        rewrite_count_target(&mut sel.expr, target_alias, edge_alias, end_col);
+    }
+    for ord in &mut q.order_by {
+        rewrite_count_target(&mut ord.expr, target_alias, edge_alias, end_col);
+    }
+
+    // Remove target table from FROM tree, preserve edge-side conditions (e.g. target_kind)
+    let extracted_conds = eliminate_target_scan(&mut q.from, target_alias);
+
+    // Remove target-only WHERE conjuncts
+    if let Some(where_clause) = q.where_clause.take() {
+        let conjuncts = flatten_and(where_clause);
+        let kept: Vec<Expr> = conjuncts
+            .into_iter()
+            .filter(|c| {
+                let aliases = collect_column_aliases(c);
+                aliases.is_empty() || aliases.iter().any(|a| a != target_alias)
+            })
+            .collect();
+        q.where_clause = Expr::and_all(kept.into_iter().map(Some));
+    }
+
+    // Add extracted edge-side conditions (e.g., target_kind) to WHERE
+    for cond in extracted_conds {
+        q.where_clause = Expr::and_all([q.where_clause.take(), Some(cond)]);
+    }
+
+    // Remove cascade CTE for the target node
+    let cascade_name = format!("_cascade_{}", target_alias);
+    q.ctes.retain(|c| c.name != cascade_name);
+
+    // Remove cascade InSubquery from WHERE
+    if let Some(where_clause) = q.where_clause.take() {
+        let conjuncts = flatten_and(where_clause);
+        let kept: Vec<Expr> = conjuncts
+            .into_iter()
+            .filter(
+                |c| !matches!(c, Expr::InSubquery { cte_name, .. } if *cte_name == cascade_name),
+            )
+            .collect();
+        q.where_clause = Expr::and_all(kept.into_iter().map(Some));
+    }
+}
+
+/// Remove the target (rightmost) table scan from the FROM tree.
+/// Expected pattern: Join(inner, Scan(target), on_outer)
+/// Result:           inner, with edge-only conditions from ON returned for WHERE injection.
+fn eliminate_target_scan(from: &mut TableRef, target_alias: &str) -> Vec<Expr> {
+    let matches = matches!(
+        from,
+        TableRef::Join { right, .. }
+        if matches!(right.as_ref(), TableRef::Scan { alias, .. } if alias == target_alias)
+    );
+    if !matches {
+        return Vec::new();
+    }
+
+    let old = std::mem::replace(
+        from,
+        TableRef::Scan {
+            table: String::new(),
+            alias: String::new(),
+        },
+    );
+    let TableRef::Join {
+        left: inner, on, ..
+    } = old
+    else {
+        unreachable!()
+    };
+
+    let extracted: Vec<Expr> = flatten_and(on)
+        .into_iter()
+        .filter(|c| {
+            let aliases = collect_column_aliases(c);
+            !aliases.iter().any(|a| a == target_alias)
+        })
+        .collect();
+
+    *from = *inner;
+    extracted
 }
 
 /// Rewrite COUNT(old_alias.id) → COUNT(new_alias.new_col) in an expression tree.
@@ -2255,6 +2387,108 @@ mod tests {
                 "mr"
             ),
             "should not narrow when root is in group_by"
+        );
+    }
+
+    #[test]
+    fn target_only_count_elimination_removes_target_join() {
+        use crate::input::{Direction, InputAggregation, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "author".into(),
+                    entity: Some("User".into()),
+                    table: Some("gl_user".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "note".into(),
+                    entity: Some("Note".into()),
+                    table: Some("gl_note".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["AUTHORED".into()],
+                from: "author".into(),
+                to: "note".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![InputAggregation {
+                function: AggFunction::Count,
+                target: Some("note".into()),
+                group_by: Some("author".into()),
+                property: None,
+                alias: Some("note_count".into()),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("author", "id"), "author_id"),
+                SelectExpr::new(count_expr("note", "id"), "note_count"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_user", "author"),
+                    TableRef::scan("gl_edge", "e0"),
+                    Expr::and(
+                        Expr::eq(Expr::col("author", "id"), Expr::col("e0", "source_id")),
+                        Expr::eq(Expr::col("e0", "source_kind"), Expr::string("User")),
+                    ),
+                ),
+                TableRef::scan("gl_note", "note"),
+                Expr::and(
+                    Expr::eq(Expr::col("e0", "target_id"), Expr::col("note", "id")),
+                    Expr::eq(Expr::col("e0", "target_kind"), Expr::string("Note")),
+                ),
+            ),
+            order_by: vec![OrderExpr {
+                expr: count_expr("note", "id"),
+                desc: true,
+            }],
+            group_by: vec![Expr::col("author", "id")],
+            where_clause: Some(Expr::func(
+                "startsWith",
+                vec![Expr::col("e0", "traversal_path"), Expr::string("1/")],
+            )),
+            ..Default::default()
+        };
+
+        apply_target_only_count_elimination(&mut q, &input);
+
+        // COUNT target should be rewritten to edge column
+        match &q.select[1].expr {
+            Expr::FuncCall { args, .. } => {
+                assert_eq!(
+                    args[0],
+                    Expr::col("e0", "target_id"),
+                    "COUNT should target edge.target_id"
+                );
+            }
+            other => panic!("expected FuncCall, got {other:?}"),
+        }
+
+        // gl_note should be eliminated from FROM tree
+        let from_str = format!("{:?}", q.from);
+        assert!(
+            !from_str.contains("gl_note"),
+            "gl_note should be eliminated from FROM"
+        );
+
+        // target_kind condition should be preserved in WHERE
+        let where_str = format!("{:?}", q.where_clause);
+        assert!(
+            where_str.contains("target_kind"),
+            "target_kind condition should be preserved"
         );
     }
 }
