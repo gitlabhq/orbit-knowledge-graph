@@ -18,8 +18,6 @@ use self::store::IndexingProgressReader;
 
 const SOURCE_CODE_DOMAIN: &str = "source_code";
 
-// ─── Status enums ───────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OverallStatus {
     Queued,
@@ -57,8 +55,6 @@ impl fmt::Display for ItemStatus {
         }
     }
 }
-
-// ─── Service ────────────────────────────────────────────────────────────────
 
 pub struct IndexingProgressService {
     store: IndexingProgressReader,
@@ -197,8 +193,6 @@ impl IndexingProgressService {
     }
 }
 
-// ─── Supporting types ───────────────────────────────────────────────────────
-
 struct IndexingSnapshot {
     sdlc_statuses: HashMap<String, bool>,
     entity_counts: HashMap<String, i64>,
@@ -261,8 +255,6 @@ mod tests {
         let client = dummy_client();
         IndexingProgressService::new(client.clone(), client, ontology)
     }
-
-    // ── ItemStatus: SDLC ────────────────────────────────────────────────
 
     #[test]
     fn sdlc_item_pending_when_no_checkpoint() {
@@ -348,8 +340,6 @@ mod tests {
             }
         }
     }
-
-    // ── ItemStatus: code ────────────────────────────────────────────────
 
     #[test]
     fn code_status_waiting_for_projects_when_sdlc_not_done() {
@@ -439,8 +429,6 @@ mod tests {
         }
     }
 
-    // ── OverallStatus ───────────────────────────────────────────────────
-
     #[test]
     fn overall_status_queued_when_no_checkpoints() {
         let snap = test_snap(
@@ -519,8 +507,6 @@ mod tests {
             OverallStatus::Indexing
         );
     }
-
-    // ── Domain response ─────────────────────────────────────────────────
 
     #[test]
     fn domain_response_groups_items_by_domain() {
