@@ -467,6 +467,23 @@ async fn traversal_produces_no_hydration_plan(_ctx: &TestContext) {
     );
 }
 
+async fn hydration_query_type_rejected_from_user_input(_ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "hydration",
+        "node": {"id": "h", "entity": "User", "node_ids": [1]},
+        "limit": 10
+    }"#;
+
+    let result = compile(json, &ontology, &security_ctx);
+    assert!(
+        result.is_err(),
+        "hydration query type must be rejected when submitted via user-facing compile(): {result:?}"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Full Pipeline: Redact → Hydrate
 // ─────────────────────────────────────────────────────────────────────────────
@@ -821,6 +838,7 @@ async fn hydration_integration() {
         // hydration plan selection
         search_produces_no_hydration_plan,
         traversal_produces_no_hydration_plan,
+        hydration_query_type_rejected_from_user_input,
         // full pipeline: redact then hydrate
         path_finding_hydration_after_partial_redaction,
         neighbors_hydration_after_partial_redaction,
