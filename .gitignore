@@ -50,3 +50,6 @@ plan.md
 
 # Session logs
 .sessions/
+
+# Benchmark results
+benchmark_results/

@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
 use crate::constants::SKIP_SECURITY_FILTER_TABLES;
-use crate::input::{Input, QueryType};
+use crate::input::{Input, InputNode, QueryType};
 use crate::security::SecurityContext;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_TABLE, TRAVERSAL_PATH_COLUMN};
 
@@ -82,6 +82,35 @@ fn apply_keyset_pagination(q: &mut Query, input: &Input, ctx: &SecurityContext) 
     }
 }
 
+/// Choose the SIP root: the node with pinned `node_ids` (fewest wins).
+/// Falls back to the `from` node of the first relationship.
+///
+/// For aggregation queries, keep the default from-node when it already has
+/// selectivity (filters or node_ids) — the target-SIP pass handles the
+/// aggregation target separately and changing the root can produce worse
+/// plans. But when the default has no selectivity at all, allow a pinned
+/// node to take over.
+fn choose_sip_root(input: &Input) -> Option<&InputNode> {
+    let first_from = input.relationships.first().map(|r| r.from.as_str())?;
+    let default_node = input.nodes.iter().find(|n| n.id == first_from);
+
+    let pinned = input
+        .nodes
+        .iter()
+        .filter(|n| !n.node_ids.is_empty())
+        .min_by_key(|n| n.node_ids.len());
+
+    if input.query_type == QueryType::Aggregation {
+        let default_has_selectivity =
+            default_node.is_some_and(|n| !n.node_ids.is_empty() || !n.filters.is_empty());
+        if default_has_selectivity {
+            return default_node;
+        }
+    }
+
+    pinned.or(default_node)
+}
+
 /// SIP (Sideways Information Passing) pre-filter.
 ///
 /// Materializes the root node's matching IDs in a CTE and pushes them into
@@ -104,14 +133,8 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         return;
     }
 
-    // The SIP root must be the `from` node of the first relationship — that's
-    // the node whose IDs map to the edge table's start column (source_id for
-    // outgoing, target_id for incoming).
-    let first_rel = match input.relationships.first() {
-        Some(r) => r,
-        None => return,
-    };
-    let root_node = match input.nodes.iter().find(|n| n.id == first_rel.from) {
+    // Pick the most selective node as SIP root so the cascade starts narrow.
+    let root_node = match choose_sip_root(input) {
         Some(n) => n,
         None => return,
     };
@@ -310,13 +333,27 @@ fn build_cascade_for_node(
         .unwrap_or_else(|| Expr::param(ChType::Bool, true))
     };
 
+    // Filter by entity kind on the selected side (source_kind / target_kind)
+    // so the cascade only picks up IDs of the correct type.
+    let kind_col = if select_col == "source_id" {
+        "source_kind"
+    } else {
+        "target_kind"
+    };
+    let kind_filter = node.entity.as_ref().map(|entity| {
+        Expr::eq(
+            Expr::col(alias, kind_col),
+            Expr::param(ChType::String, entity.clone()),
+        )
+    });
+
     Some(Query {
         select: vec![SelectExpr::new(
             Expr::col(alias, select_col),
             DEFAULT_PRIMARY_KEY,
         )],
         from: TableRef::scan(EDGE_TABLE, alias),
-        where_clause: Some(Expr::and(parent_filter, rel_filter)),
+        where_clause: Expr::and_all([Some(parent_filter), Some(rel_filter), kind_filter]),
         ..Default::default()
     })
 }
