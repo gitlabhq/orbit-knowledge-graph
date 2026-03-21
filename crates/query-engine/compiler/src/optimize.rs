@@ -38,8 +38,8 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
             apply_keyset_pagination(q, input, ctx);
             apply_sip_prefilter(q, input, ctx);
             apply_reverse_sip(q, input);
+            apply_filtered_node_sip(q, input);
             if input.query_type == QueryType::Aggregation {
-                apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
             }
             apply_join_to_in_setting(q, input);
@@ -560,41 +560,41 @@ fn apply_reverse_sip(q: &mut Query, input: &Input) {
     }
 }
 
-/// Target-side SIP for aggregation queries.
+/// Filtered-node SIP for non-root nodes with WHERE filters.
 ///
-/// When an aggregation target node has filters, materializes the matching
-/// target IDs in a CTE and pushes them into the edge scan from the target
-/// side. This narrows the edge scan by the selectivity of the target filters,
-/// which is the common case for aggregations (e.g. "count merged MRs per project"
-/// where the target MR has `state = 'merged'`).
+/// Any non-root `to` node with filters gets materialized in a CTE and pushed
+/// into the adjacent edge scan from the target side. This triggers the
+/// `by_target` projection for dramatic granule reduction.
 ///
-/// Target conditions are intentionally kept in the main WHERE clause so that
-/// `fold_filters_into_aggregates` can still convert aggregates to `-If`
-/// combinators (e.g. `countIf`). The two optimizations serve different layers:
-/// SIP narrows the edge scan (I/O), while `-If` gives ClickHouse bounded
-/// aggregation memory per group regardless of data volume.
-fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
+/// For aggregation queries, conditions are cloned (not moved) into the CTE
+/// so `fold_filters_into_aggregates` can still convert them to `-If`.
+fn apply_filtered_node_sip(q: &mut Query, input: &Input) {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return;
+    }
     if input.relationships.is_empty() {
         return;
     }
 
-    let target_aliases: HashSet<&str> = input
-        .aggregations
-        .iter()
-        .filter_map(|agg| agg.target.as_deref())
-        .collect();
+    let root_alias = match input.relationships.first() {
+        Some(r) => &r.from,
+        None => return,
+    };
 
     let mut injected: HashSet<String> = HashSet::new();
 
     for (i, rel) in input.relationships.iter().enumerate() {
-        let target_node = match input
-            .nodes
-            .iter()
-            .find(|n| n.id == rel.to && target_aliases.contains(n.id.as_str()))
-        {
+        let target_node = match input.nodes.iter().find(|n| n.id == rel.to) {
             Some(n) => n,
             None => continue,
         };
+
+        if target_node.id == *root_alias {
+            continue;
+        }
 
         let target_table = match &target_node.table {
             Some(t) => t.clone(),
@@ -642,7 +642,7 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
         };
         q.ctes.push(Cte::new(&cte_name, cte_query));
 
-        let (_, end_col) = rel.direction.edge_columns();
+        let (start_col, end_col) = rel.direction.edge_columns();
         let edge_alias = if rel.max_hops > 1 {
             format!("hop_e{i}")
         } else {
@@ -656,6 +656,34 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
             &cte_name,
             &aliases,
         );
+
+        // Reverse cascade: from the filtered-node CTE, trace edges backward
+        // to narrow the `from` side (e.g. gl_user). This avoids scanning
+        // large SKIP_SECURITY tables that have no other narrowing.
+        if rel.max_hops == 1 {
+            let from_node = match input.nodes.iter().find(|n| n.id == rel.from) {
+                Some(n) => n,
+                None => continue,
+            };
+            let is_from_skip = from_node
+                .table
+                .as_deref()
+                .is_some_and(|t| SKIP_SECURITY_FILTER_TABLES.contains(&t));
+            if is_from_skip && from_node.node_ids.is_empty() && from_node.filters.is_empty() {
+                if let Some(cascade) = build_cascade_for_node(
+                    input, &rel.from, start_col, end_col, &cte_name, &rel.types,
+                ) {
+                    let cascade_name = format!("_cascade_{}", rel.from);
+                    q.ctes.push(Cte::new(&cascade_name, cascade));
+                    let filter = Expr::InSubquery {
+                        expr: Box::new(Expr::col(&rel.from, DEFAULT_PRIMARY_KEY)),
+                        cte_name: cascade_name,
+                        column: DEFAULT_PRIMARY_KEY.to_string(),
+                    };
+                    q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
+                }
+            }
+        }
     }
 }
 
@@ -1284,7 +1312,7 @@ mod tests {
             ..Default::default()
         };
 
-        apply_target_sip_prefilter(&mut q, &input);
+        apply_filtered_node_sip(&mut q, &input);
 
         // Should have created a _target_mr_ids CTE
         assert_eq!(q.ctes.len(), 1, "expected one CTE for target SIP");
@@ -1352,7 +1380,7 @@ mod tests {
             ..Default::default()
         };
 
-        apply_target_sip_prefilter(&mut q, &input);
+        apply_filtered_node_sip(&mut q, &input);
 
         assert_eq!(
             q.ctes.len(),
@@ -1405,7 +1433,7 @@ mod tests {
             ..Default::default()
         };
 
-        apply_target_sip_prefilter(&mut q, &input);
+        apply_filtered_node_sip(&mut q, &input);
 
         assert!(
             q.ctes.is_empty(),
