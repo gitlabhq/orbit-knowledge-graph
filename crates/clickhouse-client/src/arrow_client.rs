@@ -128,6 +128,10 @@ impl ArrowClickHouseClient {
         &self.profiler
     }
 
+    pub fn new_query_id() -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+
     /// Bind a named parameter to a query.
     ///
     /// `ch_type` carries the ClickHouse type from the query placeholder. For
@@ -226,6 +230,11 @@ pub struct ArrowQuery {
 impl ArrowQuery {
     pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
         self.inner = self.inner.param(name, value);
+        self
+    }
+
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.inner = self.inner.with_option(name, value);
         self
     }
 

@@ -114,28 +114,34 @@ impl HydrationStage {
             rendered: rendered_sql.clone(),
         };
 
+        let http_params: Vec<(String, String)> = compiled
+            .base
+            .params
+            .iter()
+            .map(|(k, v)| (k.clone(), v.render_http_param()))
+            .collect();
+
         let t = std::time::Instant::now();
-        let mut query = client.query(&compiled.base.sql);
-        for (key, param) in &compiled.base.params {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-        }
-        let batches = query
-            .fetch_arrow()
+        let (batches, query_stats) = client
+            .profiler()
+            .execute_with_stats(&compiled.base.sql, &http_params, &[])
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
         let elapsed = t.elapsed();
-        let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
 
         let execution = QueryExecution {
             label: format!("hydration:{entity_type}"),
             rendered_sql,
-            query_id: String::new(),
+            query_id: query_stats.query_id.clone(),
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,
             stats: QueryExecutionStats {
-                result_rows,
-                elapsed_ns: elapsed.as_nanos() as u64,
-                ..Default::default()
+                read_rows: query_stats.read_rows,
+                read_bytes: query_stats.read_bytes,
+                result_rows: query_stats.result_rows,
+                result_bytes: query_stats.result_bytes,
+                elapsed_ns: query_stats.elapsed_ns,
+                memory_usage: query_stats.memory_usage,
             },
             explain_plan: None,
             explain_pipeline: None,

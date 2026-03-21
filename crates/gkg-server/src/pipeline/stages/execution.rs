@@ -28,35 +28,43 @@ impl PipelineStage for ClickHouseExecutor {
             .get::<Arc<ArrowClickHouseClient>>()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
         let compiled = ctx.compiled()?;
-        let sql = compiled.base.sql.clone();
-        let params = compiled.base.params.clone();
         let result_context = compiled.base.result_context.clone();
         let rendered_sql = compiled.base.render();
+        let http_params: Vec<(String, String)> = compiled
+            .base
+            .params
+            .iter()
+            .map(|(k, v)| (k.clone(), v.render_http_param()))
+            .collect();
 
-        let mut query = client.query(&sql);
-        for (key, param) in params.iter() {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-        }
-        let batches = query
-            .fetch_arrow()
+        let (batches, query_stats) = client
+            .profiler()
+            .execute_with_stats(&compiled.base.sql, &http_params, &[])
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;
 
         let elapsed = t.elapsed();
-        let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
         obs.executed(elapsed, batches.len());
-        obs.query_executed("base", result_rows, 0, 0);
+        obs.query_executed(
+            "base",
+            query_stats.read_rows,
+            query_stats.read_bytes,
+            query_stats.memory_usage,
+        );
 
         let execution = QueryExecution {
             label: "base".into(),
             rendered_sql,
-            query_id: String::new(),
+            query_id: query_stats.query_id.clone(),
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,
             stats: QueryExecutionStats {
-                result_rows,
-                elapsed_ns: elapsed.as_nanos() as u64,
-                ..Default::default()
+                read_rows: query_stats.read_rows,
+                read_bytes: query_stats.read_bytes,
+                result_rows: query_stats.result_rows,
+                result_bytes: query_stats.result_bytes,
+                elapsed_ns: query_stats.elapsed_ns,
+                memory_usage: query_stats.memory_usage,
             },
             explain_plan: None,
             explain_pipeline: None,

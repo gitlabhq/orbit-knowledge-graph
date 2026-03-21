@@ -8,12 +8,12 @@ use pipeline::{
     QueryPipelineContext, TypeMap,
 };
 use shared::{
-    AuthorizationOutput, CompilationStage, ExecutionOutput, ExtractionOutput, ExtractionStage,
-    OutputStage, PipelineOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
+    AuthorizationOutput, CompilationStage, ExtractionOutput, ExtractionStage, OutputStage,
+    PipelineOutput,
 };
 use types::ResourceAuthorization;
 
-use gkg_server::pipeline::{HydrationStage, RedactionStage};
+use gkg_server::pipeline::{ClickHouseExecutor, HydrationStage, RedactionStage};
 
 pub struct ProfilerPipelineService {
     ontology: Arc<Ontology>,
@@ -47,7 +47,7 @@ impl ProfilerPipelineService {
         let output = PipelineRunner::start(&mut ctx, &mut obs)
             .then(&CompilationStage)
             .await?
-            .then(&ProfilerExecutor)
+            .then(&ClickHouseExecutor)
             .await?
             .then(&ExtractionStage)
             .await?
@@ -63,73 +63,6 @@ impl ProfilerPipelineService {
             .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))?;
 
         Ok(output)
-    }
-}
-
-struct ProfilerExecutor;
-
-impl PipelineStage for ProfilerExecutor {
-    type Input = ();
-    type Output = ExecutionOutput;
-
-    async fn execute(
-        &self,
-        ctx: &mut QueryPipelineContext,
-        obs: &mut dyn PipelineObserver,
-    ) -> Result<Self::Output, PipelineError> {
-        let t = std::time::Instant::now();
-        let client = ctx
-            .server_extensions
-            .get::<Arc<ArrowClickHouseClient>>()
-            .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
-        let compiled = ctx.compiled()?;
-        let result_context = compiled.base.result_context.clone();
-        let rendered_sql = compiled.base.render();
-        let http_params: Vec<(String, String)> = compiled
-            .base
-            .params
-            .iter()
-            .map(|(k, v)| (k.clone(), v.render_http_param()))
-            .collect();
-
-        let (batches, query_stats) = client
-            .profiler()
-            .execute_with_stats(&compiled.base.sql, &http_params, &[])
-            .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))
-            .inspect_err(|e| obs.record_error(e))?;
-
-        let elapsed = t.elapsed();
-        obs.executed(elapsed, batches.len());
-
-        let execution = QueryExecution {
-            label: "base".into(),
-            rendered_sql,
-            query_id: query_stats.query_id.clone(),
-            elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-            stats: QueryExecutionStats {
-                read_rows: query_stats.read_rows,
-                read_bytes: query_stats.read_bytes,
-                result_rows: query_stats.result_rows,
-                result_bytes: query_stats.result_bytes,
-                elapsed_ns: query_stats.elapsed_ns,
-                memory_usage: query_stats.memory_usage,
-            },
-            explain_plan: None,
-            explain_pipeline: None,
-            query_log: None,
-            processors: None,
-        };
-
-        ctx.phases
-            .get_or_insert_default::<QueryExecutionLog>()
-            .0
-            .push(execution);
-
-        Ok(ExecutionOutput {
-            batches,
-            result_context,
-        })
     }
 }
 
