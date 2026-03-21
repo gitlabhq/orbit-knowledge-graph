@@ -13,11 +13,12 @@ use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_stats::GraphStatsService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
-    ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
-    GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
-    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
-    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
-    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
+    ClickHouseExecutionStats, ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest,
+    GetClusterHealthResponse, GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest,
+    GetGraphStatsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat,
+    SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty,
+    StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
 use query_engine::formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
@@ -131,10 +132,18 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                         Some(Content::ResultJson(formatted.to_string()))
                     };
 
+                    let clickhouse_stats = output.stats.map(|s| ClickHouseExecutionStats {
+                        read_rows: s.read_rows,
+                        read_bytes: s.read_bytes,
+                        elapsed_ns: s.elapsed_ns,
+                        result_rows: s.result_rows,
+                    });
+
                     let metadata = Some(QueryMetadata {
                         query_type: output.query_type,
                         raw_query_strings: output.raw_query_strings,
                         row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                        clickhouse_stats,
                     });
 
                     let _ = tx

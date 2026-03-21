@@ -19,6 +19,9 @@ impl From<ClickHouseError> for DestinationError {
                 format!("arrow encode error: {source}"),
                 Some(Box::new(source)),
             ),
+            ClickHouseError::Http(source) => {
+                DestinationError::Write(format!("http error: {source}"), Some(Box::new(source)))
+            }
         }
     }
 }

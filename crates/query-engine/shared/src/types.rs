@@ -5,9 +5,18 @@ use compiler::{CompiledQueryContext, ResultContext};
 use serde::Serialize;
 use types::QueryResult;
 
+#[derive(Debug, Clone, Default)]
+pub struct ClickHouseStats {
+    pub read_rows: u64,
+    pub read_bytes: u64,
+    pub elapsed_ns: u64,
+    pub result_rows: u64,
+}
+
 pub struct ExecutionOutput {
     pub batches: Vec<RecordBatch>,
     pub result_context: ResultContext,
+    pub stats: Option<ClickHouseStats>,
 }
 
 pub struct ExtractionOutput {
@@ -36,4 +45,5 @@ pub struct PipelineOutput {
     pub raw_query_strings: Vec<String>,
     pub row_count: usize,
     pub redacted_count: usize,
+    pub stats: Option<ClickHouseStats>,
 }

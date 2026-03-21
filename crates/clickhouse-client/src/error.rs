@@ -13,6 +13,9 @@ pub enum ClickHouseError {
 
     #[error("arrow encode error: {0}")]
     ArrowEncode(#[source] arrow::error::ArrowError),
+
+    #[error("http error: {0}")]
+    Http(#[source] reqwest::Error),
 }
 
 #[derive(Debug, Error)]

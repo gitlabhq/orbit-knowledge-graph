@@ -64,6 +64,7 @@ mod tests {
         ctx.phases.insert(ExecutionOutput {
             batches: vec![batch],
             result_context: ctx_result,
+            stats: None,
         });
         let mut obs = NoOpObserver;
 

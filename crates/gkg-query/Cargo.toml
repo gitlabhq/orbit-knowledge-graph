@@ -1,0 +1,24 @@
+[package]
+name = "gkg-query"
+version.workspace = true
+edition = "2024"
+
+[[bin]]
+name = "gkg-query"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+gkg-server = { path = "../gkg-server" }
+clap = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+base64 = { workspace = true }
+jsonwebtoken = { workspace = true }
+chrono = { workspace = true }

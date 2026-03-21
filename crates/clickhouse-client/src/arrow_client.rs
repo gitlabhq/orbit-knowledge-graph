@@ -18,10 +18,30 @@ use tracing::warn;
 
 use crate::error::ClickHouseError;
 
+#[derive(Debug, Clone, Default)]
+pub struct QueryStats {
+    pub read_rows: u64,
+    pub read_bytes: u64,
+    pub elapsed_ns: u64,
+    pub result_rows: u64,
+}
+
+/// ClickHouse options applied to every query on this client.
+const CH_OPTIONS: &[(&str, &str)] = &[
+    ("output_format_arrow_string_as_string", "1"),
+    ("output_format_arrow_fixed_string_as_fixed_byte_array", "1"),
+    ("join_algorithm", "full_sorting_merge,hash"),
+    ("query_plan_join_swap_table", "true"),
+    ("use_query_condition_cache", "true"),
+];
+
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
     base_url: String,
+    database: String,
+    username: String,
+    password: Option<String>,
 }
 
 impl ArrowClickHouseClient {
@@ -29,12 +49,11 @@ impl ArrowClickHouseClient {
         let mut client = Client::default()
             .with_url(url)
             .with_database(database)
-            .with_user(username)
-            .with_option("output_format_arrow_string_as_string", "1")
-            .with_option("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
-            .with_option("join_algorithm", "full_sorting_merge,hash")
-            .with_option("query_plan_join_swap_table", "true")
-            .with_option("use_query_condition_cache", "true");
+            .with_user(username);
+
+        for (k, v) in CH_OPTIONS {
+            client = client.with_option(*k, *v);
+        }
 
         if let Some(password) = password {
             client = client.with_password(password);
@@ -43,6 +62,9 @@ impl ArrowClickHouseClient {
         Self {
             client,
             base_url: url.to_string(),
+            database: database.to_string(),
+            username: username.to_string(),
+            password: password.map(String::from),
         }
     }
 
@@ -107,6 +129,64 @@ impl ArrowClickHouseClient {
 
     pub fn inner(&self) -> &Client {
         &self.client
+    }
+
+    /// Execute rendered SQL (params already inlined) via a raw HTTP request,
+    /// returning Arrow batches AND ClickHouse execution stats from the
+    /// `X-ClickHouse-Summary` response header.
+    pub async fn fetch_arrow_with_stats(
+        &self,
+        rendered_sql: &str,
+    ) -> Result<(Vec<RecordBatch>, QueryStats), ClickHouseError> {
+        let mut url = reqwest::Url::parse(&self.base_url).map_err(|e| {
+            ClickHouseError::Query(clickhouse::error::Error::BadResponse(e.to_string()))
+        })?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("database", &self.database);
+            pairs.append_pair("default_format", "ArrowStream");
+            pairs.append_pair("wait_end_of_query", "1");
+            for (k, v) in CH_OPTIONS {
+                pairs.append_pair(k, v);
+            }
+        }
+
+        let resp = reqwest::Client::new()
+            .post(url)
+            .basic_auth(&self.username, self.password.as_deref())
+            .body(rendered_sql.to_string())
+            .send()
+            .await
+            .map_err(ClickHouseError::Http)?;
+
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ClickHouseError::Query(
+                clickhouse::error::Error::BadResponse(body),
+            ));
+        }
+
+        let stats = resp
+            .headers()
+            .get("x-clickhouse-summary")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| parse_summary(s))
+            .unwrap_or_default();
+
+        let body = resp.bytes().await.map_err(ClickHouseError::Http)?;
+
+        if body.is_empty() {
+            return Ok((Vec::new(), stats));
+        }
+
+        let cursor = Cursor::new(body);
+        let reader = StreamReader::try_new(cursor, None).map_err(ClickHouseError::ArrowDecode)?;
+
+        let batches: Result<Vec<_>, _> = reader
+            .map(|r| r.map_err(ClickHouseError::ArrowDecode))
+            .collect();
+
+        Ok((batches?, stats))
     }
 
     /// Bind a named parameter to a query.
@@ -302,4 +382,14 @@ impl ArrowQuery {
 
         Ok(ReceiverStream::new(rx).boxed())
     }
+}
+
+fn parse_summary(header: &str) -> Option<QueryStats> {
+    let v: serde_json::Value = serde_json::from_str(header).ok()?;
+    Some(QueryStats {
+        read_rows: v["read_rows"].as_str()?.parse().ok()?,
+        read_bytes: v["read_bytes"].as_str()?.parse().ok()?,
+        elapsed_ns: v["elapsed_ns"].as_str()?.parse().ok()?,
+        result_rows: v["result_rows"].as_str()?.parse().ok()?,
+    })
 }

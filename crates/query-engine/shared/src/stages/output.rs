@@ -29,6 +29,11 @@ impl PipelineStage for OutputStage {
             "hydration": input.hydration_queries,
         });
 
+        let stats = ctx
+            .phases
+            .get::<crate::ExecutionOutput>()
+            .and_then(|e| e.stats.clone());
+
         Ok(PipelineOutput {
             row_count: input.query_result.authorized_count(),
             redacted_count: input.redacted_count,
@@ -37,6 +42,7 @@ impl PipelineStage for OutputStage {
             compiled: Arc::clone(compiled),
             query_result: input.query_result.clone(),
             result_context: input.result_context.clone(),
+            stats,
         })
     }
 }
