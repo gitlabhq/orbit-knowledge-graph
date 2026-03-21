@@ -12,18 +12,17 @@ use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
-/// ClickHouse query settings to prevent server crashes.
+/// Base ClickHouse query settings to prevent server crashes.
 ///
-/// - max_memory_usage: 1GB limit per query (graph traversals can be memory-intensive)
-/// - max_execution_time: 30 second timeout
-/// - max_bytes_before_external_*: Spill to disk instead of using more RAM
-/// - join_algorithm: Use disk-based partial_merge joins for large tables
-const SAFE_QUERY_SETTINGS: &str = "\
-    max_memory_usage = 1000000000, \
-    max_execution_time = 30, \
-    max_bytes_before_external_group_by = 100000000, \
-    max_bytes_before_external_sort = 100000000, \
-    join_algorithm = 'partial_merge'";
+/// These are the safe defaults; user-provided settings from the YAML config
+/// are merged on top (overriding any key that appears in both).
+const BASE_QUERY_SETTINGS: &[(&str, &str)] = &[
+    ("max_memory_usage", "1000000000"),
+    ("max_execution_time", "30"),
+    ("max_bytes_before_external_group_by", "100000000"),
+    ("max_bytes_before_external_sort", "100000000"),
+    ("join_algorithm", "'partial_merge'"),
+];
 
 /// Maximum bytes to collect for metadata sample data.
 /// Prevents memory exhaustion when queries return rows with large column values.
@@ -190,17 +189,54 @@ pub struct QueryExecutor {
     sampler: ParameterSampler,
     /// Cached security contexts: (org_id, traversal_path) pairs
     security_contexts: Vec<(i64, String)>,
+    /// Merged SETTINGS clause (base defaults + user overrides).
+    query_settings: String,
 }
 
 impl QueryExecutor {
-    pub fn new(client: ArrowClickHouseClient, ontology: Ontology, sample_size: usize) -> Self {
+    pub fn new(
+        client: ArrowClickHouseClient,
+        ontology: Ontology,
+        sample_size: usize,
+        user_settings: &std::collections::HashMap<String, String>,
+    ) -> Self {
         let sampler = ParameterSampler::new(client.clone(), sample_size);
+        let query_settings = Self::build_settings(user_settings);
         Self {
             client,
             ontology,
             sampler,
             security_contexts: Vec::new(),
+            query_settings,
         }
+    }
+
+    /// Merge base safe defaults with user-provided overrides into a SETTINGS clause.
+    ///
+    /// Values are classified as numeric (emitted bare), boolean (emitted bare),
+    /// already-quoted (emitted as-is), or string (wrapped in single quotes).
+    /// Output is sorted by key for deterministic ordering across runs.
+    fn build_settings(user: &std::collections::HashMap<String, String>) -> String {
+        let mut merged: std::collections::BTreeMap<&str, String> = BASE_QUERY_SETTINGS
+            .iter()
+            .map(|(k, v)| (*k, v.to_string()))
+            .collect();
+        for (k, v) in user {
+            let formatted = if v.starts_with('\'')
+                || v.parse::<u64>().is_ok()
+                || matches!(v.as_str(), "true" | "false" | "0" | "1")
+            {
+                v.clone()
+            } else {
+                format!("'{v}'")
+            };
+            merged.insert(k.as_str(), formatted);
+        }
+        let pairs: Vec<String> = merged
+            .into_iter()
+            .map(|(k, v)| format!("{k} = {v}"))
+            .collect();
+        format!("SETTINGS {}", pairs.join(", "))
     }
 
     /// Warm the parameter cache and sample security contexts.
@@ -382,7 +418,7 @@ impl QueryExecutor {
         &self,
         sql: &str,
     ) -> Result<(u64, Vec<SampleRow>, Vec<String>)> {
-        let settings = format!("SETTINGS {}", SAFE_QUERY_SETTINGS);
+        let settings = &self.query_settings;
 
         // Get row count
         let count_sql = format!("SELECT count() FROM ({}) {}", sql, settings);
@@ -753,7 +789,7 @@ impl QueryExecutor {
     /// - Restricting to 5 rows
     /// - Capping response size to 1MB to handle queries with large column values
     async fn fetch_sample_for_metadata(&self, sql: &str) -> Option<SampleData> {
-        let settings = format!("SETTINGS {}", SAFE_QUERY_SETTINGS);
+        let settings = &self.query_settings;
         let sample_sql = format!(
             "SELECT * FROM ({}) AS _sample LIMIT 5 {} FORMAT JSONEachRow",
             sql, settings
