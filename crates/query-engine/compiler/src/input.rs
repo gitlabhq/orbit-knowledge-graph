@@ -351,6 +351,14 @@ impl Direction {
         }
     }
 
+    /// Returns (start_kind_col, end_kind_col) for edge kind filtering.
+    pub fn kind_columns(self) -> (&'static str, &'static str) {
+        match self {
+            Direction::Outgoing | Direction::Both => ("source_kind", "target_kind"),
+            Direction::Incoming => ("target_kind", "source_kind"),
+        }
+    }
+
     /// Returns (from_col, to_col) for union subquery joins.
     pub fn union_columns(self) -> (&'static str, &'static str) {
         match self {

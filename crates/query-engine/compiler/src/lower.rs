@@ -922,9 +922,14 @@ fn build_joins(
             let alias = format!("e{i}");
             edge_aliases.insert(i, alias.clone());
 
+            let from_node = find_node(nodes, &rel.from)?;
+            let from_entity = from_node.entity.as_deref().unwrap_or("");
+            let to_entity = target.entity.as_deref().unwrap_or("");
+
             let (edge, edge_type_cond) = edge_scan(&alias, &type_filter(&rel.types));
-            let source_cond = source_join_cond(&rel.from, &alias, rel.direction);
-            let target_cond = target_join_cond(&alias, &rel.to, rel.direction);
+            let source_cond =
+                source_join_cond_with_kind(&rel.from, &alias, from_entity, rel.direction);
+            let target_cond = target_join_cond_with_kind(&alias, &rel.to, to_entity, rel.direction);
 
             let mut edge_join_cond = match (source_joined, target_joined) {
                 (true, true) => Expr::and(source_cond.clone(), target_cond.clone()),
@@ -944,7 +949,6 @@ fn build_joins(
             result = TableRef::join(JoinType::Inner, result, edge, edge_join_cond);
 
             if !source_joined {
-                let from_node = find_node(nodes, &rel.from)?;
                 let source_table = resolve_table(from_node)?;
                 result = TableRef::join(
                     JoinType::Inner,
@@ -969,33 +973,8 @@ fn build_joins(
     Ok((result, edge_aliases))
 }
 
-/// Join from source node to edge table.
-fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
-    match dir {
-        Direction::Outgoing => Expr::eq(
-            Expr::col(node, DEFAULT_PRIMARY_KEY),
-            Expr::col(edge, "source_id"),
-        ),
-        Direction::Incoming => Expr::eq(
-            Expr::col(node, DEFAULT_PRIMARY_KEY),
-            Expr::col(edge, "target_id"),
-        ),
-        Direction::Both => Expr::or(
-            Expr::eq(
-                Expr::col(node, DEFAULT_PRIMARY_KEY),
-                Expr::col(edge, "source_id"),
-            ),
-            Expr::eq(
-                Expr::col(node, DEFAULT_PRIMARY_KEY),
-                Expr::col(edge, "target_id"),
-            ),
-        ),
-    }
-}
-
 /// Join from source node to edge table, with entity type filter.
-/// Unlike `source_join_cond`, this also filters on source_kind/target_kind
-/// to prevent ID collisions across entity types.
+/// Filters on source_kind/target_kind to prevent ID collisions across entity types.
 fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Direction) -> Expr {
     let id_and_kind = |id_col, kind_col| {
         Expr::and(
@@ -1017,26 +996,25 @@ fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Directi
     }
 }
 
-/// Join from edge table to target node.
-fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
+/// Join from edge table to target node, with entity type filter.
+/// Filters on target_kind/source_kind to prevent ID collisions across entity types.
+fn target_join_cond_with_kind(edge: &str, node: &str, entity: &str, dir: Direction) -> Expr {
+    let id_and_kind = |id_col, kind_col| {
+        Expr::and(
+            Expr::eq(
+                Expr::col(edge, id_col),
+                Expr::col(node, DEFAULT_PRIMARY_KEY),
+            ),
+            Expr::eq(Expr::col(edge, kind_col), Expr::string(entity)),
+        )
+    };
+
     match dir {
-        Direction::Outgoing => Expr::eq(
-            Expr::col(edge, "target_id"),
-            Expr::col(node, DEFAULT_PRIMARY_KEY),
-        ),
-        Direction::Incoming => Expr::eq(
-            Expr::col(edge, "source_id"),
-            Expr::col(node, DEFAULT_PRIMARY_KEY),
-        ),
+        Direction::Outgoing => id_and_kind("target_id", "target_kind"),
+        Direction::Incoming => id_and_kind("source_id", "source_kind"),
         Direction::Both => Expr::or(
-            Expr::eq(
-                Expr::col(edge, "target_id"),
-                Expr::col(node, DEFAULT_PRIMARY_KEY),
-            ),
-            Expr::eq(
-                Expr::col(edge, "source_id"),
-                Expr::col(node, DEFAULT_PRIMARY_KEY),
-            ),
+            id_and_kind("target_id", "target_kind"),
+            id_and_kind("source_id", "source_kind"),
         ),
     }
 }

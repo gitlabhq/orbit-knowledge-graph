@@ -37,6 +37,7 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
             apply_keyset_pagination(q, input, ctx);
             apply_sip_prefilter(q, input, ctx);
             apply_filtered_node_sip(q, input);
+            apply_edge_kind_predicates(q, input);
             if input.query_type == QueryType::Aggregation {
                 fold_filters_into_aggregates(q, input);
             }
@@ -421,6 +422,37 @@ fn apply_filtered_node_sip(q: &mut Query, input: &Input) {
             &cte_name,
             &aliases,
         );
+    }
+}
+
+/// Push entity kind predicates into edge WHERE clauses.
+///
+/// For each relationship, adds `e{i}.source_kind = '{from_entity}'` and
+/// `e{i}.target_kind = '{to_entity}'` to the outer WHERE. These conditions
+/// are already in the JOIN ON (from lowering), but duplicating them in WHERE
+/// allows ClickHouse to use them for PREWHERE evaluation on the edge table,
+/// filtering out cross-entity ID overlaps before the JOIN.
+fn apply_edge_kind_predicates(q: &mut Query, input: &Input) {
+    for (i, rel) in input.relationships.iter().enumerate() {
+        if rel.max_hops > 1 {
+            continue;
+        }
+
+        let edge_alias = format!("e{i}");
+        let (start_kind_col, end_kind_col) = rel.direction.kind_columns();
+
+        if let Some(from_node) = input.nodes.iter().find(|n| n.id == rel.from) {
+            if let Some(entity) = &from_node.entity {
+                let pred = Expr::eq(Expr::col(&edge_alias, start_kind_col), Expr::string(entity));
+                q.where_clause = Expr::and_all([q.where_clause.take(), Some(pred)]);
+            }
+        }
+        if let Some(to_node) = input.nodes.iter().find(|n| n.id == rel.to) {
+            if let Some(entity) = &to_node.entity {
+                let pred = Expr::eq(Expr::col(&edge_alias, end_kind_col), Expr::string(entity));
+                q.where_clause = Expr::and_all([q.where_clause.take(), Some(pred)]);
+            }
+        }
     }
 }
 
