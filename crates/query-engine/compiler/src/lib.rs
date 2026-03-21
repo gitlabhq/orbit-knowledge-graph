@@ -399,7 +399,16 @@ mod tests {
             "bidirectional neighbor query should include direction column: {}",
             result.base.sql
         );
-        assert!(result.base.sql.contains("INNER JOIN"));
+        assert!(
+            !result.base.sql.contains("INNER JOIN"),
+            "edge-only neighbor query should not JOIN center node table: {}",
+            result.base.sql
+        );
+        assert!(
+            result.base.sql.contains("UNION ALL"),
+            "both-direction neighbor query should use UNION ALL: {}",
+            result.base.sql
+        );
     }
 
     #[test]

@@ -36,6 +36,7 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
         Node::Query(q) => {
             apply_keyset_pagination(q, input, ctx);
             apply_sip_prefilter(q, input, ctx);
+            apply_reverse_sip(q, input);
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
@@ -305,6 +306,208 @@ fn build_cascade_for_node(
         where_clause: Some(Expr::and(parent_filter, rel_filter)),
         ..Default::default()
     })
+}
+
+/// Reverse SIP: when a non-root node has explicit node_ids, trace edges
+/// backwards to narrow the node connected to it, then cascade forward.
+///
+/// Example: traversal Project(id=X) → MR(state=merged) → Note
+///   Root = MR (first_rel.from), but Project has node_ids.
+///   Reverse CTE: SELECT source_id FROM gl_edge WHERE target_id = X AND rel = 'IN_PROJECT'
+///   This narrows MR scans from all merged MRs to only those in project X,
+///   and cascades forward to narrow Note scans as well.
+fn apply_reverse_sip(q: &mut Query, input: &Input) {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return;
+    }
+    if input.relationships.is_empty() {
+        return;
+    }
+    let root_alias = match input.relationships.first() {
+        Some(r) => &r.from,
+        None => return,
+    };
+
+    // narrowed_alias → reverse CTE name
+    let mut narrowed: HashMap<String, String> = HashMap::new();
+
+    for node in &input.nodes {
+        if node.id == *root_alias || node.node_ids.is_empty() {
+            continue;
+        }
+
+        for rel in &input.relationships {
+            if rel.max_hops > 1 {
+                continue;
+            }
+            let is_to = rel.to == node.id;
+            let is_from = rel.from == node.id;
+            if !is_to && !is_from {
+                continue;
+            }
+
+            let (start_col, end_col) = rel.direction.edge_columns();
+            let (select_col, filter_col) = if is_to {
+                (start_col, end_col)
+            } else {
+                (end_col, start_col)
+            };
+
+            let cte_name = format!("_reverse_{}", node.id);
+            if q.ctes.iter().any(|c| c.name == cte_name) {
+                break;
+            }
+
+            let re = "_re";
+            let id_cond = Expr::col_in(
+                re,
+                filter_col,
+                ChType::Int64,
+                node.node_ids
+                    .iter()
+                    .map(|&id| serde_json::Value::from(id))
+                    .collect(),
+            );
+            let rel_cond = if rel.types.len() == 1 {
+                Expr::eq(
+                    Expr::col(re, "relationship_kind"),
+                    Expr::param(ChType::String, rel.types[0].clone()),
+                )
+            } else {
+                Expr::col_in(
+                    re,
+                    "relationship_kind",
+                    ChType::String,
+                    rel.types
+                        .iter()
+                        .map(|t| serde_json::Value::String(t.clone()))
+                        .collect(),
+                )
+                .unwrap_or_else(|| Expr::param(ChType::Bool, true))
+            };
+
+            q.ctes.push(Cte::new(
+                &cte_name,
+                Query {
+                    select: vec![SelectExpr::new(
+                        Expr::col(re, select_col),
+                        DEFAULT_PRIMARY_KEY,
+                    )],
+                    from: TableRef::scan(EDGE_TABLE, re),
+                    where_clause: Expr::and_all([id_cond, Some(rel_cond)]),
+                    ..Default::default()
+                },
+            ));
+
+            let other_alias = if is_to { &rel.from } else { &rel.to };
+            narrowed.insert(other_alias.clone(), cte_name);
+            break;
+        }
+    }
+
+    if narrowed.is_empty() {
+        return;
+    }
+
+    // Inject reverse CTEs into edge scans
+    for (i, rel) in input.relationships.iter().enumerate() {
+        if rel.max_hops > 1 {
+            continue;
+        }
+        let (start_col, end_col) = rel.direction.edge_columns();
+        let edge_alias = format!("e{i}");
+        let aliases = HashSet::from([edge_alias]);
+
+        if let Some(cte) = narrowed.get(&rel.from) {
+            inject_sip_for_aliases(&mut q.from, &mut q.where_clause, start_col, cte, &aliases);
+        }
+        if let Some(cte) = narrowed.get(&rel.to) {
+            inject_sip_for_aliases(&mut q.from, &mut q.where_clause, end_col, cte, &aliases);
+        }
+    }
+
+    // Inject into narrowed node table scans
+    for (alias, cte_name) in &narrowed {
+        let filter = Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+            cte_name: cte_name.clone(),
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        };
+        q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
+    }
+
+    // Narrow the root CTE if the reverse SIP covers the root alias.
+    // Move the reverse CTE before _root_ids so it can be referenced, then
+    // add `root.id IN (SELECT id FROM _reverse_X)` to the root CTE.
+    // This narrows all downstream cascades automatically.
+    if let Some(cte_name) = narrowed.get(root_alias) {
+        if let Some(idx) = q.ctes.iter().position(|c| c.name == *cte_name) {
+            let cte = q.ctes.remove(idx);
+            q.ctes.insert(0, cte);
+        }
+        if let Some(root_cte) = q.ctes.iter_mut().find(|c| c.name == ROOT_SIP_CTE) {
+            let intersection = Expr::InSubquery {
+                expr: Box::new(Expr::col(root_alias, DEFAULT_PRIMARY_KEY)),
+                cte_name: cte_name.clone(),
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            };
+            root_cte.query.where_clause =
+                Expr::and_all([root_cte.query.where_clause.take(), Some(intersection)]);
+        }
+    }
+
+    // Forward-cascade from narrowed nodes to other connected nodes
+    for (narrowed_alias, reverse_cte) in &narrowed {
+        for rel in &input.relationships {
+            if rel.max_hops > 1 {
+                continue;
+            }
+            let (start_col, end_col) = rel.direction.edge_columns();
+            let (target_alias, sel_col, filt_col) = if rel.from == *narrowed_alias {
+                (&rel.to, end_col, start_col)
+            } else if rel.to == *narrowed_alias {
+                (&rel.from, start_col, end_col)
+            } else {
+                continue;
+            };
+
+            if narrowed.contains_key(target_alias) {
+                continue;
+            }
+            if input
+                .nodes
+                .iter()
+                .any(|n| n.id == *target_alias && !n.node_ids.is_empty())
+            {
+                continue;
+            }
+
+            let cascade_name = format!("_rev_cascade_{}", target_alias);
+            if q.ctes.iter().any(|c| c.name == cascade_name) {
+                continue;
+            }
+
+            if let Some(cte) = build_cascade_for_node(
+                input,
+                target_alias,
+                sel_col,
+                filt_col,
+                reverse_cte,
+                &rel.types,
+            ) {
+                q.ctes.push(Cte::new(&cascade_name, cte));
+                let filter = Expr::InSubquery {
+                    expr: Box::new(Expr::col(target_alias, DEFAULT_PRIMARY_KEY)),
+                    cte_name: cascade_name,
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                };
+                q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
+            }
+        }
+    }
 }
 
 /// Target-side SIP for aggregation queries.
