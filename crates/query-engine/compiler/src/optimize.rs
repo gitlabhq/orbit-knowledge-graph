@@ -22,13 +22,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Cte, Expr, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::SKIP_SECURITY_FILTER_TABLES;
-use crate::input::{Input, QueryType};
+use crate::input::{Input, OrderDirection, QueryType};
 use crate::security::SecurityContext;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_TABLE, TRAVERSAL_PATH_COLUMN};
 
 const ROOT_SIP_CTE: &str = "_root_ids";
+const LIMIT_PUSHDOWN_MULTIPLIER: u32 = 3;
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
@@ -37,7 +38,6 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
             apply_keyset_pagination(q, input, ctx);
             apply_sip_prefilter(q, input, ctx);
             apply_filtered_node_sip(q, input);
-            apply_edge_kind_predicates(q, input);
             if input.query_type == QueryType::Aggregation {
                 fold_filters_into_aggregates(q, input);
             }
@@ -193,6 +193,21 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
             .chain(std::iter::once(keyset_predicate)),
     );
 
+    // LIMIT pushdown: for traversal queries with ORDER BY on root + LIMIT,
+    // push into CTE so edge scans only match the top-N root IDs.
+    let (cte_order_by, cte_limit) = match (input.query_type, &input.order_by) {
+        (QueryType::Traversal, Some(ob)) if ob.node == *root_alias => {
+            let offset = q.offset.unwrap_or(0);
+            let padded = (input.limit + offset).saturating_mul(LIMIT_PUSHDOWN_MULTIPLIER);
+            let order = vec![OrderExpr {
+                expr: Expr::col(root_alias, &ob.property),
+                desc: ob.direction == OrderDirection::Desc,
+            }];
+            (order, Some(padded))
+        }
+        _ => (vec![], None),
+    };
+
     let cte_query = Query {
         select: vec![SelectExpr::new(
             Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
@@ -200,6 +215,8 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         )],
         from: TableRef::scan(&root_table, root_alias),
         where_clause: cte_where,
+        order_by: cte_order_by,
+        limit: cte_limit,
         ..Default::default()
     };
     q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
@@ -425,37 +442,6 @@ fn apply_filtered_node_sip(q: &mut Query, input: &Input) {
             &cte_name,
             &aliases,
         );
-    }
-}
-
-/// Push entity kind predicates into edge WHERE clauses.
-///
-/// For each relationship, adds `e{i}.source_kind = '{from_entity}'` and
-/// `e{i}.target_kind = '{to_entity}'` to the outer WHERE. These conditions
-/// are already in the JOIN ON (from lowering), but duplicating them in WHERE
-/// allows ClickHouse to use them for PREWHERE evaluation on the edge table,
-/// filtering out cross-entity ID overlaps before the JOIN.
-fn apply_edge_kind_predicates(q: &mut Query, input: &Input) {
-    for (i, rel) in input.relationships.iter().enumerate() {
-        if rel.max_hops > 1 {
-            continue;
-        }
-
-        let edge_alias = format!("e{i}");
-        let (start_kind_col, end_kind_col) = rel.direction.kind_columns();
-
-        if let Some(from_node) = input.nodes.iter().find(|n| n.id == rel.from) {
-            if let Some(entity) = &from_node.entity {
-                let pred = Expr::eq(Expr::col(&edge_alias, start_kind_col), Expr::string(entity));
-                q.where_clause = Expr::and_all([q.where_clause.take(), Some(pred)]);
-            }
-        }
-        if let Some(to_node) = input.nodes.iter().find(|n| n.id == rel.to) {
-            if let Some(entity) = &to_node.entity {
-                let pred = Expr::eq(Expr::col(&edge_alias, end_kind_col), Expr::string(entity));
-                q.where_clause = Expr::and_all([q.where_clause.take(), Some(pred)]);
-            }
-        }
     }
 }
 
@@ -1325,6 +1311,168 @@ mod tests {
                 .iter()
                 .any(|(k, v)| k == "query_plan_convert_join_to_in" && v == "1"),
             "should have query_plan_convert_join_to_in setting"
+        );
+    }
+
+    #[test]
+    fn sip_cte_gets_limit_pushdown_for_traversal_with_order_by_on_root() {
+        use crate::input::{Direction, InputNode, InputOrderBy, InputRelationship, OrderDirection};
+        use crate::security::SecurityContext;
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "pipe".into(),
+                    entity: Some("Pipeline".into()),
+                    table: Some("gl_pipeline".into()),
+                    filters: {
+                        let mut m = HashMap::new();
+                        m.insert(
+                            "status".into(),
+                            crate::input::InputFilter {
+                                op: None,
+                                value: Some(serde_json::Value::String("failed".into())),
+                            },
+                        );
+                        m
+                    },
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "pipe".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            limit: 30,
+            order_by: Some(InputOrderBy {
+                node: "pipe".into(),
+                property: "created_at".into(),
+                direction: OrderDirection::Desc,
+            }),
+            ..Default::default()
+        };
+
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(Expr::col("pipe", "id"), "pipe_id")],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_pipeline", "pipe"),
+                TableRef::scan("gl_edge", "e0"),
+                Expr::eq(Expr::col("pipe", "id"), Expr::col("e0", "source_id")),
+            ),
+            where_clause: Some(eq_filter("pipe", "status", "failed")),
+            order_by: vec![OrderExpr {
+                expr: Expr::col("pipe", "created_at"),
+                desc: true,
+            }],
+            limit: Some(30),
+            ..Default::default()
+        }));
+
+        optimize(&mut node, &input, &ctx);
+
+        let Node::Query(q) = &node;
+        let root_cte = q.ctes.iter().find(|c| c.name == ROOT_SIP_CTE).unwrap();
+        assert_eq!(
+            root_cte.query.limit,
+            Some(90),
+            "CTE should have LIMIT = 30 * 3 = 90"
+        );
+        assert_eq!(root_cte.query.order_by.len(), 1, "CTE should have ORDER BY");
+        assert!(
+            root_cte.query.order_by[0].desc,
+            "CTE ORDER BY should be DESC"
+        );
+    }
+
+    #[test]
+    fn sip_cte_no_limit_pushdown_for_aggregation() {
+        use crate::input::{Direction, InputNode, InputOrderBy, InputRelationship, OrderDirection};
+        use crate::security::SecurityContext;
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "pipe".into(),
+                    entity: Some("Pipeline".into()),
+                    table: Some("gl_pipeline".into()),
+                    filters: {
+                        let mut m = HashMap::new();
+                        m.insert(
+                            "status".into(),
+                            crate::input::InputFilter {
+                                op: None,
+                                value: Some(serde_json::Value::String("failed".into())),
+                            },
+                        );
+                        m
+                    },
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "pipe".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![count_agg("pipe", Some("p"))],
+            limit: 10,
+            order_by: Some(InputOrderBy {
+                node: "pipe".into(),
+                property: "created_at".into(),
+                direction: OrderDirection::Desc,
+            }),
+            ..Default::default()
+        };
+
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(count_expr("pipe", "id"), "count")],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_pipeline", "pipe"),
+                TableRef::scan("gl_edge", "e0"),
+                Expr::eq(Expr::col("pipe", "id"), Expr::col("e0", "source_id")),
+            ),
+            where_clause: Some(eq_filter("pipe", "status", "failed")),
+            ..Default::default()
+        }));
+
+        optimize(&mut node, &input, &ctx);
+
+        let Node::Query(q) = &node;
+        let root_cte = q.ctes.iter().find(|c| c.name == ROOT_SIP_CTE).unwrap();
+        assert!(
+            root_cte.query.limit.is_none(),
+            "aggregation CTE should NOT have LIMIT pushdown"
+        );
+        assert!(
+            root_cte.query.order_by.is_empty(),
+            "aggregation CTE should NOT have ORDER BY"
         );
     }
 
