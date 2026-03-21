@@ -544,8 +544,8 @@ impl<'a> Validator<'a> {
     /// the FROM clause, producing broken SQL or silently dropped columns.
     fn check_unreferenced_nodes(&self, input: &Input) -> Result<()> {
         let referenced: std::collections::HashSet<&str> = match input.query_type {
-            // Single-node query types: the one declared node is the query.
-            QueryType::Search | QueryType::Neighbors => return Ok(()),
+            // Single/multi-node query types where all declared nodes are used directly.
+            QueryType::Search | QueryType::Neighbors | QueryType::Hydration => return Ok(()),
             QueryType::Traversal | QueryType::Aggregation => {
                 let mut set: std::collections::HashSet<&str> = input
                     .relationships

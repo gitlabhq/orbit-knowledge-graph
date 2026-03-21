@@ -151,6 +151,11 @@ pub enum QueryType {
     PathFinding,
     Search,
     Neighbors,
+    /// Internal-only: consolidated hydration for multiple entity types.
+    /// Generates a UNION ALL of search-like arms, one per node. Skips
+    /// security context injection (IDs are pre-authorized by the pipeline).
+    #[serde(skip)]
+    Hydration,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -113,7 +113,7 @@ impl GraphFormatter {
                     &mut edges,
                 );
             }
-            None => {}
+            Some(QueryType::Hydration) | None => {}
         }
 
         GraphResponse {

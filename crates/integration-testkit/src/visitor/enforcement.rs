@@ -111,6 +111,7 @@ impl QueryRequirements for Input {
             QueryType::Traversal | QueryType::Search => {
                 reqs.insert(Requirement::NodeCount);
             }
+            QueryType::Hydration => {}
         }
 
         // Traversal queries with joins produce edges the test must verify per type.
