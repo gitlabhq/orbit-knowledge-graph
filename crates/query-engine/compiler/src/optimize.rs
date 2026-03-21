@@ -22,7 +22,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, SelectExpr, TableRef};
 use crate::constants::SKIP_SECURITY_FILTER_TABLES;
 use crate::input::{Input, QueryType};
 use crate::security::SecurityContext;
@@ -40,6 +40,7 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
             apply_reverse_sip(q, input);
             apply_filtered_node_sip(q, input);
             if input.query_type == QueryType::Aggregation {
+                apply_edge_only_aggregation(q, input);
                 fold_filters_into_aggregates(q, input);
             }
             apply_join_to_in_setting(q, input);
@@ -699,6 +700,179 @@ fn apply_filtered_node_sip(q: &mut Query, input: &Input) {
             }
         }
     }
+}
+
+/// Edge-only aggregation: eliminate the root node table from the main query
+/// when it's only used as a COUNT target.
+///
+/// Preconditions:
+///   - Aggregation query with a single relationship (single-hop)
+///   - All aggregations are COUNT on the root node (the `from` side)
+///   - The root node is NOT in any aggregation's group_by
+///   - A SIP CTE exists for the root (_root_ids)
+///
+/// Rewrites COUNT(root.id) → COUNT(edge.start_col) and removes the root
+/// table from the JOIN tree, halving the scan for large root tables.
+fn apply_edge_only_aggregation(q: &mut Query, input: &Input) {
+    if input.relationships.len() != 1 {
+        return;
+    }
+    let rel = &input.relationships[0];
+    if rel.max_hops > 1 {
+        return;
+    }
+
+    let root_alias = &rel.from;
+
+    // Root must not be in any GROUP BY
+    let group_by_nodes: HashSet<_> = input
+        .aggregations
+        .iter()
+        .filter_map(|a| a.group_by.as_deref())
+        .collect();
+    if group_by_nodes.contains(root_alias.as_str()) {
+        return;
+    }
+
+    // All aggregations must be COUNT targeting the root node
+    if !input.aggregations.iter().all(|a| {
+        a.function == crate::input::AggFunction::Count
+            && a.target.as_deref() == Some(root_alias.as_str())
+            && a.property.is_none()
+    }) {
+        return;
+    }
+
+    // SIP CTE must exist
+    if !q.ctes.iter().any(|c| c.name == ROOT_SIP_CTE) {
+        return;
+    }
+
+    let (start_col, _) = rel.direction.edge_columns();
+    let edge_alias = "e0";
+
+    // Rewrite COUNT(root.id) → COUNT(edge.start_col) in SELECT
+    for sel in &mut q.select {
+        rewrite_count_target(&mut sel.expr, root_alias, edge_alias, start_col);
+    }
+
+    // Remove root table from FROM tree, extracting edge-only JOIN conditions
+    let extracted_conds = eliminate_root_scan(&mut q.from, root_alias);
+
+    // Remove root-only WHERE conjuncts (already enforced by SIP CTE)
+    if let Some(where_clause) = q.where_clause.take() {
+        let conjuncts = flatten_and(where_clause);
+        let kept: Vec<Expr> = conjuncts
+            .into_iter()
+            .filter(|c| {
+                let aliases = collect_column_aliases(c);
+                // Keep if it references non-root aliases (or has no aliases)
+                aliases.is_empty() || aliases.iter().any(|a| a != root_alias)
+            })
+            .collect();
+        q.where_clause = Expr::and_all(kept.into_iter().map(Some));
+    }
+
+    // Add extracted non-root conditions (source_kind, relationship_kind) to WHERE
+    for cond in extracted_conds {
+        q.where_clause = Expr::and_all([q.where_clause.take(), Some(cond)]);
+    }
+
+    // Remove the cascade CTE for the GROUP BY node — it's now redundant since
+    // the edge SIP (e0.source_id IN _root_ids) already narrows reachable targets.
+    let cascade_name = format!("_cascade_{}", rel.to);
+    q.ctes.retain(|c| c.name != cascade_name);
+
+    // Remove cascade InSubquery from WHERE
+    if let Some(where_clause) = q.where_clause.take() {
+        let conjuncts = flatten_and(where_clause);
+        let kept: Vec<Expr> = conjuncts
+            .into_iter()
+            .filter(
+                |c| !matches!(c, Expr::InSubquery { cte_name, .. } if *cte_name == cascade_name),
+            )
+            .collect();
+        q.where_clause = Expr::and_all(kept.into_iter().map(Some));
+    }
+}
+
+/// Rewrite COUNT(old_alias.id) → COUNT(new_alias.new_col) in an expression tree.
+fn rewrite_count_target(expr: &mut Expr, old_alias: &str, new_alias: &str, new_col: &str) {
+    match expr {
+        Expr::FuncCall { name, args } if name == "COUNT" => {
+            for arg in args.iter_mut() {
+                if let Expr::Column { table, column } = arg {
+                    if table == old_alias && column == DEFAULT_PRIMARY_KEY {
+                        *table = new_alias.to_string();
+                        *column = new_col.to_string();
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Remove the root table scan from the FROM tree.
+/// Returns non-root conditions from the removed JOIN's ON clause.
+///
+/// Expected pattern: Join(Join(Scan(root), Scan(edge), on_inner), Scan(target), on_outer)
+/// Result:           Join(Scan(edge), Scan(target), on_outer)
+fn eliminate_root_scan(from: &mut TableRef, root_alias: &str) -> Vec<Expr> {
+    // Check the pattern without moving: Join(Join(Scan(root), edge, _), target, _)
+    let matches = matches!(
+        from,
+        TableRef::Join { left, .. }
+        if matches!(
+            left.as_ref(),
+            TableRef::Join { left: inner_left, .. }
+            if matches!(inner_left.as_ref(), TableRef::Scan { alias, .. } if alias == root_alias)
+        )
+    );
+    if !matches {
+        return Vec::new();
+    }
+
+    // Take ownership and destructure
+    let old = std::mem::replace(
+        from,
+        TableRef::Scan {
+            table: String::new(),
+            alias: String::new(),
+        },
+    );
+    let TableRef::Join {
+        left: inner_join,
+        right: outer_right,
+        on: outer_on,
+        ..
+    } = old
+    else {
+        unreachable!()
+    };
+    let TableRef::Join {
+        right: edge,
+        on: inner_on,
+        ..
+    } = *inner_join
+    else {
+        unreachable!()
+    };
+
+    let mut extracted = Vec::new();
+    for c in flatten_and(inner_on) {
+        let aliases = collect_column_aliases(&c);
+        if !aliases.iter().any(|a| a == root_alias) {
+            extracted.push(c);
+        }
+    }
+    *from = TableRef::Join {
+        join_type: JoinType::Inner,
+        left: edge,
+        right: outer_right,
+        on: outer_on,
+    };
+    extracted
 }
 
 /// Build a decomposed keyset predicate for one traversal path:
@@ -1632,5 +1806,177 @@ mod tests {
         apply_join_to_in_setting(&mut q, &input);
 
         assert!(q.settings.is_empty());
+    }
+
+    #[test]
+    fn edge_only_aggregation_eliminates_root_table() {
+        use crate::input::{
+            AggFunction, Direction, InputAggregation, InputNode, InputRelationship,
+        };
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "pipe".into(),
+                    entity: Some("Pipeline".into()),
+                    table: Some("gl_pipeline".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "pipe".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![InputAggregation {
+                function: AggFunction::Count,
+                target: Some("pipe".into()),
+                group_by: Some("p".into()),
+                property: None,
+                alias: Some("total".into()),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(Expr::func("COUNT", vec![Expr::col("pipe", "id")]), "total"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_pipeline", "pipe"),
+                    TableRef::scan("gl_edge", "e0"),
+                    Expr::and(
+                        Expr::eq(Expr::col("pipe", "id"), Expr::col("e0", "source_id")),
+                        Expr::eq(Expr::col("e0", "source_kind"), Expr::string("Pipeline")),
+                    ),
+                ),
+                TableRef::scan("gl_project", "p"),
+                Expr::eq(Expr::col("e0", "target_id"), Expr::col("p", "id")),
+            ),
+            where_clause: Some(eq_filter("pipe", "status", "failed")),
+            group_by: vec![Expr::col("p", "name")],
+            ctes: vec![Cte::new("_root_ids", Query::default())],
+            ..Default::default()
+        };
+
+        apply_edge_only_aggregation(&mut q, &input);
+
+        // COUNT target should be rewritten to edge column
+        let count_sel = &q.select[1];
+        if let Expr::FuncCall { args, .. } = &count_sel.expr {
+            assert_eq!(
+                args[0],
+                Expr::col("e0", "source_id"),
+                "COUNT should target edge column"
+            );
+        } else {
+            panic!("expected FuncCall");
+        }
+
+        // FROM should not contain gl_pipeline scan
+        fn has_scan(t: &TableRef, alias: &str) -> bool {
+            match t {
+                TableRef::Scan { alias: a, .. } => a == alias,
+                TableRef::Join { left, right, .. } => {
+                    has_scan(left, alias) || has_scan(right, alias)
+                }
+                _ => false,
+            }
+        }
+        assert!(
+            !has_scan(&q.from, "pipe"),
+            "root table should be eliminated from FROM"
+        );
+        assert!(has_scan(&q.from, "e0"), "edge table should remain in FROM");
+        assert!(has_scan(&q.from, "p"), "target table should remain in FROM");
+    }
+
+    #[test]
+    fn edge_only_aggregation_skips_non_count() {
+        use crate::input::{
+            AggFunction, Direction, InputAggregation, InputNode, InputRelationship,
+        };
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "pipe".into(),
+                    entity: Some("Pipeline".into()),
+                    table: Some("gl_pipeline".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "pipe".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![InputAggregation {
+                function: AggFunction::Sum,
+                target: Some("pipe".into()),
+                group_by: Some("p".into()),
+                property: Some("duration".into()),
+                alias: Some("total_dur".into()),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_pipeline", "pipe"),
+                    TableRef::scan("gl_edge", "e0"),
+                    Expr::lit(true),
+                ),
+                TableRef::scan("gl_project", "p"),
+                Expr::lit(true),
+            ),
+            ctes: vec![Cte::new("_root_ids", Query::default())],
+            ..Default::default()
+        };
+
+        apply_edge_only_aggregation(&mut q, &input);
+
+        fn has_scan(t: &TableRef, alias: &str) -> bool {
+            match t {
+                TableRef::Scan { alias: a, .. } => a == alias,
+                TableRef::Join { left, right, .. } => {
+                    has_scan(left, alias) || has_scan(right, alias)
+                }
+                _ => false,
+            }
+        }
+        assert!(
+            has_scan(&q.from, "pipe"),
+            "root table should NOT be eliminated for non-COUNT aggregation"
+        );
     }
 }
