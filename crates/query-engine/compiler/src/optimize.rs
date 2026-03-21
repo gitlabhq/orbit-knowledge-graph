@@ -751,9 +751,12 @@ fn apply_edge_only_aggregation(q: &mut Query, input: &Input) {
     let (start_col, _) = rel.direction.edge_columns();
     let edge_alias = "e0";
 
-    // Rewrite COUNT(root.id) → COUNT(edge.start_col) in SELECT
+    // Rewrite COUNT(root.id) → COUNT(edge.start_col) in SELECT and ORDER BY
     for sel in &mut q.select {
         rewrite_count_target(&mut sel.expr, root_alias, edge_alias, start_col);
+    }
+    for ord in &mut q.order_by {
+        rewrite_count_target(&mut ord.expr, root_alias, edge_alias, start_col);
     }
 
     // Remove root table from FROM tree, extracting edge-only JOIN conditions
@@ -1978,5 +1981,83 @@ mod tests {
             has_scan(&q.from, "pipe"),
             "root table should NOT be eliminated for non-COUNT aggregation"
         );
+    }
+
+    #[test]
+    fn edge_only_aggregation_rewrites_order_by() {
+        use crate::input::{Direction, InputAggregation, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "mr".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![InputAggregation {
+                function: AggFunction::Count,
+                target: Some("mr".into()),
+                group_by: Some("p".into()),
+                property: None,
+                alias: Some("mr_count".into()),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(count_expr("mr", "id"), "mr_count"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_merge_request", "mr"),
+                    TableRef::scan("gl_edge", "e0"),
+                    Expr::eq(Expr::col("mr", "id"), Expr::col("e0", "source_id")),
+                ),
+                TableRef::scan("gl_project", "p"),
+                Expr::eq(Expr::col("e0", "target_id"), Expr::col("p", "id")),
+            ),
+            order_by: vec![OrderExpr {
+                expr: count_expr("mr", "id"),
+                desc: true,
+            }],
+            group_by: vec![Expr::col("p", "name")],
+            ctes: vec![Cte::new("_root_ids", Query::default())],
+            ..Default::default()
+        };
+
+        apply_edge_only_aggregation(&mut q, &input);
+
+        match &q.order_by[0].expr {
+            Expr::FuncCall { args, .. } => {
+                assert_eq!(
+                    args[0],
+                    Expr::col("e0", "source_id"),
+                    "ORDER BY COUNT should target edge column after root elimination"
+                );
+            }
+            other => panic!("expected FuncCall in ORDER BY, got {other:?}"),
+        }
     }
 }
