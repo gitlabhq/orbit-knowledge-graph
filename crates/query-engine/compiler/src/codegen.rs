@@ -128,6 +128,16 @@ impl Context {
         // SELECT, FROM, WHERE, GROUP BY, HAVING, UNION ALL, ORDER BY, LIMIT, OFFSET
         parts.push(self.emit_query_body(q)?);
 
+        // SETTINGS clause (appended after the query body)
+        if !q.settings.is_empty() {
+            let settings: Vec<String> = q
+                .settings
+                .iter()
+                .map(|(k, v)| format!("{k} = {v}"))
+                .collect();
+            parts.push(format!("SETTINGS {}", settings.join(", ")));
+        }
+
         Ok(parts.join(" "))
     }
 

@@ -29,6 +29,7 @@ use crate::security::SecurityContext;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_TABLE, TRAVERSAL_PATH_COLUMN};
 
 const ROOT_SIP_CTE: &str = "_root_ids";
+const LIMIT_PUSHDOWN_MULTIPLIER: u32 = 3;
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
@@ -41,7 +42,18 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
             }
+            apply_join_to_in_setting(q, input);
         }
+    }
+}
+
+/// Append `SETTINGS query_plan_convert_join_to_in = 1` for queries with
+/// relationships. This tells ClickHouse to auto-convert JOINs to IN
+/// subqueries when the right side is small, improving edge scan performance.
+fn apply_join_to_in_setting(q: &mut Query, input: &Input) {
+    if !input.relationships.is_empty() {
+        q.settings
+            .push(("query_plan_convert_join_to_in".into(), "1".into()));
     }
 }
 
@@ -180,6 +192,29 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
             .chain(std::iter::once(keyset_predicate)),
     );
 
+    // LIMIT pushdown: for traversal queries with ORDER BY on the root node,
+    // push the ORDER BY and a padded LIMIT into the SIP CTE. This narrows the
+    // materialized ID set from all matching roots to top-N candidates.
+    // Only for Traversal — aggregation needs all rows for correct counts.
+    let (cte_order_by, cte_limit) =
+        if input.query_type == QueryType::Traversal && has_explicit_selectivity {
+            if let (Some(ob), Some(limit)) = (&input.order_by, q.limit) {
+                if ob.node == *root_alias {
+                    let order = vec![crate::ast::OrderExpr {
+                        expr: Expr::col(root_alias, &ob.property),
+                        desc: ob.direction == crate::input::OrderDirection::Desc,
+                    }];
+                    (order, Some(limit * LIMIT_PUSHDOWN_MULTIPLIER))
+                } else {
+                    (vec![], None)
+                }
+            } else {
+                (vec![], None)
+            }
+        } else {
+            (vec![], None)
+        };
+
     let cte_query = Query {
         select: vec![SelectExpr::new(
             Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
@@ -187,6 +222,8 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         )],
         from: TableRef::scan(&root_table, root_alias),
         where_clause: cte_where,
+        order_by: cte_order_by,
+        limit: cte_limit,
         ..Default::default()
     };
     q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
@@ -213,15 +250,27 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
             inject_sip_for_aliases(&mut q.from, &mut q.where_clause, end_col, cte, &aliases);
         }
 
-        // Cascading SIP: when the root is selective (node_ids, filters, etc.),
-        // chain CTEs through relationships so every edge AND node table scan
-        // gets narrowed. Skip cascades for broad roots (e.g. "all MRs") where
-        // the cascade CTE itself would scan as many edge rows as the main query.
-        if !has_explicit_selectivity || rel.max_hops > 1 {
+        // Cascading SIP: chain CTEs through relationships to narrow downstream
+        // edge and node table scans. Cascade when:
+        //   - Root has explicit selectivity (node_ids, filters, etc.)
+        //   - OR the target node is a SKIP_SECURITY_FILTER table (e.g. gl_user,
+        //     1.5M rows) that would otherwise be read fully
+        // Skip cascades for multi-hop relationships.
+        if rel.max_hops > 1 {
             continue;
         }
 
+        let is_skip_security_table = |node_alias: &str| {
+            input
+                .nodes
+                .iter()
+                .find(|n| n.id == node_alias)
+                .and_then(|n| n.table.as_deref())
+                .is_some_and(|t| SKIP_SECURITY_FILTER_TABLES.contains(&t))
+        };
+
         if let (Some(parent), None) = (&from_cte, &to_cte)
+            && (has_explicit_selectivity || is_skip_security_table(&rel.to))
             && let Some(cte) =
                 build_cascade_for_node(input, &rel.to, end_col, start_col, parent, &rel.types)
         {
@@ -230,6 +279,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
             node_ctes.insert(rel.to.clone(), name);
         }
         if let (None, Some(parent)) = (&from_cte, &to_cte)
+            && (has_explicit_selectivity || is_skip_security_table(&rel.from))
             && let Some(cte) =
                 build_cascade_for_node(input, &rel.from, start_col, end_col, parent, &rel.types)
         {
@@ -752,15 +802,22 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
     for conjunct in conjuncts {
         let aliases = collect_column_aliases(&conjunct);
 
+        let is_cascade_sip = matches!(
+            &conjunct,
+            Expr::InSubquery { cte_name, .. } if cte_name.starts_with("_cascade_")
+        );
+
         // Keep in WHERE if:
         //   - references no columns (constant expression)
         //   - references multiple aliases (cross-table predicate)
         //   - references a group_by alias (group node filter must stay)
         //   - references an alias that isn't an aggregation target
+        //   - is a cascade CTE filter (must stay for table scan narrowing)
         let should_keep = aliases.is_empty()
             || aliases.len() > 1
             || aliases.iter().any(|a| group_aliases.contains(a.as_str()))
-            || aliases.iter().any(|a| !target_aliases.contains(a.as_str()));
+            || aliases.iter().any(|a| !target_aliases.contains(a.as_str()))
+            || is_cascade_sip;
 
         if should_keep {
             remaining.push(conjunct);
@@ -1354,5 +1411,128 @@ mod tests {
             q.ctes.is_empty(),
             "no CTE should be created without target filters"
         );
+    }
+
+    #[test]
+    fn cascade_cte_filter_stays_in_where_not_folded_into_aggregate() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "reviewer".into(),
+                    entity: Some("User".into()),
+                    table: Some("gl_user".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["REVIEWER".into()],
+                from: "mr".into(),
+                to: "reviewer".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![count_agg("reviewer", Some("mr"))],
+            ..Default::default()
+        };
+
+        // Simulate a query with a cascade CTE filter on gl_user
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("mr", "title"), "mr_title"),
+                SelectExpr::new(count_expr("reviewer", "id"), "reviewer_count"),
+            ],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            where_clause: Some(Expr::InSubquery {
+                expr: Box::new(Expr::col("reviewer", "id")),
+                cte_name: "_cascade_reviewer".into(),
+                column: "id".into(),
+            }),
+            group_by: vec![Expr::col("mr", "title")],
+            ..Default::default()
+        };
+
+        fold_filters_into_aggregates(&mut q, &input);
+
+        // Cascade filter must stay in WHERE (not folded into countIf)
+        assert!(
+            has_in_subquery(q.where_clause.as_ref().unwrap(), "_cascade_reviewer"),
+            "cascade CTE filter should remain in WHERE"
+        );
+
+        // Aggregate should still be COUNT, not countIf
+        match &q.select[1].expr {
+            Expr::FuncCall { name, .. } => assert_eq!(name, "COUNT"),
+            other => panic!("expected COUNT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn settings_added_for_queries_with_relationships() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "mr".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            limit: 10,
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![SelectExpr::new(Expr::col("mr", "id"), "mr_id")],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            ..Default::default()
+        };
+
+        apply_join_to_in_setting(&mut q, &input);
+
+        assert_eq!(q.settings.len(), 1);
+        assert_eq!(q.settings[0].0, "query_plan_convert_join_to_in");
+        assert_eq!(q.settings[0].1, "1");
+    }
+
+    #[test]
+    fn settings_not_added_without_relationships() {
+        let input = Input {
+            query_type: QueryType::Search,
+            ..Default::default()
+        };
+
+        let mut q = Query::default();
+        apply_join_to_in_setting(&mut q, &input);
+
+        assert!(q.settings.is_empty());
     }
 }
