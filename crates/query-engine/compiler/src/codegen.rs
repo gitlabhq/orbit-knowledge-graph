@@ -253,6 +253,14 @@ impl Context {
                 let e = self.emit_expr(expr);
                 format!("{e} IN (SELECT {column} FROM {cte_name})")
             }
+            Expr::Ident(name) => name.clone(),
+            Expr::ScalarSubquery(query) => {
+                let inner = self.emit_query(query).expect("scalar subquery codegen");
+                format!("({inner})")
+            }
+            Expr::TupleFieldAccess { expr, index } => {
+                format!("{}.{index}", self.emit_expr(expr))
+            }
         }
     }
 

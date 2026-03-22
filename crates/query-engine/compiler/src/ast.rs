@@ -42,6 +42,15 @@ pub enum Expr {
         cte_name: String,
         column: String,
     },
+    /// Bare identifier without table prefix → `name`
+    /// Used for references inside derived tables (e.g. arrayJoin column aliases).
+    Ident(String),
+    /// Scalar subquery as expression → `(SELECT ...)`
+    /// Returns a single value; used with groupArray/arrayJoin patterns.
+    ScalarSubquery(Box<Query>),
+    /// Tuple field access → `expr.N` (1-indexed)
+    /// Used to extract columns from edge tuples in layered traversals.
+    TupleFieldAccess { expr: Box<Expr>, index: u32 },
 }
 
 /// SQL operators for expressions.

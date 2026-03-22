@@ -129,7 +129,330 @@ fn lower_search(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input) -> Result<Node> {
-    lower_traversal_edge_only(input)
+    let all_single_hop = input.relationships.iter().all(|r| r.max_hops <= 1);
+    let multi_rel = input.relationships.len() > 1;
+
+    // Toggle for A/B testing: set to true to force edge-centric
+    let force_edge_centric = std::env::var("GKG_FORCE_EDGE_CENTRIC").is_ok();
+
+    if multi_rel && all_single_hop && !force_edge_centric {
+        lower_traversal_layered(input)
+    } else {
+        lower_traversal_edge_only(input)
+    }
+}
+
+/// Layered traversal: each relationship becomes a groupArray CTE that
+/// materializes its edges into a tuple array. Frontiers chain the layers
+/// so each subsequent scan is narrowed by the previous layer's results.
+/// The final SELECT unpacks via arrayJoin and JOINs layers on shared nodes.
+///
+/// Produces the same output schema as edge-centric (e{i}_{suffix} columns
+/// + _gkg_{node}_id/_type) so downstream passes work unchanged.
+fn lower_traversal_layered(input: &Input) -> Result<Node> {
+    // Tuple field indices (1-based) matching EDGE_RESERVED_COLUMNS order:
+    // 1=traversal_path, 2=relationship_kind, 3=source_id,
+    // 4=source_kind, 5=target_id, 6=target_kind
+    const SRC_IDX: u32 = 3;
+    const DST_IDX: u32 = 5;
+
+    let mut ctes = Vec::new();
+    // node_id -> (layer_index, tuple_field_index) for the final SELECT's _gkg_ columns
+    let mut node_layer: HashMap<String, (usize, u32)> = HashMap::new();
+    // node_id -> CTE name that has an "id" column with that node's IDs
+    let mut node_id_source: HashMap<String, String> = HashMap::new();
+
+    // Pre-generate _nf_ CTEs for nodes with filters/node_ids.
+    for node in &input.nodes {
+        let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
+        if !has_conditions {
+            continue;
+        }
+        let nf_name = format!("_nf_{}", node.id);
+        let table = resolve_table(node)?;
+        ctes.push(Cte::new(
+            &nf_name,
+            Query {
+                select: vec![SelectExpr::new(
+                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                    DEFAULT_PRIMARY_KEY,
+                )],
+                from: TableRef::scan(&table, &node.id),
+                where_clause: build_node_where(node),
+                ..Default::default()
+            },
+        ));
+    }
+
+    // Walk relationships in order, building layer + frontier CTEs.
+    for (i, rel) in input.relationships.iter().enumerate() {
+        let (start_col, end_col) = rel.direction.edge_columns();
+        let from_idx = if start_col == "source_id" { SRC_IDX } else { DST_IDX };
+        let to_idx = if end_col == "target_id" { DST_IDX } else { SRC_IDX };
+
+        // Determine which node is already reachable vs new.
+        let (filter_node, filter_idx, new_node, new_idx) = if i == 0 {
+            (&rel.from, from_idx, &rel.to, to_idx)
+        } else if node_id_source.contains_key(&rel.from) || node_layer.contains_key(&rel.from) {
+            (&rel.from, from_idx, &rel.to, to_idx)
+        } else if node_id_source.contains_key(&rel.to) || node_layer.contains_key(&rel.to) {
+            (&rel.to, to_idx, &rel.from, from_idx)
+        } else {
+            return Err(QueryError::Lowering(format!(
+                "disconnected relationship: neither '{}' nor '{}' reachable from previous layers",
+                rel.from, rel.to
+            )));
+        };
+
+        let layer_name = format!("_layer{i}");
+        let edge_alias = format!("_le{i}");
+
+        // Build WHERE conditions for the edge scan inside this layer.
+        let mut layer_conds: Vec<Expr> = Vec::new();
+
+        // Relationship type filter.
+        if let Some(types) = &type_filter(&rel.types) {
+            if let Some(tf) = Expr::col_in(
+                &edge_alias,
+                "relationship_kind",
+                ChType::String,
+                types.iter().map(|t| Value::String(t.clone())).collect(),
+            ) {
+                layer_conds.push(tf);
+            }
+        }
+
+        // Filter on the known/filter node.
+        let filter_edge_col = if filter_idx == SRC_IDX {
+            "source_id"
+        } else {
+            "target_id"
+        };
+        if let Some(source_cte) = node_id_source.get(filter_node) {
+            // Use frontier from a previous layer (tightest filter).
+            layer_conds.push(Expr::InSubquery {
+                expr: Box::new(Expr::col(&edge_alias, filter_edge_col)),
+                cte_name: source_cte.clone(),
+                column: "id".into(),
+            });
+        } else {
+            // Root node: use _nf_ CTE if it exists.
+            let nf_name = format!("_nf_{filter_node}");
+            if ctes.iter().any(|c| c.name == nf_name) {
+                layer_conds.push(Expr::InSubquery {
+                    expr: Box::new(Expr::col(&edge_alias, filter_edge_col)),
+                    cte_name: nf_name,
+                    column: DEFAULT_PRIMARY_KEY.into(),
+                });
+            }
+        }
+
+        // Filter on the new node if it has an _nf_ CTE.
+        let new_edge_col = if new_idx == SRC_IDX {
+            "source_id"
+        } else {
+            "target_id"
+        };
+        let nf_new = format!("_nf_{new_node}");
+        if ctes.iter().any(|c| c.name == nf_new) {
+            layer_conds.push(Expr::InSubquery {
+                expr: Box::new(Expr::col(&edge_alias, new_edge_col)),
+                cte_name: nf_new,
+                column: DEFAULT_PRIMARY_KEY.into(),
+            });
+        }
+
+        let layer_where = Expr::and_all(layer_conds.into_iter().map(Some));
+
+        // Layer CTE: groupArray(tuple(all edge columns)) from gl_edge.
+        let tuple_args: Vec<Expr> = EDGE_RESERVED_COLUMNS
+            .iter()
+            .map(|col| Expr::col(&edge_alias, *col))
+            .collect();
+
+        ctes.push(Cte::new(
+            &layer_name,
+            Query {
+                select: vec![SelectExpr::new(
+                    Expr::func("groupArray", vec![Expr::func("tuple", tuple_args)]),
+                    "edges",
+                )],
+                from: TableRef::scan(EDGE_TABLE, &edge_alias),
+                where_clause: layer_where,
+                ..Default::default()
+            },
+        ));
+
+        // Build a helper to create a frontier CTE from this layer at a given tuple index.
+        let build_frontier = |name: &str, idx: u32| -> Cte {
+            let scalar = Expr::ScalarSubquery(Box::new(Query {
+                select: vec![SelectExpr {
+                    expr: Expr::Ident("edges".into()),
+                    alias: None,
+                }],
+                from: TableRef::scan(&layer_name, &layer_name),
+                ..Default::default()
+            }));
+            Cte::new(
+                name,
+                Query {
+                    select: vec![SelectExpr::new(
+                        Expr::TupleFieldAccess {
+                            expr: Box::new(Expr::Ident("_e".into())),
+                            index: idx,
+                        },
+                        "id",
+                    )],
+                    from: TableRef::subquery(
+                        Query {
+                            select: vec![SelectExpr::new(
+                                Expr::func("arrayJoin", vec![scalar]),
+                                "_e",
+                            )],
+                            from: TableRef::scan("system.one", "_dummy"),
+                            ..Default::default()
+                        },
+                        format!("_uf{i}"),
+                    ),
+                    group_by: vec![Expr::Ident("id".into())],
+                    ..Default::default()
+                },
+            )
+        };
+
+        // Create frontier for the filter node (from this layer) if not already tracked.
+        if !node_id_source.contains_key(filter_node) {
+            let fname = format!("_fids_{filter_node}");
+            ctes.push(build_frontier(&fname, filter_idx));
+            node_id_source.insert(filter_node.clone(), fname);
+        }
+
+        // Create frontier for the new node.
+        let fname = format!("_fids_{new_node}");
+        ctes.push(build_frontier(&fname, new_idx));
+        node_id_source.insert(new_node.clone(), fname);
+
+        // Track node positions for the final SELECT's _gkg_ columns.
+        node_layer.entry(filter_node.clone()).or_insert((i, filter_idx));
+        node_layer.insert(new_node.clone(), (i, new_idx));
+    }
+
+    // Final SELECT: arrayJoin each layer's edges, JOIN on shared node columns.
+    let num_rels = input.relationships.len();
+    let mut select = Vec::new();
+    let mut from: Option<TableRef> = None;
+
+    for i in 0..num_rels {
+        let layer_name = format!("_layer{i}");
+        let edge_ident = format!("e{i}");
+        let table_alias = format!("_t{i}");
+
+        let scalar = Expr::ScalarSubquery(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::Ident("edges".into()),
+                alias: None,
+            }],
+            from: TableRef::scan(&layer_name, &layer_name),
+            ..Default::default()
+        }));
+        let derived = TableRef::subquery(
+            Query {
+                select: vec![SelectExpr::new(
+                    Expr::func("arrayJoin", vec![scalar]),
+                    &edge_ident,
+                )],
+                from: TableRef::scan("system.one", "_dummy"),
+                ..Default::default()
+            },
+            &table_alias,
+        );
+
+        for (j, suffix) in EDGE_ALIAS_SUFFIXES.iter().enumerate() {
+            select.push(SelectExpr::new(
+                Expr::TupleFieldAccess {
+                    expr: Box::new(Expr::col(&table_alias, &edge_ident)),
+                    index: (j + 1) as u32,
+                },
+                format!("{edge_ident}_{suffix}"),
+            ));
+        }
+
+        if let Some(prev_from) = from {
+            // Find the shared node: the one from this relationship that
+            // appeared in a PREVIOUS relationship (not just in node_layer,
+            // which already has all nodes from the CTE-building loop).
+            let curr_rel = &input.relationships[i];
+            let prev_nodes: HashSet<&str> = input.relationships[..i]
+                .iter()
+                .flat_map(|r| [r.from.as_str(), r.to.as_str()])
+                .collect();
+            let shared = if prev_nodes.contains(curr_rel.from.as_str()) {
+                &curr_rel.from
+            } else {
+                &curr_rel.to
+            };
+
+            // Left side: use the layer where this node was first recorded.
+            let &(shared_layer, shared_idx) = &node_layer[shared];
+            let shared_tbl = format!("_t{shared_layer}");
+            let shared_e = format!("e{shared_layer}");
+
+            // Right side: where does the shared node sit in this layer's tuples?
+            let idx_in_curr = if shared == &curr_rel.from {
+                if curr_rel.direction.edge_columns().0 == "source_id" { SRC_IDX } else { DST_IDX }
+            } else {
+                if curr_rel.direction.edge_columns().1 == "target_id" { DST_IDX } else { SRC_IDX }
+            };
+
+            let join_on = Expr::eq(
+                Expr::TupleFieldAccess {
+                    expr: Box::new(Expr::col(&shared_tbl, &shared_e)),
+                    index: shared_idx,
+                },
+                Expr::TupleFieldAccess {
+                    expr: Box::new(Expr::col(&table_alias, &edge_ident)),
+                    index: idx_in_curr,
+                },
+            );
+            from = Some(TableRef::join(JoinType::Inner, prev_from, derived, join_on));
+        } else {
+            from = Some(derived);
+        }
+    }
+
+    // _gkg_ redaction columns.
+    for node in &input.nodes {
+        let entity = node.entity.as_deref().unwrap_or("Unknown");
+        if let Some(&(layer, tuple_idx)) = node_layer.get(&node.id) {
+            select.push(SelectExpr::new(
+                Expr::TupleFieldAccess {
+                    expr: Box::new(Expr::col(&format!("_t{layer}"), &format!("e{layer}"))),
+                    index: tuple_idx,
+                },
+                format!("_gkg_{}_id", node.id),
+            ));
+        } else {
+            select.push(SelectExpr::new(
+                Expr::param(ChType::Int64, 0i64),
+                format!("_gkg_{}_id", node.id),
+            ));
+        }
+        select.push(SelectExpr::new(
+            Expr::param(ChType::String, entity.to_string()),
+            format!("_gkg_{}_type", node.id),
+        ));
+    }
+
+    let (limit, offset) = pagination(input);
+
+    Ok(Node::Query(Box::new(Query {
+        ctes,
+        select,
+        from: from.unwrap(),
+        limit,
+        offset,
+        ..Default::default()
+    })))
 }
 
 /// Edge-only traversal: edges are the FROM tables, node tables are

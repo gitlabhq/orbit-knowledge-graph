@@ -34,11 +34,17 @@ const ROOT_SIP_CTE: &str = "_root_ids";
 pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
     match node {
         Node::Query(q) => {
+            let is_layered = q.ctes.iter().any(|c| c.name.starts_with("_layer"));
             apply_keyset_pagination(q, input, ctx);
-            apply_sip_prefilter(q, input, ctx);
-            apply_nonroot_node_ids_to_edges(q, input);
-            apply_edge_led_reorder(q, input);
-            if input.query_type == QueryType::Traversal && input.relationships.len() > 1 {
+            if !is_layered {
+                apply_sip_prefilter(q, input, ctx);
+                apply_nonroot_node_ids_to_edges(q, input);
+                apply_edge_led_reorder(q, input);
+            }
+            if input.query_type == QueryType::Traversal
+                && input.relationships.len() > 1
+                && !is_layered
+            {
                 cascade_node_filter_ctes(q, input);
             }
             if input.query_type == QueryType::Aggregation {
@@ -752,7 +758,11 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
         Expr::InSubquery { expr, .. } => {
             collect_aliases_inner(expr, aliases);
         }
-        Expr::Literal(_) | Expr::Param { .. } => {}
+        Expr::Literal(_) | Expr::Param { .. } | Expr::Ident(_) => {}
+        Expr::ScalarSubquery(_) => {}
+        Expr::TupleFieldAccess { expr: inner, .. } => {
+            collect_aliases_inner(inner, aliases);
+        }
     }
 }
 
