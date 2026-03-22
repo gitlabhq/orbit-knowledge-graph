@@ -104,7 +104,7 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
 
     // Build rewrite map: skipped node alias → (edge alias, edge id column, kind column, entity name).
     let edge_alias = if rel.max_hops > 1 {
-        format!("hop_e0")
+        "hop_e0".to_string()
     } else {
         "e0".to_string()
     };
@@ -218,20 +218,16 @@ fn prune_join_for_alias(from: &mut TableRef, alias: &str, rescued: &mut Vec<Expr
 /// Rewrite `FuncCall(name, [Column(node_alias, "id")])` to use the edge column
 /// when node_alias is in the rewrite map.
 fn rewrite_agg_column(expr: &mut Expr, rewrites: &HashMap<String, (String, &str)>) {
-    match expr {
-        Expr::FuncCall { args, .. } => {
-            for arg in args.iter_mut() {
-                if let Expr::Column { table, column } = arg {
-                    if column == DEFAULT_PRIMARY_KEY {
-                        if let Some((edge_alias, edge_col)) = rewrites.get(table.as_str()) {
-                            *table = edge_alias.clone();
-                            *column = edge_col.to_string();
-                        }
-                    }
-                }
+    if let Expr::FuncCall { args, .. } = expr {
+        for arg in args.iter_mut() {
+            if let Expr::Column { table, column } = arg
+                && column == DEFAULT_PRIMARY_KEY
+                && let Some((edge_alias, edge_col)) = rewrites.get(table.as_str())
+            {
+                *table = edge_alias.clone();
+                *column = edge_col.to_string();
             }
         }
-        _ => {}
     }
 }
 
