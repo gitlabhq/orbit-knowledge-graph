@@ -88,8 +88,8 @@ impl IndexingProgressService {
         traversal_path: &str,
     ) -> Result<tonic::Response<GetNamespaceIndexingProgressResponse>, Status> {
         let snap = self.fetch_snapshot(namespace_id, traversal_path).await?;
-        let domains = self.build_domain_progress(&snap);
-        let overall_status = self.derive_overall_status(&snap);
+        let overall_status = snap.overall_status(&self.sdlc_plan_names);
+        let domains = snap.domain_progress(&self.ontology, &self.sdlc_plan_names);
 
         info!(namespace_id, status = %overall_status, "Namespace indexing progress fetched");
 
@@ -129,75 +129,6 @@ impl IndexingProgressService {
         })
     }
 
-    fn build_domain_progress(&self, snap: &IndexingSnapshot) -> Vec<IndexingProgressDomain> {
-        let code_status = if !snap.project_plan_completed {
-            ItemStatus::WaitingForProjects
-        } else if snap.code.is_complete() {
-            ItemStatus::Completed
-        } else {
-            ItemStatus::Indexing
-        };
-
-        self.ontology
-            .domains()
-            .map(|domain| {
-                let items = domain
-                    .node_names
-                    .iter()
-                    .map(|name| {
-                        let status = if domain.name == SOURCE_CODE_DOMAIN {
-                            code_status
-                        } else if !self.sdlc_plan_names.contains(name) {
-                            ItemStatus::Pending
-                        } else {
-                            match snap.sdlc_statuses.get(name) {
-                                None => ItemStatus::Pending,
-                                Some(s) if s.completed => ItemStatus::Completed,
-                                Some(_) => ItemStatus::InProgress,
-                            }
-                        };
-
-                        IndexingProgressItem {
-                            name: name.clone(),
-                            status: status.to_string(),
-                            count: snap.entity_counts.get(name).copied().unwrap_or(0),
-                        }
-                    })
-                    .collect();
-
-                IndexingProgressDomain {
-                    name: domain.name.clone(),
-                    items,
-                }
-            })
-            .collect()
-    }
-
-    fn derive_overall_status(&self, snap: &IndexingSnapshot) -> OverallStatus {
-        if snap.sdlc_statuses.is_empty() && snap.code.indexed_projects == 0 {
-            return OverallStatus::Queued;
-        }
-
-        let all_sdlc_done = self.sdlc_plan_names.iter().all(|p| {
-            snap.sdlc_statuses
-                .get(p)
-                .map(|s| s.completed)
-                .unwrap_or(false)
-        });
-
-        if all_sdlc_done && snap.code.is_complete() {
-            return OverallStatus::Completed;
-        }
-
-        let any_prior_completion = snap.sdlc_statuses.values().any(|s| s.has_prior_completion);
-
-        if any_prior_completion {
-            OverallStatus::ReIndexing
-        } else {
-            OverallStatus::Indexing
-        }
-    }
-
     pub async fn resolve_traversal_path(
         &self,
         namespace_id: i64,
@@ -213,6 +144,75 @@ struct IndexingSnapshot {
     project_plan_completed: bool,
 }
 
+impl IndexingSnapshot {
+    fn overall_status(&self, sdlc_plan_names: &HashSet<String>) -> OverallStatus {
+        if self.sdlc_statuses.is_empty() && self.code.indexed_projects == 0 {
+            return OverallStatus::Queued;
+        }
+
+        let all_sdlc_done = sdlc_plan_names.iter().all(|p| {
+            self.sdlc_statuses
+                .get(p)
+                .map(|s| s.completed)
+                .unwrap_or(false)
+        });
+
+        if all_sdlc_done && self.code.is_complete() {
+            return OverallStatus::Completed;
+        }
+
+        let any_prior_completion = self.sdlc_statuses.values().any(|s| s.has_prior_completion);
+
+        if any_prior_completion {
+            OverallStatus::ReIndexing
+        } else {
+            OverallStatus::Indexing
+        }
+    }
+
+    fn domain_progress(
+        &self,
+        ontology: &Ontology,
+        sdlc_plan_names: &HashSet<String>,
+    ) -> Vec<IndexingProgressDomain> {
+        let code_status = self.code.status(self.project_plan_completed);
+
+        ontology
+            .domains()
+            .map(|domain| {
+                let items = domain
+                    .node_names
+                    .iter()
+                    .map(|name| {
+                        let status = if domain.name == SOURCE_CODE_DOMAIN {
+                            code_status
+                        } else if !sdlc_plan_names.contains(name) {
+                            ItemStatus::Pending
+                        } else {
+                            match self.sdlc_statuses.get(name) {
+                                None => ItemStatus::Pending,
+                                Some(s) if s.completed => ItemStatus::Completed,
+                                Some(_) => ItemStatus::InProgress,
+                            }
+                        };
+
+                        IndexingProgressItem {
+                            name: name.clone(),
+                            status: status.to_string(),
+                            count: self.entity_counts.get(name).copied().unwrap_or(0),
+                        }
+                    })
+                    .collect();
+
+                IndexingProgressDomain {
+                    name: domain.name.clone(),
+                    items,
+                }
+            })
+            .collect()
+    }
+}
+
 struct CodeProgress {
     total_projects: i64,
     indexed_projects: i64,
@@ -221,6 +221,16 @@ struct CodeProgress {
 impl CodeProgress {
     fn is_complete(&self) -> bool {
         self.total_projects == 0 || self.indexed_projects >= self.total_projects
+    }
+
+    fn status(&self, project_plan_completed: bool) -> ItemStatus {
+        if !project_plan_completed {
+            ItemStatus::WaitingForProjects
+        } else if self.is_complete() {
+            ItemStatus::Completed
+        } else {
+            ItemStatus::Indexing
+        }
     }
 }
 
@@ -289,7 +299,7 @@ mod tests {
             false,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
         let core = domains.iter().find(|d| d.name == "core").unwrap();
         let project = core.items.iter().find(|i| i.name == "Project").unwrap();
         assert_eq!(project.status, "pending");
@@ -309,7 +319,7 @@ mod tests {
             false,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
         let core = domains.iter().find(|d| d.name == "core").unwrap();
         let project = core.items.iter().find(|i| i.name == "Project").unwrap();
         assert_eq!(project.status, "in_progress");
@@ -329,7 +339,7 @@ mod tests {
             false,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
         let core = domains.iter().find(|d| d.name == "core").unwrap();
         let project = core.items.iter().find(|i| i.name == "Project").unwrap();
         assert_eq!(project.status, "completed");
@@ -347,7 +357,7 @@ mod tests {
             false,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
 
         for domain in &domains {
             if domain.name == SOURCE_CODE_DOMAIN {
@@ -374,7 +384,7 @@ mod tests {
             false,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
         let source_code = domains
             .iter()
             .find(|d| d.name == SOURCE_CODE_DOMAIN)
@@ -396,7 +406,7 @@ mod tests {
             true,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
         let source_code = domains
             .iter()
             .find(|d| d.name == SOURCE_CODE_DOMAIN)
@@ -418,7 +428,7 @@ mod tests {
             true,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
         let source_code = domains
             .iter()
             .find(|d| d.name == SOURCE_CODE_DOMAIN)
@@ -440,7 +450,7 @@ mod tests {
             true,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
         let source_code = domains
             .iter()
             .find(|d| d.name == SOURCE_CODE_DOMAIN)
@@ -462,7 +472,10 @@ mod tests {
             false,
         );
         let service = test_service();
-        assert_eq!(service.derive_overall_status(&snap), OverallStatus::Queued);
+        assert_eq!(
+            snap.overall_status(&service.sdlc_plan_names),
+            OverallStatus::Queued
+        );
     }
 
     #[test]
@@ -480,7 +493,7 @@ mod tests {
         );
         let service = test_service();
         assert_eq!(
-            service.derive_overall_status(&snap),
+            snap.overall_status(&service.sdlc_plan_names),
             OverallStatus::Indexing
         );
     }
@@ -502,7 +515,7 @@ mod tests {
             true,
         );
         assert_eq!(
-            service.derive_overall_status(&snap),
+            snap.overall_status(&service.sdlc_plan_names),
             OverallStatus::Completed
         );
     }
@@ -524,7 +537,7 @@ mod tests {
             true,
         );
         assert_eq!(
-            service.derive_overall_status(&snap),
+            snap.overall_status(&service.sdlc_plan_names),
             OverallStatus::ReIndexing
         );
     }
@@ -545,7 +558,7 @@ mod tests {
             true,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
 
         assert!(!domains.is_empty());
         let core = domains.iter().find(|d| d.name == "core").unwrap();
@@ -566,7 +579,7 @@ mod tests {
             true,
         );
         let service = test_service();
-        let domains = service.build_domain_progress(&snap);
+        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
 
         let source_code = domains
             .iter()
@@ -596,7 +609,7 @@ mod tests {
         );
         let service = test_service();
         assert_eq!(
-            service.derive_overall_status(&snap),
+            snap.overall_status(&service.sdlc_plan_names),
             OverallStatus::ReIndexing
         );
     }
@@ -616,7 +629,7 @@ mod tests {
         );
         let service = test_service();
         assert_eq!(
-            service.derive_overall_status(&snap),
+            snap.overall_status(&service.sdlc_plan_names),
             OverallStatus::Indexing
         );
     }
