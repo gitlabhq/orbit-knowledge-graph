@@ -320,23 +320,6 @@ fn build_node_where(node: &InputNode) -> Option<Expr> {
     Expr::and_all(parts.into_iter().map(Some))
 }
 
-/// Add edge columns to SELECT for each relationship.
-fn add_edge_columns(
-    select: &mut Vec<SelectExpr>,
-    rels: &[InputRelationship],
-    edge_aliases: &HashMap<usize, String>,
-) {
-    for (i, rel) in rels.iter().enumerate() {
-        if let Some(alias) = edge_aliases.get(&i) {
-            select.extend(edge_select_exprs(alias));
-            if rel.max_hops > 1 {
-                select.push(edge_depth_select_expr(alias));
-                select.push(edge_path_nodes_select_expr(alias));
-            }
-        }
-    }
-}
-
 fn lower_aggregation(input: &Input) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
@@ -910,7 +893,8 @@ fn build_hydration_arm(node: &InputNode) -> Result<Query> {
 /// Build a UNION ALL subquery for multi-hop traversal (1 to max_hops).
 fn build_hop_union_all(rel: &InputRelationship, alias: &str) -> TableRef {
     let rel_type_filter = type_filter(&rel.types);
-    let queries = (1..=rel.max_hops)
+    let start = rel.min_hops.max(1);
+    let queries = (start..=rel.max_hops)
         .map(|depth| build_hop_arm(depth, &rel_type_filter, rel.direction))
         .collect();
     TableRef::union_all(queries, alias)
