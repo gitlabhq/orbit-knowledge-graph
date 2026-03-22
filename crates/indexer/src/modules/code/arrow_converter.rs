@@ -365,18 +365,21 @@ impl ArrowConverter {
 
     pub fn convert_edges(&self, graph_data: &GraphData) -> Result<RecordBatch, ArrowError> {
         let rels = &graph_data.relationships;
-        let top_level_dirs = graph_data
+        let root_children: Vec<(i64, &str)> = graph_data
             .directory_nodes
             .iter()
             .filter(|d| !d.path.contains('/'))
-            .count();
-        let top_level_files = graph_data
-            .file_nodes
-            .iter()
-            .filter(|f| !f.path.contains('/'))
-            .count();
-        // +1 for IN_PROJECT, +top-level dirs/files for CONTAINS
-        let capacity = rels.len() + 1 + top_level_dirs + top_level_files;
+            .filter_map(|d| d.id.map(|id| (id, "Directory")))
+            .chain(
+                graph_data
+                    .file_nodes
+                    .iter()
+                    .filter(|f| !f.path.contains('/'))
+                    .filter_map(|f| f.id.map(|id| (id, "File"))),
+            )
+            .collect();
+        // +1 for IN_PROJECT, +root children for CONTAINS
+        let capacity = rels.len() + 1 + root_children.len();
         let mut traversal_path =
             StringBuilder::with_capacity(capacity, capacity * self.traversal_path.len());
         let mut source_id = Int64Builder::with_capacity(capacity);
@@ -399,34 +402,14 @@ impl ArrowConverter {
         version.append_value(self.version_micros);
         deleted.append_value(false);
 
-        // Branch --CONTAINS--> top-level directories
-        for dir in &graph_data.directory_nodes {
-            if dir.path.contains('/') {
-                continue;
-            }
-            let Some(dir_id) = dir.id else { continue };
+        // Branch --CONTAINS--> root-level directories and files
+        for (child_id, child_kind) in &root_children {
             traversal_path.append_value(&self.traversal_path);
             source_id.append_value(branch_id);
             source_kind.append_value("Branch");
             relationship_kind.append_value("CONTAINS");
-            target_id.append_value(dir_id);
-            target_kind.append_value("Directory");
-            version.append_value(self.version_micros);
-            deleted.append_value(false);
-        }
-
-        // Branch --CONTAINS--> root-level files
-        for file in &graph_data.file_nodes {
-            if file.path.contains('/') {
-                continue;
-            }
-            let Some(file_id) = file.id else { continue };
-            traversal_path.append_value(&self.traversal_path);
-            source_id.append_value(branch_id);
-            source_kind.append_value("Branch");
-            relationship_kind.append_value("CONTAINS");
-            target_id.append_value(file_id);
-            target_kind.append_value("File");
+            target_id.append_value(*child_id);
+            target_kind.append_value(child_kind);
             version.append_value(self.version_micros);
             deleted.append_value(false);
         }
