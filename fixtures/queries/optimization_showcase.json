@@ -133,5 +133,187 @@
       {"type": "IN_PIPELINE", "from": "j", "to": "pipe"}
     ],
     "limit": 50
+  },
+
+  "12_ns_traversal_all_mrs_in_group": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "entity": "User"},
+      {"id": "mr", "entity": "MergeRequest"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "u", "to": "mr"}
+    ],
+    "limit": 50
+  },
+
+  "13_ns_traversal_merged_mrs_with_notes": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "n", "entity": "Note"}
+    ],
+    "relationships": [
+      {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+    ],
+    "limit": 50
+  },
+
+  "14_ns_aggregation_mr_count_by_project_no_ids": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest"},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+
+  "15_ns_aggregation_jobs_by_status": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "j", "entity": "Job"},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "j", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "j", "group_by": "p", "alias": "job_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+
+  "16_ns_search_pipelines_failed": {
+    "query_type": "search",
+    "node": {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed"}, "columns": ["id", "status", "ref"]},
+    "limit": 50
+  },
+
+  "17_ns_traversal_narrow_group_authored": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "entity": "User"},
+      {"id": "mr", "entity": "MergeRequest"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "u", "to": "mr"}
+    ],
+    "limit": 50
+  },
+
+  "18_ns_aggregation_narrow_group_pipeline_duration": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline"},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "pipe", "group_by": "p", "alias": "pipeline_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+
+  "19_complex_mr_full_context": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "author", "entity": "User"},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "author", "to": "mr"},
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "limit": 100
+  },
+
+  "20_complex_pipeline_chain_no_ids": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed"}},
+      {"id": "j", "entity": "Job"},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "pipe", "to": "p"},
+      {"type": "HAS_JOB", "from": "pipe", "to": "j"}
+    ],
+    "limit": 50
+  },
+
+  "21_complex_aggregation_multi_filter": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged", "draft": false}},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "mr", "group_by": "p", "alias": "merged_non_draft_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+
+  "22_complex_narrow_3node_no_ids": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "entity": "User"},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "u", "to": "mr"},
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "limit": 50
+  },
+
+  "23_complex_narrow_aggregation_jobs_per_project": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "j", "to": "p"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "j", "group_by": "p", "alias": "failed_job_count"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+
+  "24_large_result_traversal_all_jobs": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "j", "entity": "Job"},
+      {"id": "pipe", "entity": "Pipeline"}
+    ],
+    "relationships": [
+      {"type": "IN_PIPELINE", "from": "j", "to": "pipe"}
+    ],
+    "limit": 500
+  },
+
+  "25_ns_search_all_mrs": {
+    "query_type": "search",
+    "node": {"id": "mr", "entity": "MergeRequest", "columns": ["id", "title", "state"]},
+    "limit": 100
   }
 }
