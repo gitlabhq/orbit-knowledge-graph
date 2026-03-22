@@ -32,7 +32,7 @@ pub trait RepositoryService: Send + Sync {
         &self,
         project_id: i64,
         ref_name: &str,
-    ) -> Result<Vec<u8>, RepositoryServiceError>;
+    ) -> Result<ByteStream, RepositoryServiceError>;
 
     async fn changed_paths(
         &self,
@@ -75,11 +75,16 @@ impl RepositoryService for RailsRepositoryService {
         &self,
         project_id: i64,
         ref_name: &str,
-    ) -> Result<Vec<u8>, RepositoryServiceError> {
-        Ok(self
+    ) -> Result<ByteStream, RepositoryServiceError> {
+        use futures::StreamExt;
+
+        let stream = self
             .gitlab_client
             .download_archive(project_id, ref_name)
-            .await?)
+            .await
+            .map_err(map_gitlab_error)?;
+
+        Ok(Box::pin(stream.map(|r| r.map_err(map_gitlab_error))))
     }
 
     async fn changed_paths(
@@ -148,9 +153,9 @@ impl RepositoryService for CachingRepositoryService {
         &self,
         project_id: i64,
         ref_name: &str,
-    ) -> Result<Vec<u8>, RepositoryServiceError> {
+    ) -> Result<ByteStream, RepositoryServiceError> {
         match self.inner.download_archive(project_id, ref_name).await {
-            Ok(bytes) => Ok(bytes),
+            Ok(stream) => Ok(stream),
             Err(error) => {
                 self.cache.invalidate(&project_id).await;
                 Err(error)
@@ -234,8 +239,8 @@ pub mod test_utils {
             &self,
             _project_id: i64,
             _ref_name: &str,
-        ) -> Result<Vec<u8>, RepositoryServiceError> {
-            Ok(Vec::new())
+        ) -> Result<ByteStream, RepositoryServiceError> {
+            Ok(Box::pin(futures::stream::empty()))
         }
 
         async fn changed_paths(
@@ -294,7 +299,7 @@ pub mod test_utils {
             &self,
             project_id: i64,
             ref_name: &str,
-        ) -> Result<Vec<u8>, RepositoryServiceError> {
+        ) -> Result<ByteStream, RepositoryServiceError> {
             if *self.download_should_fail.lock() {
                 return Err(RepositoryServiceError::Archive(
                     "simulated download failure".to_string(),
@@ -400,7 +405,7 @@ mod tests {
         service.project_info(1).await.unwrap();
         assert_eq!(counting.project_info_call_count(), 1);
 
-        service.download_archive(1, "main").await.unwrap();
+        let _stream = service.download_archive(1, "main").await.unwrap();
 
         service.project_info(1).await.unwrap();
         assert_eq!(counting.project_info_call_count(), 1);

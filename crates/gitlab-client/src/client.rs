@@ -137,7 +137,7 @@ impl GitlabClient {
         &self,
         project_id: i64,
         ref_name: &str,
-    ) -> Result<Vec<u8>, GitlabClientError> {
+    ) -> Result<ByteStream, GitlabClientError> {
         let base = format!(
             "{}/api/v4/internal/orbit/project/{}/repository/archive",
             self.base_url, project_id
@@ -150,8 +150,7 @@ impl GitlabClient {
         let response = self.authenticated_get(url).await?;
         Self::check_response_status(&response, project_id)?;
 
-        let bytes = response.bytes().await?;
-        Ok(bytes.to_vec())
+        Ok(into_byte_stream(response))
     }
 
     pub async fn changed_paths(
