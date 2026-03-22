@@ -59,6 +59,7 @@ pub use constants::{
 };
 pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
+pub use hydrate::generate_hydration_plan;
 pub use input::{ColumnSelection, Input, InputNode, QueryType, parse_input};
 pub use input::{DynamicColumnMode, EntityAuthConfig};
 pub use lower::lower;
@@ -69,7 +70,6 @@ pub use ontology::{Ontology, OntologyError};
 pub use optimize::optimize;
 pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
-pub use hydrate::generate_hydration_plan;
 
 use metrics::CountErr;
 
@@ -123,8 +123,6 @@ pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQuer
         input,
     })
 }
-
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
