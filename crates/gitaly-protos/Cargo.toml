@@ -1,0 +1,22 @@
+[package]
+name = "gitaly-protos"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+description = "Gitaly protobuf types for gRPC repository operations"
+
+[features]
+default = []
+regenerate-protos = ["tonic-build", "prost-build", "protoc-bin-vendored", "tonic-prost-build"]
+
+[build-dependencies]
+tonic-build = { workspace = true, optional = true }
+prost-build = { workspace = true, optional = true }
+protoc-bin-vendored = { workspace = true, optional = true }
+tonic-prost-build = { workspace = true, optional = true }
+
+[dependencies]
+prost = { workspace = true }
+prost-types = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
