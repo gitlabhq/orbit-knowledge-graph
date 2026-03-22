@@ -146,11 +146,14 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         return;
     }
 
-    // Pick the most selective node as SIP root so the cascade starts narrow.
     let root_node = match choose_sip_root(input) {
         Some(n) => n,
         None => return,
     };
+
+    if input.lowering.skipped_node_joins.contains(&root_node.id) {
+        return;
+    }
 
     let has_cursor = input.cursor.is_some();
     let has_filters = !root_node.filters.is_empty();
