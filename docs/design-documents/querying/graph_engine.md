@@ -26,6 +26,31 @@ The storage model aims to replicate the CSR (Compressed Sparse Row) adjacency li
 
 - Multi‑tenancy and authorization are enforced in every query by prefix filtering on `organization_id` and `traversal_id` to keep scans local and permission-scoped.
 
+### Edge table schema (`gl_edge`)
+
+The unified edge table uses an adjacency-optimized primary key:
+
+```sql
+PRIMARY KEY (source_id, relationship_kind, target_id)
+ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)
+PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, target_kind, source_id, traversal_path))
+```
+
+The primary key serves as a forward adjacency index, giving O(log N) lookup for all
+outgoing edges from a node. The `by_target` projection serves as the reverse adjacency
+index for incoming edge lookups.
+
+Sort key column order matters: `(id, relationship_kind, ...)` ensures ClickHouse can use
+prefix-based primary index pruning for both the base table and projections. Placing
+`source_kind`/`target_kind` before `relationship_kind` breaks prefix matching since
+queries rarely filter on entity kind alone.
+
+Bloom filter indexes on `source_id`/`target_id` are intentionally omitted. They compete
+with projections in ClickHouse's cost optimizer: the optimizer counts granules and picks
+the "cheaper" path, but bloom-filtered base table granules appear cheaper than projection
+granules even though projection data is contiguous and bloom data is scattered. Removing
+bloom filters lets projections be correctly selected.
+
 ## Query Engine Design
 
 There will be two ways to interact with the graph engine:

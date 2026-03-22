@@ -36,6 +36,8 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
         Node::Query(q) => {
             apply_keyset_pagination(q, input, ctx);
             apply_sip_prefilter(q, input, ctx);
+            apply_nonroot_node_ids_to_edges(q, input);
+            apply_edge_led_reorder(q, input);
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
@@ -133,6 +135,15 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         return;
     }
     if input.relationships.is_empty() {
+        return;
+    }
+    // Edge-centric traversals handle all filtering via IN subqueries in
+    // lower.rs. SIP would create redundant CTEs and try to inject into
+    // edge aliases that don't exist in the edge-centric FROM.
+    if input.query_type == QueryType::Traversal
+        && !input.relationships.is_empty()
+        && input.relationships.iter().all(|r| r.max_hops == 1)
+    {
         return;
     }
 
@@ -861,6 +872,113 @@ fn inject_hop_frontiers(
             column: DEFAULT_PRIMARY_KEY.to_string(),
         };
         arm.where_clause = Expr::and_all([arm.where_clause.take(), Some(sip_filter)]);
+    }
+}
+
+/// For non-root nodes with pinned `node_ids`, inject literal IN filters
+/// directly on the edge columns. This avoids a CTE round-trip for small
+/// literal sets that ClickHouse can push into PREWHERE immediately.
+fn apply_nonroot_node_ids_to_edges(q: &mut Query, input: &Input) {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return;
+    }
+    let root_alias = input
+        .relationships
+        .first()
+        .map(|r| &r.from)
+        .or_else(|| input.nodes.first().map(|n| &n.id));
+
+    for (i, rel) in input.relationships.iter().enumerate() {
+        if rel.max_hops > 1 {
+            continue;
+        }
+        let (start_col, end_col) = rel.direction.edge_columns();
+        let edge_alias = format!("e{i}");
+
+        if let Some(node) = input.nodes.iter().find(|n| n.id == rel.to)
+            && !node.node_ids.is_empty()
+            && root_alias != Some(&node.id)
+            && let Some(filter) = Expr::col_in(
+                &edge_alias,
+                end_col,
+                ChType::Int64,
+                node.node_ids
+                    .iter()
+                    .map(|&id| serde_json::Value::Number(id.into()))
+                    .collect(),
+            )
+        {
+            q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
+        }
+
+        if let Some(node) = input.nodes.iter().find(|n| n.id == rel.from)
+            && !node.node_ids.is_empty()
+            && root_alias != Some(&node.id)
+            && let Some(filter) = Expr::col_in(
+                &edge_alias,
+                start_col,
+                ChType::Int64,
+                node.node_ids
+                    .iter()
+                    .map(|&id| serde_json::Value::Number(id.into()))
+                    .collect(),
+            )
+        {
+            q.where_clause = Expr::and_all([q.where_clause.take(), Some(filter)]);
+        }
+    }
+}
+
+/// Swap the innermost node-edge JOIN pair so edge becomes the driving table.
+/// This enables LIMIT pushdown: each edge row is checked against the node
+/// hash table and IN subquery PREWHERE filter in one pass.
+fn apply_edge_led_reorder(q: &mut Query, input: &Input) {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return;
+    }
+    let root_id = input
+        .relationships
+        .first()
+        .map(|r| &r.from)
+        .or_else(|| input.nodes.first().map(|n| &n.id));
+    let has_selective = input.relationships.iter().any(|rel| {
+        let to_sel = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.to)
+            .is_some_and(|n| !n.node_ids.is_empty() && root_id != Some(&n.id));
+        let from_sel = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.from)
+            .is_some_and(|n| !n.node_ids.is_empty() && root_id != Some(&n.id));
+        (to_sel || from_sel) && rel.max_hops == 1
+    });
+    if !has_selective {
+        return;
+    }
+    let mut current = &mut q.from;
+    loop {
+        match current {
+            TableRef::Join { left, right, .. } => {
+                let r_edge =
+                    matches!(right.as_ref(), TableRef::Scan { table, .. } if is_edge_table(table));
+                let l_node =
+                    matches!(left.as_ref(), TableRef::Scan { table, .. } if !is_edge_table(table));
+                if r_edge && l_node {
+                    std::mem::swap(left, right);
+                    return;
+                }
+                current = left.as_mut();
+            }
+            _ => return,
+        }
     }
 }
 

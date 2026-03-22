@@ -407,7 +407,10 @@ impl HydrationStage {
                     && let Some(props) = property_map.get(&(template.entity_type.clone(), id))
                 {
                     for (key, value) in props {
-                        row.set_column(key.clone(), value.clone());
+                        // Prefix with the node alias so entity_properties("u", ..)
+                        // finds "u_username" when the hydration returned "username".
+                        let col_name = format!("{}_{key}", template.node_alias);
+                        row.set_column(col_name, value.clone());
                     }
                 }
             }

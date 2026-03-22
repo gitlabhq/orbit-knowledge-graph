@@ -37,6 +37,7 @@ pub mod codegen;
 pub mod constants;
 pub mod enforce;
 pub mod error;
+pub mod hydrate;
 pub mod input;
 pub mod lower;
 pub mod metrics;
@@ -58,6 +59,7 @@ pub use constants::{
 };
 pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
+pub use hydrate::generate_hydration_plan;
 pub use input::{ColumnSelection, Input, InputNode, QueryType, parse_input};
 pub use input::{DynamicColumnMode, EntityAuthConfig};
 pub use lower::lower;
@@ -111,7 +113,7 @@ pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQuer
     }
     let base = codegen(&node, result_context).count_err()?;
 
-    let hydration = build_hydration_plan(&input);
+    let hydration = generate_hydration_plan(&input);
     let query_type = input.query_type;
 
     Ok(CompiledQueryContext {
@@ -120,25 +122,6 @@ pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQuer
         hydration,
         input,
     })
-}
-
-/// Build the hydration plan based on query type.
-///
-/// - Aggregation: no hydration (results are aggregate values, not entity rows).
-/// - Traversal/Search: static hydration — entity types are known at compile time,
-///   so we pre-compile one search query template per entity type.
-/// - PathFinding/Neighbors: dynamic hydration — entity types are discovered at
-///   runtime from edge data, so the server builds search queries on the fly.
-fn build_hydration_plan(input: &Input) -> HydrationPlan {
-    match input.query_type {
-        QueryType::Aggregation | QueryType::Hydration => HydrationPlan::None,
-        QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
-        // TODO: Static hydration for Traversal/Search requires the base query
-        // in lower.rs to emit only ID/type columns (slim SELECT). Until that
-        // refactor lands, Traversal/Search results already carry all requested
-        // columns from the base query, so no hydration pass is needed.
-        QueryType::Traversal | QueryType::Search => HydrationPlan::None,
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,23 +206,12 @@ mod tests {
 
         let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
 
+        // Edge-centric: edge table is FROM, no node table joins
         assert!(result.base.sql.contains("SELECT"));
-        assert!(result.base.sql.contains("gl_user AS u"));
-        assert!(result.base.sql.contains("INNER JOIN gl_edge AS e0 ON"));
+        assert!(result.base.sql.contains("gl_edge"));
         assert!(
-            result.base.sql.contains("u.id = e0.source_id"),
-            "expected source_id column: {}",
-            result.base.sql
-        );
-        assert!(result.base.sql.contains("INNER JOIN gl_note AS n ON"));
-        assert!(
-            result.base.sql.contains("e0.relationship_kind ="),
+            result.base.sql.contains("relationship_kind"),
             "expected relationship_kind filter: {}",
-            result.base.sql
-        );
-        assert!(
-            !result.base.sql.contains("n.label"),
-            "node should not have type filter: {}",
             result.base.sql
         );
         assert!(result.base.sql.contains("LIMIT 25"));
@@ -628,10 +600,8 @@ mod ontology_integration_tests {
         println!("Params: {:?}", result.base.params);
         println!("Inlined: {}", result.base);
         assert!(result.base.sql.contains("SELECT"));
-        assert!(result.base.sql.contains("INNER JOIN"));
+        assert!(result.base.sql.contains("gl_edge"));
         assert!(result.base.sql.contains("LIMIT 25"));
-        assert!(result.base.sql.contains("ORDER BY"));
-        assert!(result.base.sql.contains("DESC"));
     }
 
     #[test]
@@ -767,15 +737,11 @@ mod ontology_integration_tests {
         let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
         println!("Traversal with columns SQL: {}", result.base.sql);
 
-        // Structural query still includes all columns (slim SELECT not yet implemented)
+        // Edge-centric: redaction IDs are present, node properties come via hydration
         assert!(result.base.sql.contains("_gkg_u_id"));
         assert!(result.base.sql.contains("_gkg_u_type"));
         assert!(result.base.sql.contains("_gkg_p_id"));
         assert!(result.base.sql.contains("_gkg_p_type"));
-        assert!(result.base.sql.contains("u_username"));
-
-        // Static hydration disabled — base query already carries all columns
-        assert!(matches!(result.hydration, HydrationPlan::None));
     }
 
     #[test]

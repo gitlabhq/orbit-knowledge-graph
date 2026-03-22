@@ -445,7 +445,7 @@ async fn search_produces_no_hydration_plan(_ctx: &TestContext) {
     );
 }
 
-async fn traversal_produces_no_hydration_plan(_ctx: &TestContext) {
+async fn traversal_produces_static_hydration_plan(_ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -461,8 +461,8 @@ async fn traversal_produces_no_hydration_plan(_ctx: &TestContext) {
 
     let compiled = compile(json, &ontology, &security_ctx).unwrap();
     assert!(
-        matches!(compiled.hydration, HydrationPlan::None),
-        "Traversal should produce None (static hydration disabled), got: {:?}",
+        matches!(compiled.hydration, HydrationPlan::Static(ref t) if t.len() == 2),
+        "Edge-centric traversal should produce Static hydration with 2 templates, got: {:?}",
         compiled.hydration
     );
 }
@@ -837,7 +837,7 @@ async fn hydration_integration() {
         neighbors_json_format,
         // hydration plan selection
         search_produces_no_hydration_plan,
-        traversal_produces_no_hydration_plan,
+        traversal_produces_static_hydration_plan,
         hydration_query_type_rejected_from_user_input,
         // full pipeline: redact then hydrate
         path_finding_hydration_after_partial_redaction,
