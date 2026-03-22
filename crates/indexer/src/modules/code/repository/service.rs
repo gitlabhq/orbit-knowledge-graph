@@ -24,12 +24,6 @@ pub enum RepositoryServiceError {
     ForcePush(i64),
 }
 
-impl RepositoryServiceError {
-    pub fn is_force_push(&self) -> bool {
-        matches!(self, Self::ForcePush(_))
-    }
-}
-
 #[async_trait]
 pub trait RepositoryService: Send + Sync {
     async fn project_info(&self, project_id: i64) -> Result<ProjectInfo, RepositoryServiceError>;

@@ -113,6 +113,7 @@ impl GitlabClient {
 
         builder
             .connect_timeout(Duration::from_secs(30))
+            .read_timeout(Duration::from_secs(120))
             .build()
             .map_err(|e| GitlabClientError::Unexpected(format!("failed to build HTTP client: {e}")))
     }
