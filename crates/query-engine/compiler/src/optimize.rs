@@ -122,14 +122,13 @@ fn choose_sip_root(input: &Input) -> Option<&InputNode> {
 /// SIP (Sideways Information Passing) pre-filter.
 ///
 /// Materializes the root node's matching IDs in a CTE and pushes them into
-/// the edge table scan via IN subquery. This triggers ClickHouse's `by_source`
-/// projection on the edge table, reducing rows scanned by up to 63%.
+/// the edge table scan via IN subquery. Combined with the namespace-first
+/// edge PK `(traversal_path, source_id, relationship_kind)`, the IN filter
+/// and startsWith filter work together for precise granule pruning.
 ///
-/// Applied when either:
-/// - The root node has explicit selectivity (filters, node_ids, cursor, id_range)
-/// - The root node's table has a traversal_path security filter (the security
-///   pass will inject startsWith into the CTE, giving the IN subquery enough
-///   selectivity to trigger projection-based edge scans)
+/// When source_id IN (...) is present without startsWith, ClickHouse selects
+/// the `by_source` projection instead. When both are present, the base table
+/// PK handles both predicates via prefix matching.
 fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     if !matches!(
         input.query_type,
