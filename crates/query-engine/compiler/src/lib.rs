@@ -133,8 +133,49 @@ fn build_hydration_plan(input: &Input) -> HydrationPlan {
     match input.query_type {
         QueryType::Aggregation | QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
-        QueryType::Traversal => HydrationPlan::None,
         QueryType::Search => HydrationPlan::None,
+        QueryType::Traversal => {
+            let is_edge_centric = input.relationships.len() == 1
+                && input.relationships.iter().all(|r| r.max_hops == 1);
+            if is_edge_centric {
+                // Edge-centric queries only return edge columns + _gkg IDs.
+                // Node properties are fetched via static hydration.
+                let templates = input
+                    .nodes
+                    .iter()
+                    .filter_map(|node| {
+                        let entity = node.entity.as_ref()?;
+                        let columns = match &node.columns {
+                            Some(ColumnSelection::List(cols)) => {
+                                serde_json::json!(cols)
+                            }
+                            Some(ColumnSelection::All) => serde_json::json!("*"),
+                            None => serde_json::json!(null),
+                        };
+                        let mut query = serde_json::json!({
+                            "query_type": "search",
+                            "node": {
+                                "id": node.id,
+                                "entity": entity,
+                            },
+                            "limit": 1000
+                        });
+                        if !columns.is_null() {
+                            query["node"]["columns"] = columns;
+                        }
+                        Some(HydrationTemplate {
+                            entity_type: entity.clone(),
+                            node_alias: node.id.clone(),
+                            query_json: query.to_string(),
+                        })
+                    })
+                    .collect();
+                HydrationPlan::Static(templates)
+            } else {
+                // JOIN-based fallback includes node columns in SELECT directly.
+                HydrationPlan::None
+            }
+        }
     }
 }
 
