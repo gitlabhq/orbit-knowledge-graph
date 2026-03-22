@@ -42,19 +42,56 @@ impl HydrationStage {
         templates: &[HydrationTemplate],
         query_result: &QueryResult,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
+        let base_input = &ctx.compiled()?.input;
+
+        let mut nodes = Vec::new();
+        let mut total_ids: usize = 0;
+
         for template in templates {
             let ids = Self::collect_static_ids(query_result, template);
-            if !ids.is_empty() {
-                refs.insert(template.entity_type.clone(), ids);
+            if ids.is_empty() {
+                continue;
             }
+
+            let node = ctx
+                .ontology
+                .get_node(&template.entity_type)
+                .ok_or_else(|| {
+                    PipelineError::Execution(format!(
+                        "entity type not found in ontology: {}",
+                        template.entity_type
+                    ))
+                })?;
+
+            // Use columns from the original input node (user-specified) rather
+            // than ontology defaults, so explicit column requests like
+            // ["username", "user_type"] are preserved.
+            let columns = base_input
+                .nodes
+                .iter()
+                .find(|n| n.id == template.node_alias)
+                .and_then(|n| match &n.columns {
+                    Some(ColumnSelection::List(cols)) => Some(cols.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| node.default_columns.clone());
+
+            if columns.is_empty() {
+                continue;
+            }
+
+            total_ids += ids.len();
+            nodes.push(InputNode {
+                id: HYDRATION_NODE_ALIAS.to_string(),
+                entity: Some(template.entity_type.clone()),
+                table: Some(node.destination_table.clone()),
+                columns: Some(ColumnSelection::List(columns)),
+                node_ids: ids,
+                ..InputNode::default()
+            });
         }
 
-        if refs.is_empty() {
-            return Ok((HashMap::new(), Vec::new(), Vec::new()));
-        }
-
-        Self::hydrate_dynamic_consolidated(ctx, &refs).await
+        Self::execute_hydration(ctx, nodes, total_ids).await
     }
 
     /// Consolidated dynamic hydration: builds an `Input` with one node per entity
@@ -64,12 +101,6 @@ impl HydrationStage {
         ctx: &QueryPipelineContext,
         refs: &HashMap<String, Vec<i64>>,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let client = Self::client(ctx)?;
-        let profiling = ctx
-            .server_extensions
-            .get::<ProfilingConfig>()
-            .cloned()
-            .unwrap_or_default();
         let base_input = &ctx.compiled()?.input;
 
         let mut nodes = Vec::new();
@@ -117,9 +148,26 @@ impl HydrationStage {
             });
         }
 
+        Self::execute_hydration(ctx, nodes, total_ids).await
+    }
+
+    /// Compile a `QueryType::Hydration` input and execute the single UNION ALL
+    /// query against ClickHouse. Shared by both static and dynamic hydration.
+    async fn execute_hydration(
+        ctx: &QueryPipelineContext,
+        nodes: Vec<InputNode>,
+        total_ids: usize,
+    ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
         if nodes.is_empty() {
             return Ok((HashMap::new(), Vec::new(), Vec::new()));
         }
+
+        let client = Self::client(ctx)?;
+        let profiling = ctx
+            .server_extensions
+            .get::<ProfilingConfig>()
+            .cloned()
+            .unwrap_or_default();
 
         let hydration_input = Input {
             query_type: QueryType::Hydration,
