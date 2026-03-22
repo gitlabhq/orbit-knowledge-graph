@@ -319,19 +319,11 @@ fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
 
     let where_clause = Expr::and_all(where_parts.into_iter().map(Some));
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
-        // Map node property to edge column. The edge table has source_id/target_id
-        // but not arbitrary node properties like created_at.
-        let expr = if ob.property == "id" {
-            if let Some(edge_col) = node_edge_col.get(&ob.node) {
-                Expr::col(edge_alias, edge_col.as_str())
-            } else {
-                Expr::col(edge_alias, &ob.property)
-            }
-        } else {
-            // Non-id properties aren't on the edge table. Fall back to the
-            // edge alias — this will fail at CH if the column doesn't exist,
-            // but hydration-based ordering is not yet supported.
-            Expr::col(edge_alias, &ob.property)
+        // Map "id" to the corresponding edge column (source_id or target_id).
+        // Other node properties aren't on the edge table.
+        let expr = match (ob.property.as_str(), node_edge_col.get(&ob.node)) {
+            ("id", Some(edge_col)) => Expr::col(edge_alias, edge_col.as_str()),
+            _ => Expr::col(edge_alias, &ob.property),
         };
         vec![OrderExpr {
             expr,
