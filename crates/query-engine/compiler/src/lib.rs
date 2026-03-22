@@ -69,6 +69,7 @@ pub use ontology::{Ontology, OntologyError};
 pub use optimize::optimize;
 pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
+pub use hydrate::generate_hydration_plan;
 
 use metrics::CountErr;
 
@@ -112,7 +113,7 @@ pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQuer
     }
     let base = codegen(&node, result_context).count_err()?;
 
-    let hydration = hydrate::hydrate_context(&input);
+    let hydration = generate_hydration_plan(&input);
     let query_type = input.query_type;
 
     Ok(CompiledQueryContext {

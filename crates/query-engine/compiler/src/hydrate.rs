@@ -11,7 +11,7 @@ use crate::input::{ColumnSelection, Input, QueryType};
 ///   node tables and carries their columns.
 /// - PathFinding/Neighbors: dynamic hydration — entity types are discovered at
 ///   runtime from edge data, so the server builds search queries on the fly.
-pub fn hydrate_context(input: &Input) -> HydrationPlan {
+pub fn generate_hydration_plan(input: &Input) -> HydrationPlan {
     match input.query_type {
         QueryType::Aggregation | QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
