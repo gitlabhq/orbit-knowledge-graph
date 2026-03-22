@@ -38,6 +38,9 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
             apply_sip_prefilter(q, input, ctx);
             apply_nonroot_node_ids_to_edges(q, input);
             apply_edge_led_reorder(q, input);
+            if input.query_type == QueryType::Traversal && input.relationships.len() > 1 {
+                cascade_node_filter_ctes(q, input);
+            }
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
@@ -137,13 +140,10 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     if input.relationships.is_empty() {
         return;
     }
-    // Edge-centric traversals handle all filtering via IN subqueries in
-    // lower.rs. SIP would create redundant CTEs and try to inject into
-    // edge aliases that don't exist in the edge-centric FROM.
-    if input.query_type == QueryType::Traversal
-        && !input.relationships.is_empty()
-        && input.relationships.iter().all(|r| r.max_hops == 1)
-    {
+    // Edge-centric traversals handle node filtering via IN subqueries in
+    // lower.rs. SIP's root CTE can't extract edge-centric conditions
+    // (they reference edge aliases, not node aliases).
+    if input.query_type == QueryType::Traversal {
         return;
     }
 
@@ -754,6 +754,123 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
             collect_aliases_inner(expr, aliases);
         }
         Expr::Literal(_) | Expr::Param { .. } => {}
+    }
+}
+
+/// Cascade node filter CTEs through relationships for edge-centric traversals.
+///
+/// The lowerer creates `_nf_{node}` CTEs that filter each node independently.
+/// For multi-rel queries, this misses the relationship chain: e.g. "merged MRs"
+/// could be narrowed to "merged MRs authored by users 1,3,5" by intersecting
+/// with the AUTHORED edge.
+///
+/// This pass finds `_nf_*` CTEs and adds edge-based intersection conditions
+/// when a connected node has a narrower CTE (fewer IDs, typically node_ids).
+fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
+    // Find which nodes have _nf_* CTEs and which have node_ids (most selective)
+    let pinned: HashSet<&str> = input
+        .nodes
+        .iter()
+        .filter(|n| !n.node_ids.is_empty())
+        .map(|n| n.id.as_str())
+        .collect();
+
+    if pinned.is_empty() {
+        return;
+    }
+
+    // For each relationship, if one side is pinned and the other has a _nf CTE,
+    // narrow the CTE by intersecting with the edge.
+    for rel in &input.relationships {
+        let (start_col, end_col) = rel.direction.edge_columns();
+
+        // pinned → unpinned: narrow the unpinned side's CTE
+        let (narrow_from, narrow_to, edge_filter_col, edge_select_col) =
+            if pinned.contains(rel.from.as_str()) && !pinned.contains(rel.to.as_str()) {
+                (&rel.from, &rel.to, start_col, end_col)
+            } else if pinned.contains(rel.to.as_str()) && !pinned.contains(rel.from.as_str()) {
+                (&rel.to, &rel.from, end_col, start_col)
+            } else {
+                continue;
+            };
+
+        let source_cte = format!("_nf_{narrow_from}");
+        let target_cte = format!("_nf_{narrow_to}");
+
+        // Check both CTEs exist
+        let source_exists = q.ctes.iter().any(|c| c.name == source_cte);
+        let target_exists = q.ctes.iter().any(|c| c.name == target_cte);
+        if !source_exists || !target_exists {
+            continue;
+        }
+
+        // Add intersection: target_node.id IN (SELECT edge.{select_col} FROM gl_edge
+        //   WHERE edge.{filter_col} IN (SELECT id FROM _nf_{source}) AND kind = ...)
+        let target = input.nodes.iter().find(|n| n.id == *narrow_to);
+        let alias = "_ce";
+
+        let edge_filter = Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, edge_filter_col)),
+            cte_name: source_cte,
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        };
+        let rel_filter = if rel.types.len() == 1 {
+            Expr::eq(
+                Expr::col(alias, "relationship_kind"),
+                Expr::param(ChType::String, rel.types[0].clone()),
+            )
+        } else {
+            Expr::col_in(
+                alias,
+                "relationship_kind",
+                ChType::String,
+                rel.types
+                    .iter()
+                    .map(|t| serde_json::Value::String(t.clone()))
+                    .collect(),
+            )
+            .unwrap_or_else(|| Expr::param(ChType::Bool, true))
+        };
+        let kind_filter = target
+            .and_then(|n| n.entity.as_ref())
+            .map(|entity| {
+                let kind_col = if edge_select_col == "source_id" {
+                    "source_kind"
+                } else {
+                    "target_kind"
+                };
+                Expr::eq(
+                    Expr::col(alias, kind_col),
+                    Expr::param(ChType::String, entity.clone()),
+                )
+            });
+
+        let cascade_filter = Expr::InSubquery {
+            expr: Box::new(Expr::col(narrow_to.as_str(), DEFAULT_PRIMARY_KEY)),
+            cte_name: format!("_cascade_{narrow_to}"),
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        };
+
+        // Create the cascade CTE
+        let cascade_cte = Cte::new(
+            &format!("_cascade_{narrow_to}"),
+            Query {
+                select: vec![SelectExpr::new(
+                    Expr::col(alias, edge_select_col),
+                    DEFAULT_PRIMARY_KEY,
+                )],
+                from: TableRef::scan(EDGE_TABLE, alias),
+                where_clause: Expr::and_all([Some(edge_filter), Some(rel_filter), kind_filter]),
+                ..Default::default()
+            },
+        );
+        q.ctes.push(cascade_cte);
+
+        // Inject into the target _nf CTE's WHERE: AND id IN (SELECT id FROM _cascade_*)
+        if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_cte) {
+            cte.query.where_clause =
+                Expr::and_all([cte.query.where_clause.take(), Some(cascade_filter)]);
+        }
     }
 }
 
