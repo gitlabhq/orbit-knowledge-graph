@@ -129,23 +129,24 @@ fn lower_search(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input) -> Result<Node> {
+    let first_rel = input.relationships.first().unwrap();
+
+    // Multi-hop or multi-relationship: fall back to JOIN-based lowering.
+    // Edge-centric only works for single-relationship single-hop traversals
+    // because it can only produce IDs/columns for the driving edge's endpoints.
+    if input.relationships.iter().any(|r| r.max_hops > 1) || input.relationships.len() > 1 {
+        return lower_traversal_join_fallback(input);
+    }
+
+    // Single-hop single-relationship: use edge-centric lowering.
     lower_traversal_edge_centric(input)
 }
 
 /// Edge-centric traversal: edge table is the only FROM, node tables are
 /// referenced via IN subqueries for filtering. Node properties are deferred
 /// to the hydration pipeline.
-///
-/// This eliminates hash table building for node tables and enables PREWHERE
-/// filtering of edges via IN-built HashSets — LIMIT pushdown works naturally
-/// because PREWHERE evaluates per-row during the edge scan.
 fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
     let first_rel = input.relationships.first().unwrap();
-
-    // Multi-hop: fall back to JOIN-based lowering (UNION ALL arms)
-    if input.relationships.iter().any(|r| r.max_hops > 1) {
-        return lower_traversal_join_fallback(input);
-    }
 
     // Edge-centric: first relationship's edge drives the scan.
     // All node conditions and secondary relationships become IN subqueries.
