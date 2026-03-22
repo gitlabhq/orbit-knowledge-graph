@@ -821,7 +821,7 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
 
             let edge_filter = Expr::InSubquery {
                 expr: Box::new(Expr::col(alias, edge_filter_col)),
-                cte_name: source_cte,
+                cte_name: source_cte.clone(),
                 column: DEFAULT_PRIMARY_KEY.to_string(),
             };
             let rel_filter = if rel.types.len() == 1 {
@@ -872,7 +872,6 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 },
             ));
 
-            // Inject the cascade into the target's _nf CTE if it exists.
             let target_nf = format!("_nf_{target_id}");
             if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_nf) {
                 let filter = Expr::InSubquery {
