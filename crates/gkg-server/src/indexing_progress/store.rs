@@ -1,11 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow::array::{Array, StringArray, UInt64Array};
+use arrow::array::{Array, StringArray, TimestampMicrosecondArray, UInt64Array};
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_utils::arrow::ArrowUtils;
 use tonic::Status;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CheckpointStatus {
+    pub completed: bool,
+    pub has_prior_completion: bool,
+}
 
 pub struct IndexingProgressReader {
     graph_client: Arc<ArrowClickHouseClient>,
@@ -61,13 +67,15 @@ impl IndexingProgressReader {
     pub async fn fetch_sdlc_checkpoint_statuses(
         &self,
         namespace_id: i64,
-    ) -> Result<HashMap<String, bool>, Status> {
+    ) -> Result<HashMap<String, CheckpointStatus>, Status> {
         let prefix = format!("ns.{namespace_id}.");
 
         let batches = self
             .graph_client
             .query(
-                "SELECT key, argMax(cursor_values, _version) AS cursor_values \
+                "SELECT key, \
+                        argMax(cursor_values, _version) AS cursor_values, \
+                        argMax(watermark, _version) AS watermark \
                  FROM checkpoint \
                  WHERE startsWith(key, {prefix:String}) \
                  GROUP BY key \
@@ -87,6 +95,8 @@ impl IndexingProgressReader {
             ) else {
                 continue;
             };
+            let watermarks =
+                ArrowUtils::get_column_by_name::<TimestampMicrosecondArray>(batch, "watermark");
 
             for row in 0..batch.num_rows() {
                 if keys.is_null(row) {
@@ -100,11 +110,20 @@ impl IndexingProgressReader {
                 let completed = cursors.is_null(row)
                     || cursors.value(row).is_empty()
                     || cursors.value(row) == "null";
+                let has_prior_completion = watermarks
+                    .as_ref()
+                    .map(|w| !w.is_null(row) && w.value(row) != 0)
+                    .unwrap_or(false);
 
-                if let Some(existing) = statuses.insert(plan_name.to_string(), completed) {
+                let status = CheckpointStatus {
+                    completed,
+                    has_prior_completion,
+                };
+
+                if let Some(existing) = statuses.insert(plan_name.to_string(), status) {
                     tracing::warn!(
                         plan_name,
-                        "duplicate checkpoint key, previous value: {existing}"
+                        "duplicate checkpoint key, previous value: {existing:?}"
                     );
                 }
             }

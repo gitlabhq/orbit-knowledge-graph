@@ -310,7 +310,7 @@ message GetNamespaceIndexingProgressRequest {
 // Response with per-entity indexing statuses grouped by domain.
 message GetNamespaceIndexingProgressResponse {
   int64 namespace_id = 1;
-  string status = 2;  // not_found | queued | indexing | completed
+  string status = 2;  // not_found | queued | indexing | re_indexing | completed
   repeated IndexingProgressDomain domains = 3;
 }
 

@@ -14,7 +14,7 @@ use crate::proto::{
     GetNamespaceIndexingProgressResponse, IndexingProgressDomain, IndexingProgressItem,
 };
 
-use self::store::IndexingProgressReader;
+use self::store::{CheckpointStatus, IndexingProgressReader};
 
 const SOURCE_CODE_DOMAIN: &str = "source_code";
 
@@ -22,6 +22,7 @@ const SOURCE_CODE_DOMAIN: &str = "source_code";
 enum OverallStatus {
     Queued,
     Indexing,
+    ReIndexing,
     Completed,
 }
 
@@ -30,6 +31,7 @@ impl fmt::Display for OverallStatus {
         match self {
             Self::Queued => f.write_str("queued"),
             Self::Indexing => f.write_str("indexing"),
+            Self::ReIndexing => f.write_str("re_indexing"),
             Self::Completed => f.write_str("completed"),
         }
     }
@@ -109,7 +111,10 @@ impl IndexingProgressService {
             self.store.fetch_indexed_projects(traversal_path),
         )?;
 
-        let project_plan_completed = sdlc_statuses.get("Project").copied().unwrap_or(false);
+        let project_plan_completed = sdlc_statuses
+            .get("Project")
+            .map(|s| s.completed)
+            .unwrap_or(false);
         let known_projects = entity_counts.get("Project").copied().unwrap_or(0);
         let total_projects = known_projects.max(indexed_projects);
 
@@ -147,8 +152,8 @@ impl IndexingProgressService {
                         } else {
                             match snap.sdlc_statuses.get(name) {
                                 None => ItemStatus::Pending,
-                                Some(false) => ItemStatus::InProgress,
-                                Some(true) => ItemStatus::Completed,
+                                Some(s) if s.completed => ItemStatus::Completed,
+                                Some(_) => ItemStatus::InProgress,
                             }
                         };
 
@@ -173,13 +178,21 @@ impl IndexingProgressService {
             return OverallStatus::Queued;
         }
 
-        let all_sdlc_done = self
-            .sdlc_plan_names
-            .iter()
-            .all(|p| snap.sdlc_statuses.get(p).copied().unwrap_or(false));
+        let all_sdlc_done = self.sdlc_plan_names.iter().all(|p| {
+            snap.sdlc_statuses
+                .get(p)
+                .map(|s| s.completed)
+                .unwrap_or(false)
+        });
 
         if all_sdlc_done && snap.code.is_complete() {
-            OverallStatus::Completed
+            return OverallStatus::Completed;
+        }
+
+        let any_prior_completion = snap.sdlc_statuses.values().any(|s| s.has_prior_completion);
+
+        if any_prior_completion {
+            OverallStatus::ReIndexing
         } else {
             OverallStatus::Indexing
         }
@@ -194,7 +207,7 @@ impl IndexingProgressService {
 }
 
 struct IndexingSnapshot {
-    sdlc_statuses: HashMap<String, bool>,
+    sdlc_statuses: HashMap<String, CheckpointStatus>,
     entity_counts: HashMap<String, i64>,
     code: CodeProgress,
     project_plan_completed: bool,
@@ -227,8 +240,15 @@ mod tests {
         Arc::new(Ontology::load_embedded().expect("ontology must load"))
     }
 
+    fn checkpoint(completed: bool, has_prior_completion: bool) -> CheckpointStatus {
+        CheckpointStatus {
+            completed,
+            has_prior_completion,
+        }
+    }
+
     fn test_snap(
-        sdlc_statuses: HashMap<String, bool>,
+        sdlc_statuses: HashMap<String, CheckpointStatus>,
         entity_counts: HashMap<String, i64>,
         code: CodeProgress,
         project_plan_completed: bool,
@@ -247,6 +267,7 @@ mod tests {
             "default",
             "default",
             None,
+            &HashMap::new(),
         ))
     }
 
@@ -277,7 +298,7 @@ mod tests {
     #[test]
     fn sdlc_item_in_progress_when_cursor_present() {
         let mut statuses = HashMap::new();
-        statuses.insert("Project".to_string(), false);
+        statuses.insert("Project".to_string(), checkpoint(false, false));
         let snap = test_snap(
             statuses,
             HashMap::new(),
@@ -297,7 +318,7 @@ mod tests {
     #[test]
     fn sdlc_item_completed_when_cursor_empty() {
         let mut statuses = HashMap::new();
-        statuses.insert("Project".to_string(), true);
+        statuses.insert("Project".to_string(), checkpoint(true, true));
         let snap = test_snap(
             statuses,
             HashMap::new(),
@@ -447,7 +468,7 @@ mod tests {
     #[test]
     fn overall_status_indexing_when_partial_progress() {
         let mut statuses = HashMap::new();
-        statuses.insert("Project".to_string(), true);
+        statuses.insert("Project".to_string(), checkpoint(true, false));
         let snap = test_snap(
             statuses,
             HashMap::new(),
@@ -469,7 +490,7 @@ mod tests {
         let service = test_service();
         let mut statuses = HashMap::new();
         for name in &service.sdlc_plan_names {
-            statuses.insert(name.clone(), true);
+            statuses.insert(name.clone(), checkpoint(true, true));
         }
         let snap = test_snap(
             statuses,
@@ -487,11 +508,11 @@ mod tests {
     }
 
     #[test]
-    fn overall_status_indexing_when_code_not_done() {
+    fn overall_status_re_indexing_when_code_not_done_but_prior_completion() {
         let service = test_service();
         let mut statuses = HashMap::new();
         for name in &service.sdlc_plan_names {
-            statuses.insert(name.clone(), true);
+            statuses.insert(name.clone(), checkpoint(true, true));
         }
         let snap = test_snap(
             statuses,
@@ -504,14 +525,14 @@ mod tests {
         );
         assert_eq!(
             service.derive_overall_status(&snap),
-            OverallStatus::Indexing
+            OverallStatus::ReIndexing
         );
     }
 
     #[test]
     fn domain_response_groups_items_by_domain() {
         let mut sdlc_statuses = HashMap::new();
-        sdlc_statuses.insert("Project".to_string(), true);
+        sdlc_statuses.insert("Project".to_string(), checkpoint(true, true));
         let mut entity_counts = HashMap::new();
         entity_counts.insert("Project".to_string(), 42);
         let snap = test_snap(
@@ -558,6 +579,46 @@ mod tests {
                 item.name, item.status
             );
         }
+    }
+
+    #[test]
+    fn overall_status_re_indexing_when_prior_completion_exists() {
+        let mut statuses = HashMap::new();
+        statuses.insert("Project".to_string(), checkpoint(false, true));
+        let snap = test_snap(
+            statuses,
+            HashMap::new(),
+            CodeProgress {
+                total_projects: 0,
+                indexed_projects: 0,
+            },
+            false,
+        );
+        let service = test_service();
+        assert_eq!(
+            service.derive_overall_status(&snap),
+            OverallStatus::ReIndexing
+        );
+    }
+
+    #[test]
+    fn overall_status_indexing_when_no_prior_completion() {
+        let mut statuses = HashMap::new();
+        statuses.insert("Project".to_string(), checkpoint(false, false));
+        let snap = test_snap(
+            statuses,
+            HashMap::new(),
+            CodeProgress {
+                total_projects: 0,
+                indexed_projects: 0,
+            },
+            false,
+        );
+        let service = test_service();
+        assert_eq!(
+            service.derive_overall_status(&snap),
+            OverallStatus::Indexing
+        );
     }
 
     #[test]

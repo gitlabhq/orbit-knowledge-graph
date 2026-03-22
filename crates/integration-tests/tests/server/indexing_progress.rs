@@ -46,6 +46,7 @@ async fn indexing_progress() {
         &ctx,
         namespace_with_no_checkpoints_returns_queued,
         namespace_with_partial_checkpoints_returns_indexing,
+        namespace_with_partial_checkpoints_and_prior_completion_returns_re_indexing,
         namespace_with_all_completed_returns_completed,
         unknown_namespace_returns_not_found,
     );
@@ -72,8 +73,8 @@ async fn namespace_with_partial_checkpoints_returns_indexing(ctx: &TestContext) 
 
     ctx.execute(
         "INSERT INTO checkpoint (key, watermark, cursor_values) VALUES
-         ('ns.100.Project', '2024-06-15 12:00:00.000000', ''),
-         ('ns.100.Group', '2024-06-15 12:00:00.000000', '[\"1/100/\",\"42\"]')",
+         ('ns.100.Project', '1970-01-01 00:00:00.000000', ''),
+         ('ns.100.Group', '1970-01-01 00:00:00.000000', '[\"1/100/\",\"42\"]')",
     )
     .await;
     ctx.optimize_all().await;
@@ -97,6 +98,27 @@ async fn namespace_with_partial_checkpoints_returns_indexing(ctx: &TestContext) 
 
     let group = core.items.iter().find(|i| i.name == "Group").unwrap();
     assert_eq!(group.status, "in_progress");
+}
+
+async fn namespace_with_partial_checkpoints_and_prior_completion_returns_re_indexing(
+    ctx: &TestContext,
+) {
+    seed_base_data(ctx).await;
+
+    ctx.execute(
+        "INSERT INTO checkpoint (key, watermark, cursor_values) VALUES
+         ('ns.100.Project', '2024-06-15 12:00:00.000000', ''),
+         ('ns.100.Group', '2024-06-15 12:00:00.000000', '[\"1/100/\",\"42\"]')",
+    )
+    .await;
+    ctx.optimize_all().await;
+
+    let service = build_service(ctx);
+    let traversal_path = service.resolve_traversal_path(100).await.unwrap();
+    let response = service.get_progress(100, &traversal_path).await.unwrap();
+    let response = response.into_inner();
+
+    assert_eq!(response.status, "re_indexing");
 }
 
 async fn namespace_with_all_completed_returns_completed(ctx: &TestContext) {
