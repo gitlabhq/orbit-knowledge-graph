@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
-use tokio_util::io::StreamReader;
+use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::service::ByteStream;
+use crate::modules::code::archive::extract_tar_gz_from_reader;
 
 #[derive(Debug)]
 pub struct CachedRepository {
@@ -282,8 +283,8 @@ impl RepositoryCache for LocalRepositoryCache {
         let handle = tokio::runtime::Handle::current();
         let repo_dir_owned = repo_dir.clone();
         tokio::task::spawn_blocking(move || {
-            let bridge = tokio_util::io::SyncIoBridge::new_with_handle(reader, handle);
-            crate::modules::code::archive::extract_tar_gz_from_reader(bridge, &repo_dir_owned)
+            let bridge = SyncIoBridge::new_with_handle(reader, handle);
+            extract_tar_gz_from_reader(bridge, &repo_dir_owned)
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
