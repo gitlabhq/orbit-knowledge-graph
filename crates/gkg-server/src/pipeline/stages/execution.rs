@@ -33,11 +33,10 @@ impl PipelineStage for ClickHouseExecutor {
             .cloned()
             .unwrap_or_default();
 
-        let (sql, settings, params, result_context, rendered_sql) = {
+        let (sql, params, result_context, rendered_sql) = {
             let compiled = ctx.compiled()?;
             (
                 compiled.base.sql.clone(),
-                compiled.base.settings.clone(),
                 compiled.base.params.clone(),
                 compiled.base.result_context.clone(),
                 compiled.base.render(),
@@ -45,18 +44,9 @@ impl PipelineStage for ClickHouseExecutor {
         };
 
         let (batches, execution) = if profiling.enabled {
-            execute_profiled(
-                client,
-                &sql,
-                &settings,
-                &params,
-                &rendered_sql,
-                &profiling,
-                t,
-            )
-            .await?
+            execute_profiled(client, &sql, &params, &rendered_sql, &profiling, t).await?
         } else {
-            execute_standard(client, &sql, &settings, &params, &rendered_sql, t).await?
+            execute_standard(client, &sql, &params, &rendered_sql, t).await?
         };
 
         let elapsed = t.elapsed();
@@ -83,15 +73,11 @@ impl PipelineStage for ClickHouseExecutor {
 async fn execute_standard(
     client: &ArrowClickHouseClient,
     sql: &str,
-    settings: &[(String, String)],
     params: &std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
     rendered_sql: &str,
     t: Instant,
 ) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), PipelineError> {
     let mut query = client.query(sql);
-    for (key, value) in settings {
-        query = query.with_option(key, value);
-    }
     for (key, param) in params.iter() {
         query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
     }
@@ -128,7 +114,6 @@ async fn execute_standard(
 async fn execute_profiled(
     client: &ArrowClickHouseClient,
     sql: &str,
-    settings: &[(String, String)],
     params: &std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
     rendered_sql: &str,
     profiling: &ProfilingConfig,
@@ -138,14 +123,10 @@ async fn execute_profiled(
         .iter()
         .map(|(k, v)| (k.clone(), v.render_http_param()))
         .collect();
-    let extra_settings: Vec<(&str, &str)> = settings
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
 
     let (batches, query_stats) = client
         .profiler()
-        .execute_with_stats(sql, &http_params, &extra_settings)
+        .execute_with_stats(sql, &http_params, &[])
         .await
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
 

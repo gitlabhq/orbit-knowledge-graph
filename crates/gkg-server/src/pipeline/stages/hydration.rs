@@ -194,15 +194,9 @@ impl HydrationStage {
                 .collect();
 
             let t = Instant::now();
-            let extra_settings: Vec<(&str, &str)> = compiled
-                .base
-                .settings
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
             let (batches, query_stats) = client
                 .profiler()
-                .execute_with_stats(&compiled.base.sql, &http_params, &extra_settings)
+                .execute_with_stats(&compiled.base.sql, &http_params, &[])
                 .await
                 .map_err(|e| PipelineError::Execution(e.to_string()))?;
             let elapsed = t.elapsed();
@@ -234,9 +228,6 @@ impl HydrationStage {
         } else {
             let t = Instant::now();
             let mut query = client.query(&compiled.base.sql);
-            for (key, value) in &compiled.base.settings {
-                query = query.with_option(key, value);
-            }
             for (key, param) in &compiled.base.params {
                 query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
             }

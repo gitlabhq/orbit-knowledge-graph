@@ -14,7 +14,6 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct ParameterizedQuery {
     pub sql: String,
-    pub settings: Vec<(String, String)>,
     pub params: HashMap<String, ParamValue>,
     pub result_context: ResultContext,
 }
@@ -88,12 +87,11 @@ impl std::fmt::Display for ParameterizedQuery {
 
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
-    let (sql, settings) = match ast {
-        Node::Query(q) => (ctx.emit_query(q)?, q.set_statements.clone()),
+    let sql = match ast {
+        Node::Query(q) => ctx.emit_query(q)?,
     };
     Ok(ParameterizedQuery {
         sql,
-        settings,
         params: ctx.params,
         result_context,
     })
@@ -116,6 +114,11 @@ impl Context {
 
     fn emit_query(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
+
+        // SET statements (must come before WITH for recursive CTEs)
+        for (key, value) in &q.set_statements {
+            parts.push(format!("SET {key} = {value};"));
+        }
 
         // WITH clause (CTEs)
         if !q.ctes.is_empty() {
@@ -783,21 +786,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn query_settings_are_carried_outside_sql_text() {
-        let q = Query {
-            select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
-            from: TableRef::scan("nodes", "n"),
-            set_statements: vec![("max_threads".into(), "2".into())],
-            ..Default::default()
-        };
-
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-
-        assert_eq!(result.sql, "SELECT n.id AS id FROM nodes AS n");
-        assert_eq!(result.settings, vec![("max_threads".into(), "2".into())]);
-    }
-
     // ── UNION ALL tests ─────────────────────────────────────────────
 
     #[test]
@@ -927,7 +915,6 @@ mod tests {
 
         let pq = ParameterizedQuery {
             sql: "SELECT * FROM t WHERE kind = {p0:String} AND state = {p1:String}".into(),
-            settings: vec![],
             params,
             result_context: empty_ctx(),
         };
@@ -958,7 +945,6 @@ mod tests {
 
         let pq = ParameterizedQuery {
             sql: "SELECT * FROM t WHERE x IN {p0:Array(String)} AND y IN {p1:Array(Int64)}".into(),
-            settings: vec![],
             params,
             result_context: empty_ctx(),
         };
@@ -973,7 +959,6 @@ mod tests {
     fn render_leaves_unknown_params() {
         let pq = ParameterizedQuery {
             sql: "SELECT {p0:String} AND {p1:Int64}".into(),
-            settings: vec![],
             params: HashMap::new(),
             result_context: empty_ctx(),
         };

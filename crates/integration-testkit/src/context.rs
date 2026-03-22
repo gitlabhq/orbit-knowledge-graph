@@ -100,10 +100,6 @@ impl TestContext {
         let client = self.create_client();
         let mut query = client.query(&pq.sql);
 
-        for (name, value) in &pq.settings {
-            query = query.with_option(name, value);
-        }
-
         for (name, param) in &pq.params {
             query = ArrowClickHouseClient::bind_param(query, name, &param.value, &param.ch_type);
         }

@@ -443,7 +443,6 @@ mod tests {
                 query_type: QueryType::Search,
                 base: ParameterizedQuery {
                     sql: String::new(),
-                    settings: vec![],
                     params: HashMap::new(),
                     result_context: result_ctx.clone(),
                 },

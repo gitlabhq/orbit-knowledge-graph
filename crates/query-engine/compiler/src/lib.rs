@@ -605,38 +605,6 @@ mod ontology_integration_tests {
     }
 
     #[test]
-    fn bounded_edge_frontier_traversal_emits_thread_cap_setting() {
-        let json = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                {"id": "p", "entity": "Pipeline", "filters": {"status": "success"}}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "TRIGGERED", "from": "mr", "to": "p"}
-            ],
-            "limit": 100
-        }"#;
-
-        let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
-
-        assert_eq!(
-            result.base.settings,
-            vec![("max_threads".into(), "2".into())]
-        );
-        assert_eq!(
-            result
-                .base
-                .sql
-                .matches("SELECT _id_path FROM _nf_mr")
-                .count(),
-            1
-        );
-    }
-
-    #[test]
     fn basic_search_query() {
         let json = r#"{
             "query_type": "search",
