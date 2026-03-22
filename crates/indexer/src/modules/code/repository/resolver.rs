@@ -89,14 +89,14 @@ impl RepositoryResolver {
     ) -> Result<PathBuf, HandlerError> {
         info!(project_id, branch, commit = %commit_sha, "starting full repository download");
 
-        let archive_bytes = self
+        let archive_stream = self
             .repository_service
             .download_archive(project_id, commit_sha)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))?;
 
         self.cache
-            .extract_archive(project_id, branch, commit_sha, &archive_bytes)
+            .extract_archive(project_id, branch, commit_sha, archive_stream)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
     }
@@ -384,8 +384,11 @@ mod tests {
             &self,
             _project_id: i64,
             _ref_name: &str,
-        ) -> Result<Vec<u8>, RepositoryServiceError> {
-            Ok(self.archive.lock().clone())
+        ) -> Result<super::super::service::ByteStream, RepositoryServiceError> {
+            let data = self.archive.lock().clone();
+            Ok(Box::pin(futures::stream::once(async {
+                Ok(bytes::Bytes::from(data))
+            })))
         }
 
         async fn changed_paths(

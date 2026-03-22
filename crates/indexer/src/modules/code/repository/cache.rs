@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use sha2::{Digest, Sha256};
+use tokio_util::io::StreamReader;
+
+use super::service::ByteStream;
 
 #[derive(Debug)]
 pub struct CachedRepository {
@@ -75,7 +79,7 @@ pub trait RepositoryCache: Send + Sync {
         project_id: i64,
         branch: &str,
         commit_sha: &str,
-        archive_bytes: &[u8],
+        archive_stream: ByteStream,
     ) -> Result<PathBuf, RepositoryCacheError>;
 }
 
@@ -263,7 +267,7 @@ impl RepositoryCache for LocalRepositoryCache {
         project_id: i64,
         branch: &str,
         commit_sha: &str,
-        archive_bytes: &[u8],
+        archive_stream: ByteStream,
     ) -> Result<PathBuf, RepositoryCacheError> {
         let repo_dir = self.repository_dir(project_id, branch);
 
@@ -274,10 +278,12 @@ impl RepositoryCache for LocalRepositoryCache {
         }
         tokio::fs::create_dir_all(&repo_dir).await?;
 
-        let archive_owned = archive_bytes.to_vec();
+        let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
+        let handle = tokio::runtime::Handle::current();
         let repo_dir_owned = repo_dir.clone();
         tokio::task::spawn_blocking(move || {
-            crate::modules::code::archive::extract_tar_gz(&archive_owned, &repo_dir_owned)
+            let bridge = tokio_util::io::SyncIoBridge::new_with_handle(reader, handle);
+            crate::modules::code::archive::extract_tar_gz_from_reader(bridge, &repo_dir_owned)
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
@@ -300,6 +306,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache = LocalRepositoryCache::new(temp_dir.path().to_path_buf());
         (temp_dir, cache)
+    }
+
+    fn archive_stream(data: Vec<u8>) -> ByteStream {
+        Box::pin(futures::stream::once(async {
+            Ok(bytes::Bytes::from(data))
+        }))
     }
 
     fn build_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -358,7 +370,7 @@ mod tests {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[("file.rs", b"content")]);
         cache
-            .extract_archive(42, "main", "abc123", &archive)
+            .extract_archive(42, "main", "abc123", archive_stream(archive))
             .await
             .unwrap();
 
@@ -381,11 +393,11 @@ mod tests {
         let archive = build_tar_gz(&[("file.rs", b"content")]);
 
         cache
-            .extract_archive(42, "main", "aaa", &archive)
+            .extract_archive(42, "main", "aaa", archive_stream(archive.clone()))
             .await
             .unwrap();
         cache
-            .extract_archive(42, "develop", "bbb", &archive)
+            .extract_archive(42, "develop", "bbb", archive_stream(archive))
             .await
             .unwrap();
 
@@ -399,11 +411,11 @@ mod tests {
         let archive = build_tar_gz(&[("file.rs", b"content")]);
 
         cache
-            .extract_archive(1, "main", "aaa", &archive)
+            .extract_archive(1, "main", "aaa", archive_stream(archive.clone()))
             .await
             .unwrap();
         cache
-            .extract_archive(2, "main", "bbb", &archive)
+            .extract_archive(2, "main", "bbb", archive_stream(archive))
             .await
             .unwrap();
 
@@ -417,11 +429,11 @@ mod tests {
         let archive = build_tar_gz(&[("file.rs", b"content")]);
 
         cache
-            .extract_archive(42, "main", "aaa", &archive)
+            .extract_archive(42, "main", "aaa", archive_stream(archive.clone()))
             .await
             .unwrap();
         cache
-            .extract_archive(42, "develop", "bbb", &archive)
+            .extract_archive(42, "develop", "bbb", archive_stream(archive))
             .await
             .unwrap();
 
@@ -460,7 +472,7 @@ mod tests {
         ]);
 
         let path = cache
-            .extract_archive(42, "main", "abc123", &archive)
+            .extract_archive(42, "main", "abc123", archive_stream(archive))
             .await
             .unwrap();
 
@@ -482,13 +494,13 @@ mod tests {
         let (_dir, cache) = create_cache();
         let first_archive = build_tar_gz(&[("old_file.rs", b"old content")]);
         cache
-            .extract_archive(42, "main", "commit1", &first_archive)
+            .extract_archive(42, "main", "commit1", archive_stream(first_archive))
             .await
             .unwrap();
 
         let second_archive = build_tar_gz(&[("new_file.rs", b"new content")]);
         let path = cache
-            .extract_archive(42, "main", "commit2", &second_archive)
+            .extract_archive(42, "main", "commit2", archive_stream(second_archive))
             .await
             .unwrap();
 

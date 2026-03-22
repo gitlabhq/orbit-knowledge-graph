@@ -17,8 +17,17 @@ impl From<std::io::Error> for ArchiveError {
     }
 }
 
-pub fn extract_tar_gz(data: &[u8], target_dir: &Path) -> Result<(), ArchiveError> {
+#[cfg(test)]
+fn extract_tar_gz(data: &[u8], target_dir: &Path) -> Result<(), ArchiveError> {
     let decoder = GzDecoder::new(data);
+    unpack_tar(decoder, target_dir)
+}
+
+pub fn extract_tar_gz_from_reader<R: Read>(
+    reader: R,
+    target_dir: &Path,
+) -> Result<(), ArchiveError> {
+    let decoder = GzDecoder::new(reader);
     unpack_tar(decoder, target_dir)
 }
 
