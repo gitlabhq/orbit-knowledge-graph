@@ -12,12 +12,14 @@ datalake:
   database: default
   username: default
   # password: ""
+  # join_algorithm: hash
 
 graph:
   url: "http://127.0.0.1:8123"
   database: default
   username: default
   # password: ""
+  # join_algorithm: hash
 
 # gitlab:
 #   base_url: "http://localhost:3000"

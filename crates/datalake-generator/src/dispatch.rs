@@ -21,8 +21,7 @@ pub async fn run_dispatch_indexing(config: &SimulatorConfig) -> Result<()> {
         database: config.datalake.database.clone(),
         username: config.datalake.username.clone(),
         password: config.datalake.password.clone(),
-        query_settings: std::collections::HashMap::new(),
-        profiling: Default::default(),
+        ..Default::default()
     };
 
     let services = indexer::scheduler::connect(&nats_config)

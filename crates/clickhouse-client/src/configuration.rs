@@ -12,10 +12,16 @@ pub struct ClickHouseConfiguration {
     pub username: String,
     #[serde(default)]
     pub password: Option<String>,
+    #[serde(default = "default_join_algorithm")]
+    pub join_algorithm: String,
     #[serde(default)]
     pub query_settings: HashMap<String, String>,
     #[serde(default)]
     pub profiling: ProfilingConfig,
+}
+
+fn default_join_algorithm() -> String {
+    "hash".to_string()
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -39,6 +45,7 @@ impl Default for ClickHouseConfiguration {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            join_algorithm: default_join_algorithm(),
             query_settings: HashMap::new(),
             profiling: ProfilingConfig::default(),
         }
@@ -63,12 +70,17 @@ impl ClickHouseConfiguration {
     }
 
     pub fn build_client(&self) -> ArrowClickHouseClient {
+        let mut settings = self.query_settings.clone();
+        settings
+            .entry("join_algorithm".to_string())
+            .or_insert_with(|| self.join_algorithm.clone());
+
         ArrowClickHouseClient::new(
             &self.url,
             &self.database,
             &self.username,
             self.password.as_deref(),
-            &self.query_settings,
+            &settings,
         )
     }
 }
@@ -109,6 +121,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            join_algorithm: default_join_algorithm(),
             query_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -123,6 +136,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            join_algorithm: default_join_algorithm(),
             query_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -138,6 +152,7 @@ mod tests {
             url: "".to_string(),
             username: "default".to_string(),
             password: None,
+            join_algorithm: default_join_algorithm(),
             query_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -153,6 +168,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "".to_string(),
             password: None,
+            join_algorithm: default_join_algorithm(),
             query_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -168,6 +184,49 @@ mod tests {
         assert!(config.url.contains("8123"));
     }
 
+    #[test]
+    fn test_join_algorithm_defaults_to_hash() {
+        let json = r#"{
+            "database": "test",
+            "url": "http://127.0.0.1:8123",
+            "username": "default"
+        }"#;
+
+        let config: ClickHouseConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(config.join_algorithm, "hash");
+    }
+
+    #[test]
+    fn test_join_algorithm_override() {
+        let json = r#"{
+            "database": "test",
+            "url": "http://127.0.0.1:8123",
+            "username": "default",
+            "join_algorithm": "parallel_hash"
+        }"#;
+
+        let config: ClickHouseConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(config.join_algorithm, "parallel_hash");
+    }
+
+    #[test]
+    fn test_query_settings_override_wins_over_join_algorithm() {
+        let config = ClickHouseConfiguration {
+            join_algorithm: "parallel_hash".to_string(),
+            query_settings: HashMap::from([(
+                "join_algorithm".to_string(),
+                "full_sorting_merge".to_string(),
+            )]),
+            ..Default::default()
+        };
+
+        let mut settings = config.query_settings.clone();
+        settings
+            .entry("join_algorithm".to_string())
+            .or_insert_with(|| config.join_algorithm.clone());
+        assert_eq!(settings["join_algorithm"], "full_sorting_merge");
+    }
+
     // Without the rustls-tls-* features on the `clickhouse` crate, any HTTPS
     // URL is rejected immediately with "scheme is not http". This test guards
     // against accidental removal of those features (e.g. by Renovate Bot).
@@ -178,6 +237,7 @@ mod tests {
             url: "https://localhost:1".to_string(),
             username: "default".to_string(),
             password: None,
+            join_algorithm: default_join_algorithm(),
             query_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };

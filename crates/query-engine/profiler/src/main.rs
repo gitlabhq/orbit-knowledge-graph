@@ -71,6 +71,10 @@ struct Cli {
     #[arg(long, default_value = "json")]
     format: OutputFormat,
 
+    /// ClickHouse join algorithm (hash, parallel_hash, full_sorting_merge, etc.)
+    #[arg(long, default_value = "hash", env = "CLICKHOUSE_JOIN_ALGORITHM")]
+    join_algorithm: String,
+
     /// Extra ClickHouse settings (repeatable, e.g. max_threads=4)
     #[arg(long)]
     settings: Vec<String>,
@@ -113,7 +117,7 @@ async fn main() -> Result<()> {
     let security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
 
-    let custom_settings: std::collections::HashMap<String, String> = cli
+    let mut custom_settings: std::collections::HashMap<String, String> = cli
         .settings
         .iter()
         .filter_map(|s| {
@@ -121,6 +125,10 @@ async fn main() -> Result<()> {
             Some((k.to_string(), v.to_string()))
         })
         .collect();
+
+    custom_settings
+        .entry("join_algorithm".to_string())
+        .or_insert_with(|| cli.join_algorithm.clone());
 
     let client = Arc::new(ArrowClickHouseClient::new(
         &cli.ch_url,
