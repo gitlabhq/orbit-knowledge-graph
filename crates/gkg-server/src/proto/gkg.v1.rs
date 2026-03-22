@@ -367,35 +367,60 @@ pub struct GetNamespaceIndexingProgressRequest {
     #[prost(int64, tag = "1")]
     pub namespace_id: i64,
 }
-/// Response with per-entity indexing statuses grouped by domain.
+/// Response with indexing progress split by SDLC and code pipelines.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetNamespaceIndexingProgressResponse {
     #[prost(int64, tag = "1")]
     pub namespace_id: i64,
-    /// not_found | queued | indexing | completed
+    /// not_found | queued | indexing | re_indexing | completed
     #[prost(string, tag = "2")]
     pub status: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag = "3")]
-    pub domains: ::prost::alloc::vec::Vec<IndexingProgressDomain>,
+    #[prost(message, optional, tag = "3")]
+    pub sdlc_indexing: ::core::option::Option<SdlcIndexingProgress>,
+    #[prost(message, optional, tag = "4")]
+    pub code_indexing: ::core::option::Option<CodeIndexingProgress>,
 }
-/// Indexing progress for a single domain.
+/// SDLC indexing progress grouped by domain.
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct IndexingProgressDomain {
+pub struct SdlcIndexingProgress {
+    #[prost(message, repeated, tag = "1")]
+    pub domains: ::prost::alloc::vec::Vec<SdlcDomain>,
+}
+/// Indexing progress for a single SDLC domain.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SdlcDomain {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
-    pub items: ::prost::alloc::vec::Vec<IndexingProgressItem>,
+    pub items: ::prost::alloc::vec::Vec<SdlcItem>,
 }
-/// Indexing status for a single entity type.
-/// SDLC entities use: pending | in_progress | completed.
-/// Source code entities use: waiting_for_projects | indexing | completed.
+/// Indexing status for a single SDLC entity type.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct IndexingProgressItem {
+pub struct SdlcItem {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
+    /// pending | in_progress | completed
     #[prost(string, tag = "2")]
     pub status: ::prost::alloc::string::String,
     #[prost(int64, tag = "3")]
+    pub count: i64,
+}
+/// Code indexing progress with project-level tracking.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CodeIndexingProgress {
+    #[prost(int64, tag = "1")]
+    pub indexed_projects: i64,
+    #[prost(int64, tag = "2")]
+    pub total_projects: i64,
+    #[prost(message, repeated, tag = "3")]
+    pub items: ::prost::alloc::vec::Vec<CodeItem>,
+}
+/// Count for a single code entity type.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CodeItem {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(int64, tag = "2")]
     pub count: i64,
 }
 /// Controls output serialization across all data RPCs.

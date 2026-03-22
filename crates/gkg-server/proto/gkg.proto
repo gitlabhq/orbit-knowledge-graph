@@ -307,24 +307,41 @@ message GetNamespaceIndexingProgressRequest {
   int64 namespace_id = 1;
 }
 
-// Response with per-entity indexing statuses grouped by domain.
+// Response with indexing progress split by SDLC and code pipelines.
 message GetNamespaceIndexingProgressResponse {
   int64 namespace_id = 1;
   string status = 2;  // not_found | queued | indexing | re_indexing | completed
-  repeated IndexingProgressDomain domains = 3;
+  SdlcIndexingProgress sdlc_indexing = 3;
+  CodeIndexingProgress code_indexing = 4;
 }
 
-// Indexing progress for a single domain.
-message IndexingProgressDomain {
-  string name = 1;
-  repeated IndexingProgressItem items = 2;
+// SDLC indexing progress grouped by domain.
+message SdlcIndexingProgress {
+  repeated SdlcDomain domains = 1;
 }
 
-// Indexing status for a single entity type.
-// SDLC entities use: pending | in_progress | completed.
-// Source code entities use: waiting_for_projects | indexing | completed.
-message IndexingProgressItem {
+// Indexing progress for a single SDLC domain.
+message SdlcDomain {
   string name = 1;
-  string status = 2;
+  repeated SdlcItem items = 2;
+}
+
+// Indexing status for a single SDLC entity type.
+message SdlcItem {
+  string name = 1;
+  string status = 2;  // pending | in_progress | completed
   int64 count = 3;
+}
+
+// Code indexing progress with project-level tracking.
+message CodeIndexingProgress {
+  int64 indexed_projects = 1;
+  int64 total_projects = 2;
+  repeated CodeItem items = 3;
+}
+
+// Count for a single code entity type.
+message CodeItem {
+  string name = 1;
+  int64 count = 2;
 }

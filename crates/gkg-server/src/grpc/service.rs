@@ -243,7 +243,8 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let not_found = Ok(Response::new(GetNamespaceIndexingProgressResponse {
             namespace_id: req.namespace_id,
             status: "not_found".to_string(),
-            domains: vec![],
+            sdlc_indexing: None,
+            code_indexing: None,
         }));
 
         let traversal_path = match self

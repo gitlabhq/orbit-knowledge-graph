@@ -69,7 +69,8 @@ async fn namespace_with_no_checkpoints_returns_queued(ctx: &TestContext) {
 
     assert_eq!(response.namespace_id, 100);
     assert_eq!(response.status, "queued");
-    assert!(!response.domains.is_empty());
+    let sdlc = response.sdlc_indexing.expect("should have sdlc_indexing");
+    assert!(!sdlc.domains.is_empty());
 }
 
 async fn namespace_with_partial_checkpoints_returns_indexing(ctx: &TestContext) {
@@ -94,7 +95,8 @@ async fn namespace_with_partial_checkpoints_returns_indexing(ctx: &TestContext) 
 
     assert_eq!(response.status, "indexing");
 
-    let core = response
+    let sdlc = response.sdlc_indexing.expect("should have sdlc_indexing");
+    let core = sdlc
         .domains
         .iter()
         .find(|d| d.name == "core")
@@ -174,17 +176,20 @@ async fn namespace_with_all_completed_returns_completed(ctx: &TestContext) {
 
     assert_eq!(response.status, "completed");
 
-    for domain in &response.domains {
-        if domain.name == "source_code" {
-            for item in &domain.items {
-                assert_eq!(
-                    item.status, "completed",
-                    "source_code item {} should be completed",
-                    item.name
-                );
-            }
+    let sdlc = response.sdlc_indexing.expect("should have sdlc_indexing");
+    for domain in &sdlc.domains {
+        for item in &domain.items {
+            assert_eq!(
+                item.status, "completed",
+                "SDLC item {} should be completed",
+                item.name
+            );
         }
     }
+
+    let code = response.code_indexing.expect("should have code_indexing");
+    assert_eq!(code.total_projects, 1, "one project under 1/101/");
+    assert_eq!(code.indexed_projects, 1);
 }
 
 async fn unknown_namespace_returns_not_found(ctx: &TestContext) {

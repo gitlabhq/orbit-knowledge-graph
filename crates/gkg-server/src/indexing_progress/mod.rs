@@ -11,7 +11,8 @@ use tracing::info;
 
 use crate::graph_stats::GraphStatsService;
 use crate::proto::{
-    GetNamespaceIndexingProgressResponse, IndexingProgressDomain, IndexingProgressItem,
+    CodeIndexingProgress, CodeItem, GetNamespaceIndexingProgressResponse, SdlcDomain,
+    SdlcIndexingProgress, SdlcItem,
 };
 
 use self::store::{CheckpointStatus, IndexingProgressReader};
@@ -42,8 +43,6 @@ enum ItemStatus {
     Pending,
     InProgress,
     Completed,
-    WaitingForProjects,
-    Indexing,
 }
 
 impl fmt::Display for ItemStatus {
@@ -52,8 +51,6 @@ impl fmt::Display for ItemStatus {
             Self::Pending => f.write_str("pending"),
             Self::InProgress => f.write_str("in_progress"),
             Self::Completed => f.write_str("completed"),
-            Self::WaitingForProjects => f.write_str("waiting_for_projects"),
-            Self::Indexing => f.write_str("indexing"),
         }
     }
 }
@@ -89,14 +86,16 @@ impl IndexingProgressService {
     ) -> Result<tonic::Response<GetNamespaceIndexingProgressResponse>, Status> {
         let snap = self.fetch_snapshot(namespace_id, traversal_path).await?;
         let overall_status = snap.overall_status(&self.sdlc_plan_names);
-        let domains = snap.domain_progress(&self.ontology, &self.sdlc_plan_names);
+        let sdlc_indexing = snap.sdlc_progress(&self.ontology, &self.sdlc_plan_names);
+        let code_indexing = snap.code_progress(&self.ontology);
 
         info!(namespace_id, status = %overall_status, "Namespace indexing progress fetched");
 
         Ok(tonic::Response::new(GetNamespaceIndexingProgressResponse {
             namespace_id,
             status: overall_status.to_string(),
-            domains,
+            sdlc_indexing: Some(sdlc_indexing),
+            code_indexing: Some(code_indexing),
         }))
     }
 
@@ -111,10 +110,6 @@ impl IndexingProgressService {
             self.store.fetch_indexed_projects(traversal_path),
         )?;
 
-        let project_plan_completed = sdlc_statuses
-            .get("Project")
-            .map(|s| s.completed)
-            .unwrap_or(false);
         let known_projects = entity_counts.get("Project").copied().unwrap_or(0);
         let total_projects = known_projects.max(indexed_projects);
 
@@ -125,7 +120,6 @@ impl IndexingProgressService {
                 total_projects,
                 indexed_projects,
             },
-            project_plan_completed,
         })
     }
 
@@ -141,7 +135,6 @@ struct IndexingSnapshot {
     sdlc_statuses: HashMap<String, CheckpointStatus>,
     entity_counts: HashMap<String, i64>,
     code: CodeProgress,
-    project_plan_completed: bool,
 }
 
 impl IndexingSnapshot {
@@ -170,23 +163,20 @@ impl IndexingSnapshot {
         }
     }
 
-    fn domain_progress(
+    fn sdlc_progress(
         &self,
         ontology: &Ontology,
         sdlc_plan_names: &HashSet<String>,
-    ) -> Vec<IndexingProgressDomain> {
-        let code_status = self.code.status(self.project_plan_completed);
-
-        ontology
+    ) -> SdlcIndexingProgress {
+        let domains = ontology
             .domains()
+            .filter(|domain| domain.name != SOURCE_CODE_DOMAIN)
             .map(|domain| {
                 let items = domain
                     .node_names
                     .iter()
                     .map(|name| {
-                        let status = if domain.name == SOURCE_CODE_DOMAIN {
-                            code_status
-                        } else if !sdlc_plan_names.contains(name) {
+                        let status = if !sdlc_plan_names.contains(name) {
                             ItemStatus::Pending
                         } else {
                             match self.sdlc_statuses.get(name) {
@@ -196,7 +186,7 @@ impl IndexingSnapshot {
                             }
                         };
 
-                        IndexingProgressItem {
+                        SdlcItem {
                             name: name.clone(),
                             status: status.to_string(),
                             count: self.entity_counts.get(name).copied().unwrap_or(0),
@@ -204,12 +194,32 @@ impl IndexingSnapshot {
                     })
                     .collect();
 
-                IndexingProgressDomain {
+                SdlcDomain {
                     name: domain.name.clone(),
                     items,
                 }
             })
-            .collect()
+            .collect();
+
+        SdlcIndexingProgress { domains }
+    }
+
+    fn code_progress(&self, ontology: &Ontology) -> CodeIndexingProgress {
+        let items = ontology
+            .domains()
+            .filter(|domain| domain.name == SOURCE_CODE_DOMAIN)
+            .flat_map(|domain| domain.node_names.iter())
+            .map(|name| CodeItem {
+                name: name.clone(),
+                count: self.entity_counts.get(name).copied().unwrap_or(0),
+            })
+            .collect();
+
+        CodeIndexingProgress {
+            indexed_projects: self.code.indexed_projects,
+            total_projects: self.code.total_projects,
+            items,
+        }
     }
 }
 
@@ -220,17 +230,7 @@ struct CodeProgress {
 
 impl CodeProgress {
     fn is_complete(&self) -> bool {
-        self.total_projects == 0 || self.indexed_projects >= self.total_projects
-    }
-
-    fn status(&self, project_plan_completed: bool) -> ItemStatus {
-        if !project_plan_completed {
-            ItemStatus::WaitingForProjects
-        } else if self.is_complete() {
-            ItemStatus::Completed
-        } else {
-            ItemStatus::Indexing
-        }
+        self.total_projects > 0 && self.indexed_projects >= self.total_projects
     }
 }
 
@@ -261,13 +261,11 @@ mod tests {
         sdlc_statuses: HashMap<String, CheckpointStatus>,
         entity_counts: HashMap<String, i64>,
         code: CodeProgress,
-        project_plan_completed: bool,
     ) -> IndexingSnapshot {
         IndexingSnapshot {
             sdlc_statuses,
             entity_counts,
             code,
-            project_plan_completed,
         }
     }
 
@@ -296,11 +294,10 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            false,
         );
         let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
-        let core = domains.iter().find(|d| d.name == "core").unwrap();
+        let sdlc = snap.sdlc_progress(&service.ontology, &service.sdlc_plan_names);
+        let core = sdlc.domains.iter().find(|d| d.name == "core").unwrap();
         let project = core.items.iter().find(|i| i.name == "Project").unwrap();
         assert_eq!(project.status, "pending");
     }
@@ -316,11 +313,10 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            false,
         );
         let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
-        let core = domains.iter().find(|d| d.name == "core").unwrap();
+        let sdlc = snap.sdlc_progress(&service.ontology, &service.sdlc_plan_names);
+        let core = sdlc.domains.iter().find(|d| d.name == "core").unwrap();
         let project = core.items.iter().find(|i| i.name == "Project").unwrap();
         assert_eq!(project.status, "in_progress");
     }
@@ -336,11 +332,10 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            false,
         );
         let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
-        let core = domains.iter().find(|d| d.name == "core").unwrap();
+        let sdlc = snap.sdlc_progress(&service.ontology, &service.sdlc_plan_names);
+        let core = sdlc.domains.iter().find(|d| d.name == "core").unwrap();
         let project = core.items.iter().find(|i| i.name == "Project").unwrap();
         assert_eq!(project.status, "completed");
     }
@@ -354,15 +349,11 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            false,
         );
         let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
+        let sdlc = snap.sdlc_progress(&service.ontology, &service.sdlc_plan_names);
 
-        for domain in &domains {
-            if domain.name == SOURCE_CODE_DOMAIN {
-                continue;
-            }
+        for domain in &sdlc.domains {
             for item in &domain.items {
                 let is_sdlc_plan = service.sdlc_plan_names.contains(&item.name);
                 if !is_sdlc_plan {
@@ -373,29 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn code_status_waiting_for_projects_when_sdlc_not_done() {
-        let snap = test_snap(
-            HashMap::new(),
-            HashMap::new(),
-            CodeProgress {
-                total_projects: 10,
-                indexed_projects: 0,
-            },
-            false,
-        );
-        let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
-        let source_code = domains
-            .iter()
-            .find(|d| d.name == SOURCE_CODE_DOMAIN)
-            .unwrap();
-        for item in &source_code.items {
-            assert_eq!(item.status, "waiting_for_projects");
-        }
-    }
-
-    #[test]
-    fn code_status_indexing_when_partially_done() {
+    fn code_progress_tracks_project_counts() {
         let snap = test_snap(
             HashMap::new(),
             HashMap::new(),
@@ -403,43 +372,34 @@ mod tests {
                 total_projects: 10,
                 indexed_projects: 3,
             },
-            true,
         );
         let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
-        let source_code = domains
-            .iter()
-            .find(|d| d.name == SOURCE_CODE_DOMAIN)
-            .unwrap();
-        for item in &source_code.items {
-            assert_eq!(item.status, "indexing");
-        }
+        let code = snap.code_progress(&service.ontology);
+        assert_eq!(code.indexed_projects, 3);
+        assert_eq!(code.total_projects, 10);
     }
 
     #[test]
-    fn code_status_completed_when_all_indexed() {
+    fn code_progress_includes_entity_counts() {
+        let mut entity_counts = HashMap::new();
+        entity_counts.insert("Definition".to_string(), 100);
         let snap = test_snap(
             HashMap::new(),
-            HashMap::new(),
+            entity_counts,
             CodeProgress {
-                total_projects: 10,
-                indexed_projects: 10,
+                total_projects: 5,
+                indexed_projects: 2,
             },
-            true,
         );
         let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
-        let source_code = domains
-            .iter()
-            .find(|d| d.name == SOURCE_CODE_DOMAIN)
-            .unwrap();
-        for item in &source_code.items {
-            assert_eq!(item.status, "completed");
-        }
+        let code = snap.code_progress(&service.ontology);
+        let definition = code.items.iter().find(|i| i.name == "Definition");
+        assert!(definition.is_some());
+        assert_eq!(definition.unwrap().count, 100);
     }
 
     #[test]
-    fn code_status_completed_when_no_projects() {
+    fn code_progress_zero_counts_when_no_data() {
         let snap = test_snap(
             HashMap::new(),
             HashMap::new(),
@@ -447,16 +407,13 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            true,
         );
         let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
-        let source_code = domains
-            .iter()
-            .find(|d| d.name == SOURCE_CODE_DOMAIN)
-            .unwrap();
-        for item in &source_code.items {
-            assert_eq!(item.status, "completed");
+        let code = snap.code_progress(&service.ontology);
+        assert_eq!(code.indexed_projects, 0);
+        assert_eq!(code.total_projects, 0);
+        for item in &code.items {
+            assert_eq!(item.count, 0, "{} should have zero count", item.name);
         }
     }
 
@@ -469,7 +426,6 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            false,
         );
         let service = test_service();
         assert_eq!(
@@ -489,7 +445,6 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            true,
         );
         let service = test_service();
         assert_eq!(
@@ -512,7 +467,6 @@ mod tests {
                 total_projects: 5,
                 indexed_projects: 5,
             },
-            true,
         );
         assert_eq!(
             snap.overall_status(&service.sdlc_plan_names),
@@ -534,7 +488,6 @@ mod tests {
                 total_projects: 10,
                 indexed_projects: 3,
             },
-            true,
         );
         assert_eq!(
             snap.overall_status(&service.sdlc_plan_names),
@@ -543,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn domain_response_groups_items_by_domain() {
+    fn sdlc_progress_groups_items_by_domain() {
         let mut sdlc_statuses = HashMap::new();
         sdlc_statuses.insert("Project".to_string(), checkpoint(true, true));
         let mut entity_counts = HashMap::new();
@@ -555,41 +508,60 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            true,
         );
         let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
+        let sdlc = snap.sdlc_progress(&service.ontology, &service.sdlc_plan_names);
 
-        assert!(!domains.is_empty());
-        let core = domains.iter().find(|d| d.name == "core").unwrap();
+        assert!(!sdlc.domains.is_empty());
+        let core = sdlc.domains.iter().find(|d| d.name == "core").unwrap();
         let project = core.items.iter().find(|i| i.name == "Project").unwrap();
         assert_eq!(project.status, "completed");
         assert_eq!(project.count, 42);
     }
 
     #[test]
-    fn all_code_entities_share_same_status() {
+    fn sdlc_progress_excludes_source_code_domain() {
         let snap = test_snap(
             HashMap::new(),
             HashMap::new(),
             CodeProgress {
-                total_projects: 10,
-                indexed_projects: 3,
+                total_projects: 0,
+                indexed_projects: 0,
             },
-            true,
         );
         let service = test_service();
-        let domains = snap.domain_progress(&service.ontology, &service.sdlc_plan_names);
+        let sdlc = snap.sdlc_progress(&service.ontology, &service.sdlc_plan_names);
+        assert!(
+            sdlc.domains.iter().all(|d| d.name != SOURCE_CODE_DOMAIN),
+            "sdlc_progress should not include source_code domain"
+        );
+    }
 
-        let source_code = domains
-            .iter()
-            .find(|d| d.name == SOURCE_CODE_DOMAIN)
-            .unwrap();
-        for item in &source_code.items {
-            assert_eq!(
-                item.status, "indexing",
-                "all source_code items should be 'indexing', but {} was '{}'",
-                item.name, item.status
+    #[test]
+    fn code_progress_only_includes_source_code_entities() {
+        let snap = test_snap(
+            HashMap::new(),
+            HashMap::new(),
+            CodeProgress {
+                total_projects: 5,
+                indexed_projects: 2,
+            },
+        );
+        let service = test_service();
+        let ontology = test_ontology();
+        let code = snap.code_progress(&service.ontology);
+
+        let source_code_nodes: HashSet<String> = ontology
+            .domains()
+            .filter(|d| d.name == SOURCE_CODE_DOMAIN)
+            .flat_map(|d| d.node_names.iter().cloned())
+            .collect();
+
+        for item in &code.items {
+            assert!(
+                source_code_nodes.contains(&item.name),
+                "{} should be a source_code entity",
+                item.name
             );
         }
     }
@@ -605,7 +577,6 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            false,
         );
         let service = test_service();
         assert_eq!(
@@ -625,7 +596,6 @@ mod tests {
                 total_projects: 0,
                 indexed_projects: 0,
             },
-            false,
         );
         let service = test_service();
         assert_eq!(
