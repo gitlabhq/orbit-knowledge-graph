@@ -42,7 +42,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `User`                | Represents a GitLab user.                                                                               | `id`, `username`, `name`                                                    |
 | `Note`                | Represents a comment on an issue, merge request, or epic.                                               | `id`, `body`, `author_id`, `project_id`                                     |
 | `Epic`                | Represents a GitLab epic.                                                                               | `id`, `iid`, `title`, `state`, `group_id`, `author_id`                        |
-| `Branch`              | Represents a Git branch.                                                                                | `name`, `project_id`                                                        |
+| `Branch`              | Represents a Git branch.                                                                                | `id`, `name`, `project_id`, `is_default`                                    |
 
 ### Relationship Visualization
 
@@ -53,7 +53,7 @@ graph TD
     Project -- HAS_MERGE_REQUEST --> MergeRequest
     Project -- HAS_PIPELINE --> Pipeline
     Project -- HAS_VULNERABILITY --> Vulnerability
-    Project -- HAS_BRANCH --> Branch
+    Branch -- IN_PROJECT --> Project
 
     User -- CREATED --> Issue
     User -- CREATED --> MergeRequest
@@ -80,7 +80,7 @@ graph TD
 | `HAS_MERGE_REQUEST`                 | `Project`      | `MergeRequest` | A project has a merge request.                                                                          |
 | `HAS_PIPELINE`                      | `Project`      | `Pipeline`     | A project has a CI/CD pipeline.                                                                         |
 | `HAS_VULNERABILITY`                 | `Project`      | `Vulnerability`| A project has a vulnerability finding.                                                                  |
-| `HAS_BRANCH`                        | `Project`      | `Branch`       | A project has a branch.                                                                                 |
+| `IN_PROJECT`                        | `Branch`       | `Project`      | A branch belongs to a project.                                                                          |
 | `CREATED`                           | `User`         | `Issue`, `MR`... | A user created an entity.                                                                               |
 | `COMMENTS_ON`                       | `User`         | `Issue`, `MR`... | A user commented on an entity (via a `Note`).                                                           |
 | `IS_COMMENT_ON`                     | `Note`         | `Issue`, `MR`... | A note is a comment on a specific entity.                                                               |
@@ -98,6 +98,7 @@ The Code Graph represents the structure and relationships within the source code
 
 | Node Type             | Description                                                                                             | Key Properties                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `Branch`              | Root of the code file tree for a specific branch.                                                       | `id`, `name`, `project_id`, `is_default`                                    |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
 | `Definition`          | Represents a code definition (e.g., class, function, method, module).                                   | `fully_qualified_name`, `display_name`, `definition_type`, `file_path`      |
@@ -107,6 +108,9 @@ The Code Graph represents the structure and relationships within the source code
 
 ```mermaid
 graph TD
+    Branch -- CONTAINS --> Directory
+    Branch -- CONTAINS --> File
+    Branch -- IN_PROJECT --> Project
     Directory -- DIR_CONTAINS_DIR --> Directory
     Directory -- DIR_CONTAINS_FILE --> File
     File -- FILE_DEFINES --> Definition
@@ -120,6 +124,8 @@ graph TD
 
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
+| `CONTAINS`                          | `Branch`       | `Directory`, `File` | A branch contains root-level directories and files.                                                |
+| `IN_PROJECT`                        | `Branch`       | `Project`      | A branch belongs to a project (links the Code Graph to the Namespace Graph).                            |
 | `DIR_CONTAINS_DIR`                  | `Directory`    | `Directory`    | A directory contains another directory.                                                                 |
 | `DIR_CONTAINS_FILE`                 | `Directory`    | `File`         | A directory contains a file.                                                                            |
 | `FILE_DEFINES`                      | `File`         | `Definition`   | A file contains a code definition.                                                                      |
@@ -132,13 +138,4 @@ graph TD
 
 ## Cross-Graph Relationships
 
-The power of the Knowledge Graph comes from its ability to link the SDLC and Code graphs. In future iterations, we will be able to link the two graphs together to create a unified graph. For the first iteration, we intend to keep the two graphs separate to keep the complexity of the engineering effort manageable.
-
-Here is an example of how we can link the two graphs together:
-
-| Relationship                        | From Node      | To Node        | Description                                                                                             |
-| ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
-| `HAS_FILE`                          | `Project`      | `File`         | A project (from the Namespace Graph) contains a file (from the Code Graph).                             |
-| `HAS_DIRECTORY`                     | `Project`      | `Directory`    | A project (from the Namespace Graph) contains a directory (from the Code Graph).                        |
-
-These links allow for deep queries, like "Find all merge requests (`SDLC`) that touch files (`Code`) containing a specific function definition (`Code`)."
+The `Branch` node bridges the Namespace and Code graphs. Each branch belongs to a `Project` (Namespace Graph) via `IN_PROJECT` and contains the root-level `Directory` and `File` nodes (Code Graph) via `CONTAINS`. This link enables cross-graph queries such as "Find all merge requests that touch files containing a specific function definition."

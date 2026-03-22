@@ -5,7 +5,7 @@ domain: source_code
 description: A Git branch in a repository
 label: name
 destination_table: gl_branch
-default_columns: [id, name, protected, is_default]
+default_columns: [id, name, is_default]
 
 style:
   size: 28
@@ -21,7 +21,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "TODO: Derived identifier for the branch (needs to be computed from project_id + branch_name hash or similar)."
+    description: "Derived identifier for the branch (hash of project_id + branch name)."
 
   project_id:
     type: int64
@@ -35,16 +35,10 @@ properties:
     nullable: false
     description: "Name of the branch (e.g., main, feature/new-login)."
 
-  protected:
-    type: boolean
-    source: protected
-    nullable: true
-    description: "Whether the branch is protected."
-
   is_default:
     type: boolean
     source: is_default
-    nullable: true
+    nullable: false
     description: "Whether this is the default branch of the project."
 
   traversal_path:
@@ -53,8 +47,5 @@ properties:
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
-# edges:
-#   - type: IN_PROJECT
-#     source_id: project_id
-#     target_kind: Project
+# Edge: Branch --IN_PROJECT--> Project (emitted by code indexing pipeline)
 

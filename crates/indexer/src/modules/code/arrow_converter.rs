@@ -1,5 +1,6 @@
 //! Arrow conversion for code graph data.
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use arrow::array::{
@@ -13,6 +14,7 @@ use code_graph::analysis::types::{
     DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode,
 };
 use code_graph::graph::{RelationshipKind, RelationshipType};
+use rustc_hash::FxHasher;
 
 pub struct ArrowConverter {
     traversal_path: String,
@@ -38,12 +40,49 @@ impl ArrowConverter {
 
     pub fn convert_all(&self, graph_data: &GraphData) -> Result<ConvertedGraphData, ArrowError> {
         Ok(ConvertedGraphData {
+            branch: self.convert_branch()?,
             directories: self.convert_directories(&graph_data.directory_nodes)?,
             files: self.convert_files(&graph_data.file_nodes)?,
             definitions: self.convert_definitions(&graph_data.definition_nodes)?,
             imported_symbols: self.convert_imported_symbols(&graph_data.imported_symbol_nodes)?,
             edges: self.convert_edges(graph_data)?,
         })
+    }
+
+    pub fn convert_branch(&self) -> Result<RecordBatch, ArrowError> {
+        let branch_id = compute_branch_id(self.project_id, &self.branch);
+
+        let schema = Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("traversal_path", DataType::Utf8, false),
+            Field::new("project_id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, false),
+            Field::new("is_default", DataType::Boolean, false),
+            Field::new(
+                "_version",
+                DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                false,
+            ),
+            Field::new("_deleted", DataType::Boolean, false),
+        ]);
+
+        RecordBatch::try_new(
+            Arc::new(schema),
+            vec![
+                Arc::new(arrow::array::Int64Array::from(vec![branch_id])) as ArrayRef,
+                Arc::new(arrow::array::StringArray::from(vec![
+                    self.traversal_path.as_str(),
+                ])) as ArrayRef,
+                Arc::new(arrow::array::Int64Array::from(vec![self.project_id])) as ArrayRef,
+                Arc::new(arrow::array::StringArray::from(vec![self.branch.as_str()])) as ArrayRef,
+                Arc::new(arrow::array::BooleanArray::from(vec![true])) as ArrayRef,
+                Arc::new(
+                    arrow::array::TimestampMicrosecondArray::from(vec![self.version_micros])
+                        .with_timezone("UTC"),
+                ) as ArrayRef,
+                Arc::new(arrow::array::BooleanArray::from(vec![false])) as ArrayRef,
+            ],
+        )
     }
 
     fn base_builders(&self, count: usize) -> BaseColumnBuilders {
@@ -326,15 +365,54 @@ impl ArrowConverter {
 
     pub fn convert_edges(&self, graph_data: &GraphData) -> Result<RecordBatch, ArrowError> {
         let rels = &graph_data.relationships;
+        let root_children: Vec<(i64, &str)> = graph_data
+            .directory_nodes
+            .iter()
+            .filter(|d| !d.path.contains('/'))
+            .filter_map(|d| d.id.map(|id| (id, "Directory")))
+            .chain(
+                graph_data
+                    .file_nodes
+                    .iter()
+                    .filter(|f| !f.path.contains('/'))
+                    .filter_map(|f| f.id.map(|id| (id, "File"))),
+            )
+            .collect();
+        // +1 for IN_PROJECT, +root children for CONTAINS
+        let capacity = rels.len() + 1 + root_children.len();
         let mut traversal_path =
-            StringBuilder::with_capacity(rels.len(), rels.len() * self.traversal_path.len());
-        let mut source_id = Int64Builder::with_capacity(rels.len());
-        let mut source_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 16);
-        let mut relationship_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 32);
-        let mut target_id = Int64Builder::with_capacity(rels.len());
-        let mut target_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 16);
-        let mut version = TimestampMicrosecondBuilder::with_capacity(rels.len());
-        let mut deleted = BooleanBuilder::with_capacity(rels.len());
+            StringBuilder::with_capacity(capacity, capacity * self.traversal_path.len());
+        let mut source_id = Int64Builder::with_capacity(capacity);
+        let mut source_kind = StringBuilder::with_capacity(capacity, capacity * 16);
+        let mut relationship_kind = StringBuilder::with_capacity(capacity, capacity * 32);
+        let mut target_id = Int64Builder::with_capacity(capacity);
+        let mut target_kind = StringBuilder::with_capacity(capacity, capacity * 16);
+        let mut version = TimestampMicrosecondBuilder::with_capacity(capacity);
+        let mut deleted = BooleanBuilder::with_capacity(capacity);
+
+        let branch_id = compute_branch_id(self.project_id, &self.branch);
+
+        // Branch --IN_PROJECT--> Project
+        traversal_path.append_value(&self.traversal_path);
+        source_id.append_value(branch_id);
+        source_kind.append_value("Branch");
+        relationship_kind.append_value("IN_PROJECT");
+        target_id.append_value(self.project_id);
+        target_kind.append_value("Project");
+        version.append_value(self.version_micros);
+        deleted.append_value(false);
+
+        // Branch --CONTAINS--> root-level directories and files
+        for (child_id, child_kind) in &root_children {
+            traversal_path.append_value(&self.traversal_path);
+            source_id.append_value(branch_id);
+            source_kind.append_value("Branch");
+            relationship_kind.append_value("CONTAINS");
+            target_id.append_value(*child_id);
+            target_kind.append_value(child_kind);
+            version.append_value(self.version_micros);
+            deleted.append_value(false);
+        }
 
         for rel in rels {
             let (src_kind_str, tgt_kind_str) = relationship_kind_to_strings(&rel.kind);
@@ -484,11 +562,18 @@ impl BaseColumnBuilders {
 }
 
 pub struct ConvertedGraphData {
+    pub branch: RecordBatch,
     pub directories: RecordBatch,
     pub files: RecordBatch,
     pub definitions: RecordBatch,
     pub imported_symbols: RecordBatch,
     pub edges: RecordBatch,
+}
+
+fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
+    let mut hasher = FxHasher::default();
+    [&project_id.to_string(), branch, "branch"].hash(&mut hasher);
+    hasher.finish() as i64
 }
 
 fn relationship_kind_to_strings(kind: &RelationshipKind) -> (&'static str, &'static str) {
