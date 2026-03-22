@@ -38,6 +38,38 @@ fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
     )
 }
 
+fn path_id_tuple_expr(alias: &str, id_col: &str) -> Expr {
+    Expr::func(
+        "tuple",
+        vec![
+            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+            Expr::col(alias, id_col),
+        ],
+    )
+}
+
+#[derive(Debug, Clone)]
+struct NodeEdgeBinding {
+    alias: String,
+    col: String,
+    namespace_local: bool,
+}
+
+fn node_has_traversal_path(input: &Input, node_id: &str) -> bool {
+    input
+        .nodes
+        .iter()
+        .find(|node| node.id == node_id)
+        .is_some_and(|node| node.has_traversal_path)
+}
+
+fn union_path_matches_node(rel: &InputRelationship, node_id: &str) -> bool {
+    match rel.direction {
+        Direction::Outgoing | Direction::Both => rel.to == node_id,
+        Direction::Incoming => rel.from == node_id,
+    }
+}
+
 /// Derive LIMIT and OFFSET from the input's pagination fields.
 /// If `range` is set, limit = end - start and offset = start.
 /// Otherwise, limit = input.limit and offset = None.
@@ -145,7 +177,7 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
     let mut select = Vec::new();
     let mut where_parts: Vec<Expr> = Vec::new();
     let mut ctes = Vec::new();
-    let mut node_edge_col: HashMap<String, (String, String)> = HashMap::new();
+    let mut node_edge_col: HashMap<String, NodeEdgeBinding> = HashMap::new();
 
     // Build driving edge: flat scan for single-hop, UNION ALL for multi-hop
     let mut from;
@@ -160,11 +192,23 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
         select.push(edge_path_nodes_select_expr(edge_alias));
         node_edge_col.insert(
             first_rel.from.clone(),
-            (edge_alias.to_string(), from_col.to_string()),
+            NodeEdgeBinding {
+                alias: edge_alias.to_string(),
+                col: from_col.to_string(),
+                namespace_local: first_rel.namespace_local
+                    && union_path_matches_node(first_rel, &first_rel.from)
+                    && node_has_traversal_path(input, &first_rel.from),
+            },
         );
         node_edge_col.insert(
             first_rel.to.clone(),
-            (edge_alias.to_string(), to_col.to_string()),
+            NodeEdgeBinding {
+                alias: edge_alias.to_string(),
+                col: to_col.to_string(),
+                namespace_local: first_rel.namespace_local
+                    && union_path_matches_node(first_rel, &first_rel.to)
+                    && node_has_traversal_path(input, &first_rel.to),
+            },
         );
     } else {
         edge_alias = "e0";
@@ -176,24 +220,36 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
         }
         node_edge_col.insert(
             first_rel.from.clone(),
-            (edge_alias.to_string(), start_col.to_string()),
+            NodeEdgeBinding {
+                alias: edge_alias.to_string(),
+                col: start_col.to_string(),
+                namespace_local: first_rel.namespace_local
+                    && node_has_traversal_path(input, &first_rel.from),
+            },
         );
         node_edge_col.insert(
             first_rel.to.clone(),
-            (edge_alias.to_string(), end_col.to_string()),
+            NodeEdgeBinding {
+                alias: edge_alias.to_string(),
+                col: end_col.to_string(),
+                namespace_local: first_rel.namespace_local
+                    && node_has_traversal_path(input, &first_rel.to),
+            },
         );
     }
 
     // JOIN secondary relationships on shared columns
     for (i, rel) in input.relationships.iter().enumerate().skip(1) {
-        let (shared_node, shared_alias, shared_col) =
-            if let Some((a, c)) = node_edge_col.get(&rel.from) {
-                (&rel.from, a.clone(), c.clone())
-            } else if let Some((a, c)) = node_edge_col.get(&rel.to) {
-                (&rel.to, a.clone(), c.clone())
-            } else {
-                continue;
-            };
+        let shared_has_traversal_path =
+            node_has_traversal_path(input, &rel.from) || node_has_traversal_path(input, &rel.to);
+        let (shared_node, shared_binding) = if let Some(binding) = node_edge_col.get(&rel.from) {
+            (&rel.from, binding.clone())
+        } else if let Some(binding) = node_edge_col.get(&rel.to) {
+            (&rel.to, binding.clone())
+        } else {
+            continue;
+        };
+        let shared_is_namespaced = node_has_traversal_path(input, shared_node);
 
         if rel.max_hops > 1 {
             let alias = format!("hop_e{i}");
@@ -205,9 +261,25 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
             };
 
             let join_cond = Expr::eq(
-                Expr::col(&shared_alias, &shared_col),
+                Expr::col(&shared_binding.alias, &shared_binding.col),
                 Expr::col(&alias, sec_shared_col),
             );
+            let join_cond = if shared_binding.namespace_local
+                && rel.namespace_local
+                && shared_is_namespaced
+                && union_path_matches_node(rel, shared_node)
+                && shared_has_traversal_path
+            {
+                Expr::and(
+                    join_cond,
+                    Expr::eq(
+                        Expr::col(&shared_binding.alias, TRAVERSAL_PATH_COLUMN),
+                        Expr::col(&alias, TRAVERSAL_PATH_COLUMN),
+                    ),
+                )
+            } else {
+                join_cond
+            };
             let union = build_hop_union_all(rel, &alias);
             from = TableRef::join(JoinType::Inner, from, union, join_cond);
             select.extend(edge_select_exprs(&alias));
@@ -222,7 +294,13 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
             let other_col = if other == &rel.from { from_col } else { to_col };
             node_edge_col
                 .entry(other.clone())
-                .or_insert((alias, other_col.to_string()));
+                .or_insert(NodeEdgeBinding {
+                    alias,
+                    col: other_col.to_string(),
+                    namespace_local: rel.namespace_local
+                        && union_path_matches_node(rel, other)
+                        && node_has_traversal_path(input, other),
+                });
         } else {
             let alias = format!("e{i}");
             let (sec_start, sec_end) = rel.direction.edge_columns();
@@ -233,7 +311,7 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
             };
 
             let mut join_cond = Expr::eq(
-                Expr::col(&shared_alias, &shared_col),
+                Expr::col(&shared_binding.alias, &shared_binding.col),
                 Expr::col(&alias, sec_shared_col),
             );
             if let Some(tf) = Expr::col_in(
@@ -243,6 +321,15 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
                 rel.types.iter().map(|t| Value::String(t.clone())).collect(),
             ) {
                 join_cond = Expr::and(join_cond, tf);
+            }
+            if shared_binding.namespace_local && rel.namespace_local && shared_is_namespaced {
+                join_cond = Expr::and(
+                    join_cond,
+                    Expr::eq(
+                        Expr::col(&shared_binding.alias, TRAVERSAL_PATH_COLUMN),
+                        Expr::col(&alias, TRAVERSAL_PATH_COLUMN),
+                    ),
+                );
             }
 
             let (sec_scan, _) = edge_scan(&alias, &None);
@@ -261,15 +348,19 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
             };
             node_edge_col
                 .entry(other.clone())
-                .or_insert((alias, other_col.to_string()));
+                .or_insert(NodeEdgeBinding {
+                    alias,
+                    col: other_col.to_string(),
+                    namespace_local: rel.namespace_local && node_has_traversal_path(input, other),
+                });
         }
     }
 
     // Add _gkg_* ID/type columns for ALL nodes
     for node in &input.nodes {
         let entity = node.entity.as_deref().unwrap_or("Unknown");
-        let id_expr = if let Some((alias, col)) = node_edge_col.get(&node.id) {
-            Expr::col(alias, col.as_str())
+        let id_expr = if let Some(binding) = node_edge_col.get(&node.id) {
+            Expr::col(&binding.alias, binding.col.as_str())
         } else {
             Expr::param(ChType::Int64, 0i64)
         };
@@ -286,32 +377,48 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
         if !has_conditions {
             continue;
         }
-        if let Some((alias, edge_col)) = node_edge_col.get(&node.id) {
+        if let Some(binding) = node_edge_col.get(&node.id) {
             let table = resolve_table(node)?;
             let node_where = build_node_where(node);
             let cte_name = format!("_nf_{}", node.id);
+            let mut cte_select = vec![SelectExpr::new(
+                Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                DEFAULT_PRIMARY_KEY,
+            )];
+            if node.has_traversal_path {
+                cte_select.push(SelectExpr::new(
+                    path_id_tuple_expr(&node.id, DEFAULT_PRIMARY_KEY),
+                    "_id_path",
+                ));
+            }
             let cte_query = Query {
-                select: vec![SelectExpr::new(
-                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                    DEFAULT_PRIMARY_KEY,
-                )],
+                select: cte_select,
                 from: TableRef::scan(&table, &node.id),
                 where_clause: node_where,
                 ..Default::default()
             };
             ctes.push(Cte::new(&cte_name, cte_query));
-            where_parts.push(Expr::InSubquery {
-                expr: Box::new(Expr::col(alias, edge_col.as_str())),
-                cte_name,
-                column: DEFAULT_PRIMARY_KEY.into(),
-            });
+            let filter = if node.has_traversal_path && binding.namespace_local {
+                Expr::InSubquery {
+                    expr: Box::new(path_id_tuple_expr(&binding.alias, binding.col.as_str())),
+                    cte_name,
+                    column: "_id_path".into(),
+                }
+            } else {
+                Expr::InSubquery {
+                    expr: Box::new(Expr::col(&binding.alias, binding.col.as_str())),
+                    cte_name,
+                    column: DEFAULT_PRIMARY_KEY.into(),
+                }
+            };
+            where_parts.push(filter);
         }
     }
 
     let where_clause = Expr::and_all(where_parts.into_iter().map(Some));
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         let expr = match (ob.property.as_str(), node_edge_col.get(&ob.node)) {
-            ("id", Some((alias, edge_col))) => Expr::col(alias, edge_col.as_str()),
+            ("id", Some(binding)) => Expr::col(&binding.alias, binding.col.as_str()),
             _ => Expr::col(edge_alias, &ob.property),
         };
         vec![OrderExpr {
@@ -1357,6 +1464,46 @@ mod tests {
     use crate::validate;
     use ontology::Ontology;
 
+    fn collect_join_conditions<'a>(from: &'a TableRef, conditions: &mut Vec<&'a Expr>) {
+        match from {
+            TableRef::Join {
+                left, right, on, ..
+            } => {
+                conditions.push(on);
+                collect_join_conditions(left, conditions);
+                collect_join_conditions(right, conditions);
+            }
+            TableRef::Subquery { query, .. } => collect_join_conditions(&query.from, conditions),
+            TableRef::Union { queries, .. } => {
+                for query in queries {
+                    collect_join_conditions(&query.from, conditions);
+                }
+            }
+            TableRef::Scan { .. } => {}
+        }
+    }
+
+    fn has_traversal_path_equality(expr: &Expr) -> bool {
+        match expr {
+            Expr::BinaryOp { op, left, right } => {
+                (*op == Op::Eq
+                    && matches!(
+                        (&**left, &**right),
+                        (
+                            Expr::Column { column: left_col, .. },
+                            Expr::Column { column: right_col, .. }
+                        ) if left_col == TRAVERSAL_PATH_COLUMN && right_col == TRAVERSAL_PATH_COLUMN
+                    ))
+                    || has_traversal_path_equality(left)
+                    || has_traversal_path_equality(right)
+            }
+            Expr::UnaryOp { expr, .. } => has_traversal_path_equality(expr),
+            Expr::FuncCall { args, .. } => args.iter().any(has_traversal_path_equality),
+            Expr::InSubquery { expr, .. } => has_traversal_path_equality(expr),
+            Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } => false,
+        }
+    }
+
     fn test_ontology() -> Ontology {
         use ontology::DataType;
         Ontology::new()
@@ -1557,6 +1704,94 @@ mod tests {
         };
         println!("{:?}", q);
         assert!(q.where_clause.is_some());
+    }
+
+    #[test]
+    fn adds_traversal_path_join_for_namespaced_shared_node() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "n"},
+                {"type": "MEMBER_OF", "from": "n", "to": "p"}
+            ]
+        }"#,
+        );
+        input
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == "n")
+            .unwrap()
+            .has_traversal_path = true;
+        input
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == "p")
+            .unwrap()
+            .has_traversal_path = true;
+        input.relationships[0].namespace_local = true;
+        input.relationships[1].namespace_local = true;
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+        let mut join_conditions = Vec::new();
+        collect_join_conditions(&q.from, &mut join_conditions);
+        assert!(
+            join_conditions
+                .iter()
+                .any(|expr| has_traversal_path_equality(expr)),
+            "expected traversal_path equality in join conditions: {join_conditions:?}"
+        );
+    }
+
+    #[test]
+    fn skips_traversal_path_join_for_global_shared_node() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "n"},
+                {"type": "MEMBER_OF", "from": "u", "to": "p"}
+            ]
+        }"#,
+        );
+        input
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == "n")
+            .unwrap()
+            .has_traversal_path = true;
+        input
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == "p")
+            .unwrap()
+            .has_traversal_path = true;
+        input.relationships[0].namespace_local = true;
+        input.relationships[1].namespace_local = true;
+
+        let Node::Query(q) = lower(&input).unwrap() else {
+            panic!("expected Query");
+        };
+        let mut join_conditions = Vec::new();
+        collect_join_conditions(&q.from, &mut join_conditions);
+        assert!(
+            !join_conditions
+                .iter()
+                .any(|expr| has_traversal_path_equality(expr)),
+            "did not expect traversal_path equality in join conditions: {join_conditions:?}"
+        );
     }
 
     #[test]

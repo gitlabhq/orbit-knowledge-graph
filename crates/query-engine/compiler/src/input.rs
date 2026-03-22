@@ -202,6 +202,9 @@ pub struct InputNode {
     /// Always set before enforce.rs runs; do not add fallbacks in downstream code.
     #[serde(skip)]
     pub redaction_id_column: String,
+    /// Whether this node carries a traversal_path in its table. Populated during normalization.
+    #[serde(skip)]
+    pub has_traversal_path: bool,
 }
 
 impl Default for InputNode {
@@ -216,6 +219,7 @@ impl Default for InputNode {
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
+            has_traversal_path: false,
         }
     }
 }
@@ -328,6 +332,11 @@ pub struct InputRelationship {
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, InputFilter>,
+    /// Whether every relationship kind in this query edge is namespace-local enough to
+    /// safely compare traversal_path when the shared node is namespaced. Populated
+    /// during normalization from ontology ETL metadata.
+    #[serde(skip)]
+    pub namespace_local: bool,
 }
 
 fn default_hops() -> u32 {

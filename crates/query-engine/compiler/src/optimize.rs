@@ -29,6 +29,32 @@ use crate::security::SecurityContext;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_TABLE, TRAVERSAL_PATH_COLUMN};
 
 const ROOT_SIP_CTE: &str = "_root_ids";
+const ID_PATH_CTE_COLUMN: &str = "_id_path";
+const EDGE_FRONTIER_CTE_PREFIX: &str = "_ef_";
+const LIMITED_TRAVERSAL_MAX_THREADS: &str = "2";
+
+#[derive(Clone)]
+struct NodeCteBinding {
+    name: String,
+    has_path_tuple: bool,
+}
+
+#[derive(Clone, Copy)]
+struct CascadeParent<'a> {
+    cte_name: &'a str,
+    has_path_tuple: bool,
+    namespace_local: bool,
+}
+
+fn path_id_tuple_expr(alias: &str, id_col: &str) -> Expr {
+    Expr::func(
+        "tuple",
+        vec![
+            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+            Expr::col(alias, id_col),
+        ],
+    )
+}
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
@@ -43,7 +69,10 @@ pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
             apply_edge_led_reorder(q, input);
             if input.query_type == QueryType::Traversal && input.relationships.len() > 1 {
                 cascade_node_filter_ctes(q, input);
+                apply_edge_frontier_filters(q, input);
+                prune_subsumed_frontier_filters(q);
             }
+            apply_query_settings(q, input);
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
@@ -231,6 +260,95 @@ fn rewrite_agg_column(expr: &mut Expr, rewrites: &HashMap<String, (String, &str)
     }
 }
 
+fn apply_query_settings(q: &mut Query, input: &Input) {
+    if should_cap_traversal_threads(q, input) {
+        upsert_query_setting(q, "max_threads", LIMITED_TRAVERSAL_MAX_THREADS);
+    }
+}
+
+fn should_cap_traversal_threads(q: &Query, input: &Input) -> bool {
+    input.query_type == QueryType::Traversal
+        && input.relationships.len() > 1
+        && input.order_by.is_none()
+        && input.cursor.is_none()
+        && input.range.is_none()
+        && q.limit.is_some()
+        && q.offset.is_none()
+        && q.ctes
+            .iter()
+            .any(|cte| cte.name.starts_with(EDGE_FRONTIER_CTE_PREFIX))
+}
+
+fn upsert_query_setting(q: &mut Query, key: &str, value: &str) {
+    if let Some((_, existing)) = q.set_statements.iter_mut().find(|(name, _)| name == key) {
+        *existing = value.to_string();
+    } else {
+        q.set_statements.push((key.to_string(), value.to_string()));
+    }
+}
+
+fn prune_subsumed_frontier_filters(q: &mut Query) {
+    let Some(where_clause) = q.where_clause.take() else {
+        return;
+    };
+
+    let conjuncts = flatten_and(where_clause);
+    let frontier_filters: Vec<(Expr, String)> = conjuncts
+        .iter()
+        .filter_map(|expr| match expr {
+            Expr::InSubquery {
+                expr,
+                cte_name,
+                column,
+            } if column == ID_PATH_CTE_COLUMN => frontier_cte_node_alias(cte_name)
+                .map(|node_alias| ((**expr).clone(), node_alias.to_string())),
+            _ => None,
+        })
+        .collect();
+
+    if frontier_filters.is_empty() {
+        q.where_clause = Expr::and_all(conjuncts.into_iter().map(Some));
+        return;
+    }
+
+    let filtered = conjuncts.into_iter().filter(|expr| {
+        let Expr::InSubquery {
+            expr,
+            cte_name,
+            column,
+        } = expr
+        else {
+            return true;
+        };
+
+        if column != ID_PATH_CTE_COLUMN {
+            return true;
+        }
+
+        let Some(node_alias) = node_filter_cte_node_alias(cte_name) else {
+            return true;
+        };
+
+        !frontier_filters
+            .iter()
+            .any(|(frontier_expr, frontier_alias)| {
+                frontier_alias == node_alias && frontier_expr == expr.as_ref()
+            })
+    });
+
+    q.where_clause = Expr::and_all(filtered.map(Some));
+}
+
+fn frontier_cte_node_alias(cte_name: &str) -> Option<&str> {
+    let rest = cte_name.strip_prefix(EDGE_FRONTIER_CTE_PREFIX)?;
+    let (_, node_alias) = rest.split_once('_')?;
+    Some(node_alias)
+}
+
+fn node_filter_cte_node_alias(cte_name: &str) -> Option<&str> {
+    cte_name.strip_prefix("_nf_")
+}
+
 /// Keyset pagination and OFFSET elimination.
 ///
 /// When a cursor is present, decomposes it into a PK predicate:
@@ -402,11 +520,19 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
             .chain(std::iter::once(keyset_predicate)),
     );
 
+    let mut cte_select = vec![SelectExpr::new(
+        Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
+        DEFAULT_PRIMARY_KEY,
+    )];
+    if root_node.has_traversal_path {
+        cte_select.push(SelectExpr::new(
+            path_id_tuple_expr(root_alias, DEFAULT_PRIMARY_KEY),
+            ID_PATH_CTE_COLUMN,
+        ));
+    }
+
     let cte_query = Query {
-        select: vec![SelectExpr::new(
-            Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
-            DEFAULT_PRIMARY_KEY,
-        )],
+        select: cte_select,
         from: TableRef::scan(&root_table, root_alias),
         where_clause: cte_where,
         ..Default::default()
@@ -414,8 +540,14 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
 
     // Inject root SIP into edges adjacent to the root node.
-    let mut node_ctes: HashMap<String, String> = HashMap::new();
-    node_ctes.insert(root_alias.clone(), ROOT_SIP_CTE.to_string());
+    let mut node_ctes: HashMap<String, NodeCteBinding> = HashMap::new();
+    node_ctes.insert(
+        root_alias.clone(),
+        NodeCteBinding {
+            name: ROOT_SIP_CTE.to_string(),
+            has_path_tuple: root_node.has_traversal_path,
+        },
+    );
 
     for (i, rel) in input.relationships.iter().enumerate() {
         let from_cte = node_ctes.get(&rel.from).cloned();
@@ -429,10 +561,24 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         let aliases = HashSet::from([edge_alias]);
 
         if let Some(ref cte) = from_cte {
-            inject_sip_for_aliases(&mut q.from, &mut q.where_clause, start_col, cte, &aliases);
+            inject_sip_for_aliases(
+                &mut q.from,
+                &mut q.where_clause,
+                start_col,
+                &cte.name,
+                rel.namespace_local && cte.has_path_tuple,
+                &aliases,
+            );
         }
         if let Some(ref cte) = to_cte {
-            inject_sip_for_aliases(&mut q.from, &mut q.where_clause, end_col, cte, &aliases);
+            inject_sip_for_aliases(
+                &mut q.from,
+                &mut q.where_clause,
+                end_col,
+                &cte.name,
+                rel.namespace_local && cte.has_path_tuple,
+                &aliases,
+            );
         }
 
         // Cascading SIP: when the root is selective (node_ids, filters, etc.),
@@ -450,13 +596,29 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
                 &rel.to,
                 end_col,
                 start_col,
-                from_cte.as_ref().unwrap(),
+                CascadeParent {
+                    cte_name: &from_cte.as_ref().unwrap().name,
+                    has_path_tuple: from_cte.as_ref().unwrap().has_path_tuple,
+                    namespace_local: rel.namespace_local,
+                },
                 &rel.types,
             )
         {
             let name = format!("_cascade_{}", rel.to);
             q.ctes.push(Cte::new(&name, cte));
-            node_ctes.insert(rel.to.clone(), name);
+            let has_path_tuple = rel.namespace_local
+                && input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.to)
+                    .is_some_and(|n| n.has_traversal_path);
+            node_ctes.insert(
+                rel.to.clone(),
+                NodeCteBinding {
+                    name,
+                    has_path_tuple,
+                },
+            );
         }
         if to_cte.is_some()
             && from_cte.is_none()
@@ -465,27 +627,57 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
                 &rel.from,
                 start_col,
                 end_col,
-                to_cte.as_ref().unwrap(),
+                CascadeParent {
+                    cte_name: &to_cte.as_ref().unwrap().name,
+                    has_path_tuple: to_cte.as_ref().unwrap().has_path_tuple,
+                    namespace_local: rel.namespace_local,
+                },
                 &rel.types,
             )
         {
             let name = format!("_cascade_{}", rel.from);
             q.ctes.push(Cte::new(&name, cte));
-            node_ctes.insert(rel.from.clone(), name);
+            let has_path_tuple = rel.namespace_local
+                && input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.from)
+                    .is_some_and(|n| n.has_traversal_path);
+            node_ctes.insert(
+                rel.from.clone(),
+                NodeCteBinding {
+                    name,
+                    has_path_tuple,
+                },
+            );
         }
     }
 
     // Inject cascade CTE filters into node table scans. Each non-root node
     // with a cascade CTE gets `node.id IN (SELECT id FROM cascade_cte)`,
     // allowing ClickHouse to prewhere-filter large node tables (e.g. gl_job).
-    for (alias, cte_name) in &node_ctes {
-        if cte_name == ROOT_SIP_CTE {
+    for (alias, cte) in &node_ctes {
+        if cte.name == ROOT_SIP_CTE {
             continue;
         }
-        let node_filter = Expr::InSubquery {
-            expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
-            cte_name: cte_name.clone(),
-            column: DEFAULT_PRIMARY_KEY.to_string(),
+        let node_filter = if cte.has_path_tuple
+            && input
+                .nodes
+                .iter()
+                .find(|n| n.id == *alias)
+                .is_some_and(|n| n.has_traversal_path)
+        {
+            Expr::InSubquery {
+                expr: Box::new(path_id_tuple_expr(alias, DEFAULT_PRIMARY_KEY)),
+                cte_name: cte.name.clone(),
+                column: ID_PATH_CTE_COLUMN.to_string(),
+            }
+        } else {
+            Expr::InSubquery {
+                expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+                cte_name: cte.name.clone(),
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            }
         };
         q.where_clause = Expr::and_all([q.where_clause.take(), Some(node_filter)]);
     }
@@ -503,17 +695,25 @@ fn build_cascade_for_node(
     node_alias: &str,
     select_col: &str,
     filter_col: &str,
-    parent_cte: &str,
+    parent: CascadeParent<'_>,
     rel_types: &[String],
 ) -> Option<Query> {
     let node = input.nodes.iter().find(|n| n.id == node_alias)?;
     node.table.as_deref()?;
 
     let alias = "_ce";
-    let parent_filter = Expr::InSubquery {
-        expr: Box::new(Expr::col(alias, filter_col)),
-        cte_name: parent_cte.to_string(),
-        column: DEFAULT_PRIMARY_KEY.to_string(),
+    let parent_filter = if parent.namespace_local && parent.has_path_tuple {
+        Expr::InSubquery {
+            expr: Box::new(path_id_tuple_expr(alias, filter_col)),
+            cte_name: parent.cte_name.to_string(),
+            column: ID_PATH_CTE_COLUMN.to_string(),
+        }
+    } else {
+        Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, filter_col)),
+            cte_name: parent.cte_name.to_string(),
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        }
     };
     let rel_filter = if rel_types.len() == 1 {
         Expr::eq(
@@ -547,11 +747,19 @@ fn build_cascade_for_node(
         )
     });
 
+    let mut select = vec![SelectExpr::new(
+        Expr::col(alias, select_col),
+        DEFAULT_PRIMARY_KEY,
+    )];
+    if parent.namespace_local && node.has_traversal_path {
+        select.push(SelectExpr::new(
+            path_id_tuple_expr(alias, select_col),
+            ID_PATH_CTE_COLUMN,
+        ));
+    }
+
     Some(Query {
-        select: vec![SelectExpr::new(
-            Expr::col(alias, select_col),
-            DEFAULT_PRIMARY_KEY,
-        )],
+        select,
         from: TableRef::scan(EDGE_TABLE, alias),
         where_clause: Expr::and_all([Some(parent_filter), Some(rel_filter), kind_filter]),
         ..Default::default()
@@ -629,11 +837,19 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
         let cte_name = format!("_target_{target_alias}_ids");
         let cte_where = Expr::and_all(target_only_conds.into_iter().map(Some));
 
+        let mut cte_select = vec![SelectExpr::new(
+            Expr::col(target_alias, DEFAULT_PRIMARY_KEY),
+            DEFAULT_PRIMARY_KEY,
+        )];
+        if target_node.has_traversal_path {
+            cte_select.push(SelectExpr::new(
+                path_id_tuple_expr(target_alias, DEFAULT_PRIMARY_KEY),
+                ID_PATH_CTE_COLUMN,
+            ));
+        }
+
         let cte_query = Query {
-            select: vec![SelectExpr::new(
-                Expr::col(target_alias, DEFAULT_PRIMARY_KEY),
-                DEFAULT_PRIMARY_KEY,
-            )],
+            select: cte_select,
             from: TableRef::scan(&target_table, target_alias),
             where_clause: cte_where,
             ..Default::default()
@@ -652,6 +868,7 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
             &mut q.where_clause,
             end_col,
             &cte_name,
+            rel.namespace_local && target_node.has_traversal_path,
             &aliases,
         );
     }
@@ -690,23 +907,44 @@ fn inject_sip_for_aliases(
     outer_where: &mut Option<Expr>,
     edge_col: &str,
     cte_name: &str,
+    use_path_tuple: bool,
     target_aliases: &HashSet<String>,
 ) {
     match table_ref {
         TableRef::Scan { table, alias, .. }
             if is_edge_table(table) && target_aliases.contains(alias.as_str()) =>
         {
-            let sip_filter = make_sip_filter(alias, edge_col, cte_name);
+            let sip_filter = make_sip_filter(alias, edge_col, cte_name, use_path_tuple);
             *outer_where = Expr::and_all([outer_where.take(), Some(sip_filter)]);
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            inject_sip_for_aliases(left, outer_where, edge_col, cte_name, target_aliases);
-            inject_sip_for_aliases(right, outer_where, edge_col, cte_name, target_aliases);
+            inject_sip_for_aliases(
+                left,
+                outer_where,
+                edge_col,
+                cte_name,
+                use_path_tuple,
+                target_aliases,
+            );
+            inject_sip_for_aliases(
+                right,
+                outer_where,
+                edge_col,
+                cte_name,
+                use_path_tuple,
+                target_aliases,
+            );
         }
         TableRef::Union { alias, queries, .. } if target_aliases.contains(alias.as_str()) => {
             for arm in queries {
-                inject_sip_first_edge(&mut arm.from, &mut arm.where_clause, edge_col, cte_name);
+                inject_sip_first_edge(
+                    &mut arm.from,
+                    &mut arm.where_clause,
+                    edge_col,
+                    cte_name,
+                    use_path_tuple,
+                );
             }
         }
         TableRef::Union { .. } => {}
@@ -716,6 +954,7 @@ fn inject_sip_for_aliases(
                 &mut query.where_clause,
                 edge_col,
                 cte_name,
+                use_path_tuple,
                 target_aliases,
             );
         }
@@ -729,14 +968,15 @@ fn inject_sip_first_edge(
     where_clause: &mut Option<Expr>,
     edge_col: &str,
     cte_name: &str,
+    use_path_tuple: bool,
 ) {
     match from {
         TableRef::Scan { table, alias, .. } if is_edge_table(table) => {
-            let sip_filter = make_sip_filter(alias, edge_col, cte_name);
+            let sip_filter = make_sip_filter(alias, edge_col, cte_name, use_path_tuple);
             *where_clause = Expr::and_all([where_clause.take(), Some(sip_filter)]);
         }
         TableRef::Join { left, .. } => {
-            inject_sip_first_edge(left, where_clause, edge_col, cte_name);
+            inject_sip_first_edge(left, where_clause, edge_col, cte_name, use_path_tuple);
         }
         _ => {}
     }
@@ -746,11 +986,19 @@ fn is_edge_table(table: &str) -> bool {
     table == "gl_edge" || table.starts_with("gl_edge")
 }
 
-fn make_sip_filter(alias: &str, edge_col: &str, cte_name: &str) -> Expr {
-    Expr::InSubquery {
-        expr: Box::new(Expr::col(alias, edge_col)),
-        cte_name: cte_name.to_string(),
-        column: DEFAULT_PRIMARY_KEY.to_string(),
+fn make_sip_filter(alias: &str, edge_col: &str, cte_name: &str, use_path_tuple: bool) -> Expr {
+    if use_path_tuple {
+        Expr::InSubquery {
+            expr: Box::new(path_id_tuple_expr(alias, edge_col)),
+            cte_name: cte_name.to_string(),
+            column: ID_PATH_CTE_COLUMN.to_string(),
+        }
+    } else {
+        Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, edge_col)),
+            cte_name: cte_name.to_string(),
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        }
     }
 }
 
@@ -1003,12 +1251,34 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
             }
 
             let target = input.nodes.iter().find(|n| n.id == *target_id);
+            let source = input.nodes.iter().find(|n| n.id == *source_id);
             let alias = "_ce";
+            let source_cte_has_id_path =
+                q.ctes
+                    .iter()
+                    .find(|c| c.name == source_cte)
+                    .is_some_and(|cte| {
+                        cte.query
+                            .select
+                            .iter()
+                            .any(|expr| expr.alias.as_deref() == Some(ID_PATH_CTE_COLUMN))
+                    });
 
-            let edge_filter = Expr::InSubquery {
-                expr: Box::new(Expr::col(alias, edge_filter_col)),
-                cte_name: source_cte.clone(),
-                column: DEFAULT_PRIMARY_KEY.to_string(),
+            let edge_filter = if rel.namespace_local
+                && source.is_some_and(|n| n.has_traversal_path)
+                && source_cte_has_id_path
+            {
+                Expr::InSubquery {
+                    expr: Box::new(path_id_tuple_expr(alias, edge_filter_col)),
+                    cte_name: source_cte.clone(),
+                    column: ID_PATH_CTE_COLUMN.to_string(),
+                }
+            } else {
+                Expr::InSubquery {
+                    expr: Box::new(Expr::col(alias, edge_filter_col)),
+                    cte_name: source_cte.clone(),
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                }
             };
             let rel_filter = if rel.types.len() == 1 {
                 Expr::eq(
@@ -1038,14 +1308,21 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                     Expr::param(ChType::String, entity.clone()),
                 )
             });
+            let mut select = vec![SelectExpr::new(
+                Expr::col(alias, edge_select_col),
+                DEFAULT_PRIMARY_KEY,
+            )];
+            if rel.namespace_local && target.is_some_and(|n| n.has_traversal_path) {
+                select.push(SelectExpr::new(
+                    path_id_tuple_expr(alias, edge_select_col),
+                    ID_PATH_CTE_COLUMN,
+                ));
+            }
 
             q.ctes.push(Cte::new(
                 &cascade_name,
                 Query {
-                    select: vec![SelectExpr::new(
-                        Expr::col(alias, edge_select_col),
-                        DEFAULT_PRIMARY_KEY,
-                    )],
+                    select,
                     from: TableRef::scan(EDGE_TABLE, alias),
                     where_clause: Expr::and_all([Some(edge_filter), Some(rel_filter), kind_filter]),
                     ..Default::default()
@@ -1054,10 +1331,19 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
 
             let target_nf = format!("_nf_{target_id}");
             if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_nf) {
-                let filter = Expr::InSubquery {
-                    expr: Box::new(Expr::col(target_id.as_str(), DEFAULT_PRIMARY_KEY)),
-                    cte_name: cascade_name,
-                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                let filter = if rel.namespace_local && target.is_some_and(|n| n.has_traversal_path)
+                {
+                    Expr::InSubquery {
+                        expr: Box::new(path_id_tuple_expr(target_id.as_str(), DEFAULT_PRIMARY_KEY)),
+                        cte_name: cascade_name,
+                        column: ID_PATH_CTE_COLUMN.to_string(),
+                    }
+                } else {
+                    Expr::InSubquery {
+                        expr: Box::new(Expr::col(target_id.as_str(), DEFAULT_PRIMARY_KEY)),
+                        cte_name: cascade_name,
+                        column: DEFAULT_PRIMARY_KEY.to_string(),
+                    }
                 };
                 cte.query.where_clause =
                     Expr::and_all([cte.query.where_clause.take(), Some(filter)]);
@@ -1066,6 +1352,189 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
             narrowed.insert(target_id.clone());
             changed = true;
         }
+    }
+}
+
+/// Materialize selective edge frontiers and feed them into adjacent edge scans.
+///
+/// For multi-hop traversals, node-only `_nf_*` CTEs can still leave a neighboring
+/// edge scan too broad. This pass builds a frontier CTE from a relationship whose
+/// edge scan is already selective (because at least one endpoint has an `_nf_*`
+/// filter) and uses that smaller `(id)` / `(traversal_path, id)` frontier to
+/// constrain adjacent relationships that share the same node.
+fn apply_edge_frontier_filters(q: &mut Query, input: &Input) {
+    if input.query_type != QueryType::Traversal || input.relationships.len() < 2 {
+        return;
+    }
+    if input.relationships.iter().any(|rel| rel.max_hops > 1) {
+        return;
+    }
+
+    let nodes_by_id: HashMap<&str, &InputNode> = input
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    let filtered_nodes: HashSet<String> = q
+        .ctes
+        .iter()
+        .filter_map(|cte| cte.name.strip_prefix("_nf_").map(str::to_string))
+        .collect();
+
+    if filtered_nodes.is_empty() {
+        return;
+    }
+
+    let mut extra_filters = Vec::new();
+
+    for rel_idx in 1..input.relationships.len() {
+        let rel = &input.relationships[rel_idx];
+        let prev_rel = &input.relationships[rel_idx - 1];
+        let shared_node_id = [rel.from.as_str(), rel.to.as_str()]
+            .into_iter()
+            .find(|node_id| prev_rel.from == *node_id || prev_rel.to == *node_id);
+        let Some(shared_node_id) = shared_node_id else {
+            continue;
+        };
+        let Some(shared_node) = nodes_by_id.get(shared_node_id).copied() else {
+            continue;
+        };
+
+        let rel_alias = format!("_ef_{rel_idx}");
+        let (start_col, end_col) = rel.direction.edge_columns();
+        let from_cte = format!("_nf_{}", rel.from);
+        let to_cte = format!("_nf_{}", rel.to);
+
+        let mut frontier_where = vec![relationship_type_filter(rel, &rel_alias)];
+        let mut uses_filtered_endpoint = false;
+
+        if filtered_nodes.contains(rel.from.as_str()) {
+            let node = nodes_by_id.get(rel.from.as_str()).copied();
+            frontier_where.push(make_frontier_filter(
+                &from_cte,
+                &rel_alias,
+                start_col,
+                node,
+                rel.namespace_local,
+            ));
+            uses_filtered_endpoint = true;
+        }
+
+        if filtered_nodes.contains(rel.to.as_str()) {
+            let node = nodes_by_id.get(rel.to.as_str()).copied();
+            frontier_where.push(make_frontier_filter(
+                &to_cte,
+                &rel_alias,
+                end_col,
+                node,
+                rel.namespace_local,
+            ));
+            uses_filtered_endpoint = true;
+        }
+
+        if !uses_filtered_endpoint {
+            continue;
+        }
+
+        let shared_col = if rel.from == shared_node.id {
+            start_col
+        } else {
+            end_col
+        };
+        let cte_name = format!("_ef_{rel_idx}_{shared_node_id}");
+        if !q.ctes.iter().any(|cte| cte.name == cte_name) {
+            let mut select = vec![SelectExpr::new(
+                Expr::col(&rel_alias, shared_col),
+                DEFAULT_PRIMARY_KEY,
+            )];
+            let cte_has_path = rel.namespace_local && shared_node.has_traversal_path;
+            if cte_has_path {
+                select.push(SelectExpr::new(
+                    path_id_tuple_expr(&rel_alias, shared_col),
+                    ID_PATH_CTE_COLUMN,
+                ));
+            }
+
+            q.ctes.push(Cte::new(
+                &cte_name,
+                Query {
+                    select,
+                    from: TableRef::scan(EDGE_TABLE, &rel_alias),
+                    where_clause: Expr::and_all(frontier_where.iter().cloned()),
+                    ..Default::default()
+                },
+            ));
+        }
+
+        let (prev_start, prev_end) = prev_rel.direction.edge_columns();
+        let prev_col = if prev_rel.from == shared_node.id {
+            prev_start
+        } else {
+            prev_end
+        };
+        let prev_alias = format!("e{}", rel_idx - 1);
+        let filter =
+            if rel.namespace_local && prev_rel.namespace_local && shared_node.has_traversal_path {
+                Expr::InSubquery {
+                    expr: Box::new(path_id_tuple_expr(&prev_alias, prev_col)),
+                    cte_name: cte_name.clone(),
+                    column: ID_PATH_CTE_COLUMN.to_string(),
+                }
+            } else {
+                Expr::InSubquery {
+                    expr: Box::new(Expr::col(&prev_alias, prev_col)),
+                    cte_name: cte_name.clone(),
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                }
+            };
+        extra_filters.push(filter);
+    }
+
+    if !extra_filters.is_empty() {
+        q.where_clause = Expr::and_all(
+            std::iter::once(q.where_clause.take()).chain(extra_filters.into_iter().map(Some)),
+        );
+    }
+}
+
+fn relationship_type_filter(rel: &crate::input::InputRelationship, alias: &str) -> Option<Expr> {
+    if rel.types.len() == 1 {
+        Some(Expr::eq(
+            Expr::col(alias, "relationship_kind"),
+            Expr::string(rel.types[0].clone()),
+        ))
+    } else {
+        Expr::col_in(
+            alias,
+            "relationship_kind",
+            ChType::String,
+            rel.types
+                .iter()
+                .map(|kind| serde_json::Value::String(kind.clone()))
+                .collect(),
+        )
+    }
+}
+
+fn make_frontier_filter(
+    cte_name: &str,
+    alias: &str,
+    edge_col: &str,
+    node: Option<&InputNode>,
+    namespace_local: bool,
+) -> Option<Expr> {
+    if namespace_local && node.is_some_and(|node| node.has_traversal_path) {
+        Some(Expr::InSubquery {
+            expr: Box::new(path_id_tuple_expr(alias, edge_col)),
+            cte_name: cte_name.to_string(),
+            column: ID_PATH_CTE_COLUMN.to_string(),
+        })
+    } else {
+        Some(Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, edge_col)),
+            cte_name: cte_name.to_string(),
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        })
     }
 }
 
@@ -1600,6 +2069,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                namespace_local: false,
             }],
             aggregations: vec![count_agg("mr", Some("p"))],
             ..Default::default()
@@ -1668,6 +2138,7 @@ mod tests {
                     max_hops: 1,
                     direction: Direction::Outgoing,
                     filters: Default::default(),
+                    namespace_local: false,
                 },
                 InputRelationship {
                     types: vec!["MANAGES".into()],
@@ -1677,6 +2148,7 @@ mod tests {
                     max_hops: 1,
                     direction: Direction::Outgoing,
                     filters: Default::default(),
+                    namespace_local: false,
                 },
             ],
             aggregations: vec![count_agg("mr", Some("p"))],
@@ -1733,6 +2205,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                namespace_local: false,
             }],
             aggregations: vec![count_agg("mr", Some("p"))],
             ..Default::default()
@@ -1753,5 +2226,417 @@ mod tests {
             q.ctes.is_empty(),
             "no CTE should be created without target filters"
         );
+    }
+
+    #[test]
+    fn cascade_cte_uses_id_and_path_tuple_for_namespace_local_edges() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        fn has_id_path_subquery(expr: &Expr) -> bool {
+            match expr {
+                Expr::InSubquery {
+                    expr,
+                    column,
+                    cte_name,
+                } => {
+                    column == ID_PATH_CTE_COLUMN
+                        && cte_name == "_nf_mr"
+                        && matches!(&**expr, Expr::FuncCall { name, .. } if name == "tuple")
+                }
+                Expr::BinaryOp { left, right, .. } => {
+                    has_id_path_subquery(left) || has_id_path_subquery(right)
+                }
+                Expr::UnaryOp { expr, .. } => has_id_path_subquery(expr),
+                Expr::FuncCall { args, .. } => args.iter().any(has_id_path_subquery),
+                Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } => false,
+            }
+        }
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    node_ids: vec![1],
+                    has_traversal_path: true,
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Pipeline".into()),
+                    table: Some("gl_pipeline".into()),
+                    has_traversal_path: true,
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["TRIGGERED".into()],
+                from: "mr".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+                namespace_local: true,
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            ctes: vec![Cte::new(
+                "_nf_mr",
+                Query {
+                    select: vec![
+                        SelectExpr::new(Expr::col("mr", DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
+                        SelectExpr::new(
+                            Expr::func(
+                                "tuple",
+                                vec![
+                                    Expr::col("mr", DEFAULT_PRIMARY_KEY),
+                                    Expr::col("mr", TRAVERSAL_PATH_COLUMN),
+                                ],
+                            ),
+                            ID_PATH_CTE_COLUMN,
+                        ),
+                    ],
+                    from: TableRef::scan("gl_merge_request", "mr"),
+                    ..Default::default()
+                },
+            )],
+            from: TableRef::scan("gl_edge", "e0"),
+            ..Default::default()
+        };
+
+        cascade_node_filter_ctes(&mut q, &input);
+
+        let cascade = q
+            .ctes
+            .iter()
+            .find(|cte| cte.name == "_cascade_p")
+            .expect("expected cascade CTE for pipeline");
+        assert!(
+            cascade
+                .query
+                .select
+                .iter()
+                .any(|expr| expr.alias.as_deref() == Some(ID_PATH_CTE_COLUMN)),
+            "expected cascade CTE to keep (id, traversal_path)"
+        );
+        assert!(
+            cascade
+                .query
+                .where_clause
+                .as_ref()
+                .is_some_and(has_id_path_subquery),
+            "expected cascade CTE to filter edges by (id, traversal_path)"
+        );
+    }
+
+    #[test]
+    fn edge_frontier_cte_feeds_shared_node_into_adjacent_edge_scan() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        fn has_frontier_filter(expr: &Expr) -> bool {
+            match expr {
+                Expr::InSubquery {
+                    expr,
+                    column,
+                    cte_name,
+                } => {
+                    column == ID_PATH_CTE_COLUMN
+                        && cte_name == "_ef_1_mr"
+                        && matches!(
+                            &**expr,
+                            Expr::FuncCall { name, args }
+                                if name == "tuple"
+                                    && matches!(
+                                        args.as_slice(),
+                                        [
+                                            Expr::Column { table, column },
+                                            Expr::Column { table: table2, column: column2 }
+                                        ] if table == "e0"
+                                            && column == TRAVERSAL_PATH_COLUMN
+                                            && table2 == "e0"
+                                            && column2 == "target_id"
+                                    )
+                        )
+                }
+                Expr::BinaryOp { left, right, .. } => {
+                    has_frontier_filter(left) || has_frontier_filter(right)
+                }
+                Expr::UnaryOp { expr, .. } => has_frontier_filter(expr),
+                Expr::FuncCall { args, .. } => args.iter().any(has_frontier_filter),
+                Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } => false,
+            }
+        }
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "u".into(),
+                    entity: Some("User".into()),
+                    table: Some("gl_user".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    node_ids: vec![1],
+                    has_traversal_path: true,
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Pipeline".into()),
+                    table: Some("gl_pipeline".into()),
+                    has_traversal_path: true,
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![
+                InputRelationship {
+                    types: vec!["AUTHORED".into()],
+                    from: "u".into(),
+                    to: "mr".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                    namespace_local: true,
+                },
+                InputRelationship {
+                    types: vec!["TRIGGERED".into()],
+                    from: "mr".into(),
+                    to: "p".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                    namespace_local: true,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            ctes: vec![Cte::new(
+                "_nf_mr",
+                Query {
+                    select: vec![
+                        SelectExpr::new(Expr::col("mr", DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
+                        SelectExpr::new(
+                            path_id_tuple_expr("mr", DEFAULT_PRIMARY_KEY),
+                            ID_PATH_CTE_COLUMN,
+                        ),
+                    ],
+                    from: TableRef::scan("gl_merge_request", "mr"),
+                    ..Default::default()
+                },
+            )],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_edge", "e0"),
+                TableRef::scan("gl_edge", "e1"),
+                Expr::and(
+                    Expr::eq(Expr::col("e0", "target_id"), Expr::col("e1", "source_id")),
+                    Expr::eq(
+                        Expr::col("e0", TRAVERSAL_PATH_COLUMN),
+                        Expr::col("e1", TRAVERSAL_PATH_COLUMN),
+                    ),
+                ),
+            ),
+            where_clause: Some(Expr::eq(
+                Expr::col("e0", "relationship_kind"),
+                Expr::string("AUTHORED"),
+            )),
+            ..Default::default()
+        };
+
+        apply_edge_frontier_filters(&mut q, &input);
+
+        assert!(
+            q.ctes.iter().any(|cte| cte.name == "_ef_1_mr"),
+            "expected edge frontier CTE for shared merge request node"
+        );
+        assert!(
+            q.where_clause.as_ref().is_some_and(has_frontier_filter),
+            "expected adjacent edge scan to be filtered by the frontier CTE"
+        );
+    }
+
+    #[test]
+    fn prune_subsumed_frontier_filters_removes_redundant_node_filter() {
+        fn count_cte_refs(expr: &Expr, expected_cte: &str) -> usize {
+            match expr {
+                Expr::InSubquery { cte_name, .. } => usize::from(cte_name == expected_cte),
+                Expr::BinaryOp { left, right, .. } => {
+                    count_cte_refs(left, expected_cte) + count_cte_refs(right, expected_cte)
+                }
+                Expr::UnaryOp { expr, .. } => count_cte_refs(expr, expected_cte),
+                Expr::FuncCall { args, .. } => args
+                    .iter()
+                    .map(|arg| count_cte_refs(arg, expected_cte))
+                    .sum(),
+                Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } => 0,
+            }
+        }
+
+        let target_tuple = path_id_tuple_expr("e0", "target_id");
+        let pipeline_tuple = path_id_tuple_expr("e1", "target_id");
+        let mut q = Query {
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_edge", "e0"),
+                TableRef::scan("gl_edge", "e1"),
+                Expr::and(
+                    Expr::eq(Expr::col("e0", "target_id"), Expr::col("e1", "source_id")),
+                    Expr::eq(
+                        Expr::col("e0", TRAVERSAL_PATH_COLUMN),
+                        Expr::col("e1", TRAVERSAL_PATH_COLUMN),
+                    ),
+                ),
+            ),
+            where_clause: Expr::and_all([
+                Some(Expr::InSubquery {
+                    expr: Box::new(target_tuple.clone()),
+                    cte_name: "_nf_mr".into(),
+                    column: ID_PATH_CTE_COLUMN.into(),
+                }),
+                Some(Expr::InSubquery {
+                    expr: Box::new(pipeline_tuple),
+                    cte_name: "_nf_p".into(),
+                    column: ID_PATH_CTE_COLUMN.into(),
+                }),
+                Some(Expr::InSubquery {
+                    expr: Box::new(target_tuple),
+                    cte_name: "_ef_1_mr".into(),
+                    column: ID_PATH_CTE_COLUMN.into(),
+                }),
+            ]),
+            ..Default::default()
+        };
+
+        prune_subsumed_frontier_filters(&mut q);
+
+        let where_clause = q.where_clause.expect("expected where clause");
+        assert_eq!(count_cte_refs(&where_clause, "_nf_mr"), 0);
+        assert_eq!(count_cte_refs(&where_clause, "_ef_1_mr"), 1);
+        assert_eq!(count_cte_refs(&where_clause, "_nf_p"), 1);
+    }
+
+    #[test]
+    fn query_settings_cap_threads_for_bounded_edge_frontier_traversal() {
+        use crate::input::{Direction, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            relationships: vec![
+                InputRelationship {
+                    types: vec!["AUTHORED".into()],
+                    from: "u".into(),
+                    to: "mr".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                    namespace_local: true,
+                },
+                InputRelationship {
+                    types: vec!["TRIGGERED".into()],
+                    from: "mr".into(),
+                    to: "p".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                    namespace_local: true,
+                },
+            ],
+            limit: 100,
+            ..Default::default()
+        };
+        let mut q = Query {
+            ctes: vec![Cte::new(
+                "_ef_1_mr",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("e1", "source_id"), "id")],
+                    from: TableRef::scan("gl_edge", "e1"),
+                    ..Default::default()
+                },
+            )],
+            from: TableRef::scan("gl_edge", "e0"),
+            limit: Some(100),
+            ..Default::default()
+        };
+
+        apply_query_settings(&mut q, &input);
+
+        assert_eq!(
+            q.set_statements,
+            vec![("max_threads".into(), LIMITED_TRAVERSAL_MAX_THREADS.into())]
+        );
+    }
+
+    #[test]
+    fn query_settings_skip_ordered_traversal() {
+        use crate::input::{Direction, InputOrderBy, InputRelationship, OrderDirection};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            relationships: vec![
+                InputRelationship {
+                    types: vec!["AUTHORED".into()],
+                    from: "u".into(),
+                    to: "mr".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                    namespace_local: true,
+                },
+                InputRelationship {
+                    types: vec!["TRIGGERED".into()],
+                    from: "mr".into(),
+                    to: "p".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                    namespace_local: true,
+                },
+            ],
+            limit: 100,
+            order_by: Some(InputOrderBy {
+                node: "mr".into(),
+                property: "updated_at".into(),
+                direction: OrderDirection::Desc,
+            }),
+            ..Default::default()
+        };
+        let mut q = Query {
+            ctes: vec![Cte::new(
+                "_ef_1_mr",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("e1", "source_id"), "id")],
+                    from: TableRef::scan("gl_edge", "e1"),
+                    ..Default::default()
+                },
+            )],
+            from: TableRef::scan("gl_edge", "e0"),
+            limit: Some(100),
+            order_by: vec![OrderExpr {
+                expr: Expr::col("mr", "updated_at"),
+                desc: true,
+            }],
+            ..Default::default()
+        };
+
+        apply_query_settings(&mut q, &input);
+
+        assert!(q.set_statements.is_empty());
     }
 }

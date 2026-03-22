@@ -176,13 +176,7 @@ impl Cte {
     }
 }
 
-/// Complete SQL query:
-/// ```sql
-/// WITH cte1 AS (...), cte2 AS (...)
-/// SELECT ... FROM ... WHERE ... GROUP BY ... HAVING ... ORDER BY ... LIMIT ...
-/// UNION ALL SELECT ...
-/// SETTINGS key = value
-/// ```
+/// Complete SQL query.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
     pub ctes: Vec<Cte>,
@@ -196,7 +190,7 @@ pub struct Query {
     pub offset: Option<u32>,
     /// Additional queries to UNION ALL with this one (for recursive CTEs).
     pub union_all: Vec<Query>,
-    /// ClickHouse SET statements prepended to the query (for recursive CTEs).
+    /// ClickHouse query settings carried alongside the generated SQL.
     pub set_statements: Vec<(String, String)>,
 }
 

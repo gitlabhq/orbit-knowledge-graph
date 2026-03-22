@@ -91,10 +91,16 @@ impl PipelineStage for ProfilerExecutor {
             .iter()
             .map(|(k, v)| (k.clone(), v.render_http_param()))
             .collect();
+        let extra_settings: Vec<(&str, &str)> = compiled
+            .base
+            .settings
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
 
         let (batches, query_stats) = client
             .profiler()
-            .execute_with_stats(&compiled.base.sql, &http_params, &[])
+            .execute_with_stats(&compiled.base.sql, &http_params, &extra_settings)
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;

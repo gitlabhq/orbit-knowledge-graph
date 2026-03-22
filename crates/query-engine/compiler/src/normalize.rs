@@ -9,7 +9,7 @@
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use ontology::{EnumType, Ontology};
+use ontology::{EnumType, EtlScope, Ontology};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
@@ -54,6 +54,52 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
         .collect()
 }
 
+fn build_namespace_local_relationships(ontology: &Ontology) -> std::collections::HashSet<String> {
+    #[derive(Default)]
+    struct RelationshipState {
+        seen: bool,
+        namespace_local: bool,
+    }
+
+    let mut states: HashMap<String, RelationshipState> = HashMap::new();
+
+    for node in ontology.nodes() {
+        let Some(etl) = &node.etl else {
+            continue;
+        };
+        let is_namespace_local = etl.scope() == EtlScope::Namespaced;
+        for mapping in etl.edges().values() {
+            let state = states.entry(mapping.relationship_kind.clone()).or_default();
+            if state.seen {
+                state.namespace_local &= is_namespace_local;
+            } else {
+                state.seen = true;
+                state.namespace_local = is_namespace_local;
+            }
+        }
+    }
+
+    // Standalone edge ETL can encode namespace semantics that are not tied to a
+    // specific node frontier, so keep those out of the local propagation set.
+    for (relationship_kind, _) in ontology.edge_etl_configs() {
+        let state = states.entry(relationship_kind.to_string()).or_default();
+        state.seen = true;
+        state.namespace_local = false;
+    }
+
+    states
+        .into_iter()
+        .filter_map(|(relationship_kind, state)| {
+            state
+                .seen
+                .then_some((relationship_kind, state.namespace_local))
+        })
+        .filter_map(|(relationship_kind, namespace_local)| {
+            namespace_local.then_some(relationship_kind)
+        })
+        .collect()
+}
+
 /// Normalize validated input.
 ///
 /// Performs the following transformations:
@@ -62,6 +108,7 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
 /// - Expands wildcard column selections ("*") to explicit column lists
 pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     input.entity_auth = build_entity_auth(ontology);
+    let namespace_local_relationships = build_namespace_local_relationships(ontology);
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
@@ -90,6 +137,7 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .as_ref()
             .map(|r| r.id_column.clone())
             .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
+        node.has_traversal_path = node_entity.has_traversal_path;
 
         // Expand wildcard/empty column selections to explicit lists for lowering.
         // Redaction columns (_gkg_*) are added separately by enforce.rs.
@@ -127,6 +175,15 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             };
             filter.value = Some(coerce_value(value, enum_values));
         }
+    }
+
+    for rel in &mut input.relationships {
+        rel.namespace_local = !rel.types.is_empty()
+            && rel.types.iter().all(|kind| kind != "*")
+            && rel
+                .types
+                .iter()
+                .all(|kind| namespace_local_relationships.contains(kind));
     }
     Ok(input)
 }
