@@ -23,6 +23,7 @@ members = [
 
   "crates/health-check",
   "crates/siphon-proto",
+  "crates/gitaly-protos",
   "crates/datalake-generator",
   "crates/gitlab-client",
   "crates/xtask",

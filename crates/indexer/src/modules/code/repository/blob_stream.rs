@@ -2,6 +2,8 @@ use std::pin::Pin;
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
+use gitaly_protos::proto::ListBlobsResponse;
+use gitaly_protos::proto::list_blobs_response::Blob as BlobChunk;
 use prost::Message;
 use tokio_util::codec::{FramedRead, LengthDelimitedCodec};
 use tokio_util::io::StreamReader;
@@ -24,24 +26,6 @@ impl InProgressBlob {
             data: self.data,
         }
     }
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-struct ListBlobsResponse {
-    #[prost(message, repeated, tag = "1")]
-    blobs: Vec<BlobChunk>,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-struct BlobChunk {
-    #[prost(string, tag = "1")]
-    oid: String,
-    #[prost(int64, tag = "2")]
-    size: i64,
-    #[prost(bytes = "vec", tag = "3")]
-    data: Vec<u8>,
-    #[prost(bytes = "vec", tag = "4")]
-    path: Vec<u8>,
 }
 
 const MAX_FRAME_LENGTH: usize = 4 * 1024 * 1024; // 4 MiB

@@ -22,6 +22,7 @@ gkg-utils = { path = "../utils" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
+gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
 moka = { workspace = true }
 ontology = { path = "../ontology" }

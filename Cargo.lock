@@ -2741,6 +2741,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gitaly-protos"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "prost-build",
+ "prost-types",
+ "protoc-bin-vendored",
+ "tonic",
+ "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
+]
+
+[[package]]
 name = "gitlab-client"
 version = "0.1.0"
 dependencies = [
@@ -3365,6 +3379,7 @@ dependencies = [
  "datafusion",
  "flate2",
  "futures",
+ "gitaly-protos",
  "gitlab-client",
  "gkg-utils",
  "internment",
