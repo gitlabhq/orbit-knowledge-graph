@@ -9,6 +9,9 @@ pub enum GitlabClientError {
     #[error("project {0} not found (404)")]
     NotFound(i64),
 
+    #[error("force push detected for project {0}")]
+    ForcePush(i64),
+
     #[error("JWT signing failed: {0}")]
     JwtSigning(String),
 
