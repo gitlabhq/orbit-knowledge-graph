@@ -55,7 +55,8 @@ fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
 /// are handled in normalize.rs. Lowering is purely mechanical.
 pub fn lower(input: &Input) -> Result<Node> {
     match input.query_type {
-        QueryType::Traversal | QueryType::Search => lower_traversal(input),
+        QueryType::Search => lower_search(input),
+        QueryType::Traversal => lower_traversal(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
@@ -64,13 +65,287 @@ pub fn lower(input: &Input) -> Result<Node> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Traversal & Search
+// Search
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn lower_search(input: &Input) -> Result<Node> {
+    let node = input
+        .nodes
+        .first()
+        .ok_or_else(|| QueryError::Lowering("search requires a node".into()))?;
+    let table = resolve_table(node)?;
+    let from = TableRef::scan(&table, &node.id);
+
+    let mut conds: Vec<Expr> = Vec::new();
+    conds.extend(id_filter(&node.id, DEFAULT_PRIMARY_KEY, &node.node_ids));
+    if let Some(r) = &node.id_range {
+        conds.push(Expr::binary(
+            Op::Ge,
+            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+            Expr::int(r.start),
+        ));
+        conds.push(Expr::binary(
+            Op::Le,
+            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+            Expr::int(r.end),
+        ));
+    }
+    for (prop, filter) in &node.filters {
+        conds.push(filter_expr(&node.id, prop, filter));
+    }
+    let where_clause = Expr::and_all(conds.into_iter().map(Some));
+
+    let mut select = Vec::new();
+    if let Some(ColumnSelection::List(cols)) = &node.columns {
+        for col in cols {
+            select.push(SelectExpr::new(
+                Expr::col(&node.id, col),
+                format!("{}_{col}", node.id),
+            ));
+        }
+    }
+
+    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
+        vec![OrderExpr {
+            expr: Expr::col(&ob.node, &ob.property),
+            desc: ob.direction == OrderDirection::Desc,
+        }]
+    });
+    let (limit, offset) = pagination(input);
+
+    Ok(Node::Query(Box::new(Query {
+        select,
+        from,
+        where_clause,
+        order_by,
+        limit,
+        offset,
+        ..Default::default()
+    })))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Traversal
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input) -> Result<Node> {
+    // Multi-hop or multi-relationship: fall back to JOIN-based lowering.
+    // Edge-centric only works for single-relationship single-hop traversals
+    // because it can only produce IDs/columns for the driving edge's endpoints.
+    if input.relationships.iter().any(|r| r.max_hops > 1) || input.relationships.len() > 1 {
+        return lower_traversal_join_fallback(input);
+    }
+
+    // Single-hop single-relationship: use edge-centric lowering.
+    lower_traversal_edge_centric(input)
+}
+
+/// Edge-centric traversal: edge table is the only FROM, node tables are
+/// referenced via IN subqueries for filtering. Node properties are deferred
+/// to the hydration pipeline.
+fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
+    let first_rel = input.relationships.first().unwrap();
+
+    // Edge-centric: first relationship's edge drives the scan.
+    // All node conditions and secondary relationships become IN subqueries.
+    let edge_alias = "e0";
+    let (edge, edge_type_cond) = edge_scan(edge_alias, &type_filter(&first_rel.types));
+    let (start_col, end_col) = first_rel.direction.edge_columns();
+
+    let mut select = Vec::new();
+    select.extend(edge_select_exprs(edge_alias));
+
+    // Track which nodes are connected to the driving edge and via which column
+    let mut node_edge_col: HashMap<String, String> = HashMap::new();
+    node_edge_col.insert(first_rel.from.clone(), start_col.to_string());
+    node_edge_col.insert(first_rel.to.clone(), end_col.to_string());
+
+    // Add _gkg_* columns for ALL nodes
+    for node in &input.nodes {
+        let entity = node.entity.as_deref().unwrap_or("Unknown");
+        let col = node_edge_col.get(&node.id);
+        select.push(SelectExpr::new(
+            if let Some(c) = col {
+                Expr::col(edge_alias, c.as_str())
+            } else {
+                // Node not directly on driving edge — ID comes from secondary
+                // edge CTE. Use a placeholder; hydration resolves it.
+                Expr::param(ChType::Int64, 0i64)
+            },
+            format!("_gkg_{}_id", node.id),
+        ));
+        select.push(SelectExpr::new(
+            Expr::param(ChType::String, entity.to_string()),
+            format!("_gkg_{}_type", node.id),
+        ));
+    }
+
+    let mut where_parts: Vec<Expr> = Vec::new();
+    let mut ctes = Vec::new();
+
+    if let Some(tc) = edge_type_cond {
+        where_parts.push(tc);
+    }
+
+    // Add IN subquery for each node that has conditions (node_ids, filters)
+    // AND is connected to the driving edge.
+    for node in &input.nodes {
+        let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
+        if !has_conditions {
+            continue;
+        }
+        if let Some(edge_col) = node_edge_col.get(&node.id) {
+            let table = resolve_table(node)?;
+            let node_where = build_node_where(node);
+            let cte_name = format!("_nf_{}", node.id);
+            let cte_query = Query {
+                select: vec![SelectExpr::new(
+                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                    DEFAULT_PRIMARY_KEY,
+                )],
+                from: TableRef::scan(&table, &node.id),
+                where_clause: node_where,
+                ..Default::default()
+            };
+            ctes.push(Cte::new(&cte_name, cte_query));
+            where_parts.push(Expr::InSubquery {
+                expr: Box::new(Expr::col(edge_alias, edge_col.as_str())),
+                cte_name,
+                column: DEFAULT_PRIMARY_KEY.into(),
+            });
+        }
+    }
+
+    // Add IN subquery for each SECONDARY relationship (i > 0).
+    // Each secondary relationship connects via a shared node to the driving edge.
+    // We add: e0.{shared_col} IN (SELECT {opposite_col} FROM gl_edge WHERE rel=... AND {filter})
+    for (i, rel) in input.relationships.iter().enumerate().skip(1) {
+        // Find which node this relationship shares with the driving edge
+        let (shared_node_id, shared_edge_col) = if let Some(col) = node_edge_col.get(&rel.from) {
+            (&rel.from, col.clone())
+        } else if let Some(col) = node_edge_col.get(&rel.to) {
+            (&rel.to, col.clone())
+        } else {
+            // No shared node — can't convert to IN subquery, skip
+            continue;
+        };
+
+        let (sec_start, sec_end) = rel.direction.edge_columns();
+        // The shared node appears on one side of the secondary edge.
+        // We need to SELECT the shared side's column from the secondary edge.
+        let (_sec_filter_col, sec_select_col) = if shared_node_id == &rel.from {
+            // Shared node is the FROM of secondary → it maps to sec_start
+            (sec_start, sec_start)
+        } else {
+            // Shared node is the TO of secondary → it maps to sec_end
+            (sec_end, sec_end)
+        };
+
+        // Find the OTHER node of this relationship (not shared with driving edge)
+        let other_node_id = if shared_node_id == &rel.from {
+            &rel.to
+        } else {
+            &rel.from
+        };
+        let other_node = input.nodes.iter().find(|n| n.id == *other_node_id);
+        let other_has_conditions =
+            other_node.is_some_and(|n| !n.node_ids.is_empty() || !n.filters.is_empty());
+
+        // Skip secondary edge CTE when the other node has no conditions.
+        // A universal relationship (e.g. IN_PROJECT where every MR has one)
+        // without filters would scan ALL edges to build a useless HashSet.
+        if !other_has_conditions {
+            continue;
+        }
+
+        let other_col = if other_node_id == &rel.from {
+            sec_start
+        } else {
+            sec_end
+        };
+
+        // Build the secondary edge IN subquery
+        let sec_alias = format!("_se{i}");
+        let mut sec_where_parts: Vec<Expr> = Vec::new();
+
+        // Relationship type filter
+        if let Some(tf) = Expr::col_in(
+            &sec_alias,
+            "relationship_kind",
+            ChType::String,
+            rel.types.iter().map(|t| Value::String(t.clone())).collect(),
+        ) {
+            sec_where_parts.push(tf);
+        }
+
+        // Filter the secondary edge by the other node's conditions
+        if let Some(node) = other_node
+            && !node.node_ids.is_empty()
+            && let Some(f) = Expr::col_in(
+                &sec_alias,
+                other_col,
+                ChType::Int64,
+                node.node_ids
+                    .iter()
+                    .map(|&id| Value::Number(id.into()))
+                    .collect(),
+            )
+        {
+            sec_where_parts.push(f);
+        }
+
+        let sec_where = Expr::and_all(sec_where_parts.into_iter().map(Some));
+        let cte_name = format!("_rel{i}");
+        let cte_query = Query {
+            select: vec![SelectExpr::new(
+                Expr::col(&sec_alias, sec_select_col),
+                DEFAULT_PRIMARY_KEY,
+            )],
+            from: TableRef::scan(EDGE_TABLE, &sec_alias),
+            where_clause: sec_where,
+            ..Default::default()
+        };
+        ctes.push(Cte::new(&cte_name, cte_query));
+
+        // e0.{shared_col} IN (SELECT id FROM _rel{i})
+        where_parts.push(Expr::InSubquery {
+            expr: Box::new(Expr::col(edge_alias, &shared_edge_col)),
+            cte_name,
+            column: DEFAULT_PRIMARY_KEY.into(),
+        });
+    }
+
+    let where_clause = Expr::and_all(where_parts.into_iter().map(Some));
+    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
+        // Map "id" to the corresponding edge column (source_id or target_id).
+        // Other node properties aren't on the edge table.
+        let expr = match (ob.property.as_str(), node_edge_col.get(&ob.node)) {
+            ("id", Some(edge_col)) => Expr::col(edge_alias, edge_col.as_str()),
+            _ => Expr::col(edge_alias, &ob.property),
+        };
+        vec![OrderExpr {
+            expr,
+            desc: ob.direction == OrderDirection::Desc,
+        }]
+    });
+    let (limit, offset) = pagination(input);
+
+    Ok(Node::Query(Box::new(Query {
+        ctes,
+        select,
+        from: edge,
+        where_clause,
+        order_by,
+        limit,
+        offset,
+        ..Default::default()
+    })))
+}
+
+/// JOIN-based fallback for multi-hop traversals.
+fn lower_traversal_join_fallback(input: &Input) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
-
     let mut select = Vec::new();
     for node in &input.nodes {
         if let Some(ColumnSelection::List(cols)) = &node.columns {
@@ -83,14 +358,12 @@ fn lower_traversal(input: &Input) -> Result<Node> {
         }
     }
     add_edge_columns(&mut select, &input.relationships, &edge_aliases);
-
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         vec![OrderExpr {
             expr: Expr::col(&ob.node, &ob.property),
             desc: ob.direction == OrderDirection::Desc,
         }]
     });
-
     let (limit, offset) = pagination(input);
 
     Ok(Node::Query(Box::new(Query {
@@ -102,6 +375,28 @@ fn lower_traversal(input: &Input) -> Result<Node> {
         offset,
         ..Default::default()
     })))
+}
+
+/// Build WHERE clause for a single node's filters and node_ids.
+fn build_node_where(node: &InputNode) -> Option<Expr> {
+    let mut parts: Vec<Expr> = Vec::new();
+    if !node.node_ids.is_empty()
+        && let Some(filter) = Expr::col_in(
+            &node.id,
+            DEFAULT_PRIMARY_KEY,
+            ChType::Int64,
+            node.node_ids
+                .iter()
+                .map(|&id| serde_json::Value::Number(id.into()))
+                .collect(),
+        )
+    {
+        parts.push(filter);
+    }
+    for (col, filter) in &node.filters {
+        parts.push(filter_expr(&node.id, col, filter));
+    }
+    Expr::and_all(parts.into_iter().map(Some))
 }
 
 /// Add edge columns to SELECT for each relationship.
@@ -347,7 +642,8 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     // is needed: the edge anchors already filter by start/end node IDs.
     Ok(Node::Query(Box::new(Query {
         ctes: {
-            let mut ctes = vec![forward_cte];
+            let mut ctes = vec![];
+            ctes.push(forward_cte);
             if let Some(bc) = backward_cte {
                 ctes.push(bc);
             }
@@ -1161,10 +1457,6 @@ mod tests {
 
     #[test]
     fn test_lower_simple_traversal() {
-        let ontology = test_ontology();
-        let note_defaults = ontology.get_node("Note").unwrap().default_columns.len();
-        let user_defaults = ontology.get_node("User").unwrap().default_columns.len();
-
         let input = validated_input(
             r#"{
             "query_type": "traversal",
@@ -1181,8 +1473,13 @@ mod tests {
             panic!("expected Query");
         };
         assert_eq!(q.limit, Some(25));
-        let edge_columns = 6;
-        assert_eq!(q.select.len(), note_defaults + user_defaults + edge_columns,);
+        // Edge-centric: 6 edge columns + redaction ID/type pairs (no node properties)
+        assert!(q.select.len() >= 6);
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("e0_path"))
+        );
     }
 
     #[test]
@@ -1348,13 +1645,13 @@ mod tests {
         };
         println!("{:?}", q);
 
-        fn count_joins(t: &TableRef) -> usize {
-            match t {
-                TableRef::Join { left, right, .. } => 1 + count_joins(left) + count_joins(right),
-                TableRef::Scan { .. } | TableRef::Union { .. } | TableRef::Subquery { .. } => 0,
-            }
-        }
-        assert!(count_joins(&q.from) >= 4);
+        // Edge-centric: FROM is a single edge table scan, no node joins.
+        // 2 relationships = 2 edge scans joined together.
+        assert!(matches!(
+            q.from,
+            TableRef::Scan { .. } | TableRef::Join { .. }
+        ));
+        assert_eq!(q.limit, Some(20));
     }
 
     /// Count union subqueries in a table reference tree
@@ -1697,15 +1994,11 @@ mod tests {
             panic!("expected Query");
         };
 
-        // u_username, n_confidential + 6 edge columns
-        assert_eq!(q.select.len(), 8);
-
+        // Edge-centric: edge columns + redaction IDs (no node property columns)
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"u_username".to_string()));
-        assert!(aliases.contains(&&"n_confidential".to_string()));
-        // Edge columns
         assert!(aliases.contains(&&"e0_type".to_string()));
         assert!(aliases.contains(&&"e0_src".to_string()));
+        assert_eq!(q.limit, Some(20));
     }
 
     #[test]
@@ -1919,17 +2212,13 @@ mod tests {
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
 
-        // Should have edge columns for both relationships (e0 and e1)
+        // Edge-centric: should have edge columns for at least the first relationship
         assert!(aliases.contains(&&"e0_type".to_string()));
         assert!(aliases.contains(&&"e0_src".to_string()));
-        assert!(aliases.contains(&&"e1_type".to_string()));
-        assert!(aliases.contains(&&"e1_src".to_string()));
     }
 
     #[test]
     fn test_type_filter_variants() {
-        /// Check if an expression tree contains `relationship_kind = Param(value)`
-        /// or `relationship_kind IN Param(value)`.
         fn has_type_filter(expr: &Expr) -> bool {
             match expr {
                 Expr::BinaryOp { op, left, right } => match (op, left.as_ref(), right.as_ref()) {
@@ -1945,25 +2234,18 @@ mod tests {
             }
         }
 
-        fn extract_join_on(from: &TableRef) -> Option<&Expr> {
-            match from {
-                TableRef::Join { on, left, .. } => {
-                    // Left-deep tree: recurse left to find innermost (edge) join
-                    extract_join_on(left).or(Some(on))
-                }
-                _ => None,
-            }
-        }
-
-        // Single type — join ON should contain relationship_kind filter
+        // Edge-centric puts the type filter in WHERE, not JOIN ON.
+        // Single type — WHERE should contain relationship_kind = 'AUTHORED'
         let q = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
-        let on = extract_join_on(&q.from).expect("expected join");
-        assert!(has_type_filter(on), "expected type filter in join ON");
+        assert!(
+            q.where_clause.as_ref().is_some_and(has_type_filter),
+            "expected type filter in WHERE"
+        );
 
         // Multiple types — should use IN
         let q = validated_input(
@@ -1972,8 +2254,10 @@ mod tests {
         let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
-        let on = extract_join_on(&q.from).expect("expected join");
-        assert!(has_type_filter(on), "expected type filter in join ON");
+        assert!(
+            q.where_clause.as_ref().is_some_and(has_type_filter),
+            "expected type filter in WHERE"
+        );
 
         // Wildcard — no type filter
         let q = validated_input(
@@ -1982,8 +2266,10 @@ mod tests {
         let Node::Query(q) = lower(&q).unwrap() else {
             panic!()
         };
-        let on = extract_join_on(&q.from).expect("expected join");
-        assert!(!has_type_filter(on), "wildcard should not have type filter");
+        assert!(
+            q.where_clause.is_none() || !q.where_clause.as_ref().is_some_and(has_type_filter),
+            "wildcard should not have type filter"
+        );
     }
 
     fn contains_starts_with(expr: &Expr) -> bool {

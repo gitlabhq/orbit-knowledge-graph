@@ -176,6 +176,16 @@ impl<'a> Validator<'a> {
                 input.relationships.len()
             )));
         }
+        if input.query_type == QueryType::Traversal
+            && !input.nodes.is_empty()
+            && input.relationships.len() != input.nodes.len() - 1
+        {
+            return Err(QueryError::Validation(format!(
+                "traversal requires exactly n-1 relationships for n nodes (got {} nodes, {} relationships)",
+                input.nodes.len(),
+                input.relationships.len()
+            )));
+        }
         if input.aggregations.len() > MAX_AGGS_CAP {
             return Err(QueryError::LimitExceeded(format!(
                 "aggregations count ({}) must not exceed {MAX_AGGS_CAP}",
@@ -871,6 +881,7 @@ mod tests {
 
     #[test]
     fn rejects_unreferenced_traversal_node() {
+        // 3 nodes but 1 relationship: n-1 check fires before the orphan check
         assert_rejects(
             r#"{
                 "query_type": "traversal",
@@ -881,7 +892,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
             }"#,
-            "node \"orphan\" is not referenced",
+            "n-1 relationships",
         );
     }
 
