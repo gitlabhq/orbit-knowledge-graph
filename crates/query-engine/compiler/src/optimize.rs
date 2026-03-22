@@ -841,19 +841,17 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 )
                 .unwrap_or_else(|| Expr::param(ChType::Bool, true))
             };
-            let kind_filter = target
-                .and_then(|n| n.entity.as_ref())
-                .map(|entity| {
-                    let kind_col = if edge_select_col == "source_id" {
-                        "source_kind"
-                    } else {
-                        "target_kind"
-                    };
-                    Expr::eq(
-                        Expr::col(alias, kind_col),
-                        Expr::param(ChType::String, entity.clone()),
-                    )
-                });
+            let kind_filter = target.and_then(|n| n.entity.as_ref()).map(|entity| {
+                let kind_col = if edge_select_col == "source_id" {
+                    "source_kind"
+                } else {
+                    "target_kind"
+                };
+                Expr::eq(
+                    Expr::col(alias, kind_col),
+                    Expr::param(ChType::String, entity.clone()),
+                )
+            });
 
             q.ctes.push(Cte::new(
                 &cascade_name,
@@ -863,11 +861,7 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                         DEFAULT_PRIMARY_KEY,
                     )],
                     from: TableRef::scan(EDGE_TABLE, alias),
-                    where_clause: Expr::and_all([
-                        Some(edge_filter),
-                        Some(rel_filter),
-                        kind_filter,
-                    ]),
+                    where_clause: Expr::and_all([Some(edge_filter), Some(rel_filter), kind_filter]),
                     ..Default::default()
                 },
             ));
