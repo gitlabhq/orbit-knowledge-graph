@@ -159,8 +159,14 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
         select.extend(edge_select_exprs(edge_alias));
         select.push(edge_depth_select_expr(edge_alias));
         select.push(edge_path_nodes_select_expr(edge_alias));
-        node_edge_col.insert(first_rel.from.clone(), (edge_alias.to_string(), from_col.to_string()));
-        node_edge_col.insert(first_rel.to.clone(), (edge_alias.to_string(), to_col.to_string()));
+        node_edge_col.insert(
+            first_rel.from.clone(),
+            (edge_alias.to_string(), from_col.to_string()),
+        );
+        node_edge_col.insert(
+            first_rel.to.clone(),
+            (edge_alias.to_string(), to_col.to_string()),
+        );
     } else {
         edge_alias = "e0";
         let (edge, edge_type_cond) = edge_scan(edge_alias, &type_filter(&first_rel.types));
@@ -169,8 +175,14 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
         if let Some(tc) = edge_type_cond {
             where_parts.push(tc);
         }
-        node_edge_col.insert(first_rel.from.clone(), (edge_alias.to_string(), start_col.to_string()));
-        node_edge_col.insert(first_rel.to.clone(), (edge_alias.to_string(), end_col.to_string()));
+        node_edge_col.insert(
+            first_rel.from.clone(),
+            (edge_alias.to_string(), start_col.to_string()),
+        );
+        node_edge_col.insert(
+            first_rel.to.clone(),
+            (edge_alias.to_string(), end_col.to_string()),
+        );
     }
 
     // JOIN secondary relationships on shared columns
@@ -187,7 +199,11 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
         if rel.max_hops > 1 {
             let alias = format!("hop_e{i}");
             let (from_col, to_col) = rel.direction.union_columns();
-            let sec_shared_col = if shared_node == &rel.from { from_col } else { to_col };
+            let sec_shared_col = if shared_node == &rel.from {
+                from_col
+            } else {
+                to_col
+            };
 
             let join_cond = Expr::eq(
                 Expr::col(&shared_alias, &shared_col),
@@ -199,13 +215,23 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
             select.push(edge_depth_select_expr(&alias));
             select.push(edge_path_nodes_select_expr(&alias));
 
-            let other = if shared_node == &rel.from { &rel.to } else { &rel.from };
+            let other = if shared_node == &rel.from {
+                &rel.to
+            } else {
+                &rel.from
+            };
             let other_col = if other == &rel.from { from_col } else { to_col };
-            node_edge_col.entry(other.clone()).or_insert((alias, other_col.to_string()));
+            node_edge_col
+                .entry(other.clone())
+                .or_insert((alias, other_col.to_string()));
         } else {
             let alias = format!("e{i}");
             let (sec_start, sec_end) = rel.direction.edge_columns();
-            let sec_shared_col = if shared_node == &rel.from { sec_start } else { sec_end };
+            let sec_shared_col = if shared_node == &rel.from {
+                sec_start
+            } else {
+                sec_end
+            };
 
             let mut join_cond = Expr::eq(
                 Expr::col(&shared_alias, &shared_col),
@@ -224,9 +250,19 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
             from = TableRef::join(JoinType::Inner, from, sec_scan, join_cond);
             select.extend(edge_select_exprs(&alias));
 
-            let other = if shared_node == &rel.from { &rel.to } else { &rel.from };
-            let other_col = if other == &rel.from { sec_start } else { sec_end };
-            node_edge_col.entry(other.clone()).or_insert((alias, other_col.to_string()));
+            let other = if shared_node == &rel.from {
+                &rel.to
+            } else {
+                &rel.from
+            };
+            let other_col = if other == &rel.from {
+                sec_start
+            } else {
+                sec_end
+            };
+            node_edge_col
+                .entry(other.clone())
+                .or_insert((alias, other_col.to_string()));
         }
     }
 
