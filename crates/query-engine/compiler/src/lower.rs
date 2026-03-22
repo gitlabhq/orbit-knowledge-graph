@@ -55,7 +55,8 @@ fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
 /// are handled in normalize.rs. Lowering is purely mechanical.
 pub fn lower(input: &Input) -> Result<Node> {
     match input.query_type {
-        QueryType::Traversal | QueryType::Search => lower_traversal(input),
+        QueryType::Search => lower_search(input),
+        QueryType::Traversal => lower_traversal(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
@@ -64,25 +65,35 @@ pub fn lower(input: &Input) -> Result<Node> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Traversal & Search
+// Search
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_traversal(input: &Input) -> Result<Node> {
-    // Use edge-centric lowering when we have relationships — edge is the FROM
-    // table, node conditions are IN subqueries, node properties come from
-    // hydration. This eliminates hash table building for node tables.
-    if !input.relationships.is_empty() {
-        return lower_traversal_edge_centric(input);
-    }
-
-    // Search-only (no relationships): scan the single node table directly.
+fn lower_search(input: &Input) -> Result<Node> {
     let node = input
         .nodes
         .first()
-        .ok_or_else(|| QueryError::Lowering("no nodes in input".into()))?;
+        .ok_or_else(|| QueryError::Lowering("search requires a node".into()))?;
     let table = resolve_table(node)?;
     let from = TableRef::scan(&table, &node.id);
-    let where_clause = build_node_where(node);
+
+    let mut conds: Vec<Expr> = Vec::new();
+    conds.extend(id_filter(&node.id, DEFAULT_PRIMARY_KEY, &node.node_ids));
+    if let Some(r) = &node.id_range {
+        conds.push(Expr::binary(
+            Op::Ge,
+            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+            Expr::int(r.start),
+        ));
+        conds.push(Expr::binary(
+            Op::Le,
+            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+            Expr::int(r.end),
+        ));
+    }
+    for (prop, filter) in &node.filters {
+        conds.push(filter_expr(&node.id, prop, filter));
+    }
+    let where_clause = Expr::and_all(conds.into_iter().map(Some));
 
     let mut select = Vec::new();
     if let Some(ColumnSelection::List(cols)) = &node.columns {
@@ -111,6 +122,14 @@ fn lower_traversal(input: &Input) -> Result<Node> {
         offset,
         ..Default::default()
     })))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Traversal
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn lower_traversal(input: &Input) -> Result<Node> {
+    lower_traversal_edge_centric(input)
 }
 
 /// Edge-centric traversal: edge table is the only FROM, node tables are
