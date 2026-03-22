@@ -472,16 +472,30 @@ fn lower_aggregation_edge_only(
             join_cond = Expr::and(join_cond, tc);
         }
 
-        // Rewrite skipped node references to use the other edge column.
+        // Rewrite skipped node references to use the other edge column,
+        // and add source_kind/target_kind filter so the edge scan only
+        // matches edges for the skipped entity type.
         for skipped in skip {
-            let col = if *skipped == rel.from {
+            let skipped_node = find_node(&input.nodes, skipped)?;
+            let entity = skipped_node
+                .entity
+                .as_deref()
+                .ok_or_else(|| QueryError::Lowering("skipped node has no entity".into()))?;
+            let (id_col, kind_col) = if *skipped == rel.from {
                 let (start, _) = rel.direction.edge_columns();
-                start
+                (start, "source_kind")
             } else {
                 let (_, end) = rel.direction.edge_columns();
-                end
+                (end, "target_kind")
             };
-            rewrite.insert(skipped.clone(), Expr::col(&edge_alias, col));
+            rewrite.insert(skipped.clone(), Expr::col(&edge_alias, id_col));
+            join_cond = Expr::and(
+                join_cond,
+                Expr::eq(
+                    Expr::col(&edge_alias, kind_col),
+                    Expr::param(ChType::String, Value::String(entity.to_string())),
+                ),
+            );
         }
 
         TableRef::join(
@@ -491,20 +505,21 @@ fn lower_aggregation_edge_only(
             join_cond,
         )
     } else {
-        // All nodes skipped — just the edge table.
-        if let Some(tc) = edge_type_cond {
-            // Type cond will be picked up by where clause generation.
-            let _ = tc;
-        }
         for skipped in skip {
-            let col = if *skipped == rel.from {
+            let skipped_node = find_node(&input.nodes, skipped)?;
+            let entity = skipped_node
+                .entity
+                .as_deref()
+                .ok_or_else(|| QueryError::Lowering("skipped node has no entity".into()))?;
+            let (id_col, kind_col) = if *skipped == rel.from {
                 let (start, _) = rel.direction.edge_columns();
-                start
+                (start, "source_kind")
             } else {
                 let (_, end) = rel.direction.edge_columns();
-                end
+                (end, "target_kind")
             };
-            rewrite.insert(skipped.clone(), Expr::col(&edge_alias, col));
+            rewrite.insert(skipped.clone(), Expr::col(&edge_alias, id_col));
+            // kind filter added to WHERE via build_full_where
         }
         edge
     };
