@@ -39,6 +39,7 @@ ignores:
   - "node_modules/**"
   - ".git/**"
   - ".claude/**"
+  - ".opencode/**"
   - ".gitlab/**"
   - "CHANGELOG.md"
   - "LICENSE.md"
