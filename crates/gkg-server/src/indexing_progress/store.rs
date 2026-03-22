@@ -103,21 +103,10 @@ impl IndexingProgressReader {
                     continue;
                 }
 
-                let plan_name = keys
-                    .value(row)
-                    .strip_prefix(&prefix)
-                    .unwrap_or(keys.value(row));
-                let completed = cursors.is_null(row)
-                    || cursors.value(row).is_empty()
-                    || cursors.value(row) == "null";
-                let has_prior_completion = watermarks
-                    .as_ref()
-                    .map(|w| !w.is_null(row) && w.value(row) != 0)
-                    .unwrap_or(false);
-
+                let plan_name = extract_plan_name(keys.value(row), &prefix);
                 let status = CheckpointStatus {
-                    completed,
-                    has_prior_completion,
+                    completed: cursor_is_empty(cursors, row),
+                    has_prior_completion: watermark_is_past_epoch(watermarks, row),
                 };
 
                 if let Some(existing) = statuses.insert(plan_name.to_string(), status) {
@@ -151,6 +140,20 @@ impl IndexingProgressReader {
 
         Ok(extract_count(&batches))
     }
+}
+
+fn extract_plan_name<'a>(key: &'a str, prefix: &str) -> &'a str {
+    key.strip_prefix(prefix).unwrap_or(key)
+}
+
+fn cursor_is_empty(cursors: &StringArray, row: usize) -> bool {
+    cursors.is_null(row) || cursors.value(row).is_empty() || cursors.value(row) == "null"
+}
+
+fn watermark_is_past_epoch(watermarks: Option<&TimestampMicrosecondArray>, row: usize) -> bool {
+    watermarks
+        .map(|w| !w.is_null(row) && w.value(row) != 0)
+        .unwrap_or(false)
 }
 
 fn extract_count(batches: &[RecordBatch]) -> i64 {
