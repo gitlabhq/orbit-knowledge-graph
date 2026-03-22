@@ -48,6 +48,7 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
             if input.query_type == QueryType::PathFinding {
                 apply_path_hop_frontiers(q, input);
             }
+            propagate_limit_to_cascade_ctes(q, input);
         }
     }
 }
@@ -109,6 +110,10 @@ fn choose_sip_root(input: &Input) -> Option<&InputNode> {
         .min_by_key(|n| n.node_ids.len());
 
     if input.query_type == QueryType::Aggregation {
+        // For aggregation, prefer the default node (first_rel.from) when it
+        // has selectivity. Its filters (e.g. state='merged') are included in
+        // the root CTE, producing a tighter cascade than using a pinned node
+        // whose cascade through edges would lose the filter context.
         let default_has_selectivity =
             default_node.is_some_and(|n| !n.node_ids.is_empty() || !n.filters.is_empty());
         if default_has_selectivity {
@@ -1108,6 +1113,36 @@ fn apply_edge_led_reorder(q: &mut Query, input: &Input) {
     }
 }
 
+/// Cascade LIMIT propagation.
+///
+/// When the final query has a LIMIT, propagate a multiplied limit into
+/// cascade CTEs (`_cascade_*`). This caps the ID set size used for IN
+/// subqueries on edge scans, dramatically reducing rows read.
+///
+/// The multiplier accounts for filters that may reduce the cascade set
+/// (e.g. `state = 'merged'` might filter out 50%), ensuring enough IDs
+/// survive filtering to fill the final LIMIT. We use `limit * 5` which
+/// provides a safe margin while still cutting 24K+ ID sets down to hundreds.
+///
+/// This does NOT apply to aggregation queries (which need all matching
+/// rows for correct counts) or when no cascade CTEs exist.
+fn propagate_limit_to_cascade_ctes(q: &mut Query, input: &Input) {
+    if input.query_type == QueryType::Aggregation {
+        return;
+    }
+    let final_limit = match q.limit {
+        Some(l) if l > 0 => l,
+        _ => return,
+    };
+    let cascade_limit = final_limit.saturating_mul(5).max(100);
+
+    for cte in &mut q.ctes {
+        if cte.name.starts_with("_cascade_") && cte.query.limit.is_none() {
+            cte.query.limit = Some(cascade_limit);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1566,6 +1601,94 @@ mod tests {
         assert!(
             q.ctes.is_empty(),
             "no CTE should be created without target filters"
+        );
+    }
+
+    #[test]
+    fn cascade_limit_propagates_to_cascade_ctes() {
+        let input = Input {
+            query_type: QueryType::Traversal,
+            limit: 30,
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            limit: Some(30),
+            ctes: vec![
+                Cte::new(
+                    "_nf_p",
+                    Query {
+                        select: vec![SelectExpr::new(Expr::col("p", "id"), "id")],
+                        from: TableRef::scan("gl_project", "p"),
+                        ..Default::default()
+                    },
+                ),
+                Cte::new(
+                    "_cascade_mr",
+                    Query {
+                        select: vec![SelectExpr::new(Expr::col("_ce", "source_id"), "id")],
+                        from: TableRef::scan("gl_edge", "_ce"),
+                        ..Default::default()
+                    },
+                ),
+                Cte::new(
+                    "_cascade_note",
+                    Query {
+                        select: vec![SelectExpr::new(Expr::col("_ce", "target_id"), "id")],
+                        from: TableRef::scan("gl_edge", "_ce"),
+                        ..Default::default()
+                    },
+                ),
+            ],
+            from: TableRef::scan("gl_edge", "e0"),
+            ..Default::default()
+        };
+
+        propagate_limit_to_cascade_ctes(&mut q, &input);
+
+        assert_eq!(
+            q.ctes[0].query.limit, None,
+            "_nf_ CTE should not get a limit"
+        );
+        assert_eq!(
+            q.ctes[1].query.limit,
+            Some(150),
+            "_cascade_mr should get limit 30*5=150"
+        );
+        assert_eq!(
+            q.ctes[2].query.limit,
+            Some(150),
+            "_cascade_note should get limit 30*5=150"
+        );
+    }
+
+    #[test]
+    fn cascade_limit_skips_aggregation() {
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            limit: 20,
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            limit: Some(20),
+            ctes: vec![Cte::new(
+                "_cascade_mr",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("_ce", "source_id"), "id")],
+                    from: TableRef::scan("gl_edge", "_ce"),
+                    ..Default::default()
+                },
+            )],
+            from: TableRef::scan("gl_edge", "e0"),
+            ..Default::default()
+        };
+
+        propagate_limit_to_cascade_ctes(&mut q, &input);
+
+        assert_eq!(
+            q.ctes[0].query.limit, None,
+            "aggregation cascade should not be limited"
         );
     }
 }
