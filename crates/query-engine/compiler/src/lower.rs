@@ -129,8 +129,6 @@ fn lower_search(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input) -> Result<Node> {
-    let first_rel = input.relationships.first().unwrap();
-
     // Multi-hop or multi-relationship: fall back to JOIN-based lowering.
     // Edge-centric only works for single-relationship single-hop traversals
     // because it can only produce IDs/columns for the driving edge's endpoints.
