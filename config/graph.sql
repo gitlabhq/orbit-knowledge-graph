@@ -259,7 +259,8 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     _deleted Bool DEFAULT false,
     INDEX idx_relationship relationship_kind TYPE set(50) GRANULARITY 2,
     PROJECTION by_source (SELECT * ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)),
-    PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind))
+    PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind)),
+    PROJECTION by_rel (SELECT * ORDER BY (relationship_kind, source_id, target_id, traversal_path, source_kind, target_kind))
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, source_id, relationship_kind)
