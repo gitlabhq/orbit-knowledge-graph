@@ -246,22 +246,6 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
--- Edge table: adjacency-optimized layout.
---
--- PRIMARY KEY (source_id, relationship_kind, target_id) serves as an adjacency
--- index for forward traversal — O(log N) to find all outgoing edges from a node.
--- The by_target projection serves as the reverse adjacency index.
---
--- Sort key order matters: (id, relationship_kind, ...) ensures ClickHouse can use
--- prefix-based primary index pruning for both the base table and projections.
--- DO NOT put source_kind/target_kind before relationship_kind — it breaks prefix
--- matching since queries rarely filter on entity kind.
---
--- Bloom filter indexes on source_id/target_id are intentionally omitted. They
--- compete with projections for ClickHouse's cost optimizer and win despite being
--- less efficient (bloom filters identify scattered granules; projections have
--- contiguous sorted data). Without bloom filters, the optimizer correctly selects
--- the projection.
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     source_id Int64 CODEC(Delta(8), ZSTD(1)),
