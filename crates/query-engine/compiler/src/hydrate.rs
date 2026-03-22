@@ -1,4 +1,5 @@
 use crate::codegen::{HydrationPlan, HydrationTemplate};
+use crate::constants::HYDRATION_NODE_ALIAS;
 use crate::input::{ColumnSelection, Input, QueryType};
 
 /// Build the hydration context for a compiled query.
@@ -42,7 +43,7 @@ fn build_static_templates(input: &Input) -> Vec<HydrationTemplate> {
             let mut query = serde_json::json!({
                 "query_type": "search",
                 "node": {
-                    "id": node.id,
+                    "id": HYDRATION_NODE_ALIAS,
                     "entity": entity,
                 },
                 "limit": 1000
