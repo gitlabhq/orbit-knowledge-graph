@@ -17,16 +17,7 @@ pub fn generate_hydration_plan(input: &Input) -> HydrationPlan {
         QueryType::Aggregation | QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
         QueryType::Search => HydrationPlan::None,
-        QueryType::Traversal => {
-            // Multi-hop falls back to JOIN-based (node columns in SELECT).
-            // Single-hop uses edge-centric (node properties via hydration).
-            let is_join_fallback = input.relationships.iter().any(|r| r.max_hops > 1);
-            if is_join_fallback {
-                HydrationPlan::None
-            } else {
-                HydrationPlan::Static(build_static_templates(input))
-            }
-        }
+        QueryType::Traversal => HydrationPlan::Static(build_static_templates(input)),
     }
 }
 

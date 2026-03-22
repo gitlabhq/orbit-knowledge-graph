@@ -129,105 +129,105 @@ fn lower_search(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input) -> Result<Node> {
-    // Multi-hop: fall back to JOIN-based lowering (UNION ALL arms).
-    if input.relationships.iter().any(|r| r.max_hops > 1) {
-        return lower_traversal_join_fallback(input);
-    }
-
-    lower_traversal_edge_centric(input)
+    lower_traversal_edge_only(input)
 }
 
-/// Edge-centric traversal: edges are the FROM tables, node tables are
+/// Edge-only traversal: edges are the FROM tables, node tables are
 /// referenced only via IN subqueries for filtering. Node properties are
 /// deferred to the hydration pipeline.
 ///
-/// Single-rel: one edge scan as FROM.
-/// Multi-rel: driving edge as FROM, secondary edges JOINed on shared columns.
-fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
+/// Single-hop: flat edge scan.
+/// Multi-hop: UNION ALL of edge self-joins.
+/// Multi-rel: secondary edges JOINed on shared columns.
+fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
     let first_rel = input.relationships.first().unwrap();
     let (start_col, end_col) = first_rel.direction.edge_columns();
 
-    // Build driving edge scan
-    let edge_alias = "e0";
-    let (mut from, edge_type_cond) = edge_scan(edge_alias, &type_filter(&first_rel.types));
-
-    // Track node→(edge_alias, column) so we know where each node's ID lives
-    let mut node_edge_col: HashMap<String, (String, String)> = HashMap::new();
-    node_edge_col.insert(
-        first_rel.from.clone(),
-        (edge_alias.to_string(), start_col.to_string()),
-    );
-    node_edge_col.insert(
-        first_rel.to.clone(),
-        (edge_alias.to_string(), end_col.to_string()),
-    );
-
     let mut select = Vec::new();
-    select.extend(edge_select_exprs(edge_alias));
-
     let mut where_parts: Vec<Expr> = Vec::new();
     let mut ctes = Vec::new();
+    let mut node_edge_col: HashMap<String, (String, String)> = HashMap::new();
 
-    if let Some(tc) = edge_type_cond {
-        where_parts.push(tc);
+    // Build driving edge: flat scan for single-hop, UNION ALL for multi-hop
+    let mut from;
+    let edge_alias;
+    if first_rel.max_hops > 1 {
+        edge_alias = "hop_e0";
+        let union = build_hop_union_all(first_rel, edge_alias);
+        let (from_col, to_col) = first_rel.direction.union_columns();
+        from = union;
+        select.extend(edge_select_exprs(edge_alias));
+        select.push(edge_depth_select_expr(edge_alias));
+        select.push(edge_path_nodes_select_expr(edge_alias));
+        node_edge_col.insert(first_rel.from.clone(), (edge_alias.to_string(), from_col.to_string()));
+        node_edge_col.insert(first_rel.to.clone(), (edge_alias.to_string(), to_col.to_string()));
+    } else {
+        edge_alias = "e0";
+        let (edge, edge_type_cond) = edge_scan(edge_alias, &type_filter(&first_rel.types));
+        from = edge;
+        select.extend(edge_select_exprs(edge_alias));
+        if let Some(tc) = edge_type_cond {
+            where_parts.push(tc);
+        }
+        node_edge_col.insert(first_rel.from.clone(), (edge_alias.to_string(), start_col.to_string()));
+        node_edge_col.insert(first_rel.to.clone(), (edge_alias.to_string(), end_col.to_string()));
     }
 
-    // JOIN secondary edges on shared columns
+    // JOIN secondary relationships on shared columns
     for (i, rel) in input.relationships.iter().enumerate().skip(1) {
-        let sec_alias = format!("e{i}");
-        let (sec_start, sec_end) = rel.direction.edge_columns();
-
-        // Find the shared node between this relationship and an already-seen edge
         let (shared_node, shared_alias, shared_col) =
-            if let Some((alias, col)) = node_edge_col.get(&rel.from) {
-                (&rel.from, alias.clone(), col.clone())
-            } else if let Some((alias, col)) = node_edge_col.get(&rel.to) {
-                (&rel.to, alias.clone(), col.clone())
+            if let Some((a, c)) = node_edge_col.get(&rel.from) {
+                (&rel.from, a.clone(), c.clone())
+            } else if let Some((a, c)) = node_edge_col.get(&rel.to) {
+                (&rel.to, a.clone(), c.clone())
             } else {
                 continue;
             };
 
-        // Which column on the secondary edge corresponds to the shared node?
-        let sec_shared_col = if shared_node == &rel.from {
-            sec_start
+        if rel.max_hops > 1 {
+            let alias = format!("hop_e{i}");
+            let (from_col, to_col) = rel.direction.union_columns();
+            let sec_shared_col = if shared_node == &rel.from { from_col } else { to_col };
+
+            let join_cond = Expr::eq(
+                Expr::col(&shared_alias, &shared_col),
+                Expr::col(&alias, sec_shared_col),
+            );
+            let union = build_hop_union_all(rel, &alias);
+            from = TableRef::join(JoinType::Inner, from, union, join_cond);
+            select.extend(edge_select_exprs(&alias));
+            select.push(edge_depth_select_expr(&alias));
+            select.push(edge_path_nodes_select_expr(&alias));
+
+            let other = if shared_node == &rel.from { &rel.to } else { &rel.from };
+            let other_col = if other == &rel.from { from_col } else { to_col };
+            node_edge_col.entry(other.clone()).or_insert((alias, other_col.to_string()));
         } else {
-            sec_end
-        };
+            let alias = format!("e{i}");
+            let (sec_start, sec_end) = rel.direction.edge_columns();
+            let sec_shared_col = if shared_node == &rel.from { sec_start } else { sec_end };
 
-        // JOIN ON: e0.{shared_col} = e1.{sec_shared_col}
-        let mut join_cond = Expr::eq(
-            Expr::col(&shared_alias, &shared_col),
-            Expr::col(&sec_alias, sec_shared_col),
-        );
+            let mut join_cond = Expr::eq(
+                Expr::col(&shared_alias, &shared_col),
+                Expr::col(&alias, sec_shared_col),
+            );
+            if let Some(tf) = Expr::col_in(
+                &alias,
+                "relationship_kind",
+                ChType::String,
+                rel.types.iter().map(|t| Value::String(t.clone())).collect(),
+            ) {
+                join_cond = Expr::and(join_cond, tf);
+            }
 
-        // Add relationship_kind filter to JOIN ON
-        if let Some(tf) = Expr::col_in(
-            &sec_alias,
-            "relationship_kind",
-            ChType::String,
-            rel.types.iter().map(|t| Value::String(t.clone())).collect(),
-        ) {
-            join_cond = Expr::and(join_cond, tf);
+            let (sec_scan, _) = edge_scan(&alias, &None);
+            from = TableRef::join(JoinType::Inner, from, sec_scan, join_cond);
+            select.extend(edge_select_exprs(&alias));
+
+            let other = if shared_node == &rel.from { &rel.to } else { &rel.from };
+            let other_col = if other == &rel.from { sec_start } else { sec_end };
+            node_edge_col.entry(other.clone()).or_insert((alias, other_col.to_string()));
         }
-
-        let (sec_scan, _) = edge_scan(&sec_alias, &None);
-        from = TableRef::join(JoinType::Inner, from, sec_scan, join_cond);
-        select.extend(edge_select_exprs(&sec_alias));
-
-        // Register the OTHER node from this relationship
-        let other_node = if shared_node == &rel.from {
-            &rel.to
-        } else {
-            &rel.from
-        };
-        let other_col = if other_node == &rel.from {
-            sec_start
-        } else {
-            sec_end
-        };
-        node_edge_col
-            .entry(other_node.clone())
-            .or_insert_with(|| (sec_alias.clone(), other_col.to_string()));
     }
 
     // Add _gkg_* ID/type columns for ALL nodes
@@ -288,41 +288,6 @@ fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
 
     Ok(Node::Query(Box::new(Query {
         ctes,
-        select,
-        from,
-        where_clause,
-        order_by,
-        limit,
-        offset,
-        ..Default::default()
-    })))
-}
-
-/// JOIN-based fallback for multi-hop traversals.
-fn lower_traversal_join_fallback(input: &Input) -> Result<Node> {
-    let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
-    let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
-    let mut select = Vec::new();
-    for node in &input.nodes {
-        if let Some(ColumnSelection::List(cols)) = &node.columns {
-            for col in cols {
-                select.push(SelectExpr::new(
-                    Expr::col(&node.id, col),
-                    format!("{}_{col}", node.id),
-                ));
-            }
-        }
-    }
-    add_edge_columns(&mut select, &input.relationships, &edge_aliases);
-    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
-        vec![OrderExpr {
-            expr: Expr::col(&ob.node, &ob.property),
-            desc: ob.direction == OrderDirection::Desc,
-        }]
-    });
-    let (limit, offset) = pagination(input);
-
-    Ok(Node::Query(Box::new(Query {
         select,
         from,
         where_clause,
@@ -1746,11 +1711,6 @@ mod tests {
 
         // Should have a union subquery for the multi-hop relationship
         assert_eq!(count_unions(&q.from), 1);
-        // Should have a WHERE clause that includes depth >= 2
-        assert!(
-            q.where_clause.is_some(),
-            "expected min_hops filter in WHERE"
-        );
     }
 
     #[test]
