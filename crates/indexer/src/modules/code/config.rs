@@ -13,6 +13,7 @@ pub mod subjects {
 
 /// ClickHouse table names for code graph entities, derived from the ontology.
 pub struct CodeTableNames {
+    pub branch: String,
     pub directory: String,
     pub file: String,
     pub definition: String,
@@ -23,6 +24,7 @@ pub struct CodeTableNames {
 impl CodeTableNames {
     pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
         Ok(Self {
+            branch: ontology.table_name("Branch")?.to_owned(),
             directory: ontology.table_name("Directory")?.to_owned(),
             file: ontology.table_name("File")?.to_owned(),
             definition: ontology.table_name("Definition")?.to_owned(),
@@ -31,6 +33,9 @@ impl CodeTableNames {
         })
     }
 
+    /// Tables that follow the standard code node schema (with `branch` column).
+    /// Used by the stale data cleaner. `gl_branch` is excluded because it uses
+    /// a different schema and its single row is always overwritten in place.
     pub fn node_tables(&self) -> Vec<&str> {
         vec![
             &self.directory,

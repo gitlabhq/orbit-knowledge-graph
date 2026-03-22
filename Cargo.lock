@@ -3390,6 +3390,7 @@ dependencies = [
  "parser-core",
  "prost",
  "prost-types",
+ "rustc-hash",
  "serde",
  "serde_json",
  "sha2",

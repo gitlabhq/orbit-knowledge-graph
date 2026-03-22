@@ -1,9 +1,10 @@
-use arrow::array::StringArray;
+use arrow::array::{BooleanArray, Int64Array, StringArray};
 use gkg_utils::arrow::ArrowUtils;
 use indexer::handler::Handler;
 use indexer::modules::code::CodeIndexingTaskHandler;
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
+use integration_testkit::assert_edge_count_for_traversal_path;
 
 use super::helpers::*;
 
@@ -40,6 +41,11 @@ async fn indexes_repository() {
     assert!(result.is_ok(), "handler failed: {:?}", result);
 
     assert_code_indexed(&clickhouse, project_id).await;
+    assert_branch_indexed(&clickhouse, project_id, "main", "/test").await;
+
+    // Nested files should not have direct Branch --CONTAINS--> File edges
+    assert_edge_count_for_traversal_path(&clickhouse, "CONTAINS", "Branch", "File", "/test", 0)
+        .await;
 }
 
 #[tokio::test]
@@ -340,4 +346,59 @@ async fn assert_no_active_definitions(
         active.is_empty(),
         "definitions in '{file_path}' should not be active (soft-deleted), but found: {active:?}"
     );
+}
+
+async fn assert_branch_indexed(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    expected_name: &str,
+    expected_traversal_path: &str,
+) {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT name, is_default, traversal_path, project_id \
+             FROM gl_branch FINAL \
+             WHERE project_id = {project_id} AND _deleted = false"
+        ))
+        .await;
+
+    let batch = result
+        .first()
+        .expect("gl_branch should have rows after indexing");
+    assert_eq!(batch.num_rows(), 1, "expected exactly one branch row");
+
+    let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
+    assert_eq!(names.value(0), expected_name);
+
+    let is_default = ArrowUtils::get_column_by_name::<BooleanArray>(batch, "is_default")
+        .expect("is_default column");
+    assert!(is_default.value(0), "branch should be marked as default");
+
+    let traversal_paths = ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path")
+        .expect("traversal_path column");
+    assert_eq!(traversal_paths.value(0), expected_traversal_path);
+
+    let project_ids = ArrowUtils::get_column_by_name::<Int64Array>(batch, "project_id")
+        .expect("project_id column");
+    assert_eq!(project_ids.value(0), project_id);
+
+    assert_edge_count_for_traversal_path(
+        clickhouse,
+        "IN_PROJECT",
+        "Branch",
+        "Project",
+        expected_traversal_path,
+        1,
+    )
+    .await;
+
+    assert_edge_count_for_traversal_path(
+        clickhouse,
+        "CONTAINS",
+        "Branch",
+        "Directory",
+        expected_traversal_path,
+        1,
+    )
+    .await;
 }
