@@ -190,6 +190,7 @@ async fn namespace_with_all_completed_returns_completed(ctx: &TestContext) {
     let code = response.code_indexing.expect("should have code_indexing");
     assert_eq!(code.total_projects, 1, "one project under 1/101/");
     assert_eq!(code.indexed_projects, 1);
+    assert!(!code.items.is_empty(), "code_indexing should have items");
 }
 
 async fn unknown_namespace_returns_not_found(ctx: &TestContext) {

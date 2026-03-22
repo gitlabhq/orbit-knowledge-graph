@@ -139,6 +139,7 @@ struct IndexingSnapshot {
 
 impl IndexingSnapshot {
     fn overall_status(&self, sdlc_plan_names: &HashSet<String>) -> OverallStatus {
+        // Neither pipeline has started: no SDLC checkpoints exist and no code projects indexed.
         if self.sdlc_statuses.is_empty() && self.code.indexed_projects == 0 {
             return OverallStatus::Queued;
         }

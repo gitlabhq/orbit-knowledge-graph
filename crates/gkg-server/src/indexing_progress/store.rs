@@ -146,6 +146,7 @@ fn extract_plan_name<'a>(key: &'a str, prefix: &str) -> &'a str {
     key.strip_prefix(prefix).unwrap_or(key)
 }
 
+/// The indexer writes the JSON-serialized string `"null"` when a cursor has been fully consumed.
 fn cursor_is_empty(cursors: &StringArray, row: usize) -> bool {
     cursors.is_null(row) || cursors.value(row).is_empty() || cursors.value(row) == "null"
 }

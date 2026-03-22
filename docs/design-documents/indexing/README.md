@@ -10,6 +10,10 @@ This document outlines the general architecture, shared patterns, and components
 - [SDLC Indexing Architecture](sdlc_indexing.md)
 - [Namespace Deletion](namespace_deletion.md)
 
+### Indexing progress monitoring
+
+The `GetNamespaceIndexingProgress` gRPC endpoint exposes per-namespace indexing status by reading checkpoint tables written by both pipelines. It reports an overall status (`queued`, `indexing`, `re_indexing`, `completed`) and per-entity breakdowns for SDLC and code indexing. See `crates/gkg-server/src/indexing_progress/` for the implementation.
+
 ## Architecture Goals
 
 The indexing architecture achieves the following:

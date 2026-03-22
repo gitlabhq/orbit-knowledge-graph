@@ -33,6 +33,8 @@ service KnowledgeGraphService {
   rpc ExecuteQuery(stream ExecuteQueryMessage) returns (stream ExecuteQueryMessage);
   rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
+  rpc GetGraphStats(GetGraphStatsRequest) returns (GetGraphStatsResponse);
+  rpc GetNamespaceIndexingProgress(GetNamespaceIndexingProgressRequest) returns (GetNamespaceIndexingProgressResponse);
 }
 ```
 
@@ -42,6 +44,8 @@ service KnowledgeGraphService {
 | `ExecuteQuery` | Bidi streaming | Execute a graph query with mid-stream redaction exchange |
 | `GetGraphSchema` | Unary | Return the graph schema with optional node expansion |
 | `GetClusterHealth` | Unary | Return cluster health for the Orbit dashboard |
+| `GetGraphStats` | Unary | Return entity counts per domain scoped by traversal path |
+| `GetNamespaceIndexingProgress` | Unary | Return per-entity indexing progress for a namespace |
 
 ### The bidirectional streaming redaction exchange
 
