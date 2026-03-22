@@ -138,6 +138,10 @@ description = "Publish gitlab-gkg-proto gem to RubyGems.org"
 run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_knowledge_graph_secret 2>/dev/null || cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p gkg-server'
 description = "Start the GKG server (webserver mode)"
 
+[tasks."server:dispatch"]
+run = './scripts/run-dispatcher.sh'
+description = "Start the GKG server (dispatch-indexing mode)"
+
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
