@@ -455,18 +455,15 @@ SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_clean
 
 CREATE TABLE IF NOT EXISTS gl_branch (
     id Int64 CODEC(Delta(8), ZSTD(1)),
-    project_id Int64 CODEC(ZSTD(1)),
-    name String DEFAULT '' CODEC(ZSTD(1)),
-    protected Nullable(Bool),
-    is_default Nullable(Bool),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    name String CODEC(ZSTD(1)),
+    is_default Bool DEFAULT true,
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
-    INDEX idx_protected protected TYPE minmax GRANULARITY 1,
-    INDEX idx_is_default is_default TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, project_id, id)
 SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
 -- Code indexing tables

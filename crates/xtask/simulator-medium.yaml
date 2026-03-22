@@ -91,10 +91,6 @@ clickhouse:
       - { name: idx_deleted_file, table: gl_merge_request_diff_file, expression: deleted_file, type: minmax, granularity: 1 }
       - { name: idx_binary, table: gl_merge_request_diff_file, expression: binary, type: minmax, granularity: 1 }
 
-      # gl_branch
-      - { name: idx_protected, table: gl_branch, expression: protected, type: minmax, granularity: 1 }
-      - { name: idx_is_default, table: gl_branch, expression: is_default, type: minmax, granularity: 1 }
-
       # gl_security_scan
       - { name: idx_latest, table: gl_security_scan, expression: latest, type: minmax, granularity: 1 }
 

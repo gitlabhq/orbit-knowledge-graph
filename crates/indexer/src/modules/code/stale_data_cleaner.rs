@@ -9,7 +9,13 @@ use tracing::debug;
 use super::config::CodeTableNames;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 
-const CODE_EDGE_SOURCE_KINDS: &[&str] = &["Directory", "File", "Definition", "ImportedSymbol"];
+const CODE_EDGE_SOURCE_KINDS: &[&str] = &[
+    "Branch",
+    "Directory",
+    "File",
+    "Definition",
+    "ImportedSymbol",
+];
 
 #[async_trait]
 pub trait StaleDataCleaner: Send + Sync {

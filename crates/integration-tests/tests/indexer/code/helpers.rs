@@ -343,6 +343,17 @@ pub fn handler_context(clickhouse: &TestContext) -> HandlerContext {
 }
 
 pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
+    let branches = clickhouse
+        .query(&format!(
+            "SELECT name FROM gl_branch FINAL \
+             WHERE project_id = {project_id} AND _deleted = false"
+        ))
+        .await;
+    assert!(
+        branches.first().is_some_and(|b| b.num_rows() > 0),
+        "no branch indexed"
+    );
+
     let files = clickhouse
         .query(&format!(
             "SELECT path FROM gl_file WHERE project_id = {project_id}"

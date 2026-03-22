@@ -227,6 +227,8 @@ impl CodeIndexingPipeline {
             .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
             .record_error_stage(&self.metrics, "arrow_conversion")?;
 
+        self.write_batch(ctx, &self.table_names.branch, &converted.branch)
+            .await?;
         self.write_batch(ctx, &self.table_names.directory, &converted.directories)
             .await?;
         self.write_batch(ctx, &self.table_names.file, &converted.files)
