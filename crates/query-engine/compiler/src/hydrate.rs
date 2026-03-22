@@ -17,15 +17,7 @@ pub fn generate_hydration_plan(input: &Input) -> HydrationPlan {
         QueryType::Aggregation | QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => HydrationPlan::Dynamic,
         QueryType::Search => HydrationPlan::None,
-        QueryType::Traversal => {
-            let is_edge_centric = input.relationships.len() == 1
-                && input.relationships.iter().all(|r| r.max_hops == 1);
-            if is_edge_centric {
-                HydrationPlan::Static(build_static_templates(input))
-            } else {
-                HydrationPlan::None
-            }
-        }
+        QueryType::Traversal => HydrationPlan::Static(build_static_templates(input)),
     }
 }
 
