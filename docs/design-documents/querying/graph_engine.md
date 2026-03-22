@@ -30,7 +30,7 @@ The storage model aims to replicate the CSR (Compressed Sparse Row) adjacency li
 
 The unified edge table uses an adjacency-optimized primary key:
 
-```
+```sql
 PRIMARY KEY (source_id, relationship_kind, target_id)
 ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)
 PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, target_kind, source_id, traversal_path))
