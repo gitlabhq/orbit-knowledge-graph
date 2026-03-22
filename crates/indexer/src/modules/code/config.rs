@@ -33,9 +33,6 @@ impl CodeTableNames {
         })
     }
 
-    /// Tables that follow the standard code node schema (with `branch` column).
-    /// Used by the stale data cleaner. `gl_branch` is excluded because it uses
-    /// a different schema and its single row is always overwritten in place.
     pub fn node_tables(&self) -> Vec<&str> {
         vec![
             &self.directory,
