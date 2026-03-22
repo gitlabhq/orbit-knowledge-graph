@@ -151,15 +151,20 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         None => return,
     };
 
-    if input.lowering.skipped_node_joins.contains(&root_node.id) {
-        return;
-    }
-
     let has_cursor = input.cursor.is_some();
     let has_filters = !root_node.filters.is_empty();
     let has_node_ids = !root_node.node_ids.is_empty();
     let has_id_range = root_node.id_range.is_some();
     let has_explicit_selectivity = has_cursor || has_filters || has_node_ids || has_id_range;
+
+    // When the root node's table was eliminated from the FROM (edge-only
+    // aggregation), SIP is only worthwhile if the node has explicit selectivity
+    // (filters/node_ids). A traversal_path-only SIP on a large table (e.g. 8M
+    // jobs) scans more rows than it saves. For small tables the source_kind
+    // filter on the edge already narrows sufficiently.
+    if input.lowering.skipped_node_joins.contains(&root_node.id) && !has_explicit_selectivity {
+        return;
+    }
 
     // Apply SIP when root node has explicit filters OR when its table will
     // get a security filter (startsWith on traversal_path). Tables in
