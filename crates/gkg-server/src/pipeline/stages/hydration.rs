@@ -5,10 +5,9 @@ use std::time::Instant;
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
-use futures::future::try_join_all;
 use query_engine::compiler::{
     ColumnSelection, DynamicColumnMode, HydrationPlan, HydrationTemplate, Input, InputNode,
-    QueryType, compile, compile_input,
+    QueryType, compile_input,
 };
 
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
@@ -23,7 +22,7 @@ use query_engine::shared::{
 };
 
 use query_engine::compiler::constants::{
-    GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
+    HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
 };
 
 type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
@@ -43,32 +42,56 @@ impl HydrationStage {
         templates: &[HydrationTemplate],
         query_result: &QueryResult,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let futures: Vec<_> = templates
-            .iter()
-            .filter_map(|template| {
-                let ids = Self::collect_static_ids(query_result, template);
-                if ids.is_empty() {
-                    return None;
-                }
-                let query_json = template.with_ids(&ids);
-                Some(Self::compile_and_fetch(
-                    ctx,
-                    &template.entity_type,
-                    query_json,
-                ))
-            })
-            .collect();
+        let base_input = &ctx.compiled()?.input;
 
-        let results = try_join_all(futures).await?;
-        let mut merged = HashMap::new();
-        let mut debug_queries = Vec::new();
-        let mut executions = Vec::new();
-        for (props, debug, execution) in results {
-            merged.extend(props);
-            debug_queries.push(debug);
-            executions.push(execution);
+        let mut nodes = Vec::new();
+        let mut total_ids: usize = 0;
+
+        for template in templates {
+            let ids = Self::collect_static_ids(query_result, template);
+            if ids.is_empty() {
+                continue;
+            }
+
+            let node = ctx
+                .ontology
+                .get_node(&template.entity_type)
+                .ok_or_else(|| {
+                    PipelineError::Execution(format!(
+                        "entity type not found in ontology: {}",
+                        template.entity_type
+                    ))
+                })?;
+
+            // Use columns from the original input node (user-specified) rather
+            // than ontology defaults, so explicit column requests like
+            // ["username", "user_type"] are preserved.
+            let columns = base_input
+                .nodes
+                .iter()
+                .find(|n| n.id == template.node_alias)
+                .and_then(|n| match &n.columns {
+                    Some(ColumnSelection::List(cols)) => Some(cols.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| node.default_columns.clone());
+
+            if columns.is_empty() {
+                continue;
+            }
+
+            total_ids += ids.len();
+            nodes.push(InputNode {
+                id: HYDRATION_NODE_ALIAS.to_string(),
+                entity: Some(template.entity_type.clone()),
+                table: Some(node.destination_table.clone()),
+                columns: Some(ColumnSelection::List(columns)),
+                node_ids: ids,
+                ..InputNode::default()
+            });
         }
-        Ok((merged, debug_queries, executions))
+
+        Self::execute_hydration(ctx, nodes, total_ids).await
     }
 
     /// Consolidated dynamic hydration: builds an `Input` with one node per entity
@@ -78,12 +101,6 @@ impl HydrationStage {
         ctx: &QueryPipelineContext,
         refs: &HashMap<String, Vec<i64>>,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let client = Self::client(ctx)?;
-        let profiling = ctx
-            .server_extensions
-            .get::<ProfilingConfig>()
-            .cloned()
-            .unwrap_or_default();
         let base_input = &ctx.compiled()?.input;
 
         let mut nodes = Vec::new();
@@ -131,9 +148,26 @@ impl HydrationStage {
             });
         }
 
+        Self::execute_hydration(ctx, nodes, total_ids).await
+    }
+
+    /// Compile a `QueryType::Hydration` input and execute the single UNION ALL
+    /// query against ClickHouse. Shared by both static and dynamic hydration.
+    async fn execute_hydration(
+        ctx: &QueryPipelineContext,
+        nodes: Vec<InputNode>,
+        total_ids: usize,
+    ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
         if nodes.is_empty() {
             return Ok((HashMap::new(), Vec::new(), Vec::new()));
         }
+
+        let client = Self::client(ctx)?;
+        let profiling = ctx
+            .server_extensions
+            .get::<ProfilingConfig>()
+            .cloned()
+            .unwrap_or_default();
 
         let hydration_input = Input {
             query_type: QueryType::Hydration,
@@ -287,103 +321,6 @@ impl HydrationStage {
         Ok(result)
     }
 
-    async fn compile_and_fetch(
-        ctx: &QueryPipelineContext,
-        entity_type: &str,
-        query_json: String,
-    ) -> Result<(PropertyMap, DebugQuery, QueryExecution), PipelineError> {
-        let client = Self::client(ctx)?;
-        let profiling = ctx
-            .server_extensions
-            .get::<ProfilingConfig>()
-            .cloned()
-            .unwrap_or_default();
-        let compiled = compile(&query_json, &ctx.ontology, ctx.security_context()?)
-            .map_err(|e| PipelineError::Compile(e.to_string()))?;
-
-        let rendered_sql = compiled.base.render();
-        let debug = DebugQuery {
-            sql: compiled.base.sql.clone(),
-            rendered: rendered_sql.clone(),
-        };
-        let label = format!("hydration:{entity_type}");
-
-        let (batches, execution) = if profiling.enabled {
-            let http_params: Vec<(String, String)> = compiled
-                .base
-                .params
-                .iter()
-                .map(|(k, v)| (k.clone(), v.render_http_param()))
-                .collect();
-
-            let t = std::time::Instant::now();
-            let (batches, query_stats) = client
-                .profiler()
-                .execute_with_stats(&compiled.base.sql, &http_params, &[])
-                .await
-                .map_err(|e| PipelineError::Execution(e.to_string()))?;
-            let elapsed = t.elapsed();
-
-            let mut execution = QueryExecution {
-                label,
-                rendered_sql,
-                query_id: query_stats.query_id.clone(),
-                elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-                stats: QueryExecutionStats {
-                    read_rows: query_stats.read_rows,
-                    read_bytes: query_stats.read_bytes,
-                    result_rows: query_stats.result_rows,
-                    result_bytes: query_stats.result_bytes,
-                    elapsed_ns: query_stats.elapsed_ns,
-                    memory_usage: query_stats.memory_usage,
-                },
-                explain_plan: None,
-                explain_pipeline: None,
-                query_log: None,
-                processors: None,
-            };
-
-            if profiling.explain {
-                execution.explain_plan = client.profiler().explain_plan(&debug.rendered).await.ok();
-            }
-
-            (batches, execution)
-        } else {
-            let t = std::time::Instant::now();
-            let mut query = client.query(&compiled.base.sql);
-            for (key, param) in &compiled.base.params {
-                query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-            }
-            let batches = query
-                .fetch_arrow()
-                .await
-                .map_err(|e| PipelineError::Execution(e.to_string()))?;
-            let elapsed = t.elapsed();
-            let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
-
-            let execution = QueryExecution {
-                label,
-                rendered_sql,
-                query_id: String::new(),
-                elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-                stats: QueryExecutionStats {
-                    result_rows,
-                    elapsed_ns: elapsed.as_nanos() as u64,
-                    ..Default::default()
-                },
-                explain_plan: None,
-                explain_pipeline: None,
-                query_log: None,
-                processors: None,
-            };
-
-            (batches, execution)
-        };
-
-        let props = Self::parse_property_batches(entity_type, &batches)?;
-        Ok((props, debug, execution))
-    }
-
     fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
         let id_column = redaction_id_column(&template.node_alias);
         let mut ids: Vec<i64> = result
@@ -445,39 +382,6 @@ impl HydrationStage {
                 }
             }
         }
-    }
-
-    fn parse_property_batches(
-        entity_type: &str,
-        batches: &[RecordBatch],
-    ) -> Result<PropertyMap, PipelineError> {
-        let mut result = HashMap::new();
-        let id_column = redaction_id_column(HYDRATION_NODE_ALIAS);
-        let alias_prefix = format!("{HYDRATION_NODE_ALIAS}_");
-
-        for batch in batches {
-            for row in 0..batch.num_rows() {
-                let Some(id) = ArrowUtils::get_column::<Int64Type>(batch, &id_column, row) else {
-                    continue;
-                };
-
-                let props: HashMap<String, ColumnValue> = ArrowUtils::extract_row(batch, row)
-                    .into_iter()
-                    .filter(|(name, _)| !name.starts_with(GKG_COLUMN_PREFIX))
-                    .map(|(name, value)| {
-                        let clean = name
-                            .strip_prefix(&alias_prefix)
-                            .unwrap_or(&name)
-                            .to_string();
-                        (clean, value)
-                    })
-                    .collect();
-
-                result.insert((entity_type.to_string(), id), props);
-            }
-        }
-
-        Ok(result)
     }
 }
 
