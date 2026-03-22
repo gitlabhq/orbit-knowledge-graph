@@ -767,109 +767,126 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
 /// This pass finds `_nf_*` CTEs and adds edge-based intersection conditions
 /// when a connected node has a narrower CTE (fewer IDs, typically node_ids).
 fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
-    // Find which nodes have _nf_* CTEs and which have node_ids (most selective)
-    let pinned: HashSet<&str> = input
+    // Track which nodes have been narrowed (have a usable CTE as cascade source).
+    // Start with pinned nodes, then propagate through relationships.
+    let mut narrowed: HashSet<String> = input
         .nodes
         .iter()
         .filter(|n| !n.node_ids.is_empty())
-        .map(|n| n.id.as_str())
+        .map(|n| n.id.clone())
         .collect();
 
-    if pinned.is_empty() {
+    if narrowed.is_empty() {
         return;
     }
 
-    // For each relationship, if one side is pinned and the other has a _nf CTE,
-    // narrow the CTE by intersecting with the edge.
-    for rel in &input.relationships {
-        let (start_col, end_col) = rel.direction.edge_columns();
+    // Iterate until no more cascades are possible. Each pass may narrow new
+    // nodes, enabling further cascades in the next pass.
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for rel in &input.relationships {
+            let (start_col, end_col) = rel.direction.edge_columns();
 
-        // pinned → unpinned: narrow the unpinned side's CTE
-        let (narrow_from, narrow_to, edge_filter_col, edge_select_col) =
-            if pinned.contains(rel.from.as_str()) && !pinned.contains(rel.to.as_str()) {
-                (&rel.from, &rel.to, start_col, end_col)
-            } else if pinned.contains(rel.to.as_str()) && !pinned.contains(rel.from.as_str()) {
-                (&rel.to, &rel.from, end_col, start_col)
+            // narrowed → not-yet-narrowed
+            let (source_id, target_id, edge_filter_col, edge_select_col) =
+                if narrowed.contains(&rel.from) && !narrowed.contains(&rel.to) {
+                    (&rel.from, &rel.to, start_col, end_col)
+                } else if narrowed.contains(&rel.to) && !narrowed.contains(&rel.from) {
+                    (&rel.to, &rel.from, end_col, start_col)
+                } else {
+                    continue;
+                };
+
+            // Source CTE: either _nf_{source} or _cascade_{source} from a previous pass
+            let source_cte = if q.ctes.iter().any(|c| c.name == format!("_nf_{source_id}")) {
+                format!("_nf_{source_id}")
+            } else if q
+                .ctes
+                .iter()
+                .any(|c| c.name == format!("_cascade_{source_id}"))
+            {
+                format!("_cascade_{source_id}")
             } else {
                 continue;
             };
 
-        let source_cte = format!("_nf_{narrow_from}");
-        let target_cte = format!("_nf_{narrow_to}");
+            let cascade_name = format!("_cascade_{target_id}");
+            if q.ctes.iter().any(|c| c.name == cascade_name) {
+                continue; // already cascaded
+            }
 
-        // Check both CTEs exist
-        let source_exists = q.ctes.iter().any(|c| c.name == source_cte);
-        let target_exists = q.ctes.iter().any(|c| c.name == target_cte);
-        if !source_exists || !target_exists {
-            continue;
-        }
+            let target = input.nodes.iter().find(|n| n.id == *target_id);
+            let alias = "_ce";
 
-        // Add intersection: target_node.id IN (SELECT edge.{select_col} FROM gl_edge
-        //   WHERE edge.{filter_col} IN (SELECT id FROM _nf_{source}) AND kind = ...)
-        let target = input.nodes.iter().find(|n| n.id == *narrow_to);
-        let alias = "_ce";
-
-        let edge_filter = Expr::InSubquery {
-            expr: Box::new(Expr::col(alias, edge_filter_col)),
-            cte_name: source_cte,
-            column: DEFAULT_PRIMARY_KEY.to_string(),
-        };
-        let rel_filter = if rel.types.len() == 1 {
-            Expr::eq(
-                Expr::col(alias, "relationship_kind"),
-                Expr::param(ChType::String, rel.types[0].clone()),
-            )
-        } else {
-            Expr::col_in(
-                alias,
-                "relationship_kind",
-                ChType::String,
-                rel.types
-                    .iter()
-                    .map(|t| serde_json::Value::String(t.clone()))
-                    .collect(),
-            )
-            .unwrap_or_else(|| Expr::param(ChType::Bool, true))
-        };
-        let kind_filter = target
-            .and_then(|n| n.entity.as_ref())
-            .map(|entity| {
-                let kind_col = if edge_select_col == "source_id" {
-                    "source_kind"
-                } else {
-                    "target_kind"
-                };
+            let edge_filter = Expr::InSubquery {
+                expr: Box::new(Expr::col(alias, edge_filter_col)),
+                cte_name: source_cte,
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            };
+            let rel_filter = if rel.types.len() == 1 {
                 Expr::eq(
-                    Expr::col(alias, kind_col),
-                    Expr::param(ChType::String, entity.clone()),
+                    Expr::col(alias, "relationship_kind"),
+                    Expr::param(ChType::String, rel.types[0].clone()),
                 )
-            });
+            } else {
+                Expr::col_in(
+                    alias,
+                    "relationship_kind",
+                    ChType::String,
+                    rel.types
+                        .iter()
+                        .map(|t| serde_json::Value::String(t.clone()))
+                        .collect(),
+                )
+                .unwrap_or_else(|| Expr::param(ChType::Bool, true))
+            };
+            let kind_filter = target
+                .and_then(|n| n.entity.as_ref())
+                .map(|entity| {
+                    let kind_col = if edge_select_col == "source_id" {
+                        "source_kind"
+                    } else {
+                        "target_kind"
+                    };
+                    Expr::eq(
+                        Expr::col(alias, kind_col),
+                        Expr::param(ChType::String, entity.clone()),
+                    )
+                });
 
-        let cascade_filter = Expr::InSubquery {
-            expr: Box::new(Expr::col(narrow_to.as_str(), DEFAULT_PRIMARY_KEY)),
-            cte_name: format!("_cascade_{narrow_to}"),
-            column: DEFAULT_PRIMARY_KEY.to_string(),
-        };
+            q.ctes.push(Cte::new(
+                &cascade_name,
+                Query {
+                    select: vec![SelectExpr::new(
+                        Expr::col(alias, edge_select_col),
+                        DEFAULT_PRIMARY_KEY,
+                    )],
+                    from: TableRef::scan(EDGE_TABLE, alias),
+                    where_clause: Expr::and_all([
+                        Some(edge_filter),
+                        Some(rel_filter),
+                        kind_filter,
+                    ]),
+                    ..Default::default()
+                },
+            ));
 
-        // Create the cascade CTE
-        let cascade_cte = Cte::new(
-            &format!("_cascade_{narrow_to}"),
-            Query {
-                select: vec![SelectExpr::new(
-                    Expr::col(alias, edge_select_col),
-                    DEFAULT_PRIMARY_KEY,
-                )],
-                from: TableRef::scan(EDGE_TABLE, alias),
-                where_clause: Expr::and_all([Some(edge_filter), Some(rel_filter), kind_filter]),
-                ..Default::default()
-            },
-        );
-        q.ctes.push(cascade_cte);
+            // If target has a _nf CTE, inject the cascade into it.
+            // Otherwise the cascade CTE is available for the next hop.
+            let target_nf = format!("_nf_{target_id}");
+            if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_nf) {
+                let filter = Expr::InSubquery {
+                    expr: Box::new(Expr::col(target_id.as_str(), DEFAULT_PRIMARY_KEY)),
+                    cte_name: cascade_name,
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                };
+                cte.query.where_clause =
+                    Expr::and_all([cte.query.where_clause.take(), Some(filter)]);
+            }
 
-        // Inject into the target _nf CTE's WHERE: AND id IN (SELECT id FROM _cascade_*)
-        if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_cte) {
-            cte.query.where_clause =
-                Expr::and_all([cte.query.where_clause.take(), Some(cascade_filter)]);
+            narrowed.insert(target_id.clone());
+            changed = true;
         }
     }
 }
