@@ -551,3 +551,46 @@ CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+-- Dictionaries for small dimension tables.
+--
+-- These enable O(1) property lookups via dictGet() without JOINing the
+-- source table. Used by the `direct` join algorithm and for aggregation
+-- GROUP BY column enrichment. Only tables with bounded cardinality
+-- (< ~10M rows at production scale) are dictionary-viable.
+--
+-- Memory at production scale (100x current):
+--   gl_project: ~5 MB    gl_group: ~5 MB    gl_label: ~11 MB
+--
+-- The HASHED layout loads the full table into a hash map keyed by `id`.
+-- LIFETIME controls refresh interval (auto-reload on source changes).
+
+CREATE DICTIONARY IF NOT EXISTS project_dict (
+    id Int64,
+    name String DEFAULT '',
+    full_path String DEFAULT '',
+    traversal_path String DEFAULT ''
+) PRIMARY KEY id
+SOURCE(CLICKHOUSE(TABLE 'gl_project'))
+LAYOUT(HASHED())
+LIFETIME(MIN 60 MAX 120);
+
+CREATE DICTIONARY IF NOT EXISTS group_dict (
+    id Int64,
+    name String DEFAULT '',
+    full_path String DEFAULT '',
+    traversal_path String DEFAULT ''
+) PRIMARY KEY id
+SOURCE(CLICKHOUSE(TABLE 'gl_group'))
+LAYOUT(HASHED())
+LIFETIME(MIN 60 MAX 120);
+
+CREATE DICTIONARY IF NOT EXISTS label_dict (
+    id Int64,
+    title String DEFAULT '',
+    color String DEFAULT '',
+    traversal_path String DEFAULT ''
+) PRIMARY KEY id
+SOURCE(CLICKHOUSE(TABLE 'gl_label'))
+LAYOUT(HASHED())
+LIFETIME(MIN 60 MAX 120);

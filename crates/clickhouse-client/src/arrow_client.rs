@@ -43,7 +43,8 @@ impl ArrowClickHouseClient {
             .with_option("join_algorithm", "hash")
             .with_option("query_plan_join_swap_table", "true")
             .with_option("use_query_condition_cache", "true")
-            .with_option("join_use_nulls", "0");
+            .with_option("join_use_nulls", "0")
+            .with_option("max_bytes_in_join", "5000000000");
 
         if let Some(password) = password {
             client = client.with_password(password);
