@@ -185,6 +185,177 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
     resp.assert_node_absent("User", 3);
 }
 
+/// Cross-namespace: User 2 is MEMBER_OF group 100 (ns `1/100/`) but authored
+/// MR 2002 in ns `1/101/1001/`. When scoped to `1/101/`, User 2 must appear
+/// as the MR author even though their membership edge is in a different namespace.
+pub(super) async fn cross_namespace_user_authors_mr_in_different_group(ctx: &TestContext) {
+    let ctx_101 = SecurityContext::new(1, vec!["1/101/".into()]).unwrap();
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+        ctx_101,
+    )
+    .await;
+
+    resp.assert_node_count(2);
+
+    // User 2 (bob) authored MR 2002 in ns 1/101/1001/ — must be visible
+    resp.assert_node("User", 2, |n| n.prop_str("username") == Some("bob"));
+    resp.assert_node("MergeRequest", 2002, |n| {
+        n.prop_str("title") == Some("Refactor C")
+    });
+    resp.assert_edge_exists("User", 2, "MergeRequest", 2002, "AUTHORED");
+
+    // User 1's AUTHORED edges are in ns 1/100/1000/ — must NOT appear
+    resp.assert_node_absent("User", 1);
+    resp.assert_node_absent("MergeRequest", 2000);
+    resp.assert_node_absent("MergeRequest", 2001);
+
+    resp.assert_referential_integrity();
+}
+
+/// Cross-namespace: Group 100 (ns `1/100/`) CONTAINS subgroup 200 (edge ns
+/// `1/100/200/`) and subgroup 200 CONTAINS subgroup 300 (edge ns
+/// `1/100/200/300/`). All containment edges must be visible when scoped to
+/// the parent namespace `1/100/`.
+pub(super) async fn cross_namespace_group_containment_across_depth(ctx: &TestContext) {
+    let ctx_100 = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "child", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "g", "to": "child"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+        ctx_100,
+    )
+    .await;
+
+    resp.assert_node_count(3);
+
+    // Group 100 contains Group 200 (edge ns 1/100/200/)
+    resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");
+    // Group 200 contains Group 300 (edge ns 1/100/200/300/)
+    resp.assert_edge_exists("Group", 200, "Group", 300, "CONTAINS");
+
+    resp.assert_referential_integrity();
+}
+
+/// Cross-namespace isolation: scoped to `1/101/` should NOT see edges from
+/// `1/100/` or `1/102/`. User 1's AUTHORED MRs in `1/100/1000/` and
+/// User 3's MR in `1/102/1004/` must be invisible.
+pub(super) async fn cross_namespace_isolation_no_leakage(ctx: &TestContext) {
+    let ctx_101 = SecurityContext::new(1, vec!["1/101/".into()]).unwrap();
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 50
+        }"#,
+        &allow_all(),
+        ctx_101,
+    )
+    .await;
+
+    resp.assert_node_count(2);
+
+    // Only MR 2002 is in ns 1/101/ — authored by User 2
+    resp.assert_node_ids("MergeRequest", &[2002]);
+    resp.assert_edge_set("AUTHORED", &[(2, 2002)]);
+
+    // MRs from other namespaces must not leak
+    resp.assert_node_absent("MergeRequest", 2000); // ns 1/100/1000/
+    resp.assert_node_absent("MergeRequest", 2001); // ns 1/100/1000/
+    resp.assert_node_absent("MergeRequest", 2003); // ns 1/102/1004/
+
+    resp.assert_referential_integrity();
+}
+
+/// Cross-namespace: narrow scope `1/100/1000/` sees AUTHORED edges in that
+/// project's namespace. The source User has no traversal_path filter — they
+/// come from any namespace. Only edges with matching traversal_path appear.
+pub(super) async fn cross_namespace_narrow_scope_returns_all_authors(ctx: &TestContext) {
+    let ctx_project = SecurityContext::new(1, vec!["1/100/1000/".into()]).unwrap();
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+        ctx_project,
+    )
+    .await;
+
+    resp.assert_node_count(3);
+
+    // Both MRs 2000 and 2001 are in 1/100/1000/, authored by User 1
+    resp.assert_node_ids("MergeRequest", &[2000, 2001]);
+    resp.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
+    resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001)]);
+
+    // User 2's MR 2002 is in 1/101/ — must not appear
+    resp.assert_node_absent("MergeRequest", 2002);
+
+    resp.assert_referential_integrity();
+}
+
+/// Cross-namespace aggregation: scoped to `1/100/`, count projects per group.
+/// Group 100 CONTAINS projects 1000 and 1002 via edges in `1/100/` subtree.
+/// Projects in `1/101/` and `1/102/` must not appear.
+pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext) {
+    let ctx_100 = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project"},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "p", "group_by": "g", "alias": "project_count"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+        ctx_100,
+    )
+    .await;
+
+    // Group 100 CONTAINS projects 1000 (edge ns 1/100/1000/) and 1002
+    // (edge ns 1/100/1002/) — both in the 1/100/ subtree
+    resp.assert_node_count(1);
+    resp.assert_node("Group", 100, |n| n.prop_i64("project_count") == Some(2));
+
+    // Groups 101 and 102 have CONTAINS edges outside 1/100/ — must not appear
+    resp.assert_node_absent("Group", 101);
+    resp.assert_node_absent("Group", 102);
+}
+
 pub(super) async fn empty_result_has_valid_schema(ctx: &TestContext) {
     let resp = run_query(
         ctx,
