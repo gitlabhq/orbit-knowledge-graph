@@ -129,56 +129,41 @@ fn lower_search(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input) -> Result<Node> {
-    // Multi-hop or multi-relationship: fall back to JOIN-based lowering.
-    // Edge-centric only works for single-relationship single-hop traversals
-    // because it can only produce IDs/columns for the driving edge's endpoints.
-    if input.relationships.iter().any(|r| r.max_hops > 1) || input.relationships.len() > 1 {
+    // Multi-hop: fall back to JOIN-based lowering (UNION ALL arms).
+    if input.relationships.iter().any(|r| r.max_hops > 1) {
         return lower_traversal_join_fallback(input);
     }
 
-    // Single-hop single-relationship: use edge-centric lowering.
     lower_traversal_edge_centric(input)
 }
 
-/// Edge-centric traversal: edge table is the only FROM, node tables are
-/// referenced via IN subqueries for filtering. Node properties are deferred
-/// to the hydration pipeline.
+/// Edge-centric traversal: edges are the FROM tables, node tables are
+/// referenced only via IN subqueries for filtering. Node properties are
+/// deferred to the hydration pipeline.
+///
+/// Single-rel: one edge scan as FROM.
+/// Multi-rel: driving edge as FROM, secondary edges JOINed on shared columns.
 fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
     let first_rel = input.relationships.first().unwrap();
-
-    // Edge-centric: first relationship's edge drives the scan.
-    // All node conditions and secondary relationships become IN subqueries.
-    let edge_alias = "e0";
-    let (edge, edge_type_cond) = edge_scan(edge_alias, &type_filter(&first_rel.types));
     let (start_col, end_col) = first_rel.direction.edge_columns();
+
+    // Build driving edge scan
+    let edge_alias = "e0";
+    let (mut from, edge_type_cond) = edge_scan(edge_alias, &type_filter(&first_rel.types));
+
+    // Track node→(edge_alias, column) so we know where each node's ID lives
+    let mut node_edge_col: HashMap<String, (String, String)> = HashMap::new();
+    node_edge_col.insert(
+        first_rel.from.clone(),
+        (edge_alias.to_string(), start_col.to_string()),
+    );
+    node_edge_col.insert(
+        first_rel.to.clone(),
+        (edge_alias.to_string(), end_col.to_string()),
+    );
 
     let mut select = Vec::new();
     select.extend(edge_select_exprs(edge_alias));
-
-    // Track which nodes are connected to the driving edge and via which column
-    let mut node_edge_col: HashMap<String, String> = HashMap::new();
-    node_edge_col.insert(first_rel.from.clone(), start_col.to_string());
-    node_edge_col.insert(first_rel.to.clone(), end_col.to_string());
-
-    // Add _gkg_* columns for ALL nodes
-    for node in &input.nodes {
-        let entity = node.entity.as_deref().unwrap_or("Unknown");
-        let col = node_edge_col.get(&node.id);
-        select.push(SelectExpr::new(
-            if let Some(c) = col {
-                Expr::col(edge_alias, c.as_str())
-            } else {
-                // Node not directly on driving edge — ID comes from secondary
-                // edge CTE. Use a placeholder; hydration resolves it.
-                Expr::param(ChType::Int64, 0i64)
-            },
-            format!("_gkg_{}_id", node.id),
-        ));
-        select.push(SelectExpr::new(
-            Expr::param(ChType::String, entity.to_string()),
-            format!("_gkg_{}_type", node.id),
-        ));
-    }
 
     let mut where_parts: Vec<Expr> = Vec::new();
     let mut ctes = Vec::new();
@@ -187,14 +172,86 @@ fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
         where_parts.push(tc);
     }
 
-    // Add IN subquery for each node that has conditions (node_ids, filters)
-    // AND is connected to the driving edge.
+    // JOIN secondary edges on shared columns
+    for (i, rel) in input.relationships.iter().enumerate().skip(1) {
+        let sec_alias = format!("e{i}");
+        let (sec_start, sec_end) = rel.direction.edge_columns();
+
+        // Find the shared node between this relationship and an already-seen edge
+        let (shared_node, shared_alias, shared_col) =
+            if let Some((alias, col)) = node_edge_col.get(&rel.from) {
+                (&rel.from, alias.clone(), col.clone())
+            } else if let Some((alias, col)) = node_edge_col.get(&rel.to) {
+                (&rel.to, alias.clone(), col.clone())
+            } else {
+                continue;
+            };
+
+        // Which column on the secondary edge corresponds to the shared node?
+        let sec_shared_col = if shared_node == &rel.from {
+            sec_start
+        } else {
+            sec_end
+        };
+
+        // JOIN ON: e0.{shared_col} = e1.{sec_shared_col}
+        let mut join_cond = Expr::eq(
+            Expr::col(&shared_alias, &shared_col),
+            Expr::col(&sec_alias, sec_shared_col),
+        );
+
+        // Add relationship_kind filter to JOIN ON
+        if let Some(tf) = Expr::col_in(
+            &sec_alias,
+            "relationship_kind",
+            ChType::String,
+            rel.types.iter().map(|t| Value::String(t.clone())).collect(),
+        ) {
+            join_cond = Expr::and(join_cond, tf);
+        }
+
+        let (sec_scan, _) = edge_scan(&sec_alias, &None);
+        from = TableRef::join(JoinType::Inner, from, sec_scan, join_cond);
+        select.extend(edge_select_exprs(&sec_alias));
+
+        // Register the OTHER node from this relationship
+        let other_node = if shared_node == &rel.from {
+            &rel.to
+        } else {
+            &rel.from
+        };
+        let other_col = if other_node == &rel.from {
+            sec_start
+        } else {
+            sec_end
+        };
+        node_edge_col
+            .entry(other_node.clone())
+            .or_insert_with(|| (sec_alias.clone(), other_col.to_string()));
+    }
+
+    // Add _gkg_* ID/type columns for ALL nodes
+    for node in &input.nodes {
+        let entity = node.entity.as_deref().unwrap_or("Unknown");
+        let id_expr = if let Some((alias, col)) = node_edge_col.get(&node.id) {
+            Expr::col(alias, col.as_str())
+        } else {
+            Expr::param(ChType::Int64, 0i64)
+        };
+        select.push(SelectExpr::new(id_expr, format!("_gkg_{}_id", node.id)));
+        select.push(SelectExpr::new(
+            Expr::param(ChType::String, entity.to_string()),
+            format!("_gkg_{}_type", node.id),
+        ));
+    }
+
+    // Add IN subquery for each node that has conditions
     for node in &input.nodes {
         let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
         if !has_conditions {
             continue;
         }
-        if let Some(edge_col) = node_edge_col.get(&node.id) {
+        if let Some((alias, edge_col)) = node_edge_col.get(&node.id) {
             let table = resolve_table(node)?;
             let node_where = build_node_where(node);
             let cte_name = format!("_nf_{}", node.id);
@@ -209,118 +266,17 @@ fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
             };
             ctes.push(Cte::new(&cte_name, cte_query));
             where_parts.push(Expr::InSubquery {
-                expr: Box::new(Expr::col(edge_alias, edge_col.as_str())),
+                expr: Box::new(Expr::col(alias, edge_col.as_str())),
                 cte_name,
                 column: DEFAULT_PRIMARY_KEY.into(),
             });
         }
     }
 
-    // Add IN subquery for each SECONDARY relationship (i > 0).
-    // Each secondary relationship connects via a shared node to the driving edge.
-    // We add: e0.{shared_col} IN (SELECT {opposite_col} FROM gl_edge WHERE rel=... AND {filter})
-    for (i, rel) in input.relationships.iter().enumerate().skip(1) {
-        // Find which node this relationship shares with the driving edge
-        let (shared_node_id, shared_edge_col) = if let Some(col) = node_edge_col.get(&rel.from) {
-            (&rel.from, col.clone())
-        } else if let Some(col) = node_edge_col.get(&rel.to) {
-            (&rel.to, col.clone())
-        } else {
-            // No shared node — can't convert to IN subquery, skip
-            continue;
-        };
-
-        let (sec_start, sec_end) = rel.direction.edge_columns();
-        // The shared node appears on one side of the secondary edge.
-        // We need to SELECT the shared side's column from the secondary edge.
-        let (_sec_filter_col, sec_select_col) = if shared_node_id == &rel.from {
-            // Shared node is the FROM of secondary → it maps to sec_start
-            (sec_start, sec_start)
-        } else {
-            // Shared node is the TO of secondary → it maps to sec_end
-            (sec_end, sec_end)
-        };
-
-        // Find the OTHER node of this relationship (not shared with driving edge)
-        let other_node_id = if shared_node_id == &rel.from {
-            &rel.to
-        } else {
-            &rel.from
-        };
-        let other_node = input.nodes.iter().find(|n| n.id == *other_node_id);
-        let other_has_conditions =
-            other_node.is_some_and(|n| !n.node_ids.is_empty() || !n.filters.is_empty());
-
-        // Skip secondary edge CTE when the other node has no conditions.
-        // A universal relationship (e.g. IN_PROJECT where every MR has one)
-        // without filters would scan ALL edges to build a useless HashSet.
-        if !other_has_conditions {
-            continue;
-        }
-
-        let other_col = if other_node_id == &rel.from {
-            sec_start
-        } else {
-            sec_end
-        };
-
-        // Build the secondary edge IN subquery
-        let sec_alias = format!("_se{i}");
-        let mut sec_where_parts: Vec<Expr> = Vec::new();
-
-        // Relationship type filter
-        if let Some(tf) = Expr::col_in(
-            &sec_alias,
-            "relationship_kind",
-            ChType::String,
-            rel.types.iter().map(|t| Value::String(t.clone())).collect(),
-        ) {
-            sec_where_parts.push(tf);
-        }
-
-        // Filter the secondary edge by the other node's conditions
-        if let Some(node) = other_node
-            && !node.node_ids.is_empty()
-            && let Some(f) = Expr::col_in(
-                &sec_alias,
-                other_col,
-                ChType::Int64,
-                node.node_ids
-                    .iter()
-                    .map(|&id| Value::Number(id.into()))
-                    .collect(),
-            )
-        {
-            sec_where_parts.push(f);
-        }
-
-        let sec_where = Expr::and_all(sec_where_parts.into_iter().map(Some));
-        let cte_name = format!("_rel{i}");
-        let cte_query = Query {
-            select: vec![SelectExpr::new(
-                Expr::col(&sec_alias, sec_select_col),
-                DEFAULT_PRIMARY_KEY,
-            )],
-            from: TableRef::scan(EDGE_TABLE, &sec_alias),
-            where_clause: sec_where,
-            ..Default::default()
-        };
-        ctes.push(Cte::new(&cte_name, cte_query));
-
-        // e0.{shared_col} IN (SELECT id FROM _rel{i})
-        where_parts.push(Expr::InSubquery {
-            expr: Box::new(Expr::col(edge_alias, &shared_edge_col)),
-            cte_name,
-            column: DEFAULT_PRIMARY_KEY.into(),
-        });
-    }
-
     let where_clause = Expr::and_all(where_parts.into_iter().map(Some));
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
-        // Map "id" to the corresponding edge column (source_id or target_id).
-        // Other node properties aren't on the edge table.
         let expr = match (ob.property.as_str(), node_edge_col.get(&ob.node)) {
-            ("id", Some(edge_col)) => Expr::col(edge_alias, edge_col.as_str()),
+            ("id", Some((alias, edge_col))) => Expr::col(alias, edge_col.as_str()),
             _ => Expr::col(edge_alias, &ob.property),
         };
         vec![OrderExpr {
@@ -333,7 +289,7 @@ fn lower_traversal_edge_centric(input: &Input) -> Result<Node> {
     Ok(Node::Query(Box::new(Query {
         ctes,
         select,
-        from: edge,
+        from,
         where_clause,
         order_by,
         limit,
