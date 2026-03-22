@@ -105,7 +105,7 @@ pub fn compile(
 /// that bypass JSON schema validation.
 pub fn compile_input(mut input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
     let mut node = lower(&mut input).count_err()?;
-    optimize(&mut node, &input, ctx);
+    optimize(&mut node, &mut input, ctx);
     let result_context = enforce_return(&mut node, &input)?;
     if input.query_type != QueryType::Hydration {
         apply_security_context(&mut node, ctx).count_err()?;

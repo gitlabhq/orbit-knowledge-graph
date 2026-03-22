@@ -75,14 +75,16 @@ pub struct Input {
     /// so dynamic nodes (path/neighbors) can be resolved without re-consulting the ontology.
     #[serde(skip)]
     pub entity_auth: HashMap<String, EntityAuthConfig>,
-    /// Metadata produced by lowering, consumed by downstream passes.
+    /// Metadata accumulated across compiler passes (lowering, optimize, etc.).
     #[serde(skip)]
-    pub lowering: LoweringContext,
+    pub compiler: CompilerMetadata,
 }
 
-/// Metadata produced by lowering, consumed by optimize/enforce/etc.
+/// Metadata accumulated across compiler passes.
+///
+/// Written by lowering and optimize, read by downstream passes (SIP, security, etc.).
 #[derive(Debug, Clone, Default)]
-pub struct LoweringContext {
+pub struct CompilerMetadata {
     /// Node IDs whose tables were eliminated from the FROM clause
     /// (e.g. edge-only aggregation). SIP/cascade should skip these.
     pub skipped_node_joins: HashSet<String>,
@@ -104,7 +106,7 @@ impl Default for Input {
             aggregation_sort: None,
             options: QueryOptions::default(),
             entity_auth: HashMap::new(),
-            lowering: LoweringContext::default(),
+            compiler: CompilerMetadata::default(),
         }
     }
 }

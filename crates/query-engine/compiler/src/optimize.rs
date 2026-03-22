@@ -31,10 +31,13 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_TABLE, TRAVERSAL_PATH_COLUMN
 const ROOT_SIP_CTE: &str = "_root_ids";
 
 /// Apply all optimization passes to the AST.
-pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
+pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
     match node {
         Node::Query(q) => {
             apply_keyset_pagination(q, input, ctx);
+            if input.query_type == QueryType::Aggregation {
+                eliminate_agg_node_joins(q, input);
+            }
             apply_sip_prefilter(q, input, ctx);
             apply_nonroot_node_ids_to_edges(q, input);
             apply_edge_led_reorder(q, input);
@@ -49,6 +52,186 @@ pub fn optimize(node: &mut Node, input: &Input, ctx: &SecurityContext) {
                 apply_path_hop_frontiers(q, input);
             }
         }
+    }
+}
+
+/// Eliminate unnecessary node table joins from aggregation queries.
+///
+/// When an aggregation target node has no filters, no pinned `node_ids`, and
+/// only appears in property-less aggregates (e.g. `COUNT`), its table scan
+/// can be removed from the FROM tree. The aggregate expression is rewritten
+/// to reference the edge column instead (e.g. `COUNT(mr.id)` → `COUNT(e0.source_id)`),
+/// and a `source_kind`/`target_kind` filter is added to ensure only edges for
+/// the correct entity type are counted.
+///
+/// Constraints: single relationship, single-hop only.
+fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
+    if input.relationships.len() != 1 {
+        return;
+    }
+    let rel = &input.relationships[0];
+    if rel.max_hops > 1 {
+        return;
+    }
+
+    let group_by_ids: HashSet<&str> = input
+        .aggregations
+        .iter()
+        .filter_map(|a| a.group_by.as_deref())
+        .collect();
+
+    let mut skippable: HashSet<String> = HashSet::new();
+    for node in &input.nodes {
+        if group_by_ids.contains(node.id.as_str()) {
+            continue;
+        }
+        if !node.node_ids.is_empty() || !node.filters.is_empty() {
+            continue;
+        }
+        let all_simple = input
+            .aggregations
+            .iter()
+            .filter(|a| a.target.as_deref() == Some(&node.id))
+            .all(|a| a.property.is_none());
+        if all_simple {
+            skippable.insert(node.id.clone());
+        }
+    }
+
+    if skippable.is_empty() {
+        return;
+    }
+
+    // Build rewrite map: skipped node alias → (edge alias, edge id column, kind column, entity name).
+    let edge_alias = if rel.max_hops > 1 {
+        format!("hop_e0")
+    } else {
+        "e0".to_string()
+    };
+    let mut rewrites: HashMap<String, (String, &str)> = HashMap::new();
+    let mut kind_filters: Vec<Expr> = Vec::new();
+
+    for node_id in &skippable {
+        let node = match input.nodes.iter().find(|n| &n.id == node_id) {
+            Some(n) => n,
+            None => continue,
+        };
+        let entity = match node.entity.as_deref() {
+            Some(e) => e,
+            None => continue,
+        };
+        let (id_col, kind_col) = if *node_id == rel.from {
+            let (start, _) = rel.direction.edge_columns();
+            (start, "source_kind")
+        } else {
+            let (_, end) = rel.direction.edge_columns();
+            (end, "target_kind")
+        };
+        rewrites.insert(node_id.clone(), (edge_alias.clone(), id_col));
+        kind_filters.push(Expr::eq(
+            Expr::col(&edge_alias, kind_col),
+            Expr::param(ChType::String, entity.to_string()),
+        ));
+    }
+
+    // Remove the node table scan from the FROM tree, collecting any
+    // surviving join conditions (e.g. relationship_kind = 'IN_PROJECT')
+    // that need to move to WHERE.
+    let mut rescued_conditions: Vec<Expr> = Vec::new();
+    for node_id in &skippable {
+        prune_join_for_alias(&mut q.from, node_id, &mut rescued_conditions);
+    }
+
+    // Rewrite aggregate expressions in SELECT: COUNT(node.id) → COUNT(e0.source_id).
+    for sel in &mut q.select {
+        rewrite_agg_column(&mut sel.expr, &rewrites);
+    }
+    for ord in &mut q.order_by {
+        rewrite_agg_column(&mut ord.expr, &rewrites);
+    }
+
+    // Strip WHERE conjuncts that reference the eliminated node aliases,
+    // and add kind filters + rescued join conditions.
+    if let Some(w) = q.where_clause.take() {
+        let conjuncts = flatten_and(w);
+        let mut remaining: Vec<Expr> = conjuncts
+            .into_iter()
+            .filter(|c| {
+                let aliases = collect_column_aliases(c);
+                !aliases.iter().any(|a| skippable.contains(a))
+            })
+            .collect();
+        remaining.extend(kind_filters);
+        remaining.extend(rescued_conditions);
+        q.where_clause = rebuild_and(remaining);
+    } else {
+        kind_filters.extend(rescued_conditions);
+        q.where_clause = rebuild_and(kind_filters);
+    }
+
+    input.compiler.skipped_node_joins = skippable;
+}
+
+/// Remove a Scan node (by alias) from the FROM join tree.
+///
+/// Walks the tree looking for a Join whose left or right child is a Scan
+/// with the target alias. When found, replaces the Join with the other child.
+/// Any ON conjuncts that don't reference the pruned alias are collected into
+/// `rescued` so the caller can add them to WHERE.
+fn prune_join_for_alias(from: &mut TableRef, alias: &str, rescued: &mut Vec<Expr>) {
+    let replacement = match from {
+        TableRef::Join {
+            left, right, on, ..
+        } => {
+            if matches!(right.as_ref(), TableRef::Scan { alias: a, .. } if a == alias) {
+                let conjuncts = flatten_and(on.clone());
+                rescued.extend(conjuncts.into_iter().filter(|c| {
+                    let aliases = collect_column_aliases(c);
+                    !aliases.contains(alias)
+                }));
+                Some(*left.clone())
+            } else if matches!(left.as_ref(), TableRef::Scan { alias: a, .. } if a == alias) {
+                let conjuncts = flatten_and(on.clone());
+                rescued.extend(conjuncts.into_iter().filter(|c| {
+                    let aliases = collect_column_aliases(c);
+                    !aliases.contains(alias)
+                }));
+                Some(*right.clone())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    if let Some(r) = replacement {
+        *from = r;
+        return;
+    }
+
+    if let TableRef::Join { left, right, .. } = from {
+        prune_join_for_alias(left, alias, rescued);
+        prune_join_for_alias(right, alias, rescued);
+    }
+}
+
+/// Rewrite `FuncCall(name, [Column(node_alias, "id")])` to use the edge column
+/// when node_alias is in the rewrite map.
+fn rewrite_agg_column(expr: &mut Expr, rewrites: &HashMap<String, (String, &str)>) {
+    match expr {
+        Expr::FuncCall { args, .. } => {
+            for arg in args.iter_mut() {
+                if let Expr::Column { table, column } = arg {
+                    if column == DEFAULT_PRIMARY_KEY {
+                        if let Some((edge_alias, edge_col)) = rewrites.get(table.as_str()) {
+                            *table = edge_alias.clone();
+                            *column = edge_col.to_string();
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -162,7 +345,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
     // (filters/node_ids). A traversal_path-only SIP on a large table (e.g. 8M
     // jobs) scans more rows than it saves. For small tables the source_kind
     // filter on the edge already narrows sufficiently.
-    if input.lowering.skipped_node_joins.contains(&root_node.id) && !has_explicit_selectivity {
+    if input.compiler.skipped_node_joins.contains(&root_node.id) && !has_explicit_selectivity {
         return;
     }
 
@@ -1262,7 +1445,7 @@ mod tests {
 
     #[test]
     fn non_aggregate_query_skips_optimization() {
-        let input = Input {
+        let mut input = Input {
             query_type: QueryType::Traversal,
             ..Default::default()
         };
@@ -1277,7 +1460,7 @@ mod tests {
             Node::Query(q) => q.where_clause.clone(),
         };
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        optimize(&mut node, &input, &ctx);
+        optimize(&mut node, &mut input, &ctx);
 
         match &node {
             Node::Query(q) => assert_eq!(q.where_clause, original),

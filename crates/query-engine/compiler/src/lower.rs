@@ -51,7 +51,7 @@ fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
 
 /// Lower validated input into an AST node.
 ///
-/// Writes lowering metadata to `input.lowering` for downstream passes.
+/// Writes metadata to `input.compiler` for downstream passes.
 pub fn lower(input: &mut Input) -> Result<Node> {
     match input.query_type {
         QueryType::Search => lower_search(input),
@@ -356,19 +356,7 @@ fn build_node_where(node: &InputNode) -> Option<Expr> {
 }
 
 fn lower_aggregation(input: &mut Input) -> Result<Node> {
-    let skip = agg_skippable_nodes(input);
-
-    let all_single_hop = input.relationships.iter().all(|r| r.max_hops <= 1);
-    let can_use_edge_only = !skip.is_empty() && input.relationships.len() == 1 && all_single_hop;
-
-    let (from, edge_aliases, agg_rewrite) = if can_use_edge_only {
-        input.lowering.skipped_node_joins = skip.clone();
-        lower_aggregation_edge_only(input, &skip)?
-    } else {
-        let (from, ea) = build_joins(&input.nodes, &input.relationships)?;
-        (from, ea, HashMap::new())
-    };
-
+    let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
     let group_by_node_ids: HashSet<_> = input
@@ -394,13 +382,8 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     }
 
     for agg in &input.aggregations {
-        let expr = if let Some(rewritten) = agg.target.as_ref().and_then(|t| agg_rewrite.get(t)) {
-            Expr::func(agg.function.as_sql(), vec![rewritten.clone()])
-        } else {
-            agg_expr(agg)
-        };
         select.push(SelectExpr::new(
-            expr,
+            agg_expr(agg),
             agg.alias
                 .clone()
                 .unwrap_or_else(|| agg.function.as_sql().to_lowercase()),
@@ -413,14 +396,8 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         .filter(|s| s.agg_index < input.aggregations.len())
         .map_or(vec![], |s| {
             let agg = &input.aggregations[s.agg_index];
-            let expr =
-                if let Some(rewritten) = agg.target.as_ref().and_then(|t| agg_rewrite.get(t)) {
-                    Expr::func(agg.function.as_sql(), vec![rewritten.clone()])
-                } else {
-                    agg_expr(agg)
-                };
             vec![OrderExpr {
-                expr,
+                expr: agg_expr(agg),
                 desc: s.direction == OrderDirection::Desc,
             }]
         });
@@ -437,125 +414,6 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         offset,
         ..Default::default()
     })))
-}
-
-/// Edge-only aggregation: FROM is edge JOIN group_by_node, skipping the target node table.
-/// Returns (from, edge_aliases, rewrite_map) where rewrite_map maps skipped node IDs
-/// to the edge column expression that replaces `node.id` in aggregates.
-fn lower_aggregation_edge_only(
-    input: &Input,
-    skip: &HashSet<String>,
-) -> Result<(TableRef, HashMap<usize, String>, HashMap<String, Expr>)> {
-    let rel = &input.relationships[0];
-    let edge_alias = "e0".to_string();
-    let (edge, edge_type_cond) = edge_scan(&edge_alias, &type_filter(&rel.types));
-
-    // Find the group-by node (the one we keep).
-    let group_node = input.nodes.iter().find(|n| !skip.contains(&n.id));
-    let mut rewrite = HashMap::new();
-
-    let from = if let Some(gn) = group_node {
-        let table = resolve_table(gn)?;
-        // Determine which edge column connects to the group node.
-        let (join_col_edge, join_col_node) = if gn.id == rel.from {
-            let (start, _) = rel.direction.edge_columns();
-            (start, DEFAULT_PRIMARY_KEY)
-        } else {
-            let (_, end) = rel.direction.edge_columns();
-            (end, DEFAULT_PRIMARY_KEY)
-        };
-        let mut join_cond = Expr::eq(
-            Expr::col(&gn.id, join_col_node),
-            Expr::col(&edge_alias, join_col_edge),
-        );
-        if let Some(tc) = edge_type_cond {
-            join_cond = Expr::and(join_cond, tc);
-        }
-
-        // Rewrite skipped node references to use the other edge column,
-        // and add source_kind/target_kind filter so the edge scan only
-        // matches edges for the skipped entity type.
-        for skipped in skip {
-            let skipped_node = find_node(&input.nodes, skipped)?;
-            let entity = skipped_node
-                .entity
-                .as_deref()
-                .ok_or_else(|| QueryError::Lowering("skipped node has no entity".into()))?;
-            let (id_col, kind_col) = if *skipped == rel.from {
-                let (start, _) = rel.direction.edge_columns();
-                (start, "source_kind")
-            } else {
-                let (_, end) = rel.direction.edge_columns();
-                (end, "target_kind")
-            };
-            rewrite.insert(skipped.clone(), Expr::col(&edge_alias, id_col));
-            join_cond = Expr::and(
-                join_cond,
-                Expr::eq(
-                    Expr::col(&edge_alias, kind_col),
-                    Expr::param(ChType::String, Value::String(entity.to_string())),
-                ),
-            );
-        }
-
-        TableRef::join(
-            JoinType::Inner,
-            TableRef::scan(&table, &gn.id),
-            edge,
-            join_cond,
-        )
-    } else {
-        for skipped in skip {
-            let skipped_node = find_node(&input.nodes, skipped)?;
-            let entity = skipped_node
-                .entity
-                .as_deref()
-                .ok_or_else(|| QueryError::Lowering("skipped node has no entity".into()))?;
-            let (id_col, kind_col) = if *skipped == rel.from {
-                let (start, _) = rel.direction.edge_columns();
-                (start, "source_kind")
-            } else {
-                let (_, end) = rel.direction.edge_columns();
-                (end, "target_kind")
-            };
-            rewrite.insert(skipped.clone(), Expr::col(&edge_alias, id_col));
-            // kind filter added to WHERE via build_full_where
-        }
-        edge
-    };
-
-    let mut ea = HashMap::new();
-    ea.insert(0, edge_alias);
-    Ok((from, ea, rewrite))
-}
-
-/// Determine which aggregation target nodes can be skipped from the JOIN.
-fn agg_skippable_nodes(input: &Input) -> HashSet<String> {
-    let group_by_ids: HashSet<_> = input
-        .aggregations
-        .iter()
-        .filter_map(|a| a.group_by.as_ref())
-        .cloned()
-        .collect();
-
-    let mut skippable = HashSet::new();
-    for node in &input.nodes {
-        if group_by_ids.contains(&node.id) {
-            continue;
-        }
-        if !node.node_ids.is_empty() || !node.filters.is_empty() {
-            continue;
-        }
-        let all_simple = input
-            .aggregations
-            .iter()
-            .filter(|a| a.target.as_deref() == Some(&node.id))
-            .all(|a| a.property.is_none());
-        if all_simple {
-            skippable.insert(node.id.clone());
-        }
-    }
-    skippable
 }
 
 fn agg_expr(agg: &InputAggregation) -> Expr {
