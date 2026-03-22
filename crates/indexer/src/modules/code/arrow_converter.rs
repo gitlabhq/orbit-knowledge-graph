@@ -50,7 +50,7 @@ impl ArrowConverter {
     }
 
     pub fn convert_branch(&self) -> Result<RecordBatch, ArrowError> {
-        let branch_id = self.branch_id();
+        let branch_id = compute_branch_id(self.project_id, &self.branch);
 
         let schema = Schema::new(vec![
             Field::new("id", DataType::Int64, false),
@@ -83,10 +83,6 @@ impl ArrowConverter {
                 Arc::new(arrow::array::BooleanArray::from(vec![false])) as ArrayRef,
             ],
         )
-    }
-
-    fn branch_id(&self) -> i64 {
-        compute_branch_id(self.project_id, &self.branch)
     }
 
     fn base_builders(&self, count: usize) -> BaseColumnBuilders {
@@ -391,7 +387,7 @@ impl ArrowConverter {
         let mut version = TimestampMicrosecondBuilder::with_capacity(capacity);
         let mut deleted = BooleanBuilder::with_capacity(capacity);
 
-        let branch_id = self.branch_id();
+        let branch_id = compute_branch_id(self.project_id, &self.branch);
 
         // Branch --IN_PROJECT--> Project
         traversal_path.append_value(&self.traversal_path);
