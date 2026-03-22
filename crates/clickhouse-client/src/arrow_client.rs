@@ -40,10 +40,11 @@ impl ArrowClickHouseClient {
             .with_user(username)
             .with_option("output_format_arrow_string_as_string", "1")
             .with_option("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
-            .with_option("join_algorithm", "hash")
+            .with_option("join_algorithm", "direct,parallel_hash,hash")
             .with_option("query_plan_join_swap_table", "true")
             .with_option("use_query_condition_cache", "true")
-            .with_option("join_use_nulls", "0");
+            .with_option("join_use_nulls", "0")
+            .with_option("use_skip_indexes_for_top_k", "1");
 
         if let Some(password) = password {
             client = client.with_password(password);

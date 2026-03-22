@@ -13,10 +13,11 @@ use crate::stats::{
 const DEFAULT_QUERY_SETTINGS: &[(&str, &str)] = &[
     ("output_format_arrow_string_as_string", "1"),
     ("output_format_arrow_fixed_string_as_fixed_byte_array", "1"),
-    ("join_algorithm", "hash"),
+    ("join_algorithm", "direct,parallel_hash,hash"),
     ("query_plan_join_swap_table", "true"),
     ("use_query_condition_cache", "true"),
     ("join_use_nulls", "0"),
+    ("use_skip_indexes_for_top_k", "1"),
 ];
 
 pub struct QueryProfiler {
