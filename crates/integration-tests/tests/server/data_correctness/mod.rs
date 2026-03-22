@@ -96,6 +96,12 @@ async fn data_correctness() {
         edge_cases::sip_prefilter_with_filter_returns_correct_results,
         edge_cases::sip_prefilter_multi_hop_returns_correct_results,
         edge_cases::sip_target_aggregation_with_filter_returns_correct_counts,
+        // cross-namespace correctness
+        edge_cases::cross_namespace_user_authors_mr_in_different_group,
+        edge_cases::cross_namespace_group_containment_across_depth,
+        edge_cases::cross_namespace_isolation_no_leakage,
+        edge_cases::cross_namespace_narrow_scope_returns_all_authors,
+        edge_cases::cross_namespace_aggregation_respects_scope,
         // referential integrity
         edge_cases::traversal_referential_integrity_on_complex_query,
     );

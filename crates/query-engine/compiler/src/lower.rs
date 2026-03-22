@@ -764,9 +764,9 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
     let (limit, offset) = pagination(input);
 
     // For Direction::Both, split into UNION ALL of outgoing + incoming so
-    // ClickHouse can use by_source and by_target projections respectively.
-    // An OR join (source_id = X OR target_id = X) prevents projection use
-    // and forces a full edge table scan.
+    // ClickHouse can select the optimal access path for each direction
+    // (base table PK or by_source/by_target projections). An OR join
+    // (source_id = X OR target_id = X) prevents index use.
     if neighbors_config.direction == Direction::Both {
         let build_arm = |dir: Direction| -> Query {
             let (edge_table, edge_type_cond) = edge_scan(edge_alias, &type_filter);
