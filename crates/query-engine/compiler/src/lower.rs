@@ -129,6 +129,37 @@ fn lower_search(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_traversal(input: &Input) -> Result<Node> {
+    if input.relationships.len() > 1 {
+        // Pick the relationship touching the most selective node as driving edge.
+        // Puts the smallest scan on the left (streaming) side so LIMIT stops early.
+        let best = input
+            .relationships
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, rel)| {
+                let sel = |id: &str| -> u8 {
+                    input
+                        .nodes
+                        .iter()
+                        .find(|n| n.id == id)
+                        .map(|n| {
+                            if !n.node_ids.is_empty() { 0 }
+                            else if !n.filters.is_empty() { 1 }
+                            else { 2 }
+                        })
+                        .unwrap_or(2)
+                };
+                sel(&rel.from).min(sel(&rel.to))
+            })
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        if best != 0 {
+            let mut reordered = input.clone();
+            reordered.relationships.swap(0, best);
+            return lower_traversal_edge_only(&reordered);
+        }
+    }
     lower_traversal_edge_only(input)
 }
 
