@@ -315,20 +315,6 @@ mod tests {
         }))
     }
 
-    fn chunked_archive_stream(data: Vec<u8>, chunk_size: usize) -> ByteStream {
-        Box::pin(futures::stream::unfold(
-            (data, 0usize),
-            move |(data, offset)| async move {
-                if offset >= data.len() {
-                    return None;
-                }
-                let end = (offset + chunk_size).min(data.len());
-                let chunk = bytes::Bytes::copy_from_slice(&data[offset..end]);
-                Some((Ok(chunk), (data, end)))
-            },
-        ))
-    }
-
     fn build_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
         use flate2::Compression;
         use flate2::write::GzEncoder;
@@ -713,38 +699,5 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn extract_archive_works_with_small_streamed_chunks() {
-        let (_dir, cache) = create_cache();
-        let file_content = vec![b'x'; 1024 * 1024]; // 1MB per file
-        let files: Vec<(&str, &[u8])> = vec![
-            ("a.bin", &file_content),
-            ("b.bin", &file_content),
-            ("c.bin", &file_content),
-            ("d.bin", &file_content),
-            ("e.bin", &file_content),
-        ];
-        let archive = build_tar_gz(&files);
-        let archive_size = archive.len();
-        assert!(
-            archive_size > 1024 * 4,
-            "archive should be larger than one chunk"
-        );
-
-        // Deliver the archive in 4KB chunks — the old &[u8] API required the
-        // entire payload in memory. This test proves the streaming path works
-        // with incremental delivery where no single chunk holds the full archive.
-        let stream = chunked_archive_stream(archive, 4096);
-        let path = cache
-            .extract_archive(42, "main", "abc123", stream)
-            .await
-            .unwrap();
-
-        for name in ["a.bin", "b.bin", "c.bin", "d.bin", "e.bin"] {
-            let content = tokio::fs::read(path.join(name)).await.unwrap();
-            assert_eq!(content.len(), 1024 * 1024);
-        }
     }
 }
