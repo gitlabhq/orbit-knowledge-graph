@@ -57,7 +57,11 @@ async fn namespace_with_no_checkpoints_returns_queued(ctx: &TestContext) {
 
     let service = build_service(ctx);
 
-    let traversal_path = service.resolve_traversal_path(100).await.unwrap();
+    let traversal_path = service
+        .resolve_traversal_path(100)
+        .await
+        .unwrap()
+        .expect("namespace 100 should have a traversal path");
     assert_eq!(traversal_path, "1/100/");
 
     let response = service.get_progress(100, &traversal_path).await.unwrap();
@@ -80,7 +84,11 @@ async fn namespace_with_partial_checkpoints_returns_indexing(ctx: &TestContext) 
     ctx.optimize_all().await;
 
     let service = build_service(ctx);
-    let traversal_path = service.resolve_traversal_path(100).await.unwrap();
+    let traversal_path = service
+        .resolve_traversal_path(100)
+        .await
+        .unwrap()
+        .expect("namespace 100 should have a traversal path");
     let response = service.get_progress(100, &traversal_path).await.unwrap();
     let response = response.into_inner();
 
@@ -114,7 +122,11 @@ async fn namespace_with_partial_checkpoints_and_prior_completion_returns_re_inde
     ctx.optimize_all().await;
 
     let service = build_service(ctx);
-    let traversal_path = service.resolve_traversal_path(100).await.unwrap();
+    let traversal_path = service
+        .resolve_traversal_path(100)
+        .await
+        .unwrap()
+        .expect("namespace 100 should have a traversal path");
     let response = service.get_progress(100, &traversal_path).await.unwrap();
     let response = response.into_inner();
 
@@ -152,7 +164,11 @@ async fn namespace_with_all_completed_returns_completed(ctx: &TestContext) {
     ctx.optimize_all().await;
 
     let service = build_service(ctx);
-    let traversal_path = service.resolve_traversal_path(101).await.unwrap();
+    let traversal_path = service
+        .resolve_traversal_path(101)
+        .await
+        .unwrap()
+        .expect("namespace 101 should have a traversal path");
     let response = service.get_progress(101, &traversal_path).await.unwrap();
     let response = response.into_inner();
 
@@ -176,7 +192,7 @@ async fn unknown_namespace_returns_not_found(ctx: &TestContext) {
 
     let traversal_path = service.resolve_traversal_path(999).await.unwrap();
     assert!(
-        traversal_path.is_empty(),
-        "unknown namespace should resolve to an empty traversal path"
+        traversal_path.is_none(),
+        "unknown namespace should resolve to None"
     );
 }
