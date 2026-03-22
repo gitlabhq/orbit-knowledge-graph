@@ -872,8 +872,7 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 },
             ));
 
-            // If target has a _nf CTE, inject the cascade into it.
-            // Otherwise the cascade CTE is available for the next hop.
+            // Inject the cascade into the target's _nf CTE if it exists.
             let target_nf = format!("_nf_{target_id}");
             if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_nf) {
                 let filter = Expr::InSubquery {
