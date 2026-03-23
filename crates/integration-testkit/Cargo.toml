@@ -10,7 +10,6 @@ gkg-utils = { path = "../utils" }
 futures = { workspace = true }
 gkg-server = { path = "../gkg-server" }
 query-engine = { path = "../query-engine" }
-regex = { workspace = true }
 rustls = { workspace = true }
 serde_json = { workspace = true }
 testcontainers = { workspace = true }
