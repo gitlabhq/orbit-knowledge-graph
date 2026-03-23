@@ -6,7 +6,7 @@ pub mod resolver;
 pub(crate) mod service;
 
 pub use cache::{LocalRepositoryCache, RepositoryCache};
-pub use cache_budget::CacheEntryGuard;
+pub use cache_budget::RepositoryLease;
 pub use resolver::{RepositoryResolver, ResolveResult};
 pub use service::{
     ByteStream, CachingRepositoryService, RailsRepositoryService, RepositoryService,

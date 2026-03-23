@@ -4,9 +4,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
-use super::cache_budget::{
-    CacheBudget, CacheEntryGuard, directory_size, hashed_branch_name,
-};
+use super::cache_budget::{CacheBudget, RepositoryLease, directory_size, hashed_branch_name};
 use super::service::ByteStream;
 use crate::configuration::RepositoryCacheConfiguration;
 use crate::modules::code::archive::extract_tar_gz_from_reader;
@@ -47,8 +45,6 @@ pub trait RepositoryCache: Send + Sync {
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
 
-    fn code_repository_path(&self, project_id: i64, branch: &str) -> PathBuf;
-
     async fn delete_file(
         &self,
         project_id: i64,
@@ -79,35 +75,26 @@ pub trait RepositoryCache: Send + Sync {
         commit_sha: &str,
     ) -> Result<(), RepositoryCacheError>;
 
+    /// Extract an archive into the cache, pin the entry, enforce the disk
+    /// budget, and return a guard that keeps the entry alive plus a flag
+    /// indicating whether the entry is small enough to clean up after indexing.
     async fn extract_archive(
         &self,
         project_id: i64,
         branch: &str,
         commit_sha: &str,
         archive_stream: ByteStream,
-    ) -> Result<PathBuf, RepositoryCacheError>;
-
-    /// Pin an entry so it cannot be evicted. Returns a guard that unpins on drop.
-    fn pin(&self, project_id: i64, branch: &str) -> CacheEntryGuard;
+    ) -> Result<(RepositoryLease, bool), RepositoryCacheError>;
 
     /// Atomically look up a cached entry and pin it if found.
     ///
     /// This holds the eviction read lock across both operations so that an
     /// in-flight eviction cannot delete the entry between the lookup and the pin.
-    async fn get_pinned(
+    async fn acquire(
         &self,
         project_id: i64,
         branch: &str,
-    ) -> Result<Option<(CachedRepository, CacheEntryGuard)>, RepositoryCacheError>;
-
-    /// Measure the entry's size on disk, record it in the budget index,
-    /// evict other entries if the cache is over budget, and return whether
-    /// this entry is small enough to be cleaned up after indexing.
-    async fn record_and_evict(
-        &self,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<bool, RepositoryCacheError>;
+    ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError>;
 }
 
 const COMMIT_FILE: &str = ".commit";
@@ -154,6 +141,31 @@ impl LocalRepositoryCache {
 
     fn repository_dir(&self, project_id: i64, branch: &str) -> PathBuf {
         self.branch_dir(project_id, branch).join(REPOSITORY_DIR)
+    }
+
+    fn pin(&self, project_id: i64, branch: &str) -> RepositoryLease {
+        self.budget
+            .pin(self.repository_dir(project_id, branch), project_id, branch)
+    }
+
+    async fn enforce_budget(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<bool, RepositoryCacheError> {
+        let repo_dir = self.repository_dir(project_id, branch);
+        let size = tokio::task::spawn_blocking(move || directory_size(&repo_dir))
+            .await
+            .map_err(|e| RepositoryCacheError::Archive(format!("size calculation failed: {e}")))?;
+
+        self.budget.record_size(project_id, branch, size);
+
+        self.budget
+            .make_room(size)
+            .await
+            .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
+
+        Ok(size < self.budget.large_repo_threshold())
     }
 }
 
@@ -236,10 +248,6 @@ impl RepositoryCache for LocalRepositoryCache {
         Ok(())
     }
 
-    fn code_repository_path(&self, project_id: i64, branch: &str) -> PathBuf {
-        self.repository_dir(project_id, branch)
-    }
-
     async fn delete_file(
         &self,
         project_id: i64,
@@ -309,7 +317,7 @@ impl RepositoryCache for LocalRepositoryCache {
         branch: &str,
         commit_sha: &str,
         archive_stream: ByteStream,
-    ) -> Result<PathBuf, RepositoryCacheError> {
+    ) -> Result<(RepositoryLease, bool), RepositoryCacheError> {
         let repo_dir = self.repository_dir(project_id, branch);
 
         match tokio::fs::remove_dir_all(&repo_dir).await {
@@ -334,19 +342,16 @@ impl RepositoryCache for LocalRepositoryCache {
         tokio::fs::create_dir_all(&meta_dir).await?;
         tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
 
-        Ok(repo_dir)
+        let guard = self.pin(project_id, branch);
+        let should_cleanup = self.enforce_budget(project_id, branch).await?;
+        Ok((guard, should_cleanup))
     }
 
-    fn pin(&self, project_id: i64, branch: &str) -> CacheEntryGuard {
-        self.budget
-            .pin(self.repository_dir(project_id, branch), project_id, branch)
-    }
-
-    async fn get_pinned(
+    async fn acquire(
         &self,
         project_id: i64,
         branch: &str,
-    ) -> Result<Option<(CachedRepository, CacheEntryGuard)>, RepositoryCacheError> {
+    ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError> {
         let _eviction_guard = self.budget.eviction_read_lock().await;
         let cached = self.get(project_id, branch).await?;
         match cached {
@@ -356,26 +361,6 @@ impl RepositoryCache for LocalRepositoryCache {
             }
             None => Ok(None),
         }
-    }
-
-    async fn record_and_evict(
-        &self,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<bool, RepositoryCacheError> {
-        let repo_dir = self.repository_dir(project_id, branch);
-        let size = tokio::task::spawn_blocking(move || directory_size(&repo_dir))
-            .await
-            .map_err(|e| RepositoryCacheError::Archive(format!("size calculation failed: {e}")))?;
-
-        self.budget.record_size(project_id, branch, size);
-
-        self.budget
-            .make_room(size)
-            .await
-            .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
-
-        Ok(size < self.budget.large_repo_threshold())
     }
 }
 
@@ -546,16 +531,16 @@ mod tests {
             ("src/lib.rs", b"pub mod lib;"),
         ]);
 
-        let path = cache
+        let (guard, _) = cache
             .extract_archive(42, "main", "abc123", archive_stream(archive))
             .await
             .unwrap();
 
-        let content = tokio::fs::read_to_string(path.join("src/main.rs"))
+        let content = tokio::fs::read_to_string(guard.join("src/main.rs"))
             .await
             .unwrap();
         assert_eq!(content, "fn main() {}");
-        let content = tokio::fs::read_to_string(path.join("src/lib.rs"))
+        let content = tokio::fs::read_to_string(guard.join("src/lib.rs"))
             .await
             .unwrap();
         assert_eq!(content, "pub mod lib;");
@@ -574,13 +559,13 @@ mod tests {
             .unwrap();
 
         let second_archive = build_tar_gz(&[("new_file.rs", b"new content")]);
-        let path = cache
+        let (guard, _) = cache
             .extract_archive(42, "main", "commit2", archive_stream(second_archive))
             .await
             .unwrap();
 
-        assert!(!path.join("old_file.rs").exists());
-        let content = tokio::fs::read_to_string(path.join("new_file.rs"))
+        assert!(!guard.join("old_file.rs").exists());
+        let content = tokio::fs::read_to_string(guard.join("new_file.rs"))
             .await
             .unwrap();
         assert_eq!(content, "new content");
@@ -739,25 +724,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_and_evict_records_nonzero_size_for_files_on_disk() {
+    async fn extract_archive_records_size_in_budget() {
         let (_dir, cache) = create_cache();
-        cache.save(42, "main", "abc123").await.unwrap();
-        cache
-            .write_file(42, "main", "file.rs", b"hello world")
+        let archive = build_tar_gz(&[("file.rs", b"hello world")]);
+
+        let (_, should_cleanup) = cache
+            .extract_archive(42, "main", "abc123", archive_stream(archive))
             .await
             .unwrap();
 
-        let should_cleanup = cache.record_and_evict(42, "main").await.unwrap();
-
-        assert!(!should_cleanup, "default threshold is 0 so nothing is small");
+        assert!(
+            should_cleanup,
+            "small repo should be below the default 100MB threshold"
+        );
     }
 
     #[tokio::test]
-    async fn get_pinned_returns_entry_and_guard_on_cache_hit() {
+    async fn acquire_returns_entry_and_guard_on_cache_hit() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
 
-        let result = cache.get_pinned(42, "main").await.unwrap();
+        let result = cache.acquire(42, "main").await.unwrap();
 
         let (cached, guard) = result.expect("should return cached entry");
         assert_eq!(cached.commit, "abc123");
@@ -765,10 +752,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_pinned_returns_none_on_cache_miss() {
+    async fn acquire_returns_none_on_cache_miss() {
         let (_dir, cache) = create_cache();
 
-        let result = cache.get_pinned(42, "main").await.unwrap();
+        let result = cache.acquire(42, "main").await.unwrap();
 
         assert!(result.is_none());
     }

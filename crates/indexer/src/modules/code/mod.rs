@@ -40,8 +40,8 @@ pub use siphon_code_indexing_task_dispatcher::{
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use repository::{
-    CacheEntryGuard, CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService,
-    RepositoryCache, RepositoryService, RepositoryServiceError,
+    CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
+    RepositoryLease, RepositoryService, RepositoryServiceError,
 };
 pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
 

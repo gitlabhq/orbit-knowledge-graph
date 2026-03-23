@@ -5,7 +5,7 @@ use tracing::{info, warn};
 
 use super::blob_stream::BlobStream;
 use super::cache::RepositoryCache;
-use super::cache_budget::CacheEntryGuard;
+use super::cache_budget::RepositoryLease;
 use super::changed_path_stream::{ChangeStatus, ChangedPath, ChangedPathStream};
 use super::service::RepositoryService;
 use crate::handler::HandlerError;
@@ -21,7 +21,7 @@ const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
 /// that are cheap to re-download.
 #[derive(Debug)]
 pub struct ResolveResult {
-    pub guard: CacheEntryGuard,
+    pub guard: RepositoryLease,
     /// `true` when the entry is below the large-repo threshold and should be
     /// deleted from cache after indexing completes.
     pub should_cleanup: bool,
@@ -56,14 +56,17 @@ impl RepositoryResolver {
 
         let cached = self
             .cache
-            .get_pinned(project_id, branch)
+            .acquire(project_id, branch)
             .await
             .map_err(|e| HandlerError::Processing(format!("cache lookup failed: {e}")))?;
 
         let Some((cached, guard)) = cached else {
             self.metrics.record_resolution_strategy("full_download");
-            self.full_download(project_id, branch, ref_name).await?;
-            return self.pin_and_record(project_id, branch).await;
+            let (guard, should_cleanup) = self.full_download(project_id, branch, ref_name).await?;
+            return Ok(ResolveResult {
+                guard,
+                should_cleanup,
+            });
         };
 
         if cached.commit == ref_name {
@@ -86,24 +89,28 @@ impl RepositoryResolver {
         {
             Ok(()) => {
                 self.metrics.record_resolution_strategy("incremental");
+                Ok(ResolveResult {
+                    guard,
+                    should_cleanup: false,
+                })
             }
             Err(reason) => {
                 self.metrics
                     .record_resolution_strategy("full_download_fallback");
                 warn!(project_id, branch, reason, "falling back to full download");
-                self.full_download(project_id, branch, ref_name).await?;
+                drop(guard);
+                let (guard, should_cleanup) =
+                    self.full_download(project_id, branch, ref_name).await?;
+                Ok(ResolveResult {
+                    guard,
+                    should_cleanup,
+                })
             }
         }
-
-        let should_cleanup = self.record_and_evict(project_id, branch).await?;
-        Ok(ResolveResult {
-            guard,
-            should_cleanup,
-        })
     }
 
     /// Delete a small repository from cache after indexing is complete.
-    /// Call this after dropping the [`CacheEntryGuard`].
+    /// Call this after dropping the [`RepositoryLease`].
     pub async fn cleanup_after_indexing(&self, project_id: i64, branch: &str) {
         if let Err(e) = self.cache.invalidate(project_id, branch).await {
             warn!(
@@ -115,36 +122,12 @@ impl RepositoryResolver {
         }
     }
 
-    async fn record_and_evict(
-        &self,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<bool, HandlerError> {
-        self.cache
-            .record_and_evict(project_id, branch)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("cache budget error: {e}")))
-    }
-
-    async fn pin_and_record(
-        &self,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<ResolveResult, HandlerError> {
-        let guard = self.cache.pin(project_id, branch);
-        let should_cleanup = self.record_and_evict(project_id, branch).await?;
-        Ok(ResolveResult {
-            guard,
-            should_cleanup,
-        })
-    }
-
     async fn full_download(
         &self,
         project_id: i64,
         branch: &str,
         commit_sha: &str,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<(RepositoryLease, bool), HandlerError> {
         info!(project_id, branch, commit = %commit_sha, "starting full repository download");
 
         let archive_stream = self
@@ -156,9 +139,7 @@ impl RepositoryResolver {
         self.cache
             .extract_archive(project_id, branch, commit_sha, archive_stream)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))?;
-
-        Ok(())
+            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
     }
 
     async fn incremental_update(

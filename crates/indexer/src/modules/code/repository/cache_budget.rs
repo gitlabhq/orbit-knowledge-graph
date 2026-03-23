@@ -37,23 +37,23 @@ pub fn cache_key(project_id: i64, branch: &str) -> CacheKey {
     (project_id, branch.to_string())
 }
 
-/// Guard that pins a cache entry, preventing eviction while held.
+/// A lease on a cached repository directory, preventing eviction while held.
 ///
 /// Dereferences to `&Path` so it can be passed directly to code that expects a path.
 #[derive(Debug)]
-pub struct CacheEntryGuard {
+pub struct RepositoryLease {
     path: PathBuf,
     key: CacheKey,
     pin_counts: Arc<RwLock<HashMap<CacheKey, usize>>>,
 }
 
-impl CacheEntryGuard {
+impl RepositoryLease {
     pub fn path(&self) -> &Path {
         &self.path
     }
 }
 
-impl Deref for CacheEntryGuard {
+impl Deref for RepositoryLease {
     type Target = Path;
 
     fn deref(&self) -> &Path {
@@ -61,7 +61,7 @@ impl Deref for CacheEntryGuard {
     }
 }
 
-impl Drop for CacheEntryGuard {
+impl Drop for RepositoryLease {
     fn drop(&mut self) {
         let mut pins = self.pin_counts.write();
         if let Some(count) = pins.get_mut(&self.key) {
@@ -90,7 +90,7 @@ struct IndexEntry {
 ///   cache hit and its pin.
 /// - `index` (parking_lot `RwLock`): protects the in-memory size/LRU index.
 ///   Held briefly — never across await points.
-/// - `pin_counts` (parking_lot `RwLock`): tracks active `CacheEntryGuard` refs.
+/// - `pin_counts` (parking_lot `RwLock`): tracks active `RepositoryLease` refs.
 ///   Read under `index` read in `make_room`; written independently in `pin`/`Drop`.
 pub struct CacheBudget {
     base_dir: PathBuf,
@@ -128,14 +128,14 @@ impl CacheBudget {
     }
 
     /// Pin an entry so it cannot be evicted. Returns a guard that unpins on drop.
-    pub fn pin(&self, path: PathBuf, project_id: i64, branch: &str) -> CacheEntryGuard {
+    pub fn pin(&self, path: PathBuf, project_id: i64, branch: &str) -> RepositoryLease {
         let key = cache_key(project_id, branch);
         {
             let mut pins = self.pin_counts.write();
             *pins.entry(key.clone()).or_insert(0) += 1;
         }
 
-        CacheEntryGuard {
+        RepositoryLease {
             path,
             key,
             pin_counts: Arc::clone(&self.pin_counts),
@@ -440,7 +440,7 @@ mod tests {
         base_dir: &Path,
         project_id: i64,
         branch: &str,
-    ) -> CacheEntryGuard {
+    ) -> RepositoryLease {
         budget.pin(entry_dir(base_dir, project_id, branch), project_id, branch)
     }
 
