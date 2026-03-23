@@ -265,6 +265,11 @@ async fn create_k8s_secrets(cfg: &Config, toolbox_pod: &str) -> Result<()> {
 fn deploy_gkg_chart(sh: &Shell, cfg: &Config) -> Result<()> {
     ui::info("Deploying GKG Helm chart...")?;
 
+    let sync_script = cfg.gkg_root.join("helm/sync.sh");
+    cmd!(sh, "{sync_script}")
+        .run()
+        .context("helm/sync.sh failed — is vendir installed?")?;
+
     let chart_path = cfg.gkg_root.join(c::GKG_CHART_PATH);
     let chart_str = chart_path.to_string_lossy().to_string();
     let values_path = cfg.gkg_root.join(c::HELM_VALUES_YAML);
