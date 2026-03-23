@@ -1,8 +1,4 @@
-//! Bounded disk-cache budget management with LRU eviction.
-//!
-//! This module tracks cache entry sizes, manages pin counts to protect active
-//! entries from eviction, and enforces a disk budget using two-pass LRU:
-//! small repositories are evicted first, large repositories only when necessary.
+//! Two-pass LRU eviction: small repos first, then large.
 
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -18,11 +14,8 @@ use super::disk::hashed_branch_name;
 
 use crate::modules::code::metrics::CodeMetrics;
 
-/// Read guard on the eviction lock. While held, eviction cannot run.
 pub type EvictionReadGuard<'a> = tokio::sync::RwLockReadGuard<'a, ()>;
 
-/// Returned when eviction cannot free enough space because all remaining
-/// entries are pinned by active workers.
 #[derive(Debug, thiserror::Error)]
 #[error(
     "cache budget exhausted: {remaining_bytes} bytes in use, target was {target_bytes} bytes — all unpinned entries already evicted"
@@ -38,9 +31,7 @@ pub fn cache_key(project_id: i64, branch: &str) -> CacheKey {
     (project_id, branch.to_string())
 }
 
-/// A lease on a cached repository directory, preventing eviction while held.
-///
-/// Dereferences to `&Path` so it can be passed directly to code that expects a path.
+/// Derefs to `&Path` for convenience.
 #[derive(Debug)]
 pub struct RepositoryLease {
     path: PathBuf,
@@ -85,14 +76,11 @@ struct EvictionCandidate {
     size_bytes: u64,
 }
 
-/// Unpinned entries eligible for eviction, sorted oldest-first within each tier.
 struct EvictionPlan {
     small_repos: Vec<EvictionCandidate>,
     large_repos: Vec<EvictionCandidate>,
 }
 
-/// Tracks cache entry sizes, pin counts, and enforces a disk budget via LRU eviction.
-///
 /// # Lock ordering
 ///
 /// `eviction_lock` → `index` → `pin_counts`. Always acquire in this order.
@@ -145,7 +133,6 @@ impl CacheBudget {
             .join(hashed_branch_name(branch))
     }
 
-    /// Pin an entry so it cannot be evicted. Returns a guard that unpins on drop.
     pub fn pin(&self, path: PathBuf, project_id: i64, branch: &str) -> RepositoryLease {
         let key = cache_key(project_id, branch);
         {
@@ -164,7 +151,6 @@ impl CacheBudget {
         self.large_repo_threshold
     }
 
-    /// Record an entry's size in the index after measuring it on disk.
     pub fn record_size(&self, project_id: i64, branch: &str, size_bytes: u64) {
         let key = cache_key(project_id, branch);
         let old_size = self
@@ -189,7 +175,6 @@ impl CacheBudget {
         self.report_state();
     }
 
-    /// Update the last-accessed timestamp for an entry.
     pub fn touch(&self, project_id: i64, branch: &str) {
         let key = cache_key(project_id, branch);
         let mut index = self.index.write();
@@ -198,8 +183,6 @@ impl CacheBudget {
         }
     }
 
-    /// Adjust a recorded entry's size by a signed delta without re-measuring disk.
-    /// Used after incremental updates to keep the budget estimate roughly accurate.
     pub fn adjust_size(&self, project_id: i64, branch: &str, delta: i64) {
         let key = cache_key(project_id, branch);
         let mut index = self.index.write();
@@ -224,8 +207,6 @@ impl CacheBudget {
         self.phantom_entries.read().values().sum()
     }
 
-    /// Remove an entry from the index (e.g. on invalidation).
-    /// Also clears any phantom bytes associated with this entry.
     pub fn remove(&self, project_id: i64, branch: &str) {
         let key = cache_key(project_id, branch);
         if let Some(entry) = self.index.write().remove(&key) {
@@ -236,19 +217,11 @@ impl CacheBudget {
         self.report_state();
     }
 
-    /// Acquire a read lock on eviction. Hold this across `get` → `pin` sequences
-    /// to prevent an in-flight eviction from deleting the entry between the two calls.
     pub async fn eviction_read_lock(&self) -> EvictionReadGuard<'_> {
         self.eviction_lock.read().await
     }
 
-    /// Evict unpinned entries until the cache has room for `new_entry_bytes`.
-    ///
-    /// Call this *before* `record_size` so the new entry's bytes are not yet
-    /// counted in `total_bytes`.
-    ///
-    /// Holds the eviction write lock for its duration, blocking new `get`+`pin`
-    /// sequences until eviction is complete.
+    /// Must be called *before* `record_size` so the new entry isn't double-counted.
     pub async fn make_room(&self, new_entry_bytes: u64) -> Result<(), CacheBudgetExhausted> {
         let _eviction_guard = self.eviction_lock.write().await;
 
@@ -270,7 +243,6 @@ impl CacheBudget {
         self.evict_until_under(target, total, plan).await
     }
 
-    /// Snapshot the index, partition into small/large tiers, and sort each by LRU.
     fn eviction_candidates(&self) -> EvictionPlan {
         let index = self.index.read();
         let pins = self.pin_counts.read();
@@ -302,12 +274,6 @@ impl CacheBudget {
         }
     }
 
-    /// Walk candidates oldest-first (small repos first, then large), deleting
-    /// from disk and removing from the index until we're under `target` bytes.
-    ///
-    /// If all unpinned entries are evicted and we're still over budget, either
-    /// purges the entire cache (when phantom bytes exceed headroom) or returns
-    /// an error so the caller can retry when workers release their pins.
     async fn evict_until_under(
         &self,
         target: u64,
@@ -390,10 +356,7 @@ impl CacheBudget {
         Ok(())
     }
 
-    /// Last-resort wipe of the entire cache directory. Called when phantom bytes
-    /// from failed deletions push total estimated disk usage beyond the full disk
-    /// budget (usable + headroom). Active workers holding pinned entries will get
-    /// I/O errors and their messages will be retried.
+    /// Active workers holding leases will get I/O errors; their messages will be retried.
     async fn purge_entire_cache(&self) {
         error!(
             phantom_bytes = self.total_phantom_bytes(),

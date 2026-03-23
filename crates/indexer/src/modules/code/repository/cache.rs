@@ -17,7 +17,6 @@ pub struct CachedRepository {
     pub commit: String,
 }
 
-/// Result of extracting an archive into the cache.
 #[derive(Debug)]
 pub struct ExtractionResult {
     pub lease: RepositoryLease,
@@ -39,7 +38,6 @@ pub enum RepositoryCacheError {
     PathTraversal(String),
 }
 
-/// Cache lifecycle: acquire, populate, and remove entire cache entries.
 #[async_trait]
 pub trait RepositoryCacheLifecycle: Send + Sync {
     async fn get(
@@ -57,9 +55,6 @@ pub trait RepositoryCacheLifecycle: Send + Sync {
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
 
-    /// Extract an archive into the cache, pin the entry, enforce the disk
-    /// budget, and return a lease that keeps the entry alive plus a flag
-    /// indicating whether the entry is small enough to clean up after indexing.
     async fn extract_archive(
         &self,
         project_id: i64,
@@ -68,27 +63,21 @@ pub trait RepositoryCacheLifecycle: Send + Sync {
         archive_stream: ByteStream,
     ) -> Result<ExtractionResult, RepositoryCacheError>;
 
-    /// Atomically look up a cached entry and pin it if found.
-    ///
-    /// Holds the eviction read lock across both operations so that an
-    /// in-flight eviction cannot delete the entry between the lookup and the pin.
+    /// Holds the eviction read lock across get+pin so an in-flight eviction
+    /// cannot delete the entry between the two operations.
     async fn acquire(
         &self,
         project_id: i64,
         branch: &str,
     ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError>;
 
-    /// Adjust the recorded size of a cache entry by a signed delta.
-    /// Called after incremental updates to keep the budget estimate in sync
-    /// without re-measuring the entire directory.
+    /// Avoids re-measuring the entire directory after incremental updates.
     fn adjust_recorded_size(&self, project_id: i64, branch: &str, delta: i64);
 }
 
-/// File-level mutations on an already-cached repository.
 #[async_trait]
 pub trait CachedRepositoryFiles: Send + Sync {
-    /// Delete a file from the cached repository. Returns the size in bytes of the
-    /// removed file, or 0 if the file did not exist.
+    /// Returns the size of the removed file, or 0 if it did not exist.
     async fn delete_file(
         &self,
         project_id: i64,
@@ -120,8 +109,7 @@ pub trait CachedRepositoryFiles: Send + Sync {
     ) -> Result<(), RepositoryCacheError>;
 }
 
-/// Combined trait for full cache access. Automatically implemented for any type
-/// that implements both [`RepositoryCacheLifecycle`] and [`CachedRepositoryFiles`].
+/// Blanket-implemented for any type implementing both sub-traits.
 pub trait RepositoryCache: RepositoryCacheLifecycle + CachedRepositoryFiles {}
 impl<T: RepositoryCacheLifecycle + CachedRepositoryFiles> RepositoryCache for T {}
 

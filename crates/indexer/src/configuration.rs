@@ -101,25 +101,20 @@ pub struct ScheduledTasksConfiguration {
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
 }
 
-/// Configuration for the on-disk repository cache used by code indexing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepositoryCacheConfiguration {
-    /// Directory where cached repositories are stored on disk.
-    /// Defaults to `<temp_dir>/gkg-repository-cache`.
     #[serde(default = "RepositoryCacheConfiguration::default_path")]
     pub path: PathBuf,
 
-    /// Maximum total disk bytes the cache may use. Defaults to 20 GB.
+    /// Defaults to 20 GB.
     #[serde(default = "RepositoryCacheConfiguration::default_disk_budget_bytes")]
     pub disk_budget_bytes: u64,
 
-    /// Bytes reserved per code worker for in-flight archive extraction.
-    /// Headroom = this value × code worker count. Defaults to 2 GB.
+    /// Headroom = this value * code worker count. Defaults to 2 GB.
     #[serde(default = "RepositoryCacheConfiguration::default_headroom_per_worker_bytes")]
     pub headroom_per_worker_bytes: u64,
 
-    /// Repos at or above this size are considered "large" and evicted last.
-    /// Defaults to 100 MB.
+    /// Repos at or above this size are evicted last. Defaults to 100 MB.
     #[serde(default = "RepositoryCacheConfiguration::default_large_repo_threshold_bytes")]
     pub large_repo_threshold_bytes: u64,
 }
@@ -152,7 +147,6 @@ impl RepositoryCacheConfiguration {
         100 * 1024 * 1024 // 100 MB
     }
 
-    /// Computes the usable cache budget after reserving headroom for workers.
     pub fn usable_budget(&self, code_worker_count: usize) -> u64 {
         self.disk_budget_bytes
             .saturating_sub(self.headroom_per_worker_bytes * code_worker_count as u64)
@@ -181,7 +175,6 @@ pub struct EngineConfiguration {
     #[serde(default)]
     pub handlers: HandlersConfiguration,
 
-    /// On-disk repository cache settings for code indexing.
     #[serde(default)]
     pub repository_cache: RepositoryCacheConfiguration,
 }
@@ -202,7 +195,7 @@ impl EngineConfiguration {
         16
     }
 
-    /// Returns the concurrency limit for the "code" group, or 1 if not configured.
+    /// Falls back to 1 if "code" group is not configured.
     pub fn code_worker_count(&self) -> usize {
         self.concurrency_groups.get("code").copied().unwrap_or(1)
     }

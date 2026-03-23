@@ -15,15 +15,11 @@ const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
 const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
 
-/// Result of resolving a repository. The guard pins the cache entry for the
-/// duration of indexing. After indexing, the caller should drop the guard and
-/// call [`RepositoryResolver::cleanup_after_indexing`] to delete small repos
-/// that are cheap to re-download.
+/// Drop the guard then call [`RepositoryResolver::cleanup_after_indexing`]
+/// if `should_cleanup` is set.
 #[derive(Debug)]
 pub struct ResolveResult {
     pub guard: RepositoryLease,
-    /// `true` when the entry is below the large-repo threshold and should be
-    /// deleted from cache after indexing completes.
     pub should_cleanup: bool,
 }
 
@@ -108,8 +104,7 @@ impl RepositoryResolver {
         }
     }
 
-    /// Delete a small repository from cache after indexing is complete.
-    /// Call this after dropping the [`RepositoryLease`].
+    /// Call after dropping the [`RepositoryLease`].
     pub async fn cleanup_after_indexing(&self, project_id: i64, branch: &str) {
         if let Err(e) = self.cache.invalidate(project_id, branch).await {
             warn!(
@@ -290,10 +285,8 @@ impl ChangesetBuilder {
         }
     }
 
-    /// Gitaly sometimes reports renames as separate DELETED + ADDED entries
-    /// instead of a single RENAMED entry. When a deleted blob ID matches an
-    /// added blob ID, pair them up as renames. Any unpaired leftovers stay
-    /// as plain deletions or additions.
+    /// Gitaly sometimes reports renames as separate DELETED + ADDED entries.
+    /// Match them up by blob ID; unpaired leftovers stay as plain deletions/additions.
     fn reconcile_delete_add_renames(&mut self) {
         for (blob_id, deleted_paths) in std::mem::take(&mut self.deleted_by_blob_id) {
             let Some(added_paths) = self.paths_by_blob_id.remove(&blob_id) else {
