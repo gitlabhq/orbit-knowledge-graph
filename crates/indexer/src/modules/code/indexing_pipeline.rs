@@ -55,7 +55,7 @@ impl CodeIndexingPipeline {
         request: &IndexingRequest,
     ) -> Result<(), HandlerError> {
         let fetch_start = Instant::now();
-        let repo_path = self
+        let result = self
             .resolver
             .resolve(
                 request.project_id,
@@ -77,9 +77,16 @@ impl CodeIndexingPipeline {
             &request.branch,
             &request.traversal_path,
             indexed_at,
-            &repo_path,
+            &result.guard,
         )
         .await?;
+
+        drop(result.guard);
+        if result.should_cleanup {
+            self.resolver
+                .cleanup_after_indexing(request.project_id, &request.branch)
+                .await;
+        }
 
         self.set_checkpoint(
             &request.traversal_path,

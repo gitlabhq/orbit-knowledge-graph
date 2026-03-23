@@ -51,7 +51,13 @@ impl CodeIndexingDeps {
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
         let metrics = CodeMetrics::new();
 
-        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::default());
+        let config = indexer::configuration::RepositoryCacheConfiguration::default();
+        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
+            std::env::temp_dir().join("gkg-repository-cache-test"),
+            &config,
+            4,
+            metrics.clone(),
+        ));
         let resolver =
             RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
 

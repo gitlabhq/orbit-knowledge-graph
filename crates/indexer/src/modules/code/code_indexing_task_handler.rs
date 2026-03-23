@@ -269,8 +269,14 @@ mod tests {
             );
 
             let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
+            let config = crate::configuration::RepositoryCacheConfiguration::default();
             let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> =
-                Arc::new(LocalRepositoryCache::new(temp_dir.path().to_path_buf()));
+                Arc::new(LocalRepositoryCache::new(
+                    temp_dir.path().to_path_buf(),
+                    &config,
+                    4,
+                    metrics.clone(),
+                ));
             let resolver = RepositoryResolver::new(Arc::clone(&mock_repo), cache, metrics.clone());
 
             let pipeline = Arc::new(CodeIndexingPipeline::new(

@@ -40,8 +40,8 @@ pub use siphon_code_indexing_task_dispatcher::{
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use repository::{
-    CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
-    RepositoryService, RepositoryServiceError,
+    CacheEntryGuard, CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService,
+    RepositoryCache, RepositoryService, RepositoryServiceError,
 };
 pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
 
@@ -73,7 +73,13 @@ pub fn register_handlers(
     );
     let metrics = CodeMetrics::new();
 
-    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::default());
+    let code_worker_count = config.engine.code_worker_count();
+    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::new(
+        std::env::temp_dir().join("gkg-repository-cache"),
+        &config.engine.repository_cache,
+        code_worker_count,
+        metrics.clone(),
+    ));
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
 

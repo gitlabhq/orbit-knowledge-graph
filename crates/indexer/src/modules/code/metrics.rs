@@ -1,7 +1,7 @@
 use code_graph::analysis::types::GraphData;
 use opentelemetry::KeyValue;
 use opentelemetry::global;
-use opentelemetry::metrics::{Counter, Histogram, Meter};
+use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
 
 use crate::handler::HandlerError;
 use crate::metrics::DURATION_BUCKETS;
@@ -16,6 +16,9 @@ pub struct CodeMetrics {
     pub(super) files_processed: Counter<u64>,
     pub(super) nodes_indexed: Counter<u64>,
     pub(super) errors: Counter<u64>,
+    pub(super) cache_eviction_bytes: Counter<u64>,
+    pub(super) cache_size_bytes: Gauge<u64>,
+    pub(super) cache_entry_count: Gauge<u64>,
 }
 
 impl CodeMetrics {
@@ -73,6 +76,21 @@ impl CodeMetrics {
             .with_description("Total code indexing errors by pipeline stage")
             .build();
 
+        let cache_eviction_bytes = meter
+            .u64_counter("indexer.code.cache.eviction.bytes")
+            .with_description("Total bytes evicted from repository disk cache")
+            .build();
+
+        let cache_size_bytes = meter
+            .u64_gauge("indexer.code.cache.size.bytes")
+            .with_description("Current total size of cached repositories on disk")
+            .build();
+
+        let cache_entry_count = meter
+            .u64_gauge("indexer.code.cache.entries")
+            .with_description("Number of cached repository entries on disk")
+            .build();
+
         Self {
             events_processed,
             handler_duration,
@@ -82,6 +100,9 @@ impl CodeMetrics {
             files_processed,
             nodes_indexed,
             errors,
+            cache_eviction_bytes,
+            cache_size_bytes,
+            cache_entry_count,
         }
     }
 }
@@ -100,6 +121,15 @@ impl CodeMetrics {
     pub(super) fn record_files_processed(&self, count: u64, outcome: &'static str) {
         self.files_processed
             .add(count, &[KeyValue::new("outcome", outcome)]);
+    }
+
+    pub(super) fn record_cache_eviction(&self, bytes: u64) {
+        self.cache_eviction_bytes.add(bytes, &[]);
+    }
+
+    pub(super) fn record_cache_state(&self, total_bytes: u64, entry_count: u64) {
+        self.cache_size_bytes.record(total_bytes, &[]);
+        self.cache_entry_count.record(entry_count, &[]);
     }
 
     pub(super) fn record_node_counts(&self, graph_data: &GraphData) {

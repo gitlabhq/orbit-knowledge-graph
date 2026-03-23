@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tracing::{info, warn};
 
 use super::blob_stream::BlobStream;
 use super::cache::RepositoryCache;
+use super::cache_budget::CacheEntryGuard;
 use super::changed_path_stream::{ChangeStatus, ChangedPath, ChangedPathStream};
 use super::service::RepositoryService;
 use crate::handler::HandlerError;
@@ -14,6 +14,18 @@ use crate::modules::code::metrics::CodeMetrics;
 const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
 const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
+
+/// Result of resolving a repository. The guard pins the cache entry for the
+/// duration of indexing. After indexing, the caller should drop the guard and
+/// call [`RepositoryResolver::cleanup_after_indexing`] to delete small repos
+/// that are cheap to re-download.
+#[derive(Debug)]
+pub struct ResolveResult {
+    pub guard: CacheEntryGuard,
+    /// `true` when the entry is below the large-repo threshold and should be
+    /// deleted from cache after indexing completes.
+    pub should_cleanup: bool,
+}
 
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
@@ -39,18 +51,19 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: Option<&str>,
-    ) -> Result<PathBuf, HandlerError> {
+    ) -> Result<ResolveResult, HandlerError> {
         let ref_name = commit_sha.unwrap_or(branch);
 
         let cached = self
             .cache
-            .get(project_id, branch)
+            .get_pinned(project_id, branch)
             .await
             .map_err(|e| HandlerError::Processing(format!("cache lookup failed: {e}")))?;
 
-        let Some(cached) = cached else {
+        let Some((cached, guard)) = cached else {
             self.metrics.record_resolution_strategy("full_download");
-            return self.full_download(project_id, branch, ref_name).await;
+            self.full_download(project_id, branch, ref_name).await?;
+            return self.pin_and_record_size(project_id, branch).await;
         };
 
         if cached.commit == ref_name {
@@ -61,24 +74,79 @@ impl RepositoryResolver {
                 commit = %ref_name,
                 "using cached repository"
             );
-            return Ok(cached.path);
+            return Ok(ResolveResult {
+                guard,
+                should_cleanup: false,
+            });
         }
 
         match self
             .incremental_update(project_id, branch, &cached.commit, ref_name)
             .await
         {
-            Ok(path) => {
+            Ok(()) => {
                 self.metrics.record_resolution_strategy("incremental");
-                Ok(path)
             }
             Err(reason) => {
                 self.metrics
                     .record_resolution_strategy("full_download_fallback");
                 warn!(project_id, branch, reason, "falling back to full download");
-                self.full_download(project_id, branch, ref_name).await
+                self.full_download(project_id, branch, ref_name).await?;
             }
         }
+
+        let size = self.record_size_and_make_room(project_id, branch).await?;
+        Ok(ResolveResult {
+            guard,
+            should_cleanup: size < self.cache.large_repo_threshold(),
+        })
+    }
+
+    /// Delete a small repository from cache after indexing is complete.
+    /// Call this after dropping the [`CacheEntryGuard`].
+    pub async fn cleanup_after_indexing(&self, project_id: i64, branch: &str) {
+        if let Err(e) = self.cache.invalidate(project_id, branch).await {
+            warn!(
+                project_id,
+                branch,
+                error = %e,
+                "failed to clean up small repository after indexing"
+            );
+        }
+    }
+
+    async fn record_size_and_make_room(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<u64, HandlerError> {
+        let size = self
+            .cache
+            .record_entry_size(project_id, branch)
+            .await
+            .map_err(|e| HandlerError::Processing(format!("failed to record entry size: {e}")))?;
+
+        // Eviction runs after the entry is already on disk. The temporary overshoot
+        // is absorbed by `headroom_per_worker_bytes` in the budget configuration.
+        self.cache
+            .make_room(size)
+            .await
+            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+
+        Ok(size)
+    }
+
+    async fn pin_and_record_size(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<ResolveResult, HandlerError> {
+        let guard = self.cache.pin(project_id, branch);
+        let size = self.record_size_and_make_room(project_id, branch).await?;
+        Ok(ResolveResult {
+            guard,
+            should_cleanup: size < self.cache.large_repo_threshold(),
+        })
     }
 
     async fn full_download(
@@ -86,7 +154,7 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: &str,
-    ) -> Result<PathBuf, HandlerError> {
+    ) -> Result<(), HandlerError> {
         info!(project_id, branch, commit = %commit_sha, "starting full repository download");
 
         let archive_stream = self
@@ -98,7 +166,9 @@ impl RepositoryResolver {
         self.cache
             .extract_archive(project_id, branch, commit_sha, archive_stream)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
+            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))?;
+
+        Ok(())
     }
 
     async fn incremental_update(
@@ -107,7 +177,7 @@ impl RepositoryResolver {
         branch: &str,
         from_sha: &str,
         to_sha: &str,
-    ) -> Result<PathBuf, String> {
+    ) -> Result<(), String> {
         info!(
             project_id,
             branch, from_sha, to_sha, "attempting incremental update"
@@ -189,7 +259,7 @@ impl RepositoryResolver {
             "incremental update complete"
         );
 
-        Ok(self.cache.code_repository_path(project_id, branch))
+        Ok(())
     }
 }
 
@@ -493,14 +563,26 @@ mod tests {
     fn create_resolver(
         service: Arc<ScriptedRepositoryService>,
     ) -> (tempfile::TempDir, RepositoryResolver) {
+        create_resolver_with_config(
+            service,
+            crate::configuration::RepositoryCacheConfiguration::default(),
+        )
+    }
+
+    fn create_resolver_with_config(
+        service: Arc<ScriptedRepositoryService>,
+        config: crate::configuration::RepositoryCacheConfiguration,
+    ) -> (tempfile::TempDir, RepositoryResolver) {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let cache: Arc<dyn RepositoryCache> =
-            Arc::new(LocalRepositoryCache::new(temp_dir.path().to_path_buf()));
-        let resolver = RepositoryResolver::new(
-            service as Arc<dyn RepositoryService>,
-            cache,
-            CodeMetrics::default(),
-        );
+        let metrics = CodeMetrics::default();
+        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
+            temp_dir.path().to_path_buf(),
+            &config,
+            4,
+            metrics.clone(),
+        ));
+        let resolver =
+            RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache, metrics);
         (temp_dir, resolver)
     }
 
@@ -546,10 +628,10 @@ mod tests {
         let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
         let (_dir, resolver) = create_resolver(service);
 
-        let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let result = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
 
-        assert!(path.join("src/main.rs").exists());
-        let content = std::fs::read_to_string(path.join("src/main.rs")).unwrap();
+        assert!(result.guard.join("src/main.rs").exists());
+        let content = std::fs::read_to_string(result.guard.join("src/main.rs")).unwrap();
         assert_eq!(content, "fn main() {}");
     }
 
@@ -558,8 +640,11 @@ mod tests {
         let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
         let (_dir, resolver) = create_resolver(service);
 
-        let first_path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        let second_path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let first = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let first_path = first.guard.path().to_path_buf();
+        drop(first);
+        let second = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let second_path = second.guard.path().to_path_buf();
 
         assert_eq!(first_path, second_path);
     }
@@ -579,10 +664,10 @@ mod tests {
             r#"{"path":"src/lib.rs","status":"ADDED","old_path":"","new_mode":33188,"old_mode":0,"old_blob_id":"","new_blob_id":"blob_src/lib.rs"}"#.to_string()
         ));
 
-        let path = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
+        let result = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
-        assert!(path.join("src/main.rs").exists());
-        assert!(path.join("src/lib.rs").exists());
+        assert!(result.guard.join("src/main.rs").exists());
+        assert!(result.guard.join("src/lib.rs").exists());
     }
 
     #[tokio::test]
@@ -595,10 +680,10 @@ mod tests {
         service.set_changed_paths_response(Err(RepositoryServiceError::ForcePush(1)));
         service.set_archive(&[("src/new.rs", "fn new() {}")]);
 
-        let path = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
+        let result = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
-        assert!(path.join("src/new.rs").exists());
-        assert!(!path.join("src/main.rs").exists());
+        assert!(result.guard.join("src/new.rs").exists());
+        assert!(!result.guard.join("src/main.rs").exists());
     }
 
     #[tokio::test]
@@ -606,9 +691,54 @@ mod tests {
         let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
         let (_dir, resolver) = create_resolver(service);
 
-        let path = resolver.resolve(1, "main", None).await.unwrap();
+        let result = resolver.resolve(1, "main", None).await.unwrap();
 
-        assert!(path.join("src/main.rs").exists());
+        assert!(result.guard.join("src/main.rs").exists());
+    }
+
+    #[tokio::test]
+    async fn resolve_full_download_marks_small_repo_for_cleanup() {
+        let service = ScriptedRepositoryService::with_archive(&[("tiny.rs", "x")]);
+        let (_dir, resolver) = create_resolver(service);
+
+        let result = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+
+        assert!(
+            result.should_cleanup,
+            "small repo should be marked for cleanup"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_cache_hit_does_not_mark_for_cleanup() {
+        let service = ScriptedRepositoryService::with_archive(&[("tiny.rs", "x")]);
+        let (_dir, resolver) = create_resolver(service);
+
+        resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let result = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+
+        assert!(
+            !result.should_cleanup,
+            "cache hit should not mark for cleanup"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_after_indexing_invalidates_cache() {
+        let service = ScriptedRepositoryService::with_archive(&[("tiny.rs", "x")]);
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+
+        let result = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        assert!(result.should_cleanup);
+        drop(result.guard);
+
+        resolver.cleanup_after_indexing(1, "main").await;
+
+        let second = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        assert!(
+            second.should_cleanup,
+            "should full-download again after cleanup"
+        );
     }
 
     #[tokio::test]
@@ -790,5 +920,26 @@ mod tests {
 
         let err = compute_changeset(stream).await.unwrap_err();
         assert!(err.contains("too many changed paths"));
+    }
+
+    #[tokio::test]
+    async fn resolve_returns_processing_error_when_budget_exhausted() {
+        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let config = crate::configuration::RepositoryCacheConfiguration {
+            disk_budget_bytes: 1,
+            headroom_per_worker_bytes: 0,
+            large_repo_threshold_bytes: 0,
+        };
+        let (_dir, resolver) = create_resolver_with_config(service, config);
+
+        let error = resolver
+            .resolve(1, "main", Some("abc123"))
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, HandlerError::Processing(_)),
+            "expected HandlerError::Processing, got: {error:?}"
+        );
     }
 }

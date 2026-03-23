@@ -2,11 +2,15 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
+use super::cache_budget::{
+    CacheBudget, CacheBudgetExhausted, CacheEntryGuard, directory_size, hashed_branch_name,
+};
 use super::service::ByteStream;
+use crate::configuration::RepositoryCacheConfiguration;
 use crate::modules::code::archive::extract_tar_gz_from_reader;
+use crate::modules::code::metrics::CodeMetrics;
 
 #[derive(Debug)]
 pub struct CachedRepository {
@@ -82,28 +86,72 @@ pub trait RepositoryCache: Send + Sync {
         commit_sha: &str,
         archive_stream: ByteStream,
     ) -> Result<PathBuf, RepositoryCacheError>;
+
+    /// Pin an entry so it cannot be evicted. Returns a guard that unpins on drop.
+    fn pin(&self, project_id: i64, branch: &str) -> CacheEntryGuard;
+
+    /// Atomically look up a cached entry and pin it if found.
+    ///
+    /// This holds the eviction read lock across both operations so that an
+    /// in-flight eviction cannot delete the entry between the lookup and the pin.
+    async fn get_pinned(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<Option<(CachedRepository, CacheEntryGuard)>, RepositoryCacheError>;
+
+    /// Run eviction to make room for a new entry of the given size.
+    ///
+    /// Returns `Err` when all unpinned entries have been evicted but the cache
+    /// is still over budget. The caller should treat this as a transient failure
+    /// and retry later.
+    async fn make_room(&self, new_entry_bytes: u64) -> Result<(), CacheBudgetExhausted>;
+
+    /// Measure and record the size of a cache entry after a write.
+    async fn record_entry_size(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<u64, RepositoryCacheError>;
+
+    /// Returns the size threshold below which repos are considered "small".
+    fn large_repo_threshold(&self) -> u64;
 }
 
-const CACHE_DIR_NAME: &str = "gkg-repository-cache";
 const COMMIT_FILE: &str = ".commit";
 const META_DIR: &str = "meta";
 const REPOSITORY_DIR: &str = "repository";
 
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
-}
-
-impl Default for LocalRepositoryCache {
-    fn default() -> Self {
-        Self {
-            base_dir: std::env::temp_dir().join(CACHE_DIR_NAME),
-        }
-    }
+    budget: CacheBudget,
 }
 
 impl LocalRepositoryCache {
-    pub fn new(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+    pub fn new(
+        base_dir: PathBuf,
+        config: &RepositoryCacheConfiguration,
+        code_worker_count: usize,
+        metrics: CodeMetrics,
+    ) -> Self {
+        let usable_budget = config.usable_budget(code_worker_count);
+        if usable_budget == 0 {
+            tracing::warn!(
+                disk_budget_bytes = config.disk_budget_bytes,
+                headroom_per_worker_bytes = config.headroom_per_worker_bytes,
+                code_worker_count,
+                "usable cache budget is 0 — every write will trigger full eviction; \
+                 increase disk_budget_bytes or decrease headroom_per_worker_bytes"
+            );
+        }
+        let budget = CacheBudget::new(
+            base_dir.clone(),
+            usable_budget,
+            config.disk_budget_bytes,
+            config.large_repo_threshold_bytes,
+            metrics,
+        );
+        Self { base_dir, budget }
     }
 
     fn branch_dir(&self, project_id: i64, branch: &str) -> PathBuf {
@@ -115,11 +163,6 @@ impl LocalRepositoryCache {
     fn repository_dir(&self, project_id: i64, branch: &str) -> PathBuf {
         self.branch_dir(project_id, branch).join(REPOSITORY_DIR)
     }
-}
-
-fn hashed_branch_name(branch: &str) -> String {
-    let hash = Sha256::digest(branch.as_bytes());
-    format!("{:x}", hash)
 }
 
 fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCacheError> {
@@ -166,6 +209,8 @@ impl RepositoryCache for LocalRepositoryCache {
             _ => return Ok(None),
         }
 
+        self.budget.touch(project_id, branch);
+
         Ok(Some(CachedRepository {
             path: repository_dir,
             commit,
@@ -190,10 +235,13 @@ impl RepositoryCache for LocalRepositoryCache {
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
         let branch_dir = self.branch_dir(project_id, branch);
         match tokio::fs::remove_dir_all(&branch_dir).await {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
+
+        self.budget.remove(project_id, branch);
+        Ok(())
     }
 
     fn code_repository_path(&self, project_id: i64, branch: &str) -> PathBuf {
@@ -296,6 +344,50 @@ impl RepositoryCache for LocalRepositoryCache {
 
         Ok(repo_dir)
     }
+
+    fn pin(&self, project_id: i64, branch: &str) -> CacheEntryGuard {
+        self.budget
+            .pin(self.repository_dir(project_id, branch), project_id, branch)
+    }
+
+    async fn get_pinned(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<Option<(CachedRepository, CacheEntryGuard)>, RepositoryCacheError> {
+        let _eviction_guard = self.budget.eviction_read_lock().await;
+        let cached = self.get(project_id, branch).await?;
+        match cached {
+            Some(repo) => {
+                let guard = self.pin(project_id, branch);
+                Ok(Some((repo, guard)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn make_room(&self, new_entry_bytes: u64) -> Result<(), CacheBudgetExhausted> {
+        self.budget.make_room(new_entry_bytes).await
+    }
+
+    async fn record_entry_size(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<u64, RepositoryCacheError> {
+        let repo_dir = self.repository_dir(project_id, branch);
+        let size = tokio::task::spawn_blocking(move || directory_size(&repo_dir))
+            .await
+            .map_err(|e| RepositoryCacheError::Archive(format!("size calculation failed: {e}")))?;
+
+        self.budget.record_size(project_id, branch, size);
+
+        Ok(size)
+    }
+
+    fn large_repo_threshold(&self) -> u64 {
+        self.budget.large_repo_threshold()
+    }
 }
 
 #[cfg(test)]
@@ -305,7 +397,12 @@ mod tests {
 
     fn create_cache() -> (TempDir, LocalRepositoryCache) {
         let temp_dir = TempDir::new().unwrap();
-        let cache = LocalRepositoryCache::new(temp_dir.path().to_path_buf());
+        let cache = LocalRepositoryCache::new(
+            temp_dir.path().to_path_buf(),
+            &RepositoryCacheConfiguration::default(),
+            4,
+            CodeMetrics::default(),
+        );
         (temp_dir, cache)
     }
 
@@ -333,6 +430,14 @@ mod tests {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
         encoder.write_all(&tar_bytes).unwrap();
         encoder.finish().unwrap()
+    }
+
+    async fn assert_path_traversal_rejected(result: Result<(), RepositoryCacheError>) {
+        let error = result.unwrap_err();
+        assert!(
+            error.to_string().contains("path traversal"),
+            "expected path traversal error, got: {error}"
+        );
     }
 
     #[tokio::test]
@@ -442,26 +547,6 @@ mod tests {
 
         assert!(cache.get(42, "main").await.unwrap().is_none());
         assert!(cache.get(42, "develop").await.unwrap().is_some());
-    }
-
-    #[tokio::test]
-    async fn branch_dir_hashes_branch_name() {
-        let (dir, cache) = create_cache();
-
-        let path = cache.branch_dir(42, "main");
-
-        let expected_hash = hashed_branch_name("main");
-        assert_eq!(path, dir.path().join(format!("42/{expected_hash}")));
-    }
-
-    #[tokio::test]
-    async fn branch_dir_hashes_away_path_traversal_characters() {
-        let (dir, cache) = create_cache();
-
-        let safe_path = cache.branch_dir(42, "../../../tmp/evil");
-
-        assert!(safe_path.starts_with(dir.path().join("42")));
-        assert!(!safe_path.to_string_lossy().contains(".."));
     }
 
     #[tokio::test]
@@ -592,105 +677,68 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn write_file_rejects_path_traversal() {
+    async fn rename_file_moves_content_to_new_path() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+        cache
+            .write_file(42, "main", "old.rs", b"content")
+            .await
+            .unwrap();
+
+        cache
+            .rename_file(42, "main", "old.rs", "new.rs")
+            .await
+            .unwrap();
+
+        let repo_dir = cache.repository_dir(42, "main");
+        assert!(!repo_dir.join("old.rs").exists());
+        let content = tokio::fs::read_to_string(repo_dir.join("new.rs"))
+            .await
+            .unwrap();
+        assert_eq!(content, "content");
+    }
+
+    #[tokio::test]
+    async fn rename_file_succeeds_when_source_does_not_exist() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
 
-        let result = cache
-            .write_file(42, "main", "../../../etc/passwd", b"bad")
+        cache
+            .rename_file(42, "main", "nonexistent.rs", "new.rs")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn path_traversal_rejected_for_all_file_operations() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+        let malicious = "../../../etc/passwd";
+
+        assert_path_traversal_rejected(cache.write_file(42, "main", malicious, b"bad").await).await;
+        assert_path_traversal_rejected(cache.delete_file(42, "main", malicious).await).await;
+        assert_path_traversal_rejected(cache.rename_file(42, "main", malicious, "safe.rs").await)
             .await;
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("path traversal"));
-    }
-
-    #[tokio::test]
-    async fn delete_file_rejects_path_traversal() {
-        let (_dir, cache) = create_cache();
-        cache.save(42, "main", "abc123").await.unwrap();
-
-        let result = cache.delete_file(42, "main", "../../../etc/passwd").await;
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("path traversal"));
-    }
-
-    #[tokio::test]
-    async fn write_file_rejects_absolute_path() {
-        let (_dir, cache) = create_cache();
-        cache.save(42, "main", "abc123").await.unwrap();
-
-        let result = cache.write_file(42, "main", "/etc/passwd", b"bad").await;
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("path traversal"));
-    }
-
-    #[tokio::test]
-    async fn delete_file_rejects_absolute_path() {
-        let (_dir, cache) = create_cache();
-        cache.save(42, "main", "abc123").await.unwrap();
-
-        let result = cache.delete_file(42, "main", "/etc/passwd").await;
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("path traversal"));
-    }
-
-    #[tokio::test]
-    async fn rename_file_rejects_path_traversal_in_old_path() {
-        let (_dir, cache) = create_cache();
-        cache.save(42, "main", "abc123").await.unwrap();
-
-        let result = cache
-            .rename_file(42, "main", "../../../etc/passwd", "safe.rs")
+        assert_path_traversal_rejected(cache.rename_file(42, "main", "safe.rs", malicious).await)
             .await;
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("path traversal"));
     }
 
     #[tokio::test]
-    async fn rename_file_rejects_path_traversal_in_new_path() {
+    async fn absolute_paths_rejected_for_all_file_operations() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
+        let absolute = "/etc/passwd";
 
-        let result = cache
-            .rename_file(42, "main", "safe.rs", "../../../etc/passwd")
+        assert_path_traversal_rejected(cache.write_file(42, "main", absolute, b"bad").await).await;
+        assert_path_traversal_rejected(cache.delete_file(42, "main", absolute).await).await;
+        assert_path_traversal_rejected(cache.rename_file(42, "main", absolute, "safe.rs").await)
             .await;
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("path traversal"));
+        assert_path_traversal_rejected(cache.rename_file(42, "main", "safe.rs", absolute).await)
+            .await;
     }
 
     #[tokio::test]
-    async fn rename_file_rejects_absolute_old_path() {
-        let (_dir, cache) = create_cache();
-        cache.save(42, "main", "abc123").await.unwrap();
-
-        let result = cache
-            .rename_file(42, "main", "/etc/passwd", "safe.rs")
-            .await;
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("path traversal"));
-    }
-
-    #[tokio::test]
-    async fn rename_file_rejects_absolute_new_path() {
-        let (_dir, cache) = create_cache();
-        cache.save(42, "main", "abc123").await.unwrap();
-
-        let result = cache
-            .rename_file(42, "main", "safe.rs", "/etc/passwd")
-            .await;
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("path traversal"));
-    }
-
-    #[tokio::test]
-    async fn write_file_allows_sibling_path_within_base() {
+    async fn sibling_path_within_base_is_allowed() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
 
@@ -699,5 +747,40 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn record_entry_size_returns_nonzero_for_files_on_disk() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+        cache
+            .write_file(42, "main", "file.rs", b"hello world")
+            .await
+            .unwrap();
+
+        let size = cache.record_entry_size(42, "main").await.unwrap();
+
+        assert!(size > 0);
+    }
+
+    #[tokio::test]
+    async fn get_pinned_returns_entry_and_guard_on_cache_hit() {
+        let (_dir, cache) = create_cache();
+        cache.save(42, "main", "abc123").await.unwrap();
+
+        let result = cache.get_pinned(42, "main").await.unwrap();
+
+        let (cached, guard) = result.expect("should return cached entry");
+        assert_eq!(cached.commit, "abc123");
+        assert_eq!(guard.path(), cache.repository_dir(42, "main"));
+    }
+
+    #[tokio::test]
+    async fn get_pinned_returns_none_on_cache_miss() {
+        let (_dir, cache) = create_cache();
+
+        let result = cache.get_pinned(42, "main").await.unwrap();
+
+        assert!(result.is_none());
     }
 }
