@@ -85,7 +85,7 @@ etl:
     ON namespace.id = namespace_details.namespace_id
     INNER JOIN namespace_traversal_paths traversal_paths
     ON namespace.id = traversal_paths.id
-  traversal_path_filter: "namespace.id IN (SELECT id FROM namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
+  traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: namespace._siphon_replicated_at
   deleted: namespace._siphon_deleted
   edges:
