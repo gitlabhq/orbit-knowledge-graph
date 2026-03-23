@@ -2,7 +2,7 @@
 //!
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -369,16 +369,17 @@ impl Direction {
     /// Returns (start_col, end_col) for edge traversal.
     pub fn edge_columns(self) -> (&'static str, &'static str) {
         match self {
-            Direction::Outgoing | Direction::Both => ("source_id", "target_id"),
-            Direction::Incoming => ("target_id", "source_id"),
+            Direction::Outgoing | Direction::Both => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN),
+            Direction::Incoming => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
         }
     }
 
     /// Returns (from_col, to_col) for union subquery joins.
     pub fn union_columns(self) -> (&'static str, &'static str) {
+        use crate::constants::{END_ID_COLUMN, START_ID_COLUMN};
         match self {
-            Direction::Outgoing | Direction::Both => ("start_id", "end_id"),
-            Direction::Incoming => ("end_id", "start_id"),
+            Direction::Outgoing | Direction::Both => (START_ID_COLUMN, END_ID_COLUMN),
+            Direction::Incoming => (END_ID_COLUMN, START_ID_COLUMN),
         }
     }
 }

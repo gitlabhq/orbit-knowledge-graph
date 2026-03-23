@@ -14,13 +14,28 @@ pub const NODE_RESERVED_COLUMNS: &[&str] = &["id"];
 
 /// Reserved columns on the edge table (matches EdgeEntity schema).
 pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
-    "traversal_path",
-    "relationship_kind",
-    "source_id",
-    "source_kind",
-    "target_id",
-    "target_kind",
+    TRAVERSAL_PATH_COLUMN,
+    RELATIONSHIP_KIND_COLUMN,
+    SOURCE_ID_COLUMN,
+    SOURCE_KIND_COLUMN,
+    TARGET_ID_COLUMN,
+    TARGET_KIND_COLUMN,
 ];
+
+/// Edge column: type of relationship between two entities.
+pub const RELATIONSHIP_KIND_COLUMN: &str = "relationship_kind";
+
+/// Edge column: ID of the source entity.
+pub const SOURCE_ID_COLUMN: &str = "source_id";
+
+/// Edge column: entity type of the source.
+pub const SOURCE_KIND_COLUMN: &str = "source_kind";
+
+/// Edge column: ID of the target entity.
+pub const TARGET_ID_COLUMN: &str = "target_id";
+
+/// Edge column: entity type of the target.
+pub const TARGET_KIND_COLUMN: &str = "target_kind";
 
 /// Prefix for all ClickHouse graph tables (e.g., `gl_user`, `gl_project`).
 pub const GL_TABLE_PREFIX: &str = "gl_";

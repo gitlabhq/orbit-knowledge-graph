@@ -68,3 +68,65 @@ pub const EDGE_ALIAS_SUFFIXES: &[&str] = &[
     EDGE_DST_SUFFIX,
     EDGE_DST_TYPE_SUFFIX,
 ];
+
+// ─── CTE and internal column names ──────────────────────────────────────────
+
+/// Internal CTE column for hop depth (used in path-finding and multi-hop traversal).
+pub const DEPTH_COLUMN: &str = "depth";
+
+/// Internal CTE column for accumulated path node tuples.
+pub const PATH_NODES_COLUMN: &str = "path_nodes";
+
+/// Internal CTE column for accumulated edge relationship kinds per hop.
+/// Named distinctly from `EDGE_KINDS_COLUMN` (`_gkg_edge_kinds`) which is the
+/// output alias — this is the raw CTE-internal column before projection.
+pub const FRONTIER_EDGE_KINDS_COLUMN: &str = "edge_kinds";
+
+/// Internal CTE column for the frontier anchor node ID.
+pub const ANCHOR_ID_COLUMN: &str = "anchor_id";
+
+/// Internal CTE column for the frontier end node ID.
+pub const END_ID_COLUMN: &str = "end_id";
+
+/// Internal CTE column for the frontier end node type.
+pub const END_KIND_COLUMN: &str = "end_kind";
+
+/// Internal CTE column for the hop start node ID (multi-hop UNION ALL).
+pub const START_ID_COLUMN: &str = "start_id";
+
+/// CTE name for forward frontier in path-finding.
+pub const FORWARD_CTE: &str = "forward";
+
+/// CTE name for backward frontier in path-finding.
+pub const BACKWARD_CTE: &str = "backward";
+
+/// Table alias for the forward frontier CTE.
+pub const FORWARD_ALIAS: &str = "f";
+
+/// Table alias for the backward frontier CTE.
+pub const BACKWARD_ALIAS: &str = "b";
+
+/// Table alias for the combined paths UNION ALL subquery.
+pub const PATHS_ALIAS: &str = "paths";
+
+/// CTE name prefix for node-filter CTEs in edge-centric traversal.
+const NODE_FILTER_CTE_PREFIX: &str = "_nf_";
+
+/// CTE name prefix for cascading SIP CTEs.
+const CASCADE_CTE_PREFIX: &str = "_cascade_";
+
+/// CTE name for a node-filter: `_nf_{alias}`.
+pub fn node_filter_cte(alias: &str) -> String {
+    format!("{NODE_FILTER_CTE_PREFIX}{alias}")
+}
+
+/// CTE name for a cascade SIP: `_cascade_{alias}`.
+pub fn cascade_cte(alias: &str) -> String {
+    format!("{CASCADE_CTE_PREFIX}{alias}")
+}
+
+/// Edge alias used in cascade/hop-frontier CTE building.
+pub const CASCADE_EDGE_ALIAS: &str = "_ce";
+
+/// Edge alias used in hop-frontier CTE building.
+pub const HOP_EDGE_ALIAS: &str = "_he";
