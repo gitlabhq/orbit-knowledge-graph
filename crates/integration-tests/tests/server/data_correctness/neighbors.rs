@@ -104,15 +104,18 @@ pub(super) async fn neighbors_mixed_entity_types(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_count(5);
+    resp.assert_node_count(7);
     resp.assert_referential_integrity();
     resp.assert_node_ids("User", &[1]);
     resp.assert_node_ids("Note", &[3000, 3002, 3003]);
+    resp.assert_node_ids("MergeRequestDiff", &[5000, 5001]);
 
     resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
     resp.assert_edge_exists("MergeRequest", 2000, "Note", 3000, "HAS_NOTE");
     resp.assert_edge_exists("MergeRequest", 2000, "Note", 3002, "HAS_NOTE");
     resp.assert_edge_exists("MergeRequest", 2000, "Note", 3003, "HAS_NOTE");
+    resp.assert_edge_exists("MergeRequest", 2000, "MergeRequestDiff", 5000, "HAS_DIFF");
+    resp.assert_edge_exists("MergeRequest", 2000, "MergeRequestDiff", 5001, "HAS_DIFF");
 }
 
 pub(super) async fn neighbors_redaction_removes_unauthorized_targets(ctx: &TestContext) {
