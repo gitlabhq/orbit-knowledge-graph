@@ -88,6 +88,10 @@ pub struct CompilerMetadata {
     /// Node IDs whose tables were eliminated from the FROM clause
     /// (e.g. edge-only aggregation). SIP/cascade should skip these.
     pub skipped_node_joins: HashSet<String>,
+    /// For traversal queries: maps node alias → (edge_alias, edge_column).
+    /// Written by lower, read by enforce to emit `_gkg_*` redaction columns
+    /// from edge columns instead of node table columns.
+    pub node_edge_col: HashMap<String, (String, String)>,
 }
 
 impl Default for Input {
