@@ -3435,6 +3435,7 @@ dependencies = [
  "gkg-server",
  "gkg-utils",
  "query-engine",
+ "regex",
  "rustls",
  "serde_json",
  "testcontainers",
