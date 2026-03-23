@@ -313,10 +313,24 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
     // the edge column directly (source_id / target_id).
     if let Some(ob) = &input.order_by
         && ob.property != "id"
-        && let Some(ob_node) = input.nodes.iter().find(|n| n.id == ob.node)
-        && let Some((edge_a, edge_c)) = node_edge_col.get(&ob.node)
-        && let Ok(table) = resolve_table(ob_node)
     {
+        let ob_node = input
+            .nodes
+            .iter()
+            .find(|n| n.id == ob.node)
+            .ok_or_else(|| {
+                QueryError::Lowering(format!(
+                    "order_by node '{}' not found in input nodes",
+                    ob.node
+                ))
+            })?;
+        let (edge_a, edge_c) = node_edge_col.get(&ob.node).ok_or_else(|| {
+            QueryError::Lowering(format!(
+                "order_by node '{}' not connected to driving edge",
+                ob.node
+            ))
+        })?;
+        let table = resolve_table(ob_node)?;
         let join_cond = Expr::eq(
             Expr::col(edge_a, edge_c.as_str()),
             Expr::col(&ob_node.id, DEFAULT_PRIMARY_KEY),
