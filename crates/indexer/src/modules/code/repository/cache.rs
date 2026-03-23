@@ -87,6 +87,9 @@ pub trait RepositoryCache: Send + Sync {
         archive_stream: ByteStream,
     ) -> Result<PathBuf, RepositoryCacheError>;
 
+    /// Pin an entry so it cannot be evicted. Returns a guard that unpins on drop.
+    fn pin(&self, project_id: i64, branch: &str) -> CacheEntryGuard;
+
     /// Atomically look up a cached entry and pin it if found.
     ///
     /// This holds the eviction read lock across both operations so that an
@@ -151,11 +154,6 @@ impl LocalRepositoryCache {
 
     fn repository_dir(&self, project_id: i64, branch: &str) -> PathBuf {
         self.branch_dir(project_id, branch).join(REPOSITORY_DIR)
-    }
-
-    fn pin(&self, project_id: i64, branch: &str) -> CacheEntryGuard {
-        self.budget
-            .pin(self.repository_dir(project_id, branch), project_id, branch)
     }
 }
 
@@ -337,6 +335,11 @@ impl RepositoryCache for LocalRepositoryCache {
         tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
 
         Ok(repo_dir)
+    }
+
+    fn pin(&self, project_id: i64, branch: &str) -> CacheEntryGuard {
+        self.budget
+            .pin(self.repository_dir(project_id, branch), project_id, branch)
     }
 
     async fn get_pinned(

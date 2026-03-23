@@ -131,16 +131,7 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
     ) -> Result<ResolveResult, HandlerError> {
-        let (_, guard) = self
-            .cache
-            .get_pinned(project_id, branch)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("cache pin failed: {e}")))?
-            .ok_or_else(|| {
-                HandlerError::Processing(
-                    "cache entry missing immediately after download".to_string(),
-                )
-            })?;
+        let guard = self.cache.pin(project_id, branch);
         let should_cleanup = self.record_and_evict(project_id, branch).await?;
         Ok(ResolveResult {
             guard,
