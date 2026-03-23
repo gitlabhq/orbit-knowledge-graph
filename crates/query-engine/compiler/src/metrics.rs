@@ -121,6 +121,7 @@ fn counter_info(err: &QueryError) -> (&Counter<u64>, &'static str) {
         QueryError::LimitExceeded(_) => (&METRICS.limit_exceeded, "limit"),
         QueryError::Security(_) => (&METRICS.auth_filter_missing, "security"),
         QueryError::Lowering(_) => (&METRICS.pipeline_invariant_violated, "lowering"),
+        QueryError::Enforcement(_) => (&METRICS.pipeline_invariant_violated, "enforcement"),
         QueryError::Codegen(_) => (&METRICS.pipeline_invariant_violated, "codegen"),
     }
 }

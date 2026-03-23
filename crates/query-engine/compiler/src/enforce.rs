@@ -9,9 +9,9 @@
 //! For path finding queries, the start node's ID is added to the base query and
 //! the end node's ID is added to the final query.
 
-use crate::ast::{ChType, Expr, JoinType, Node, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use std::collections::{HashMap, HashSet};
@@ -207,31 +207,32 @@ fn enforce_return_columns(
         let needs_separate_pk = node.redaction_id_column != DEFAULT_PRIMARY_KEY;
 
         if is_traversal {
-            let edge_id_expr = if let Some((edge_alias, edge_col)) = node_edge_col.get(&node.id) {
-                Expr::col(edge_alias, edge_col.as_str())
-            } else {
-                Expr::param(ChType::Int64, 0i64)
-            };
+            let (edge_alias, edge_col) = node_edge_col.get(&node.id).ok_or_else(|| {
+                QueryError::Enforcement(format!(
+                    "traversal node '{}' has no edge mapping in node_edge_col",
+                    node.id
+                ))
+            })?;
+            let edge_id_expr = Expr::col(edge_alias, edge_col.as_str());
 
             if needs_separate_pk {
                 // JOIN node table for the auth column (e.g. merge_request_id).
-                let joined = if let Some((edge_a, edge_c)) = node_edge_col.get(&node.id)
-                    && let Some(table) = &node.table
-                {
-                    let join_cond = Expr::eq(
-                        Expr::col(edge_a, edge_c.as_str()),
-                        Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                    );
-                    q.from = TableRef::join(
-                        JoinType::Inner,
-                        std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
-                        TableRef::scan(table, &node.id),
-                        join_cond,
-                    );
-                    true
-                } else {
-                    false
-                };
+                let table = node.table.as_ref().ok_or_else(|| {
+                    QueryError::Enforcement(format!(
+                        "traversal node '{}' has non-default redaction_id_column '{}' but no resolved table",
+                        node.id, node.redaction_id_column
+                    ))
+                })?;
+                let join_cond = Expr::eq(
+                    Expr::col(edge_alias, edge_col.as_str()),
+                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                );
+                q.from = TableRef::join(
+                    JoinType::Inner,
+                    std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
+                    TableRef::scan(table, &node.id),
+                    join_cond,
+                );
 
                 let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
                 if !has_pk {
@@ -244,11 +245,7 @@ fn enforce_return_columns(
                 let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
                 if !has_id {
                     q.select.push(SelectExpr {
-                        expr: if joined {
-                            Expr::col(&node.id, &node.redaction_id_column)
-                        } else {
-                            edge_id_expr
-                        },
+                        expr: Expr::col(&node.id, &node.redaction_id_column),
                         alias: Some(id_col.clone()),
                     });
                 }
@@ -1113,8 +1110,7 @@ mod tests {
     }
 
     #[test]
-    fn traversal_node_without_edge_mapping_gets_zero_id() {
-        // Node not connected to any edge gets Param(0) for its ID
+    fn traversal_node_without_edge_mapping_returns_error() {
         let input = traversal_input_with_edge_col(
             vec![InputNode {
                 id: "x".to_string(),
@@ -1133,17 +1129,41 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input).unwrap();
+        let err = enforce_return(&mut node, &input).unwrap_err();
+        assert!(
+            err.to_string().contains("no edge mapping"),
+            "expected edge mapping error, got: {err}"
+        );
+    }
 
-        let Node::Query(q) = node else {
-            panic!("expected Query")
+    #[test]
+    fn traversal_non_default_redaction_without_table_returns_error() {
+        let node_edge_col: HashMap<String, (String, String)> =
+            [("d".into(), ("e0".into(), "target_id".into()))].into();
+
+        let input = traversal_input_with_edge_col(
+            vec![InputNode {
+                id: "d".to_string(),
+                entity: Some("MergeRequestDiff".to_string()),
+                table: None, // no resolved table
+                redaction_id_column: "merge_request_id".to_string(),
+                ..Default::default()
+            }],
+            node_edge_col,
+        );
+
+        let query = Query {
+            select: vec![],
+            from: edge_from(),
+            limit: Some(10),
+            ..Default::default()
         };
 
-        let x_id = q
-            .select
-            .iter()
-            .find(|s| s.alias.as_deref() == Some("_gkg_x_id"))
-            .expect("missing _gkg_x_id");
-        assert!(matches!(&x_id.expr, Expr::Param { .. }));
+        let mut node = Node::Query(Box::new(query));
+        let err = enforce_return(&mut node, &input).unwrap_err();
+        assert!(
+            err.to_string().contains("no resolved table"),
+            "expected missing table error, got: {err}"
+        );
     }
 }

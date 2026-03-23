@@ -266,7 +266,8 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
     }
 
     // Surface edge-to-node mapping for enforce to emit _gkg_* columns.
-    input.compiler.node_edge_col = node_edge_col.clone();
+    input.compiler.node_edge_col = node_edge_col;
+    let node_edge_col = &input.compiler.node_edge_col;
 
     // Add IN subquery for each node that has conditions
     for node in &input.nodes {
