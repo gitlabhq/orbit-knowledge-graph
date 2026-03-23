@@ -308,11 +308,32 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
         }
     }
 
+    // When order_by references a node property other than "id", JOIN
+    // that node's table so the column is accessible. For "id" we can use
+    // the edge column directly (source_id / target_id).
+    if let Some(ob) = &input.order_by
+        && ob.property != "id"
+        && let Some(ob_node) = input.nodes.iter().find(|n| n.id == ob.node)
+        && let Some((edge_a, edge_c)) = node_edge_col.get(&ob.node)
+        && let Ok(table) = resolve_table(ob_node)
+    {
+        let join_cond = Expr::eq(
+            Expr::col(edge_a, edge_c.as_str()),
+            Expr::col(&ob_node.id, DEFAULT_PRIMARY_KEY),
+        );
+        from = TableRef::join(
+            JoinType::Inner,
+            from,
+            TableRef::scan(&table, &ob_node.id),
+            join_cond,
+        );
+    }
+
     let where_clause = Expr::and_all(where_parts.into_iter().map(Some));
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         let expr = match (ob.property.as_str(), node_edge_col.get(&ob.node)) {
             ("id", Some((alias, edge_col))) => Expr::col(alias, edge_col.as_str()),
-            _ => Expr::col(edge_alias, &ob.property),
+            _ => Expr::col(&ob.node, &ob.property),
         };
         vec![OrderExpr {
             expr,
@@ -2313,5 +2334,86 @@ mod tests {
             !table_ref_has_starts_with(&q.from),
             "neighbors join should not contain startsWith"
         );
+    }
+
+    #[test]
+    fn test_order_by_node_property_joins_node_table() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "n", "entity": "Note", "columns": ["confidential"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "order_by": {"node": "n", "property": "created_at", "direction": "DESC"},
+            "limit": 25
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        fn has_scan(t: &TableRef, tbl: &str) -> bool {
+            match t {
+                TableRef::Scan { table, .. } => table == tbl,
+                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+                _ => false,
+            }
+        }
+        assert!(
+            has_scan(&q.from, "gl_note"),
+            "order_by on node property should JOIN the node table"
+        );
+
+        assert_eq!(q.order_by.len(), 1);
+        if let Expr::Column { table, column } = &q.order_by[0].expr {
+            assert_eq!(table, "n");
+            assert_eq!(column, "created_at");
+        } else {
+            panic!("expected column expression in order_by");
+        }
+        assert!(q.order_by[0].desc);
+    }
+
+    #[test]
+    fn test_order_by_id_uses_edge_column() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "limit": 25
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        fn has_scan(t: &TableRef, tbl: &str) -> bool {
+            match t {
+                TableRef::Scan { table, .. } => table == tbl,
+                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+                _ => false,
+            }
+        }
+        assert!(
+            !has_scan(&q.from, "gl_user"),
+            "order_by id should not add a node table JOIN"
+        );
+
+        assert_eq!(q.order_by.len(), 1);
+        if let Expr::Column { table, column } = &q.order_by[0].expr {
+            assert_eq!(table, "e0");
+            assert_eq!(column, "source_id");
+        } else {
+            panic!("expected column expression in order_by");
+        }
     }
 }

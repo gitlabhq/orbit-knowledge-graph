@@ -364,3 +364,26 @@ pub(super) async fn traversal_shared_target_fan_in(ctx: &TestContext) {
     resp.assert_node_ids("Note", &[3000, 3002, 3003]);
     resp.assert_edge_set("HAS_NOTE", &[(2000, 3000), (2000, 3002), (2000, 3003)]);
 }
+
+pub(super) async fn traversal_order_by_node_property(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "order_by": {"node": "mr", "property": "title", "direction": "ASC"},
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(7);
+    resp.assert_referential_integrity();
+    resp.assert_node_order("MergeRequest", &[2000, 2001, 2002, 2003]);
+    resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+}

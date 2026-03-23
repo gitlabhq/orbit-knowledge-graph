@@ -51,6 +51,7 @@ async fn data_correctness() {
         traversal::traversal_variable_length_with_redaction_at_depth,
         traversal::traversal_deduplicates_shared_nodes,
         traversal::traversal_shared_target_fan_in,
+        traversal::traversal_order_by_node_property,
         // aggregation
         aggregation::aggregation_count_returns_correct_values,
         aggregation::aggregation_count_group_contains_projects,
