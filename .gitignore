@@ -18,8 +18,6 @@ gl_synthetic_data*/
 gkg_simulator_manifest.json
 crates/simulator/profiles
 evaluation_results*/
-datalake-generator-state/
-datalake-generator-report.json
 
 # Tilt secrets (contains passwords)
 .tilt-secrets
