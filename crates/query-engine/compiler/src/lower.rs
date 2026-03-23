@@ -4,8 +4,11 @@
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::{
-    EDGE_ALIAS_SUFFIXES, NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN,
-    RELATIONSHIP_TYPE_COLUMN,
+    ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,
+    EDGE_KINDS_COLUMN, EDGE_KINDS_CTE_COLUMN, END_ID_COLUMN, END_KIND_COLUMN, FORWARD_ALIAS,
+    FORWARD_CTE, NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN,
+    NODE_FILTER_CTE_PREFIX, PATH_COLUMN, PATH_NODES_COLUMN, PATHS_ALIAS, RELATIONSHIP_TYPE_COLUMN,
+    START_ID_COLUMN,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{
@@ -13,7 +16,9 @@ use crate::input::{
     InputRelationship, OrderDirection, QueryType,
 };
 use ontology::constants::{
-    DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, EDGE_TABLE, TRAVERSAL_PATH_COLUMN,
+    DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN,
+    SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
+    TRAVERSAL_PATH_COLUMN,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -28,13 +33,16 @@ fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
 }
 
 fn edge_depth_select_expr(alias: &str) -> SelectExpr {
-    SelectExpr::new(Expr::col(alias, "depth"), format!("{alias}_depth"))
+    SelectExpr::new(
+        Expr::col(alias, DEPTH_COLUMN),
+        format!("{alias}_{DEPTH_COLUMN}"),
+    )
 }
 
 fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
     SelectExpr::new(
-        Expr::col(alias, "path_nodes"),
-        format!("{alias}_path_nodes"),
+        Expr::col(alias, PATH_NODES_COLUMN),
+        format!("{alias}_{PATH_NODES_COLUMN}"),
     )
 }
 
@@ -238,7 +246,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
             );
             if let Some(tf) = Expr::col_in(
                 &alias,
-                "relationship_kind",
+                RELATIONSHIP_KIND_COLUMN,
                 ChType::String,
                 rel.types.iter().map(|t| Value::String(t.clone())).collect(),
             ) {
@@ -278,7 +286,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
         if let Some((alias, edge_col)) = node_edge_col.get(&node.id) {
             let table = resolve_table(node)?;
             let node_where = build_node_where(node);
-            let cte_name = format!("_nf_{}", node.id);
+            let cte_name = format!("{NODE_FILTER_CTE_PREFIX}{}", node.id);
             let cte_query = Query {
                 select: vec![SelectExpr::new(
                     Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
@@ -301,7 +309,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
     // that node's table so the column is accessible. For "id" we can use
     // the edge column directly (source_id / target_id).
     if let Some(ob) = &input.order_by
-        && ob.property != "id"
+        && ob.property != DEFAULT_PRIMARY_KEY
     {
         let ob_node = input
             .nodes
@@ -335,7 +343,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
     let where_clause = Expr::and_all(where_parts.into_iter().map(Some));
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         let expr = match (ob.property.as_str(), node_edge_col.get(&ob.node)) {
-            ("id", Some((alias, edge_col))) => Expr::col(alias, edge_col.as_str()),
+            (DEFAULT_PRIMARY_KEY, Some((alias, edge_col))) => Expr::col(alias, edge_col.as_str()),
             _ => Expr::col(&ob.node, &ob.property),
         };
         vec![OrderExpr {
@@ -488,12 +496,12 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
     let forward_cte = Cte::new(
-        "forward",
+        FORWARD_CTE,
         build_frontier(&start.node_ids, forward_depth, &rel_type_filter, true),
     );
     let backward_cte = if backward_depth > 0 {
         Some(Cte::new(
-            "backward",
+            BACKWARD_CTE,
             build_frontier(&end.node_ids, backward_depth, &rel_type_filter, false),
         ))
     } else {
@@ -504,38 +512,48 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let start_tuple = |table: &str| {
         Expr::func(
             "tuple",
-            vec![Expr::col(table, "anchor_id"), Expr::string(start_entity)],
+            vec![
+                Expr::col(table, ANCHOR_ID_COLUMN),
+                Expr::string(start_entity),
+            ],
         )
     };
     let end_tuple = |table: &str| {
         Expr::func(
             "tuple",
-            vec![Expr::col(table, "anchor_id"), Expr::string(end_entity)],
+            vec![Expr::col(table, ANCHOR_ID_COLUMN), Expr::string(end_entity)],
         )
     };
 
     // Direct depth-1 paths: forward frontier reaching end directly.
     let direct_query = Query {
         select: vec![
-            SelectExpr::new(Expr::col("f", "depth"), "depth"),
+            SelectExpr::new(Expr::col(FORWARD_ALIAS, DEPTH_COLUMN), DEPTH_COLUMN),
             SelectExpr::new(
                 Expr::func(
                     "arrayConcat",
                     vec![
-                        Expr::func("array", vec![start_tuple("f")]),
-                        Expr::col("f", "path_nodes"),
+                        Expr::func("array", vec![start_tuple(FORWARD_ALIAS)]),
+                        Expr::col(FORWARD_ALIAS, PATH_NODES_COLUMN),
                     ],
                 ),
-                "_gkg_path",
+                PATH_COLUMN,
             ),
-            SelectExpr::new(Expr::col("f", "edge_kinds"), "_gkg_edge_kinds"),
+            SelectExpr::new(
+                Expr::col(FORWARD_ALIAS, EDGE_KINDS_CTE_COLUMN),
+                EDGE_KINDS_COLUMN,
+            ),
         ],
-        from: TableRef::scan("forward", "f"),
+        from: TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
         where_clause: Expr::and_all([
-            Some(Expr::binary(Op::Eq, Expr::col("f", "depth"), Expr::int(1))),
+            Some(Expr::binary(
+                Op::Eq,
+                Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
+                Expr::int(1),
+            )),
             Expr::col_in(
-                "f",
-                "end_id",
+                FORWARD_ALIAS,
+                END_ID_COLUMN,
                 ChType::Int64,
                 end.node_ids.iter().map(|id| Value::from(*id)).collect(),
             ),
@@ -547,41 +565,58 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let intersection_query = Query {
         select: vec![
             SelectExpr::new(
-                Expr::binary(Op::Add, Expr::col("f", "depth"), Expr::col("b", "depth")),
-                "depth",
+                Expr::binary(
+                    Op::Add,
+                    Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
+                    Expr::col(BACKWARD_ALIAS, DEPTH_COLUMN),
+                ),
+                DEPTH_COLUMN,
             ),
             SelectExpr::new(
                 Expr::func(
                     "arrayConcat",
                     vec![
-                        Expr::func("array", vec![start_tuple("f")]),
-                        Expr::col("f", "path_nodes"),
-                        Expr::func("arrayReverse", vec![Expr::col("b", "path_nodes")]),
-                        Expr::func("array", vec![end_tuple("b")]),
+                        Expr::func("array", vec![start_tuple(FORWARD_ALIAS)]),
+                        Expr::col(FORWARD_ALIAS, PATH_NODES_COLUMN),
+                        Expr::func(
+                            "arrayReverse",
+                            vec![Expr::col(BACKWARD_ALIAS, PATH_NODES_COLUMN)],
+                        ),
+                        Expr::func("array", vec![end_tuple(BACKWARD_ALIAS)]),
                     ],
                 ),
-                "_gkg_path",
+                PATH_COLUMN,
             ),
             SelectExpr::new(
                 Expr::func(
                     "arrayConcat",
                     vec![
-                        Expr::col("f", "edge_kinds"),
-                        Expr::func("arrayReverse", vec![Expr::col("b", "edge_kinds")]),
+                        Expr::col(FORWARD_ALIAS, EDGE_KINDS_CTE_COLUMN),
+                        Expr::func(
+                            "arrayReverse",
+                            vec![Expr::col(BACKWARD_ALIAS, EDGE_KINDS_CTE_COLUMN)],
+                        ),
                     ],
                 ),
-                "_gkg_edge_kinds",
+                EDGE_KINDS_COLUMN,
             ),
         ],
         from: TableRef::join(
             JoinType::Inner,
-            TableRef::scan("forward", "f"),
-            TableRef::scan("backward", "b"),
-            Expr::eq(Expr::col("f", "end_id"), Expr::col("b", "end_id")),
+            TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
+            TableRef::scan(BACKWARD_CTE, BACKWARD_ALIAS),
+            Expr::eq(
+                Expr::col(FORWARD_ALIAS, END_ID_COLUMN),
+                Expr::col(BACKWARD_ALIAS, END_ID_COLUMN),
+            ),
         ),
         where_clause: Some(Expr::binary(
             Op::Le,
-            Expr::binary(Op::Add, Expr::col("f", "depth"), Expr::col("b", "depth")),
+            Expr::binary(
+                Op::Add,
+                Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
+                Expr::col(BACKWARD_ALIAS, DEPTH_COLUMN),
+            ),
             Expr::int(max_depth as i64),
         )),
         ..Default::default()
@@ -589,9 +624,9 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 
     // Combine direct + intersection as a UNION ALL subquery.
     let paths_union = if backward_depth == 0 {
-        TableRef::subquery(direct_query, "paths")
+        TableRef::subquery(direct_query, PATHS_ALIAS)
     } else {
-        TableRef::union_all(vec![direct_query, intersection_query], "paths")
+        TableRef::union_all(vec![direct_query, intersection_query], PATHS_ALIAS)
     };
 
     let (limit, offset) = pagination(input);
@@ -610,13 +645,13 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             ctes
         },
         select: vec![
-            SelectExpr::new(Expr::col("paths", "_gkg_path"), "_gkg_path"),
-            SelectExpr::new(Expr::col("paths", "_gkg_edge_kinds"), "_gkg_edge_kinds"),
-            SelectExpr::new(Expr::col("paths", "depth"), "depth"),
+            SelectExpr::new(Expr::col(PATHS_ALIAS, PATH_COLUMN), PATH_COLUMN),
+            SelectExpr::new(Expr::col(PATHS_ALIAS, EDGE_KINDS_COLUMN), EDGE_KINDS_COLUMN),
+            SelectExpr::new(Expr::col(PATHS_ALIAS, DEPTH_COLUMN), DEPTH_COLUMN),
         ],
         from: paths_union,
         order_by: vec![OrderExpr {
-            expr: Expr::col("paths", "depth"),
+            expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
             desc: false,
         }],
         limit,
@@ -666,9 +701,9 @@ fn build_frontier_arm(
 ) -> Query {
     // Column naming: forward traverses source→target, backward target→source.
     let (anchor_col, next_col, next_kind_col) = if is_forward {
-        ("source_id", "target_id", "target_kind")
+        (SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN)
     } else {
-        ("target_id", "source_id", "source_kind")
+        (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN)
     };
 
     let last = format!("e{depth}");
@@ -728,7 +763,7 @@ fn build_frontier_arm(
     let edge_kinds = Expr::func(
         "array",
         (1..=depth)
-            .map(|i| Expr::col(format!("e{i}"), "relationship_kind"))
+            .map(|i| Expr::col(format!("e{i}"), RELATIONSHIP_KIND_COLUMN))
             .collect(),
     );
 
@@ -742,12 +777,12 @@ fn build_frontier_arm(
 
     Query {
         select: vec![
-            SelectExpr::new(Expr::col("e1", anchor_col), "anchor_id"),
-            SelectExpr::new(Expr::col(&last, next_col), "end_id"),
-            SelectExpr::new(Expr::col(&last, next_kind_col), "end_kind"),
-            SelectExpr::new(path_nodes, "path_nodes"),
-            SelectExpr::new(edge_kinds, "edge_kinds"),
-            SelectExpr::new(Expr::int(depth as i64), "depth"),
+            SelectExpr::new(Expr::col("e1", anchor_col), ANCHOR_ID_COLUMN),
+            SelectExpr::new(Expr::col(&last, next_col), END_ID_COLUMN),
+            SelectExpr::new(Expr::col(&last, next_kind_col), END_KIND_COLUMN),
+            SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
+            SelectExpr::new(edge_kinds, EDGE_KINDS_CTE_COLUMN),
+            SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
         ],
         from,
         where_clause: Expr::and_all([anchor_cond, first_type_cond]),
@@ -796,8 +831,8 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
                 join_cond = Expr::and(join_cond, tc);
             }
             let (neighbor_id, neighbor_type, is_outgoing) = match dir {
-                Direction::Outgoing => ("target_id", "target_kind", 1),
-                Direction::Incoming => ("source_id", "source_kind", 0),
+                Direction::Outgoing => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN, 1),
+                Direction::Incoming => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, 0),
                 Direction::Both => unreachable!(),
             };
             Query {
@@ -805,7 +840,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
                     SelectExpr::new(Expr::col(edge_alias, neighbor_id), NEIGHBOR_ID_COLUMN),
                     SelectExpr::new(Expr::col(edge_alias, neighbor_type), NEIGHBOR_TYPE_COLUMN),
                     SelectExpr::new(
-                        Expr::col(edge_alias, "relationship_kind"),
+                        Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
                         RELATIONSHIP_TYPE_COLUMN,
                     ),
                     SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
@@ -840,8 +875,8 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         join_cond = Expr::and(join_cond, tc);
     }
     let (neighbor_id, neighbor_type, is_outgoing) = match neighbors_config.direction {
-        Direction::Outgoing => ("target_id", "target_kind", 1i64),
-        Direction::Incoming => ("source_id", "source_kind", 0i64),
+        Direction::Outgoing => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN, 1i64),
+        Direction::Incoming => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, 0i64),
         Direction::Both => unreachable!(),
     };
 
@@ -850,7 +885,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
             SelectExpr::new(Expr::col(edge_alias, neighbor_id), NEIGHBOR_ID_COLUMN),
             SelectExpr::new(Expr::col(edge_alias, neighbor_type), NEIGHBOR_TYPE_COLUMN),
             SelectExpr::new(
-                Expr::col(edge_alias, "relationship_kind"),
+                Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
                 RELATIONSHIP_TYPE_COLUMN,
             ),
             SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
@@ -960,8 +995,8 @@ fn build_hop_union_all(rel: &InputRelationship, alias: &str) -> TableRef {
 fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direction) -> Query {
     let (start_col, end_col) = direction.edge_columns();
     let end_type_col = match direction {
-        Direction::Outgoing | Direction::Both => "target_kind",
-        Direction::Incoming => "source_kind",
+        Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
+        Direction::Incoming => SOURCE_KIND_COLUMN,
     };
     let last = format!("e{depth}");
 
@@ -990,25 +1025,25 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
         target_kind_expr,
     ) = match direction {
         Direction::Outgoing | Direction::Both => (
-            Expr::col("e1", "relationship_kind"),
-            Expr::col("e1", "source_id"),
-            Expr::col("e1", "source_kind"),
-            Expr::col(&last, "target_id"),
-            Expr::col(&last, "target_kind"),
+            Expr::col("e1", RELATIONSHIP_KIND_COLUMN),
+            Expr::col("e1", SOURCE_ID_COLUMN),
+            Expr::col("e1", SOURCE_KIND_COLUMN),
+            Expr::col(&last, TARGET_ID_COLUMN),
+            Expr::col(&last, TARGET_KIND_COLUMN),
         ),
         Direction::Incoming => (
-            Expr::col(&last, "relationship_kind"),
-            Expr::col(&last, "source_id"),
-            Expr::col(&last, "source_kind"),
-            Expr::col("e1", "target_id"),
-            Expr::col("e1", "target_kind"),
+            Expr::col(&last, RELATIONSHIP_KIND_COLUMN),
+            Expr::col(&last, SOURCE_ID_COLUMN),
+            Expr::col(&last, SOURCE_KIND_COLUMN),
+            Expr::col("e1", TARGET_ID_COLUMN),
+            Expr::col("e1", TARGET_KIND_COLUMN),
         ),
     };
 
     Query {
         select: vec![
-            SelectExpr::new(Expr::col("e1", start_col), "start_id"),
-            SelectExpr::new(Expr::col(&last, end_col), "end_id"),
+            SelectExpr::new(Expr::col("e1", start_col), START_ID_COLUMN),
+            SelectExpr::new(Expr::col(&last, end_col), END_ID_COLUMN),
             SelectExpr::new(
                 Expr::col(&last, TRAVERSAL_PATH_COLUMN),
                 TRAVERSAL_PATH_COLUMN,
@@ -1026,14 +1061,14 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
                         })
                         .collect(),
                 ),
-                "path_nodes",
+                PATH_NODES_COLUMN,
             ),
-            SelectExpr::new(relationship_kind_expr, "relationship_kind"),
-            SelectExpr::new(source_id_expr, "source_id"),
-            SelectExpr::new(source_kind_expr, "source_kind"),
-            SelectExpr::new(target_id_expr, "target_id"),
-            SelectExpr::new(target_kind_expr, "target_kind"),
-            SelectExpr::new(Expr::int(depth as i64), "depth"),
+            SelectExpr::new(relationship_kind_expr, RELATIONSHIP_KIND_COLUMN),
+            SelectExpr::new(source_id_expr, SOURCE_ID_COLUMN),
+            SelectExpr::new(source_kind_expr, SOURCE_KIND_COLUMN),
+            SelectExpr::new(target_id_expr, TARGET_ID_COLUMN),
+            SelectExpr::new(target_kind_expr, TARGET_KIND_COLUMN),
+            SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
         ],
         from,
         where_clause: first_type_cond,
@@ -1048,7 +1083,7 @@ fn edge_scan(alias: &str, type_filter: &Option<Vec<String>>) -> (TableRef, Optio
     let cond = type_filter.as_ref().and_then(|types| {
         Expr::col_in(
             alias,
-            "relationship_kind",
+            RELATIONSHIP_KIND_COLUMN,
             ChType::String,
             types.iter().map(|t| Value::String(t.clone())).collect(),
         )
@@ -1197,20 +1232,20 @@ fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
     match dir {
         Direction::Outgoing => Expr::eq(
             Expr::col(node, DEFAULT_PRIMARY_KEY),
-            Expr::col(edge, "source_id"),
+            Expr::col(edge, SOURCE_ID_COLUMN),
         ),
         Direction::Incoming => Expr::eq(
             Expr::col(node, DEFAULT_PRIMARY_KEY),
-            Expr::col(edge, "target_id"),
+            Expr::col(edge, TARGET_ID_COLUMN),
         ),
         Direction::Both => Expr::or(
             Expr::eq(
                 Expr::col(node, DEFAULT_PRIMARY_KEY),
-                Expr::col(edge, "source_id"),
+                Expr::col(edge, SOURCE_ID_COLUMN),
             ),
             Expr::eq(
                 Expr::col(node, DEFAULT_PRIMARY_KEY),
-                Expr::col(edge, "target_id"),
+                Expr::col(edge, TARGET_ID_COLUMN),
             ),
         ),
     }
@@ -1231,11 +1266,11 @@ fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Directi
     };
 
     match dir {
-        Direction::Outgoing => id_and_kind("source_id", "source_kind"),
-        Direction::Incoming => id_and_kind("target_id", "target_kind"),
+        Direction::Outgoing => id_and_kind(SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
+        Direction::Incoming => id_and_kind(TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
         Direction::Both => Expr::or(
-            id_and_kind("source_id", "source_kind"),
-            id_and_kind("target_id", "target_kind"),
+            id_and_kind(SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
+            id_and_kind(TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
         ),
     }
 }
@@ -1244,20 +1279,20 @@ fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Directi
 fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
     match dir {
         Direction::Outgoing => Expr::eq(
-            Expr::col(edge, "target_id"),
+            Expr::col(edge, TARGET_ID_COLUMN),
             Expr::col(node, DEFAULT_PRIMARY_KEY),
         ),
         Direction::Incoming => Expr::eq(
-            Expr::col(edge, "source_id"),
+            Expr::col(edge, SOURCE_ID_COLUMN),
             Expr::col(node, DEFAULT_PRIMARY_KEY),
         ),
         Direction::Both => Expr::or(
             Expr::eq(
-                Expr::col(edge, "target_id"),
+                Expr::col(edge, TARGET_ID_COLUMN),
                 Expr::col(node, DEFAULT_PRIMARY_KEY),
             ),
             Expr::eq(
-                Expr::col(edge, "source_id"),
+                Expr::col(edge, SOURCE_ID_COLUMN),
                 Expr::col(node, DEFAULT_PRIMARY_KEY),
             ),
         ),
@@ -1305,7 +1340,7 @@ fn build_full_where(
             if rel.max_hops > 1 && rel.min_hops > 1 {
                 conds.push(Expr::binary(
                     Op::Ge,
-                    Expr::col(alias, "depth"),
+                    Expr::col(alias, DEPTH_COLUMN),
                     Expr::int(rel.min_hops as i64),
                 ));
             }
