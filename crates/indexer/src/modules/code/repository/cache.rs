@@ -5,7 +5,7 @@ use futures::StreamExt;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::cache_budget::{
-    CacheBudget, CacheBudgetExhausted, CacheEntryGuard, directory_size, hashed_branch_name,
+    CacheBudget, CacheEntryGuard, directory_size, hashed_branch_name,
 };
 use super::service::ByteStream;
 use crate::configuration::RepositoryCacheConfiguration;
@@ -100,22 +100,14 @@ pub trait RepositoryCache: Send + Sync {
         branch: &str,
     ) -> Result<Option<(CachedRepository, CacheEntryGuard)>, RepositoryCacheError>;
 
-    /// Run eviction to make room for a new entry of the given size.
-    ///
-    /// Returns `Err` when all unpinned entries have been evicted but the cache
-    /// is still over budget. The caller should treat this as a transient failure
-    /// and retry later.
-    async fn make_room(&self, new_entry_bytes: u64) -> Result<(), CacheBudgetExhausted>;
-
-    /// Measure and record the size of a cache entry after a write.
-    async fn record_entry_size(
+    /// Measure the entry's size on disk, record it in the budget index,
+    /// evict other entries if the cache is over budget, and return whether
+    /// this entry is small enough to be cleaned up after indexing.
+    async fn record_and_evict(
         &self,
         project_id: i64,
         branch: &str,
-    ) -> Result<u64, RepositoryCacheError>;
-
-    /// Returns the size threshold below which repos are considered "small".
-    fn large_repo_threshold(&self) -> u64;
+    ) -> Result<bool, RepositoryCacheError>;
 }
 
 const COMMIT_FILE: &str = ".commit";
@@ -366,15 +358,11 @@ impl RepositoryCache for LocalRepositoryCache {
         }
     }
 
-    async fn make_room(&self, new_entry_bytes: u64) -> Result<(), CacheBudgetExhausted> {
-        self.budget.make_room(new_entry_bytes).await
-    }
-
-    async fn record_entry_size(
+    async fn record_and_evict(
         &self,
         project_id: i64,
         branch: &str,
-    ) -> Result<u64, RepositoryCacheError> {
+    ) -> Result<bool, RepositoryCacheError> {
         let repo_dir = self.repository_dir(project_id, branch);
         let size = tokio::task::spawn_blocking(move || directory_size(&repo_dir))
             .await
@@ -382,11 +370,12 @@ impl RepositoryCache for LocalRepositoryCache {
 
         self.budget.record_size(project_id, branch, size);
 
-        Ok(size)
-    }
+        self.budget
+            .make_room(size)
+            .await
+            .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
 
-    fn large_repo_threshold(&self) -> u64 {
-        self.budget.large_repo_threshold()
+        Ok(size < self.budget.large_repo_threshold())
     }
 }
 
@@ -750,7 +739,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_entry_size_returns_nonzero_for_files_on_disk() {
+    async fn record_and_evict_records_nonzero_size_for_files_on_disk() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
         cache
@@ -758,9 +747,9 @@ mod tests {
             .await
             .unwrap();
 
-        let size = cache.record_entry_size(42, "main").await.unwrap();
+        let should_cleanup = cache.record_and_evict(42, "main").await.unwrap();
 
-        assert!(size > 0);
+        assert!(!should_cleanup, "default threshold is 0 so nothing is small");
     }
 
     #[tokio::test]

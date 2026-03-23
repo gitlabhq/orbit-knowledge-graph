@@ -63,7 +63,7 @@ impl RepositoryResolver {
         let Some((cached, guard)) = cached else {
             self.metrics.record_resolution_strategy("full_download");
             self.full_download(project_id, branch, ref_name).await?;
-            return self.pin_and_record_size(project_id, branch).await;
+            return self.pin_and_record(project_id, branch).await;
         };
 
         if cached.commit == ref_name {
@@ -95,10 +95,10 @@ impl RepositoryResolver {
             }
         }
 
-        let size = self.record_size_and_make_room(project_id, branch).await?;
+        let should_cleanup = self.record_and_evict(project_id, branch).await?;
         Ok(ResolveResult {
             guard,
-            should_cleanup: size < self.cache.large_repo_threshold(),
+            should_cleanup,
         })
     }
 
@@ -115,37 +115,27 @@ impl RepositoryResolver {
         }
     }
 
-    async fn record_size_and_make_room(
+    async fn record_and_evict(
         &self,
         project_id: i64,
         branch: &str,
-    ) -> Result<u64, HandlerError> {
-        let size = self
-            .cache
-            .record_entry_size(project_id, branch)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to record entry size: {e}")))?;
-
-        // Eviction runs after the entry is already on disk. The temporary overshoot
-        // is absorbed by `headroom_per_worker_bytes` in the budget configuration.
+    ) -> Result<bool, HandlerError> {
         self.cache
-            .make_room(size)
+            .record_and_evict(project_id, branch)
             .await
-            .map_err(|e| HandlerError::Processing(e.to_string()))?;
-
-        Ok(size)
+            .map_err(|e| HandlerError::Processing(format!("cache budget error: {e}")))
     }
 
-    async fn pin_and_record_size(
+    async fn pin_and_record(
         &self,
         project_id: i64,
         branch: &str,
     ) -> Result<ResolveResult, HandlerError> {
         let guard = self.cache.pin(project_id, branch);
-        let size = self.record_size_and_make_room(project_id, branch).await?;
+        let should_cleanup = self.record_and_evict(project_id, branch).await?;
         Ok(ResolveResult {
             guard,
-            should_cleanup: size < self.cache.large_repo_threshold(),
+            should_cleanup,
         })
     }
 
