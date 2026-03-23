@@ -24,8 +24,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
 use crate::constants::{
-    BACKWARD_CTE, CASCADE_CTE_PREFIX, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS,
-    NODE_FILTER_CTE_PREFIX, SKIP_SECURITY_FILTER_TABLES,
+    BACKWARD_CTE, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS, SKIP_SECURITY_FILTER_TABLES,
+    cascade_cte, node_filter_cte,
 };
 use crate::input::{Input, InputNode, QueryType};
 use crate::security::SecurityContext;
@@ -460,7 +460,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
                 &rel.types,
             )
         {
-            let name = format!("{CASCADE_CTE_PREFIX}{}", rel.to);
+            let name = cascade_cte(&rel.to);
             q.ctes.push(Cte::new(&name, cte));
             node_ctes.insert(rel.to.clone(), name);
         }
@@ -475,7 +475,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
                 &rel.types,
             )
         {
-            let name = format!("{CASCADE_CTE_PREFIX}{}", rel.from);
+            let name = cascade_cte(&rel.from);
             q.ctes.push(Cte::new(&name, cte));
             node_ctes.insert(rel.from.clone(), name);
         }
@@ -991,23 +991,17 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 };
 
             // Source CTE: either _nf_{source} or _cascade_{source} from a previous pass
-            let source_cte = if q
-                .ctes
-                .iter()
-                .any(|c| c.name == format!("{NODE_FILTER_CTE_PREFIX}{source_id}"))
-            {
-                format!("{NODE_FILTER_CTE_PREFIX}{source_id}")
-            } else if q
-                .ctes
-                .iter()
-                .any(|c| c.name == format!("{CASCADE_CTE_PREFIX}{source_id}"))
-            {
-                format!("{CASCADE_CTE_PREFIX}{source_id}")
+            let nf_name = node_filter_cte(source_id);
+            let cascade_source = cascade_cte(source_id);
+            let source_cte = if q.ctes.iter().any(|c| c.name == nf_name) {
+                nf_name
+            } else if q.ctes.iter().any(|c| c.name == cascade_source) {
+                cascade_source
             } else {
                 continue;
             };
 
-            let cascade_name = format!("{CASCADE_CTE_PREFIX}{target_id}");
+            let cascade_name = cascade_cte(target_id);
             if q.ctes.iter().any(|c| c.name == cascade_name) {
                 continue; // already cascaded
             }
@@ -1062,7 +1056,7 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 },
             ));
 
-            let target_nf = format!("{NODE_FILTER_CTE_PREFIX}{target_id}");
+            let target_nf = node_filter_cte(target_id);
             if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_nf) {
                 let filter = Expr::InSubquery {
                     expr: Box::new(Expr::col(target_id.as_str(), DEFAULT_PRIMARY_KEY)),

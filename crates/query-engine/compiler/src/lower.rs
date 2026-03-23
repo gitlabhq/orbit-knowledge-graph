@@ -5,10 +5,10 @@
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::{
     ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,
-    EDGE_KINDS_COLUMN, EDGE_KINDS_CTE_COLUMN, END_ID_COLUMN, END_KIND_COLUMN, FORWARD_ALIAS,
-    FORWARD_CTE, NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN,
-    NODE_FILTER_CTE_PREFIX, PATH_COLUMN, PATH_NODES_COLUMN, PATHS_ALIAS, RELATIONSHIP_TYPE_COLUMN,
-    START_ID_COLUMN,
+    EDGE_KINDS_COLUMN, END_ID_COLUMN, END_KIND_COLUMN, FORWARD_ALIAS, FORWARD_CTE,
+    FRONTIER_EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN,
+    NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, PATH_NODES_COLUMN, PATHS_ALIAS, RELATIONSHIP_TYPE_COLUMN,
+    START_ID_COLUMN, node_filter_cte,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{
@@ -286,7 +286,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
         if let Some((alias, edge_col)) = node_edge_col.get(&node.id) {
             let table = resolve_table(node)?;
             let node_where = build_node_where(node);
-            let cte_name = format!("{NODE_FILTER_CTE_PREFIX}{}", node.id);
+            let cte_name = node_filter_cte(&node.id);
             let cte_query = Query {
                 select: vec![SelectExpr::new(
                     Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
@@ -540,7 +540,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 PATH_COLUMN,
             ),
             SelectExpr::new(
-                Expr::col(FORWARD_ALIAS, EDGE_KINDS_CTE_COLUMN),
+                Expr::col(FORWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN),
                 EDGE_KINDS_COLUMN,
             ),
         ],
@@ -591,10 +591,10 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 Expr::func(
                     "arrayConcat",
                     vec![
-                        Expr::col(FORWARD_ALIAS, EDGE_KINDS_CTE_COLUMN),
+                        Expr::col(FORWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN),
                         Expr::func(
                             "arrayReverse",
-                            vec![Expr::col(BACKWARD_ALIAS, EDGE_KINDS_CTE_COLUMN)],
+                            vec![Expr::col(BACKWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN)],
                         ),
                     ],
                 ),
@@ -781,7 +781,7 @@ fn build_frontier_arm(
             SelectExpr::new(Expr::col(&last, next_col), END_ID_COLUMN),
             SelectExpr::new(Expr::col(&last, next_kind_col), END_KIND_COLUMN),
             SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
-            SelectExpr::new(edge_kinds, EDGE_KINDS_CTE_COLUMN),
+            SelectExpr::new(edge_kinds, FRONTIER_EDGE_KINDS_COLUMN),
             SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
         ],
         from,
