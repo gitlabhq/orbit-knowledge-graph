@@ -272,6 +272,26 @@ impl Ontology {
         self
     }
 
+    /// Builder: set redaction config for a node (for testing).
+    #[must_use]
+    pub fn with_redaction(
+        mut self,
+        node_name: &str,
+        resource_type: impl Into<String>,
+        id_column: impl Into<String>,
+    ) -> Self {
+        let node = self
+            .nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"));
+        node.redaction = Some(RedactionConfig {
+            resource_type: resource_type.into(),
+            id_column: id_column.into(),
+            ability: "read".to_string(),
+        });
+        self
+    }
+
     /// Load ontology from a directory containing schema.yaml and referenced files.
     ///
     /// # Errors

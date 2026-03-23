@@ -1395,8 +1395,15 @@ mod tests {
     fn test_ontology() -> Ontology {
         use ontology::DataType;
         Ontology::new()
-            .with_nodes(["User", "Project", "Note", "Group"])
-            .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
+            .with_nodes([
+                "User",
+                "Project",
+                "Note",
+                "Group",
+                "MergeRequest",
+                "MergeRequestDiff",
+            ])
+            .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF", "HAS_DIFF"])
             .with_fields(
                 "User",
                 [
@@ -1416,6 +1423,24 @@ mod tests {
             .with_default_columns("Note", ["confidential"])
             .with_fields("Project", [("name", DataType::String)])
             .with_default_columns("Project", ["name"])
+            .with_fields(
+                "MergeRequest",
+                [
+                    ("title", DataType::String),
+                    ("state", DataType::String),
+                    ("iid", DataType::Int),
+                ],
+            )
+            .with_default_columns("MergeRequest", ["title", "state"])
+            .with_fields(
+                "MergeRequestDiff",
+                [
+                    ("merge_request_id", DataType::Int),
+                    ("state", DataType::String),
+                ],
+            )
+            .with_default_columns("MergeRequestDiff", ["merge_request_id", "state"])
+            .with_redaction("MergeRequestDiff", "merge_request", "merge_request_id")
     }
 
     fn validated_input(json: &str) -> Input {
@@ -2566,5 +2591,44 @@ mod tests {
         // Multi-hop gets user table joined for ordering
         assert!(has_scan(&q.from, "gl_user"));
         assert_eq!(q.order_by.len(), 1);
+    }
+
+    #[test]
+    fn test_order_by_merge_request_title() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "order_by": {"node": "mr", "property": "title", "direction": "ASC"},
+            "limit": 25
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        fn has_scan(t: &TableRef, tbl: &str) -> bool {
+            match t {
+                TableRef::Scan { table, .. } => table == tbl,
+                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+                _ => false,
+            }
+        }
+        assert!(
+            has_scan(&q.from, "gl_mergerequest"),
+            "order_by mr.title should JOIN gl_mergerequest"
+        );
+        assert!(!q.order_by[0].desc);
+        if let Expr::Column { table, column } = &q.order_by[0].expr {
+            assert_eq!(table, "mr");
+            assert_eq!(column, "title");
+        } else {
+            panic!("expected column expression");
+        }
     }
 }
