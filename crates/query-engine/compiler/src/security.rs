@@ -10,8 +10,32 @@
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
+use crate::pipeline::{CompilerContext, CompilerPass, Enforced, Secured};
 use once_cell::sync::Lazy;
 use regex::Regex;
+
+/// Pipeline pass: injects `startsWith(traversal_path, ...)` security filters.
+pub struct SecurityPass<'a> {
+    pub security_context: &'a SecurityContext,
+}
+
+impl<'a> SecurityPass<'a> {
+    pub fn new(security_context: &'a SecurityContext) -> Self {
+        Self { security_context }
+    }
+}
+
+impl CompilerPass for SecurityPass<'_> {
+    const NAME: &'static str = "security";
+    type In = Enforced;
+    type Out = Secured;
+
+    fn run(&self, ctx: &mut CompilerContext<Enforced>) -> Result<()> {
+        let node = ctx.node.as_mut().expect("node must exist after enforce");
+        apply_security_context(node, self.security_context)?;
+        Ok(())
+    }
+}
 
 /// Matches paths like "1/", "1/2/", "123/456/789/"
 static TRAVERSAL_PATH_REGEX: Lazy<Regex> =

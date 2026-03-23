@@ -23,6 +23,30 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
+use crate::pipeline::{CompilerContext, CompilerPass, Lowered, Optimized};
+
+/// Pipeline pass: applies query optimizations.
+pub struct OptimizePass<'a> {
+    pub security_context: &'a SecurityContext,
+}
+
+impl<'a> OptimizePass<'a> {
+    pub fn new(security_context: &'a SecurityContext) -> Self {
+        Self { security_context }
+    }
+}
+
+impl CompilerPass for OptimizePass<'_> {
+    const NAME: &'static str = "optimize";
+    type In = Lowered;
+    type Out = Optimized;
+
+    fn run(&self, ctx: &mut CompilerContext<Lowered>) -> crate::error::Result<()> {
+        let node = ctx.node.as_mut().expect("node must exist after lowering");
+        optimize(node, &mut ctx.input, self.security_context);
+        Ok(())
+    }
+}
 use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS, SKIP_SECURITY_FILTER_TABLES,
     cascade_cte, node_filter_cte,

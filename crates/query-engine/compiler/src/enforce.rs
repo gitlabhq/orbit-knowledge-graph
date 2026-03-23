@@ -13,8 +13,25 @@ use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
+use crate::pipeline::{CompilerContext, CompilerPass, Enforced, Optimized};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use std::collections::{HashMap, HashSet};
+
+/// Pipeline pass: enforces redaction return columns (`_gkg_*`).
+pub struct EnforcePass;
+
+impl CompilerPass for EnforcePass {
+    const NAME: &'static str = "enforce";
+    type In = Optimized;
+    type Out = Enforced;
+
+    fn run(&self, ctx: &mut CompilerContext<Optimized>) -> Result<()> {
+        let node = ctx.node.as_mut().expect("node must exist after optimize");
+        let result_context = enforce_return(node, &ctx.input)?;
+        ctx.result_context = Some(result_context);
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {

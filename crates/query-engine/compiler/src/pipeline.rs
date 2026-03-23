@@ -32,7 +32,7 @@ use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
 use crate::ast::Node;
-use crate::codegen::{CompiledQueryContext, HydrationPlan};
+use crate::codegen::CompiledQueryContext;
 use crate::enforce::ResultContext;
 use crate::error::{QueryError, Result};
 use crate::input::Input;
@@ -74,10 +74,10 @@ define_phases!(
 /// parameter prevents accessing fields before the pass that populates
 /// them has executed.
 pub struct CompilerContext<P: Phase> {
-    input: Input,
-    node: Option<Node>,
-    result_context: Option<ResultContext>,
-    output: Option<CompiledQueryContext>,
+    pub(crate) input: Input,
+    pub(crate) node: Option<Node>,
+    pub(crate) result_context: Option<ResultContext>,
+    pub(crate) output: Option<CompiledQueryContext>,
     _phase: PhantomData<P>,
 }
 
@@ -140,11 +140,11 @@ impl CompilerContext<Emitted> {
 // CompilerPass trait
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A single compiler pass that transforms the context from one phase to
-/// another.
+/// A single compiler pass that transforms the context in place.
 ///
 /// Passes carry their own dependencies (ontology, security context, etc.)
-/// so each pass declares exactly what it needs.
+/// so each pass declares exactly what it needs. The phase transition is
+/// handled by the [`CompilerRunner`] — passes never call `advance()`.
 pub trait CompilerPass {
     /// Human-readable name for observability.
     const NAME: &'static str;
@@ -155,9 +155,10 @@ pub trait CompilerPass {
     /// Phase the context transitions to after this pass runs.
     type Out: Phase;
 
-    /// Execute the pass, consuming the context at phase `In` and producing
-    /// a context at phase `Out`.
-    fn run(&self, ctx: CompilerContext<Self::In>) -> Result<CompilerContext<Self::Out>>;
+    /// Execute the pass, mutating the context in place.
+    ///
+    /// The runner advances the phase automatically on success.
+    fn run(&self, ctx: &mut CompilerContext<Self::In>) -> Result<()>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -234,16 +235,17 @@ impl<P: Phase> CompilerRunner<P> {
     /// Run a pass, advancing the pipeline to the next phase.
     ///
     /// The compiler enforces `S::In == P` — you cannot call a pass that
-    /// expects a different input phase.
+    /// expects a different input phase. The runner handles the phase
+    /// transition; the pass only mutates the context.
     pub fn then<S: CompilerPass<In = P>>(mut self, pass: &S) -> Result<CompilerRunner<S::Out>> {
         let start = Instant::now();
-        match pass.run(self.ctx) {
-            Ok(ctx) => {
+        match pass.run(&mut self.ctx) {
+            Ok(()) => {
                 if let Some(ref mut obs) = self.observer {
                     obs.pass_completed(S::NAME, start.elapsed());
                 }
                 Ok(CompilerRunner {
-                    ctx,
+                    ctx: self.ctx.advance(),
                     observer: self.observer,
                 })
             }
@@ -263,175 +265,16 @@ impl<P: Phase> CompilerRunner<P> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Pass implementations
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Lowers a validated `Input` into an AST `Node`.
-pub struct LowerPass;
-
-impl CompilerPass for LowerPass {
-    const NAME: &'static str = "lower";
-    type In = Parsed;
-    type Out = Lowered;
-
-    fn run(&self, mut ctx: CompilerContext<Parsed>) -> Result<CompilerContext<Lowered>> {
-        let node = crate::lower::lower(&mut ctx.input)?;
-        ctx.node = Some(node);
-        Ok(ctx.advance())
-    }
-}
-
-/// Applies query optimizations (SIP, join reordering, keyset pagination, etc.).
-pub struct OptimizePass<'a> {
-    pub security_context: &'a crate::SecurityContext,
-}
-
-impl<'a> OptimizePass<'a> {
-    pub fn new(security_context: &'a crate::SecurityContext) -> Self {
-        Self { security_context }
-    }
-}
-
-impl CompilerPass for OptimizePass<'_> {
-    const NAME: &'static str = "optimize";
-    type In = Lowered;
-    type Out = Optimized;
-
-    fn run(&self, mut ctx: CompilerContext<Lowered>) -> Result<CompilerContext<Optimized>> {
-        let node = ctx.node.as_mut().expect("node must exist after lowering");
-        crate::optimize::optimize(node, &mut ctx.input, self.security_context);
-        Ok(ctx.advance())
-    }
-}
-
-/// Enforces redaction return columns (`_gkg_*`) and produces a `ResultContext`.
-pub struct EnforcePass;
-
-impl CompilerPass for EnforcePass {
-    const NAME: &'static str = "enforce";
-    type In = Optimized;
-    type Out = Enforced;
-
-    fn run(&self, mut ctx: CompilerContext<Optimized>) -> Result<CompilerContext<Enforced>> {
-        let node = ctx.node.as_mut().expect("node must exist after optimize");
-        let result_context = crate::enforce::enforce_return(node, &ctx.input)?;
-        ctx.result_context = Some(result_context);
-        Ok(ctx.advance())
-    }
-}
-
-/// Injects `startsWith(traversal_path, ...)` security filters into the AST.
-pub struct SecurityPass<'a> {
-    pub security_context: &'a crate::SecurityContext,
-}
-
-impl<'a> SecurityPass<'a> {
-    pub fn new(security_context: &'a crate::SecurityContext) -> Self {
-        Self { security_context }
-    }
-}
-
-impl CompilerPass for SecurityPass<'_> {
-    const NAME: &'static str = "security";
-    type In = Enforced;
-    type Out = Secured;
-
-    fn run(&self, mut ctx: CompilerContext<Enforced>) -> Result<CompilerContext<Secured>> {
-        let node = ctx.node.as_mut().expect("node must exist after enforce");
-        crate::security::apply_security_context(node, self.security_context)?;
-        Ok(ctx.advance())
-    }
-}
-
-/// Validates that all required security filters are present in the AST.
-pub struct CheckPass<'a> {
-    pub security_context: &'a crate::SecurityContext,
-}
-
-impl<'a> CheckPass<'a> {
-    pub fn new(security_context: &'a crate::SecurityContext) -> Self {
-        Self { security_context }
-    }
-}
-
-impl CompilerPass for CheckPass<'_> {
-    const NAME: &'static str = "check";
-    type In = Secured;
-    type Out = Checked;
-
-    fn run(&self, ctx: CompilerContext<Secured>) -> Result<CompilerContext<Checked>> {
-        let node = ctx.node.as_ref().expect("node must exist after security");
-        crate::check::check_ast(node, self.security_context)?;
-        Ok(ctx.advance())
-    }
-}
-
-/// Generates parameterized SQL and a hydration plan.
-///
-/// This is the standard codegen pass for secured queries (ClickHouse).
-pub struct CodegenPass;
-
-impl CompilerPass for CodegenPass {
-    const NAME: &'static str = "codegen";
-    type In = Checked;
-    type Out = Emitted;
-
-    fn run(&self, mut ctx: CompilerContext<Checked>) -> Result<CompilerContext<Emitted>> {
-        let node = ctx.node.as_ref().expect("node must exist");
-        let result_context = ctx
-            .result_context
-            .take()
-            .expect("result_context must exist");
-        let base = crate::codegen::codegen(node, result_context)?;
-        let hydration = crate::hydrate::generate_hydration_plan(&ctx.input);
-        let query_type = ctx.input.query_type;
-        let input = ctx.input.clone();
-
-        let mut ctx: CompilerContext<Emitted> = ctx.advance();
-        ctx.output = Some(CompiledQueryContext {
-            query_type,
-            base,
-            hydration,
-            input,
-        });
-        Ok(ctx)
-    }
-}
-
-/// Codegen for hydration queries — accepts `Enforced` directly, skipping
-/// security and check passes. Hydration queries are internal-only and
-/// operate on pre-authorized IDs.
-pub struct HydrationCodegenPass;
-
-impl CompilerPass for HydrationCodegenPass {
-    const NAME: &'static str = "hydration_codegen";
-    type In = Enforced;
-    type Out = Emitted;
-
-    fn run(&self, mut ctx: CompilerContext<Enforced>) -> Result<CompilerContext<Emitted>> {
-        let node = ctx.node.as_ref().expect("node must exist");
-        let result_context = ctx
-            .result_context
-            .take()
-            .expect("result_context must exist");
-        let base = crate::codegen::codegen(node, result_context)?;
-        let query_type = ctx.input.query_type;
-        let input = ctx.input.clone();
-
-        let mut ctx: CompilerContext<Emitted> = ctx.advance();
-        ctx.output = Some(CompiledQueryContext {
-            query_type,
-            base,
-            hydration: HydrationPlan::None,
-            input,
-        });
-        Ok(ctx)
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Pipeline presets
 // ─────────────────────────────────────────────────────────────────────────────
+
+use crate::check::CheckPass;
+use crate::codegen::CodegenPass;
+use crate::enforce::EnforcePass;
+use crate::hydrate::HydrationCodegenPass;
+use crate::lower::LowerPass;
+use crate::optimize::OptimizePass;
+use crate::security::SecurityPass;
 
 /// Standard ClickHouse compilation pipeline.
 ///

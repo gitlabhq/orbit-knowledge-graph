@@ -11,7 +11,31 @@ use serde_json::Value;
 use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
+use crate::pipeline::{Checked, CompilerContext, CompilerPass, Secured};
 use crate::security::{SecurityContext, collect_node_aliases};
+
+/// Pipeline pass: validates that all required security filters are present.
+pub struct CheckPass<'a> {
+    pub security_context: &'a SecurityContext,
+}
+
+impl<'a> CheckPass<'a> {
+    pub fn new(security_context: &'a SecurityContext) -> Self {
+        Self { security_context }
+    }
+}
+
+impl CompilerPass for CheckPass<'_> {
+    const NAME: &'static str = "check";
+    type In = Secured;
+    type Out = Checked;
+
+    fn run(&self, ctx: &mut CompilerContext<Secured>) -> Result<()> {
+        let node = ctx.node.as_ref().expect("node must exist after security");
+        check_ast(node, self.security_context)?;
+        Ok(())
+    }
+}
 
 const STARTS_WITH_FNAME: &str = "startsWith";
 

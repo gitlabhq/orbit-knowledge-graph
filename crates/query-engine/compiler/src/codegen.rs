@@ -7,9 +7,38 @@ use crate::enforce::ResultContext;
 use crate::error::Result;
 use crate::input::Input;
 use crate::input::QueryType;
+use crate::pipeline::{Checked, CompilerContext, CompilerPass, Emitted};
 pub use gkg_utils::clickhouse::ParamValue;
 use serde_json::Value;
 use std::collections::HashMap;
+
+/// Pipeline pass: generates parameterized SQL and a hydration plan.
+pub struct CodegenPass;
+
+impl CompilerPass for CodegenPass {
+    const NAME: &'static str = "codegen";
+    type In = Checked;
+    type Out = Emitted;
+
+    fn run(&self, ctx: &mut CompilerContext<Checked>) -> Result<()> {
+        let node = ctx.node.as_ref().expect("node must exist");
+        let result_context = ctx
+            .result_context
+            .take()
+            .expect("result_context must exist");
+        let base = codegen(node, result_context)?;
+        let hydration = crate::hydrate::generate_hydration_plan(&ctx.input);
+        let query_type = ctx.input.query_type;
+        let input = ctx.input.clone();
+        ctx.output = Some(CompiledQueryContext {
+            query_type,
+            base,
+            hydration,
+            input,
+        });
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ParameterizedQuery {

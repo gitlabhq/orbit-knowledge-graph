@@ -48,7 +48,9 @@ pub mod security;
 pub mod validate;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+pub use check::CheckPass;
 pub use check::check_ast;
+pub use codegen::CodegenPass;
 pub use codegen::{
     CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
 };
@@ -58,22 +60,26 @@ pub use constants::{
     NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
     RELATIONSHIP_TYPE_COLUMN,
 };
+pub use enforce::EnforcePass;
 pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
+pub use hydrate::HydrationCodegenPass;
 pub use hydrate::generate_hydration_plan;
 pub use input::{ColumnSelection, Input, InputNode, QueryType, parse_input};
 pub use input::{DynamicColumnMode, EntityAuthConfig};
+pub use lower::LowerPass;
 pub use lower::lower;
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use normalize::{build_entity_auth, normalize};
 pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
+pub use optimize::OptimizePass;
 pub use optimize::optimize;
 pub use pipeline::{
-    CheckPass, CodegenPass, CompilerContext, CompilerObserver, CompilerPass, CompilerRunner,
-    EnforcePass, HydrationCodegenPass, LowerPass, MetricsObserver, OptimizePass, SecurityPass,
+    CompilerContext, CompilerObserver, CompilerPass, CompilerRunner, MetricsObserver,
     compile_clickhouse, compile_hydration,
 };
+pub use security::SecurityPass;
 pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
 
