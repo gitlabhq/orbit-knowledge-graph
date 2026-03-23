@@ -17,6 +17,13 @@ pub struct CachedRepository {
     pub commit: String,
 }
 
+/// Result of extracting an archive into the cache.
+#[derive(Debug)]
+pub struct ExtractionResult {
+    pub lease: RepositoryLease,
+    pub should_cleanup: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RepositoryCacheError {
     #[error("I/O error: {0}")]
@@ -24,6 +31,9 @@ pub enum RepositoryCacheError {
 
     #[error("archive extraction failed: {0}")]
     Archive(String),
+
+    #[error("cache budget exhausted: {0}")]
+    BudgetExhausted(String),
 
     #[error("path traversal detected: {0}")]
     PathTraversal(String),
@@ -56,7 +66,7 @@ pub trait RepositoryCacheLifecycle: Send + Sync {
         branch: &str,
         commit_sha: &str,
         archive_stream: ByteStream,
-    ) -> Result<(RepositoryLease, bool), RepositoryCacheError>;
+    ) -> Result<ExtractionResult, RepositoryCacheError>;
 
     /// Atomically look up a cached entry and pin it if found.
     ///
@@ -211,7 +221,7 @@ impl LocalRepositoryCache {
         Ok(())
     }
 
-    async fn record_and_enforce_budget(
+    async fn measure_and_enforce_budget(
         &self,
         project_id: i64,
         branch: &str,
@@ -224,7 +234,7 @@ impl LocalRepositoryCache {
         self.budget
             .make_room(size)
             .await
-            .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
+            .map_err(|e| RepositoryCacheError::BudgetExhausted(e.to_string()))?;
 
         self.budget.record_size(project_id, branch, size);
 
@@ -302,7 +312,7 @@ impl RepositoryCacheLifecycle for LocalRepositoryCache {
         branch: &str,
         commit_sha: &str,
         archive_stream: ByteStream,
-    ) -> Result<(RepositoryLease, bool), RepositoryCacheError> {
+    ) -> Result<ExtractionResult, RepositoryCacheError> {
         self.clear_repository_dir(project_id, branch).await?;
         self.extract_stream_to_disk(project_id, branch, archive_stream)
             .await?;
@@ -310,8 +320,11 @@ impl RepositoryCacheLifecycle for LocalRepositoryCache {
             .await?;
 
         let lease = self.pin(project_id, branch);
-        let is_small = self.record_and_enforce_budget(project_id, branch).await?;
-        Ok((lease, is_small))
+        let should_cleanup = self.measure_and_enforce_budget(project_id, branch).await?;
+        Ok(ExtractionResult {
+            lease,
+            should_cleanup,
+        })
     }
 
     async fn acquire(
@@ -573,16 +586,16 @@ mod tests {
             ("src/lib.rs", b"pub mod lib;"),
         ]);
 
-        let (guard, _) = cache
+        let result = cache
             .extract_archive(42, "main", "abc123", archive_stream(archive))
             .await
             .unwrap();
 
-        let content = tokio::fs::read_to_string(guard.join("src/main.rs"))
+        let content = tokio::fs::read_to_string(result.lease.join("src/main.rs"))
             .await
             .unwrap();
         assert_eq!(content, "fn main() {}");
-        let content = tokio::fs::read_to_string(guard.join("src/lib.rs"))
+        let content = tokio::fs::read_to_string(result.lease.join("src/lib.rs"))
             .await
             .unwrap();
         assert_eq!(content, "pub mod lib;");
@@ -601,13 +614,13 @@ mod tests {
             .unwrap();
 
         let second_archive = build_tar_gz(&[("new_file.rs", b"new content")]);
-        let (guard, _) = cache
+        let result = cache
             .extract_archive(42, "main", "commit2", archive_stream(second_archive))
             .await
             .unwrap();
 
-        assert!(!guard.join("old_file.rs").exists());
-        let content = tokio::fs::read_to_string(guard.join("new_file.rs"))
+        assert!(!result.lease.join("old_file.rs").exists());
+        let content = tokio::fs::read_to_string(result.lease.join("new_file.rs"))
             .await
             .unwrap();
         assert_eq!(content, "new content");
@@ -770,13 +783,13 @@ mod tests {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[("file.rs", b"hello world")]);
 
-        let (_, should_cleanup) = cache
+        let result = cache
             .extract_archive(42, "main", "abc123", archive_stream(archive))
             .await
             .unwrap();
 
         assert!(
-            should_cleanup,
+            result.should_cleanup,
             "small repo should be below the default 100MB threshold"
         );
     }

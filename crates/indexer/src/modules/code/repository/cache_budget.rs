@@ -112,7 +112,7 @@ pub struct CacheBudget {
     index: Arc<RwLock<HashMap<CacheKey, IndexEntry>>>,
     pin_counts: Arc<RwLock<HashMap<CacheKey, usize>>>,
     total_bytes: Arc<AtomicU64>,
-    phantom_bytes: Arc<AtomicU64>,
+    phantom_entries: Arc<RwLock<HashMap<CacheKey, u64>>>,
     eviction_lock: Arc<tokio::sync::RwLock<()>>,
     metrics: CodeMetrics,
 }
@@ -133,7 +133,7 @@ impl CacheBudget {
             index: Arc::new(RwLock::new(HashMap::new())),
             pin_counts: Arc::new(RwLock::new(HashMap::new())),
             total_bytes: Arc::new(AtomicU64::new(0)),
-            phantom_bytes: Arc::new(AtomicU64::new(0)),
+            phantom_entries: Arc::new(RwLock::new(HashMap::new())),
             eviction_lock: Arc::new(tokio::sync::RwLock::new(())),
             metrics,
         }
@@ -220,13 +220,19 @@ impl CacheBudget {
         self.report_state();
     }
 
+    fn total_phantom_bytes(&self) -> u64 {
+        self.phantom_entries.read().values().sum()
+    }
+
     /// Remove an entry from the index (e.g. on invalidation).
+    /// Also clears any phantom bytes associated with this entry.
     pub fn remove(&self, project_id: i64, branch: &str) {
         let key = cache_key(project_id, branch);
         if let Some(entry) = self.index.write().remove(&key) {
             self.total_bytes
                 .fetch_sub(entry.size_bytes, Ordering::Relaxed);
         }
+        self.phantom_entries.write().remove(&key);
         self.report_state();
     }
 
@@ -245,7 +251,15 @@ impl CacheBudget {
     /// sequences until eviction is complete.
     pub async fn make_room(&self, new_entry_bytes: u64) -> Result<(), CacheBudgetExhausted> {
         let _eviction_guard = self.eviction_lock.write().await;
-        let target = self.usable_budget.saturating_sub(new_entry_bytes);
+
+        if new_entry_bytes > self.usable_budget {
+            return Err(CacheBudgetExhausted {
+                remaining_bytes: new_entry_bytes,
+                target_bytes: self.usable_budget,
+            });
+        }
+
+        let target = self.usable_budget - new_entry_bytes;
         let total = self.total_bytes.load(Ordering::Relaxed);
 
         if total <= target {
@@ -314,16 +328,18 @@ impl CacheBudget {
             let entry_dir = self.branch_dir(candidate.key.0, &candidate.key.1);
 
             if let Err(e) = tokio::fs::remove_dir_all(&entry_dir).await {
-                self.phantom_bytes
-                    .fetch_add(candidate.size_bytes, Ordering::Relaxed);
+                self.phantom_entries
+                    .write()
+                    .insert(candidate.key.clone(), candidate.size_bytes);
                 warn!(
                     project_id = candidate.key.0,
                     branch = %candidate.key.1,
                     error = %e,
-                    phantom_bytes = self.phantom_bytes.load(Ordering::Relaxed),
+                    phantom_bytes = self.total_phantom_bytes(),
                     "failed to delete evicted repository from disk, removing from index anyway"
                 );
             } else {
+                self.phantom_entries.write().remove(&candidate.key);
                 info!(
                     project_id = candidate.key.0,
                     branch = %candidate.key.1,
@@ -357,7 +373,7 @@ impl CacheBudget {
         self.report_state();
 
         if remaining > target {
-            let phantom = self.phantom_bytes.load(Ordering::Relaxed);
+            let phantom = self.total_phantom_bytes();
             let headroom = self.disk_budget.saturating_sub(self.usable_budget);
 
             if phantom > headroom {
@@ -380,7 +396,7 @@ impl CacheBudget {
     /// I/O errors and their messages will be retried.
     async fn purge_entire_cache(&self) {
         error!(
-            phantom_bytes = self.phantom_bytes.load(Ordering::Relaxed),
+            phantom_bytes = self.total_phantom_bytes(),
             disk_budget = self.disk_budget,
             "phantom bytes exceeded disk budget, purging entire cache"
         );
@@ -393,7 +409,7 @@ impl CacheBudget {
         self.index.write().clear();
         self.pin_counts.write().clear();
         self.total_bytes.store(0, Ordering::Relaxed);
-        self.phantom_bytes.store(0, Ordering::Relaxed);
+        self.phantom_entries.write().clear();
         self.report_state();
     }
 
@@ -627,7 +643,10 @@ mod tests {
         let _guard = pin_entry(&budget, dir.path(), 1, "main");
 
         // Phantom bytes (101) exceed headroom (100) → triggers purge
-        budget.phantom_bytes.store(101, Ordering::Relaxed);
+        budget
+            .phantom_entries
+            .write()
+            .insert(cache_key(99, "phantom"), 101);
 
         let result = budget.make_room(0).await;
 
@@ -636,7 +655,7 @@ mod tests {
             "purge should recover instead of returning an error"
         );
         assert!(budget.index.read().is_empty(), "index should be cleared");
-        assert_eq!(budget.phantom_bytes.load(Ordering::Relaxed), 0);
+        assert!(budget.phantom_entries.read().is_empty());
     }
 
     #[tokio::test]
@@ -648,7 +667,10 @@ mod tests {
         let _guard = pin_entry(&budget, dir.path(), 1, "main");
 
         // Phantom bytes (50) within headroom (100) → no purge, returns error
-        budget.phantom_bytes.store(50, Ordering::Relaxed);
+        budget
+            .phantom_entries
+            .write()
+            .insert(cache_key(99, "phantom"), 50);
 
         let result = budget.make_room(0).await;
 

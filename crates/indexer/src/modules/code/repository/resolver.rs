@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::blob_stream::BlobStream;
-use super::cache::RepositoryCache;
+use super::cache::{ExtractionResult, RepositoryCache};
 use super::cache_budget::RepositoryLease;
 use super::changed_path_stream::{ChangeStatus, ChangedPath, ChangedPathStream};
 use super::service::RepositoryService;
@@ -62,10 +62,10 @@ impl RepositoryResolver {
 
         let Some((cached, guard)) = cached else {
             self.metrics.record_resolution_strategy("full_download");
-            let (guard, should_cleanup) = self.full_download(project_id, branch, ref_name).await?;
+            let extraction = self.full_download(project_id, branch, ref_name).await?;
             return Ok(ResolveResult {
-                guard,
-                should_cleanup,
+                guard: extraction.lease,
+                should_cleanup: extraction.should_cleanup,
             });
         };
 
@@ -99,11 +99,10 @@ impl RepositoryResolver {
                     .record_resolution_strategy("full_download_fallback");
                 warn!(project_id, branch, reason, "falling back to full download");
                 drop(guard);
-                let (guard, should_cleanup) =
-                    self.full_download(project_id, branch, ref_name).await?;
+                let extraction = self.full_download(project_id, branch, ref_name).await?;
                 Ok(ResolveResult {
-                    guard,
-                    should_cleanup,
+                    guard: extraction.lease,
+                    should_cleanup: extraction.should_cleanup,
                 })
             }
         }
@@ -127,7 +126,7 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: &str,
-    ) -> Result<(RepositoryLease, bool), HandlerError> {
+    ) -> Result<ExtractionResult, HandlerError> {
         info!(project_id, branch, commit = %commit_sha, "starting full repository download");
 
         let archive_stream = self
