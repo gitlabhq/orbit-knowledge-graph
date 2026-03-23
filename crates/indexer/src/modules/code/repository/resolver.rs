@@ -929,6 +929,7 @@ mod tests {
             disk_budget_bytes: 1,
             headroom_per_worker_bytes: 0,
             large_repo_threshold_bytes: 0,
+            ..Default::default()
         };
         let (_dir, resolver) = create_resolver_with_config(service, config);
 

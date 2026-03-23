@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::modules::code::{
@@ -103,6 +104,11 @@ pub struct ScheduledTasksConfiguration {
 /// Configuration for the on-disk repository cache used by code indexing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepositoryCacheConfiguration {
+    /// Directory where cached repositories are stored on disk.
+    /// Defaults to `<temp_dir>/gkg-repository-cache`.
+    #[serde(default = "RepositoryCacheConfiguration::default_path")]
+    pub path: PathBuf,
+
     /// Maximum total disk bytes the cache may use. Defaults to 20 GB.
     #[serde(default = "RepositoryCacheConfiguration::default_disk_budget_bytes")]
     pub disk_budget_bytes: u64,
@@ -121,6 +127,7 @@ pub struct RepositoryCacheConfiguration {
 impl Default for RepositoryCacheConfiguration {
     fn default() -> Self {
         Self {
+            path: Self::default_path(),
             disk_budget_bytes: Self::default_disk_budget_bytes(),
             headroom_per_worker_bytes: Self::default_headroom_per_worker_bytes(),
             large_repo_threshold_bytes: Self::default_large_repo_threshold_bytes(),
@@ -129,6 +136,10 @@ impl Default for RepositoryCacheConfiguration {
 }
 
 impl RepositoryCacheConfiguration {
+    fn default_path() -> PathBuf {
+        std::env::temp_dir().join("gkg-repository-cache")
+    }
+
     const fn default_disk_budget_bytes() -> u64 {
         20 * 1024 * 1024 * 1024 // 20 GB
     }

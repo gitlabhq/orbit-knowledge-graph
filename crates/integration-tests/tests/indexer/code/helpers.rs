@@ -34,6 +34,7 @@ pub struct CodeIndexingDeps {
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
+    _cache_dir: tempfile::TempDir,
 }
 
 impl CodeIndexingDeps {
@@ -51,9 +52,13 @@ impl CodeIndexingDeps {
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
         let metrics = CodeMetrics::new();
 
-        let config = indexer::configuration::RepositoryCacheConfiguration::default();
+        let cache_dir = tempfile::tempdir().expect("failed to create temp dir for cache");
+        let config = indexer::configuration::RepositoryCacheConfiguration {
+            large_repo_threshold_bytes: 0,
+            ..Default::default()
+        };
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-            std::env::temp_dir().join("gkg-repository-cache-test"),
+            cache_dir.path().to_path_buf(),
             &config,
             4,
             metrics.clone(),
@@ -74,6 +79,7 @@ impl CodeIndexingDeps {
             repository_service,
             checkpoint_store,
             metrics,
+            _cache_dir: cache_dir,
         }
     }
 

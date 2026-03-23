@@ -31,6 +31,7 @@ engine:
     sdlc: 12
     code: 4
   repository_cache:
+    path: /tmp/gkg-repository-cache
     disk_budget_bytes: 21474836480     # 20 GB
     headroom_per_worker_bytes: 2147483648  # 2 GB per code worker
     large_repo_threshold_bytes: 104857600  # 100 MB
