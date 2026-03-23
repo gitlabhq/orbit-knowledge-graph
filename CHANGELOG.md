@@ -1,3 +1,38 @@
+## [0.16.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.15.0...v0.16.0) (2026-03-23)
+
+### Features
+
+* **compiler:** unified edge-only traversal with multi-rel and multi-hop ([db49fae](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/db49faeb88298e020b336c50407649e69bc4d1da)) by Michael Usachenko
+* **indexer:** add branch node to graph ([17caa8c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/17caa8c943e88f90a775f5a5481ef2818c8e6d94)) by Jean-Gabriel Doyon
+* **indexer:** add incremental file fetching with rename detection ([0741ec9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0741ec9760db3563b8b8e89c1ec1aacb401211bf)) by Jean-Gabriel Doyon
+* **indexer:** stream archive downloads to disk instead of buffering in memory ([d44af8b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d44af8bc5745bdc40c0a52d57b61ac10bff6be31)) by Jean-Gabriel Doyon
+* **protos:** add gitaly-protos crate ([be4536f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/be4536fe3fd07deea6d19769cef3717c2e6eb70c)) by Jean-Gabriel Doyon
+* **query:** add cascading SIP, neighbors UNION ALL, and path hop frontiers ([df7a970](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/df7a9702c09d3cd94c8323c7333fdf58945ecadd)) by Michael Usachenko
+* **query:** add ClickHouse query profiling and instrumentation ([c92a3ea](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c92a3ea6a27be96bea41efdfa178f9d8167fe13c)) by Michael Angelo Rivera
+* **query:** consolidate dynamic hydration into single UNION ALL query ([165ea18](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/165ea1802516c97e2580e7e6d5c4afbbde187f55)) by Michael Angelo Rivera
+* **schema:** namespace-first edge PK for traversal_path pruning ([6637a5c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6637a5ca47f19271447d7b87e29d2098cc13140f)) by Michael Angelo Rivera
+* **scripts:** add run-dispatcher.sh for local dispatch-indexing mode ([cb18e34](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cb18e341b3063607f3bc83d44a0cbac315c38000)) by Jean-Gabriel Doyon
+* **synth:** add evaluation settings override and optimization benchmark queries ([5767a1c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5767a1cfef0f4bf115654cf7eb6ffb2dee0ed8ed)) by Michael Usachenko
+
+### Fixes
+
+* **deps:** upgrade rustls-webpki ([9e01b18](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9e01b18bc7136c4d11c83f531ab1a8b7b88e0d8c)) by Jean-Gabriel Doyon
+* **profiler:** forward query settings to EXPLAIN queries ([5c3d53a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5c3d53a386b6fa1cd62396b14bc8f6b533efa7cf)) by Michael Usachenko
+* **query:** extract keyset pagination so it applies to search queries ([9a4e154](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9a4e1543272f776bad9af4a9486e777ead92d20c)) by Michael Usachenko
+
+### Performance
+
+* **compiler:** skip node table join for edge-only count aggregations ([f2a65a5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f2a65a55ee37e03afb2d70ffab24fab653652bbd)) by Michael Usachenko
+* **schema:** add by_rel projection to gl_edge ([58f0c7e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/58f0c7ee44632b44956c0f7bf2a2b04bd7f7e6c6)) by Michael Usachenko
+* **schema:** add source_kind to by_rel projection ([c2892a7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c2892a7d5f11ba8a404282cf5c95c7f78b43d6d5)) by Michael Usachenko
+* **schema:** rename by_rel to by_rel_source_kind and add by_rel_target_kind projection ([4c14281](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4c14281f0b40bd625b53c1f0817562d5f020ee9e)) by michaelusa
+
+### Other
+
+* **build:** add manual MR docker build job ([b385332](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b385332cb1f4b8fbe677ac39921ddd81f1bae647)) by Bohdan Parkhomchuk
+* **ci:** remove docs linting from lefthook pre-commit ([e9f8d1b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e9f8d1b041c920aaf25ad792777e24b4b2beb5bb)) by michaelangeloio
+* **compiler:** edge-centric traversal with cascading SIP ([713e5c6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/713e5c6bd205602b8e2b5a238115df03eb86fa3f)) by Michael Usachenko
+
 ## [0.15.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.14.0...v0.15.0) (2026-03-20)
 
 ### Features
