@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
-use super::cache_budget::{CacheBudget, RepositoryLease, directory_size, hashed_branch_name};
+use super::cache_budget::{CacheBudget, RepositoryLease};
+use super::disk::{directory_size, hashed_branch_name};
 use super::service::ByteStream;
 use crate::configuration::RepositoryCacheConfiguration;
 use crate::modules::code::archive::extract_tar_gz_from_reader;
@@ -28,8 +29,9 @@ pub enum RepositoryCacheError {
     PathTraversal(String),
 }
 
+/// Cache lifecycle: acquire, populate, and remove entire cache entries.
 #[async_trait]
-pub trait RepositoryCache: Send + Sync {
+pub trait RepositoryCacheLifecycle: Send + Sync {
     async fn get(
         &self,
         project_id: i64,
@@ -45,12 +47,44 @@ pub trait RepositoryCache: Send + Sync {
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
 
+    /// Extract an archive into the cache, pin the entry, enforce the disk
+    /// budget, and return a lease that keeps the entry alive plus a flag
+    /// indicating whether the entry is small enough to clean up after indexing.
+    async fn extract_archive(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit_sha: &str,
+        archive_stream: ByteStream,
+    ) -> Result<(RepositoryLease, bool), RepositoryCacheError>;
+
+    /// Atomically look up a cached entry and pin it if found.
+    ///
+    /// Holds the eviction read lock across both operations so that an
+    /// in-flight eviction cannot delete the entry between the lookup and the pin.
+    async fn acquire(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError>;
+
+    /// Adjust the recorded size of a cache entry by a signed delta.
+    /// Called after incremental updates to keep the budget estimate in sync
+    /// without re-measuring the entire directory.
+    fn adjust_recorded_size(&self, project_id: i64, branch: &str, delta: i64);
+}
+
+/// File-level mutations on an already-cached repository.
+#[async_trait]
+pub trait CachedRepositoryFiles: Send + Sync {
+    /// Delete a file from the cached repository. Returns the size in bytes of the
+    /// removed file, or 0 if the file did not exist.
     async fn delete_file(
         &self,
         project_id: i64,
         branch: &str,
         relative_path: &str,
-    ) -> Result<(), RepositoryCacheError>;
+    ) -> Result<u64, RepositoryCacheError>;
 
     async fn write_file(
         &self,
@@ -74,28 +108,12 @@ pub trait RepositoryCache: Send + Sync {
         branch: &str,
         commit_sha: &str,
     ) -> Result<(), RepositoryCacheError>;
-
-    /// Extract an archive into the cache, pin the entry, enforce the disk
-    /// budget, and return a guard that keeps the entry alive plus a flag
-    /// indicating whether the entry is small enough to clean up after indexing.
-    async fn extract_archive(
-        &self,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-        archive_stream: ByteStream,
-    ) -> Result<(RepositoryLease, bool), RepositoryCacheError>;
-
-    /// Atomically look up a cached entry and pin it if found.
-    ///
-    /// This holds the eviction read lock across both operations so that an
-    /// in-flight eviction cannot delete the entry between the lookup and the pin.
-    async fn acquire(
-        &self,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError>;
 }
+
+/// Combined trait for full cache access. Automatically implemented for any type
+/// that implements both [`RepositoryCacheLifecycle`] and [`CachedRepositoryFiles`].
+pub trait RepositoryCache: RepositoryCacheLifecycle + CachedRepositoryFiles {}
+impl<T: RepositoryCacheLifecycle + CachedRepositoryFiles> RepositoryCache for T {}
 
 const COMMIT_FILE: &str = ".commit";
 const META_DIR: &str = "meta";
@@ -148,7 +166,52 @@ impl LocalRepositoryCache {
             .pin(self.repository_dir(project_id, branch), project_id, branch)
     }
 
-    async fn enforce_budget(
+    async fn clear_repository_dir(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<(), RepositoryCacheError> {
+        let repo_dir = self.repository_dir(project_id, branch);
+        match tokio::fs::remove_dir_all(&repo_dir).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        tokio::fs::create_dir_all(&repo_dir).await?;
+        Ok(())
+    }
+
+    async fn extract_stream_to_disk(
+        &self,
+        project_id: i64,
+        branch: &str,
+        archive_stream: ByteStream,
+    ) -> Result<(), RepositoryCacheError> {
+        let repo_dir = self.repository_dir(project_id, branch);
+        let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
+        let handle = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            let bridge = SyncIoBridge::new_with_handle(reader, handle);
+            extract_tar_gz_from_reader(bridge, &repo_dir)
+        })
+        .await
+        .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
+        .map_err(|e| RepositoryCacheError::Archive(e.to_string()))
+    }
+
+    async fn write_commit_metadata(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit_sha: &str,
+    ) -> Result<(), RepositoryCacheError> {
+        let meta_dir = self.branch_dir(project_id, branch).join(META_DIR);
+        tokio::fs::create_dir_all(&meta_dir).await?;
+        tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
+        Ok(())
+    }
+
+    async fn record_and_enforce_budget(
         &self,
         project_id: i64,
         branch: &str,
@@ -158,41 +221,29 @@ impl LocalRepositoryCache {
             .await
             .map_err(|e| RepositoryCacheError::Archive(format!("size calculation failed: {e}")))?;
 
-        self.budget.record_size(project_id, branch, size);
-
         self.budget
             .make_room(size)
             .await
             .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
+
+        self.budget.record_size(project_id, branch, size);
 
         Ok(size < self.budget.large_repo_threshold())
     }
 }
 
 fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCacheError> {
-    let mut depth: i32 = 0;
     for component in Path::new(relative).components() {
         match component {
-            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
-                return Err(RepositoryCacheError::PathTraversal(relative.to_string()));
-            }
-            std::path::Component::ParentDir => {
-                depth -= 1;
-                if depth < 0 {
-                    return Err(RepositoryCacheError::PathTraversal(relative.to_string()));
-                }
-            }
-            std::path::Component::Normal(_) => {
-                depth += 1;
-            }
-            std::path::Component::CurDir => {}
+            std::path::Component::Normal(_) | std::path::Component::CurDir => {}
+            _ => return Err(RepositoryCacheError::PathTraversal(relative.to_string())),
         }
     }
     Ok(base.join(relative))
 }
 
 #[async_trait]
-impl RepositoryCache for LocalRepositoryCache {
+impl RepositoryCacheLifecycle for LocalRepositoryCache {
     async fn get(
         &self,
         project_id: i64,
@@ -227,13 +278,10 @@ impl RepositoryCache for LocalRepositoryCache {
         branch: &str,
         commit_sha: &str,
     ) -> Result<(), RepositoryCacheError> {
-        let branch_dir = self.branch_dir(project_id, branch);
-        let meta_dir = branch_dir.join(META_DIR);
-        let repository_dir = branch_dir.join(REPOSITORY_DIR);
-        tokio::fs::create_dir_all(&meta_dir).await?;
+        let repository_dir = self.repository_dir(project_id, branch);
         tokio::fs::create_dir_all(&repository_dir).await?;
-        tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
-        Ok(())
+        self.write_commit_metadata(project_id, branch, commit_sha)
+            .await
     }
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
@@ -248,17 +296,65 @@ impl RepositoryCache for LocalRepositoryCache {
         Ok(())
     }
 
+    async fn extract_archive(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit_sha: &str,
+        archive_stream: ByteStream,
+    ) -> Result<(RepositoryLease, bool), RepositoryCacheError> {
+        self.clear_repository_dir(project_id, branch).await?;
+        self.extract_stream_to_disk(project_id, branch, archive_stream)
+            .await?;
+        self.write_commit_metadata(project_id, branch, commit_sha)
+            .await?;
+
+        let lease = self.pin(project_id, branch);
+        let is_small = self.record_and_enforce_budget(project_id, branch).await?;
+        Ok((lease, is_small))
+    }
+
+    async fn acquire(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError> {
+        let _eviction_guard = self.budget.eviction_read_lock().await;
+        let cached = self.get(project_id, branch).await?;
+        match cached {
+            Some(repo) => {
+                let guard = self.pin(project_id, branch);
+                Ok(Some((repo, guard)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn adjust_recorded_size(&self, project_id: i64, branch: &str, delta: i64) {
+        self.budget.adjust_size(project_id, branch, delta);
+    }
+}
+
+#[async_trait]
+impl CachedRepositoryFiles for LocalRepositoryCache {
     async fn delete_file(
         &self,
         project_id: i64,
         branch: &str,
         relative_path: &str,
-    ) -> Result<(), RepositoryCacheError> {
+    ) -> Result<u64, RepositoryCacheError> {
         let repo_dir = self.repository_dir(project_id, branch);
         let target = validated_path(&repo_dir, relative_path)?;
+
+        let size = match tokio::fs::metadata(&target).await {
+            Ok(meta) => meta.len(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(e.into()),
+        };
+
         match tokio::fs::remove_file(&target).await {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Ok(()) => Ok(size),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
             Err(e) => Err(e.into()),
         }
     }
@@ -305,62 +401,8 @@ impl RepositoryCache for LocalRepositoryCache {
         branch: &str,
         commit_sha: &str,
     ) -> Result<(), RepositoryCacheError> {
-        let meta_dir = self.branch_dir(project_id, branch).join(META_DIR);
-        tokio::fs::create_dir_all(&meta_dir).await?;
-        tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
-        Ok(())
-    }
-
-    async fn extract_archive(
-        &self,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-        archive_stream: ByteStream,
-    ) -> Result<(RepositoryLease, bool), RepositoryCacheError> {
-        let repo_dir = self.repository_dir(project_id, branch);
-
-        match tokio::fs::remove_dir_all(&repo_dir).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-        tokio::fs::create_dir_all(&repo_dir).await?;
-
-        let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
-        let handle = tokio::runtime::Handle::current();
-        let repo_dir_owned = repo_dir.clone();
-        tokio::task::spawn_blocking(move || {
-            let bridge = SyncIoBridge::new_with_handle(reader, handle);
-            extract_tar_gz_from_reader(bridge, &repo_dir_owned)
-        })
-        .await
-        .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
-        .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
-
-        let meta_dir = self.branch_dir(project_id, branch).join(META_DIR);
-        tokio::fs::create_dir_all(&meta_dir).await?;
-        tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
-
-        let guard = self.pin(project_id, branch);
-        let should_cleanup = self.enforce_budget(project_id, branch).await?;
-        Ok((guard, should_cleanup))
-    }
-
-    async fn acquire(
-        &self,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError> {
-        let _eviction_guard = self.budget.eviction_read_lock().await;
-        let cached = self.get(project_id, branch).await?;
-        match cached {
-            Some(repo) => {
-                let guard = self.pin(project_id, branch);
-                Ok(Some((repo, guard)))
-            }
-            None => Ok(None),
-        }
+        self.write_commit_metadata(project_id, branch, commit_sha)
+            .await
     }
 }
 
@@ -406,7 +448,7 @@ mod tests {
         encoder.finish().unwrap()
     }
 
-    async fn assert_path_traversal_rejected(result: Result<(), RepositoryCacheError>) {
+    fn assert_path_traversal_rejected<T: std::fmt::Debug>(result: Result<T, RepositoryCacheError>) {
         let error = result.unwrap_err();
         assert!(
             error.to_string().contains("path traversal"),
@@ -625,29 +667,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_file_removes_existing_file() {
+    async fn delete_file_removes_existing_file_and_returns_size() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
+        let content = b"content";
         cache
-            .write_file(42, "main", "file.rs", b"content")
+            .write_file(42, "main", "file.rs", content)
             .await
             .unwrap();
 
-        cache.delete_file(42, "main", "file.rs").await.unwrap();
+        let freed = cache.delete_file(42, "main", "file.rs").await.unwrap();
 
+        assert_eq!(freed, content.len() as u64);
         let repo_dir = cache.repository_dir(42, "main");
         assert!(!repo_dir.join("file.rs").exists());
     }
 
     #[tokio::test]
-    async fn delete_file_succeeds_when_file_does_not_exist() {
+    async fn delete_file_returns_zero_when_file_does_not_exist() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
 
-        cache
+        let freed = cache
             .delete_file(42, "main", "nonexistent.rs")
             .await
             .unwrap();
+
+        assert_eq!(freed, 0);
     }
 
     #[tokio::test]
@@ -689,12 +735,10 @@ mod tests {
         cache.save(42, "main", "abc123").await.unwrap();
         let malicious = "../../../etc/passwd";
 
-        assert_path_traversal_rejected(cache.write_file(42, "main", malicious, b"bad").await).await;
-        assert_path_traversal_rejected(cache.delete_file(42, "main", malicious).await).await;
-        assert_path_traversal_rejected(cache.rename_file(42, "main", malicious, "safe.rs").await)
-            .await;
-        assert_path_traversal_rejected(cache.rename_file(42, "main", "safe.rs", malicious).await)
-            .await;
+        assert_path_traversal_rejected(cache.write_file(42, "main", malicious, b"bad").await);
+        assert_path_traversal_rejected(cache.delete_file(42, "main", malicious).await);
+        assert_path_traversal_rejected(cache.rename_file(42, "main", malicious, "safe.rs").await);
+        assert_path_traversal_rejected(cache.rename_file(42, "main", "safe.rs", malicious).await);
     }
 
     #[tokio::test]
@@ -703,24 +747,22 @@ mod tests {
         cache.save(42, "main", "abc123").await.unwrap();
         let absolute = "/etc/passwd";
 
-        assert_path_traversal_rejected(cache.write_file(42, "main", absolute, b"bad").await).await;
-        assert_path_traversal_rejected(cache.delete_file(42, "main", absolute).await).await;
-        assert_path_traversal_rejected(cache.rename_file(42, "main", absolute, "safe.rs").await)
-            .await;
-        assert_path_traversal_rejected(cache.rename_file(42, "main", "safe.rs", absolute).await)
-            .await;
+        assert_path_traversal_rejected(cache.write_file(42, "main", absolute, b"bad").await);
+        assert_path_traversal_rejected(cache.delete_file(42, "main", absolute).await);
+        assert_path_traversal_rejected(cache.rename_file(42, "main", absolute, "safe.rs").await);
+        assert_path_traversal_rejected(cache.rename_file(42, "main", "safe.rs", absolute).await);
     }
 
     #[tokio::test]
-    async fn sibling_path_within_base_is_allowed() {
+    async fn parent_dir_components_are_always_rejected() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
 
-        let result = cache
-            .write_file(42, "main", "foo/../bar.rs", b"content")
-            .await;
-
-        assert!(result.is_ok());
+        assert_path_traversal_rejected(
+            cache
+                .write_file(42, "main", "foo/../bar.rs", b"content")
+                .await,
+        );
     }
 
     #[tokio::test]

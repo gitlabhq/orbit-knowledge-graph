@@ -161,6 +161,7 @@ impl RepositoryResolver {
             .map_err(|e| format!("failed to fetch changed paths: {e}"))?;
 
         let changeset = compute_changeset(changed_path_stream).await?;
+        let mut size_delta: i64 = 0;
 
         for (old_path, new_path) in &changeset.renames {
             self.cache
@@ -170,10 +171,12 @@ impl RepositoryResolver {
         }
 
         for path in &changeset.deletions {
-            self.cache
+            let freed = self
+                .cache
                 .delete_file(project_id, branch, path)
                 .await
                 .map_err(|e| format!("failed to delete cached file: {e}"))?;
+            size_delta -= freed as i64;
         }
 
         let expected_writes: usize = changeset.paths_by_blob_id.values().map(|v| v.len()).sum();
@@ -203,6 +206,7 @@ impl RepositoryResolver {
                         .write_file(project_id, branch, path, &blob.data)
                         .await
                         .map_err(|e| format!("failed to write cached file: {e}"))?;
+                    size_delta += blob.data.len() as i64;
                     write_count += 1;
                 }
             }
@@ -219,6 +223,9 @@ impl RepositoryResolver {
             .await
             .map_err(|e| format!("failed to update cache commit: {e}"))?;
 
+        self.cache
+            .adjust_recorded_size(project_id, branch, size_delta);
+
         info!(
             project_id,
             branch,
@@ -227,6 +234,7 @@ impl RepositoryResolver {
             renames = changeset.renames.len(),
             deletions = changeset.deletions.len(),
             writes = write_count,
+            size_delta,
             "incremental update complete"
         );
 

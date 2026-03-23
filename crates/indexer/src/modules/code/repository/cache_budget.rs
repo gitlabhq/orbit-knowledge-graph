@@ -12,8 +12,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use parking_lot::RwLock;
-use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
+
+use super::disk::hashed_branch_name;
 
 use crate::modules::code::metrics::CodeMetrics;
 
@@ -79,6 +80,17 @@ struct IndexEntry {
     last_accessed: SystemTime,
 }
 
+struct EvictionCandidate {
+    key: CacheKey,
+    size_bytes: u64,
+}
+
+/// Unpinned entries eligible for eviction, sorted oldest-first within each tier.
+struct EvictionPlan {
+    small_repos: Vec<EvictionCandidate>,
+    large_repos: Vec<EvictionCandidate>,
+}
+
 /// Tracks cache entry sizes, pin counts, and enforces a disk budget via LRU eviction.
 ///
 /// # Lock ordering
@@ -125,6 +137,12 @@ impl CacheBudget {
             eviction_lock: Arc::new(tokio::sync::RwLock::new(())),
             metrics,
         }
+    }
+
+    fn branch_dir(&self, project_id: i64, branch: &str) -> PathBuf {
+        self.base_dir
+            .join(project_id.to_string())
+            .join(hashed_branch_name(branch))
     }
 
     /// Pin an entry so it cannot be evicted. Returns a guard that unpins on drop.
@@ -180,6 +198,28 @@ impl CacheBudget {
         }
     }
 
+    /// Adjust a recorded entry's size by a signed delta without re-measuring disk.
+    /// Used after incremental updates to keep the budget estimate roughly accurate.
+    pub fn adjust_size(&self, project_id: i64, branch: &str, delta: i64) {
+        let key = cache_key(project_id, branch);
+        let mut index = self.index.write();
+        if let Some(entry) = index.get_mut(&key) {
+            let new_size = (entry.size_bytes as i64).saturating_add(delta).max(0) as u64;
+            let old_size = entry.size_bytes;
+            entry.size_bytes = new_size;
+
+            if new_size >= old_size {
+                self.total_bytes
+                    .fetch_add(new_size - old_size, Ordering::Relaxed);
+            } else {
+                self.total_bytes
+                    .fetch_sub(old_size - new_size, Ordering::Relaxed);
+            }
+        }
+        drop(index);
+        self.report_state();
+    }
+
     /// Remove an entry from the index (e.g. on invalidation).
     pub fn remove(&self, project_id: i64, branch: &str) {
         let key = cache_key(project_id, branch);
@@ -198,94 +238,116 @@ impl CacheBudget {
 
     /// Evict unpinned entries until the cache has room for `new_entry_bytes`.
     ///
+    /// Call this *before* `record_size` so the new entry's bytes are not yet
+    /// counted in `total_bytes`.
+    ///
     /// Holds the eviction write lock for its duration, blocking new `get`+`pin`
     /// sequences until eviction is complete.
-    ///
-    /// Returns `Err` if all unpinned entries have been evicted and the cache is
-    /// still over budget — the caller should retry later when active workers
-    /// release their pins.
-    ///
-    /// Pass 1: evict small repos (below threshold) by LRU.
-    /// Pass 2: evict large repos only if still over budget.
     pub async fn make_room(&self, new_entry_bytes: u64) -> Result<(), CacheBudgetExhausted> {
         let _eviction_guard = self.eviction_lock.write().await;
         let target = self.usable_budget.saturating_sub(new_entry_bytes);
+        let total = self.total_bytes.load(Ordering::Relaxed);
 
-        let (total_bytes, small_candidates, large_candidates) = {
-            let total = self.total_bytes.load(Ordering::Relaxed);
+        if total <= target {
+            return Ok(());
+        }
 
-            if total <= target {
-                return Ok(());
+        let plan = self.eviction_candidates();
+        self.evict_until_under(target, total, plan).await
+    }
+
+    /// Snapshot the index, partition into small/large tiers, and sort each by LRU.
+    fn eviction_candidates(&self) -> EvictionPlan {
+        let index = self.index.read();
+        let pins = self.pin_counts.read();
+
+        let mut small_repos = Vec::new();
+        let mut large_repos = Vec::new();
+
+        for (key, entry) in index.iter() {
+            if pins.get(key).is_some_and(|&count| count > 0) {
+                continue;
             }
-
-            let index = self.index.read();
-
-            let mut small = Vec::new();
-            let mut large = Vec::new();
-
-            let pins = self.pin_counts.read();
-            for (key, entry) in index.iter() {
-                if pins.get(key).is_some_and(|&count| count > 0) {
-                    continue;
-                }
-                if entry.size_bytes < self.large_repo_threshold {
-                    small.push((key.clone(), entry.clone()));
-                } else {
-                    large.push((key.clone(), entry.clone()));
-                }
+            let candidate = EvictionCandidate {
+                key: key.clone(),
+                size_bytes: entry.size_bytes,
+            };
+            if entry.size_bytes < self.large_repo_threshold {
+                small_repos.push((candidate, entry.last_accessed));
+            } else {
+                large_repos.push((candidate, entry.last_accessed));
             }
-            drop(pins);
+        }
 
-            small.sort_by_key(|(_, e)| e.last_accessed);
-            large.sort_by_key(|(_, e)| e.last_accessed);
+        small_repos.sort_by_key(|(_, ts)| *ts);
+        large_repos.sort_by_key(|(_, ts)| *ts);
 
-            (total, small, large)
-        };
+        EvictionPlan {
+            small_repos: small_repos.into_iter().map(|(c, _)| c).collect(),
+            large_repos: large_repos.into_iter().map(|(c, _)| c).collect(),
+        }
+    }
 
+    /// Walk candidates oldest-first (small repos first, then large), deleting
+    /// from disk and removing from the index until we're under `target` bytes.
+    ///
+    /// If all unpinned entries are evicted and we're still over budget, either
+    /// purges the entire cache (when phantom bytes exceed headroom) or returns
+    /// an error so the caller can retry when workers release their pins.
+    async fn evict_until_under(
+        &self,
+        target: u64,
+        total_bytes: u64,
+        plan: EvictionPlan,
+    ) -> Result<(), CacheBudgetExhausted> {
         let mut remaining = total_bytes;
         let mut evicted_bytes = 0u64;
         let mut evicted_keys = Vec::new();
 
-        for (key, entry) in small_candidates.iter().chain(large_candidates.iter()) {
+        let candidates = plan.small_repos.into_iter().chain(plan.large_repos);
+
+        for candidate in candidates {
             if remaining <= target {
                 break;
             }
 
-            let entry_dir = self
-                .base_dir
-                .join(key.0.to_string())
-                .join(hashed_branch_name(&key.1));
+            let entry_dir = self.branch_dir(candidate.key.0, &candidate.key.1);
 
             if let Err(e) = tokio::fs::remove_dir_all(&entry_dir).await {
                 self.phantom_bytes
-                    .fetch_add(entry.size_bytes, Ordering::Relaxed);
+                    .fetch_add(candidate.size_bytes, Ordering::Relaxed);
                 warn!(
-                    project_id = key.0,
-                    branch = %key.1,
+                    project_id = candidate.key.0,
+                    branch = %candidate.key.1,
                     error = %e,
                     phantom_bytes = self.phantom_bytes.load(Ordering::Relaxed),
                     "failed to delete evicted repository from disk, removing from index anyway"
                 );
             } else {
                 info!(
-                    project_id = key.0,
-                    branch = %key.1,
-                    size_bytes = entry.size_bytes,
+                    project_id = candidate.key.0,
+                    branch = %candidate.key.1,
+                    size_bytes = candidate.size_bytes,
                     "evicted cached repository"
                 );
             }
 
-            evicted_keys.push(key.clone());
-            remaining = remaining.saturating_sub(entry.size_bytes);
-            evicted_bytes += entry.size_bytes;
+            evicted_keys.push(candidate.key);
+            remaining = remaining.saturating_sub(candidate.size_bytes);
+            evicted_bytes += candidate.size_bytes;
         }
 
         if !evicted_keys.is_empty() {
             let mut index = self.index.write();
+            let mut confirmed_bytes = 0u64;
             for key in &evicted_keys {
-                index.remove(key);
+                if let Some(entry) = index.remove(key) {
+                    confirmed_bytes += entry.size_bytes;
+                }
             }
-            self.total_bytes.fetch_sub(evicted_bytes, Ordering::Relaxed);
+            self.total_bytes
+                .fetch_sub(confirmed_bytes, Ordering::Relaxed);
+            evicted_bytes = confirmed_bytes;
         }
 
         if evicted_bytes > 0 {
@@ -297,6 +359,7 @@ impl CacheBudget {
         if remaining > target {
             let phantom = self.phantom_bytes.load(Ordering::Relaxed);
             let headroom = self.disk_budget.saturating_sub(self.usable_budget);
+
             if phantom > headroom {
                 self.purge_entire_cache().await;
                 return Ok(());
@@ -349,24 +412,9 @@ impl CacheBudget {
     }
 }
 
-pub fn hashed_branch_name(branch: &str) -> String {
-    let hash = Sha256::digest(branch.as_bytes());
-    format!("{:x}", hash)
-}
-
-/// Synchronous directory size calculation — must be called from `spawn_blocking`.
-pub fn directory_size(path: &Path) -> u64 {
-    walkdir::WalkDir::new(path)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| entry.metadata().ok())
-        .filter(|metadata| metadata.is_file())
-        .map(|metadata| metadata.len())
-        .sum()
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::disk::hashed_branch_name;
     use super::*;
     use tempfile::TempDir;
 
@@ -490,7 +538,8 @@ mod tests {
         register_entry_on_disk(&budget, dir.path(), 2, "main", 300).await;
         register_entry_on_disk(&budget, dir.path(), 3, "main", 350).await;
 
-        // Total: 1150. Budget: 1200. Target for 400 new = 800.
+        // Total: 1150. Budget: 1200. Making room for 400 → target = 800.
+        // Evicts small repos (300 + 350) before the large one.
         budget.make_room(400).await.unwrap();
 
         assert!(
@@ -516,8 +565,8 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(10));
         register_entry_on_disk(&budget, dir.path(), 2, "main", 300).await;
 
-        // Total: 600. Budget: 600. Need to make room for 100 → target = 500.
-        // Only one needs eviction. Project 1 is older, should go first.
+        // Total: 600. Budget: 600. Making room for 100 → target = 500.
+        // Project 1 is older, should be evicted first.
         budget.make_room(100).await.unwrap();
 
         assert!(
