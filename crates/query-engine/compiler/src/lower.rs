@@ -265,15 +265,54 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
         }
     }
 
-    // Add _gkg_* ID/type columns for ALL nodes
+    // Add _gkg_* ID/type/pk columns for ALL nodes.
+    //
+    // For entities with redaction_id_column != "id" (e.g. MergeRequestDiff
+    // uses merge_request_id), the auth ID column isn't on the edge table.
+    // JOIN their node table so enforce can reference the auth column, and
+    // pre-emit _gkg_{id}_pk (the entity's row ID from the edge column) so
+    // enforce doesn't try to emit it from the non-existent node alias.
     for node in &input.nodes {
         let entity = node.entity.as_deref().unwrap_or("Unknown");
-        let id_expr = if let Some((alias, col)) = node_edge_col.get(&node.id) {
+        let edge_id_expr = if let Some((alias, col)) = node_edge_col.get(&node.id) {
             Expr::col(alias, col.as_str())
         } else {
             Expr::param(ChType::Int64, 0i64)
         };
-        select.push(SelectExpr::new(id_expr, format!("_gkg_{}_id", node.id)));
+
+        if node.redaction_id_column != DEFAULT_PRIMARY_KEY {
+            // JOIN node table for the auth column (e.g. merge_request_id)
+            if let Some((edge_a, edge_c)) = node_edge_col.get(&node.id)
+                && let Ok(table) = resolve_table(node)
+            {
+                let join_cond = Expr::eq(
+                    Expr::col(edge_a, edge_c.as_str()),
+                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                );
+                from = TableRef::join(
+                    JoinType::Inner,
+                    from,
+                    TableRef::scan(&table, &node.id),
+                    join_cond,
+                );
+            }
+            // _gkg_*_pk = entity row ID (from edge column, for hydration)
+            select.push(SelectExpr::new(
+                edge_id_expr,
+                format!("_gkg_{}_pk", node.id),
+            ));
+            // _gkg_*_id = auth column (from joined node table, for redaction)
+            select.push(SelectExpr::new(
+                Expr::col(&node.id, &node.redaction_id_column),
+                format!("_gkg_{}_id", node.id),
+            ));
+        } else {
+            select.push(SelectExpr::new(
+                edge_id_expr,
+                format!("_gkg_{}_id", node.id),
+            ));
+        }
+
         select.push(SelectExpr::new(
             Expr::param(ChType::String, entity.to_string()),
             format!("_gkg_{}_type", node.id),

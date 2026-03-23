@@ -372,3 +372,30 @@ pub(super) async fn empty_result_has_valid_schema(ctx: &TestContext) {
     resp.assert_node_count(0);
     assert_eq!(resp.edge_count(), 0);
 }
+
+pub(super) async fn non_default_redaction_id_entity_traversal(ctx: &TestContext) {
+    // MergeRequestDiff uses id_column=merge_request_id (not "id").
+    // In edge-only mode, enforce.rs emits _gkg_d_pk via Expr::col(&node.id, "id")
+    // which references a node table not in FROM. The fix pre-emits _gkg_d_pk
+    // in lower using the edge column.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"], "node_ids": [2000]},
+                {"id": "d", "entity": "MergeRequestDiff", "columns": ["state"]}
+            ],
+            "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(3);
+    resp.assert_referential_integrity();
+    resp.assert_node_ids("MergeRequest", &[2000]);
+    resp.assert_node_ids("MergeRequestDiff", &[5000, 5001]);
+    resp.assert_edge_set("HAS_DIFF", &[(2000, 5000), (2000, 5001)]);
+}

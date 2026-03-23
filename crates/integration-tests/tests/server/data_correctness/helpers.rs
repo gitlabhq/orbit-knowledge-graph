@@ -230,6 +230,14 @@ pub(super) async fn seed(ctx: &TestContext) {
     .await;
 
     ctx.execute(
+        "INSERT INTO gl_merge_request_diff (id, merge_request_id, state, traversal_path) VALUES
+         (5000, 2000, 'collected', '1/100/1000/'),
+         (5001, 2000, 'collected', '1/100/1000/'),
+         (5002, 2001, 'collected', '1/100/1000/')",
+    )
+    .await;
+
+    ctx.execute(
         "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
          ('1/102/', 1, 'User', 'MEMBER_OF', 102, 'Group'),
@@ -255,7 +263,10 @@ pub(super) async fn seed(ctx: &TestContext) {
          ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3000, 'Note'),
          ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3002, 'Note'),
          ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3003, 'Note'),
-         ('1/100/1000/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note')",
+         ('1/100/1000/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note'),
+         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5000, 'MergeRequestDiff'),
+         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5001, 'MergeRequestDiff'),
+         ('1/100/1000/', 2001, 'MergeRequest', 'HAS_DIFF', 5002, 'MergeRequestDiff')",
     )
     .await;
 
