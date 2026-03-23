@@ -22,7 +22,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::SKIP_SECURITY_FILTER_TABLES;
 use crate::input::{Input, InputNode, QueryType};
 use crate::security::SecurityContext;
@@ -105,11 +105,20 @@ pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
 /// Eliminate unnecessary node table joins from aggregation queries.
 ///
 /// When an aggregation target node has no filters, no pinned `node_ids`, and
-/// only appears in property-less aggregates (e.g. `COUNT`), its table scan
-/// can be removed from the FROM tree. The aggregate expression is rewritten
-/// to reference the edge column instead (e.g. `COUNT(mr.id)` → `COUNT(e0.source_id)`),
-/// and a `source_kind`/`target_kind` filter is added to ensure only edges for
-/// the correct entity type are counted.
+/// only appears in property-less aggregates (e.g. `COUNT`), the query is
+/// restructured as a subquery aggregation on `gl_edge` alone, joined to the
+/// group-by node table for column hydration:
+///
+/// ```sql
+/// SELECT p.name, _edge_agg.cnt, ...
+/// FROM (SELECT target_id, count() AS cnt FROM gl_edge WHERE ... GROUP BY target_id) AS _edge_agg
+/// JOIN gl_project AS p ON (_edge_agg.target_id = p.id)
+/// WHERE startsWith(p.traversal_path, ...)
+/// ORDER BY _edge_agg.cnt DESC LIMIT 20
+/// ```
+///
+/// This lets ClickHouse use the `agg_counts` aggregation projection, reading
+/// pre-aggregated rows instead of scanning the full edge table.
 ///
 /// Constraints: single relationship, single-hop only.
 fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
@@ -149,15 +158,52 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
         return;
     }
 
-    // Build rewrite map: skipped node alias → (edge alias, edge id column, kind column, entity name).
-    let edge_alias = if rel.max_hops > 1 {
-        "hop_e0".to_string()
-    } else {
-        "e0".to_string()
-    };
-    let mut rewrites: HashMap<String, (String, &str)> = HashMap::new();
-    let mut kind_filters: Vec<Expr> = Vec::new();
+    let edge_alias = "e0";
+    let subquery_alias = "_edge_agg";
+    let count_alias = "_cnt";
 
+    // Determine which edge column connects to the group-by node.
+    let group_node = match input
+        .nodes
+        .iter()
+        .find(|n| group_by_ids.contains(n.id.as_str()))
+    {
+        Some(n) => n,
+        None => return,
+    };
+    let (group_edge_col, _) = if group_node.id == rel.to {
+        let (_, end) = rel.direction.edge_columns();
+        (end, "target_kind")
+    } else {
+        let (start, _) = rel.direction.edge_columns();
+        (start, "source_kind")
+    };
+
+    // Build inner subquery WHERE conditions: traversal_path + relationship_kind + source/target_kind.
+    let mut inner_where: Vec<Expr> = Vec::new();
+
+    // Collect edge-only conditions from WHERE.
+    if let Some(w) = &q.where_clause {
+        for conjunct in flatten_and(w.clone()) {
+            let aliases = collect_column_aliases(&conjunct);
+            if aliases.len() == 1 && aliases.contains(edge_alias) {
+                inner_where.push(conjunct);
+            }
+        }
+    }
+
+    // Collect edge-only conditions from all JOIN ON clauses in the FROM tree
+    // (e.g. relationship_kind = 'IN_PROJECT' lives on a join condition).
+    let mut all_join_conditions: Vec<Expr> = Vec::new();
+    collect_all_join_conditions(&q.from, &mut all_join_conditions);
+    for cond in all_join_conditions {
+        let aliases = collect_column_aliases(&cond);
+        if aliases.len() == 1 && aliases.contains(edge_alias) {
+            inner_where.push(cond);
+        }
+    }
+
+    // Add source_kind/target_kind filters for skipped nodes.
     for node_id in &skippable {
         let node = match input.nodes.iter().find(|n| &n.id == node_id) {
             Some(n) => n,
@@ -167,114 +213,125 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
             Some(e) => e,
             None => continue,
         };
-        let (id_col, kind_col) = if *node_id == rel.from {
-            let (start, _) = rel.direction.edge_columns();
-            (start, "source_kind")
+        let kind_col = if *node_id == rel.from {
+            "source_kind"
         } else {
-            let (_, end) = rel.direction.edge_columns();
-            (end, "target_kind")
+            "target_kind"
         };
-        rewrites.insert(node_id.clone(), (edge_alias.clone(), id_col));
-        kind_filters.push(Expr::eq(
-            Expr::col(&edge_alias, kind_col),
+        inner_where.push(Expr::eq(
+            Expr::col(edge_alias, kind_col),
             Expr::param(ChType::String, entity.to_string()),
         ));
     }
 
-    // Remove the node table scan from the FROM tree, collecting any
-    // surviving join conditions (e.g. relationship_kind = 'IN_PROJECT')
-    // that need to move to WHERE.
-    let mut rescued_conditions: Vec<Expr> = Vec::new();
-    for node_id in &skippable {
-        prune_join_for_alias(&mut q.from, node_id, &mut rescued_conditions);
+    // Inner subquery: SELECT group_edge_col, count() AS _cnt FROM gl_edge WHERE ... GROUP BY group_edge_col
+    let inner_query = Query {
+        select: vec![
+            SelectExpr::new(Expr::col(edge_alias, group_edge_col), group_edge_col),
+            SelectExpr::new(Expr::func("COUNT", vec![]), count_alias),
+        ],
+        from: TableRef::scan(EDGE_TABLE, edge_alias),
+        where_clause: rebuild_and(inner_where),
+        group_by: vec![Expr::col(edge_alias, group_edge_col)],
+        ..Default::default()
+    };
+
+    let inner_subquery = TableRef::Subquery {
+        query: Box::new(inner_query),
+        alias: subquery_alias.to_string(),
+    };
+
+    // Build outer WHERE: only keep conjuncts referencing the group-by node.
+    let mut outer_where: Vec<Expr> = Vec::new();
+    if let Some(w) = &q.where_clause {
+        for conjunct in flatten_and(w.clone()) {
+            let aliases = collect_column_aliases(&conjunct);
+            if !aliases.is_empty() && aliases.iter().all(|a| a == &group_node.id) {
+                outer_where.push(conjunct);
+            }
+        }
     }
 
-    // Rewrite aggregate expressions in SELECT: COUNT(node.id) → COUNT(e0.source_id).
-    for sel in &mut q.select {
-        rewrite_agg_column(&mut sel.expr, &rewrites);
+    // Build outer SELECT: group-by node columns + aggregation results from subquery.
+    let mut outer_select: Vec<SelectExpr> = Vec::new();
+    for sel in &q.select {
+        let aliases = collect_column_aliases(&sel.expr);
+        if aliases.iter().all(|a| a == &group_node.id) {
+            outer_select.push(sel.clone());
+        }
     }
-    for ord in &mut q.order_by {
-        rewrite_agg_column(&mut ord.expr, &rewrites);
+    for agg in &input.aggregations {
+        if let Some(target) = &agg.target
+            && skippable.contains(target.as_str())
+        {
+            let alias = agg
+                .alias
+                .clone()
+                .unwrap_or_else(|| agg.function.as_sql().to_lowercase());
+            outer_select.push(SelectExpr::new(
+                Expr::col(subquery_alias, count_alias),
+                alias,
+            ));
+        }
+    }
+    // Add _gkg_*_id and _gkg_*_type columns from the original query.
+    for sel in &q.select {
+        if let Some(alias) = &sel.alias
+            && alias.starts_with("_gkg_")
+        {
+            let aliases = collect_column_aliases(&sel.expr);
+            if aliases.iter().all(|a| a == &group_node.id) {
+                // Already added above.
+            } else {
+                outer_select.push(sel.clone());
+            }
+        }
     }
 
-    // Strip WHERE conjuncts that reference the eliminated node aliases,
-    // and add kind filters + rescued join conditions.
-    if let Some(w) = q.where_clause.take() {
-        let conjuncts = flatten_and(w);
-        let mut remaining: Vec<Expr> = conjuncts
-            .into_iter()
-            .filter(|c| {
-                let aliases = collect_column_aliases(c);
-                !aliases.iter().any(|a| skippable.contains(a))
-            })
-            .collect();
-        remaining.extend(kind_filters);
-        remaining.extend(rescued_conditions);
-        q.where_clause = rebuild_and(remaining);
-    } else {
-        kind_filters.extend(rescued_conditions);
-        q.where_clause = rebuild_and(kind_filters);
-    }
+    // Build outer ORDER BY referencing the subquery count.
+    let outer_order_by: Vec<OrderExpr> = q
+        .order_by
+        .iter()
+        .map(|o| OrderExpr {
+            expr: Expr::col(subquery_alias, count_alias),
+            desc: o.desc,
+        })
+        .collect();
+
+    // Resolve the group-by node table.
+    let group_table = group_node.table.as_deref().unwrap_or(&group_node.id);
+
+    // Outer FROM: subquery JOIN group_node_table ON (subquery.group_col = node.id)
+    let outer_from = TableRef::join(
+        JoinType::Inner,
+        inner_subquery,
+        TableRef::scan(group_table, &group_node.id),
+        Expr::eq(
+            Expr::col(subquery_alias, group_edge_col),
+            Expr::col(&group_node.id, DEFAULT_PRIMARY_KEY),
+        ),
+    );
+
+    // Replace the entire query.
+    q.ctes.clear();
+    q.select = outer_select;
+    q.from = outer_from;
+    q.where_clause = rebuild_and(outer_where);
+    q.group_by.clear();
+    q.order_by = outer_order_by;
 
     input.compiler.skipped_node_joins = skippable;
 }
 
-/// Remove a Scan node (by alias) from the FROM join tree.
-///
-/// Walks the tree looking for a Join whose left or right child is a Scan
-/// with the target alias. When found, replaces the Join with the other child.
-/// Any ON conjuncts that don't reference the pruned alias are collected into
-/// `rescued` so the caller can add them to WHERE.
-fn prune_join_for_alias(from: &mut TableRef, alias: &str, rescued: &mut Vec<Expr>) {
-    let replacement = match from {
-        TableRef::Join {
-            left, right, on, ..
-        } => {
-            if matches!(right.as_ref(), TableRef::Scan { alias: a, .. } if a == alias) {
-                let conjuncts = flatten_and(on.clone());
-                rescued.extend(conjuncts.into_iter().filter(|c| {
-                    let aliases = collect_column_aliases(c);
-                    !aliases.contains(alias)
-                }));
-                Some(*left.clone())
-            } else if matches!(left.as_ref(), TableRef::Scan { alias: a, .. } if a == alias) {
-                let conjuncts = flatten_and(on.clone());
-                rescued.extend(conjuncts.into_iter().filter(|c| {
-                    let aliases = collect_column_aliases(c);
-                    !aliases.contains(alias)
-                }));
-                Some(*right.clone())
-            } else {
-                None
-            }
-        }
-        _ => None,
-    };
-
-    if let Some(r) = replacement {
-        *from = r;
-        return;
-    }
-
-    if let TableRef::Join { left, right, .. } = from {
-        prune_join_for_alias(left, alias, rescued);
-        prune_join_for_alias(right, alias, rescued);
-    }
-}
-
-/// Rewrite `FuncCall(name, [Column(node_alias, "id")])` to use the edge column
-/// when node_alias is in the rewrite map.
-fn rewrite_agg_column(expr: &mut Expr, rewrites: &HashMap<String, (String, &str)>) {
-    if let Expr::FuncCall { args, .. } = expr {
-        for arg in args.iter_mut() {
-            if let Expr::Column { table, column } = arg
-                && column == DEFAULT_PRIMARY_KEY
-                && let Some((edge_alias, edge_col)) = rewrites.get(table.as_str())
-            {
-                *table = edge_alias.clone();
-                *column = edge_col.to_string();
-            }
-        }
+/// Collect all ON condition conjuncts from every Join in the FROM tree.
+fn collect_all_join_conditions(from: &TableRef, out: &mut Vec<Expr>) {
+    if let TableRef::Join {
+        left, right, on, ..
+    } = from
+    {
+        out.extend(flatten_and(on.clone()));
+        collect_all_join_conditions(left, out);
+        collect_all_join_conditions(right, out);
     }
 }
 
