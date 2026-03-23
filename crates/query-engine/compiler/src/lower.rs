@@ -2680,19 +2680,24 @@ mod tests {
 
     #[test]
     fn test_non_default_id_column_emits_pk_and_id() {
+        // MergeRequestDiff has redaction id_column=merge_request_id in ontology.
+        // Normalization picks this up automatically via validated_input.
         let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "n", "entity": "Note"}
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "d", "entity": "MergeRequestDiff"}
             ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
             "limit": 10
         }"#,
         );
-        // Simulate non-default redaction id_column on the "to" node
-        input.nodes[1].redaction_id_column = "noteable_id".to_string();
+
+        assert_eq!(
+            input.nodes[1].redaction_id_column, "merge_request_id",
+            "normalization should set redaction_id_column from ontology"
+        );
 
         let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
@@ -2700,38 +2705,41 @@ mod tests {
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_deref()).collect();
 
-        // Should have _gkg_n_pk (entity row ID) and _gkg_n_id (auth column)
-        assert!(aliases.contains(&"_gkg_n_pk"), "missing _gkg_n_pk");
-        assert!(aliases.contains(&"_gkg_n_id"), "missing _gkg_n_id");
-        assert!(aliases.contains(&"_gkg_n_type"), "missing _gkg_n_type");
+        // MergeRequest (default id): _gkg_mr_id only, no _gkg_mr_pk
+        assert!(aliases.contains(&"_gkg_mr_id"));
+        assert!(!aliases.contains(&"_gkg_mr_pk"));
 
-        // _gkg_n_pk should use edge column (e0.target_id)
+        // MergeRequestDiff (non-default): both _gkg_d_pk and _gkg_d_id
+        assert!(aliases.contains(&"_gkg_d_pk"), "missing _gkg_d_pk");
+        assert!(aliases.contains(&"_gkg_d_id"), "missing _gkg_d_id");
+        assert!(aliases.contains(&"_gkg_d_type"), "missing _gkg_d_type");
+
+        // _gkg_d_pk should use edge column (e0.target_id)
         let pk = q
             .select
             .iter()
-            .find(|s| s.alias.as_deref() == Some("_gkg_n_pk"))
+            .find(|s| s.alias.as_deref() == Some("_gkg_d_pk"))
             .unwrap();
         if let Expr::Column { table, column } = &pk.expr {
             assert_eq!(table, "e0");
             assert_eq!(column, "target_id");
         } else {
-            panic!("_gkg_n_pk should be edge column, got {:?}", pk.expr);
+            panic!("_gkg_d_pk should be edge column, got {:?}", pk.expr);
         }
 
-        // _gkg_n_id should use joined node table column (n.noteable_id)
+        // _gkg_d_id should use joined node table column (d.merge_request_id)
         let id = q
             .select
             .iter()
-            .find(|s| s.alias.as_deref() == Some("_gkg_n_id"))
+            .find(|s| s.alias.as_deref() == Some("_gkg_d_id"))
             .unwrap();
         if let Expr::Column { table, column } = &id.expr {
-            assert_eq!(table, "n");
-            assert_eq!(column, "noteable_id");
+            assert_eq!(table, "d");
+            assert_eq!(column, "merge_request_id");
         } else {
-            panic!("_gkg_n_id should be node column, got {:?}", id.expr);
+            panic!("_gkg_d_id should be node column, got {:?}", id.expr);
         }
 
-        // Node table should be JOINed
         fn has_scan(t: &TableRef, tbl: &str) -> bool {
             match t {
                 TableRef::Scan { table, .. } => table == tbl,
@@ -2740,7 +2748,7 @@ mod tests {
             }
         }
         assert!(
-            has_scan(&q.from, "gl_note"),
+            has_scan(&q.from, "gl_mergerequestdiff"),
             "non-default id_column should JOIN the node table"
         );
     }
@@ -2752,9 +2760,9 @@ mod tests {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User"},
-                {"id": "n", "entity": "Note"}
+                {"id": "mr", "entity": "MergeRequest"}
             ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "limit": 10
         }"#,
         );
@@ -2765,39 +2773,27 @@ mod tests {
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_deref()).collect();
 
-        // Default id_column entities should NOT have _gkg_*_pk
-        assert!(
-            !aliases.contains(&"_gkg_u_pk"),
-            "default id should not have _gkg_u_pk"
-        );
-        assert!(
-            !aliases.contains(&"_gkg_n_pk"),
-            "default id should not have _gkg_n_pk"
-        );
-        // Should have _gkg_*_id
+        // Both entities have default id_column — no _gkg_*_pk emitted
+        assert!(!aliases.contains(&"_gkg_u_pk"));
+        assert!(!aliases.contains(&"_gkg_mr_pk"));
         assert!(aliases.contains(&"_gkg_u_id"));
-        assert!(aliases.contains(&"_gkg_n_id"));
+        assert!(aliases.contains(&"_gkg_mr_id"));
     }
 
     #[test]
-    fn test_non_default_id_column_fallback_when_not_on_edge() {
+    fn test_non_default_id_column_on_source_side() {
+        // MergeRequestDiff on the FROM side — id_column still non-default
         let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "n", "entity": "Note"},
-                {"id": "p", "entity": "Project"}
+                {"id": "d", "entity": "MergeRequestDiff"},
+                {"id": "mr", "entity": "MergeRequest"}
             ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "n"},
-                {"type": "CONTAINS", "from": "p", "to": "n"}
-            ],
+            "relationships": [{"type": "HAS_DIFF", "from": "d", "to": "mr"}],
             "limit": 10
         }"#,
         );
-        // p is on a secondary edge; set non-default id_column
-        input.nodes[2].redaction_id_column = "group_id".to_string();
 
         let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
@@ -2805,8 +2801,49 @@ mod tests {
 
         let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_deref()).collect();
 
-        // p should have _gkg_p_pk and _gkg_p_id even on secondary edge
-        assert!(aliases.contains(&"_gkg_p_pk"));
-        assert!(aliases.contains(&"_gkg_p_id"));
+        // d (from side, non-default id_column): both pk and id
+        assert!(aliases.contains(&"_gkg_d_pk"));
+        assert!(aliases.contains(&"_gkg_d_id"));
+
+        // _gkg_d_pk should use source_id (d is on the from side)
+        let pk = q
+            .select
+            .iter()
+            .find(|s| s.alias.as_deref() == Some("_gkg_d_pk"))
+            .unwrap();
+        if let Expr::Column { table, column } = &pk.expr {
+            assert_eq!(table, "e0");
+            assert_eq!(column, "source_id");
+        } else {
+            panic!("_gkg_d_pk should be source_id, got {:?}", pk.expr);
+        }
+    }
+
+    #[test]
+    fn test_non_default_id_column_with_filters() {
+        // Non-default id_column entity with node_ids filter
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
+                {"id": "d", "entity": "MergeRequestDiff"}
+            ],
+            "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_deref()).collect();
+
+        // node_ids filter CTE for mr
+        assert!(q.ctes.iter().any(|c| c.name == "_nf_mr"));
+        // Non-default entity still has pk and id
+        assert!(aliases.contains(&"_gkg_d_pk"));
+        assert!(aliases.contains(&"_gkg_d_id"));
     }
 }
