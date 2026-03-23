@@ -34,11 +34,26 @@ pub struct CodeIndexingDeps {
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
-    _cache_dir: tempfile::TempDir,
+    pub cache_dir: tempfile::TempDir,
 }
 
 impl CodeIndexingDeps {
     pub fn new(mock: &MockGitlabServer, clickhouse: &TestContext) -> Self {
+        Self::with_cache_config(
+            mock,
+            clickhouse,
+            indexer::configuration::RepositoryCacheConfiguration {
+                large_repo_threshold_bytes: 0,
+                ..Default::default()
+            },
+        )
+    }
+
+    pub fn with_cache_config(
+        mock: &MockGitlabServer,
+        clickhouse: &TestContext,
+        cache_config: indexer::configuration::RepositoryCacheConfiguration,
+    ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
         let graph_client = Arc::new(clickhouse.config.build_client());
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
@@ -53,13 +68,9 @@ impl CodeIndexingDeps {
         let metrics = CodeMetrics::new();
 
         let cache_dir = tempfile::tempdir().expect("failed to create temp dir for cache");
-        let config = indexer::configuration::RepositoryCacheConfiguration {
-            large_repo_threshold_bytes: 0,
-            ..Default::default()
-        };
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
             cache_dir.path().to_path_buf(),
-            &config,
+            &cache_config,
             4,
             metrics.clone(),
         ));
@@ -79,7 +90,7 @@ impl CodeIndexingDeps {
             repository_service,
             checkpoint_store,
             metrics,
-            _cache_dir: cache_dir,
+            cache_dir,
         }
     }
 

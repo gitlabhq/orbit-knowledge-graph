@@ -203,6 +203,52 @@ async fn incremental_update_applies_changed_paths_and_blobs() {
     .await;
 }
 
+#[tokio::test]
+async fn small_repo_evicted_from_cache_after_indexing() {
+    let project_id: i64 = 4;
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void run() {} }",
+        )],
+    );
+
+    let config = indexer::configuration::RepositoryCacheConfiguration::default();
+    let deps = CodeIndexingDeps::with_cache_config(&mock, &clickhouse, config);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        "/evict-test",
+    )
+    .await;
+
+    assert_code_indexed(&clickhouse, project_id).await;
+
+    let project_dir = deps.cache_dir.path().join(project_id.to_string());
+    let branch_entries: Vec<_> = std::fs::read_dir(&project_dir)
+        .expect("project dir should be readable")
+        .collect();
+    assert!(
+        branch_entries.is_empty(),
+        "small repo cache should be evicted after indexing, found: {branch_entries:?}"
+    );
+}
+
 async fn index_code(
     handler: &CodeIndexingTaskHandler,
     clickhouse: &integration_testkit::TestContext,
