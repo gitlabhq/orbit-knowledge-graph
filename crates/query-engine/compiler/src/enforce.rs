@@ -9,9 +9,9 @@
 //! For path finding queries, the start node's ID is added to the base query and
 //! the end node's ID is added to the final query.
 
-use crate::ast::{Expr, Node, Query, SelectExpr};
+use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use std::collections::{HashMap, HashSet};
@@ -187,6 +187,8 @@ fn enforce_return_columns(
     ctx: &mut ResultContext,
 ) -> Result<()> {
     let select_len_before = q.select.len();
+    let is_traversal = input.query_type == QueryType::Traversal;
+    let node_edge_col = &input.compiler.node_edge_col;
 
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
@@ -202,54 +204,123 @@ fn enforce_return_columns(
         let id_col = redaction_node.id_column.clone();
         let type_col = redaction_node.type_column.clone();
 
-        // When the auth ID column differs from "id" (e.g. Definition uses
-        // "project_id" for authorization), emit a separate pk column so
-        // hydration can still look up the entity by its own row ID.
         let needs_separate_pk = node.redaction_id_column != DEFAULT_PRIMARY_KEY;
 
-        if needs_separate_pk {
-            let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
-            if !has_pk {
+        if is_traversal {
+            let (edge_alias, edge_col) = node_edge_col.get(&node.id).ok_or_else(|| {
+                QueryError::Enforcement(format!(
+                    "traversal node '{}' has no edge mapping in node_edge_col",
+                    node.id
+                ))
+            })?;
+            let edge_id_expr = Expr::col(edge_alias, edge_col.as_str());
+
+            if needs_separate_pk {
+                // JOIN node table for the auth column (e.g. merge_request_id).
+                let table = node.table.as_ref().ok_or_else(|| {
+                    QueryError::Enforcement(format!(
+                        "traversal node '{}' has non-default redaction_id_column '{}' but no resolved table",
+                        node.id, node.redaction_id_column
+                    ))
+                })?;
+                let join_cond = Expr::eq(
+                    Expr::col(edge_alias, edge_col.as_str()),
+                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                );
+                q.from = TableRef::join(
+                    JoinType::Inner,
+                    std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
+                    TableRef::scan(table, &node.id),
+                    join_cond,
+                );
+
+                let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
+                if !has_pk {
+                    q.select.push(SelectExpr {
+                        expr: edge_id_expr.clone(),
+                        alias: Some(pk_col),
+                    });
+                }
+
+                let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+                if !has_id {
+                    q.select.push(SelectExpr {
+                        expr: Expr::col(&node.id, &node.redaction_id_column),
+                        alias: Some(id_col.clone()),
+                    });
+                }
+            } else {
+                let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+                if !has_id {
+                    q.select.push(SelectExpr {
+                        expr: edge_id_expr,
+                        alias: Some(id_col.clone()),
+                    });
+                }
+            }
+
+            let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
+            if !has_type {
+                let insert_pos = q
+                    .select
+                    .iter()
+                    .position(|s| s.alias.as_ref() == Some(&id_col))
+                    .map(|i| i + 1)
+                    .unwrap_or(q.select.len());
+
+                q.select.insert(
+                    insert_pos,
+                    SelectExpr {
+                        expr: Expr::string(entity.as_str()),
+                        alias: Some(type_col),
+                    },
+                );
+            }
+        } else {
+            // Table-centric: search, aggregation — node tables are in FROM.
+            if needs_separate_pk {
+                let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
+                if !has_pk {
+                    q.select.push(SelectExpr {
+                        expr: Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                        alias: Some(pk_col),
+                    });
+                }
+            }
+
+            let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+            let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
+
+            if !has_id {
+                let id_expr = Expr::col(&node.id, &node.redaction_id_column);
                 q.select.push(SelectExpr {
-                    expr: Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                    alias: Some(pk_col),
+                    expr: id_expr.clone(),
+                    alias: Some(id_col.clone()),
                 });
+                if input.query_type == QueryType::Aggregation
+                    && !q.group_by.is_empty()
+                    && !q.group_by.contains(&id_expr)
+                {
+                    q.group_by.push(id_expr);
+                }
             }
-        }
 
-        let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
-        let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
+            if !has_type {
+                let insert_pos = q
+                    .select
+                    .iter()
+                    .position(|s| s.alias.as_ref() == Some(&id_col))
+                    .map(|i| i + 1)
+                    .unwrap_or(q.select.len());
 
-        if !has_id {
-            let id_expr = Expr::col(&node.id, &node.redaction_id_column);
-            q.select.push(SelectExpr {
-                expr: id_expr.clone(),
-                alias: Some(id_col.clone()),
-            });
-            // Push down id column to aggregation group by if not already present.
-            if input.query_type == QueryType::Aggregation
-                && !q.group_by.is_empty()
-                && !q.group_by.contains(&id_expr)
-            {
-                q.group_by.push(id_expr);
+                q.select.insert(
+                    insert_pos,
+                    SelectExpr {
+                        expr: Expr::string(entity.as_str()),
+                        alias: Some(type_col),
+                    },
+                );
             }
-        }
-
-        if !has_type {
-            let insert_pos = q
-                .select
-                .iter()
-                .position(|s| s.alias.as_ref() == Some(&id_col))
-                .map(|i| i + 1)
-                .unwrap_or(q.select.len());
-
-            q.select.insert(
-                insert_pos,
-                SelectExpr {
-                    expr: Expr::string(entity.as_str()),
-                    alias: Some(type_col),
-                },
-            );
         }
     }
 
@@ -277,6 +348,7 @@ mod tests {
 
     fn test_input() -> Input {
         Input {
+            query_type: QueryType::Search,
             nodes: vec![
                 InputNode {
                     id: "u".to_string(),
@@ -628,6 +700,7 @@ mod tests {
         }));
 
         let input = Input {
+            query_type: QueryType::Search,
             nodes: vec![
                 InputNode {
                     id: "d".to_string(),
@@ -756,6 +829,7 @@ mod tests {
     #[test]
     fn default_entity_does_not_emit_pk_column() {
         let input = Input {
+            query_type: QueryType::Search,
             nodes: vec![InputNode {
                 id: "p".to_string(),
                 entity: Some("Project".to_string()),
@@ -790,5 +864,306 @@ mod tests {
             "default entity (redaction_id_column == id) should not emit _gkg_p_pk"
         );
         assert_eq!(q.select.len(), 3); // p_name + _gkg_p_id + _gkg_p_type
+    }
+
+    // ─── Traversal (edge-centric) tests ──────────────────────────────
+
+    fn traversal_input_with_edge_col(
+        nodes: Vec<InputNode>,
+        node_edge_col: HashMap<String, (String, String)>,
+    ) -> Input {
+        use crate::input::CompilerMetadata;
+        Input {
+            query_type: QueryType::Traversal,
+            nodes,
+            compiler: CompilerMetadata {
+                node_edge_col,
+                ..Default::default()
+            },
+            ..Input::default()
+        }
+    }
+
+    fn edge_from() -> TableRef {
+        TableRef::scan("kg_edge", "e0")
+    }
+
+    #[test]
+    fn traversal_emits_gkg_id_from_edge_column() {
+        let node_edge_col: HashMap<String, (String, String)> = [
+            ("u".into(), ("e0".into(), "source_id".into())),
+            ("mr".into(), ("e0".into(), "target_id".into())),
+        ]
+        .into();
+
+        let input = traversal_input_with_edge_col(
+            vec![
+                InputNode {
+                    id: "u".to_string(),
+                    entity: Some("User".to_string()),
+                    table: Some("gl_user".to_string()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".to_string(),
+                    entity: Some("MergeRequest".to_string()),
+                    table: Some("gl_merge_request".to_string()),
+                    ..Default::default()
+                },
+            ],
+            node_edge_col,
+        );
+
+        let query = Query {
+            select: vec![],
+            from: edge_from(),
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let mut node = Node::Query(Box::new(query));
+        enforce_return(&mut node, &input).unwrap();
+
+        let Node::Query(q) = node else {
+            panic!("expected Query")
+        };
+
+        // u: _gkg_u_id (from e0.source_id), _gkg_u_type
+        let u_id = q
+            .select
+            .iter()
+            .find(|s| s.alias.as_deref() == Some("_gkg_u_id"))
+            .expect("missing _gkg_u_id");
+        assert!(
+            matches!(&u_id.expr, Expr::Column { table, column } if table == "e0" && column == "source_id")
+        );
+
+        // mr: _gkg_mr_id (from e0.target_id), _gkg_mr_type
+        let mr_id = q
+            .select
+            .iter()
+            .find(|s| s.alias.as_deref() == Some("_gkg_mr_id"))
+            .expect("missing _gkg_mr_id");
+        assert!(
+            matches!(&mr_id.expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
+        );
+
+        // No _pk columns for default entities
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_u_pk"))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk"))
+        );
+
+        // Type columns present
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_u_type"))
+        );
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_mr_type"))
+        );
+    }
+
+    #[test]
+    fn traversal_non_default_redaction_emits_pk_and_joins_node_table() {
+        let node_edge_col: HashMap<String, (String, String)> = [
+            ("mr".into(), ("e0".into(), "source_id".into())),
+            ("d".into(), ("e0".into(), "target_id".into())),
+        ]
+        .into();
+
+        let input = traversal_input_with_edge_col(
+            vec![
+                InputNode {
+                    id: "mr".to_string(),
+                    entity: Some("MergeRequest".to_string()),
+                    table: Some("gl_merge_request".to_string()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "d".to_string(),
+                    entity: Some("MergeRequestDiff".to_string()),
+                    table: Some("gl_mergerequestdiff".to_string()),
+                    redaction_id_column: "merge_request_id".to_string(),
+                    ..Default::default()
+                },
+            ],
+            node_edge_col,
+        );
+
+        let query = Query {
+            select: vec![],
+            from: edge_from(),
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let mut node = Node::Query(Box::new(query));
+        enforce_return(&mut node, &input).unwrap();
+
+        let Node::Query(q) = node else {
+            panic!("expected Query")
+        };
+
+        // _gkg_d_pk from edge column (e0.target_id)
+        let d_pk = q
+            .select
+            .iter()
+            .find(|s| s.alias.as_deref() == Some("_gkg_d_pk"))
+            .expect("missing _gkg_d_pk");
+        assert!(
+            matches!(&d_pk.expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
+        );
+
+        // _gkg_d_id from joined node table (d.merge_request_id)
+        let d_id = q
+            .select
+            .iter()
+            .find(|s| s.alias.as_deref() == Some("_gkg_d_id"))
+            .expect("missing _gkg_d_id");
+        assert!(
+            matches!(&d_id.expr, Expr::Column { table, column } if table == "d" && column == "merge_request_id")
+        );
+
+        // Verify node table was JOINed
+        fn has_scan(t: &TableRef, tbl: &str) -> bool {
+            match t {
+                TableRef::Scan { table, .. } => table == tbl,
+                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+                _ => false,
+            }
+        }
+        assert!(
+            has_scan(&q.from, "gl_mergerequestdiff"),
+            "non-default redaction_id_column should JOIN the node table"
+        );
+
+        // mr (default) has no pk column
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk"))
+        );
+    }
+
+    #[test]
+    fn traversal_non_default_redaction_on_source_side() {
+        let node_edge_col: HashMap<String, (String, String)> = [
+            ("d".into(), ("e0".into(), "source_id".into())),
+            ("mr".into(), ("e0".into(), "target_id".into())),
+        ]
+        .into();
+
+        let input = traversal_input_with_edge_col(
+            vec![
+                InputNode {
+                    id: "d".to_string(),
+                    entity: Some("MergeRequestDiff".to_string()),
+                    table: Some("gl_mergerequestdiff".to_string()),
+                    redaction_id_column: "merge_request_id".to_string(),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".to_string(),
+                    entity: Some("MergeRequest".to_string()),
+                    table: Some("gl_merge_request".to_string()),
+                    ..Default::default()
+                },
+            ],
+            node_edge_col,
+        );
+
+        let query = Query {
+            select: vec![],
+            from: edge_from(),
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let mut node = Node::Query(Box::new(query));
+        enforce_return(&mut node, &input).unwrap();
+
+        let Node::Query(q) = node else {
+            panic!("expected Query")
+        };
+
+        // _gkg_d_pk should use source_id (d is on the from side)
+        let d_pk = q
+            .select
+            .iter()
+            .find(|s| s.alias.as_deref() == Some("_gkg_d_pk"))
+            .expect("missing _gkg_d_pk");
+        assert!(
+            matches!(&d_pk.expr, Expr::Column { table, column } if table == "e0" && column == "source_id"),
+            "_gkg_d_pk should be e0.source_id, got {:?}",
+            d_pk.expr
+        );
+    }
+
+    #[test]
+    fn traversal_node_without_edge_mapping_returns_error() {
+        let input = traversal_input_with_edge_col(
+            vec![InputNode {
+                id: "x".to_string(),
+                entity: Some("User".to_string()),
+                table: Some("gl_user".to_string()),
+                ..Default::default()
+            }],
+            HashMap::new(),
+        );
+
+        let query = Query {
+            select: vec![],
+            from: edge_from(),
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let mut node = Node::Query(Box::new(query));
+        let err = enforce_return(&mut node, &input).unwrap_err();
+        assert!(
+            err.to_string().contains("no edge mapping"),
+            "expected edge mapping error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn traversal_non_default_redaction_without_table_returns_error() {
+        let node_edge_col: HashMap<String, (String, String)> =
+            [("d".into(), ("e0".into(), "target_id".into()))].into();
+
+        let input = traversal_input_with_edge_col(
+            vec![InputNode {
+                id: "d".to_string(),
+                entity: Some("MergeRequestDiff".to_string()),
+                table: None, // no resolved table
+                redaction_id_column: "merge_request_id".to_string(),
+                ..Default::default()
+            }],
+            node_edge_col,
+        );
+
+        let query = Query {
+            select: vec![],
+            from: edge_from(),
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let mut node = Node::Query(Box::new(query));
+        let err = enforce_return(&mut node, &input).unwrap_err();
+        assert!(
+            err.to_string().contains("no resolved table"),
+            "expected missing table error, got: {err}"
+        );
     }
 }

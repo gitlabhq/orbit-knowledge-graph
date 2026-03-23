@@ -33,6 +33,9 @@ pub enum QueryError {
     #[error("lowering error: {0}")]
     Lowering(String),
 
+    #[error("enforce error: {0}")]
+    Enforcement(String),
+
     #[error("codegen error: {0}")]
     Codegen(String),
 
