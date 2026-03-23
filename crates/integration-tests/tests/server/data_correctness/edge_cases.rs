@@ -399,3 +399,61 @@ pub(super) async fn non_default_redaction_id_entity_traversal(ctx: &TestContext)
     resp.assert_node_ids("MergeRequestDiff", &[5000, 5001]);
     resp.assert_edge_set("HAS_DIFF", &[(2000, 5000), (2000, 5001)]);
 }
+
+pub(super) async fn non_default_redaction_id_denies_unauthorized(ctx: &TestContext) {
+    // Redaction for MergeRequestDiff checks merge_request_id against
+    // the merge_request resource type. Only allow MR 2001 — diffs
+    // 5000/5001 have merge_request_id=2000 (denied), diff 5002 has
+    // merge_request_id=2001 (allowed).
+    let mut svc = MockRedactionService::new();
+    svc.allow("merge_request", &[2001]);
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]},
+                {"id": "d", "entity": "MergeRequestDiff"}
+            ],
+            "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
+            "limit": 20
+        }"#,
+        &svc,
+    )
+    .await;
+
+    // MR 2000 is denied, MR 2001 is allowed. Diff 5002 (MR 2001) is allowed.
+    resp.assert_node_ids("MergeRequest", &[2001]);
+    resp.assert_node_ids("MergeRequestDiff", &[5002]);
+    resp.assert_edge_set("HAS_DIFF", &[(2001, 5002)]);
+    resp.assert_node_count(2);
+    resp.assert_node_absent("MergeRequest", 2000);
+    resp.assert_node_absent("MergeRequestDiff", 5000);
+    resp.assert_node_absent("MergeRequestDiff", 5001);
+}
+
+pub(super) async fn non_default_redaction_id_with_multiple_mrs(ctx: &TestContext) {
+    // Allow both MR 2000 and 2001. All diffs should be authorized
+    // via their merge_request_id.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]},
+                {"id": "d", "entity": "MergeRequestDiff"}
+            ],
+            "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    resp.assert_referential_integrity();
+    resp.assert_node_ids("MergeRequest", &[2000, 2001]);
+    resp.assert_node_ids("MergeRequestDiff", &[5000, 5001, 5002]);
+    resp.assert_edge_set("HAS_DIFF", &[(2000, 5000), (2000, 5001), (2001, 5002)]);
+}

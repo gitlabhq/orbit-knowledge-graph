@@ -2677,4 +2677,136 @@ mod tests {
             panic!("expected column expression");
         }
     }
+
+    #[test]
+    fn test_non_default_id_column_emits_pk_and_id() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 10
+        }"#,
+        );
+        // Simulate non-default redaction id_column on the "to" node
+        input.nodes[1].redaction_id_column = "noteable_id".to_string();
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_deref()).collect();
+
+        // Should have _gkg_n_pk (entity row ID) and _gkg_n_id (auth column)
+        assert!(aliases.contains(&"_gkg_n_pk"), "missing _gkg_n_pk");
+        assert!(aliases.contains(&"_gkg_n_id"), "missing _gkg_n_id");
+        assert!(aliases.contains(&"_gkg_n_type"), "missing _gkg_n_type");
+
+        // _gkg_n_pk should use edge column (e0.target_id)
+        let pk = q
+            .select
+            .iter()
+            .find(|s| s.alias.as_deref() == Some("_gkg_n_pk"))
+            .unwrap();
+        if let Expr::Column { table, column } = &pk.expr {
+            assert_eq!(table, "e0");
+            assert_eq!(column, "target_id");
+        } else {
+            panic!("_gkg_n_pk should be edge column, got {:?}", pk.expr);
+        }
+
+        // _gkg_n_id should use joined node table column (n.noteable_id)
+        let id = q
+            .select
+            .iter()
+            .find(|s| s.alias.as_deref() == Some("_gkg_n_id"))
+            .unwrap();
+        if let Expr::Column { table, column } = &id.expr {
+            assert_eq!(table, "n");
+            assert_eq!(column, "noteable_id");
+        } else {
+            panic!("_gkg_n_id should be node column, got {:?}", id.expr);
+        }
+
+        // Node table should be JOINed
+        fn has_scan(t: &TableRef, tbl: &str) -> bool {
+            match t {
+                TableRef::Scan { table, .. } => table == tbl,
+                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+                _ => false,
+            }
+        }
+        assert!(
+            has_scan(&q.from, "gl_note"),
+            "non-default id_column should JOIN the node table"
+        );
+    }
+
+    #[test]
+    fn test_default_id_column_no_pk_column() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_deref()).collect();
+
+        // Default id_column entities should NOT have _gkg_*_pk
+        assert!(
+            !aliases.contains(&"_gkg_u_pk"),
+            "default id should not have _gkg_u_pk"
+        );
+        assert!(
+            !aliases.contains(&"_gkg_n_pk"),
+            "default id should not have _gkg_n_pk"
+        );
+        // Should have _gkg_*_id
+        assert!(aliases.contains(&"_gkg_u_id"));
+        assert!(aliases.contains(&"_gkg_n_id"));
+    }
+
+    #[test]
+    fn test_non_default_id_column_fallback_when_not_on_edge() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "n"},
+                {"type": "CONTAINS", "from": "p", "to": "n"}
+            ],
+            "limit": 10
+        }"#,
+        );
+        // p is on a secondary edge; set non-default id_column
+        input.nodes[2].redaction_id_column = "group_id".to_string();
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_deref()).collect();
+
+        // p should have _gkg_p_pk and _gkg_p_id even on secondary edge
+        assert!(aliases.contains(&"_gkg_p_pk"));
+        assert!(aliases.contains(&"_gkg_p_id"));
+    }
 }
