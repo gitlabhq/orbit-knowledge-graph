@@ -364,3 +364,78 @@ pub(super) async fn traversal_shared_target_fan_in(ctx: &TestContext) {
     resp.assert_node_ids("Note", &[3000, 3002, 3003]);
     resp.assert_edge_set("HAS_NOTE", &[(2000, 3000), (2000, 3002), (2000, 3003)]);
 }
+
+pub(super) async fn traversal_order_by_node_property(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "order_by": {"node": "mr", "property": "title", "direction": "ASC"},
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(7);
+    resp.assert_referential_integrity();
+    resp.assert_node_order("MergeRequest", &[2000, 2001, 2002, 2003]);
+    resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+}
+
+pub(super) async fn traversal_order_by_source_node_property(ctx: &TestContext) {
+    // order_by on the source (from) node's non-id property
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(9);
+    resp.assert_referential_integrity();
+    resp.assert_edge_count("MEMBER_OF", 9);
+    // Usernames alphabetically: alice, bob, charlie, diana, eve, 用户...
+    resp.assert_node_order("User", &[1, 2, 3, 4, 5, 6]);
+}
+
+pub(super) async fn traversal_order_by_with_node_ids_filter(ctx: &TestContext) {
+    // order_by combined with node_ids filter
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "order_by": {"node": "mr", "property": "title", "direction": "DESC"},
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    resp.assert_referential_integrity();
+    // Only users 1 and 2 — alice authored MRs 2000,2001; bob authored MR 2002
+    resp.assert_node_ids("User", &[1, 2]);
+    // Titles DESC: Refactor C, Fix bug B, Add feature A
+    resp.assert_node_order("MergeRequest", &[2002, 2001, 2000]);
+    resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001), (2, 2002)]);
+}
