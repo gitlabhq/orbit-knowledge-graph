@@ -213,7 +213,16 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
    mise install
    ```
 
-2. **Configure secrets:**
+2. **Sync vendored Helm charts:**
+
+   ```shell
+   helm/sync.sh
+   ```
+
+   This fetches the official GKG chart via vendir and applies local patches.
+   Requires `vendir` and `yq` (installed by `mise install`).
+
+3. **Configure secrets:**
 
    ```shell
    cp .tilt-secrets.example .tilt-secrets
@@ -226,7 +235,7 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
    The JWT secret is read automatically from `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret`
    (generated in prerequisite 8).
 
-3. **Start local environment:**
+4. **Start local environment:**
 
    ```shell
    tilt up
