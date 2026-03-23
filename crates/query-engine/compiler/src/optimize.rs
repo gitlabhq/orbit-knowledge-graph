@@ -23,10 +23,16 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
-use crate::constants::SKIP_SECURITY_FILTER_TABLES;
+use crate::constants::{
+    BACKWARD_CTE, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS, SKIP_SECURITY_FILTER_TABLES,
+    cascade_cte, node_filter_cte,
+};
 use crate::input::{Input, InputNode, QueryType};
 use crate::security::SecurityContext;
-use ontology::constants::{DEFAULT_PRIMARY_KEY, EDGE_TABLE, TRAVERSAL_PATH_COLUMN};
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
+    SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
+};
 
 const ROOT_SIP_CTE: &str = "_root_ids";
 
@@ -122,10 +128,10 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
         };
         let (id_col, kind_col) = if *node_id == rel.from {
             let (start, _) = rel.direction.edge_columns();
-            (start, "source_kind")
+            (start, SOURCE_KIND_COLUMN)
         } else {
             let (_, end) = rel.direction.edge_columns();
-            (end, "target_kind")
+            (end, TARGET_KIND_COLUMN)
         };
         rewrites.insert(node_id.clone(), (edge_alias.clone(), id_col));
         kind_filters.push(Expr::eq(
@@ -454,7 +460,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
                 &rel.types,
             )
         {
-            let name = format!("_cascade_{}", rel.to);
+            let name = cascade_cte(&rel.to);
             q.ctes.push(Cte::new(&name, cte));
             node_ctes.insert(rel.to.clone(), name);
         }
@@ -469,7 +475,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
                 &rel.types,
             )
         {
-            let name = format!("_cascade_{}", rel.from);
+            let name = cascade_cte(&rel.from);
             q.ctes.push(Cte::new(&name, cte));
             node_ctes.insert(rel.from.clone(), name);
         }
@@ -509,7 +515,7 @@ fn build_cascade_for_node(
     let node = input.nodes.iter().find(|n| n.id == node_alias)?;
     node.table.as_deref()?;
 
-    let alias = "_ce";
+    let alias = CASCADE_EDGE_ALIAS;
     let parent_filter = Expr::InSubquery {
         expr: Box::new(Expr::col(alias, filter_col)),
         cte_name: parent_cte.to_string(),
@@ -517,13 +523,13 @@ fn build_cascade_for_node(
     };
     let rel_filter = if rel_types.len() == 1 {
         Expr::eq(
-            Expr::col(alias, "relationship_kind"),
+            Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
             Expr::param(ChType::String, rel_types[0].clone()),
         )
     } else {
         Expr::col_in(
             alias,
-            "relationship_kind",
+            RELATIONSHIP_KIND_COLUMN,
             ChType::String,
             rel_types
                 .iter()
@@ -535,10 +541,10 @@ fn build_cascade_for_node(
 
     // Filter by entity kind on the selected side (source_kind / target_kind)
     // so the cascade only picks up IDs of the correct type.
-    let kind_col = if select_col == "source_id" {
-        "source_kind"
+    let kind_col = if select_col == SOURCE_ID_COLUMN {
+        SOURCE_KIND_COLUMN
     } else {
-        "target_kind"
+        TARGET_KIND_COLUMN
     };
     let kind_filter = node.entity.as_ref().map(|entity| {
         Expr::eq(
@@ -743,7 +749,7 @@ fn inject_sip_first_edge(
 }
 
 fn is_edge_table(table: &str) -> bool {
-    table == "gl_edge" || table.starts_with("gl_edge")
+    table == EDGE_TABLE || table.starts_with(EDGE_TABLE)
 }
 
 fn make_sip_filter(alias: &str, edge_col: &str, cte_name: &str) -> Expr {
@@ -985,25 +991,23 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 };
 
             // Source CTE: either _nf_{source} or _cascade_{source} from a previous pass
-            let source_cte = if q.ctes.iter().any(|c| c.name == format!("_nf_{source_id}")) {
-                format!("_nf_{source_id}")
-            } else if q
-                .ctes
-                .iter()
-                .any(|c| c.name == format!("_cascade_{source_id}"))
-            {
-                format!("_cascade_{source_id}")
+            let nf_name = node_filter_cte(source_id);
+            let cascade_source = cascade_cte(source_id);
+            let source_cte = if q.ctes.iter().any(|c| c.name == nf_name) {
+                nf_name
+            } else if q.ctes.iter().any(|c| c.name == cascade_source) {
+                cascade_source
             } else {
                 continue;
             };
 
-            let cascade_name = format!("_cascade_{target_id}");
+            let cascade_name = cascade_cte(target_id);
             if q.ctes.iter().any(|c| c.name == cascade_name) {
                 continue; // already cascaded
             }
 
             let target = input.nodes.iter().find(|n| n.id == *target_id);
-            let alias = "_ce";
+            let alias = CASCADE_EDGE_ALIAS;
 
             let edge_filter = Expr::InSubquery {
                 expr: Box::new(Expr::col(alias, edge_filter_col)),
@@ -1012,13 +1016,13 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
             };
             let rel_filter = if rel.types.len() == 1 {
                 Expr::eq(
-                    Expr::col(alias, "relationship_kind"),
+                    Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
                     Expr::param(ChType::String, rel.types[0].clone()),
                 )
             } else {
                 Expr::col_in(
                     alias,
-                    "relationship_kind",
+                    RELATIONSHIP_KIND_COLUMN,
                     ChType::String,
                     rel.types
                         .iter()
@@ -1028,10 +1032,10 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 .unwrap_or_else(|| Expr::param(ChType::Bool, true))
             };
             let kind_filter = target.and_then(|n| n.entity.as_ref()).map(|entity| {
-                let kind_col = if edge_select_col == "source_id" {
-                    "source_kind"
+                let kind_col = if edge_select_col == SOURCE_ID_COLUMN {
+                    SOURCE_KIND_COLUMN
                 } else {
-                    "target_kind"
+                    TARGET_KIND_COLUMN
                 };
                 Expr::eq(
                     Expr::col(alias, kind_col),
@@ -1052,7 +1056,7 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 },
             ));
 
-            let target_nf = format!("_nf_{target_id}");
+            let target_nf = node_filter_cte(target_id);
             if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_nf) {
                 let filter = Expr::InSubquery {
                     expr: Box::new(Expr::col(target_id.as_str(), DEFAULT_PRIMARY_KEY)),
@@ -1094,9 +1098,23 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
 
     // Build hop frontier CTEs and inject SIP into frontier arms.
     let mut new_ctes = Vec::new();
-    inject_hop_frontiers(q, "forward", start_ids, forward_depth, true, &mut new_ctes);
+    inject_hop_frontiers(
+        q,
+        FORWARD_CTE,
+        start_ids,
+        forward_depth,
+        true,
+        &mut new_ctes,
+    );
     if backward_depth > 0 {
-        inject_hop_frontiers(q, "backward", end_ids, backward_depth, false, &mut new_ctes);
+        inject_hop_frontiers(
+            q,
+            BACKWARD_CTE,
+            end_ids,
+            backward_depth,
+            false,
+            &mut new_ctes,
+        );
     }
 
     // Prepend hop CTEs before the forward/backward CTEs so they're available.
@@ -1115,8 +1133,16 @@ fn inject_hop_frontiers(
     new_ctes: &mut Vec<Cte>,
 ) {
     let prefix = if is_forward { "_fwd_hop" } else { "_bwd_hop" };
-    let anchor_col = if is_forward { "source_id" } else { "target_id" };
-    let next_col = if is_forward { "target_id" } else { "source_id" };
+    let anchor_col = if is_forward {
+        SOURCE_ID_COLUMN
+    } else {
+        TARGET_ID_COLUMN
+    };
+    let next_col = if is_forward {
+        TARGET_ID_COLUMN
+    } else {
+        SOURCE_ID_COLUMN
+    };
 
     // Build hop frontier CTEs: _fwd_hop1 chains from anchor IDs,
     // _fwd_hop2 chains from _fwd_hop1, etc.
@@ -1127,7 +1153,7 @@ fn inject_hop_frontiers(
         } else {
             Some(format!("{prefix}{}", hop - 1))
         };
-        let alias = "_he";
+        let alias = HOP_EDGE_ALIAS;
 
         let anchor_filter = if let Some(parent) = parent {
             Some(Expr::InSubquery {
