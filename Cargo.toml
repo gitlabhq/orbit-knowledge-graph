@@ -110,6 +110,7 @@ indicatif = "0.18"
 
 
 regex = "1.12.2"
+sqlparser = { version = "0.61.0", features = ["visitor"] }
 hex = "0.4.3"
 hmac = "0.12.1"
 hyper-util = { version = "0.1", features = ["client", "tokio"] }

@@ -99,7 +99,7 @@ INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, interna
     (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '2024-01-15 10:30:00', '1/100/1000/'),
     (3001, 'Confidential feedback on bug B', 'MergeRequest', 2001, true, false, '2024-02-20 14:45:00', '1/100/1000/'),
     (3002, repeat('x', 10000), 'MergeRequest', 2000, false, false, NULL, '1/100/1000/'),
-    (3003, 'Robert'' DROP TABLE gl_note --', 'MergeRequest', 2000, false, false, NULL, '1/100/1000/');
+    (3003, 'Robert''); DROP TABLE gl_note;--', 'MergeRequest', 2000, false, false, NULL, '1/100/1000/');
 
 INSERT INTO gl_merge_request_diff (id, merge_request_id, state, traversal_path) VALUES
     (5000, 2000, 'collected', '1/100/1000/'),
