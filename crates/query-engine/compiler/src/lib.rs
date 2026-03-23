@@ -43,6 +43,7 @@ pub mod lower;
 pub mod metrics;
 pub mod normalize;
 pub mod optimize;
+pub mod pipeline;
 pub mod security;
 pub mod validate;
 
@@ -68,6 +69,11 @@ pub use normalize::{build_entity_auth, normalize};
 pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
 pub use optimize::optimize;
+pub use pipeline::{
+    CheckPass, CodegenPass, CompilerContext, CompilerObserver, CompilerPass, CompilerRunner,
+    EnforcePass, HydrationCodegenPass, LowerPass, MetricsObserver, OptimizePass, SecurityPass,
+    compile_clickhouse, compile_hydration,
+};
 pub use security::{SecurityContext, apply_security_context};
 pub use validate::Validator;
 
@@ -78,7 +84,7 @@ use metrics::CountErr;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Validate and normalize a JSON query string into a typed `Input`.
-fn validated_input(json_input: &str, ontology: &Ontology) -> Result<Input> {
+pub(crate) fn validated_input(json_input: &str, ontology: &Ontology) -> Result<Input> {
     let v = Validator::new(ontology);
     let value = v.check_json(json_input).count_err()?;
     v.check_ontology(&value).count_err()?;

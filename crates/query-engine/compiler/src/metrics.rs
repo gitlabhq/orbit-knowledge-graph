@@ -109,7 +109,7 @@ impl Default for QueryEngineMetrics {
 }
 
 /// Maps a [`QueryError`] variant to its counter and a low-cardinality reason label.
-fn counter_info(err: &QueryError) -> (&Counter<u64>, &'static str) {
+pub(crate) fn counter_info(err: &QueryError) -> (&Counter<u64>, &'static str) {
     match err {
         QueryError::Parse(_) => (&METRICS.validation_failed, "parse"),
         QueryError::Validation(_) => (&METRICS.validation_failed, "schema"),
