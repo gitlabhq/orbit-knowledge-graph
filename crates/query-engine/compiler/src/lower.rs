@@ -2430,4 +2430,141 @@ mod tests {
             panic!("expected column expression in order_by");
         }
     }
+
+    #[test]
+    fn test_order_by_target_node_property_joins_target_table() {
+        // order_by on the "to" (target) side node
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        fn has_scan(t: &TableRef, tbl: &str) -> bool {
+            match t {
+                TableRef::Scan { table, .. } => table == tbl,
+                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+                _ => false,
+            }
+        }
+        // source-side node should get its table joined for username
+        assert!(has_scan(&q.from, "gl_user"));
+        assert!(!q.order_by[0].desc);
+        if let Expr::Column { table, column } = &q.order_by[0].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "username");
+        } else {
+            panic!("expected column expression");
+        }
+    }
+
+    #[test]
+    fn test_order_by_id_on_target_side_uses_edge_column() {
+        // order_by id on the "to" side — should use target_id edge column
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "order_by": {"node": "n", "property": "id", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        if let Expr::Column { table, column } = &q.order_by[0].expr {
+            assert_eq!(table, "e0");
+            assert_eq!(column, "target_id");
+        } else {
+            panic!("expected column expression");
+        }
+    }
+
+    #[test]
+    fn test_order_by_with_filters_and_node_ids() {
+        // order_by combined with filters and node_ids — both the
+        // node filter CTE and the order_by JOIN should be present
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "order_by": {"node": "n", "property": "created_at", "direction": "DESC"},
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        fn has_scan(t: &TableRef, tbl: &str) -> bool {
+            match t {
+                TableRef::Scan { table, .. } => table == tbl,
+                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+                _ => false,
+            }
+        }
+        // gl_note joined for order_by
+        assert!(has_scan(&q.from, "gl_note"));
+        // node_ids filter CTE present
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_u"),
+            "node_ids filter CTE should exist"
+        );
+        // WHERE should have the IN subquery
+        assert!(q.where_clause.is_some());
+    }
+
+    #[test]
+    fn test_order_by_multi_hop_still_works() {
+        // Multi-hop uses UNION ALL; order_by should still work
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],
+            "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        fn has_scan(t: &TableRef, tbl: &str) -> bool {
+            match t {
+                TableRef::Scan { table, .. } => table == tbl,
+                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+                _ => false,
+            }
+        }
+        // Multi-hop gets user table joined for ordering
+        assert!(has_scan(&q.from, "gl_user"));
+        assert_eq!(q.order_by.len(), 1);
+    }
 }

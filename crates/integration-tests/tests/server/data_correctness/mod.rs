@@ -52,6 +52,8 @@ async fn data_correctness() {
         traversal::traversal_deduplicates_shared_nodes,
         traversal::traversal_shared_target_fan_in,
         traversal::traversal_order_by_node_property,
+        traversal::traversal_order_by_source_node_property,
+        traversal::traversal_order_by_with_node_ids_filter,
         // aggregation
         aggregation::aggregation_count_returns_correct_values,
         aggregation::aggregation_count_group_contains_projects,
