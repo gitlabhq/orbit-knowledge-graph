@@ -51,9 +51,8 @@ fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
 
 /// Lower validated input into an AST node.
 ///
-/// Note: Ontology-dependent transformations (wildcard expansion, enum coercion)
-/// are handled in normalize.rs. Lowering is purely mechanical.
-pub fn lower(input: &Input) -> Result<Node> {
+/// Writes metadata to `input.compiler` for downstream passes.
+pub fn lower(input: &mut Input) -> Result<Node> {
     match input.query_type {
         QueryType::Search => lower_search(input),
         QueryType::Traversal => lower_traversal(input),
@@ -356,19 +355,16 @@ fn build_node_where(node: &InputNode) -> Option<Expr> {
     Expr::and_all(parts.into_iter().map(Some))
 }
 
-fn lower_aggregation(input: &Input) -> Result<Node> {
+fn lower_aggregation(input: &mut Input) -> Result<Node> {
     let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
     let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
 
-    // Collect unique group_by node IDs
     let group_by_node_ids: HashSet<_> = input
         .aggregations
         .iter()
         .filter_map(|agg| agg.group_by.clone())
         .collect();
 
-    // Build SELECT and GROUP BY columns for group_by nodes
-    // Note: Wildcards are expanded to List by normalize, so we only handle None/List
     let mut select = Vec::new();
     let mut group_by = Vec::new();
 
@@ -385,7 +381,6 @@ fn lower_aggregation(input: &Input) -> Result<Node> {
         }
     }
 
-    // Add aggregation expressions
     for agg in &input.aggregations {
         select.push(SelectExpr::new(
             agg_expr(agg),
@@ -400,8 +395,9 @@ fn lower_aggregation(input: &Input) -> Result<Node> {
         .as_ref()
         .filter(|s| s.agg_index < input.aggregations.len())
         .map_or(vec![], |s| {
+            let agg = &input.aggregations[s.agg_index];
             vec![OrderExpr {
-                expr: agg_expr(&input.aggregations[s.agg_index]),
+                expr: agg_expr(agg),
                 desc: s.direction == OrderDirection::Desc,
             }]
         });
@@ -1398,7 +1394,7 @@ mod tests {
 
     #[test]
     fn test_lower_simple_traversal() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1410,7 +1406,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         assert_eq!(q.limit, Some(25));
@@ -1425,7 +1421,7 @@ mod tests {
 
     #[test]
     fn test_lower_aggregation() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User", "columns": ["username"]}],
@@ -1435,7 +1431,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         assert!(!q.group_by.is_empty());
@@ -1448,7 +1444,7 @@ mod tests {
 
     #[test]
     fn test_lower_aggregation_with_columns() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1461,7 +1457,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1483,7 +1479,7 @@ mod tests {
 
     #[test]
     fn test_lower_aggregation_with_wildcard_columns() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1496,7 +1492,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1516,7 +1512,7 @@ mod tests {
 
     #[test]
     fn test_lower_path_finding() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -1527,7 +1523,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1541,7 +1537,7 @@ mod tests {
 
     #[test]
     fn test_lower_with_filters() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "search",
             "node": {
@@ -1556,7 +1552,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1565,7 +1561,7 @@ mod tests {
 
     #[test]
     fn test_lower_multi_relationship() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1581,7 +1577,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1627,7 +1623,7 @@ mod tests {
 
     #[test]
     fn test_lower_variable_length_path() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1645,7 +1641,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1706,7 +1702,7 @@ mod tests {
 
     #[test]
     fn test_lower_variable_length_with_min_hops() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1724,7 +1720,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1735,7 +1731,7 @@ mod tests {
 
     #[test]
     fn test_lower_mixed_single_and_multi_hop() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1751,7 +1747,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1770,7 +1766,7 @@ mod tests {
 
     #[test]
     fn test_lower_single_hop_no_union() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1788,7 +1784,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1802,7 +1798,7 @@ mod tests {
 
     #[test]
     fn test_lower_search() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "search",
             "node": {
@@ -1817,7 +1813,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         println!("{:?}", q);
@@ -1836,7 +1832,7 @@ mod tests {
 
     #[test]
     fn test_lower_search_simple() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "search",
             "node": {
@@ -1847,7 +1843,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1862,7 +1858,7 @@ mod tests {
 
     #[test]
     fn test_lower_with_specific_columns() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "search",
             "node": {
@@ -1874,7 +1870,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1887,7 +1883,7 @@ mod tests {
 
     #[test]
     fn test_lower_with_wildcard_columns() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "search",
             "node": {
@@ -1899,7 +1895,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1914,7 +1910,7 @@ mod tests {
 
     #[test]
     fn test_lower_traversal_with_columns() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1926,7 +1922,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1939,7 +1935,7 @@ mod tests {
 
     #[test]
     fn test_lower_no_columns_uses_defaults() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "search",
             "node": {
@@ -1950,7 +1946,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -1968,7 +1964,7 @@ mod tests {
 
     #[test]
     fn test_lower_columns_with_id_in_list() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "search",
             "node": {
@@ -1980,7 +1976,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -2009,7 +2005,7 @@ mod tests {
 
     #[test]
     fn test_path_finding_cte_structure() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -2020,7 +2016,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -2054,7 +2050,7 @@ mod tests {
     fn test_neighbors_includes_edge_columns() {
         use crate::input::{Direction, InputNeighbors};
 
-        let input = Input {
+        let mut input = Input {
             query_type: QueryType::Neighbors,
             nodes: vec![InputNode {
                 id: "u".to_string(),
@@ -2072,7 +2068,7 @@ mod tests {
             ..Input::default()
         };
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -2094,7 +2090,7 @@ mod tests {
     fn test_lower_neighbors_both_direction() {
         use crate::input::{Direction, InputNeighbors};
 
-        let input = Input {
+        let mut input = Input {
             query_type: QueryType::Neighbors,
             nodes: vec![InputNode {
                 id: "g".to_string(),
@@ -2112,7 +2108,7 @@ mod tests {
             ..Input::default()
         };
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -2126,7 +2122,7 @@ mod tests {
 
     #[test]
     fn test_multi_relationship_has_multiple_edge_columns() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -2142,7 +2138,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
 
@@ -2172,10 +2168,10 @@ mod tests {
 
         // Edge-centric puts the type filter in WHERE, not JOIN ON.
         // Single type — WHERE should contain relationship_kind = 'AUTHORED'
-        let q = validated_input(
+        let mut inp = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
         );
-        let Node::Query(q) = lower(&q).unwrap() else {
+        let Node::Query(q) = lower(&mut inp).unwrap() else {
             panic!()
         };
         assert!(
@@ -2184,10 +2180,10 @@ mod tests {
         );
 
         // Multiple types — should use IN
-        let q = validated_input(
+        let mut inp = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":["AUTHORED","CONTAINS"],"from":"u","to":"n"}]}"#,
         );
-        let Node::Query(q) = lower(&q).unwrap() else {
+        let Node::Query(q) = lower(&mut inp).unwrap() else {
             panic!()
         };
         assert!(
@@ -2196,10 +2192,10 @@ mod tests {
         );
 
         // Wildcard — no type filter
-        let q = validated_input(
+        let mut inp = validated_input(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"*","from":"u","to":"n"}]}"#,
         );
-        let Node::Query(q) = lower(&q).unwrap() else {
+        let Node::Query(q) = lower(&mut inp).unwrap() else {
             panic!()
         };
         assert!(
@@ -2238,7 +2234,7 @@ mod tests {
 
     #[test]
     fn no_starts_with_in_single_hop_join() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -2250,7 +2246,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         assert!(
@@ -2261,7 +2257,7 @@ mod tests {
 
     #[test]
     fn no_starts_with_in_multi_hop_join() {
-        let input = validated_input(
+        let mut input = validated_input(
             r#"{
             "query_type": "traversal",
             "nodes": [
@@ -2279,7 +2275,7 @@ mod tests {
         }"#,
         );
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         assert!(
@@ -2292,7 +2288,7 @@ mod tests {
     fn no_starts_with_in_neighbors_join() {
         use crate::input::{Direction, InputNeighbors};
 
-        let input = Input {
+        let mut input = Input {
             query_type: QueryType::Neighbors,
             nodes: vec![InputNode {
                 id: "g".to_string(),
@@ -2310,7 +2306,7 @@ mod tests {
             ..Input::default()
         };
 
-        let Node::Query(q) = lower(&input).unwrap() else {
+        let Node::Query(q) = lower(&mut input).unwrap() else {
             panic!("expected Query");
         };
         assert!(

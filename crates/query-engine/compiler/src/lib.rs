@@ -103,9 +103,9 @@ pub fn compile(
 
 /// Compile from a pre-built `Input`. Used for internal query types (Hydration)
 /// that bypass JSON schema validation.
-pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
-    let mut node = lower(&input).count_err()?;
-    optimize(&mut node, &input, ctx);
+pub fn compile_input(mut input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
+    let mut node = lower(&mut input).count_err()?;
+    optimize(&mut node, &mut input, ctx);
     let result_context = enforce_return(&mut node, &input)?;
     if input.query_type != QueryType::Hydration {
         apply_security_context(&mut node, ctx).count_err()?;
@@ -169,8 +169,8 @@ mod tests {
         v.check_ontology(&value)?;
         let input: Input = serde_json::from_value(value)?;
         v.check_references(&input)?;
-        let input = normalize::normalize(input, ontology)?;
-        let node = lower::lower(&input)?;
+        let mut input = normalize::normalize(input, ontology)?;
+        let node = lower::lower(&mut input)?;
         Ok(node)
     }
 

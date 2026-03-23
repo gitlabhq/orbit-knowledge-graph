@@ -5,7 +5,7 @@
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Top-level input
@@ -75,6 +75,19 @@ pub struct Input {
     /// so dynamic nodes (path/neighbors) can be resolved without re-consulting the ontology.
     #[serde(skip)]
     pub entity_auth: HashMap<String, EntityAuthConfig>,
+    /// Metadata accumulated across compiler passes (lowering, optimize, etc.).
+    #[serde(skip)]
+    pub compiler: CompilerMetadata,
+}
+
+/// Metadata accumulated across compiler passes.
+///
+/// Written by lowering and optimize, read by downstream passes (SIP, security, etc.).
+#[derive(Debug, Clone, Default)]
+pub struct CompilerMetadata {
+    /// Node IDs whose tables were eliminated from the FROM clause
+    /// (e.g. edge-only aggregation). SIP/cascade should skip these.
+    pub skipped_node_joins: HashSet<String>,
 }
 
 impl Default for Input {
@@ -93,6 +106,7 @@ impl Default for Input {
             aggregation_sort: None,
             options: QueryOptions::default(),
             entity_auth: HashMap::new(),
+            compiler: CompilerMetadata::default(),
         }
     }
 }
