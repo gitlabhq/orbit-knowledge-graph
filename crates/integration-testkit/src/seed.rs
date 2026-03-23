@@ -12,43 +12,39 @@ pub async fn load_seed(ctx: &TestContext, name: &str) {
     }
 }
 
-/// Split SQL text into individual statements on `;` boundaries,
-/// ignoring semicolons inside single-quoted string literals.
-/// ClickHouse escapes quotes by doubling: `''`.
-/// Leading `-- ...` comment lines are stripped before parsing.
+/// Split SQL into statements on `;`, skipping quoted strings.
+/// Comments (`-- ...`) are stripped first, then the comment-free SQL
+/// is split on unquoted `;` boundaries.
 fn split_statements(sql: &str) -> Vec<String> {
-    let comment_re = Regex::new(r"(?m)^--.*$").unwrap();
-    let stripped = comment_re.replace_all(sql, "");
+    // Pass 1: strip `-- ...` comments while preserving quoted strings.
+    let strip_re = Regex::new(r"(?s)'(?:''|[^'])*'|--[^\n]*").unwrap();
+    let stripped = strip_re.replace_all(sql, |caps: &regex::Captures| {
+        let m = caps.get(0).unwrap().as_str();
+        if m.starts_with('\'') {
+            m.to_string()
+        } else {
+            String::new()
+        }
+    });
 
+    // Pass 2: split on unquoted `;`.
+    let split_re = Regex::new(r"(?s)'(?:''|[^'])*'|;").unwrap();
     let mut statements = Vec::new();
-    let mut current = String::new();
-    let mut in_quote = false;
-    let mut chars = stripped.chars().peekable();
+    let mut last = 0;
 
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\'' => {
-                current.push(ch);
-                if in_quote && chars.peek() == Some(&'\'') {
-                    current.push(chars.next().unwrap());
-                } else {
-                    in_quote = !in_quote;
-                }
+    for m in split_re.find_iter(&stripped) {
+        if m.as_str() == ";" {
+            let chunk = stripped[last..m.start()].trim();
+            if !chunk.is_empty() {
+                statements.push(chunk.to_string());
             }
-            ';' if !in_quote => {
-                let trimmed = current.trim().to_string();
-                if !trimmed.is_empty() {
-                    statements.push(trimmed);
-                }
-                current.clear();
-            }
-            _ => current.push(ch),
+            last = m.end();
         }
     }
 
-    let trimmed = current.trim().to_string();
-    if !trimmed.is_empty() {
-        statements.push(trimmed);
+    let tail = stripped[last..].trim();
+    if !tail.is_empty() {
+        statements.push(tail.to_string());
     }
 
     statements
