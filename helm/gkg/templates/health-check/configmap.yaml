@@ -1,0 +1,34 @@
+{{- if .Values.healthCheck.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gkg.fullname" . }}-health-check-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "health-check") | nindent 4 }}
+data:
+  default.yaml: |
+    health_check:
+      bind_address: "0.0.0.0:{{ .Values.healthCheck.port }}"
+      namespace: {{ .Release.Namespace | quote }}
+      services:
+        {{- range .Values.healthCheck.services }}
+        - {{ . | quote }}
+        {{- end }}
+    datalake:
+      {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.datalake) | nindent 6 }}
+    graph:
+      {{- include "gkg.clickhouseConfig" (dict "config" (mustMergeOverwrite (dict) .Values.clickhouse.graph (dict "user" .Values.clickhouse.graph.readUser))) | nindent 6 }}
+    nats:
+      url: {{ .Values.nats.url | quote }}
+    metrics:
+      log_level: {{ .Values.healthCheck.logLevel | quote }}
+      otel:
+        enabled: {{ .Values.metrics.otel.enabled }}
+        {{- if .Values.metrics.otel.enabled }}
+        endpoint: {{ .Values.metrics.otel.endpoint | quote }}
+        {{- end }}
+      prometheus:
+        enabled: {{ .Values.metrics.prometheus.enabled }}
+        port: {{ .Values.metrics.prometheus.port }}
+{{- end }}

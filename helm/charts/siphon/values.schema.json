@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Siphon Helm Chart Values",
+  "description": "Schema for the siphon Helm chart values. Validates the Helm-specific structure; appConfig content is validated post-render against the siphon JSON Schemas.",
+  "type": "object",
+  "properties": {
+    "namespace": {
+      "type": "string",
+      "description": "Kubernetes namespace for all resources."
+    },
+    "monitoring_namespace": {
+      "type": "string",
+      "description": "Namespace where PodMonitor resources are created."
+    },
+    "prometheus_release": {
+      "type": "string",
+      "description": "Prometheus release label for PodMonitor discovery."
+    },
+    "image": {
+      "$ref": "#/$defs/image",
+      "description": "Global image defaults. Per-deployment image settings override these."
+    },
+    "replicas": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Global default replica count."
+    },
+    "reloader": {
+      "type": "boolean",
+      "description": "Global default for Stakater Reloader annotation."
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Global labels merged with per-deployment labels."
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics",
+      "description": "Global metrics (Prometheus) defaults."
+    },
+    "resources": {
+      "$ref": "#/$defs/resources",
+      "description": "Global resource requests/limits defaults."
+    },
+    "podSpec": {
+      "type": "object",
+      "description": "Global podSpec defaults (tolerations, nodeSelector, affinity, etc.)."
+    },
+    "podTargetLabels": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Labels propagated from pods to PodMonitor targets."
+    },
+    "deploymentProfiles": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/deployment"
+      },
+      "description": "Named bundles of deployment defaults inherited via `profile:`."
+    },
+    "appConfigDefaults": {
+      "type": "object",
+      "description": "Shared defaults for appConfig. Only sections also defined in a deployment's appConfig are merged."
+    },
+    "deployments": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/deployment"
+      },
+      "description": "Map of deployment name to deployment configuration."
+    }
+  },
+  "required": ["deployments"],
+  "additionalProperties": false,
+  "$defs": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": { "type": "string" },
+        "tag": { "type": ["string", "null"] },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "port": { "type": "integer" },
+        "path": { "type": "string" },
+        "interval": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": {},
+            "memory": {}
+          },
+          "additionalProperties": false
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": {},
+            "memory": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "envVar": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["name", "value"],
+      "additionalProperties": false
+    },
+    "envFromSecret": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "secretName": { "type": "string", "minLength": 1 },
+        "secretKey": { "type": "string" }
+      },
+      "required": ["name", "secretName", "secretKey"],
+      "additionalProperties": false
+    },
+    "envFromSecretTemplate": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "secretName": { "type": "string", "minLength": 1 },
+        "secretKey": { "type": "string" }
+      },
+      "required": ["name", "secretKey"],
+      "additionalProperties": false
+    },
+    "deployment": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this deployment is rendered."
+        },
+        "profile": {
+          "type": "string",
+          "description": "Name of a deploymentProfile to inherit defaults from."
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reloader": {
+          "type": "boolean",
+          "description": "Enable Stakater Reloader annotations for this deployment."
+        },
+        "podmonitor": {
+          "type": "boolean",
+          "description": "Create a PodMonitor resource for this deployment."
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "image": {
+          "$ref": "#/$defs/image"
+        },
+        "command": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "env": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/envVar" }
+        },
+        "envFromSecrets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/envFromSecret" }
+        },
+        "envFromSecretsTemplate": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/envFromSecretTemplate" },
+          "description": "Template for envFromSecrets. Combined with envFromSecretsName to generate envFromSecrets entries."
+        },
+        "envFromSecretsName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Secret name injected into each envFromSecretsTemplate entry."
+        },
+        "metrics": {
+          "$ref": "#/$defs/metrics"
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "podSpec": {
+          "type": "object",
+          "description": "Pod-level spec overrides (tolerations, nodeSelector, affinity, etc.)."
+        },
+        "natsClientCertsSecretName": {
+          "type": "string",
+          "description": "Secret name for NATS client TLS certificates."
+        },
+        "volumes": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "volumeMounts": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["producer", "consumer", "combined"],
+          "description": "Controls config wrapping: producer wraps in producers:[...], consumer wraps in consumers:[{type:...}], combined passes appConfig through as-is."
+        },
+        "consumerType": {
+          "type": "string",
+          "enum": ["clickhouse", "demo", "gcs_parquet"],
+          "description": "Consumer type injected as 'type' field in consumer config items. Only used when mode is consumer."
+        },
+        "appConfig": {
+          "type": "object",
+          "description": "Application config merged with appConfigDefaults and rendered into the ConfigMap."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

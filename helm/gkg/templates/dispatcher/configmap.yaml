@@ -1,0 +1,30 @@
+{{- if .Values.dispatcher.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gkg.fullname" . }}-dispatcher-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "dispatcher") | nindent 4 }}
+data:
+  default.yaml: |
+    nats:
+      url: {{ .Values.nats.url | quote }}
+    datalake:
+      {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.datalake) | nindent 6 }}
+    graph:
+      {{- include "gkg.clickhouseConfig" (dict "config" (mustMergeOverwrite (dict) .Values.clickhouse.graph (dict "user" .Values.clickhouse.graph.readUser))) | nindent 6 }}
+    schedule:
+      tasks:
+        {{- include "gkg.scheduleConfig" . | nindent 8 }}
+    metrics:
+      log_level: {{ .Values.dispatcher.logLevel | quote }}
+      otel:
+        enabled: {{ .Values.metrics.otel.enabled }}
+        {{- if .Values.metrics.otel.enabled }}
+        endpoint: {{ .Values.metrics.otel.endpoint | quote }}
+        {{- end }}
+      prometheus:
+        enabled: {{ .Values.metrics.prometheus.enabled }}
+        port: {{ .Values.metrics.prometheus.port }}
+{{- end }}

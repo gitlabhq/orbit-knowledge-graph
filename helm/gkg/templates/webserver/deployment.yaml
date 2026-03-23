@@ -1,0 +1,84 @@
+{{- if .Values.webserver.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gkg.fullname" . }}-webserver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "webserver") | nindent 4 }}
+spec:
+  replicas: {{ .Values.webserver.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "webserver") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "webserver") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/webserver/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "gkg.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "gkg.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: gkg-webserver
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--mode=webserver"
+          ports:
+            - name: http
+              containerPort: {{ .Values.webserver.service.httpPort }}
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.webserver.service.grpcPort }}
+              protocol: TCP
+            {{- if .Values.metrics.prometheus.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.prometheus.port }}
+              protocol: TCP
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            {{- include "gkg.secretVolumeMount" . | nindent 12 }}
+          {{- if .Values.webserver.probes.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          {{- end }}
+          securityContext:
+            {{- include "gkg.securityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.webserver.resources | nindent 12 }}
+      {{- with .Values.webserver.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webserver.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webserver.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "gkg.fullname" . }}-webserver-config
+        {{- include "gkg.secretVolume" (dict "root" . "keys" (list "gitlabJwtVerifyingKey" "gitlabJwtSigningKey" "graphReadPassword")) | nindent 8 }}
+{{- end }}

@@ -1,0 +1,657 @@
+{
+  "type": "object",
+  "properties": {
+    "producers": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer"
+              },
+              "user": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              },
+              "database": {
+                "type": "string"
+              },
+              "advisory_lock_id": {
+                "type": "integer"
+              },
+              "advisory_lock_timeout_ms": {
+                "type": "integer"
+              },
+              "advisory_lock_timeout_fuzziness_ms": {
+                "type": "integer"
+              },
+              "lock_timeout_ms": {
+                "type": "integer"
+              },
+              "lock_timeout_fuzziness_ms": {
+                "type": "integer"
+              },
+              "application_name": {
+                "type": "string"
+              },
+              "disallow_hot_standby_feedback_on": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "host",
+              "database",
+              "advisory_lock_id",
+              "advisory_lock_timeout_ms",
+              "advisory_lock_timeout_fuzziness_ms",
+              "lock_timeout_ms",
+              "lock_timeout_fuzziness_ms",
+              "application_name"
+            ],
+            "additionalProperties": false
+          },
+          "snapshot_database": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer"
+              },
+              "user": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              },
+              "database": {
+                "type": "string"
+              },
+              "advisory_lock_id": {
+                "type": "integer"
+              },
+              "advisory_lock_timeout_ms": {
+                "type": "integer"
+              },
+              "advisory_lock_timeout_fuzziness_ms": {
+                "type": "integer"
+              },
+              "lock_timeout_ms": {
+                "type": "integer"
+              },
+              "lock_timeout_fuzziness_ms": {
+                "type": "integer"
+              },
+              "application_name": {
+                "type": "string"
+              },
+              "disallow_hot_standby_feedback_on": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "host",
+              "database",
+              "advisory_lock_id",
+              "advisory_lock_timeout_ms",
+              "advisory_lock_timeout_fuzziness_ms",
+              "lock_timeout_ms",
+              "lock_timeout_fuzziness_ms",
+              "application_name"
+            ],
+            "additionalProperties": false
+          },
+          "primary_database": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer"
+              },
+              "user": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              },
+              "database": {
+                "type": "string"
+              },
+              "advisory_lock_id": {
+                "type": "integer"
+              },
+              "advisory_lock_timeout_ms": {
+                "type": "integer"
+              },
+              "advisory_lock_timeout_fuzziness_ms": {
+                "type": "integer"
+              },
+              "lock_timeout_ms": {
+                "type": "integer"
+              },
+              "lock_timeout_fuzziness_ms": {
+                "type": "integer"
+              },
+              "application_name": {
+                "type": "string"
+              },
+              "disallow_hot_standby_feedback_on": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "host",
+              "database",
+              "advisory_lock_id",
+              "advisory_lock_timeout_ms",
+              "advisory_lock_timeout_fuzziness_ms",
+              "lock_timeout_ms",
+              "lock_timeout_fuzziness_ms",
+              "application_name"
+            ],
+            "additionalProperties": false
+          },
+          "queueing": {
+            "type": "object",
+            "properties": {
+              "driver": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "tls_config": {
+                "type": "object",
+                "properties": {
+                  "ca_cert_path": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "username": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              },
+              "stream_name": {
+                "type": "string"
+              },
+              "temp_stream_name": {
+                "type": "string"
+              },
+              "snapshot_stream_name": {
+                "type": "string"
+              },
+              "lsn_store_name": {
+                "type": "string"
+              },
+              "snapshot_subject_name": {
+                "type": "string"
+              },
+              "lowest_ack_purge_enabled": {
+                "type": "boolean"
+              },
+              "lowest_ack_purge_schedule_seconds": {
+                "type": "integer"
+              },
+              "oversize_bucket_name": {
+                "type": "string"
+              },
+              "oversize_limit_bytes": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "driver"
+            ],
+            "additionalProperties": false
+          },
+          "replication": {
+            "type": "object",
+            "properties": {
+              "publication_name": {
+                "type": "string"
+              },
+              "slot_name": {
+                "type": "string"
+              },
+              "initial_data_snapshot_threads_per_table": {
+                "type": "integer"
+              },
+              "standby_timeout_ms": {
+                "type": "integer"
+              },
+              "memory_buffer_size_in_bytes": {
+                "type": "integer"
+              },
+              "failover": {
+                "type": "boolean"
+              },
+              "use_alter_publication_function": {
+                "type": "boolean"
+              },
+              "snapshot_memory_buffer_size_bytes": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "publication_name",
+              "slot_name"
+            ],
+            "additionalProperties": false
+          },
+          "table_mapping": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string"
+                },
+                "schema": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "initial_data_snapshot_threads_per_table": {
+                  "type": "integer"
+                },
+                "snapshot_memory_buffer_size_bytes": {
+                  "type": "integer"
+                },
+                "column_transformations": {
+                  "type": [
+                    "null",
+                    "array"
+                  ],
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "column_name": {
+                        "type": "string"
+                      },
+                      "transformation_type": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "row_filters": {
+                  "type": [
+                    "null",
+                    "array"
+                  ],
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "column_name": {
+                        "type": "string"
+                      },
+                      "values_query": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "column_name",
+                      "values_query"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "table",
+                "schema",
+                "subject"
+              ]
+            }
+          },
+          "application_identifier": {
+            "type": "string"
+          },
+          "max_column_size_in_bytes": {
+            "type": "integer"
+          },
+          "partitions_monitoring_interval_in_seconds": {
+            "type": "integer"
+          },
+          "prometheus": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "properties": {
+              "port": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "port"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "database",
+          "queueing",
+          "replication",
+          "application_identifier",
+          "max_column_size_in_bytes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "consumers": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "queueing": {
+            "type": "object",
+            "properties": {
+              "driver": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "tls_config": {
+                "type": "object",
+                "properties": {
+                  "ca_cert_path": {
+                    "type": [
+                      "null",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "username": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              },
+              "stream_name": {
+                "type": "string"
+              },
+              "temp_stream_name": {
+                "type": "string"
+              },
+              "snapshot_stream_name": {
+                "type": "string"
+              },
+              "lsn_store_name": {
+                "type": "string"
+              },
+              "snapshot_subject_name": {
+                "type": "string"
+              },
+              "lowest_ack_purge_enabled": {
+                "type": "boolean"
+              },
+              "lowest_ack_purge_schedule_seconds": {
+                "type": "integer"
+              },
+              "oversize_bucket_name": {
+                "type": "string"
+              },
+              "oversize_limit_bytes": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "driver"
+            ],
+            "additionalProperties": false
+          },
+          "streams": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "identifier": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "enable_refresh_package": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "identifier",
+                "subject",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "application_identifier": {
+            "type": "string"
+          },
+          "clickhouse": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "database": {
+                "type": "string"
+              },
+              "username": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              },
+              "max_open_conns": {
+                "type": "integer"
+              },
+              "max_idle_conns": {
+                "type": "integer"
+              },
+              "ssl": {
+                "type": "boolean"
+              },
+              "insert_batch_size": {
+                "type": "integer"
+              },
+              "refresh_on_change": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "source_stream_identifier": {
+                      "type": "string"
+                    },
+                    "source_keys": {
+                      "type": [
+                        "null",
+                        "array"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "target_keys": {
+                      "type": [
+                        "null",
+                        "array"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "target_stream_identifier": {
+                      "type": "string"
+                    },
+                    "filters": {
+                      "type": [
+                        "null",
+                        "array"
+                      ],
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "column": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "column",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "source_stream_identifier",
+                    "source_keys",
+                    "target_keys",
+                    "target_stream_identifier"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "dedup_config": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "stream_identifier": {
+                      "type": "string"
+                    },
+                    "dedup_by": {
+                      "type": [
+                        "null",
+                        "array"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "dedup_by_table": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "stream_identifier"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "host",
+              "port",
+              "database"
+            ],
+            "additionalProperties": false
+          },
+          "prometheus": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "properties": {
+              "port": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "port"
+            ],
+            "additionalProperties": false
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "queueing",
+          "streams",
+          "application_identifier",
+          "clickhouse",
+          "type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "prometheus": {
+      "type": [
+        "null",
+        "object"
+      ],
+      "properties": {
+        "port": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

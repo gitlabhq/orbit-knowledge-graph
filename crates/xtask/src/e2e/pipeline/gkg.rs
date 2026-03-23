@@ -1,7 +1,7 @@
 //! GKG stack: ClickHouse, schema, siphon, dispatch-indexing, E2E tests.
 //!
 //! Deploys ClickHouse, applies schemas, builds and deploys the GKG Helm
-//! chart (NATS + siphon + GKG services), waits for data to flow, runs
+//! chart (NATS + siphon subcharts + GKG services), waits for data to flow, runs
 //! dispatch-indexing, verifies graph tables, and runs the redaction/
 //! permission E2E test suite.
 //!
@@ -274,15 +274,9 @@ fn deploy_gkg_chart(sh: &Shell, cfg: &Config) -> Result<()> {
     let timeout = &cfg.timeouts.gkg_chart;
     let docker_host = cfg.docker_host();
 
-    helm::dependency_build(sh, &chart_str, &docker_host);
-
-    let pg_host = format!(
-        "{}.{}.svc.cluster.local",
-        cfg.postgres.service_name, cfg.namespaces.gitlab
-    );
-
     helm::uninstall(sh, release, default_ns, &docker_host);
 
+    let secret_name = &cfg.gkg.server_credentials_secret;
     helm::install_with_sets(
         sh,
         release,
@@ -290,26 +284,17 @@ fn deploy_gkg_chart(sh: &Shell, cfg: &Config) -> Result<()> {
         default_ns,
         &values_str,
         &[
-            ("postgres.host", &pg_host),
-            ("postgres.port", &cfg.postgres.port),
-            ("postgres.database", &cfg.postgres.database),
-            ("postgres.user", &cfg.postgres.user),
             ("clickhouse.datalake.host", &cfg.clickhouse.service_name),
-            ("clickhouse.datalake.port", &cfg.clickhouse.http_port),
-            (
-                "clickhouse.datalake.nativePort",
-                &cfg.clickhouse.native_port,
-            ),
+            ("clickhouse.datalake.httpPort", &cfg.clickhouse.http_port),
             ("clickhouse.datalake.database", &cfg.clickhouse.datalake_db),
             ("clickhouse.datalake.user", &cfg.clickhouse.default_user),
             ("clickhouse.graph.host", &cfg.clickhouse.service_name),
-            ("clickhouse.graph.port", &cfg.clickhouse.http_port),
+            ("clickhouse.graph.httpPort", &cfg.clickhouse.http_port),
             ("clickhouse.graph.database", &cfg.clickhouse.graph_db),
             ("clickhouse.graph.user", &cfg.clickhouse.default_user),
-            ("gkgServer.image.repository", &cfg.gkg.server_image),
-            ("gkgServer.image.tag", &cfg.gkg.dev_tag),
-            ("producer.publicationName", &cfg.siphon.publication),
-            ("producer.slotName", &cfg.siphon.slot),
+            ("image.repository", &cfg.gkg.server_image),
+            ("image.tag", &cfg.gkg.dev_tag),
+            ("secrets.existingSecret", secret_name),
         ],
         "",
         timeout,
@@ -363,7 +348,7 @@ async fn wait_for_siphon_data(cfg: &Config) -> Result<()> {
         if start.elapsed() >= timeout {
             bail!(
                 "Timed out after {}s. Still empty: {}. \
-                 Check siphon pod logs: kubectl logs -l app.kubernetes.io/component=siphon-producer",
+                 Check siphon pod logs: kubectl logs -l app=siphon-producer",
                 timeout.as_secs(),
                 pending.join(", ")
             );

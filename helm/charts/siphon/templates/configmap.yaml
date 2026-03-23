@@ -1,0 +1,18 @@
+{{- include "siphon.prepareDeployments" $ -}}
+{{- range $name, $deployment := .Values.deployments }}
+{{- if $deployment.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "siphon.labels" (dict "name" $name "context" $) | nindent 4 }}
+data:
+  config.yaml: |
+{{- $mergedYaml := include "siphon.mergedAppConfig" (dict "defaults" ($.Values.appConfigDefaults | default dict) "override" $deployment.appConfig) -}}
+{{- $merged := fromYaml $mergedYaml -}}
+{{- include "siphon.wrapConfig" (dict "merged" $merged "deployment" $deployment) | nindent 4 }}
+{{- end }}
+{{- end }}

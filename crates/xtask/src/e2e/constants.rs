@@ -70,8 +70,8 @@ pub const E2E_TESTS_DIR: &str = concat!(env!("E2E_DIR"), "/tests");
 // -- Paths (derived from .cargo/config.toml env vars) -------------------------
 
 pub const GRAPH_SQL_PATH: &str = concat!(env!("CONFIG_DIR"), "/graph.sql");
-pub const GKG_CHART_PATH: &str = concat!(env!("HELM_DEV_DIR"), "/gkg");
-pub const HELM_VALUES_YAML: &str = concat!(env!("E2E_DIR"), "/helm-values.yaml");
+pub const GKG_CHART_PATH: &str = concat!(env!("HELM_DIR"), "/gkg");
+pub const HELM_VALUES_YAML: &str = concat!(env!("HELM_DIR"), "/values/gkg-e2e.yaml");
 pub const BUILD_DEV_SCRIPT: &str = concat!(env!("SCRIPTS_DIR"), "/build-dev.sh");
 pub const DISPATCH_JOB_TEMPLATE: &str = concat!(
     env!("E2E_DIR"),
@@ -115,14 +115,8 @@ pub const GKG_TEARDOWN_LOG_FILES: &[&str] =
 
 // -- GKG Helm chart deployments (rollout restart targets) ---------------------
 
-/// Deployment names created by the GKG Helm chart in helm-dev/gkg/templates/.
-pub const GKG_DEPLOYMENTS: &[&str] = &[
-    "gkg-indexer",
-    "gkg-webserver",
-    "gkg-health-check",
-    "siphon-producer",
-    "siphon-consumer",
-];
+/// Deployment names created by the GKG Helm chart.
+pub const GKG_DEPLOYMENTS: &[&str] = &["gkg-indexer", "gkg-webserver", "gkg-health-check"];
 
 /// Datalake tables dumped for diagnostics after indexing.
 pub const DATALAKE_DIAGNOSTIC_TABLES: &[&str] = &[

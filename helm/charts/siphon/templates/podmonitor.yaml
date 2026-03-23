@@ -1,0 +1,29 @@
+{{- include "siphon.prepareDeployments" $ -}}
+{{- range $name, $deployment := .Values.deployments }}
+{{- if and $deployment.enabled $deployment.podmonitor }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $name }}-podmonitor
+  namespace: {{ $.Values.monitoring_namespace | default $.Values.namespace }}
+  labels:
+    {{- include "siphon.labels" (dict "name" $name "context" $) | nindent 4 }}
+spec:
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+      - {{ $.Values.namespace | quote }}
+  selector:
+    matchLabels:
+      {{- include "siphon.selectorLabels" (dict "name" $name) | nindent 6 }}
+  podMetricsEndpoints:
+    - port: "http-metrics"
+      interval: {{ ($deployment.metrics).interval | default "30s" }}
+      path: {{ ($deployment.metrics).path | default "/metrics" }}
+  {{- with $.Values.podTargetLabels }}
+  podTargetLabels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

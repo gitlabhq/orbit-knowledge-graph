@@ -1,0 +1,40 @@
+{{- if .Values.indexer.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gkg.fullname" . }}-indexer-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "indexer") | nindent 4 }}
+data:
+  default.yaml: |
+    nats:
+      url: {{ .Values.nats.url | quote }}
+      consumer_name: {{ .Values.nats.consumerName | quote }}
+    datalake:
+      {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.datalake) | nindent 6 }}
+    graph:
+      {{- include "gkg.clickhouseConfig" (dict "config" .Values.clickhouse.graph) | nindent 6 }}
+    gitlab:
+      base_url: {{ .Values.gitlab.baseUrl | quote }}
+      {{- if .Values.gitlab.resolveHost }}
+      resolve_host: {{ .Values.gitlab.resolveHost | quote }}
+      {{- end }}
+    metrics:
+      log_level: {{ .Values.indexer.logLevel | quote }}
+      otel:
+        enabled: {{ .Values.metrics.otel.enabled }}
+        {{- if .Values.metrics.otel.enabled }}
+        endpoint: {{ .Values.metrics.otel.endpoint | quote }}
+        {{- end }}
+      prometheus:
+        enabled: {{ .Values.metrics.prometheus.enabled }}
+        port: {{ .Values.metrics.prometheus.port }}
+    {{- if .Values.engine }}
+    engine:
+      {{- toYaml .Values.engine | nindent 6 }}
+    {{- end }}
+    schedule:
+      tasks:
+        {{- include "gkg.scheduleConfig" . | nindent 8 }}
+{{- end }}

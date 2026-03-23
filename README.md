@@ -140,9 +140,8 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 
 | Chart | Repository | Purpose |
 |---|---|---|
-| GKG (official) | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Production Helm chart for GKG (v1.0.0, application type). Uses [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks) patterns. |
-| GKG (dev) | [`helm-dev/gkg/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/helm-dev/gkg) | Development/sandbox chart. Deploys full stack: GKG server (4 modes) + Siphon producer/consumer + NATS subchart + GitLab Runner. Values files for local, sandbox. |
-| Observability (dev) | [`helm-dev/observability/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/helm-dev/observability) | kube-prometheus-stack + Loki + Alloy + Grafana dashboards (ETL engine, GKG overview, NATS JetStream) |
+| GKG (official) | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Production Helm chart for GKG. Vendored into `helm/gkg/` via [vendir](https://carvel.dev/vendir/) with local patches for siphon/NATS. |
+| Local observability | [`helm/local/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/helm/local) | Standalone Prometheus + Grafana manifests for local dev. Prometheus scrapes GKG pods via kubernetes SD. |
 | Siphon (standalone) | [`siphon/helm/siphon/`](https://gitlab.com/gitlab-org/analytics-section/siphon/-/tree/main/helm/siphon) | Minimal standalone chart (v0.0.1). Superseded by the GKG dev chart for GKG deployments. |
 | Siphon (production) | [siphon-helm-charts](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts) | v1.0.1, deployed via [gitlab-helmfiles](https://ops.gitlab.net/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles) on ops.gitlab.net |
 
@@ -268,7 +267,7 @@ Jerome Ng (@jeromezng, usage billing system architect).
 
 | Component | Status |
 |---|---|
-| Grafana dashboards (dev) | Deployed via [`helm-dev/observability/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/helm-dev/observability) (ETL engine, GKG overview, NATS JetStream) |
+| Grafana dashboards (dev) | Deployed via [`helm/local/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/helm/local) (ETL engine, GKG overview) |
 | Production Grafana dashboards | TODO |
 | Alerting rules | TODO |
 | SLIs / SLOs | TODO -- to be defined as part of [PREP](https://gitlab.com/gitlab-org/architecture/readiness/-/merge_requests/64) |

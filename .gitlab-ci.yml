@@ -241,7 +241,7 @@ tilt-ci:
         - .tilt-secrets.example
         - Dockerfile
         - scripts/build-dev.sh
-        - helm-dev/**/*
+        - helm/**/*
         - .gitlab-ci.yml
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
   tags:
@@ -280,12 +280,6 @@ tilt-ci:
               - "docker"
       EOF
     - sed -i -E 's#https://0\.0\.0\.0:#https://docker:#' ~/.kube/config
-    - helm repo add gitlab https://charts.gitlab.io
-    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    - helm repo add grafana https://grafana.github.io/helm-charts
-    - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    - helm dependency build helm-dev/gkg
-    - helm dependency build helm-dev/observability
     # Create dummy secrets for CI (not real credentials)
     - |
       cat <<EOF > .tilt-secrets
@@ -376,12 +370,6 @@ docker-build-mr:
     - apt-get update && apt-get install -y curl
     - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
     - helm version
-    - helm repo add gitlab https://charts.gitlab.io
-    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    - helm repo add grafana https://grafana.github.io/helm-charts
-    - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    - helm dependency update helm-dev/gkg
-    - helm dependency update helm-dev/observability
 
 helm-lint:
   extends:
@@ -390,10 +378,8 @@ helm-lint:
   stage: lint
   needs: []
   script:
-    - helm lint helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-    - helm lint helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
-    - helm template gkg helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-    - helm template gkg-obs helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
+    - helm lint helm/gkg
+    - helm template gkg helm/gkg
 
 build-proto-gem:
   needs: []

@@ -164,12 +164,11 @@ pub async fn ch_row_counts<'a>(
 // K8s secrets (shared across cngsetup + gkg)
 // =============================================================================
 
-/// Create the three K8s secrets that the GKG Helm chart expects.
+/// Create the K8s secrets that the GKG Helm chart expects.
 ///
-/// Reads the JWT secret from the toolbox pod and the PG password from the
-/// GitLab secret, then creates `postgres-credentials`,
-/// `clickhouse-credentials`, and `gkg-server-credentials` in the default
-/// namespace using idempotent apply.
+/// Reads the JWT secret from the toolbox pod, then creates a single
+/// `gkg-secrets` secret with all keys matching the official chart's
+/// `secrets.keys.*` structure.
 pub async fn create_k8s_secrets(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     let jwt_path = &cfg.pod_paths.jwt_secret_path;
     let jwt_raw = toolbox_exec(cfg, toolbox_pod, &["cat", jwt_path])
@@ -182,43 +181,23 @@ pub async fn create_k8s_secrets(cfg: &Config, toolbox_pod: &str) -> Result<()> {
     // it back to the original value that Rails signs with.
     let jwt_secret = STANDARD.encode(jwt_raw.trim());
 
-    let pg_pass = kube::read_secret(
-        &cfg.namespaces.gitlab,
-        &cfg.postgres.secret_name,
-        &cfg.postgres.password_key,
+    let default_ns = &cfg.namespaces.default;
+    let secret_name = &cfg.gkg.server_credentials_secret;
+
+    kube::apply_secret_multi(
+        default_ns,
+        secret_name,
+        &[
+            ("gitlab-jwt-verifying-key", &jwt_secret),
+            ("gitlab-jwt-signing-key", &jwt_secret),
+            ("datalake-password", ""),
+            ("graph-password", ""),
+            ("graph-read-password", ""),
+        ],
     )
     .await?;
 
-    let default_ns = &cfg.namespaces.default;
-
-    let secrets: Vec<(&str, &str, &str)> = vec![
-        (
-            &cfg.postgres.bridge_secret_name,
-            &cfg.postgres.bridge_password_key,
-            pg_pass.as_str(),
-        ),
-        (
-            &cfg.clickhouse.credentials_secret,
-            &cfg.clickhouse.credentials_key,
-            "",
-        ),
-        (
-            &cfg.gkg.server_credentials_secret,
-            &cfg.gkg.server_credentials_jwt_key,
-            jwt_secret.as_str(),
-        ),
-    ];
-
-    let futs: Vec<_> = secrets
-        .iter()
-        .map(|(name, key, value)| kube::apply_secret(default_ns, name, key, value))
-        .collect();
-    futures::future::try_join_all(futs).await?;
-
-    for (name, _, _) in &secrets {
-        ui::detail_item(name)?;
-    }
-
+    ui::detail_item(secret_name)?;
     Ok(())
 }
 

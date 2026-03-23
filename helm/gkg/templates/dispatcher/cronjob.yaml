@@ -1,0 +1,61 @@
+{{- if .Values.dispatcher.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "gkg.fullname" . }}-dispatcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "dispatcher") | nindent 4 }}
+spec:
+  schedule: {{ .Values.dispatcher.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "dispatcher") | nindent 12 }}
+          annotations:
+            checksum/config: {{ include (print $.Template.BasePath "/dispatcher/configmap.yaml") . | sha256sum }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "gkg.serviceAccountName" . }}
+          automountServiceAccountToken: false
+          securityContext:
+            {{- include "gkg.podSecurityContext" . | nindent 12 }}
+          containers:
+            - name: gkg-dispatcher
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args:
+                - "--mode=dispatch-indexing"
+              volumeMounts:
+                - name: config
+                  mountPath: /app/config
+                  readOnly: true
+                {{- include "gkg.secretVolumeMount" . | nindent 16 }}
+              securityContext:
+                {{- include "gkg.securityContext" . | nindent 16 }}
+              resources:
+                {{- toYaml .Values.dispatcher.resources | nindent 16 }}
+          {{- with .Values.dispatcher.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.dispatcher.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.dispatcher.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumes:
+            - name: config
+              configMap:
+                name: {{ include "gkg.fullname" . }}-dispatcher-config
+            {{- include "gkg.secretVolume" (dict "root" . "keys" (list "datalakePassword" "graphReadPassword")) | nindent 12 }}
+{{- end }}

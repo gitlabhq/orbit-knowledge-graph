@@ -27,15 +27,11 @@ pre-commit:
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
     - name: helm-lint
-      glob: "helm-dev/**"
+      glob: "helm/**"
       group:
         parallel: true
         jobs:
           - name: helm-lint-gkg
-            run: helm lint helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-          - name: helm-lint-observability
-            run: helm lint helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
+            run: helm lint helm/gkg
           - name: helm-template-gkg
-            run: helm template gkg helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-          - name: helm-template-observability
-            run: helm template gkg-obs helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
+            run: helm template gkg helm/gkg

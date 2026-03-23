@@ -1,0 +1,28 @@
+{{- if .Values.webserver.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gkg.fullname" . }}-webserver-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "webserver") | nindent 4 }}
+data:
+  default.yaml: |
+    bind_address: "0.0.0.0:{{ .Values.webserver.service.httpPort }}"
+    grpc_bind_address: "0.0.0.0:{{ .Values.webserver.service.grpcPort }}"
+    {{- if .Values.healthCheck.enabled }}
+    health_check_url: "http://{{ include "gkg.fullname" . }}-health-check:{{ .Values.healthCheck.port }}"
+    {{- end }}
+    graph:
+      {{- include "gkg.clickhouseConfig" (dict "config" (mustMergeOverwrite (dict) .Values.clickhouse.graph (dict "user" .Values.clickhouse.graph.readUser))) | nindent 6 }}
+    metrics:
+      log_level: {{ .Values.webserver.logLevel | quote }}
+      otel:
+        enabled: {{ .Values.metrics.otel.enabled }}
+        {{- if .Values.metrics.otel.enabled }}
+        endpoint: {{ .Values.metrics.otel.endpoint | quote }}
+        {{- end }}
+      prometheus:
+        enabled: {{ .Values.metrics.prometheus.enabled }}
+        port: {{ .Values.metrics.prometheus.port }}
+{{- end }}

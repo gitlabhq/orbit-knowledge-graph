@@ -1,0 +1,16 @@
+{{- if and .Values.webserver.enabled .Values.metrics.prometheus.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "gkg.fullname" . }}-webserver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gkg.componentLabels" (dict "root" . "component" "webserver") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "gkg.componentSelectorLabels" (dict "root" . "component" "webserver") | nindent 6 }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+{{- end }}

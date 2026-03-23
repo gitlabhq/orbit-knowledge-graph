@@ -1,0 +1,18 @@
+apiVersion: v2
+name: siphon
+description: Helm charts to deploy Siphon to a Kubernetes cluster
+icon:
+
+type: application
+
+# This is the chart version. This version number should be incremented each time you make changes
+# to the chart and its templates, including the app version.
+# Versions are expected to follow Semantic Versioning (https://semver.org/)
+
+version: 1.0.0  # overwritten on the fly through helm package --version="x.y.z"
+
+# This is the version number of the application being deployed. This version number should be
+# incremented each time you make changes to the application. Versions are not expected to
+# follow Semantic Versioning. They should reflect the version the application is using.
+# It is recommended to use it with quotes.
+# appVersion: "3.22.0" # specified on the fly through helm package --app-version="x.y.z"

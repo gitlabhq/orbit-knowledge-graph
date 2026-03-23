@@ -1,0 +1,588 @@
+suite: ConfigMap
+templates:
+  - templates/configmap.yaml
+release:
+  name: test-release
+tests:
+  # ── Basic rendering ──────────────────────────────────────────────
+  - it: should create a ConfigMap for each enabled deployment
+    values:
+      - ../values-full.yaml
+    set:
+      deployments.example-postgres-producer.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: should not create a ConfigMap for disabled deployments
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-app:
+          enabled: false
+          appConfig:
+            application_identifier: test
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # ── Metadata ─────────────────────────────────────────────────────
+  - it: should set correct name and namespace
+    values:
+      - fixtures/clean.yaml
+    set:
+      namespace: my-ns
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            application_identifier: test
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-producer-config
+      - equal:
+          path: metadata.namespace
+          value: my-ns
+
+  - it: should include standard Helm labels
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            application_identifier: test
+    asserts:
+      - equal:
+          path: metadata.labels.app
+          value: my-producer
+      - equal:
+          path: metadata.labels["helm.sh/chart"]
+          value: siphon-1.0.0
+      - equal:
+          path: metadata.labels["app.kubernetes.io/managed-by"]
+          value: Helm
+      - equal:
+          path: metadata.labels["app.kubernetes.io/instance"]
+          value: test-release
+
+  # ── appConfig merging ────────────────────────────────────────────
+  - it: should merge appConfigDefaults into matching appConfig sections
+    values:
+      - fixtures/clean.yaml
+    set:
+      appConfigDefaults:
+        database:
+          advisory_lock_timeout_ms: 100
+          lock_timeout_ms: 200
+        queueing:
+          driver: nats
+          url: "nats:4222"
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            application_identifier: my-app
+            database:
+              host: db-host
+              user: admin
+            queueing:
+              stream_name: events
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "host: db-host"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "user: admin"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "advisory_lock_timeout_ms: 100"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "lock_timeout_ms: 200"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "driver: nats"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "stream_name: events"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "application_identifier: my-app"
+
+  - it: should NOT leak defaults into deployments that omit those sections
+    values:
+      - fixtures/clean.yaml
+    set:
+      appConfigDefaults:
+        database:
+          advisory_lock_timeout_ms: 100
+        replication:
+          standby_timeout_ms: 3000
+      deployments:
+        my-consumer:
+          enabled: true
+          mode: consumer
+          appConfig:
+            application_identifier: consumer-app
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "application_identifier: consumer-app"
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: "advisory_lock_timeout_ms"
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: "standby_timeout_ms"
+
+  - it: should allow deployment appConfig to override default values
+    values:
+      - fixtures/clean.yaml
+    set:
+      appConfigDefaults:
+        database:
+          advisory_lock_timeout_ms: 100
+          lock_timeout_ms: 200
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            database:
+              advisory_lock_timeout_ms: 999
+              host: db-host
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "advisory_lock_timeout_ms: 999"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "lock_timeout_ms: 200"
+
+  - it: should work when appConfigDefaults is not set
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            application_identifier: test
+            database:
+              host: db-host
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "host: db-host"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "application_identifier: test"
+
+  - it: should include non-map values like table_mapping as-is
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            application_identifier: test
+            table_mapping:
+              - table: users
+                schema: public
+                subject: users
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "table: users"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "schema: public"
+
+  # ── table_mapping shorthand ─────────────────────────────────────
+  - it: should expand string table_mapping items to full form
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            table_mapping:
+              - users
+              - organizations
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "table: users"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "schema: public"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "subject: users"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "table: organizations"
+
+  - it: should default schema to public and subject to table name
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            table_mapping:
+              - table: namespaces
+                ignored_columns:
+                  - runners_token
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "table: namespaces"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "schema: public"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "subject: namespaces"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "runners_token"
+
+  - it: should allow explicit schema and subject to override defaults
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            table_mapping:
+              - table: users
+                schema: custom_schema
+                subject: custom_subject
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "schema: custom_schema"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "subject: custom_subject"
+
+  # ── streams shorthand ───────────────────────────────────────────
+  - it: should expand string stream items with siphon_ prefix
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-consumer:
+          enabled: true
+          mode: consumer
+          appConfig:
+            streams:
+              - users
+              - notes
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "identifier: users"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "subject: users"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "target: siphon_users"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "identifier: notes"
+
+  - it: should default subject and target when only identifier is given
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-consumer:
+          enabled: true
+          mode: consumer
+          appConfig:
+            streams:
+              - identifier: merge_requests
+                enable_refresh_package: true
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "identifier: merge_requests"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "subject: merge_requests"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "target: siphon_merge_requests"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "enable_refresh_package: true"
+
+  - it: should allow explicit subject and target to override stream defaults
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-consumer:
+          enabled: true
+          mode: consumer
+          appConfig:
+            streams:
+              - identifier: users
+                subject: custom_subject
+                target: custom_target
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "subject: custom_subject"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "target: custom_target"
+
+  # ── Profile + appConfig merging ─────────────────────────────────
+  - it: should merge profile appConfig with deployment appConfig and appConfigDefaults
+    values:
+      - fixtures/clean.yaml
+    set:
+      appConfigDefaults:
+        database:
+          advisory_lock_timeout_ms: 100
+          lock_timeout_ms: 200
+      deploymentProfiles:
+        producer:
+          appConfig:
+            prometheus:
+              port: 8080
+            max_column_size_in_bytes: 5000000
+      deployments:
+        my-producer:
+          enabled: true
+          profile: producer
+          mode: producer
+          appConfig:
+            application_identifier: my-app
+            database:
+              host: db-host
+    asserts:
+      # From profile appConfig
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "port: 8080"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "max_column_size_in_bytes: 5000000"
+      # From deployment appConfig
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "application_identifier: my-app"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "host: db-host"
+      # From appConfigDefaults (merged into database section)
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "advisory_lock_timeout_ms: 100"
+
+  # ── mode: producer wrapping ─────────────────────────────────────
+  - it: should wrap appConfig in producers array when mode is producer
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            application_identifier: my-app
+            prometheus:
+              port: 8080
+            database:
+              host: db-host
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "producers:"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "application_identifier: my-app"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "host: db-host"
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: "consumers:"
+
+  - it: should extract prometheus to top level when mode is producer
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-producer:
+          enabled: true
+          mode: producer
+          appConfig:
+            prometheus:
+              port: 9090
+            database:
+              host: db-host
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "(?m)^prometheus:"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "port: 9090"
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: "producers:.*prometheus:"
+
+  # ── mode: consumer wrapping ──────────────────────────────────────
+  - it: should wrap appConfig in consumers array with type when mode is consumer
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-consumer:
+          enabled: true
+          mode: consumer
+          consumerType: clickhouse
+          appConfig:
+            application_identifier: my-consumer-app
+            prometheus:
+              port: 8080
+            queueing:
+              stream_name: events
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "consumers:"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "type: clickhouse"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "application_identifier: my-consumer-app"
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: "producers:"
+
+  - it: should default consumerType to clickhouse when not specified
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-consumer:
+          enabled: true
+          mode: consumer
+          appConfig:
+            application_identifier: my-consumer-app
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "type: clickhouse"
+
+  - it: should support gcs_parquet consumer type
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-gcs-consumer:
+          enabled: true
+          mode: consumer
+          consumerType: gcs_parquet
+          appConfig:
+            application_identifier: my-gcs-app
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "type: gcs_parquet"
+
+  # ── mode: combined pass-through ────────────────────────────────────
+  - it: should pass appConfig through flat when mode is combined
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        my-combined:
+          enabled: true
+          mode: combined
+          appConfig:
+            application_identifier: combined-app
+            prometheus:
+              port: 8080
+            database:
+              host: db-host
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "application_identifier: combined-app"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "host: db-host"
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "port: 8080"
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: "producers:"
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: "consumers:"
+
+  # ── mode required guard ────────────────────────────────────────────
+  - it: should fail when enabled deployment has appConfig but no mode
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        bad-producer:
+          enabled: true
+          appConfig:
+            application_identifier: test
+    asserts:
+      - failedTemplate:
+          errorMessage: 'deployment "bad-producer" has appConfig but is missing required key "mode" (must be one of: producer, consumer, combined)'
+
+  - it: should fail when enabled deployment has mode but no appConfig
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        bad-producer:
+          enabled: true
+          mode: producer
+    asserts:
+      - failedTemplate:
+          errorMessage: 'deployment "bad-producer" has mode "producer" but is missing required key "appConfig"'
+
+  - it: should not fail when disabled deployment has appConfig but no mode
+    values:
+      - fixtures/clean.yaml
+    set:
+      deployments:
+        disabled-app:
+          enabled: false
+          appConfig:
+            application_identifier: test
+    asserts:
+      - hasDocuments:
+          count: 0
