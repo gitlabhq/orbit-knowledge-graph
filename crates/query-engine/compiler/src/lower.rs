@@ -281,8 +281,10 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
         };
 
         if node.redaction_id_column != DEFAULT_PRIMARY_KEY {
-            // JOIN node table for the auth column (e.g. merge_request_id)
-            if let Some((edge_a, edge_c)) = node_edge_col.get(&node.id)
+            // JOIN node table for the auth column (e.g. merge_request_id).
+            // The node table must be joinable; if not, fall back to edge column
+            // for _gkg_*_id (redaction will use the entity's own ID).
+            let joined = if let Some((edge_a, edge_c)) = node_edge_col.get(&node.id)
                 && let Ok(table) = resolve_table(node)
             {
                 let join_cond = Expr::eq(
@@ -295,15 +297,20 @@ fn lower_traversal_edge_only(input: &Input) -> Result<Node> {
                     TableRef::scan(&table, &node.id),
                     join_cond,
                 );
-            }
-            // _gkg_*_pk = entity row ID (from edge column, for hydration)
+                true
+            } else {
+                false
+            };
             select.push(SelectExpr::new(
-                edge_id_expr,
+                edge_id_expr.clone(),
                 format!("_gkg_{}_pk", node.id),
             ));
-            // _gkg_*_id = auth column (from joined node table, for redaction)
             select.push(SelectExpr::new(
-                Expr::col(&node.id, &node.redaction_id_column),
+                if joined {
+                    Expr::col(&node.id, &node.redaction_id_column)
+                } else {
+                    edge_id_expr
+                },
                 format!("_gkg_{}_id", node.id),
             ));
         } else {
