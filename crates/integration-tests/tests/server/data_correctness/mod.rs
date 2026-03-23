@@ -105,6 +105,10 @@ async fn data_correctness() {
         edge_cases::cross_namespace_isolation_no_leakage,
         edge_cases::cross_namespace_narrow_scope_returns_all_authors,
         edge_cases::cross_namespace_aggregation_respects_scope,
+        // non-default redaction id_column
+        edge_cases::non_default_redaction_id_entity_traversal,
+        edge_cases::non_default_redaction_id_denies_unauthorized,
+        edge_cases::non_default_redaction_id_with_multiple_mrs,
         // referential integrity
         edge_cases::traversal_referential_integrity_on_complex_query,
     );
