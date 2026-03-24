@@ -1,0 +1,22 @@
+# Extra values merged into the vendored chart by sync.sh.
+
+# NATS subchart (disabled by default, enable for e2e)
+nats:
+  enabled: false
+  streamName: ""
+
+# Siphon subchart (disabled by default, enable for e2e)
+siphon:
+  enabled: false
+
+gcp:
+  project: ""
+  region: ""
+  cluster: ""
+
+externalSecrets:
+  enabled: false
+  gcpServiceAccount: ""
+  postgresSecretName: postgres-password
+  clickhouseSecretName: clickhouse-password
+  jwtSecretName: ""
