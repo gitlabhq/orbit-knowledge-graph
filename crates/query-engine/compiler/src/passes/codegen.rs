@@ -8,7 +8,7 @@ use crate::input::Input;
 use crate::input::QueryType;
 use crate::passes::enforce::ResultContext;
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::state::{HasInput, HasNode, HasOutput, HasResultCtx};
+use crate::pipelines::{HasInput, HasNode, HasOutput, HasResultCtx};
 pub use gkg_utils::clickhouse::ParamValue;
 use serde_json::Value;
 use std::collections::HashMap;

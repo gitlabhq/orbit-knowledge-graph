@@ -6,11 +6,10 @@
 //! - Filter values are coerced to match ontology types
 //! - Wildcard column selections are expanded to explicit column lists
 
-use crate::envs::HasOntology;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::state::HasInput;
+use crate::pipelines::{HasInput, HasOntology};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;

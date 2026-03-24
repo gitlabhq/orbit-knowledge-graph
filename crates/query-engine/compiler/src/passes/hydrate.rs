@@ -2,7 +2,7 @@ use crate::constants::HYDRATION_NODE_ALIAS;
 use crate::input::{ColumnSelection, Input, QueryType};
 use crate::passes::codegen::{CompiledQueryContext, HydrationPlan, HydrationTemplate};
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::state::{HasInput, HasNode, HasOutput, HasResultCtx};
+use crate::pipelines::{HasInput, HasNode, HasOutput, HasResultCtx};
 
 /// Pipeline pass: codegen for hydration queries (no security/check passes).
 pub struct HydrationCodegenPass;

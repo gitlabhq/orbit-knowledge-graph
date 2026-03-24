@@ -27,11 +27,10 @@ use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS, SKIP_SECURITY_FILTER_TABLES,
     cascade_cte, node_filter_cte,
 };
-use crate::envs::HasSecurityCtx;
 use crate::input::{Input, InputNode, QueryType};
 use crate::passes::security::SecurityContext;
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::state::{HasInput, HasNode};
+use crate::pipelines::{HasInput, HasNode, HasSecurityCtx};
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,

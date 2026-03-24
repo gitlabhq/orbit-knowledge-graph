@@ -4,7 +4,7 @@
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::state::{HasInput, HasNode};
+use crate::pipelines::{HasInput, HasNode};
 
 use crate::constants::{
     ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,

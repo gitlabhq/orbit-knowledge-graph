@@ -79,11 +79,7 @@ impl<E: PipelineEnv, S: PipelineState> PipelineBuilder<E, S> {
     }
 
     pub fn pass_if<P: CompilerPass<E, S> + 'static>(self, cond: bool, pass: P) -> Self {
-        if cond {
-            self.pass(pass).done()
-        } else {
-            self
-        }
+        if cond { self.pass(pass).done() } else { self }
     }
 
     pub fn observe(mut self, obs: impl PipelineObserver + 'static) -> Self {

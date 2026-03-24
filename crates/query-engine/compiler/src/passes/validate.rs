@@ -8,11 +8,10 @@
 
 use std::sync::OnceLock;
 
-use crate::envs::HasOntology;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::state::{HasInput, HasJson};
+use crate::pipelines::{HasInput, HasJson, HasOntology};
 use ontology::{DataType, Ontology};
 
 /// Pipeline pass: validates a parsed `Input` against schema, ontology, and

@@ -38,13 +38,12 @@ pub mod input;
 pub mod metrics;
 pub mod types;
 
-// pipeline must come before envs/state — its macros.rs defines
+// pipeline must come before pipelines — its macros.rs defines
 // `define_env_capabilities!` and `define_state_capabilities!` which
-// those modules invoke.
-pub mod envs;
-pub mod passes;
+// pipelines.rs invokes.
 pub mod pipeline;
-pub mod state;
+pub mod pipelines;
+pub mod passes;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
@@ -62,8 +61,12 @@ pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
 pub use pipeline::{CompilerPass, Pipeline, PipelineEnv, PipelineState, SealedPipeline};
 
-// Re-export env + state types.
-pub use envs::{HasOntology, HasSecurityCtx, LocalEnv, SecureEnv};
+// Re-export env, state, and capability traits.
+pub use pipelines::{
+    HasOntology, HasSecurityCtx, LocalEnv, SecureEnv,
+    HasInput, HasJson, HasNode, HasOutput, HasResultCtx,
+    QueryState, DuckDbState,
+};
 pub use passes::{
     CheckPass, CodegenPass, EnforcePass, HydrationCodegenPass, LowerPass, NormalizePass,
     OptimizePass, SecurityPass, ValidatePass,

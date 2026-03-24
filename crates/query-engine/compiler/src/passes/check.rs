@@ -10,11 +10,10 @@ use serde_json::Value;
 
 use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
-use crate::envs::HasSecurityCtx;
 use crate::error::{QueryError, Result};
-use crate::passes::security::{SecurityContext, collect_node_aliases};
+use crate::passes::security::{collect_node_aliases, SecurityContext};
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::state::HasNode;
+use crate::pipelines::{HasNode, HasSecurityCtx};
 
 /// Pipeline pass: validates that all required security filters are present.
 /// Reads security context from the environment.
@@ -151,10 +150,9 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = project_query(Some(Expr::lit(true)));
         let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
@@ -167,10 +165,9 @@ mod tests {
         );
         let node = project_query(Some(wrong_filter));
         let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
@@ -225,10 +222,9 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = wrap_in_subquery(inner_project_query(None));
         let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
@@ -272,10 +268,9 @@ mod tests {
         };
         let node = wrap_in_subquery(inner);
         let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
@@ -351,10 +346,9 @@ mod tests {
             ..Default::default()
         }));
         let err = check_ast(&node, &ctx).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing valid traversal_path filter")
-        );
+        assert!(err
+            .to_string()
+            .contains("missing valid traversal_path filter"));
     }
 
     #[test]
