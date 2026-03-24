@@ -36,14 +36,13 @@ pub enum RepositoryCacheError {
 
 #[async_trait]
 pub trait RepositoryCache: Send + Sync {
-    async fn save(
+    /// Returns the cached repository and a lease that pins it (safe from eviction)
+    /// for the duration of the lease's lifetime.
+    async fn acquire(
         &self,
         project_id: i64,
         branch: &str,
-        commit_sha: &str,
-    ) -> Result<(), RepositoryCacheError>;
-
-    async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
+    ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError>;
 
     async fn extract_archive(
         &self,
@@ -53,13 +52,14 @@ pub trait RepositoryCache: Send + Sync {
         archive_stream: ByteStream,
     ) -> Result<RepositoryLease, RepositoryCacheError>;
 
-    /// Returns the cached repository and a lease that pins it (safe from eviction)
-    /// for the duration of the lease's lifetime.
-    async fn acquire(
+    async fn save(
         &self,
         project_id: i64,
         branch: &str,
-    ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError>;
+        commit_sha: &str,
+    ) -> Result<(), RepositoryCacheError>;
+
+    async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
 
     async fn delete_file(
         &self,
@@ -327,48 +327,6 @@ fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCach
 
 #[async_trait]
 impl RepositoryCache for LocalRepositoryCache {
-    async fn save(
-        &self,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-    ) -> Result<(), RepositoryCacheError> {
-        let repository_dir = self.repository_dir(project_id, branch);
-        tokio::fs::create_dir_all(&repository_dir).await?;
-        self.write_commit_metadata(project_id, branch, commit_sha)
-            .await
-    }
-
-    async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
-        let branch_dir = self.branch_dir(project_id, branch);
-        match tokio::fs::remove_dir_all(&branch_dir).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-
-        self.budget.remove(project_id, branch);
-        Ok(())
-    }
-
-    async fn extract_archive(
-        &self,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-        archive_stream: ByteStream,
-    ) -> Result<RepositoryLease, RepositoryCacheError> {
-        self.clear_repository_dir(project_id, branch).await?;
-        self.extract_stream_to_disk(project_id, branch, archive_stream)
-            .await?;
-        self.write_commit_metadata(project_id, branch, commit_sha)
-            .await?;
-
-        let lease = self.pin(project_id, branch);
-        self.measure_and_enforce_budget(project_id, branch).await?;
-        Ok(lease)
-    }
-
     async fn acquire(
         &self,
         project_id: i64,
@@ -401,6 +359,48 @@ impl RepositoryCache for LocalRepositoryCache {
             },
             lease,
         )))
+    }
+
+    async fn extract_archive(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit_sha: &str,
+        archive_stream: ByteStream,
+    ) -> Result<RepositoryLease, RepositoryCacheError> {
+        self.clear_repository_dir(project_id, branch).await?;
+        self.extract_stream_to_disk(project_id, branch, archive_stream)
+            .await?;
+        self.write_commit_metadata(project_id, branch, commit_sha)
+            .await?;
+
+        let lease = self.pin(project_id, branch);
+        self.measure_and_enforce_budget(project_id, branch).await?;
+        Ok(lease)
+    }
+
+    async fn save(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit_sha: &str,
+    ) -> Result<(), RepositoryCacheError> {
+        let repository_dir = self.repository_dir(project_id, branch);
+        tokio::fs::create_dir_all(&repository_dir).await?;
+        self.write_commit_metadata(project_id, branch, commit_sha)
+            .await
+    }
+
+    async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
+        let branch_dir = self.branch_dir(project_id, branch);
+        match tokio::fs::remove_dir_all(&branch_dir).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+
+        self.budget.remove(project_id, branch);
+        Ok(())
     }
 
     async fn delete_file(
@@ -560,7 +560,7 @@ mod tests {
     // --- Lifecycle tests ---
 
     #[tokio::test]
-    async fn get_returns_none_when_no_cache_exists() {
+    async fn get_info_returns_none_when_no_cache_exists() {
         let (_dir, cache) = create_cache();
 
         let result = cache.get_info(42, "main").await.unwrap();
@@ -569,7 +569,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn save_then_get_returns_cached_repository() {
+    async fn save_then_get_info_returns_cached_repository() {
         let (_dir, cache) = create_cache();
 
         cache.save(42, "main", "abc123").await.unwrap();

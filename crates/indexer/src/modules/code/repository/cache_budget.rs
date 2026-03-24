@@ -233,18 +233,18 @@ impl CacheBudget {
         self.report_state();
     }
 
+    fn report_state(&self) {
+        let total_bytes = self.total_bytes.load(Ordering::Relaxed);
+        let entry_count = self.index.read().len() as u64;
+        self.metrics.record_cache_state(total_bytes, entry_count);
+    }
+
     #[cfg(test)]
     fn is_pinned(&self, key: &CacheKey) -> bool {
         self.pin_counts
             .read()
             .get(key)
             .is_some_and(|&count| count > 0)
-    }
-
-    fn report_state(&self) {
-        let total_bytes = self.total_bytes.load(Ordering::Relaxed);
-        let entry_count = self.index.read().len() as u64;
-        self.metrics.record_cache_state(total_bytes, entry_count);
     }
 }
 
