@@ -32,44 +32,58 @@
 //! ```
 
 pub mod ast;
-pub mod check;
-pub mod codegen;
 pub mod constants;
-pub mod enforce;
 pub mod error;
-pub mod hydrate;
 pub mod input;
-pub mod lower;
 pub mod metrics;
-pub mod normalize;
-pub mod optimize;
-pub mod security;
-pub mod validate;
+pub mod types;
+
+// pipeline must come before pipelines — its macros.rs defines
+// `define_env_capabilities!` and `define_state_capabilities!` which
+// pipelines.rs invokes.
+pub mod passes;
+pub mod pipeline;
+pub mod pipelines;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
-pub use check::check_ast;
-pub use codegen::{
-    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
-};
 pub use constants::{
     EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_KINDS_COLUMN, EDGE_SRC_SUFFIX,
     EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS,
     NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
     RELATIONSHIP_TYPE_COLUMN,
 };
-pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
-pub use hydrate::generate_hydration_plan;
-pub use input::{ColumnSelection, Input, InputNode, QueryType, parse_input};
-pub use input::{DynamicColumnMode, EntityAuthConfig};
-pub use lower::lower;
+pub use input::{
+    ColumnSelection, DynamicColumnMode, EntityAuthConfig, Input, InputNode, QueryType, parse_input,
+};
 pub use metrics::{METRICS, QueryEngineMetrics};
-pub use normalize::{build_entity_auth, normalize};
 pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
-pub use optimize::optimize;
-pub use security::{SecurityContext, apply_security_context};
-pub use validate::Validator;
+pub use pipeline::{CompilerPass, Pipeline, PipelineEnv, PipelineState, SealedPipeline};
+
+// Re-export env, state, and capability traits.
+pub use passes::{
+    CheckPass, CodegenPass, EnforcePass, HydrationCodegenPass, LowerPass, NormalizePass,
+    OptimizePass, SecurityPass, ValidatePass,
+};
+pub use pipelines::{
+    DuckDbState, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx,
+    LocalEnv, QueryState, SecureEnv,
+};
+
+// Re-export key types from pass modules.
+pub use passes::check::check_ast;
+pub use passes::codegen::{
+    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
+};
+pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
+pub use passes::hydrate::generate_hydration_plan;
+pub use passes::lower::lower;
+pub use passes::normalize::{build_entity_auth, normalize};
+pub use passes::optimize::optimize;
+pub use passes::security::apply_security_context;
+pub use passes::validate::Validator;
+pub use types::SecurityContext;
 
 use metrics::CountErr;
 
@@ -78,7 +92,7 @@ use metrics::CountErr;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Validate and normalize a JSON query string into a typed `Input`.
-fn validated_input(json_input: &str, ontology: &Ontology) -> Result<Input> {
+pub(crate) fn validated_input(json_input: &str, ontology: &Ontology) -> Result<Input> {
     let v = Validator::new(ontology);
     let value = v.check_json(json_input).count_err()?;
     v.check_ontology(&value).count_err()?;
@@ -124,9 +138,7 @@ pub fn compile_input(mut input: Input, ctx: &SecurityContext) -> Result<Compiled
     })
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline presets are in `pipelines.rs`.
 
 #[cfg(test)]
 #[allow(irrefutable_let_patterns)]
@@ -164,13 +176,13 @@ mod tests {
     /// Compile JSON and return the AST without generating SQL.
     #[must_use = "the compiled AST should be used"]
     pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> Result<Node> {
-        let v = validate::Validator::new(ontology);
+        let v = Validator::new(ontology);
         let value = v.check_json(json_input)?;
         v.check_ontology(&value)?;
         let input: Input = serde_json::from_value(value)?;
         v.check_references(&input)?;
-        let mut input = normalize::normalize(input, ontology)?;
-        let node = lower::lower(&mut input)?;
+        let mut input = normalize(input, ontology)?;
+        let node = lower(&mut input)?;
         Ok(node)
     }
 

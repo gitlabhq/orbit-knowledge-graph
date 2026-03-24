@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
-use crate::security::{SecurityContext, collect_node_aliases};
+use crate::passes::security::{SecurityContext, collect_node_aliases};
 
 const STARTS_WITH_FNAME: &str = "startsWith";
 
@@ -122,7 +122,7 @@ mod tests {
     fn passes_after_security_injection() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::security::apply_security_context(&mut node, &ctx).unwrap();
+        crate::passes::security::apply_security_context(&mut node, &ctx).unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
 
@@ -157,7 +157,7 @@ mod tests {
     fn accepts_lowest_common_prefix() {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::security::apply_security_context(&mut node, &ctx).unwrap();
+        crate::passes::security::apply_security_context(&mut node, &ctx).unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
 
@@ -215,8 +215,11 @@ mod tests {
     fn accepts_subquery_with_inner_security_filter() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut inner = inner_project_query(None);
-        crate::security::apply_security_context(&mut Node::Query(Box::new(inner.clone())), &ctx)
-            .unwrap();
+        crate::passes::security::apply_security_context(
+            &mut Node::Query(Box::new(inner.clone())),
+            &ctx,
+        )
+        .unwrap();
         // Re-extract the filtered query from the node
         let filter = Expr::func(
             STARTS_WITH_FNAME,
@@ -355,7 +358,7 @@ mod tests {
             }],
             ..Default::default()
         }));
-        crate::security::apply_security_context(&mut node, &ctx).unwrap();
+        crate::passes::security::apply_security_context(&mut node, &ctx).unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
 
