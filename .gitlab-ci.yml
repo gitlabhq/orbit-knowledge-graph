@@ -231,70 +231,6 @@ integration-test:
     - cargo nextest run --profile ci --all-features --test '*'
     - sccache --show-stats || true
 
-tilt-ci:
-  stage: test
-  rules:
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      changes:
-        - Tiltfile
-        - .tiltignore
-        - .tilt-secrets.example
-        - Dockerfile
-        - scripts/build-dev.sh
-        - helm-dev/**/*
-        - .gitlab-ci.yml
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
-  tags:
-    - saas-linux-large-amd64
-  services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29-dind
-      alias: docker
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    KIND_VERSION: "v0.25.0"
-    TILT_VERSION: "0.36.0"
-    KUBECTL_VERSION: "v1.32.0"
-    SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
-  needs: []
-  before_script:
-    - apk add --no-cache curl bash sed
-    - curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-    - chmod +x kubectl && mv kubectl /usr/local/bin/
-    - curl -Lo ./kind https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64
-    - chmod +x ./kind && mv ./kind /usr/local/bin/kind
-    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-    - curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux-alpine.x86_64.tar.gz" | tar -xz -C /usr/local/bin tilt
-  script:
-    - |
-      cat <<EOF | kind create cluster --wait 5m --config=-
-      kind: Cluster
-      apiVersion: kind.x-k8s.io/v1alpha4
-      networking:
-        apiServerAddress: "0.0.0.0"
-      kubeadmConfigPatches:
-        - |
-          kind: ClusterConfiguration
-          apiServer:
-            certSANs:
-              - "docker"
-      EOF
-    - sed -i -E 's#https://0\.0\.0\.0:#https://docker:#' ~/.kube/config
-    - helm repo add gitlab https://charts.gitlab.io
-    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    - helm repo add grafana https://grafana.github.io/helm-charts
-    - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    - helm dependency build helm-dev/gkg
-    - helm dependency build helm-dev/observability
-    # Create dummy secrets for CI (not real credentials)
-    - |
-      cat <<EOF > .tilt-secrets
-      POSTGRES_PASSWORD=ci_test_password
-      CLICKHOUSE_PASSWORD=ci_test_password
-      GKG_GITLAB__JWT__VERIFYING_KEY=ci_test_jwt_secret_at_least_32_bytes_long
-      EOF
-    - tilt ci
-
 # Build Stage
 
 .docker-build:
@@ -375,13 +311,9 @@ docker-build-mr:
   before_script:
     - apt-get update && apt-get install -y curl
     - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    - curl -L https://carvel.dev/install.sh | K14SIO_INSTALL_BIN_DIR=/usr/local/bin bash
+    - curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
     - helm version
-    - helm repo add gitlab https://charts.gitlab.io
-    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    - helm repo add grafana https://grafana.github.io/helm-charts
-    - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    - helm dependency update helm-dev/gkg
-    - helm dependency update helm-dev/observability
 
 helm-lint:
   extends:
@@ -390,10 +322,9 @@ helm-lint:
   stage: lint
   needs: []
   script:
-    - helm lint helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-    - helm lint helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
-    - helm template gkg helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-    - helm template gkg-obs helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
+    - helm/sync.sh
+    - helm lint helm/gkg
+    - helm template gkg helm/gkg
 
 build-proto-gem:
   needs: []

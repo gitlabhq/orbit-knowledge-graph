@@ -188,11 +188,18 @@ pub async fn read_secret(namespace: &str, secret_name: &str, key: &str) -> Resul
 
 /// Create or update a secret with a single key-value pair (idempotent via SSA).
 pub async fn apply_secret(ns: &str, name: &str, key: &str, value: &str) -> Result<()> {
+    apply_secret_multi(ns, name, &[(key, value)]).await
+}
+
+/// Create or update a secret with multiple key-value pairs (idempotent via SSA).
+pub async fn apply_secret_multi(ns: &str, name: &str, entries: &[(&str, &str)]) -> Result<()> {
     let client = client().await?;
     let secrets: Api<Secret> = Api::namespaced(client, ns);
 
-    let mut data = BTreeMap::new();
-    data.insert(key.to_string(), ByteString(value.as_bytes().to_vec()));
+    let data: BTreeMap<String, ByteString> = entries
+        .iter()
+        .map(|(k, v)| (k.to_string(), ByteString(v.as_bytes().to_vec())))
+        .collect();
 
     let secret = Secret {
         metadata: ObjectMeta {

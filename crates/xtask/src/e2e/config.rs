@@ -77,7 +77,6 @@ pub struct Postgres {
     pub database: String,
     pub user: String,
     pub superuser: String,
-    pub port: String,
     pub service_name: String,
     pub bridge_secret_name: String,
     pub bridge_password_key: String,

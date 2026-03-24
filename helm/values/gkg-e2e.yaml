@@ -1,0 +1,213 @@
+# =============================================================================
+# E2E self-contained environment
+#
+# NOTE: Image and ClickHouse values are overridden at deploy time via --set
+# flags (see gkg.rs deploy_gkg_chart).
+#
+# In-cluster: NATS (subchart), Siphon (subchart), ClickHouse (standalone),
+#             GKG indexer + webserver + health-check
+# Host (GDK): PostgreSQL, GitLab Rails
+# =============================================================================
+
+image:
+  repository: gkg-server
+  tag: dev
+  pullPolicy: Never
+
+clickhouse:
+  datalake:
+    host: gkg-e2e-clickhouse
+    httpPort: 8123
+    database: gitlab_clickhouse_development
+    user: default
+    ssl: false
+  graph:
+    host: gkg-e2e-clickhouse
+    httpPort: 8123
+    database: gkg-development
+    user: default
+    ssl: false
+
+nats:
+  enabled: true
+  url: ""
+  consumerName: gkg-indexer
+  streamName: siphon_stream_main_db
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          enabled: true
+          size: 1Gi
+  container:
+    image:
+      repository: nats
+      tag: "2.11-alpine"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  natsBox:
+    enabled: false
+
+# Siphon subchart (producer + consumer in-cluster)
+siphon:
+  enabled: true
+  namespace: default
+  image:
+    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
+    pullPolicy: Always
+    tag: latest
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  appConfigDefaults:
+    prometheus:
+      port: 8080
+    database:
+      password: "${POSTGRES_PASSWORD}"
+      database: gitlabhq_production
+      advisory_lock_timeout_ms: 100
+      advisory_lock_timeout_fuzziness_ms: 50
+      lock_timeout_ms: 500
+      lock_timeout_fuzziness_ms: 300
+    queueing:
+      driver: nats
+      url: "nats://gkg-e2e-nats:4222"
+      stream_name: siphon_stream_main_db
+      oversize_bucket_name: repl_events_bucket
+  deployments:
+    siphon-producer:
+      enabled: true
+      mode: producer
+      command:
+        - "/app/siphon"
+        - "producer"
+        - "--config=/etc/config/config.yaml"
+        - "--log-level=info"
+      env:
+        - name: POSTGRES_PASSWORD
+          value: ""
+      appConfig:
+        application_identifier: "gkg-e2e-producer"
+        max_column_size_in_bytes: 8000000
+        database:
+          host: host.docker.internal
+          port: 5432
+          user: gitlab
+          application_name: "gkg-e2e-producer"
+          advisory_lock_id: 144324
+        replication:
+          publication_name: "siphon_publication_main_db"
+          slot_name: "siphon_slot_main_db"
+          initial_data_snapshot_threads_per_table: 3
+          memory_buffer_size_in_bytes: 104857600
+        queueing:
+          lsn_store_name: postgresql_lsn_store
+          snapshot_subject_name: tables
+        table_mapping:
+          - namespaces
+          - projects
+          - issues
+          - merge_requests
+          - users
+          - members
+          - labels
+          - milestones
+          - notes
+          - knowledge_graph_enabled_namespaces
+          - namespace_details
+    siphon-consumer:
+      enabled: true
+      mode: consumer
+      command:
+        - "/app/siphon"
+        - "consumer"
+        - "--config=/etc/config/config.yaml"
+        - "--log-level=info"
+      env:
+        - name: CH_DB_PASSWORD
+          value: ""
+      appConfig:
+        application_identifier: "gkg-e2e-consumer"
+        queueing:
+          stream_name: siphon_stream_main_db
+        clickhouse:
+          host: gkg-e2e-clickhouse
+          port: 9000
+          database: gitlab_clickhouse_development
+          user: default
+          password: ""
+          insert_batch_size: 10000
+        streams:
+          - namespaces
+          - projects
+          - issues
+          - merge_requests
+          - users
+          - members
+          - labels
+          - milestones
+          - notes
+          - knowledge_graph_enabled_namespaces
+          - namespace_details
+
+webserver:
+  enabled: true
+  replicas: 1
+  logLevel: "info,gkg_server=debug"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+indexer:
+  enabled: true
+  replicas: 1
+  logLevel: "info,gkg_server=debug"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+dispatcher:
+  enabled: false
+
+healthCheck:
+  enabled: true
+  replicas: 1
+  services:
+    - gkg-indexer
+    - gkg-webserver
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+gitlab:
+  baseUrl: "http://gitlab-webservice-default.gitlab.svc.cluster.local:8181"
+
+metrics:
+  otel:
+    enabled: false
+  prometheus:
+    enabled: true
+    port: 9394
