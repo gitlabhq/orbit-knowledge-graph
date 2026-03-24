@@ -6,6 +6,14 @@ publish = false
 
 # No src/lib.rs — this crate only contains integration tests.
 
+[[test]]
+name = "entrypoint"
+path = "tests/entrypoints/entrypoint.rs"
+
+[[test]]
+name = "compiler_entrypoint"
+path = "tests/entrypoints/compiler_entrypoint.rs"
+
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
