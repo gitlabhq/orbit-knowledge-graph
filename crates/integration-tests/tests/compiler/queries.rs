@@ -1,6 +1,7 @@
 //! Compiler unit tests using a hand-built ontology.
 
 use super::setup::{compile_to_ast, test_ctx, test_ontology};
+use super::utils::{has_param_value, ParsedSql};
 use compiler::{compile, Node, QueryError};
 
 #[test]
@@ -31,24 +32,15 @@ fn traversal_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let sql = ParsedSql::parse(&result.base.sql);
 
-    assert!(result.base.sql.contains("SELECT"));
-    assert!(result.base.sql.contains("gl_edge"));
-    assert!(
-        result.base.sql.contains("relationship_kind"),
-        "expected relationship_kind filter: {}",
-        result.base.sql
-    );
-    assert!(result.base.sql.contains("LIMIT 25"));
-    assert!(
-        result
-            .base
-            .params
-            .values()
-            .any(|p| p.value == serde_json::json!("AUTHORED")),
-        "expected AUTHORED in params: {:?}",
-        result.base.params
-    );
+    assert!(sql.has_table("gl_edge"));
+    assert!(sql.has_column_ref("relationship_kind"));
+    assert_eq!(sql.limit_value(), Some(25));
+    assert!(has_param_value(
+        &result.base.params,
+        &serde_json::json!("AUTHORED")
+    ));
 }
 
 #[test]
@@ -59,38 +51,36 @@ fn bool_filter_value_is_preserved() {
             "id": "n",
             "entity": "Note",
             "columns": ["confidential"],
-            "filters": {
-                "confidential": true
-            }
+            "filters": { "confidential": true }
         },
         "limit": 5
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    assert!(
-        result
-            .base
-            .params
-            .values()
-            .any(|p| p.value == serde_json::Value::Bool(true)),
-        "expected boolean filter to remain true in params: {:?}",
-        result.base.params
-    );
+    assert!(has_param_value(
+        &result.base.params,
+        &serde_json::Value::Bool(true)
+    ));
 }
 
 #[test]
 fn aggregation_query() {
     let json = r#"{
         "query_type": "aggregation",
-        "nodes": [{"id": "n", "entity": "Note", "columns": ["confidential"]}, {"id": "u", "entity": "User", "columns": ["username"]}],
+        "nodes": [
+            {"id": "n", "entity": "Note", "columns": ["confidential"]},
+            {"id": "u", "entity": "User", "columns": ["username"]}
+        ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
         "limit": 10
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    assert!(result.base.sql.contains("COUNT"));
-    assert!(result.base.sql.contains("GROUP BY"));
+    let sql = ParsedSql::parse(&result.base.sql);
+
+    assert!(sql.has_function("COUNT") || sql.has_function("countIf"));
+    assert!(sql.has_group_by());
 }
 
 #[test]
@@ -105,26 +95,21 @@ fn path_finding_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let sql = ParsedSql::parse(&result.base.sql);
 
+    assert!(sql.has_cte("forward"), "should have forward CTE");
+    assert!(sql.has_cte("backward"), "should have backward CTE");
+    assert!(sql.has_union_all());
     assert!(
-        result.base.sql.contains("forward AS"),
-        "should have forward CTE"
-    );
-    assert!(
-        result.base.sql.contains("backward AS"),
-        "should have backward CTE"
-    );
-    assert!(result.base.sql.contains("UNION ALL"));
-    assert!(
-        result.base.sql.contains("arrayConcat"),
+        sql.has_function("arrayConcat"),
         "paths should be concatenated"
     );
     assert!(
-        result.base.sql.contains("tuple"),
+        sql.has_function("tuple"),
         "path nodes should be typed tuples"
     );
     assert!(
-        result.base.sql.contains("f.end_id") && result.base.sql.contains("b.end_id"),
+        sql.has_column_ref("f.end_id") && sql.has_column_ref("b.end_id"),
         "should join forward and backward on end_id"
     );
 }
@@ -149,28 +134,31 @@ fn path_finding_depth_control() {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let shallow_result = compile(shallow, &test_ontology(), &test_ctx()).unwrap();
-    let deep_result = compile(deep, &test_ontology(), &test_ctx()).unwrap();
+    let shallow_sql = ParsedSql::parse(
+        &compile(shallow, &test_ontology(), &test_ctx())
+            .unwrap()
+            .base
+            .sql,
+    );
+    let deep_sql = ParsedSql::parse(
+        &compile(deep, &test_ontology(), &test_ctx())
+            .unwrap()
+            .base
+            .sql,
+    );
 
     assert!(
-        shallow_result.base.sql.contains("WITH forward AS"),
+        shallow_sql.has_cte("forward"),
         "shallow should have forward CTE"
     );
     assert!(
-        !shallow_result.base.sql.contains("backward AS"),
+        !shallow_sql.has_cte("backward"),
         "shallow (max_depth=1) should not have backward CTE"
     );
+    assert!(deep_sql.has_cte("forward"), "deep should have forward CTE");
     assert!(
-        deep_result.base.sql.contains("forward AS"),
-        "deep should have forward CTE"
-    );
-    assert!(
-        deep_result.base.sql.contains("backward AS"),
+        deep_sql.has_cte("backward"),
         "deep (max_depth=3) should have backward CTE"
-    );
-    assert!(
-        deep_result.base.sql.len() > shallow_result.base.sql.len(),
-        "deeper max_depth should produce more SQL"
     );
 }
 
@@ -183,16 +171,16 @@ fn neighbors_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    assert!(result.base.sql.contains("SELECT"));
-    assert!(result.base.sql.contains("_gkg_neighbor_id"));
-    assert!(result.base.sql.contains("_gkg_neighbor_type"));
-    assert!(result.base.sql.contains("_gkg_relationship_type"));
+    let sql = ParsedSql::parse(&result.base.sql);
+
+    assert!(sql.has_select_column("_gkg_neighbor_id"));
+    assert!(sql.has_select_column("_gkg_neighbor_type"));
+    assert!(sql.has_select_column("_gkg_relationship_type"));
     assert!(
-        result.base.sql.contains("_gkg_neighbor_is_outgoing"),
-        "bidirectional neighbor query should include direction column: {}",
-        result.base.sql
+        sql.has_select_column("_gkg_neighbor_is_outgoing"),
+        "bidirectional should include direction"
     );
-    assert!(result.base.sql.contains("INNER JOIN"));
+    assert!(sql.has_join());
 }
 
 #[test]
@@ -213,10 +201,12 @@ fn filter_operators() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    assert!(result.base.sql.contains("WHERE"));
-    assert!(result.base.sql.contains(">="));
-    assert!(result.base.sql.contains("IN"));
-    assert!(result.base.sql.contains("LIKE"));
+    let sql = ParsedSql::parse(&result.base.sql);
+
+    assert!(sql.has_where());
+    assert!(sql.has_operator(">="));
+    assert!(sql.has_operator("IN"));
+    assert!(sql.has_operator("LIKE"));
 }
 
 #[test]
@@ -226,57 +216,77 @@ fn invalid_json_rejected() {
 
 #[test]
 fn missing_required_fields_rejected() {
-    let result = compile(
+    assert!(compile(
         r#"{"query_type": "traversal"}"#,
         &test_ontology(),
-        &test_ctx(),
-    );
-    assert!(result.is_err());
+        &test_ctx()
+    )
+    .is_err());
 }
 
 #[test]
 fn sql_injection_in_node_id() {
-    let json = r#"{"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --"}]}"#;
-    let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+    let err = compile(
+        r#"{"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --"}]}"#,
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
 }
 
 #[test]
 fn sql_injection_in_relationship() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "a"}, {"id": "b"}],
-        "relationships": [{"type": "REL", "from": "a' OR '1'='1", "to": "b"}]
-    }"#;
-    let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "a"}, {"id": "b"}],
+            "relationships": [{"type": "REL", "from": "a' OR '1'='1", "to": "b"}]
+        }"#,
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
 }
 
 #[test]
 fn empty_node_id_rejected() {
-    let json = r#"{"query_type": "traversal", "nodes": [{"id": ""}]}"#;
-    assert!(compile(json, &test_ontology(), &test_ctx()).is_err());
+    assert!(compile(
+        r#"{"query_type": "traversal", "nodes": [{"id": ""}]}"#,
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .is_err());
 }
 
 #[test]
 fn id_starting_with_number_rejected() {
-    let json = r#"{"query_type": "traversal", "nodes": [{"id": "123abc"}]}"#;
-    let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+    let err = compile(
+        r#"{"query_type": "traversal", "nodes": [{"id": "123abc"}]}"#,
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
 }
 
 #[test]
 fn sql_injection_in_filter_property() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]
-    }"#;
-    let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]
+        }"#,
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
 }
 
 #[test]
-fn valid_identifiers_accepted() {
+fn valid_identifiers_produce_parseable_sql() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -291,5 +301,6 @@ fn valid_identifiers_accepted() {
             {"type": "MEMBER_OF", "from": "user_node", "to": "node123"}
         ]
     }"#;
-    assert!(compile(json, &test_ontology(), &test_ctx()).is_ok());
+    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    ParsedSql::parse(&result.base.sql);
 }

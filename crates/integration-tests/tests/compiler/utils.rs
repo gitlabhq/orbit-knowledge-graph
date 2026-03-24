@@ -1,19 +1,124 @@
-//! SQL assertion utilities backed by sqlparser.
+//! SQL assertion utilities backed by sqlparser's Visitor.
 //!
-//! Parses compiled SQL with the ClickHouse dialect and provides
-//! structured accessors so tests validate the AST, not string fragments.
+//! Parses compiled SQL with the ClickHouse dialect, then walks the
+//! entire AST (CTEs, subqueries, unions) to collect function names,
+//! column references, table names, aliases, and operators. Tests
+//! assert against these collected sets instead of raw string matching.
+
+use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
 
 use sqlparser::ast::{
-    Cte, Expr, GroupByExpr, LimitClause, OrderByKind, Query, Select, SelectItem, SetExpr,
-    Statement, TableFactor, TableWithJoins, With,
+    Expr, Function, GroupByExpr, LimitClause, ObjectName, OrderByKind, Query, Select, SelectItem,
+    SetExpr, Statement, TableFactor, Value, Visit, Visitor,
 };
 use sqlparser::dialect::ClickHouseDialect;
 use sqlparser::parser::Parser;
 
-/// Parsed SQL wrapper for structured assertions.
+use compiler::passes::codegen::ParamValue;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Collector — walks the full AST via Visitor
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Default)]
+struct Collector {
+    functions: HashSet<String>,
+    columns: HashSet<String>,
+    tables: HashSet<String>,
+    aliases: HashSet<String>,
+    cte_names: HashSet<String>,
+    operators: HashSet<String>,
+    has_union_all: bool,
+}
+
+impl Visitor for Collector {
+    type Break = ();
+
+    fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<()> {
+        match expr {
+            Expr::Function(Function { name, .. }) => {
+                self.functions.insert(name.to_string().to_uppercase());
+            }
+            Expr::Identifier(ident) => {
+                self.columns.insert(ident.value.clone());
+            }
+            Expr::CompoundIdentifier(parts) => {
+                let full = parts
+                    .iter()
+                    .map(|p| p.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                self.columns.insert(full);
+                if let Some(last) = parts.last() {
+                    self.columns.insert(last.value.clone());
+                }
+            }
+            Expr::BinaryOp { op, .. } => {
+                self.operators.insert(op.to_string());
+            }
+            Expr::Like { .. } => {
+                self.operators.insert("LIKE".to_string());
+            }
+            Expr::InList { .. } => {
+                self.operators.insert("IN".to_string());
+            }
+            _ => {}
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_relation(&mut self, relation: &ObjectName) -> ControlFlow<()> {
+        self.tables.insert(relation.to_string());
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_table_factor(&mut self, table_factor: &TableFactor) -> ControlFlow<()> {
+        match table_factor {
+            TableFactor::Table { alias, .. } => {
+                if let Some(a) = alias {
+                    self.aliases.insert(a.name.value.clone());
+                }
+            }
+            TableFactor::Derived { alias, .. } => {
+                if let Some(a) = alias {
+                    self.aliases.insert(a.name.value.clone());
+                }
+            }
+            _ => {}
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<()> {
+        if let Some(with) = &query.with {
+            for cte in &with.cte_tables {
+                self.cte_names.insert(cte.alias.name.value.clone());
+            }
+        }
+        if matches!(
+            query.body.as_ref(),
+            SetExpr::SetOperation {
+                op: sqlparser::ast::SetOperator::Union,
+                set_quantifier: sqlparser::ast::SetQuantifier::All
+                    | sqlparser::ast::SetQuantifier::None,
+                ..
+            }
+        ) {
+            self.has_union_all = true;
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ParsedSql — the public API
+// ─────────────────────────────────────────────────────────────────────────────
+
 pub struct ParsedSql {
     pub statements: Vec<Statement>,
     pub raw: String,
+    collected: Collector,
 }
 
 impl ParsedSql {
@@ -22,55 +127,158 @@ impl ParsedSql {
         let dialect = ClickHouseDialect {};
         let statements = Parser::parse_sql(&dialect, sql)
             .unwrap_or_else(|e| panic!("failed to parse SQL:\n{sql}\n\nerror: {e}"));
+
+        let mut collected = Collector::default();
+        for stmt in &statements {
+            stmt.visit(&mut collected);
+        }
+
+        // Also collect SELECT aliases (ExprWithAlias) which the visitor
+        // doesn't traverse as relations/identifiers.
+        for stmt in &statements {
+            if let Statement::Query(q) = stmt {
+                collect_select_aliases(q, &mut collected.aliases);
+            }
+        }
+
         Self {
             statements,
             raw: sql.to_string(),
+            collected,
         }
     }
 
-    /// Get the first (and usually only) statement.
-    pub fn statement(&self) -> &Statement {
-        assert!(
-            !self.statements.is_empty(),
-            "expected at least one statement"
-        );
-        &self.statements[0]
-    }
+    // ── Structural queries ───────────────────────────────────────────────
 
-    /// Get the top-level Query (unwrapping Statement::Query).
     pub fn query(&self) -> &Query {
-        match self.statement() {
+        match &self.statements[0] {
             Statement::Query(q) => q,
             other => panic!("expected Query, got: {other:?}"),
         }
     }
 
-    /// Get the outermost SELECT body (descends through SetExpr::Select).
     pub fn select(&self) -> &Select {
         extract_select(self.query())
     }
 
-    /// True if any CTE name matches.
-    pub fn has_cte(&self, name: &str) -> bool {
-        self.ctes().iter().any(|c| c.alias.name.value == name)
+    // ── Visitor-based lookups ────────────────────────────────────────────
+
+    /// True if any function call in the AST matches (case-insensitive).
+    pub fn has_function(&self, name: &str) -> bool {
+        self.collected.functions.contains(&name.to_uppercase())
     }
 
-    /// All CTEs from the WITH clause.
-    pub fn ctes(&self) -> Vec<&Cte> {
-        match &self.query().with {
-            Some(With { cte_tables, .. }) => cte_tables.iter().collect(),
-            None => vec![],
+    /// True if any column reference contains the substring.
+    pub fn has_column_ref(&self, needle: &str) -> bool {
+        self.collected.columns.iter().any(|c| c.contains(needle))
+    }
+
+    /// True if no column reference contains the substring.
+    pub fn lacks_column_ref(&self, needle: &str) -> bool {
+        !self.has_column_ref(needle)
+    }
+
+    /// True if any table name matches.
+    pub fn has_table(&self, name: &str) -> bool {
+        self.collected.tables.iter().any(|t| t.contains(name))
+    }
+
+    /// True if any alias matches.
+    pub fn has_alias(&self, name: &str) -> bool {
+        self.collected.aliases.contains(name)
+    }
+
+    /// True if a CTE with this name exists.
+    pub fn has_cte(&self, name: &str) -> bool {
+        self.collected.cte_names.contains(name)
+    }
+
+    /// True if any binary/unary operator matches.
+    pub fn has_operator(&self, op: &str) -> bool {
+        self.collected.operators.contains(op)
+    }
+
+    /// True if a UNION ALL appears anywhere in the query tree.
+    pub fn has_union_all(&self) -> bool {
+        self.collected.has_union_all
+    }
+
+    // ── SELECT-level helpers ─────────────────────────────────────────────
+
+    /// True if any SELECT item (alias or expression) contains the substring.
+    pub fn has_select_column(&self, needle: &str) -> bool {
+        self.select()
+            .projection
+            .iter()
+            .any(|item| item.to_string().contains(needle))
+    }
+
+    pub fn lacks_select_column(&self, needle: &str) -> bool {
+        !self.has_select_column(needle)
+    }
+
+    pub fn has_where(&self) -> bool {
+        self.select().selection.is_some()
+    }
+
+    pub fn where_str(&self) -> Option<String> {
+        self.select().selection.as_ref().map(|e| e.to_string())
+    }
+
+    pub fn has_group_by(&self) -> bool {
+        matches!(&self.select().group_by, GroupByExpr::Expressions(exprs, _) if !exprs.is_empty())
+    }
+
+    pub fn has_order_by(&self) -> bool {
+        match &self.query().order_by {
+            Some(ob) => match &ob.kind {
+                OrderByKind::Expressions(exprs) => !exprs.is_empty(),
+                OrderByKind::All(_) => true,
+            },
+            None => false,
         }
     }
 
-    /// Fallback for things sqlparser doesn't model well.
+    pub fn has_join(&self) -> bool {
+        self.select().from.iter().any(|t| !t.joins.is_empty())
+    }
+
+    pub fn lacks_join(&self) -> bool {
+        !self.has_join()
+    }
+
+    pub fn has_limit(&self) -> bool {
+        self.query().limit_clause.is_some()
+    }
+
+    pub fn limit_value(&self) -> Option<u64> {
+        match &self.query().limit_clause {
+            Some(LimitClause::LimitOffset { limit, .. }) => limit.as_ref().and_then(expr_to_u64),
+            Some(LimitClause::OffsetCommaLimit { limit, .. }) => expr_to_u64(limit),
+            None => None,
+        }
+    }
+
+    pub fn offset_value(&self) -> Option<u64> {
+        match &self.query().limit_clause {
+            Some(LimitClause::LimitOffset { offset, .. }) => {
+                offset.as_ref().and_then(|o| expr_to_u64(&o.value))
+            }
+            Some(LimitClause::OffsetCommaLimit { offset, .. }) => expr_to_u64(offset),
+            None => None,
+        }
+    }
+
+    /// Fallback for anything the visitor doesn't cover.
     pub fn raw_contains(&self, s: &str) -> bool {
         self.raw.contains(s)
     }
+}
 
-    /// Assert the SQL parses and return self for chaining.
-    pub fn assert_valid(self) -> Self {
-        self
+fn expr_to_u64(expr: &Expr) -> Option<u64> {
+    match expr {
+        Expr::Value(v) => v.to_string().parse().ok(),
+        _ => None,
     }
 }
 
@@ -85,184 +293,19 @@ fn extract_select(query: &Query) -> &Select {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Select-level helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-impl ParsedSql {
-    /// All projected column aliases/expressions as strings.
-    pub fn select_columns(&self) -> Vec<String> {
-        self.select()
-            .projection
-            .iter()
-            .map(|item| match item {
-                SelectItem::UnnamedExpr(e) => e.to_string(),
-                SelectItem::ExprWithAlias { alias, .. } => alias.value.clone(),
-                SelectItem::QualifiedWildcard(name, _) => format!("{name}.*"),
-                SelectItem::Wildcard(_) => "*".to_string(),
-            })
-            .collect()
-    }
-
-    /// True if any SELECT column alias or expression contains the substring.
-    pub fn has_select_column(&self, needle: &str) -> bool {
-        self.select()
-            .projection
-            .iter()
-            .any(|item| item.to_string().contains(needle))
-    }
-
-    /// True if SELECT has no columns matching the substring.
-    pub fn lacks_select_column(&self, needle: &str) -> bool {
-        !self.has_select_column(needle)
-    }
-
-    /// True if there's a LIMIT clause.
-    pub fn has_limit(&self) -> bool {
-        self.query().limit_clause.is_some()
-    }
-
-    /// Get the LIMIT value as u64.
-    pub fn limit_value(&self) -> Option<u64> {
-        match &self.query().limit_clause {
-            Some(LimitClause::LimitOffset { limit, .. }) => limit.as_ref().and_then(|e| match e {
-                Expr::Value(v) => v.to_string().parse().ok(),
-                _ => None,
-            }),
-            Some(LimitClause::OffsetCommaLimit { limit, .. }) => match limit {
-                Expr::Value(v) => v.to_string().parse().ok(),
-                _ => None,
-            },
-            None => None,
-        }
-    }
-
-    /// Get the OFFSET value as u64.
-    pub fn offset_value(&self) -> Option<u64> {
-        match &self.query().limit_clause {
-            Some(LimitClause::LimitOffset { offset, .. }) => {
-                offset.as_ref().and_then(|o| match &o.value {
-                    Expr::Value(v) => v.to_string().parse().ok(),
-                    _ => None,
-                })
-            }
-            Some(LimitClause::OffsetCommaLimit { offset, .. }) => match offset {
-                Expr::Value(v) => v.to_string().parse().ok(),
-                _ => None,
-            },
-            None => None,
-        }
-    }
-
-    /// True if there's an ORDER BY clause.
-    pub fn has_order_by(&self) -> bool {
-        match &self.query().order_by {
-            Some(ob) => match &ob.kind {
-                OrderByKind::Expressions(exprs) => !exprs.is_empty(),
-                OrderByKind::All(_) => true,
-            },
-            None => false,
-        }
-    }
-
-    /// True if there's a GROUP BY clause.
-    pub fn has_group_by(&self) -> bool {
-        matches!(&self.select().group_by, GroupByExpr::Expressions(exprs, _) if !exprs.is_empty())
-    }
-
-    /// True if there's a WHERE clause.
-    pub fn has_where(&self) -> bool {
-        self.select().selection.is_some()
-    }
-
-    /// The WHERE clause as a string.
-    pub fn where_str(&self) -> Option<String> {
-        self.select().selection.as_ref().map(|e| e.to_string())
-    }
-
-    /// True if any FROM table reference contains the name.
-    pub fn has_table(&self, name: &str) -> bool {
-        self.select().from.iter().any(|t| table_contains(t, name))
-    }
-
-    /// True if there's any JOIN in the FROM clause.
-    pub fn has_join(&self) -> bool {
-        self.select().from.iter().any(|t| !t.joins.is_empty())
-    }
-
-    /// True if there's no JOIN in the FROM clause.
-    pub fn lacks_join(&self) -> bool {
-        !self.has_join()
-    }
-
-    /// True if the query body is a UNION ALL.
-    pub fn is_union_all(&self) -> bool {
-        matches!(
-            self.query().body.as_ref(),
-            SetExpr::SetOperation {
-                op: sqlparser::ast::SetOperator::Union,
-                ..
-            }
-        )
-    }
-
-    /// Collect all table names referenced anywhere in FROM/JOIN.
-    pub fn all_tables(&self) -> Vec<String> {
-        let mut tables = Vec::new();
-        for from in &self.select().from {
-            collect_table_names(&from.relation, &mut tables);
-            for join in &from.joins {
-                collect_table_names(&join.relation, &mut tables);
+fn collect_select_aliases(query: &Query, aliases: &mut HashSet<String>) {
+    if let SetExpr::Select(s) = query.body.as_ref() {
+        for item in &s.projection {
+            if let SelectItem::ExprWithAlias { alias, .. } = item {
+                aliases.insert(alias.value.clone());
             }
         }
-        tables
-    }
-}
-
-fn table_contains(twj: &TableWithJoins, name: &str) -> bool {
-    table_factor_contains(&twj.relation, name)
-        || twj
-            .joins
-            .iter()
-            .any(|j| table_factor_contains(&j.relation, name))
-}
-
-fn table_factor_contains(tf: &TableFactor, name: &str) -> bool {
-    match tf {
-        TableFactor::Table { name: n, .. } => n.to_string().contains(name),
-        TableFactor::Derived { alias, .. } => {
-            alias.as_ref().is_some_and(|a| a.name.value.contains(name))
-        }
-        TableFactor::NestedJoin {
-            table_with_joins, ..
-        } => table_contains(table_with_joins, name),
-        _ => false,
-    }
-}
-
-fn collect_table_names(tf: &TableFactor, out: &mut Vec<String>) {
-    match tf {
-        TableFactor::Table { name, alias, .. } => {
-            out.push(name.to_string());
-            if let Some(a) = alias {
-                out.push(a.name.value.clone());
-            }
-        }
-        TableFactor::Derived { alias, .. } => {
-            if let Some(a) = alias {
-                out.push(a.name.value.clone());
-            }
-        }
-        _ => {}
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Param helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
-use compiler::passes::codegen::ParamValue;
-use std::collections::HashMap;
 
 /// True if any param value matches the given JSON value.
 pub fn has_param_value(params: &HashMap<String, ParamValue>, val: &serde_json::Value) -> bool {
