@@ -32,7 +32,7 @@ fn traversal_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_table("gl_edge"));
     assert!(sql.has_column_ref("relationship_kind"));
@@ -77,7 +77,7 @@ fn aggregation_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_function("COUNT") || sql.has_function("countIf"));
     assert!(sql.has_group_by());
@@ -95,7 +95,7 @@ fn path_finding_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_cte("forward"), "should have forward CTE");
     assert!(sql.has_cte("backward"), "should have backward CTE");
@@ -134,18 +134,13 @@ fn path_finding_depth_control() {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let shallow_sql = ParsedSql::parse(
+    let shallow_sql = ParsedSql::from_query(
         &compile(shallow, &test_ontology(), &test_ctx())
             .unwrap()
-            .base
-            .sql,
+            .base,
     );
-    let deep_sql = ParsedSql::parse(
-        &compile(deep, &test_ontology(), &test_ctx())
-            .unwrap()
-            .base
-            .sql,
-    );
+    let deep_sql =
+        ParsedSql::from_query(&compile(deep, &test_ontology(), &test_ctx()).unwrap().base);
 
     assert!(
         shallow_sql.has_cte("forward"),
@@ -171,16 +166,17 @@ fn neighbors_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    // Uses ClickHouse `IN [...]` array syntax for node_ids.
+    let rendered = result.base.render();
 
-    assert!(sql.has_select_column("_gkg_neighbor_id"));
-    assert!(sql.has_select_column("_gkg_neighbor_type"));
-    assert!(sql.has_select_column("_gkg_relationship_type"));
+    assert!(rendered.contains("_gkg_neighbor_id"));
+    assert!(rendered.contains("_gkg_neighbor_type"));
+    assert!(rendered.contains("_gkg_relationship_type"));
     assert!(
-        sql.has_select_column("_gkg_neighbor_is_outgoing"),
+        rendered.contains("_gkg_neighbor_is_outgoing"),
         "bidirectional should include direction"
     );
-    assert!(sql.has_join());
+    assert!(rendered.contains("JOIN"));
 }
 
 #[test]
@@ -201,12 +197,13 @@ fn filter_operators() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
+    let rendered = result.base.render();
 
-    assert!(sql.has_where());
-    assert!(sql.has_operator(">="));
-    assert!(sql.has_operator("IN"));
-    assert!(sql.has_operator("LIKE"));
+    assert!(rendered.contains("WHERE"));
+    assert!(rendered.contains(">="));
+    assert!(rendered.contains("IN"));
+    assert!(rendered.contains("LIKE"));
 }
 
 #[test]
@@ -302,5 +299,5 @@ fn valid_identifiers_produce_parseable_sql() {
         ]
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    ParsedSql::parse(&result.base.sql);
+    ParsedSql::from_query(&result.base);
 }

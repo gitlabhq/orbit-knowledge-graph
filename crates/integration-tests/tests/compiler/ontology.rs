@@ -122,7 +122,7 @@ fn full_pipeline() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_table("gl_edge"));
     assert_eq!(sql.limit_value(), Some(25));
@@ -142,7 +142,7 @@ fn basic_search_query() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_where());
     assert!(sql.has_column_ref("username"));
@@ -169,15 +169,20 @@ fn complex_search_query() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
+    let rendered = result.base.render();
 
-    assert!(sql.has_where());
-    assert!(sql.has_column_ref("username"));
-    assert!(sql.has_column_ref("state"));
-    assert!(sql.has_column_ref("created_at"));
-    assert!(sql.has_order_by());
-    assert_eq!(sql.limit_value(), Some(50));
-    assert!(sql.lacks_join(), "search queries should not have joins");
+    assert!(rendered.contains("WHERE"));
+    assert!(rendered.contains("username"));
+    assert!(rendered.contains("state"));
+    assert!(rendered.contains("created_at"));
+    assert!(rendered.contains("ORDER BY"));
+    assert!(rendered.contains("DESC"));
+    assert!(rendered.contains("LIMIT 50"));
+    assert!(
+        !rendered.contains("JOIN"),
+        "search queries should not have joins"
+    );
 }
 
 #[test]
@@ -189,7 +194,7 @@ fn search_with_specific_columns() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_u_id"));
     assert!(sql.has_select_column("_gkg_u_type"));
@@ -206,7 +211,7 @@ fn search_with_wildcard_columns() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_u_id"));
     assert!(sql.has_select_column("_gkg_u_type"));
@@ -226,7 +231,7 @@ fn traversal_with_columns() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_u_id"));
     assert!(sql.has_select_column("_gkg_u_type"));
@@ -248,7 +253,7 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_u_id"));
     assert!(sql.has_select_column("_gkg_u_type"));
@@ -270,7 +275,7 @@ fn path_finding_uses_gkg_path_not_node_columns() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_column_ref("_gkg_path"));
     assert!(result.base.result_context.query_type == Some(QueryType::PathFinding));
@@ -289,7 +294,7 @@ fn result_context_populated() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert_eq!(result.base.result_context.len(), 2);
 
@@ -326,7 +331,7 @@ fn multi_hop_traversal_generates_union_subquery() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_union_all());
     assert!(sql.has_alias("hop_e0"));
@@ -346,7 +351,7 @@ fn multi_hop_with_min_hops_filter() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_column_ref("hop_e0.depth") || sql.has_column_ref("depth"));
 }
@@ -364,7 +369,7 @@ fn single_hop_does_not_generate_recursive_cte() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(
         !sql.raw_contains("WITH RECURSIVE"),
@@ -386,7 +391,7 @@ fn multi_hop_aggregation() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_union_all());
     assert!(sql.has_alias("hop_e0"));
@@ -406,7 +411,7 @@ fn definition_uses_project_id_for_redaction() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_d_id"));
     assert!(sql.has_select_column("_gkg_d_type"));
@@ -425,7 +430,7 @@ fn project_still_uses_id_for_redaction() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_p_id"));
     assert!(
@@ -453,7 +458,7 @@ fn range_pagination() {
         &ctx,
     )
     .unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
     assert_eq!(sql.limit_value(), Some(10));
     assert_eq!(sql.offset_value(), Some(40));
 
@@ -472,7 +477,7 @@ fn range_pagination() {
         &ctx,
     )
     .unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
     assert_eq!(sql.limit_value(), Some(30));
     assert_eq!(sql.offset_value(), Some(0));
     assert!(sql.has_order_by());
@@ -579,12 +584,12 @@ fn render_in_filter_inlines_array() {
     .base
     .render();
 
-    let sql = ParsedSql::parse(&rendered);
+    // Uses ClickHouse `IN [...]` array syntax.
     assert!(
         !rendered.contains("{p"),
         "rendered SQL should have no placeholders"
     );
-    assert!(sql.raw_contains("'project_bot'") && sql.raw_contains("'service_account'"));
+    assert!(rendered.contains("'project_bot'") && rendered.contains("'service_account'"));
 }
 
 #[test]
@@ -602,7 +607,7 @@ fn render_node_ids_inlines_array() {
     .base
     .render();
 
-    ParsedSql::parse(&rendered);
+    // Uses ClickHouse `IN [...]` array syntax for node_ids.
     assert!(
         !rendered.contains("{p"),
         "rendered SQL should have no placeholders"
@@ -627,9 +632,8 @@ fn debug_json_round_trip() {
     )
     .unwrap();
 
-    // Both parameterized and rendered SQL should parse
-    ParsedSql::parse(&compiled.base.sql);
-    ParsedSql::parse(&compiled.base.render());
+    // Rendered (inlined) SQL should parse as valid ClickHouse SQL
+    ParsedSql::from_query(&compiled.base);
 
     let debug_json = serde_json::json!({
         "base": compiled.base.sql,
@@ -682,12 +686,14 @@ fn hydration_query_type_generates_union_all() {
     };
 
     let result = compile_input(input, &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    // Hydration SQL uses ClickHouse array literals (`IN [1,2,3]`) which
+    // sqlparser doesn't support yet, so we check the raw SQL string.
+    let raw = &result.base.render();
 
-    assert!(sql.has_union_all());
-    assert!(sql.has_function("toJSONString"));
-    assert!(sql.has_table("gl_note"));
-    assert!(sql.has_table("gl_project"));
+    assert!(raw.contains("UNION ALL"));
+    assert!(raw.contains("toJSONString"));
+    assert!(raw.contains("gl_note"));
+    assert!(raw.contains("gl_project"));
     assert!(matches!(result.hydration, HydrationPlan::None));
 }
 
@@ -708,7 +714,7 @@ fn hydration_single_entity_no_union_all() {
     };
 
     let result = compile_input(input, &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(!sql.has_union_all());
     assert!(sql.has_function("toJSONString"));
@@ -736,14 +742,15 @@ fn hydration_uses_parameterized_ids() {
     };
 
     let result = compile_input(input, &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    // Hydration SQL uses ClickHouse array literals — check raw strings.
+    let parameterized = &result.base.sql;
 
     assert!(
-        sql.raw_contains("Array(Int64)"),
+        parameterized.contains("Array(Int64)"),
         "IDs should be parameterized"
     );
     assert!(
-        !sql.raw_contains("100"),
+        !parameterized.contains("100"),
         "literal IDs should not appear in parameterized SQL"
     );
 
@@ -771,7 +778,7 @@ fn hydration_skips_security_context() {
     };
 
     let result = compile_input(input, &test_ctx()).unwrap();
-    let sql = ParsedSql::parse(&result.base.sql);
+    let sql = ParsedSql::from_query(&result.base);
 
     assert!(
         !sql.has_column_ref("traversal_path"),

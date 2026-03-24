@@ -10,12 +10,12 @@ use std::ops::ControlFlow;
 
 use sqlparser::ast::{
     Expr, Function, GroupByExpr, LimitClause, ObjectName, OrderByKind, Query, Select, SelectItem,
-    SetExpr, Statement, TableFactor, Value, Visit, Visitor,
+    SetExpr, Statement, TableFactor, Visit, Visitor,
 };
 use sqlparser::dialect::ClickHouseDialect;
 use sqlparser::parser::Parser;
 
-use compiler::passes::codegen::ParamValue;
+use compiler::passes::codegen::{ParamValue, ParameterizedQuery};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Collector — walks the full AST via Visitor
@@ -122,7 +122,15 @@ pub struct ParsedSql {
 }
 
 impl ParsedSql {
-    /// Parse SQL using ClickHouse dialect. Panics on parse failure.
+    /// Parse a `ParameterizedQuery` by rendering (inlining params) first.
+    /// This is the preferred entry point — parameterized placeholders like
+    /// `{p0:String}` aren't valid SQL and can't be parsed directly.
+    pub fn from_query(query: &ParameterizedQuery) -> Self {
+        Self::parse(&query.render())
+    }
+
+    /// Parse raw SQL using ClickHouse dialect. Panics on parse failure.
+    /// Prefer `from_query` for compiler output.
     pub fn parse(sql: &str) -> Self {
         let dialect = ClickHouseDialect {};
         let statements = Parser::parse_sql(&dialect, sql)
@@ -130,7 +138,7 @@ impl ParsedSql {
 
         let mut collected = Collector::default();
         for stmt in &statements {
-            stmt.visit(&mut collected);
+            let _ = stmt.visit(&mut collected);
         }
 
         // Also collect SELECT aliases (ExprWithAlias) which the visitor
