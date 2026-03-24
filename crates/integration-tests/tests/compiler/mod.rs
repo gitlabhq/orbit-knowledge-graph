@@ -1,3 +1,4 @@
+mod macros;
 mod ontology;
 mod pipeline;
 mod queries;
