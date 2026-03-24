@@ -35,7 +35,7 @@ pub enum RepositoryCacheError {
 }
 
 #[async_trait]
-pub trait RepositoryCacheLifecycle: Send + Sync {
+pub trait RepositoryCache: Send + Sync {
     async fn get(
         &self,
         project_id: i64,
@@ -66,10 +66,7 @@ pub trait RepositoryCacheLifecycle: Send + Sync {
         project_id: i64,
         branch: &str,
     ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError>;
-}
 
-#[async_trait]
-pub trait CachedRepositoryFiles: Send + Sync {
     async fn delete_file(
         &self,
         project_id: i64,
@@ -101,10 +98,6 @@ pub trait CachedRepositoryFiles: Send + Sync {
     ) -> Result<(), RepositoryCacheError>;
 }
 
-/// Blanket-implemented for any type implementing both sub-traits.
-pub trait RepositoryCache: RepositoryCacheLifecycle + CachedRepositoryFiles {}
-impl<T: RepositoryCacheLifecycle + CachedRepositoryFiles> RepositoryCache for T {}
-
 const COMMIT_FILE: &str = ".commit";
 const META_DIR: &str = "meta";
 const REPOSITORY_DIR: &str = "repository";
@@ -112,6 +105,7 @@ const REPOSITORY_DIR: &str = "repository";
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
     budget: CacheBudget,
+    eviction_lock: tokio::sync::RwLock<()>,
     metrics: CodeMetrics,
     phantom_bytes: AtomicU64,
     headroom: u64,
@@ -143,6 +137,7 @@ impl LocalRepositoryCache {
         Self {
             base_dir,
             budget,
+            eviction_lock: tokio::sync::RwLock::new(()),
             metrics,
             phantom_bytes: AtomicU64::new(0),
             headroom,
@@ -210,7 +205,7 @@ impl LocalRepositoryCache {
     }
 
     async fn make_room_for(&self, needed_bytes: u64) -> Result<(), RepositoryCacheError> {
-        let _eviction_guard = self.budget.eviction_write_lock().await;
+        let _eviction_guard = self.eviction_lock.write().await;
 
         let keys_to_evict = match self.budget.entries_to_evict(needed_bytes) {
             Ok(keys) => keys,
@@ -310,7 +305,7 @@ fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCach
 }
 
 #[async_trait]
-impl RepositoryCacheLifecycle for LocalRepositoryCache {
+impl RepositoryCache for LocalRepositoryCache {
     async fn get(
         &self,
         project_id: i64,
@@ -386,7 +381,7 @@ impl RepositoryCacheLifecycle for LocalRepositoryCache {
         project_id: i64,
         branch: &str,
     ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError> {
-        let _eviction_guard = self.budget.eviction_read_lock().await;
+        let _eviction_guard = self.eviction_lock.read().await;
         let cached = self.get(project_id, branch).await?;
         match cached {
             Some(repo) => {
@@ -396,10 +391,7 @@ impl RepositoryCacheLifecycle for LocalRepositoryCache {
             None => Ok(None),
         }
     }
-}
 
-#[async_trait]
-impl CachedRepositoryFiles for LocalRepositoryCache {
     async fn delete_file(
         &self,
         project_id: i64,
@@ -1033,7 +1025,7 @@ mod tests {
             let cache = std::sync::Arc::clone(&cache);
             let path = entry_path.clone();
             readers.push(tokio::spawn(async move {
-                let _read_guard = cache.budget.eviction_read_lock().await;
+                let _read_guard = cache.eviction_lock.read().await;
                 let guard = cache.budget.pin(path, 1, "main");
                 tokio::task::yield_now().await;
                 drop(guard);

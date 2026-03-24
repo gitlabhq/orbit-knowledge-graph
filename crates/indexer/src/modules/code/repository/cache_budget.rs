@@ -13,8 +13,6 @@ use parking_lot::RwLock;
 use crate::modules::code::metrics::CodeMetrics;
 
 pub type CacheKey = (i64, String);
-pub type EvictionReadGuard<'a> = tokio::sync::RwLockReadGuard<'a, ()>;
-pub type EvictionWriteGuard<'a> = tokio::sync::RwLockWriteGuard<'a, ()>;
 
 pub fn cache_key(project_id: i64, branch: &str) -> CacheKey {
     (project_id, branch.to_string())
@@ -70,24 +68,25 @@ struct IndexEntry {
     last_accessed: SystemTime,
 }
 
+/// Pure bookkeeping for cache sizes, pins, and LRU eviction ordering.
+///
 /// # Lock ordering
 ///
-/// `eviction_lock` → `index` → `pin_counts`. Always acquire in this order.
+/// `index` → `pin_counts`. Always acquire in this order.
 ///
-/// - `eviction_lock` (tokio `RwLock`): serializes eviction (write) with
-///   `get`+`pin` sequences (read) so an entry cannot be deleted between a
-///   cache hit and its pin.
 /// - `index` (parking_lot `RwLock`): protects the in-memory size/LRU index.
 ///   Held briefly — never across await points.
 /// - `pin_counts` (parking_lot `RwLock`): tracks active `RepositoryLease` refs.
 ///   Read under `index` read in `entries_to_evict`; written independently in `pin`/`Drop`.
+///
+/// The eviction lock that serializes eviction with `get`+`pin` sequences
+/// lives in `LocalRepositoryCache`, not here.
 pub struct CacheBudget {
     usable_budget: u64,
     large_repo_threshold: u64,
     index: Arc<RwLock<HashMap<CacheKey, IndexEntry>>>,
     pin_counts: Arc<RwLock<HashMap<CacheKey, usize>>>,
     total_bytes: Arc<AtomicU64>,
-    eviction_lock: Arc<tokio::sync::RwLock<()>>,
     metrics: CodeMetrics,
 }
 
@@ -99,7 +98,6 @@ impl CacheBudget {
             index: Arc::new(RwLock::new(HashMap::new())),
             pin_counts: Arc::new(RwLock::new(HashMap::new())),
             total_bytes: Arc::new(AtomicU64::new(0)),
-            eviction_lock: Arc::new(tokio::sync::RwLock::new(())),
             metrics,
         }
     }
@@ -159,14 +157,6 @@ impl CacheBudget {
         }
         self.report_state();
         size
-    }
-
-    pub async fn eviction_read_lock(&self) -> EvictionReadGuard<'_> {
-        self.eviction_lock.read().await
-    }
-
-    pub async fn eviction_write_lock(&self) -> EvictionWriteGuard<'_> {
-        self.eviction_lock.write().await
     }
 
     /// Returns the keys that should be evicted to make room for `needed_bytes`.
