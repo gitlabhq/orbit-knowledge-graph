@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
 use crate::passes::envs::HasOntology;
-use crate::pipeline::{CompilerContext, CompilerPass, Parsed, PipelineEnv, Validated};
+use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 use ontology::{DataType, Ontology};
 
 /// Pipeline pass: validates a parsed `Input` against schema, ontology, and
@@ -20,10 +20,8 @@ pub struct ValidatePass;
 
 impl<E: PipelineEnv + HasOntology> CompilerPass<E> for ValidatePass {
     const NAME: &'static str = "validate";
-    type In = Parsed;
-    type Out = Validated;
 
-    fn run(&self, ctx: &mut CompilerContext<Parsed, E>) -> Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
         let json = ctx.json.as_deref().expect("json must exist");
         let ontology = ctx.env().ontology();
         let v = Validator::new(ontology);

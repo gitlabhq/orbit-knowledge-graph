@@ -9,7 +9,7 @@
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
 use crate::passes::envs::HasOntology;
-use crate::pipeline::{CompilerContext, CompilerPass, Normalized, PipelineEnv, Validated};
+use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
@@ -24,10 +24,8 @@ pub struct NormalizePass;
 
 impl<E: PipelineEnv + HasOntology> CompilerPass<E> for NormalizePass {
     const NAME: &'static str = "normalize";
-    type In = Validated;
-    type Out = Normalized;
 
-    fn run(&self, ctx: &mut CompilerContext<Validated, E>) -> Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
         let input = ctx
             .input
             .take()

@@ -3,7 +3,7 @@
 //! Transforms validated input into a SQL-oriented AST.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
-use crate::pipeline::{CompilerContext, CompilerPass, Lowered, Normalized, PipelineEnv};
+use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 
 use crate::constants::{
     ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,
@@ -30,10 +30,8 @@ pub struct LowerPass;
 
 impl<E: PipelineEnv> CompilerPass<E> for LowerPass {
     const NAME: &'static str = "lower";
-    type In = Normalized;
-    type Out = Lowered;
 
-    fn run(&self, ctx: &mut CompilerContext<Normalized, E>) -> crate::error::Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<E>) -> crate::error::Result<()> {
         let input = ctx
             .input
             .as_mut()

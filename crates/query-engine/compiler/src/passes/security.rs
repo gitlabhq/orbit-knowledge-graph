@@ -11,7 +11,7 @@ use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
 use crate::passes::envs::HasSecurityCtx;
-use crate::pipeline::{CompilerContext, CompilerPass, Enforced, PipelineEnv, Secured};
+use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -21,10 +21,8 @@ pub struct SecurityPass;
 
 impl<E: PipelineEnv + HasSecurityCtx> CompilerPass<E> for SecurityPass {
     const NAME: &'static str = "security";
-    type In = Enforced;
-    type Out = Secured;
 
-    fn run(&self, ctx: &mut CompilerContext<Enforced, E>) -> Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
         let security_ctx = ctx.env().security_ctx().clone();
         let node = ctx.node.as_mut().expect("node must exist after enforce");
         apply_security_context(node, &security_ctx)?;

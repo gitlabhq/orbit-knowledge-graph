@@ -30,7 +30,7 @@ use crate::constants::{
 use crate::input::{Input, InputNode, QueryType};
 use crate::passes::envs::HasSecurityCtx;
 use crate::passes::security::SecurityContext;
-use crate::pipeline::{CompilerContext, CompilerPass, Lowered, Optimized, PipelineEnv};
+use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
@@ -44,10 +44,8 @@ pub struct OptimizePass;
 
 impl<E: PipelineEnv + HasSecurityCtx> CompilerPass<E> for OptimizePass {
     const NAME: &'static str = "optimize";
-    type In = Lowered;
-    type Out = Optimized;
 
-    fn run(&self, ctx: &mut CompilerContext<Lowered, E>) -> crate::error::Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<E>) -> crate::error::Result<()> {
         let security_ctx = ctx.env().security_ctx().clone();
         let node = ctx.node.as_mut().expect("node must exist after lowering");
         let input = ctx.input.as_mut().expect("input must exist");
