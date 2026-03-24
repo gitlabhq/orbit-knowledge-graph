@@ -86,56 +86,53 @@ pub use passes::validate::Validator;
 pub use types::SecurityContext;
 
 use metrics::CountErr;
+use std::sync::Arc;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Validate and normalize a JSON query string into a typed `Input`.
-pub(crate) fn validated_input(json_input: &str, ontology: &Ontology) -> Result<Input> {
-    let v = Validator::new(ontology);
-    let value = v.check_json(json_input).count_err()?;
-    v.check_ontology(&value).count_err()?;
-    let input: Input = serde_json::from_value(value).count_err()?;
-    v.check_references(&input).count_err()?;
-    normalize(input, ontology).count_err()
-}
-
 /// Compile a JSON query into a [`CompiledQueryContext`].
 ///
 /// The context contains the parameterized SQL, bind parameters, result context
 /// for redaction, hydration plan, and the validated input.
+///
+/// Runs the full ClickHouse compilation pipeline:
+/// `JSON → Validate → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen`
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     json_input: &str,
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let input = validated_input(json_input, ontology).count_err()?;
-    compile_input(input, ctx)
+    let env = SecureEnv::new(Arc::new(ontology.clone()), ctx.clone());
+    let state = QueryState::from_json(json_input);
+    let pipeline = pipelines::clickhouse().seal();
+    pipeline.execute(state, &env)?.into_output().count_err()
 }
 
 /// Compile from a pre-built `Input`. Used for internal query types (Hydration)
 /// that bypass JSON schema validation.
-pub fn compile_input(mut input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
-    let mut node = lower(&mut input).count_err()?;
-    optimize(&mut node, &mut input, ctx);
-    let result_context = enforce_return(&mut node, &input)?;
-    if input.query_type != QueryType::Hydration {
-        apply_security_context(&mut node, ctx).count_err()?;
-        check_ast(&node, ctx).count_err()?;
-    }
-    let base = codegen(&node, result_context).count_err()?;
+///
+/// For hydration queries (`QueryType::Hydration`), skips security and check
+/// passes and uses `HydrationCodegenPass` (no hydration plan generation).
+/// For all other query types, runs the full secure pipeline.
+pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
+    let env = SecureEnv::new(Arc::new(Ontology::new()), ctx.clone());
+    let is_hydration = input.query_type == QueryType::Hydration;
+    let state = QueryState::from_input(input);
 
-    let hydration = generate_hydration_plan(&input);
-    let query_type = input.query_type;
+    let pipeline = if is_hydration {
+        pipelines::hydration()
+    } else {
+        pipelines::from_input()
+    };
 
-    Ok(CompiledQueryContext {
-        query_type,
-        base,
-        hydration,
-        input,
-    })
+    pipeline
+        .seal()
+        .execute(state, &env)?
+        .into_output()
+        .count_err()
 }
 
 // Pipeline presets are in `pipelines.rs`.

@@ -63,6 +63,14 @@ pub struct QueryState {
     pub output: Option<CompiledQueryContext>,
 }
 
+impl QueryState {
+    /// Extract the compiled output, consuming the state.
+    pub fn into_output(self) -> Result<CompiledQueryContext> {
+        self.output
+            .ok_or_else(|| QueryError::PipelineInvariant("pipeline did not produce output".into()))
+    }
+}
+
 #[derive(PipelineState)]
 pub struct DuckDbState {
     pub json: Option<String>,
@@ -88,26 +96,40 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
-        .seal(SealInput)
         .pass(SecurityPass)
         .pass(CheckPass)
         .pass(CodegenPass)
         .build()
 }
 
-/// Hydration pipeline — skips security and check passes.
+/// Compile from a pre-built [`Input`]. Runs full security and check passes.
+///
+/// Used by tests and the `compile_input()` public API for non-hydration queries.
 ///
 /// ```text
-/// Input → Normalize → Lower → Optimize → Enforce → Check → Codegen
+/// Input → Lower → Optimize → Enforce → Security → Check → Codegen
 /// ```
-pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
+pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
-        .pass(NormalizePass)
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
-        .seal(SealInput)
+        .pass(SecurityPass)
         .pass(CheckPass)
         .pass(CodegenPass)
+        .build()
+}
+
+/// Hydration compilation — skips security, check, and hydration plan generation.
+///
+/// ```text
+/// Input → Lower → Optimize → Enforce → HydrationCodegen
+/// ```
+pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
+    Pipeline::builder()
+        .pass(LowerPass)
+        .pass(OptimizePass)
+        .pass(EnforcePass)
+        .pass(HydrationCodegenPass)
         .build()
 }
