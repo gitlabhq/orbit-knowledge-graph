@@ -75,15 +75,9 @@ impl Visitor for Collector {
 
     fn pre_visit_table_factor(&mut self, table_factor: &TableFactor) -> ControlFlow<()> {
         match table_factor {
-            TableFactor::Table { alias, .. } => {
-                if let Some(a) = alias {
-                    self.aliases.insert(a.name.value.clone());
-                }
-            }
-            TableFactor::Derived { alias, .. } => {
-                if let Some(a) = alias {
-                    self.aliases.insert(a.name.value.clone());
-                }
+            TableFactor::Table { alias: Some(a), .. }
+            | TableFactor::Derived { alias: Some(a), .. } => {
+                self.aliases.insert(a.name.value.clone());
             }
             _ => {}
         }
