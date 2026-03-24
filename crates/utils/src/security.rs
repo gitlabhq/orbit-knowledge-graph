@@ -1,0 +1,61 @@
+//! Security context for request-level isolation.
+
+use once_cell::sync::Lazy;
+use regex::Regex;
+
+/// Matches paths like "1/", "1/2/", "123/456/789/"
+static TRAVERSAL_PATH_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
+
+/// Security context for request-level isolation.
+///
+/// Contains the org ID and traversal paths used to scope queries to
+/// a specific organization's data.
+#[derive(Debug, Clone)]
+pub struct SecurityContext {
+    pub org_id: i64,
+    pub traversal_paths: Vec<String>,
+}
+
+impl SecurityContext {
+    /// Create a new security context with validation.
+    ///
+    /// Validates that:
+    /// - Each path matches the format `int/int/.../`
+    /// - Each segment fits in i64
+    /// - The first segment of each path equals org_id
+    pub fn new(org_id: i64, traversal_paths: Vec<String>) -> Result<Self, String> {
+        for path in &traversal_paths {
+            validate_traversal_path(path, org_id)?;
+        }
+        Ok(Self {
+            org_id,
+            traversal_paths,
+        })
+    }
+}
+
+fn validate_traversal_path(path: &str, org_id: i64) -> Result<(), String> {
+    if !TRAVERSAL_PATH_REGEX.is_match(path) {
+        return Err(format!(
+            "invalid traversal_path format: '{path}' (expected pattern like '1/2/3/')"
+        ));
+    }
+
+    let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+
+    for segment in &segments {
+        segment
+            .parse::<i64>()
+            .map_err(|_| format!("traversal_path segment '{segment}' exceeds i64 range"))?;
+    }
+
+    let first_segment: i64 = segments[0].parse().expect("validated above");
+    if first_segment != org_id {
+        return Err(format!(
+            "traversal_path '{path}' does not start with org_id {org_id}"
+        ));
+    }
+
+    Ok(())
+}

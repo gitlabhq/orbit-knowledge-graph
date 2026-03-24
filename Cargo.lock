@@ -2806,6 +2806,8 @@ dependencies = [
  "arrow",
  "chrono",
  "enum-as-inner",
+ "once_cell",
+ "regex",
  "serde_json",
  "strum",
 ]

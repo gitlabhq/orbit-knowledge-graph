@@ -8,8 +8,8 @@
 
 use std::sync::Arc;
 
-use crate::passes::security::SecurityContext;
 use crate::pipeline::PipelineEnv;
+use gkg_utils::security::SecurityContext;
 use ontology::Ontology;
 
 /// Environment provides access to the ontology.
