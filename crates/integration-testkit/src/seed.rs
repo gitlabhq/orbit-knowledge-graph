@@ -113,6 +113,6 @@ mod tests {
         let path = format!("{}/data_correctness.sql", env!("SEEDS_DIR"));
         let seed = std::fs::read_to_string(&path).unwrap();
         let stmts = split_sql_statements(&seed).unwrap();
-        assert_eq!(stmts.len(), 7);
+        assert_eq!(stmts.len(), 10);
     }
 }

@@ -77,6 +77,7 @@ pub(super) async fn traversal_user_authored_work_item_returns_correct_edges(ctx:
     )
     .await;
 
+    resp.assert_node_count(7);
     resp.assert_referential_integrity();
 
     resp.assert_edge_exists("User", 1, "WorkItem", 4000, "AUTHORED");
@@ -108,6 +109,7 @@ pub(super) async fn traversal_work_item_in_group_returns_correct_edges(ctx: &Tes
     )
     .await;
 
+    resp.assert_node_count(7);
     resp.assert_referential_integrity();
 
     resp.assert_edge_exists("WorkItem", 4000, "Group", 100, "IN_GROUP");
@@ -134,6 +136,7 @@ pub(super) async fn traversal_work_item_in_milestone_returns_correct_edges(ctx: 
     )
     .await;
 
+    resp.assert_node_count(3);
     resp.assert_referential_integrity();
 
     resp.assert_edge_exists("WorkItem", 4000, "Milestone", 6000, "IN_MILESTONE");
@@ -160,6 +163,7 @@ pub(super) async fn traversal_user_assigned_work_item_returns_correct_edges(ctx:
     )
     .await;
 
+    resp.assert_node_count(5);
     resp.assert_referential_integrity();
 
     resp.assert_edge_exists("User", 1, "WorkItem", 4000, "ASSIGNED");
@@ -188,6 +192,7 @@ pub(super) async fn traversal_work_item_has_label_returns_correct_edges(ctx: &Te
     )
     .await;
 
+    resp.assert_node_count(5);
     resp.assert_referential_integrity();
 
     resp.assert_edge_exists("WorkItem", 4000, "Label", 7000, "HAS_LABEL");
