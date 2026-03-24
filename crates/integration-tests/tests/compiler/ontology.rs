@@ -1,18 +1,9 @@
 //! Compiler tests using the embedded (production) ontology.
 
+use super::setup::{embedded_ontology, test_ctx};
 use compiler::{
-    compile, compile_input, ColumnSelection, HydrationPlan, Input, InputNode, QueryError,
-    QueryType, SecurityContext,
+    compile, compile_input, ColumnSelection, HydrationPlan, Input, InputNode, QueryError, QueryType,
 };
-use ontology::Ontology;
-
-fn test_ctx() -> SecurityContext {
-    SecurityContext::new(1, vec!["1/".into()]).unwrap()
-}
-
-fn load_test_ontology() -> Ontology {
-    Ontology::load_embedded().expect("Failed to load test ontology")
-}
 
 #[test]
 fn valid_column_in_order_by() {
@@ -22,7 +13,7 @@ fn valid_column_in_order_by() {
         "limit": 10,
         "order_by": {"node": "u", "property": "username", "direction": "ASC"}
     }"#;
-    assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
+    assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
 }
 
 #[test]
@@ -33,7 +24,7 @@ fn invalid_column_in_order_by() {
         "limit": 10,
         "order_by": {"node": "u", "property": "nonexistent_column", "direction": "ASC"}
     }"#;
-    let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
+    let err = compile(json, &embedded_ontology(), &test_ctx()).unwrap_err();
     assert!(err.to_string().contains("does not exist"));
 }
 
@@ -44,7 +35,7 @@ fn valid_column_in_filter() {
         "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}},
         "limit": 10
     }"#;
-    assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
+    assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
 }
 
 #[test]
@@ -54,7 +45,7 @@ fn invalid_column_in_filter() {
         "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}},
         "limit": 10
     }"#;
-    let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
+    let err = compile(json, &embedded_ontology(), &test_ctx()).unwrap_err();
     assert!(
         err.to_string().contains("nonexistent_column"),
         "expected error mentioning invalid column name, got: {err}"
@@ -69,7 +60,7 @@ fn valid_column_in_aggregation() {
         "aggregations": [{"function": "count", "target": "p", "property": "name", "alias": "name_count"}],
         "limit": 10
     }"#;
-    assert!(compile(json, &load_test_ontology(), &test_ctx()).is_ok());
+    assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
 }
 
 #[test]
@@ -80,7 +71,7 @@ fn invalid_column_in_aggregation() {
         "aggregations": [{"function": "sum", "target": "p", "property": "invalid_property", "alias": "total"}],
         "limit": 10
     }"#;
-    let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
+    let err = compile(json, &embedded_ontology(), &test_ctx()).unwrap_err();
     assert!(err.to_string().contains("does not exist"));
 }
 
@@ -91,7 +82,7 @@ fn invalid_entity_type_rejected() {
         "node": {"id": "n", "entity": "NonexistentType", "columns": ["name"]},
         "limit": 10
     }"#;
-    let err = compile(json, &load_test_ontology(), &test_ctx()).unwrap_err();
+    let err = compile(json, &embedded_ontology(), &test_ctx()).unwrap_err();
     assert!(
         err.to_string().contains("NonexistentType") && err.to_string().contains("is not one of"),
         "expected validation error with valid options: {}",
@@ -112,7 +103,7 @@ fn full_pipeline() {
         "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     assert!(result.base.sql.contains("SELECT"));
     assert!(result.base.sql.contains("gl_edge"));
     assert!(result.base.sql.contains("LIMIT 25"));
@@ -133,7 +124,7 @@ fn basic_search_query() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(result.base.sql.contains("SELECT"));
     assert!(result.base.sql.contains("FROM"));
@@ -164,7 +155,7 @@ fn complex_search_query() {
         "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(result.base.sql.contains("SELECT"));
     assert!(result.base.sql.contains("WHERE"));
@@ -193,7 +184,7 @@ fn search_with_specific_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(result.base.sql.contains("_gkg_u_id"));
     assert!(result.base.sql.contains("_gkg_u_type"));
@@ -213,7 +204,7 @@ fn search_with_wildcard_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(result.base.sql.contains("_gkg_u_id"));
     assert!(result.base.sql.contains("_gkg_u_type"));
@@ -232,7 +223,7 @@ fn traversal_with_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(result.base.sql.contains("_gkg_u_id"));
     assert!(result.base.sql.contains("_gkg_u_type"));
@@ -253,7 +244,7 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(result.base.sql.contains("_gkg_u_id"));
     assert!(result.base.sql.contains("_gkg_u_type"));
@@ -274,7 +265,7 @@ fn path_finding_uses_gkg_path_not_node_columns() {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(result.base.sql.contains("_gkg_path"));
     assert!(result.base.result_context.query_type == Some(QueryType::PathFinding));
@@ -292,7 +283,7 @@ fn result_context_populated() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert_eq!(result.base.result_context.len(), 2);
 
@@ -330,7 +321,7 @@ fn multi_hop_traversal_generates_union_subquery() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(
         result.base.sql.contains("UNION ALL"),
@@ -367,7 +358,7 @@ fn multi_hop_with_min_hops_filter() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(
         result.base.sql.contains("hop_e0.depth"),
@@ -394,7 +385,7 @@ fn single_hop_does_not_generate_cte() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(
         !result.base.sql.contains("WITH RECURSIVE"),
@@ -422,7 +413,7 @@ fn multi_hop_aggregation() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(
         result.base.sql.contains("UNION ALL"),
@@ -449,7 +440,7 @@ fn definition_uses_project_id_for_redaction() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(
         result.base.sql.contains("d.project_id AS _gkg_d_id"),
@@ -467,7 +458,7 @@ fn project_still_uses_id_for_redaction() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &load_test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
 
     assert!(
         result.base.sql.contains("p.id AS _gkg_p_id"),
@@ -478,7 +469,7 @@ fn project_still_uses_id_for_redaction() {
 
 #[test]
 fn range_pagination() {
-    let ontology = load_test_ontology();
+    let ontology = embedded_ontology();
     let ctx = test_ctx();
 
     let result = compile(
@@ -575,7 +566,7 @@ fn render_traversal_inlines_all_params() {
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "limit": 10
         }"#,
-        &load_test_ontology(),
+        &embedded_ontology(),
         &test_ctx(),
     )
     .unwrap()
@@ -600,7 +591,7 @@ fn render_in_filter_inlines_array() {
             }},
             "limit": 10
         }"#,
-        &load_test_ontology(),
+        &embedded_ontology(),
         &test_ctx(),
     )
     .unwrap()
@@ -625,7 +616,7 @@ fn render_node_ids_inlines_array() {
             "node": {"id": "u", "entity": "User", "node_ids": [100, 200, 300]},
             "limit": 10
         }"#,
-        &load_test_ontology(),
+        &embedded_ontology(),
         &test_ctx(),
     )
     .unwrap()
@@ -654,7 +645,7 @@ fn debug_json_round_trip() {
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "limit": 10
         }"#,
-        &load_test_ontology(),
+        &embedded_ontology(),
         &test_ctx(),
     )
     .unwrap();

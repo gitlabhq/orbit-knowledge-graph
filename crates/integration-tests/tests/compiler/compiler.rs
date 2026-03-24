@@ -1,45 +1,7 @@
 //! Compiler unit tests using a hand-built ontology.
 
-use compiler::{compile, lower, normalize, Node, QueryError, SecurityContext, Validator};
-use ontology::{DataType, Ontology};
-
-fn test_ctx() -> SecurityContext {
-    SecurityContext::new(1, vec!["1/".into()]).unwrap()
-}
-
-fn test_ontology() -> Ontology {
-    Ontology::new()
-        .with_nodes(["User", "Project", "Note", "Group"])
-        .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
-        .with_fields(
-            "User",
-            [
-                ("username", DataType::String),
-                ("state", DataType::String),
-                ("created_at", DataType::DateTime),
-            ],
-        )
-        .with_fields(
-            "Note",
-            [
-                ("confidential", DataType::Bool),
-                ("created_at", DataType::DateTime),
-            ],
-        )
-        .with_fields("Project", [("name", DataType::String)])
-        .with_fields("Group", [("name", DataType::String)])
-}
-
-fn compile_to_ast(json_input: &str, ontology: &Ontology) -> compiler::Result<Node> {
-    let v = Validator::new(ontology);
-    let value = v.check_json(json_input)?;
-    v.check_ontology(&value)?;
-    let input: compiler::Input = serde_json::from_value(value)?;
-    v.check_references(&input)?;
-    let mut input = normalize(input, ontology)?;
-    let node = lower(&mut input)?;
-    Ok(node)
-}
+use super::setup::{compile_to_ast, test_ctx, test_ontology};
+use compiler::{compile, Node, QueryError};
 
 #[test]
 fn compile_to_ast_works() {
