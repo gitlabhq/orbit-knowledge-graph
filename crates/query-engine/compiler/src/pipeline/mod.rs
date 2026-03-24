@@ -1,4 +1,3 @@
-
 //! Composable, two-phase compiler pipeline.
 //!
 //! Generic over:
@@ -46,8 +45,12 @@ trait ErasedPass<E: PipelineEnv, S: PipelineState>: Send + Sync {
 }
 
 impl<E: PipelineEnv, S: PipelineState, P: CompilerPass<E, S>> ErasedPass<E, S> for P {
-    fn name(&self) -> &'static str { P::NAME }
-    fn run(&self, env: &E, state: &mut S) -> Result<()> { CompilerPass::run(self, env, state) }
+    fn name(&self) -> &'static str {
+        P::NAME
+    }
+    fn run(&self, env: &E, state: &mut S) -> Result<()> {
+        CompilerPass::run(self, env, state)
+    }
 }
 
 struct Step<E: PipelineEnv, S: PipelineState> {
@@ -66,7 +69,7 @@ pub struct PipelineBuilder<E: PipelineEnv, S: PipelineState> {
 }
 
 impl<E: PipelineEnv, S: PipelineState> PipelineBuilder<E, S> {
-    pub fn add<P: CompilerPass<E, S> + 'static>(mut self, pass: P) -> StepBuilder<E, S> {
+    pub fn pass<P: CompilerPass<E, S> + 'static>(mut self, pass: P) -> StepBuilder<E, S> {
         self.steps.push(Step {
             pass: Box::new(pass),
             seals: Vec::new(),
@@ -75,8 +78,12 @@ impl<E: PipelineEnv, S: PipelineState> PipelineBuilder<E, S> {
         StepBuilder { inner: self }
     }
 
-    pub fn add_if<P: CompilerPass<E, S> + 'static>(self, cond: bool, pass: P) -> Self {
-        if cond { self.add(pass).done() } else { self }
+    pub fn pass_if<P: CompilerPass<E, S> + 'static>(self, cond: bool, pass: P) -> Self {
+        if cond {
+            self.pass(pass).done()
+        } else {
+            self
+        }
     }
 
     pub fn observe(mut self, obs: impl PipelineObserver + 'static) -> Self {
@@ -100,7 +107,12 @@ pub struct StepBuilder<E: PipelineEnv, S: PipelineState> {
 
 impl<E: PipelineEnv, S: PipelineState> StepBuilder<E, S> {
     pub fn seal(mut self, seal: impl Seal<S> + 'static) -> Self {
-        self.inner.steps.last_mut().unwrap().seals.push(Box::new(seal));
+        self.inner
+            .steps
+            .last_mut()
+            .unwrap()
+            .seals
+            .push(Box::new(seal));
         self
     }
 
@@ -108,13 +120,15 @@ impl<E: PipelineEnv, S: PipelineState> StepBuilder<E, S> {
         self.inner
     }
 
-    pub fn add<P: CompilerPass<E, S> + 'static>(self, pass: P) -> StepBuilder<E, S> {
-        self.inner.add(pass)
+    pub fn pass<P: CompilerPass<E, S> + 'static>(self, pass: P) -> StepBuilder<E, S> {
+        self.inner.pass(pass)
     }
 
-    pub fn add_if<P: CompilerPass<E, S> + 'static>(self, cond: bool, pass: P) -> Self {
+    pub fn pass_if<P: CompilerPass<E, S> + 'static>(self, cond: bool, pass: P) -> Self {
         if cond {
-            StepBuilder { inner: self.inner.add(pass).inner }
+            StepBuilder {
+                inner: self.inner.pass(pass).inner,
+            }
         } else {
             self
         }
@@ -140,7 +154,10 @@ pub struct Pipeline<E: PipelineEnv, S: PipelineState> {
 
 impl<E: PipelineEnv, S: PipelineState> Pipeline<E, S> {
     pub fn builder() -> PipelineBuilder<E, S> {
-        PipelineBuilder { steps: Vec::new(), observer: None }
+        PipelineBuilder {
+            steps: Vec::new(),
+            observer: None,
+        }
     }
 
     pub fn disable(mut self, pass_name: &str) -> Self {
@@ -172,7 +189,10 @@ impl<E: PipelineEnv, S: PipelineState> Pipeline<E, S> {
     }
 
     pub fn passes(&self) -> Vec<(&'static str, bool)> {
-        self.steps.iter().map(|s| (s.pass.name(), s.enabled)).collect()
+        self.steps
+            .iter()
+            .map(|s| (s.pass.name(), s.enabled))
+            .collect()
     }
 
     pub fn seal(self) -> SealedPipeline<E, S> {

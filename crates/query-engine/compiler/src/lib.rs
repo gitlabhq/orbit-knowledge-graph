@@ -41,10 +41,10 @@ pub mod types;
 // pipeline must come before envs/state — its macros.rs defines
 // `define_env_capabilities!` and `define_state_capabilities!` which
 // those modules invoke.
-pub mod pipeline;
 pub mod envs;
-pub mod state;
 pub mod passes;
+pub mod pipeline;
+pub mod state;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
@@ -137,8 +137,6 @@ pub fn compile_input(mut input: Input, ctx: &SecurityContext) -> Result<Compiled
 }
 
 // Pipeline presets are in `pipelines.rs`.
-
-
 
 #[cfg(test)]
 #[allow(irrefutable_let_patterns)]

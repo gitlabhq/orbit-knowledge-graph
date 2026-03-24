@@ -623,22 +623,26 @@ mod tests {
 
         // Should only have columns for 'u' (group_by node), not 'n' (target node)
         assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string())));
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string())));
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string())));
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string())));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
+        );
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
+        );
         assert_eq!(q.group_by.len(), 1); // u.id already present, no duplicate added
 
         // Context should only have the group_by node
@@ -967,24 +971,28 @@ mod tests {
         );
 
         // No _pk columns for default entities
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_deref() == Some("_gkg_u_pk")));
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk")));
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_u_pk"))
+        );
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk"))
+        );
 
         // Type columns present
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_deref() == Some("_gkg_u_type")));
-        assert!(q
-            .select
-            .iter()
-            .any(|s| s.alias.as_deref() == Some("_gkg_mr_type")));
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_u_type"))
+        );
+        assert!(
+            q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_mr_type"))
+        );
     }
 
     #[test]
@@ -1062,10 +1070,11 @@ mod tests {
         );
 
         // mr (default) has no pk column
-        assert!(!q
-            .select
-            .iter()
-            .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk")));
+        assert!(
+            !q.select
+                .iter()
+                .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk"))
+        );
     }
 
     #[test]

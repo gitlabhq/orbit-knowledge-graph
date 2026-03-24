@@ -5,7 +5,7 @@
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput, Fields};
+use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
 fn require_named_fields(
     input: &DeriveInput,
@@ -26,10 +26,10 @@ fn peel_option(ty: &syn::Type) -> Option<&syn::Type> {
         if seg.ident != "Option" {
             return None;
         }
-        if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
-            if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
-                return Some(inner);
-            }
+        if let syn::PathArguments::AngleBracketed(args) = &seg.arguments
+            && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+        {
+            return Some(inner);
         }
     }
     None
