@@ -35,9 +35,9 @@ The `Indexer` and `DispatchIndexing` modes share the same configuration structur
 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
-| `nats.url` | `NATS_URL` | `localhost:4222` | Broker address |
-| `nats.username` | `NATS_USERNAME` | None | Auth username |
-| `nats.password` | `NATS_PASSWORD` | None | Auth password |
+| `nats.url` | `GKG_NATS__URL` | `localhost:4222` | Broker address |
+| `nats.username` | `GKG_NATS__USERNAME` | None | Auth username |
+| `nats.password` | `GKG_NATS__PASSWORD` | None | Auth password |
 | `nats.connection_timeout_secs` | | `10` | Connection timeout |
 | `nats.request_timeout_secs` | | `5` | Request timeout |
 
@@ -45,7 +45,7 @@ The `Indexer` and `DispatchIndexing` modes share the same configuration structur
 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
-| `nats.consumer_name` | `NATS_CONSUMER_NAME` | None | Durable consumer name. `None` = ephemeral (lost on disconnect). Set in production for persistence across restarts. |
+| `nats.consumer_name` | `GKG_NATS__CONSUMER_NAME` | None | Durable consumer name. `None` = ephemeral (lost on disconnect). Set in production for persistence across restarts. |
 | `nats.ack_wait_secs` | | `300` | Seconds before unacked message is redelivered |
 | `nats.max_deliver` | | `5` | Max redelivery attempts. `None` = unlimited. |
 | `nats.batch_size` | | `10` | Messages fetched per batch |
@@ -55,11 +55,11 @@ The `Indexer` and `DispatchIndexing` modes share the same configuration structur
 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
-| `nats.auto_create_streams` | `NATS_AUTO_CREATE_STREAMS` | `true` | Create streams on startup |
-| `nats.stream_replicas` | `NATS_STREAM_REPLICAS` | `1` | Replicas per stream. Use 3 in production for fault tolerance. |
-| `nats.stream_max_age_secs` | `NATS_STREAM_MAX_AGE_SECS` | None | Max message age before deletion |
-| `nats.stream_max_bytes` | `NATS_STREAM_MAX_BYTES` | None | Max stream size in bytes |
-| `nats.stream_max_messages` | `NATS_STREAM_MAX_MESSAGES` | None | Max messages per stream |
+| `nats.auto_create_streams` | `GKG_NATS__AUTO_CREATE_STREAMS` | `true` | Create streams on startup |
+| `nats.stream_replicas` | `GKG_NATS__STREAM_REPLICAS` | `1` | Replicas per stream. Use 3 in production for fault tolerance. |
+| `nats.stream_max_age_secs` | `GKG_NATS__STREAM_MAX_AGE_SECS` | None | Max message age before deletion |
+| `nats.stream_max_bytes` | `GKG_NATS__STREAM_MAX_BYTES` | None | Max stream size in bytes |
+| `nats.stream_max_messages` | `GKG_NATS__STREAM_MAX_MESSAGES` | None | Max messages per stream |
 
 The `GKG_INDEXER` stream is created with:
 
@@ -274,9 +274,10 @@ engine:
 Increase SDLC batch sizes for large namespaces:
 
 ```yaml
-handlers:
-  namespace_handler:
-    datalake_batch_size: 5000000
+engine:
+  handlers:
+    namespace_handler:
+      datalake_batch_size: 5000000
 ```
 
 ### Reduce NATS pressure
@@ -284,7 +285,7 @@ handlers:
 Increase ack wait for slow handlers:
 
 ```shell
-NATS_ACK_WAIT_SECS=600  # 10 minutes instead of default 5
+GKG_NATS__ACK_WAIT_SECS=600  # 10 minutes instead of default 5
 ```
 
 ### Handle large CDC backlogs
@@ -301,9 +302,9 @@ schedule:
 ### Production NATS settings
 
 ```shell
-NATS_CONSUMER_NAME=gkg-indexer       # Durable consumer (survives restarts)
-NATS_STREAM_REPLICAS=3               # Fault tolerance
-NATS_AUTO_CREATE_STREAMS=true        # Auto-create on startup
+GKG_NATS__CONSUMER_NAME=gkg-indexer       # Durable consumer (survives restarts)
+GKG_NATS__STREAM_REPLICAS=3               # Fault tolerance
+GKG_NATS__AUTO_CREATE_STREAMS=true        # Auto-create on startup
 ```
 
 ## Example: production config

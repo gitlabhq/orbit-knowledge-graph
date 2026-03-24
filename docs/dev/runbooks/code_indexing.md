@@ -219,14 +219,14 @@ Check the checkpoint:
 
 ```sql
 SELECT project_id, branch, last_task_id, last_commit, indexed_at
-FROM `gkg-sandbox`.code_indexing_checkpoint
+FROM `<gkg-database>`.code_indexing_checkpoint
 WHERE project_id = <id>;
 ```
 
 To force reprocessing, delete the checkpoint row:
 
 ```sql
-ALTER TABLE `gkg-sandbox`.code_indexing_checkpoint
+ALTER TABLE `<gkg-database>`.code_indexing_checkpoint
 DELETE WHERE project_id = <id> AND branch = '<branch>';
 ```
 
