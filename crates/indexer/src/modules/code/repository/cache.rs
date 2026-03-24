@@ -36,12 +36,6 @@ pub enum RepositoryCacheError {
 
 #[async_trait]
 pub trait RepositoryCache: Send + Sync {
-    async fn get(
-        &self,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<Option<CachedRepository>, RepositoryCacheError>;
-
     async fn save(
         &self,
         project_id: i64,
@@ -59,8 +53,8 @@ pub trait RepositoryCache: Send + Sync {
         archive_stream: ByteStream,
     ) -> Result<RepositoryLease, RepositoryCacheError>;
 
-    /// Holds the eviction read lock across get+pin so an in-flight eviction
-    /// cannot delete the entry between the two operations.
+    /// Returns the cached repository and a lease that pins it (safe from eviction)
+    /// for the duration of the lease's lifetime.
     async fn acquire(
         &self,
         project_id: i64,
@@ -292,20 +286,8 @@ impl LocalRepositoryCache {
 
         Ok(())
     }
-}
 
-fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCacheError> {
-    for component in Path::new(relative).components() {
-        match component {
-            std::path::Component::Normal(_) | std::path::Component::CurDir => {}
-            _ => return Err(RepositoryCacheError::PathTraversal(relative.to_string())),
-        }
-    }
-    Ok(base.join(relative))
-}
-
-#[async_trait]
-impl RepositoryCache for LocalRepositoryCache {
+    #[cfg(test)]
     async fn get(
         &self,
         project_id: i64,
@@ -326,14 +308,25 @@ impl RepositoryCache for LocalRepositoryCache {
             _ => return Ok(None),
         }
 
-        self.budget.touch(project_id, branch);
-
         Ok(Some(CachedRepository {
             path: repository_dir,
             commit,
         }))
     }
+}
 
+fn validated_path(base: &Path, relative: &str) -> Result<PathBuf, RepositoryCacheError> {
+    for component in Path::new(relative).components() {
+        match component {
+            std::path::Component::Normal(_) | std::path::Component::CurDir => {}
+            _ => return Err(RepositoryCacheError::PathTraversal(relative.to_string())),
+        }
+    }
+    Ok(base.join(relative))
+}
+
+#[async_trait]
+impl RepositoryCache for LocalRepositoryCache {
     async fn save(
         &self,
         project_id: i64,
@@ -382,14 +375,32 @@ impl RepositoryCache for LocalRepositoryCache {
         branch: &str,
     ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError> {
         let _eviction_guard = self.eviction_lock.read().await;
-        let cached = self.get(project_id, branch).await?;
-        match cached {
-            Some(repo) => {
-                let guard = self.pin(project_id, branch);
-                Ok(Some((repo, guard)))
-            }
-            None => Ok(None),
+
+        let branch_dir = self.branch_dir(project_id, branch);
+        let commit_file = branch_dir.join(META_DIR).join(COMMIT_FILE);
+
+        let commit = match tokio::fs::read_to_string(&commit_file).await {
+            Ok(content) => content.trim().to_string(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+
+        let repository_dir = branch_dir.join(REPOSITORY_DIR);
+        match tokio::fs::metadata(&repository_dir).await {
+            Ok(meta) if meta.is_dir() => {}
+            _ => return Ok(None),
         }
+
+        self.budget.touch(project_id, branch);
+        let lease = self.pin(project_id, branch);
+
+        Ok(Some((
+            CachedRepository {
+                path: repository_dir,
+                commit,
+            },
+            lease,
+        )))
     }
 
     async fn delete_file(
