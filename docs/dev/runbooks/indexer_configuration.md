@@ -7,7 +7,7 @@ Reference for all configurable knobs in the GKG indexer and dispatcher.
 Config is loaded in layers, each overriding the previous:
 
 1. **Configuration file**: Example `config/default.yaml`
-2. **Secrets**: Files in `/run/secrets/` (Kubernetes secret mounts)
+2. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
 3. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
 
 Environment variable examples:
@@ -154,12 +154,12 @@ engine:
       concurrency_group: sdlc
       max_attempts: 1
       retry_interval_secs: 60
-    code-push-event:
+    code-indexing-task:
       concurrency_group: code
       max_attempts: 5
       retry_interval_secs: 60
-    code-project-reconciliation:
-      concurrency_group: code
+    namespace-deletion:
+      concurrency_group: sdlc
       max_attempts: 1
 ```
 
@@ -183,8 +183,7 @@ engine:
 |---------|-------------|-----|-----------|
 | Global (SDLC) | 1 | No | Re-dispatched every cycle. No need to retry. |
 | Namespace (SDLC) | 1 | No | Re-dispatched every cycle. No need to retry. |
-| Code push event | 5 | Yes | Event-driven. Won't be re-dispatched. Must retry and DLQ. |
-| Code project reconciliation | 1 | No | Periodic backfill. Re-dispatched on next cycle. |
+| Code indexing task | 5 | Yes | Event-driven. Won't be re-dispatched. Must retry and DLQ. |
 | Namespace deletion | 1 | No | Re-dispatched on next scheduler cycle. |
 
 ## Scheduler configuration
@@ -307,6 +306,93 @@ GKG_NATS__STREAM_REPLICAS=3               # Fault tolerance
 GKG_NATS__AUTO_CREATE_STREAMS=true        # Auto-create on startup
 ```
 
+## Helm chart configuration
+
+In production, GKG is deployed via the [gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables.
+
+### Key Helm values mapping
+
+| Helm value | Application config | Description |
+|------------|-------------------|-------------|
+| `nats.url` | `nats.url` | NATS broker address |
+| `nats.consumerName` | `nats.consumer_name` | Durable consumer name |
+| `clickhouse.datalake.host` | `datalake.url` | Datalake ClickHouse host |
+| `clickhouse.datalake.database` | `datalake.database` | Datalake database name |
+| `clickhouse.graph.host` | `graph.url` | Graph ClickHouse host |
+| `clickhouse.graph.database` | `graph.database` | Graph database name |
+| `gitlab.baseUrl` | `gitlab.base_url` | GitLab instance URL |
+| `indexer.logLevel` | `metrics.log_level` | Indexer log level |
+| `secrets.existingSecret` | (secret mounts) | Kubernetes secret with credentials |
+
+### Overriding configuration via Helm
+
+```shell
+helm upgrade gkg gkg-helm-charts/gkg \
+  --set nats.consumerName=gkg-indexer \
+  --set clickhouse.graph.database=gkg-production
+```
+
+For complex overrides, use a values file:
+
+```shell
+helm upgrade gkg gkg-helm-charts/gkg -f custom-values.yaml
+```
+
+## Troubleshooting with kubectl
+
+### Check pod status and logs
+
+```shell
+kubectl -n gkg get pods
+kubectl -n gkg logs deployment/gkg-indexer -f
+kubectl -n gkg logs deployment/gkg-dispatcher -f
+
+# Filter logs for a specific project
+kubectl -n gkg logs deployment/gkg-indexer -f | grep 'project_id=<id>'
+```
+
+### Inspect running configuration
+
+```shell
+kubectl -n gkg exec deployment/gkg-indexer -- env | grep GKG_
+```
+
+### Troubleshoot NATS with nats-box
+
+Spin up a [nats-box](https://github.com/nats-io/nats-box) pod to run NATS commands inside the cluster:
+
+```shell
+kubectl -n gkg run nats-box --image=natsio/nats-box:latest --restart=Never -- sleep infinity
+kubectl -n gkg exec -it nats-box -- sh
+```
+
+From inside nats-box:
+
+```shell
+# Check stream health
+nats -s nats://gkg-nats:4222 stream ls
+nats -s nats://gkg-nats:4222 stream info GKG_INDEXER
+
+# Inspect consumers
+nats -s nats://gkg-nats:4222 consumer ls GKG_INDEXER
+
+# Check dead letter queue
+nats -s nats://gkg-nats:4222 stream info GKG_DEAD_LETTERS
+
+# Purge a stuck subject
+nats -s nats://gkg-nats:4222 stream purge GKG_INDEXER \
+  --subject='sdlc.namespace.indexing.requested.<org>.<ns>'
+
+# Inspect KV locks
+nats -s nats://gkg-nats:4222 kv ls indexing_locks
+```
+
+Clean up when done:
+
+```shell
+kubectl -n gkg delete pod nats-box
+```
+
 ## Example: production config
 
 ```yaml
@@ -344,12 +430,12 @@ engine:
       concurrency_group: sdlc
       max_attempts: 1
       retry_interval_secs: 60
-    code-push-event:
+    code-indexing-task:
       concurrency_group: code
       max_attempts: 5
       retry_interval_secs: 60
-    code-project-reconciliation:
-      concurrency_group: code
+    namespace-deletion:
+      concurrency_group: sdlc
       max_attempts: 1
 
 schedule:

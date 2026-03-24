@@ -84,11 +84,11 @@ Consumes CDC events for `knowledge_graph_enabled_namespaces`. When a namespace i
 When the `CodeIndexingTaskHandler` receives a message:
 
 1. Compare `task_id` against stored checkpoint. Skip if `task_id <= last_task_id`.
-2. Acquire a NATS KV lock on `indexing/{project_id}/{base64_branch}/lock` (TTL: 60 seconds). Skip if lock is held by another worker.
+2. Acquire a NATS KV lock on `project.{project_id}.{base64_branch}` (TTL: 60 seconds). Skip if lock is held by another worker.
 3. Download the repository archive from Rails API (or use incremental fetch / cache).
 4. Run tree-sitter + swc parsers across supported languages, build an in-memory property graph.
 5. Convert graph to Arrow batches and insert into graph tables.
-6. Record checkpoint: `(project_id, branch, last_task_id, last_commit, indexed_at)`.
+6. Record checkpoint: `(traversal_path, project_id, branch, last_task_id, last_commit, indexed_at)`.
 
 Individual file parse failures are logged but do not fail the task. The pipeline writes whatever it parsed successfully.
 
@@ -193,7 +193,7 @@ The NATS KV lock has a 60-second TTL and expires automatically. If a worker cras
 If the lock is not expiring (clock skew or NATS bug):
 
 ```shell
-nats kv del indexing_locks 'indexing/<project_id>/<base64_branch>/lock'
+nats kv del indexing_locks 'project.<project_id>.<base64_branch>'
 ```
 
 ### Message stuck in redelivery loop
@@ -218,7 +218,7 @@ If the checkpoint's `last_task_id` is higher than the incoming task, the handler
 Check the checkpoint:
 
 ```sql
-SELECT project_id, branch, last_task_id, last_commit, indexed_at
+SELECT traversal_path, project_id, branch, last_task_id, last_commit, indexed_at
 FROM `<gkg-database>`.code_indexing_checkpoint
 WHERE project_id = <id>;
 ```
@@ -291,6 +291,41 @@ Attempt 1 fails -> nack (60s delay)
 If DLQ publication itself fails, the original message is nacked for redelivery rather than being dropped.
 
 ## Other failure modes
+
+### NATS stream name mismatch
+
+If code indexing dispatchers are running but no tasks are being processed, the Siphon events stream name may not match between GKG and Siphon.
+
+Symptoms:
+
+- Dispatcher logs show no events consumed
+- The `GKG_INDEXER` stream has no code indexing messages
+- Siphon is publishing to a stream that GKG is not subscribed to
+
+Check the configured stream name:
+
+```shell
+# In the GKG config or Helm values
+kubectl -n gkg exec deployment/gkg-dispatcher -- env | grep EVENTS_STREAM
+```
+
+Check what streams exist in NATS:
+
+```shell
+nats stream ls
+```
+
+The `events_stream_name` in `schedule.tasks.code_indexing_task` must match the Siphon stream name exactly. For example, staging Siphon may publish to `stg_siphon_event_stream` while GKG defaults to `siphon_stream_main_db`.
+
+Fix via Helm values or environment variable:
+
+```shell
+# Helm
+helm upgrade gkg gkg-helm-charts/gkg \
+  --set dispatcher.extraEnv.GKG_SCHEDULE__TASKS__CODE_INDEXING_TASK__EVENTS_STREAM_NAME=stg_siphon_event_stream
+
+# Or in values.yaml under schedule.tasks.code_indexing_task.events_stream_name
+```
 
 ### Stale data accumulation
 
