@@ -100,8 +100,7 @@ impl Visitor for Collector {
             query.body.as_ref(),
             SetExpr::SetOperation {
                 op: sqlparser::ast::SetOperator::Union,
-                set_quantifier: sqlparser::ast::SetQuantifier::All
-                    | sqlparser::ast::SetQuantifier::None,
+                set_quantifier: sqlparser::ast::SetQuantifier::All,
                 ..
             }
         ) {
@@ -159,6 +158,7 @@ impl ParsedSql {
     // ── Structural queries ───────────────────────────────────────────────
 
     pub fn query(&self) -> &Query {
+        assert!(!self.statements.is_empty(), "parsed SQL has no statements");
         match &self.statements[0] {
             Statement::Query(q) => q,
             other => panic!("expected Query, got: {other:?}"),
