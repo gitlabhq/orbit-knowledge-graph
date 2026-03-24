@@ -93,6 +93,7 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
     )
     .await;
 
+    // Only Public Project (1000) is public AND in 1/100/. Shared Project (1004) is public but in 1/102/.
     resp.assert_node_count(1);
     resp.assert_node_ids("Project", &[1000]);
     resp.assert_filter("Project", "visibility_level", |n| {
@@ -107,6 +108,9 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
 pub(super) async fn path_finding_scoped_excludes_paths_through_other_namespaces(
     ctx: &TestContext,
 ) {
+    // User 1 → Group 100 → Project 1000 is within 1/100/.
+    // User 1 → Group 102 → Project 1004 requires 1/102/.
+    // Scoping to 1/100/ should only find the path through Group 100.
     let resp = run_query_with_security(
         ctx,
         r#"{
@@ -125,6 +129,8 @@ pub(super) async fn path_finding_scoped_excludes_paths_through_other_namespaces(
     resp.assert_referential_integrity();
 
     let pids = resp.path_ids();
+    // Only the path to 1000 (via Group 100) should survive.
+    // Path to 1004 (via Group 102) should be excluded by traversal_path scoping.
     let destinations: HashSet<i64> = pids
         .iter()
         .filter_map(|&pid| resp.path(pid).last().map(|e| e.to_id))
@@ -169,6 +175,9 @@ pub(super) async fn path_finding_multi_path_scope_finds_both(ctx: &TestContext) 
 }
 
 pub(super) async fn path_finding_narrow_scope_excludes_all_targets(ctx: &TestContext) {
+    // Scope to 1/101/ — User 1 is in gl_user (no traversal_path filtering),
+    // but Projects 1000 and 1004 are in 1/100/ and 1/102/ respectively.
+    // Neither is reachable within 1/101/ scope.
     let resp = run_query_with_security(
         ctx,
         r#"{
