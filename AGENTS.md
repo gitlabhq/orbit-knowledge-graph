@@ -59,7 +59,7 @@ Integration tests need Docker: `mise test:integration`.
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbook | `docs/dev/RUNBOOK.md` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
-| Helm charts (dev) | `helm-dev/gkg/`, `helm-dev/observability/` |
+| Helm charts | `helm/gkg/` (vendored via vendir), `helm/local/` (dev Prometheus + Grafana) |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |

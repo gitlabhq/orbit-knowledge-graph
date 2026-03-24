@@ -147,9 +147,9 @@ Prometheus scrapes these metrics into Grafana Mimir. We also maintain dashboards
 
 ### Alert Rules
 
-Alert rules are defined as a `PrometheusRule` CRD in `helm-dev/observability/templates/gkg-alert-rules.yaml`, automatically discovered by the Prometheus Operator. Thresholds are configurable via Helm values (`alerting.rules.*`). Alerts are disabled by default and enabled per environment (currently active in sandbox).
+Alert rules are defined as `PrometheusRule` CRDs, automatically discovered by the Prometheus Operator. Thresholds are configurable via Helm values.
 
-Metrics flow through OTel SDK → OTLP → Alloy → Prometheus remote\_write. The OTel-to-Prometheus conversion replaces dots with underscores and appends `_total` for counters (e.g., `qe.threat.auth_filter_missing` → `qe_threat_auth_filter_missing_total`).
+Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the GKG chart. The OTel-to-Prometheus conversion replaces dots with underscores and appends `_total` for counters (e.g., `qe.threat.auth_filter_missing` → `qe_threat_auth_filter_missing_total`).
 
 **Security alerts** (any non-zero count is anomalous):
 

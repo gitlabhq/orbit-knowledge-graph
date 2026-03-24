@@ -1,0 +1,23 @@
+apiVersion: vendir.k14s.io/v1alpha1
+directories:
+- contents:
+  - git:
+      commitTitle: Merge branch 'bohdanpk/prometheus_support_and_labeling' into 'main'...
+      sha: 3882e8f73a7c01c98e6378024ea1169e483055b5
+      tags:
+      - v0.8.0
+    path: .
+  path: gkg
+- contents:
+  - helmChart:
+      appVersion: 2.11.10
+      version: 1.3.16
+    path: nats
+  - git:
+      commitTitle: Merge branch 'renovate/alpine-helm-4.x' into 'main'...
+      sha: ef8f3d4f6e745c464ce32d2387a0700dbf493f01
+      tags:
+      - v1.7.0-2-gef8f3d4
+    path: siphon
+  path: charts
+kind: LockConfig
