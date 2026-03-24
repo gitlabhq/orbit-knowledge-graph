@@ -50,6 +50,10 @@ description = "Run unit tests with full debug symbols"
 run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins --test compiler"
 description = "Run unit tests with reduced debug info for faster builds"
 
+[tasks."test:compiler"]
+run = "cargo nextest run --test compiler"
+description = "Run compiler integration tests (no Docker)"
+
 [tasks."test:integration"]
 run = "cargo nextest run --all-features --test docker --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
