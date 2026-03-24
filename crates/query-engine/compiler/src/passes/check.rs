@@ -12,25 +12,6 @@ use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::passes::security::{collect_node_aliases, SecurityContext};
-use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::pipelines::{HasNode, HasSecurityCtx};
-
-/// Pipeline pass: validates that all required security filters are present.
-/// Reads security context from the environment.
-pub struct CheckPass;
-
-impl<E, S> CompilerPass<E, S> for CheckPass
-where
-    E: PipelineEnv + HasSecurityCtx,
-    S: PipelineState + HasNode,
-{
-    const NAME: &'static str = "check";
-
-    fn run(&self, env: &E, state: &mut S) -> Result<()> {
-        let node = state.node()?;
-        check_ast(node, env.security_ctx())
-    }
-}
 
 const STARTS_WITH_FNAME: &str = "startsWith";
 

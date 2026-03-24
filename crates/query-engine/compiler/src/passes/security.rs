@@ -10,26 +10,7 @@
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
-use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::pipelines::{HasNode, HasSecurityCtx};
 pub use crate::types::SecurityContext;
-
-/// Pipeline pass: injects `startsWith(traversal_path, ...)` security filters.
-/// Reads security context from the environment.
-pub struct SecurityPass;
-
-impl<E, S> CompilerPass<E, S> for SecurityPass
-where
-    E: PipelineEnv + HasSecurityCtx,
-    S: PipelineState + HasNode,
-{
-    const NAME: &'static str = "security";
-
-    fn run(&self, env: &E, state: &mut S) -> Result<()> {
-        let node = state.node_mut()?;
-        apply_security_context(node, env.security_ctx())
-    }
-}
 
 /// Inject security filters into an AST node (mutates in place).
 pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<()> {

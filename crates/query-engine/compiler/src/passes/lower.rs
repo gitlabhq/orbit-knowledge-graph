@@ -3,8 +3,6 @@
 //! Transforms validated input into a SQL-oriented AST.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
-use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::pipelines::{HasInput, HasNode};
 
 use crate::constants::{
     ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,
@@ -25,24 +23,6 @@ use ontology::constants::{
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-
-/// Pipeline pass: lowers a normalized `Input` into an AST `Node`.
-pub struct LowerPass;
-
-impl<E, S> CompilerPass<E, S> for LowerPass
-where
-    E: PipelineEnv,
-    S: PipelineState + HasInput + HasNode,
-{
-    const NAME: &'static str = "lower";
-
-    fn run(&self, _env: &E, state: &mut S) -> crate::error::Result<()> {
-        let input = state.input_mut()?;
-        let node = lower(input)?;
-        state.set_node(node);
-        Ok(())
-    }
-}
 
 /// Generate SELECT expressions for all edge columns with the given table alias.
 fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {

@@ -13,30 +13,8 @@ use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
-use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::pipelines::{HasInput, HasNode, HasResultCtx};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use std::collections::{HashMap, HashSet};
-
-/// Pipeline pass: enforces redaction return columns (`_gkg_*`).
-pub struct EnforcePass;
-
-impl<E, S> CompilerPass<E, S> for EnforcePass
-where
-    E: PipelineEnv,
-    S: PipelineState + HasNode + HasInput + HasResultCtx,
-{
-    const NAME: &'static str = "enforce";
-
-    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
-        let mut node = state.take_node()?;
-        let input = state.input()?;
-        let result_context = enforce_return(&mut node, input)?;
-        state.set_node(node);
-        state.set_result_ctx(result_context);
-        Ok(())
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {

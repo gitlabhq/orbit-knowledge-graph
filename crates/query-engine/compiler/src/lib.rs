@@ -41,9 +41,9 @@ pub mod types;
 // pipeline must come before pipelines — its macros.rs defines
 // `define_env_capabilities!` and `define_state_capabilities!` which
 // pipelines.rs invokes.
+pub mod passes;
 pub mod pipeline;
 pub mod pipelines;
-pub mod passes;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
@@ -62,14 +62,13 @@ pub use ontology::{Ontology, OntologyError};
 pub use pipeline::{CompilerPass, Pipeline, PipelineEnv, PipelineState, SealedPipeline};
 
 // Re-export env, state, and capability traits.
-pub use pipelines::{
-    HasOntology, HasSecurityCtx, LocalEnv, SecureEnv,
-    HasInput, HasJson, HasNode, HasOutput, HasResultCtx,
-    QueryState, DuckDbState,
-};
 pub use passes::{
     CheckPass, CodegenPass, EnforcePass, HydrationCodegenPass, LowerPass, NormalizePass,
     OptimizePass, SecurityPass, ValidatePass,
+};
+pub use pipelines::{
+    DuckDbState, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx,
+    LocalEnv, QueryState, SecureEnv,
 };
 
 // Re-export key types from pass modules.

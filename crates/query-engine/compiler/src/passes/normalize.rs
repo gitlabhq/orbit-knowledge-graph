@@ -8,34 +8,10 @@
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
-use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::pipelines::{HasInput, HasOntology};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
-
-/// Pipeline pass: normalizes a parsed `Input` into canonical form.
-///
-/// Resolves entity names to table names, coerces enum filter values,
-/// expands wildcard column selections, and builds entity auth config.
-/// Reads ontology from the environment.
-pub struct NormalizePass;
-
-impl<E, S> CompilerPass<E, S> for NormalizePass
-where
-    E: PipelineEnv + HasOntology,
-    S: PipelineState + HasInput,
-{
-    const NAME: &'static str = "normalize";
-
-    fn run(&self, env: &E, state: &mut S) -> Result<()> {
-        let input = state.take_input()?;
-        let ontology = env.ontology();
-        state.set_input(normalize(input, ontology)?);
-        Ok(())
-    }
-}
 
 /// Build the entity auth map for every entity type in the ontology that has a
 /// redaction config. This is the single source of truth consumed by both the

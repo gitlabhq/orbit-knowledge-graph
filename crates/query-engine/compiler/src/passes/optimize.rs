@@ -29,36 +29,12 @@ use crate::constants::{
 };
 use crate::input::{Input, InputNode, QueryType};
 use crate::passes::security::SecurityContext;
-use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
-use crate::pipelines::{HasInput, HasNode, HasSecurityCtx};
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
 };
 
 const ROOT_SIP_CTE: &str = "_root_ids";
-
-/// Pipeline pass: applies query optimizations.
-/// Reads security context from the environment.
-pub struct OptimizePass;
-
-impl<E, S> CompilerPass<E, S> for OptimizePass
-where
-    E: PipelineEnv + HasSecurityCtx,
-    S: PipelineState + HasNode + HasInput,
-{
-    const NAME: &'static str = "optimize";
-
-    fn run(&self, env: &E, state: &mut S) -> crate::error::Result<()> {
-        let security_ctx = env.security_ctx().clone();
-        let mut node = state.take_node()?;
-        let mut input = state.take_input()?;
-        optimize(&mut node, &mut input, &security_ctx);
-        state.set_node(node);
-        state.set_input(input);
-        Ok(())
-    }
-}
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
