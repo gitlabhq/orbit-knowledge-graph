@@ -288,7 +288,7 @@ impl LocalRepositoryCache {
     }
 
     #[cfg(test)]
-    async fn get(
+    async fn get_info(
         &self,
         project_id: i64,
         branch: &str,
@@ -563,7 +563,7 @@ mod tests {
     async fn get_returns_none_when_no_cache_exists() {
         let (_dir, cache) = create_cache();
 
-        let result = cache.get(42, "main").await.unwrap();
+        let result = cache.get_info(42, "main").await.unwrap();
 
         assert!(result.is_none());
     }
@@ -573,7 +573,7 @@ mod tests {
         let (_dir, cache) = create_cache();
 
         cache.save(42, "main", "abc123").await.unwrap();
-        let cached = cache.get(42, "main").await.unwrap().unwrap();
+        let cached = cache.get_info(42, "main").await.unwrap().unwrap();
 
         assert_eq!(cached.path, cache.repository_dir(42, "main"));
         assert_eq!(cached.commit, "abc123");
@@ -586,7 +586,7 @@ mod tests {
         cache.save(42, "main", "abc123").await.unwrap();
         cache.save(42, "main", "def456").await.unwrap();
 
-        let cached = cache.get(42, "main").await.unwrap().unwrap();
+        let cached = cache.get_info(42, "main").await.unwrap().unwrap();
         assert_eq!(cached.commit, "def456");
     }
 
@@ -601,7 +601,7 @@ mod tests {
 
         cache.invalidate(42, "main").await.unwrap();
 
-        let result = cache.get(42, "main").await.unwrap();
+        let result = cache.get_info(42, "main").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -626,8 +626,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(cache.get(42, "main").await.unwrap().is_some());
-        assert!(cache.get(42, "develop").await.unwrap().is_some());
+        assert!(cache.get_info(42, "main").await.unwrap().is_some());
+        assert!(cache.get_info(42, "develop").await.unwrap().is_some());
     }
 
     #[tokio::test]
@@ -644,8 +644,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(cache.get(1, "main").await.unwrap().is_some());
-        assert!(cache.get(2, "main").await.unwrap().is_some());
+        assert!(cache.get_info(1, "main").await.unwrap().is_some());
+        assert!(cache.get_info(2, "main").await.unwrap().is_some());
     }
 
     #[tokio::test]
@@ -664,8 +664,8 @@ mod tests {
 
         cache.invalidate(42, "main").await.unwrap();
 
-        assert!(cache.get(42, "main").await.unwrap().is_none());
-        assert!(cache.get(42, "develop").await.unwrap().is_some());
+        assert!(cache.get_info(42, "main").await.unwrap().is_none());
+        assert!(cache.get_info(42, "develop").await.unwrap().is_some());
     }
 
     // --- Archive tests ---
@@ -692,7 +692,7 @@ mod tests {
             .unwrap();
         assert_eq!(content, "pub mod lib;");
 
-        let cached = cache.get(42, "main").await.unwrap().unwrap();
+        let cached = cache.get_info(42, "main").await.unwrap().unwrap();
         assert_eq!(cached.commit, "abc123");
     }
 
@@ -717,7 +717,7 @@ mod tests {
             .unwrap();
         assert_eq!(content, "new content");
 
-        let cached = cache.get(42, "main").await.unwrap().unwrap();
+        let cached = cache.get_info(42, "main").await.unwrap().unwrap();
         assert_eq!(cached.commit, "commit2");
     }
 
@@ -731,7 +731,7 @@ mod tests {
             .await
             .unwrap();
 
-        let cached = cache.get(42, "main").await.unwrap();
+        let cached = cache.get_info(42, "main").await.unwrap();
         assert!(cached.is_some(), "entry should be tracked in the cache");
     }
 
@@ -744,7 +744,7 @@ mod tests {
 
         cache.update_commit(42, "main", "def456").await.unwrap();
 
-        let cached = cache.get(42, "main").await.unwrap().unwrap();
+        let cached = cache.get_info(42, "main").await.unwrap().unwrap();
         assert_eq!(cached.commit, "def456");
     }
 
@@ -762,7 +762,7 @@ mod tests {
         tokio::fs::write(&test_file, "fn main() {}").await.unwrap();
 
         cache.save(42, "main", "abc123").await.unwrap();
-        let cached = cache.get(42, "main").await.unwrap().unwrap();
+        let cached = cache.get_info(42, "main").await.unwrap().unwrap();
 
         let content = tokio::fs::read_to_string(cached.path.join("src/main.rs"))
             .await
