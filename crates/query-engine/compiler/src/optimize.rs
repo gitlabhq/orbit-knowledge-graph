@@ -23,7 +23,19 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
+use crate::constants::{
+    BACKWARD_CTE, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS, SKIP_SECURITY_FILTER_TABLES,
+    cascade_cte, node_filter_cte,
+};
+use crate::input::{Input, InputNode, QueryType};
 use crate::pipeline::{CompilerContext, CompilerPass, Lowered, Optimized};
+use crate::security::SecurityContext;
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
+    SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
+};
+
+const ROOT_SIP_CTE: &str = "_root_ids";
 
 /// Pipeline pass: applies query optimizations.
 pub struct OptimizePass<'a> {
@@ -43,22 +55,11 @@ impl CompilerPass for OptimizePass<'_> {
 
     fn run(&self, ctx: &mut CompilerContext<Lowered>) -> crate::error::Result<()> {
         let node = ctx.node.as_mut().expect("node must exist after lowering");
-        optimize(node, &mut ctx.input, self.security_context);
+        let input = ctx.input.as_mut().expect("input must exist");
+        optimize(node, input, self.security_context);
         Ok(())
     }
 }
-use crate::constants::{
-    BACKWARD_CTE, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS, SKIP_SECURITY_FILTER_TABLES,
-    cascade_cte, node_filter_cte,
-};
-use crate::input::{Input, InputNode, QueryType};
-use crate::security::SecurityContext;
-use ontology::constants::{
-    DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
-    SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
-};
-
-const ROOT_SIP_CTE: &str = "_root_ids";
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {

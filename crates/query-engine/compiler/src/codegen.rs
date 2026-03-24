@@ -26,10 +26,11 @@ impl CompilerPass for CodegenPass {
             .result_context
             .take()
             .expect("result_context must exist");
+        let input_ref = ctx.input.as_ref().expect("input must exist");
         let base = codegen(node, result_context)?;
-        let hydration = crate::hydrate::generate_hydration_plan(&ctx.input);
-        let query_type = ctx.input.query_type;
-        let input = ctx.input.clone();
+        let hydration = crate::hydrate::generate_hydration_plan(input_ref);
+        let query_type = input_ref.query_type;
+        let input = input_ref.clone();
         ctx.output = Some(CompiledQueryContext {
             query_type,
             base,

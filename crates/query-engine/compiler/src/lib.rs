@@ -70,7 +70,7 @@ pub use input::{DynamicColumnMode, EntityAuthConfig};
 pub use lower::LowerPass;
 pub use lower::lower;
 pub use metrics::{METRICS, QueryEngineMetrics};
-pub use normalize::{build_entity_auth, normalize};
+pub use normalize::{NormalizePass, build_entity_auth, normalize};
 pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
 pub use optimize::OptimizePass;
@@ -81,7 +81,7 @@ pub use pipeline::{
 };
 pub use security::SecurityPass;
 pub use security::{SecurityContext, apply_security_context};
-pub use validate::Validator;
+pub use validate::{ParsePass, Validator};
 
 use metrics::CountErr;
 

@@ -10,7 +10,39 @@ use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
+use crate::pipeline::{CompilerContext, CompilerPass, Parsed, Raw};
 use ontology::{DataType, Ontology};
+
+/// Pipeline pass: validates the raw JSON query and deserializes into `Input`.
+///
+/// Performs schema validation, ontology allowlist checks, deserialization,
+/// and cross-reference validation.
+pub struct ParsePass<'a> {
+    pub ontology: &'a Ontology,
+}
+
+impl<'a> ParsePass<'a> {
+    pub fn new(ontology: &'a Ontology) -> Self {
+        Self { ontology }
+    }
+}
+
+impl CompilerPass for ParsePass<'_> {
+    const NAME: &'static str = "parse";
+    type In = Raw;
+    type Out = Parsed;
+
+    fn run(&self, ctx: &mut CompilerContext<Raw>) -> Result<()> {
+        let json = ctx.json.as_deref().expect("json must exist at Raw phase");
+        let v = Validator::new(self.ontology);
+        let value = v.check_json(json)?;
+        v.check_ontology(&value)?;
+        let input: Input = serde_json::from_value(value)?;
+        v.check_references(&input)?;
+        ctx.input = Some(input);
+        Ok(())
+    }
+}
 
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));

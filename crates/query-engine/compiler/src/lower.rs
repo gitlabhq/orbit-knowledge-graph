@@ -3,21 +3,8 @@
 //! Transforms validated input into a SQL-oriented AST.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
-use crate::pipeline::{CompilerContext, CompilerPass, Lowered, Parsed};
+use crate::pipeline::{CompilerContext, CompilerPass, Lowered, Normalized};
 
-/// Pipeline pass: lowers a validated `Input` into an AST `Node`.
-pub struct LowerPass;
-
-impl CompilerPass for LowerPass {
-    const NAME: &'static str = "lower";
-    type In = Parsed;
-    type Out = Lowered;
-
-    fn run(&self, ctx: &mut CompilerContext<Parsed>) -> crate::error::Result<()> {
-        ctx.node = Some(lower(&mut ctx.input)?);
-        Ok(())
-    }
-}
 use crate::constants::{
     ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,
     EDGE_KINDS_COLUMN, END_ID_COLUMN, END_KIND_COLUMN, FORWARD_ALIAS, FORWARD_CTE,
@@ -37,6 +24,24 @@ use ontology::constants::{
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+
+/// Pipeline pass: lowers a normalized `Input` into an AST `Node`.
+pub struct LowerPass;
+
+impl CompilerPass for LowerPass {
+    const NAME: &'static str = "lower";
+    type In = Normalized;
+    type Out = Lowered;
+
+    fn run(&self, ctx: &mut CompilerContext<Normalized>) -> crate::error::Result<()> {
+        let input = ctx
+            .input
+            .as_mut()
+            .expect("input must exist at Normalized phase");
+        ctx.node = Some(lower(input)?);
+        Ok(())
+    }
+}
 
 /// Generate SELECT expressions for all edge columns with the given table alias.
 fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {

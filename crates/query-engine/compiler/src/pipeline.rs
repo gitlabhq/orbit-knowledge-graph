@@ -8,15 +8,17 @@
 //! # Pipelines
 //!
 //! ```text
-//! ClickHouse:  Parsed → Lower → Optimize → Enforce → Security → Check → Codegen
-//! Hydration:   Parsed → Lower → Optimize → Enforce → Codegen (no security)
-//! DuckDB:      Parsed → Lower → Optimize → Enforce → DuckDbCodegen (future)
+//! ClickHouse:  Raw → Parse → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen
+//! Hydration:   Normalized → Lower → Optimize → Enforce → HydrationCodegen (no security)
+//! DuckDB:      Raw → Parse → Normalize → Lower → Optimize → Enforce → DuckDbCodegen (future)
 //! ```
 //!
 //! # Example
 //!
 //! ```ignore
-//! let compiled = CompilerRunner::parse(json, &ontology)?
+//! let compiled = CompilerRunner::new(json)
+//!     .then(&ParsePass::new(&ontology))?
+//!     .then(&NormalizePass::new(&ontology))?
 //!     .then(&LowerPass)?
 //!     .then(&OptimizePass::new(&security_ctx))?
 //!     .then(&EnforcePass)?
@@ -61,7 +63,7 @@ macro_rules! define_phases {
 }
 
 define_phases!(
-    Parsed, Lowered, Optimized, Enforced, Secured, Checked, Emitted
+    Raw, Parsed, Normalized, Lowered, Optimized, Enforced, Secured, Checked, Emitted
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,7 +76,8 @@ define_phases!(
 /// parameter prevents accessing fields before the pass that populates
 /// them has executed.
 pub struct CompilerContext<P: Phase> {
-    pub(crate) input: Input,
+    pub(crate) json: Option<String>,
+    pub(crate) input: Option<Input>,
     pub(crate) node: Option<Node>,
     pub(crate) result_context: Option<ResultContext>,
     pub(crate) output: Option<CompiledQueryContext>,
@@ -85,6 +88,7 @@ impl<P: Phase> CompilerContext<P> {
     /// Zero-cost phase transition — same memory layout, different phantom type.
     fn advance<Q: Phase>(self) -> CompilerContext<Q> {
         CompilerContext {
+            json: self.json,
             input: self.input,
             node: self.node,
             result_context: self.result_context,
@@ -92,14 +96,29 @@ impl<P: Phase> CompilerContext<P> {
             _phase: PhantomData,
         }
     }
-
-    /// Read access to the input (available at all phases).
-    pub fn input(&self) -> &Input {
-        &self.input
-    }
 }
 
-// Phase-gated accessors: node is available after Lowered.
+// Phase-gated accessors — each field is only accessible after the pass
+// that populates it.
+
+// input is available from Parsed onward.
+macro_rules! impl_input_accessors {
+    ($($phase:ty),+ $(,)?) => {
+        $(
+            impl CompilerContext<$phase> {
+                pub fn input(&self) -> &Input {
+                    self.input.as_ref().expect("input must exist at this phase")
+                }
+            }
+        )+
+    };
+}
+
+impl_input_accessors!(
+    Parsed, Normalized, Lowered, Optimized, Enforced, Secured, Checked, Emitted
+);
+
+// node is available from Lowered onward.
 macro_rules! impl_node_accessors {
     ($($phase:ty),+ $(,)?) => {
         $(
@@ -114,7 +133,7 @@ macro_rules! impl_node_accessors {
 
 impl_node_accessors!(Lowered, Optimized, Enforced, Secured, Checked);
 
-// result_context is available after Enforced.
+// result_context is available from Enforced onward.
 macro_rules! impl_result_context_accessors {
     ($($phase:ty),+ $(,)?) => {
         $(
@@ -202,19 +221,30 @@ pub struct CompilerRunner<P: Phase> {
     observer: Option<Box<dyn CompilerObserver>>,
 }
 
-impl CompilerRunner<Parsed> {
-    /// Parse and validate a JSON query string into a typed `Input`, producing
-    /// a runner at the `Parsed` phase.
-    pub fn parse(json: &str, ontology: &ontology::Ontology) -> Result<Self> {
-        let input = crate::validated_input(json, ontology)?;
-        Ok(Self::from_input(input))
+impl CompilerRunner<Raw> {
+    /// Start a pipeline from a raw JSON query string.
+    pub fn new(json: impl Into<String>) -> Self {
+        CompilerRunner {
+            ctx: CompilerContext {
+                json: Some(json.into()),
+                input: None,
+                node: None,
+                result_context: None,
+                output: None,
+                _phase: PhantomData,
+            },
+            observer: None,
+        }
     }
+}
 
-    /// Start from a pre-built `Input` (for hydration queries or tests).
+impl CompilerRunner<Normalized> {
+    /// Start from a pre-built, normalized `Input` (for hydration queries or tests).
     pub fn from_input(input: Input) -> Self {
         CompilerRunner {
             ctx: CompilerContext {
-                input,
+                json: None,
+                input: Some(input),
                 node: None,
                 result_context: None,
                 output: None,
@@ -273,21 +303,25 @@ use crate::codegen::CodegenPass;
 use crate::enforce::EnforcePass;
 use crate::hydrate::HydrationCodegenPass;
 use crate::lower::LowerPass;
+use crate::normalize::NormalizePass;
 use crate::optimize::OptimizePass;
 use crate::security::SecurityPass;
+use crate::validate::ParsePass;
 
 /// Standard ClickHouse compilation pipeline.
 ///
 /// ```text
-/// JSON → Parse → Lower → Optimize → Enforce → Security → Check → Codegen
+/// JSON → Parse → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen
 /// ```
 pub fn compile_clickhouse(
     json: &str,
     ontology: &ontology::Ontology,
     security_ctx: &crate::SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    CompilerRunner::parse(json, ontology)?
+    CompilerRunner::new(json)
         .with_observer(MetricsObserver)
+        .then(&ParsePass::new(ontology))?
+        .then(&NormalizePass::new(ontology))?
         .then(&LowerPass)?
         .then(&OptimizePass::new(security_ctx))?
         .then(&EnforcePass)?
@@ -404,7 +438,10 @@ mod tests {
             "limit": 10
         }"#;
 
-        let ctx = CompilerRunner::parse(json, &ontology)
+        let ctx = CompilerRunner::new(json)
+            .then(&ParsePass::new(&ontology))
+            .unwrap()
+            .then(&NormalizePass::new(&ontology))
             .unwrap()
             .then(&LowerPass)
             .unwrap()
@@ -413,6 +450,27 @@ mod tests {
         // Can inspect the AST after lowering.
         let Node::Query(q) = ctx.node();
         assert!(!q.select.is_empty());
+    }
+
+    #[test]
+    fn partial_pipeline_inspect_after_normalize() {
+        let ontology = test_ontology();
+
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#;
+
+        let ctx = CompilerRunner::new(json)
+            .then(&ParsePass::new(&ontology))
+            .unwrap()
+            .then(&NormalizePass::new(&ontology))
+            .unwrap()
+            .into_context();
+
+        // Input is available after normalize.
+        assert_eq!(ctx.input().query_type, QueryType::Search);
     }
 
     #[test]
@@ -426,7 +484,10 @@ mod tests {
             "limit": 10
         }"#;
 
-        let ctx = CompilerRunner::parse(json, &ontology)
+        let ctx = CompilerRunner::new(json)
+            .then(&ParsePass::new(&ontology))
+            .unwrap()
+            .then(&NormalizePass::new(&ontology))
             .unwrap()
             .then(&LowerPass)
             .unwrap()
@@ -442,7 +503,7 @@ mod tests {
     fn parse_error_propagates() {
         let ontology = test_ontology();
 
-        let result = CompilerRunner::parse("not valid json", &ontology);
+        let result = CompilerRunner::new("not valid json").then(&ParsePass::new(&ontology));
         assert!(result.is_err());
     }
 
@@ -475,9 +536,12 @@ mod tests {
             "limit": 10
         }"#;
 
-        let _ = CompilerRunner::parse(json, &ontology)
-            .unwrap()
+        let _ = CompilerRunner::new(json)
             .with_observer(obs)
+            .then(&ParsePass::new(&ontology))
+            .unwrap()
+            .then(&NormalizePass::new(&ontology))
+            .unwrap()
             .then(&LowerPass)
             .unwrap()
             .then(&OptimizePass::new(&ctx))
@@ -496,7 +560,14 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "lower", "optimize", "enforce", "security", "check", "codegen"
+                "parse",
+                "normalize",
+                "lower",
+                "optimize",
+                "enforce",
+                "security",
+                "check",
+                "codegen"
             ]
         );
     }

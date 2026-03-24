@@ -27,7 +27,8 @@ impl CompilerPass for EnforcePass {
 
     fn run(&self, ctx: &mut CompilerContext<Optimized>) -> Result<()> {
         let node = ctx.node.as_mut().expect("node must exist after optimize");
-        let result_context = enforce_return(node, &ctx.input)?;
+        let input = ctx.input.as_ref().expect("input must exist");
+        let result_context = enforce_return(node, input)?;
         ctx.result_context = Some(result_context);
         Ok(())
     }
