@@ -131,7 +131,8 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | [Internal program page](https://internal.gitlab.com/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/) | R&D PMO program landing page ([source](https://gitlab.com/gitlab-com/content-sites/internal-handbook/blob/main/content/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/_index.md)) |
 | [orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and summary (Feb 3-5, 2026): architecture, indexing, query engine, infra, DIP, deployment, billing |
 | [Readiness reviews (old)](https://gitlab.com/gitlab-com/gl-infra/readiness) | Legacy readiness repo. Siphon review [MR !231](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/231) (open, 78 comments), NATS review [MR !240](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/240) (merged). |
-| In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) and [RUNBOOK.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/RUNBOOK.md) -- GCP sandbox environment details and operational runbook (dev/sandbox only) |
+| In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) -- GCP sandbox environment details (dev/sandbox only) |
+| Operational runbooks | [docs/dev/runbooks/](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs/dev/runbooks) -- indexing pipelines, configuration, troubleshooting |
 | [Design Specs (Figma)](https://www.figma.com/design/GOrqDStp1E1SE0Ms7lVbXF/--588317--Orbit-GA-Designs?t=SLZ2CosGuBAzjC6r-0) | UI/UX design specs and visual references for Orbit GA features |
 
 ---
@@ -260,7 +261,9 @@ Jerome Ng (@jeromezng, usage billing system architect).
 
 | Runbook | Location |
 |---|---|
-| Dev/sandbox runbook | [`docs/dev/RUNBOOK.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/RUNBOOK.md) |
+| SDLC indexing | [`docs/dev/runbooks/sdlc_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/sdlc_indexing.md) |
+| Code indexing | [`docs/dev/runbooks/code_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/code_indexing.md) |
+| Indexer configuration | [`docs/dev/runbooks/indexer_configuration.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/indexer_configuration.md) |
 | Production runbook | TODO |
 
 ### Observability
