@@ -7,7 +7,7 @@ Operations guide for the SDLC indexing pipeline: dispatching, entity extraction,
 Siphon CDC replicates GitLab PostgreSQL tables into ClickHouse datalake tables.
 The SDLC indexing pipeline transforms datalake rows into graph node and edge tables.
 
-```text
+```plaintext
 GitLab PostgreSQL
   -> Siphon CDC (logical replication)
     -> NATS JetStream

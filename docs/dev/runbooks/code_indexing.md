@@ -6,7 +6,7 @@ Operations guide for the code indexing pipeline: dispatch sources, task processi
 
 Code indexing is event-driven, not periodic. Two dispatch sources feed code indexing task requests into the `GKG_INDEXER` stream:
 
-```text
+```plaintext
 Push events (CDC):
   Siphon -> p_knowledge_graph_code_indexing_tasks -> NATS siphon_stream_main_db
     -> SiphonCodeIndexingTaskDispatcher (DispatchIndexing mode)
@@ -98,7 +98,7 @@ Failed code indexing tasks are sent to the `GKG_DEAD_LETTERS` stream after exhau
 
 ### DLQ subject format
 
-```text
+```plaintext
 dlq.GKG_INDEXER.code.task.indexing.requested.<project_id>.<base64_branch>
 ```
 
@@ -280,7 +280,7 @@ Code indexing retries differently from SDLC indexing because tasks are event-dri
 
 The retry flow:
 
-```text
+```plaintext
 Attempt 1 fails -> nack (60s delay)
   -> Attempt 2 fails -> nack (60s delay)
     -> Attempt 3 fails -> nack (60s delay)
