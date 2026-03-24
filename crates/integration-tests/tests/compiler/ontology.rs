@@ -2,7 +2,7 @@
 
 use super::setup::{embedded_ontology, test_ctx};
 use compiler::{
-    compile, compile_input, ColumnSelection, HydrationPlan, Input, InputNode, QueryError, QueryType,
+    ColumnSelection, HydrationPlan, Input, InputNode, QueryError, QueryType, compile, compile_input,
 };
 
 #[test]
@@ -542,16 +542,18 @@ fn range_pagination() {
     .unwrap_err();
     assert!(err.to_string().contains("must not exceed 1000"), "{err}");
 
-    assert!(compile(
-        r#"{
+    assert!(
+        compile(
+            r#"{
             "query_type": "search",
             "node": {"id": "u", "entity": "User"},
             "range": {"start": 0, "end": 1000}
         }"#,
-        &ontology,
-        &ctx,
-    )
-    .is_ok());
+            &ontology,
+            &ctx,
+        )
+        .is_ok()
+    );
 }
 
 #[test]

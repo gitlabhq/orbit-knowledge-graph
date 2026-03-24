@@ -1,7 +1,7 @@
 //! Compiler unit tests using a hand-built ontology.
 
 use super::setup::{compile_to_ast, test_ctx, test_ontology};
-use compiler::{compile, Node, QueryError};
+use compiler::{Node, QueryError, compile};
 
 #[test]
 fn compile_to_ast_works() {
