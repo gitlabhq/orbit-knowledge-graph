@@ -8,9 +8,9 @@
 
 use std::sync::OnceLock;
 
+use crate::envs::HasOntology;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
-use crate::passes::envs::HasOntology;
 use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 use ontology::{DataType, Ontology};
 

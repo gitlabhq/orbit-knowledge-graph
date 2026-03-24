@@ -27,8 +27,8 @@ use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS, SKIP_SECURITY_FILTER_TABLES,
     cascade_cte, node_filter_cte,
 };
+use crate::envs::HasSecurityCtx;
 use crate::input::{Input, InputNode, QueryType};
-use crate::passes::envs::HasSecurityCtx;
 use crate::passes::security::SecurityContext;
 use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 use ontology::constants::{

@@ -6,9 +6,9 @@
 //! - Filter values are coerced to match ontology types
 //! - Wildcard column selections are expanded to explicit column lists
 
+use crate::envs::HasOntology;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
-use crate::passes::envs::HasOntology;
 use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};

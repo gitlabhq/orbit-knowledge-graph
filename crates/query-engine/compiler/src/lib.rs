@@ -33,6 +33,7 @@
 
 pub mod ast;
 pub mod constants;
+pub mod envs;
 pub mod error;
 pub mod input;
 pub mod metrics;
@@ -58,10 +59,10 @@ pub use pipeline::{
 };
 
 // Re-export pass structs.
+pub use envs::{ClickHouseEnv, HydrationEnv};
 pub use passes::{
-    CheckPass, ClickHouseEnv, CodegenPass, EnforcePass, HasOntology, HasSecurityCtx,
-    HydrationCodegenPass, HydrationEnv, LowerPass, NormalizePass, OptimizePass, ParsePass,
-    SecurityPass, ValidatePass,
+    CheckPass, CodegenPass, EnforcePass, HydrationCodegenPass, LowerPass, NormalizePass,
+    OptimizePass, ParsePass, SecurityPass, ValidatePass,
 };
 
 // Re-export key types from pass modules.

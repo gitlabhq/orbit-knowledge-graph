@@ -9,8 +9,8 @@
 
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
+use crate::envs::HasSecurityCtx;
 use crate::error::{QueryError, Result};
-use crate::passes::envs::HasSecurityCtx;
 use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 use once_cell::sync::Lazy;
 use regex::Regex;

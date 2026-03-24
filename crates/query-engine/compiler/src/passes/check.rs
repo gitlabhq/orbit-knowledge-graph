@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
+use crate::envs::HasSecurityCtx;
 use crate::error::{QueryError, Result};
-use crate::passes::envs::HasSecurityCtx;
 use crate::passes::security::{SecurityContext, collect_node_aliases};
 use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 

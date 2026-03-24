@@ -1,7 +1,6 @@
 pub mod check;
 pub mod codegen;
 pub mod enforce;
-pub mod envs;
 pub mod hydrate;
 pub mod lower;
 pub mod normalize;
@@ -13,7 +12,6 @@ pub mod validate;
 pub use check::CheckPass;
 pub use codegen::CodegenPass;
 pub use enforce::EnforcePass;
-pub use envs::{ClickHouseEnv, HasOntology, HasSecurityCtx, HydrationEnv};
 pub use hydrate::HydrationCodegenPass;
 pub use lower::LowerPass;
 pub use normalize::NormalizePass;
