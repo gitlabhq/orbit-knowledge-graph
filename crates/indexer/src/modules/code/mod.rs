@@ -75,7 +75,6 @@ pub fn register_handlers(
 
     let code_worker_count = config.engine.code_worker_count();
     let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-        config.engine.repository_cache.path.clone(),
         &config.engine.repository_cache,
         code_worker_count,
         metrics.clone(),

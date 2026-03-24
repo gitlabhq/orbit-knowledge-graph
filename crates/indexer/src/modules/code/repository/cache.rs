@@ -107,7 +107,6 @@ pub struct LocalRepositoryCache {
 
 impl LocalRepositoryCache {
     pub fn new(
-        base_dir: PathBuf,
         config: &RepositoryCacheConfiguration,
         code_worker_count: usize,
         metrics: CodeMetrics,
@@ -129,7 +128,7 @@ impl LocalRepositoryCache {
         );
         let headroom = config.disk_budget_bytes.saturating_sub(usable_budget);
         Self {
-            base_dir,
+            base_dir: config.path.clone(),
             budget,
             eviction_lock: tokio::sync::RwLock::new(()),
             metrics,
@@ -146,6 +145,32 @@ impl LocalRepositoryCache {
 
     fn repository_dir(&self, project_id: i64, branch: &str) -> PathBuf {
         self.branch_dir(project_id, branch).join(REPOSITORY_DIR)
+    }
+
+    async fn read_cached_entry(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<Option<CachedRepository>, RepositoryCacheError> {
+        let branch_dir = self.branch_dir(project_id, branch);
+        let commit_file = branch_dir.join(META_DIR).join(COMMIT_FILE);
+
+        let commit = match tokio::fs::read_to_string(&commit_file).await {
+            Ok(content) => content.trim().to_string(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+
+        let repository_dir = branch_dir.join(REPOSITORY_DIR);
+        match tokio::fs::metadata(&repository_dir).await {
+            Ok(meta) if meta.is_dir() => {}
+            _ => return Ok(None),
+        }
+
+        Ok(Some(CachedRepository {
+            path: repository_dir,
+            commit,
+        }))
     }
 
     fn pin(&self, project_id: i64, branch: &str) -> RepositoryLease {
@@ -293,25 +318,7 @@ impl LocalRepositoryCache {
         project_id: i64,
         branch: &str,
     ) -> Result<Option<CachedRepository>, RepositoryCacheError> {
-        let branch_dir = self.branch_dir(project_id, branch);
-        let commit_file = branch_dir.join(META_DIR).join(COMMIT_FILE);
-
-        let commit = match tokio::fs::read_to_string(&commit_file).await {
-            Ok(content) => content.trim().to_string(),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
-
-        let repository_dir = branch_dir.join(REPOSITORY_DIR);
-        match tokio::fs::metadata(&repository_dir).await {
-            Ok(meta) if meta.is_dir() => {}
-            _ => return Ok(None),
-        }
-
-        Ok(Some(CachedRepository {
-            path: repository_dir,
-            commit,
-        }))
+        self.read_cached_entry(project_id, branch).await
     }
 }
 
@@ -334,31 +341,14 @@ impl RepositoryCache for LocalRepositoryCache {
     ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError> {
         let _eviction_guard = self.eviction_lock.read().await;
 
-        let branch_dir = self.branch_dir(project_id, branch);
-        let commit_file = branch_dir.join(META_DIR).join(COMMIT_FILE);
-
-        let commit = match tokio::fs::read_to_string(&commit_file).await {
-            Ok(content) => content.trim().to_string(),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e.into()),
+        let Some(cached) = self.read_cached_entry(project_id, branch).await? else {
+            return Ok(None);
         };
-
-        let repository_dir = branch_dir.join(REPOSITORY_DIR);
-        match tokio::fs::metadata(&repository_dir).await {
-            Ok(meta) if meta.is_dir() => {}
-            _ => return Ok(None),
-        }
 
         self.budget.touch(project_id, branch);
         let lease = self.pin(project_id, branch);
 
-        Ok(Some((
-            CachedRepository {
-                path: repository_dir,
-                commit,
-            },
-            lease,
-        )))
+        Ok(Some((cached, lease)))
     }
 
     async fn extract_archive(
@@ -472,18 +462,13 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn default_config() -> RepositoryCacheConfiguration {
-        RepositoryCacheConfiguration::default()
-    }
-
     fn create_cache() -> (TempDir, LocalRepositoryCache) {
         let temp_dir = TempDir::new().unwrap();
-        let cache = LocalRepositoryCache::new(
-            temp_dir.path().to_path_buf(),
-            &default_config(),
-            4,
-            CodeMetrics::default(),
-        );
+        let config = RepositoryCacheConfiguration {
+            path: temp_dir.path().to_path_buf(),
+            ..Default::default()
+        };
+        let cache = LocalRepositoryCache::new(&config, 4, CodeMetrics::default());
         (temp_dir, cache)
     }
 
@@ -499,7 +484,7 @@ mod tests {
             headroom_per_worker_bytes,
             large_repo_threshold_bytes,
         };
-        LocalRepositoryCache::new(temp_dir.to_path_buf(), &config, 1, CodeMetrics::default())
+        LocalRepositoryCache::new(&config, 1, CodeMetrics::default())
     }
 
     fn archive_stream(data: Vec<u8>) -> ByteStream {
@@ -1015,7 +1000,6 @@ mod tests {
     async fn concurrent_eviction_and_pin_do_not_race() {
         let dir = TempDir::new().unwrap();
         let cache = std::sync::Arc::new(LocalRepositoryCache::new(
-            dir.path().to_path_buf(),
             &RepositoryCacheConfiguration {
                 path: dir.path().to_path_buf(),
                 disk_budget_bytes: 400,

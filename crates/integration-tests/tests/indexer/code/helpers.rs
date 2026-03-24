@@ -52,7 +52,7 @@ impl CodeIndexingDeps {
     pub fn with_cache_config(
         mock: &MockGitlabServer,
         clickhouse: &TestContext,
-        cache_config: indexer::configuration::RepositoryCacheConfiguration,
+        mut cache_config: indexer::configuration::RepositoryCacheConfiguration,
     ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
         let graph_client = Arc::new(clickhouse.config.build_client());
@@ -68,12 +68,9 @@ impl CodeIndexingDeps {
         let metrics = CodeMetrics::new();
 
         let cache_dir = tempfile::tempdir().expect("failed to create temp dir for cache");
-        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-            cache_dir.path().to_path_buf(),
-            &cache_config,
-            4,
-            metrics.clone(),
-        ));
+        cache_config.path = cache_dir.path().to_path_buf();
+        let cache: Arc<dyn RepositoryCache> =
+            Arc::new(LocalRepositoryCache::new(&cache_config, 4, metrics.clone()));
         let resolver =
             RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
 

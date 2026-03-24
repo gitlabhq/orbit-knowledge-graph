@@ -500,16 +500,13 @@ mod tests {
 
     fn create_resolver_with_config(
         service: Arc<ScriptedRepositoryService>,
-        config: crate::configuration::RepositoryCacheConfiguration,
+        mut config: crate::configuration::RepositoryCacheConfiguration,
     ) -> (tempfile::TempDir, RepositoryResolver) {
         let temp_dir = tempfile::TempDir::new().unwrap();
+        config.path = temp_dir.path().to_path_buf();
         let metrics = CodeMetrics::default();
-        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-            temp_dir.path().to_path_buf(),
-            &config,
-            4,
-            metrics.clone(),
-        ));
+        let cache: Arc<dyn RepositoryCache> =
+            Arc::new(LocalRepositoryCache::new(&config, 4, metrics.clone()));
         let resolver =
             RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache, metrics);
         (temp_dir, resolver)

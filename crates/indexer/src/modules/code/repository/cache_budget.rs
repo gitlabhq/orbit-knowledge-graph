@@ -87,6 +87,7 @@ pub struct CacheBudget {
     index: Arc<RwLock<HashMap<CacheKey, IndexEntry>>>,
     pin_counts: Arc<RwLock<HashMap<CacheKey, usize>>>,
     total_bytes: Arc<AtomicU64>,
+    entry_count: Arc<AtomicU64>,
     metrics: CodeMetrics,
 }
 
@@ -98,6 +99,7 @@ impl CacheBudget {
             index: Arc::new(RwLock::new(HashMap::new())),
             pin_counts: Arc::new(RwLock::new(HashMap::new())),
             total_bytes: Arc::new(AtomicU64::new(0)),
+            entry_count: Arc::new(AtomicU64::new(0)),
             metrics,
         }
     }
@@ -118,17 +120,19 @@ impl CacheBudget {
 
     pub fn record_size(&self, project_id: i64, branch: &str, size_bytes: u64) {
         let key = cache_key(project_id, branch);
-        let old_size = self
-            .index
-            .write()
-            .insert(
-                key,
-                IndexEntry {
-                    size_bytes,
-                    last_accessed: SystemTime::now(),
-                },
-            )
-            .map_or(0, |e| e.size_bytes);
+        let previous = self.index.write().insert(
+            key,
+            IndexEntry {
+                size_bytes,
+                last_accessed: SystemTime::now(),
+            },
+        );
+
+        let is_new = previous.is_none();
+        let old_size = previous.map_or(0, |e| e.size_bytes);
+        if is_new {
+            self.entry_count.fetch_add(1, Ordering::Relaxed);
+        }
 
         if size_bytes >= old_size {
             self.total_bytes
@@ -151,12 +155,16 @@ impl CacheBudget {
     /// Removes an entry from the index and returns its tracked size (0 if absent).
     pub fn remove(&self, project_id: i64, branch: &str) -> u64 {
         let key = cache_key(project_id, branch);
-        let size = self.index.write().remove(&key).map_or(0, |e| e.size_bytes);
-        if size > 0 {
-            self.total_bytes.fetch_sub(size, Ordering::Relaxed);
+        let Some(entry) = self.index.write().remove(&key) else {
+            return 0;
+        };
+        self.entry_count.fetch_sub(1, Ordering::Relaxed);
+        if entry.size_bytes > 0 {
+            self.total_bytes
+                .fetch_sub(entry.size_bytes, Ordering::Relaxed);
         }
         self.report_state();
-        size
+        entry.size_bytes
     }
 
     /// Returns the keys that should be evicted to make room for `needed_bytes`.
@@ -230,13 +238,15 @@ impl CacheBudget {
         self.index.write().clear();
         self.pin_counts.write().clear();
         self.total_bytes.store(0, Ordering::Relaxed);
+        self.entry_count.store(0, Ordering::Relaxed);
         self.report_state();
     }
 
     fn report_state(&self) {
-        let total_bytes = self.total_bytes.load(Ordering::Relaxed);
-        let entry_count = self.index.read().len() as u64;
-        self.metrics.record_cache_state(total_bytes, entry_count);
+        self.metrics.record_cache_state(
+            self.total_bytes.load(Ordering::Relaxed),
+            self.entry_count.load(Ordering::Relaxed),
+        );
     }
 
     #[cfg(test)]
@@ -245,6 +255,19 @@ impl CacheBudget {
             .read()
             .get(key)
             .is_some_and(|&count| count > 0)
+    }
+
+    #[cfg(test)]
+    fn entry_count(&self) -> usize {
+        self.index.read().len()
+    }
+
+    #[cfg(test)]
+    fn last_accessed(&self, project_id: i64, branch: &str) -> Option<SystemTime> {
+        self.index
+            .read()
+            .get(&cache_key(project_id, branch))
+            .map(|e| e.last_accessed)
     }
 }
 
@@ -261,12 +284,7 @@ mod tests {
     }
 
     fn index_entry_timestamp(budget: &CacheBudget, project_id: i64, branch: &str) -> SystemTime {
-        budget
-            .index
-            .read()
-            .get(&cache_key(project_id, branch))
-            .unwrap()
-            .last_accessed
+        budget.last_accessed(project_id, branch).unwrap()
     }
 
     #[tokio::test]
@@ -341,7 +359,7 @@ mod tests {
 
         let _ = budget.entries_to_evict(200);
 
-        assert_eq!(budget.index.read().len(), 2, "index should be unchanged");
+        assert_eq!(budget.entry_count(), 2, "index should be unchanged");
     }
 
     #[tokio::test]
@@ -363,7 +381,7 @@ mod tests {
         let removed = budget.remove(1, "main");
 
         assert_eq!(removed, 100);
-        assert!(budget.index.read().is_empty());
+        assert_eq!(budget.entry_count(), 0);
     }
 
     #[tokio::test]
@@ -399,7 +417,7 @@ mod tests {
 
         budget.clear();
 
-        assert!(budget.index.read().is_empty());
+        assert_eq!(budget.entry_count(), 0);
         assert_eq!(budget.total_bytes.load(Ordering::Relaxed), 0);
     }
 }
