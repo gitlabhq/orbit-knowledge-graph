@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use crate::pipeline::PipelineEnv;
-use gkg_utils::security::SecurityContext;
+use crate::types::SecurityContext;
 use ontology::Ontology;
 
 /// Environment provides access to the ontology.

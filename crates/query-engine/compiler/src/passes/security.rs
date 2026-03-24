@@ -12,7 +12,7 @@ use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_P
 use crate::envs::HasSecurityCtx;
 use crate::error::{QueryError, Result};
 use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
-pub use gkg_utils::security::SecurityContext;
+pub use crate::types::SecurityContext;
 
 /// Pipeline pass: injects `startsWith(traversal_path, ...)` security filters.
 /// Reads security context from the environment.

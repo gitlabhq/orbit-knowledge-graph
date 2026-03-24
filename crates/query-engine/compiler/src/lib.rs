@@ -39,6 +39,7 @@ pub mod input;
 pub mod metrics;
 pub mod passes;
 pub mod pipeline;
+pub mod types;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
@@ -75,8 +76,9 @@ pub use passes::hydrate::generate_hydration_plan;
 pub use passes::lower::lower;
 pub use passes::normalize::{build_entity_auth, normalize};
 pub use passes::optimize::optimize;
-pub use passes::security::{SecurityContext, apply_security_context};
+pub use passes::security::apply_security_context;
 pub use passes::validate::Validator;
+pub use types::SecurityContext;
 
 use std::sync::Arc;
 
