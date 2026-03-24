@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
+use compiler_pipeline_macros::{PipelineEnv, PipelineState};
 use ontology::Ontology;
-use pipeline_macros::{PipelineEnv, PipelineState};
 
 use crate::ast::Node;
 use crate::error::{QueryError, Result};

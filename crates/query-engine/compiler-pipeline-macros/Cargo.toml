@@ -1,5 +1,5 @@
 [package]
-name = "pipeline-macros"
+name = "compiler-pipeline-macros"
 version.workspace = true
 edition = "2024"
 

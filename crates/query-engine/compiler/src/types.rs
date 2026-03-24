@@ -27,38 +27,39 @@ impl SecurityContext {
     /// - The first segment of each path equals org_id
     pub fn new(org_id: i64, traversal_paths: Vec<String>) -> Result<Self> {
         for path in &traversal_paths {
-            validate_traversal_path(path, org_id)?;
+            Self::validate_traversal_path(path, org_id)?;
         }
         Ok(Self {
             org_id,
             traversal_paths,
         })
     }
-}
 
-fn validate_traversal_path(path: &str, org_id: i64) -> Result<()> {
-    if !TRAVERSAL_PATH_REGEX.is_match(path) {
-        return Err(QueryError::Security(format!(
-            "invalid traversal_path format: '{path}' (expected pattern like '1/2/3/')"
-        )));
+    fn validate_traversal_path(path: &str, org_id: i64) -> Result<()> {
+        if !TRAVERSAL_PATH_REGEX.is_match(path) {
+            return Err(QueryError::Security(format!(
+                "invalid traversal_path format: '{path}' (expected pattern like '1/2/3/')"
+            )));
+        }
+    
+        let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+    
+        for segment in &segments {
+            segment.parse::<i64>().map_err(|_| {
+                QueryError::Security(format!(
+                    "traversal_path segment '{segment}' exceeds i64 range"
+                ))
+            })?;
+        }
+    
+        let first_segment: i64 = segments[0].parse().expect("validated above");
+        if first_segment != org_id {
+            return Err(QueryError::Security(format!(
+                "traversal_path '{path}' does not start with org_id {org_id}"
+            )));
+        }
+    
+        Ok(())
     }
-
-    let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
-
-    for segment in &segments {
-        segment.parse::<i64>().map_err(|_| {
-            QueryError::Security(format!(
-                "traversal_path segment '{segment}' exceeds i64 range"
-            ))
-        })?;
-    }
-
-    let first_segment: i64 = segments[0].parse().expect("validated above");
-    if first_segment != org_id {
-        return Err(QueryError::Security(format!(
-            "traversal_path '{path}' does not start with org_id {org_id}"
-        )));
-    }
-
-    Ok(())
+    
 }

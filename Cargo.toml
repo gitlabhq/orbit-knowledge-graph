@@ -16,7 +16,7 @@ members = [
   "crates/query-engine/shared",
   "crates/query-engine/formatters",
   "crates/query-engine/profiler",
-  "crates/query-engine/pipeline-macros",
+  "crates/query-engine/compiler-pipeline-macros",
   "crates/cli",
 
   "crates/gkg-server",
