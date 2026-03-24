@@ -1,6 +1,6 @@
 #[path = "../common.rs"]
 mod common;
-#[path = "../indexer"]
+#[path = "../indexer/mod.rs"]
 mod indexer;
 
 #[path = "../canary"]
