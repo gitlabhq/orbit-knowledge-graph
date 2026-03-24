@@ -8,7 +8,7 @@
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
-use crate::pipeline::{CompilerContext, CompilerPass, Normalized, Parsed};
+use crate::pipeline::{CompilerContext, CompilerPass, Normalized, Validated};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
@@ -30,11 +30,14 @@ impl<'a> NormalizePass<'a> {
 
 impl CompilerPass for NormalizePass<'_> {
     const NAME: &'static str = "normalize";
-    type In = Parsed;
+    type In = Validated;
     type Out = Normalized;
 
-    fn run(&self, ctx: &mut CompilerContext<Parsed>) -> Result<()> {
-        let input = ctx.input.take().expect("input must exist at Parsed phase");
+    fn run(&self, ctx: &mut CompilerContext<Validated>) -> Result<()> {
+        let input = ctx
+            .input
+            .take()
+            .expect("input must exist at Validated phase");
         ctx.input = Some(normalize(input, self.ontology)?);
         Ok(())
     }

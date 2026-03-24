@@ -8,16 +8,17 @@
 //! # Pipelines
 //!
 //! ```text
-//! ClickHouse:  Raw → Parse → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen
+//! ClickHouse:  Raw → Parse → Validate → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen
 //! Hydration:   Normalized → Lower → Optimize → Enforce → HydrationCodegen (no security)
-//! DuckDB:      Raw → Parse → Normalize → Lower → Optimize → Enforce → DuckDbCodegen (future)
+//! DuckDB:      Raw → Parse → Validate → Normalize → Lower → Optimize → Enforce → DuckDbCodegen (future)
 //! ```
 //!
 //! # Example
 //!
 //! ```ignore
 //! let compiled = CompilerRunner::new(json)
-//!     .then(&ParsePass::new(&ontology))?
+//!     .then(&ParsePass)?
+//!     .then(&ValidatePass::new(&ontology))?
 //!     .then(&NormalizePass::new(&ontology))?
 //!     .then(&LowerPass)?
 //!     .then(&OptimizePass::new(&security_ctx))?
@@ -34,10 +35,10 @@ use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
 use crate::ast::Node;
-use crate::codegen::CompiledQueryContext;
-use crate::enforce::ResultContext;
 use crate::error::{QueryError, Result};
 use crate::input::Input;
+use crate::passes::codegen::CompiledQueryContext;
+use crate::passes::enforce::ResultContext;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Phases
@@ -63,7 +64,7 @@ macro_rules! define_phases {
 }
 
 define_phases!(
-    Raw, Parsed, Normalized, Lowered, Optimized, Enforced, Secured, Checked, Emitted
+    Raw, Parsed, Validated, Normalized, Lowered, Optimized, Enforced, Secured, Checked, Emitted
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,7 +116,7 @@ macro_rules! impl_input_accessors {
 }
 
 impl_input_accessors!(
-    Parsed, Normalized, Lowered, Optimized, Enforced, Secured, Checked, Emitted
+    Parsed, Validated, Normalized, Lowered, Optimized, Enforced, Secured, Checked, Emitted
 );
 
 // node is available from Lowered onward.
@@ -291,337 +292,5 @@ impl<P: Phase> CompilerRunner<P> {
     /// Extract the context at the current phase (for tests/inspection).
     pub fn into_context(self) -> CompilerContext<P> {
         self.ctx
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pipeline presets
-// ─────────────────────────────────────────────────────────────────────────────
-
-use crate::check::CheckPass;
-use crate::codegen::CodegenPass;
-use crate::enforce::EnforcePass;
-use crate::hydrate::HydrationCodegenPass;
-use crate::lower::LowerPass;
-use crate::normalize::NormalizePass;
-use crate::optimize::OptimizePass;
-use crate::security::SecurityPass;
-use crate::validate::ParsePass;
-
-/// Standard ClickHouse compilation pipeline.
-///
-/// ```text
-/// JSON → Parse → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen
-/// ```
-pub fn compile_clickhouse(
-    json: &str,
-    ontology: &ontology::Ontology,
-    security_ctx: &crate::SecurityContext,
-) -> Result<CompiledQueryContext> {
-    CompilerRunner::new(json)
-        .with_observer(MetricsObserver)
-        .then(&ParsePass::new(ontology))?
-        .then(&NormalizePass::new(ontology))?
-        .then(&LowerPass)?
-        .then(&OptimizePass::new(security_ctx))?
-        .then(&EnforcePass)?
-        .then(&SecurityPass::new(security_ctx))?
-        .then(&CheckPass::new(security_ctx))?
-        .then(&CodegenPass)?
-        .into_context()
-        .take_output()
-        .ok_or_else(|| QueryError::Codegen("CodegenPass did not produce output".into()))
-}
-
-/// Hydration pipeline — skips security and check passes.
-///
-/// Hydration queries are internal-only (not user-facing), operate on
-/// pre-authorized IDs, and don't have `traversal_path` columns.
-///
-/// ```text
-/// Input → Lower → Optimize → Enforce → HydrationCodegen
-/// ```
-pub fn compile_hydration(
-    input: Input,
-    security_ctx: &crate::SecurityContext,
-) -> Result<CompiledQueryContext> {
-    CompilerRunner::from_input(input)
-        .with_observer(MetricsObserver)
-        .then(&LowerPass)?
-        .then(&OptimizePass::new(security_ctx))?
-        .then(&EnforcePass)?
-        .then(&HydrationCodegenPass)?
-        .into_context()
-        .take_output()
-        .ok_or_else(|| QueryError::Codegen("HydrationCodegenPass did not produce output".into()))
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::input::QueryType;
-    use ontology::Ontology;
-
-    fn test_ontology() -> Ontology {
-        Ontology::load_embedded().expect("ontology must load")
-    }
-
-    fn test_security_ctx() -> crate::SecurityContext {
-        crate::SecurityContext::new(1, vec!["1/".into()]).unwrap()
-    }
-
-    #[test]
-    fn full_clickhouse_pipeline() {
-        let ontology = test_ontology();
-        let ctx = test_security_ctx();
-
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let compiled = compile_clickhouse(json, &ontology, &ctx).unwrap();
-        assert!(!compiled.base.sql.is_empty());
-        assert_eq!(compiled.query_type, QueryType::Search);
-    }
-
-    #[test]
-    fn full_traversal_pipeline() {
-        let ontology = test_ontology();
-        let ctx = test_security_ctx();
-
-        let json = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "mr", "entity": "MergeRequest"}
-            ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
-
-        let compiled = compile_clickhouse(json, &ontology, &ctx).unwrap();
-        assert!(!compiled.base.sql.is_empty());
-        assert_eq!(compiled.query_type, QueryType::Traversal);
-    }
-
-    #[test]
-    fn hydration_pipeline_skips_security() {
-        let ontology = test_ontology();
-        let ctx = test_security_ctx();
-
-        // Build a hydration-type Input directly (like HydrationStage does).
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-        let mut input = crate::validated_input(json, &ontology).unwrap();
-        input.query_type = QueryType::Hydration;
-
-        let compiled = compile_hydration(input, &ctx).unwrap();
-        assert!(!compiled.base.sql.is_empty());
-    }
-
-    #[test]
-    fn partial_pipeline_inspect_after_lower() {
-        let ontology = test_ontology();
-
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let ctx = CompilerRunner::new(json)
-            .then(&ParsePass::new(&ontology))
-            .unwrap()
-            .then(&NormalizePass::new(&ontology))
-            .unwrap()
-            .then(&LowerPass)
-            .unwrap()
-            .into_context();
-
-        // Can inspect the AST after lowering.
-        let Node::Query(q) = ctx.node();
-        assert!(!q.select.is_empty());
-    }
-
-    #[test]
-    fn partial_pipeline_inspect_after_normalize() {
-        let ontology = test_ontology();
-
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let ctx = CompilerRunner::new(json)
-            .then(&ParsePass::new(&ontology))
-            .unwrap()
-            .then(&NormalizePass::new(&ontology))
-            .unwrap()
-            .into_context();
-
-        // Input is available after normalize.
-        assert_eq!(ctx.input().query_type, QueryType::Search);
-    }
-
-    #[test]
-    fn partial_pipeline_inspect_after_optimize() {
-        let ontology = test_ontology();
-        let sec_ctx = test_security_ctx();
-
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let ctx = CompilerRunner::new(json)
-            .then(&ParsePass::new(&ontology))
-            .unwrap()
-            .then(&NormalizePass::new(&ontology))
-            .unwrap()
-            .then(&LowerPass)
-            .unwrap()
-            .then(&OptimizePass::new(&sec_ctx))
-            .unwrap()
-            .into_context();
-
-        let Node::Query(q) = ctx.node();
-        assert!(q.limit.is_some());
-    }
-
-    #[test]
-    fn parse_error_propagates() {
-        let ontology = test_ontology();
-
-        let result = CompilerRunner::new("not valid json").then(&ParsePass::new(&ontology));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn observer_receives_pass_completions() {
-        use std::sync::{Arc, Mutex};
-
-        #[derive(Default)]
-        struct RecordingObserver {
-            completed: Arc<Mutex<Vec<(&'static str, Duration)>>>,
-        }
-
-        impl CompilerObserver for RecordingObserver {
-            fn pass_completed(&mut self, name: &'static str, elapsed: Duration) {
-                self.completed.lock().unwrap().push((name, elapsed));
-            }
-            fn pass_failed(&mut self, _name: &'static str, _error: &QueryError) {}
-        }
-
-        let ontology = test_ontology();
-        let ctx = test_security_ctx();
-        let completed = Arc::new(Mutex::new(Vec::new()));
-        let obs = RecordingObserver {
-            completed: Arc::clone(&completed),
-        };
-
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let _ = CompilerRunner::new(json)
-            .with_observer(obs)
-            .then(&ParsePass::new(&ontology))
-            .unwrap()
-            .then(&NormalizePass::new(&ontology))
-            .unwrap()
-            .then(&LowerPass)
-            .unwrap()
-            .then(&OptimizePass::new(&ctx))
-            .unwrap()
-            .then(&EnforcePass)
-            .unwrap()
-            .then(&SecurityPass::new(&ctx))
-            .unwrap()
-            .then(&CheckPass::new(&ctx))
-            .unwrap()
-            .then(&CodegenPass)
-            .unwrap()
-            .into_context();
-
-        let names: Vec<_> = completed.lock().unwrap().iter().map(|(n, _)| *n).collect();
-        assert_eq!(
-            names,
-            vec![
-                "parse",
-                "normalize",
-                "lower",
-                "optimize",
-                "enforce",
-                "security",
-                "check",
-                "codegen"
-            ]
-        );
-    }
-
-    #[test]
-    fn observer_records_failures() {
-        use std::sync::{Arc, Mutex};
-
-        #[derive(Default)]
-        struct FailureObserver {
-            failed: Arc<Mutex<Vec<&'static str>>>,
-        }
-
-        impl CompilerObserver for FailureObserver {
-            fn pass_completed(&mut self, _name: &'static str, _elapsed: Duration) {}
-            fn pass_failed(&mut self, name: &'static str, _error: &QueryError) {
-                self.failed.lock().unwrap().push(name);
-            }
-        }
-
-        let failed = Arc::new(Mutex::new(Vec::new()));
-        let obs = FailureObserver {
-            failed: Arc::clone(&failed),
-        };
-
-        let bad_input = Input {
-            query_type: QueryType::Search,
-            ..Input::default()
-        };
-
-        let result = CompilerRunner::from_input(bad_input)
-            .with_observer(obs)
-            .then(&LowerPass);
-
-        assert!(result.is_err());
-        let names = failed.lock().unwrap().clone();
-        assert_eq!(names, vec!["lower"]);
-    }
-
-    #[test]
-    fn compile_clickhouse_matches_legacy_compile() {
-        let ontology = test_ontology();
-        let ctx = test_security_ctx();
-
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let pipeline_result = compile_clickhouse(json, &ontology, &ctx).unwrap();
-        let legacy_result = crate::compile(json, &ontology, &ctx).unwrap();
-
-        assert_eq!(pipeline_result.base.sql, legacy_result.base.sql);
-        assert_eq!(pipeline_result.query_type, legacy_result.query_type);
     }
 }

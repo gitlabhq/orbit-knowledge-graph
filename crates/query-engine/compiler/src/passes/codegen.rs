@@ -3,10 +3,10 @@
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
-use crate::enforce::ResultContext;
 use crate::error::Result;
 use crate::input::Input;
 use crate::input::QueryType;
+use crate::passes::enforce::ResultContext;
 use crate::pipeline::{Checked, CompilerContext, CompilerPass, Emitted};
 pub use gkg_utils::clickhouse::ParamValue;
 use serde_json::Value;
@@ -28,7 +28,7 @@ impl CompilerPass for CodegenPass {
             .expect("result_context must exist");
         let input_ref = ctx.input.as_ref().expect("input must exist");
         let base = codegen(node, result_context)?;
-        let hydration = crate::hydrate::generate_hydration_plan(input_ref);
+        let hydration = crate::passes::hydrate::generate_hydration_plan(input_ref);
         let query_type = input_ref.query_type;
         let input = input_ref.clone();
         ctx.output = Some(CompiledQueryContext {

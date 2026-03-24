@@ -28,8 +28,8 @@ use crate::constants::{
     cascade_cte, node_filter_cte,
 };
 use crate::input::{Input, InputNode, QueryType};
+use crate::passes::security::SecurityContext;
 use crate::pipeline::{CompilerContext, CompilerPass, Lowered, Optimized};
-use crate::security::SecurityContext;
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,

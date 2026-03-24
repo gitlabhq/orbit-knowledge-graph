@@ -32,56 +32,49 @@
 //! ```
 
 pub mod ast;
-pub mod check;
-pub mod codegen;
 pub mod constants;
-pub mod enforce;
 pub mod error;
-pub mod hydrate;
 pub mod input;
-pub mod lower;
 pub mod metrics;
-pub mod normalize;
-pub mod optimize;
+pub mod passes;
 pub mod pipeline;
-pub mod security;
-pub mod validate;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
-pub use check::CheckPass;
-pub use check::check_ast;
-pub use codegen::CodegenPass;
-pub use codegen::{
-    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
-};
 pub use constants::{
     EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_KINDS_COLUMN, EDGE_SRC_SUFFIX,
     EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS,
     NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
     RELATIONSHIP_TYPE_COLUMN,
 };
-pub use enforce::EnforcePass;
-pub use enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use error::{QueryError, Result};
-pub use hydrate::HydrationCodegenPass;
-pub use hydrate::generate_hydration_plan;
-pub use input::{ColumnSelection, Input, InputNode, QueryType, parse_input};
-pub use input::{DynamicColumnMode, EntityAuthConfig};
-pub use lower::LowerPass;
-pub use lower::lower;
+pub use input::{
+    ColumnSelection, DynamicColumnMode, EntityAuthConfig, Input, InputNode, QueryType, parse_input,
+};
 pub use metrics::{METRICS, QueryEngineMetrics};
-pub use normalize::{NormalizePass, build_entity_auth, normalize};
 pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
-pub use optimize::OptimizePass;
-pub use optimize::optimize;
 pub use pipeline::{
     CompilerContext, CompilerObserver, CompilerPass, CompilerRunner, MetricsObserver,
-    compile_clickhouse, compile_hydration,
 };
-pub use security::SecurityPass;
-pub use security::{SecurityContext, apply_security_context};
-pub use validate::{ParsePass, Validator};
+
+// Re-export pass structs.
+pub use passes::{
+    CheckPass, CodegenPass, EnforcePass, HydrationCodegenPass, LowerPass, NormalizePass,
+    OptimizePass, ParsePass, SecurityPass, ValidatePass,
+};
+
+// Re-export key types from pass modules.
+pub use passes::check::check_ast;
+pub use passes::codegen::{
+    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
+};
+pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
+pub use passes::hydrate::generate_hydration_plan;
+pub use passes::lower::lower;
+pub use passes::normalize::{build_entity_auth, normalize};
+pub use passes::optimize::optimize;
+pub use passes::security::{SecurityContext, apply_security_context};
+pub use passes::validate::Validator;
 
 use metrics::CountErr;
 
@@ -137,8 +130,328 @@ pub fn compile_input(mut input: Input, ctx: &SecurityContext) -> Result<Compiled
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pipeline presets
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Standard ClickHouse compilation pipeline.
+///
+/// ```text
+/// JSON → Parse → Validate → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen
+/// ```
+pub fn compile_clickhouse(
+    json: &str,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    CompilerRunner::new(json)
+        .with_observer(MetricsObserver)
+        .then(&ParsePass)?
+        .then(&ValidatePass::new(ontology))?
+        .then(&NormalizePass::new(ontology))?
+        .then(&LowerPass)?
+        .then(&OptimizePass::new(security_ctx))?
+        .then(&EnforcePass)?
+        .then(&SecurityPass::new(security_ctx))?
+        .then(&CheckPass::new(security_ctx))?
+        .then(&CodegenPass)?
+        .into_context()
+        .take_output()
+        .ok_or_else(|| QueryError::Codegen("CodegenPass did not produce output".into()))
+}
+
+/// Hydration pipeline — skips security and check passes.
+///
+/// ```text
+/// Input → Lower → Optimize → Enforce → HydrationCodegen
+/// ```
+pub fn compile_hydration(
+    input: Input,
+    security_ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    CompilerRunner::from_input(input)
+        .with_observer(MetricsObserver)
+        .then(&LowerPass)?
+        .then(&OptimizePass::new(security_ctx))?
+        .then(&EnforcePass)?
+        .then(&HydrationCodegenPass)?
+        .into_context()
+        .take_output()
+        .ok_or_else(|| QueryError::Codegen("HydrationCodegenPass did not produce output".into()))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[allow(irrefutable_let_patterns)]
+mod pipeline_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn test_ontology() -> Ontology {
+        Ontology::load_embedded().expect("ontology must load")
+    }
+
+    fn test_security_ctx() -> SecurityContext {
+        SecurityContext::new(1, vec!["1/".into()]).unwrap()
+    }
+
+    #[test]
+    fn full_clickhouse_pipeline() {
+        let ontology = test_ontology();
+        let ctx = test_security_ctx();
+
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#;
+
+        let compiled = compile_clickhouse(json, &ontology, &ctx).unwrap();
+        assert!(!compiled.base.sql.is_empty());
+        assert_eq!(compiled.query_type, QueryType::Search);
+    }
+
+    #[test]
+    fn full_traversal_pipeline() {
+        let ontology = test_ontology();
+        let ctx = test_security_ctx();
+
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile_clickhouse(json, &ontology, &ctx).unwrap();
+        assert!(!compiled.base.sql.is_empty());
+        assert_eq!(compiled.query_type, QueryType::Traversal);
+    }
+
+    #[test]
+    fn hydration_pipeline_skips_security() {
+        let ontology = test_ontology();
+        let ctx = test_security_ctx();
+
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#;
+        let mut input = validated_input(json, &ontology).unwrap();
+        input.query_type = QueryType::Hydration;
+
+        let compiled = compile_hydration(input, &ctx).unwrap();
+        assert!(!compiled.base.sql.is_empty());
+    }
+
+    #[test]
+    fn partial_pipeline_inspect_after_lower() {
+        let ontology = test_ontology();
+
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#;
+
+        let ctx = CompilerRunner::new(json)
+            .then(&ParsePass)
+            .unwrap()
+            .then(&ValidatePass::new(&ontology))
+            .unwrap()
+            .then(&NormalizePass::new(&ontology))
+            .unwrap()
+            .then(&LowerPass)
+            .unwrap()
+            .into_context();
+
+        let Node::Query(q) = ctx.node();
+        assert!(!q.select.is_empty());
+    }
+
+    #[test]
+    fn partial_pipeline_inspect_after_normalize() {
+        let ontology = test_ontology();
+
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#;
+
+        let ctx = CompilerRunner::new(json)
+            .then(&ParsePass)
+            .unwrap()
+            .then(&ValidatePass::new(&ontology))
+            .unwrap()
+            .then(&NormalizePass::new(&ontology))
+            .unwrap()
+            .into_context();
+
+        assert_eq!(ctx.input().query_type, QueryType::Search);
+    }
+
+    #[test]
+    fn partial_pipeline_inspect_after_optimize() {
+        let ontology = test_ontology();
+        let sec_ctx = test_security_ctx();
+
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#;
+
+        let ctx = CompilerRunner::new(json)
+            .then(&ParsePass)
+            .unwrap()
+            .then(&ValidatePass::new(&ontology))
+            .unwrap()
+            .then(&NormalizePass::new(&ontology))
+            .unwrap()
+            .then(&LowerPass)
+            .unwrap()
+            .then(&OptimizePass::new(&sec_ctx))
+            .unwrap()
+            .into_context();
+
+        let Node::Query(q) = ctx.node();
+        assert!(q.limit.is_some());
+    }
+
+    #[test]
+    fn parse_error_propagates() {
+        let result = CompilerRunner::new("not valid json").then(&ParsePass);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn observer_receives_pass_completions() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        struct RecordingObserver {
+            completed: Arc<Mutex<Vec<(&'static str, Duration)>>>,
+        }
+
+        impl CompilerObserver for RecordingObserver {
+            fn pass_completed(&mut self, name: &'static str, elapsed: Duration) {
+                self.completed.lock().unwrap().push((name, elapsed));
+            }
+            fn pass_failed(&mut self, _name: &'static str, _error: &QueryError) {}
+        }
+
+        let ontology = test_ontology();
+        let ctx = test_security_ctx();
+        let completed = Arc::new(Mutex::new(Vec::new()));
+        let obs = RecordingObserver {
+            completed: Arc::clone(&completed),
+        };
+
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#;
+
+        let _ = CompilerRunner::new(json)
+            .with_observer(obs)
+            .then(&ParsePass)
+            .unwrap()
+            .then(&ValidatePass::new(&ontology))
+            .unwrap()
+            .then(&NormalizePass::new(&ontology))
+            .unwrap()
+            .then(&LowerPass)
+            .unwrap()
+            .then(&OptimizePass::new(&ctx))
+            .unwrap()
+            .then(&EnforcePass)
+            .unwrap()
+            .then(&SecurityPass::new(&ctx))
+            .unwrap()
+            .then(&CheckPass::new(&ctx))
+            .unwrap()
+            .then(&CodegenPass)
+            .unwrap()
+            .into_context();
+
+        let names: Vec<_> = completed.lock().unwrap().iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            names,
+            vec![
+                "parse",
+                "validate",
+                "normalize",
+                "lower",
+                "optimize",
+                "enforce",
+                "security",
+                "check",
+                "codegen"
+            ]
+        );
+    }
+
+    #[test]
+    fn observer_records_failures() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        struct FailureObserver {
+            failed: Arc<Mutex<Vec<&'static str>>>,
+        }
+
+        impl CompilerObserver for FailureObserver {
+            fn pass_completed(&mut self, _name: &'static str, _elapsed: Duration) {}
+            fn pass_failed(&mut self, name: &'static str, _error: &QueryError) {
+                self.failed.lock().unwrap().push(name);
+            }
+        }
+
+        let failed = Arc::new(Mutex::new(Vec::new()));
+        let obs = FailureObserver {
+            failed: Arc::clone(&failed),
+        };
+
+        let bad_input = Input {
+            query_type: QueryType::Search,
+            ..Input::default()
+        };
+
+        let result = CompilerRunner::from_input(bad_input)
+            .with_observer(obs)
+            .then(&LowerPass);
+
+        assert!(result.is_err());
+        let names = failed.lock().unwrap().clone();
+        assert_eq!(names, vec!["lower"]);
+    }
+
+    #[test]
+    fn compile_clickhouse_matches_legacy_compile() {
+        let ontology = test_ontology();
+        let ctx = test_security_ctx();
+
+        let json = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#;
+
+        let pipeline_result = compile_clickhouse(json, &ontology, &ctx).unwrap();
+        let legacy_result = compile(json, &ontology, &ctx).unwrap();
+
+        assert_eq!(pipeline_result.base.sql, legacy_result.base.sql);
+        assert_eq!(pipeline_result.query_type, legacy_result.query_type);
+    }
+}
 
 #[cfg(test)]
 #[allow(irrefutable_let_patterns)]
@@ -176,13 +489,13 @@ mod tests {
     /// Compile JSON and return the AST without generating SQL.
     #[must_use = "the compiled AST should be used"]
     pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> Result<Node> {
-        let v = validate::Validator::new(ontology);
+        let v = Validator::new(ontology);
         let value = v.check_json(json_input)?;
         v.check_ontology(&value)?;
         let input: Input = serde_json::from_value(value)?;
         v.check_references(&input)?;
-        let mut input = normalize::normalize(input, ontology)?;
-        let node = lower::lower(&mut input)?;
+        let mut input = normalize(input, ontology)?;
+        let node = lower(&mut input)?;
         Ok(node)
     }
 

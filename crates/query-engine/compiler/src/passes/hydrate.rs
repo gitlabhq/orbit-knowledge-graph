@@ -1,6 +1,6 @@
-use crate::codegen::{CompiledQueryContext, HydrationPlan, HydrationTemplate};
 use crate::constants::HYDRATION_NODE_ALIAS;
 use crate::input::{ColumnSelection, Input, QueryType};
+use crate::passes::codegen::{CompiledQueryContext, HydrationPlan, HydrationTemplate};
 use crate::pipeline::{CompilerContext, CompilerPass, Emitted, Enforced};
 
 /// Pipeline pass: codegen for hydration queries.
@@ -21,7 +21,7 @@ impl CompilerPass for HydrationCodegenPass {
             .take()
             .expect("result_context must exist");
         let input_ref = ctx.input.as_ref().expect("input must exist");
-        let base = crate::codegen::codegen(node, result_context)?;
+        let base = crate::passes::codegen::codegen(node, result_context)?;
         let query_type = input_ref.query_type;
         let input = input_ref.clone();
         ctx.output = Some(CompiledQueryContext {

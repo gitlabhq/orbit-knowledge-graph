@@ -10,36 +10,36 @@ use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
-use crate::pipeline::{CompilerContext, CompilerPass, Parsed, Raw};
+use crate::pipeline::{CompilerContext, CompilerPass, Parsed, Validated};
 use ontology::{DataType, Ontology};
 
-/// Pipeline pass: validates the raw JSON query and deserializes into `Input`.
-///
-/// Performs schema validation, ontology allowlist checks, deserialization,
-/// and cross-reference validation.
-pub struct ParsePass<'a> {
+/// Pipeline pass: validates a parsed `Input` against schema, ontology, and
+/// cross-reference rules.
+pub struct ValidatePass<'a> {
     pub ontology: &'a Ontology,
 }
 
-impl<'a> ParsePass<'a> {
+impl<'a> ValidatePass<'a> {
     pub fn new(ontology: &'a Ontology) -> Self {
         Self { ontology }
     }
 }
 
-impl CompilerPass for ParsePass<'_> {
-    const NAME: &'static str = "parse";
-    type In = Raw;
-    type Out = Parsed;
+impl CompilerPass for ValidatePass<'_> {
+    const NAME: &'static str = "validate";
+    type In = Parsed;
+    type Out = Validated;
 
-    fn run(&self, ctx: &mut CompilerContext<Raw>) -> Result<()> {
-        let json = ctx.json.as_deref().expect("json must exist at Raw phase");
+    fn run(&self, ctx: &mut CompilerContext<Parsed>) -> Result<()> {
+        let json = ctx.json.as_deref().expect("json must exist");
         let v = Validator::new(self.ontology);
         let value = v.check_json(json)?;
         v.check_ontology(&value)?;
-        let input: Input = serde_json::from_value(value)?;
-        v.check_references(&input)?;
-        ctx.input = Some(input);
+        let input = ctx
+            .input
+            .as_ref()
+            .expect("input must exist at Parsed phase");
+        v.check_references(input)?;
         Ok(())
     }
 }

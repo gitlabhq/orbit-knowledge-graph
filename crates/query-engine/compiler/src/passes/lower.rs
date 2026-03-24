@@ -1432,8 +1432,8 @@ fn resolve_table(node: &InputNode) -> Result<String> {
 mod tests {
     use super::*;
     use crate::input::parse_input;
-    use crate::normalize;
-    use crate::validate;
+    use crate::passes::normalize;
+    use crate::passes::validate;
     use ontology::Ontology;
 
     fn test_ontology() -> Ontology {
