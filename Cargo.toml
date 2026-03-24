@@ -102,6 +102,9 @@ testcontainers-modules = { version = "0.15.0", features = ["nats"] }
 indexmap = "2"
 jsonschema = "0.44.0"
 const_format = "0.2.35"
+syn = { version = "2.0.117", features = ["full"] }
+quote = "1.0.45"
+proc-macro2 = "1.0.106"
 
 # Simulator dependencies
 rand = "0.10"

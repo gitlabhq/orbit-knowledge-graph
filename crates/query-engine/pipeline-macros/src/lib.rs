@@ -115,9 +115,8 @@ pub fn derive_pipeline_state(input: TokenStream) -> TokenStream {
 
     for field in &field_list {
         let field_ident = field.ident.as_ref().unwrap();
-        let inner_ty = peel_option(&field.ty).unwrap_or_else(|| {
-            panic!("PipelineState fields must be Option<T>, got {:?}", field.ty)
-        });
+        let inner_ty = peel_option(&field.ty)
+            .unwrap_or_else(|| panic!("PipelineState fields must be Option<T>"));
         let field_name_str = field_ident.to_string();
         let trait_name = format_ident!("Has{}", to_pascal(&field_name_str));
         let getter_mut = format_ident!("{}_mut", field_ident);
