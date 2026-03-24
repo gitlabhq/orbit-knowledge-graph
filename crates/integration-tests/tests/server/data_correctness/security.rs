@@ -105,9 +105,7 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
 // Path finding: traversal path scoping
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) async fn path_finding_scoped_excludes_paths_through_other_namespaces(
-    ctx: &TestContext,
-) {
+pub(super) async fn path_finding_scoped_excludes_paths_through_other_namespaces(ctx: &TestContext) {
     // User 1 → Group 100 → Project 1000 is within 1/100/.
     // User 1 → Group 102 → Project 1004 requires 1/102/.
     // Scoping to 1/100/ should only find the path through Group 100.
