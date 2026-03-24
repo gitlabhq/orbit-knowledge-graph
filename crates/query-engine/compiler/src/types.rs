@@ -41,9 +41,9 @@ impl SecurityContext {
                 "invalid traversal_path format: '{path}' (expected pattern like '1/2/3/')"
             )));
         }
-    
+
         let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
-    
+
         for segment in &segments {
             segment.parse::<i64>().map_err(|_| {
                 QueryError::Security(format!(
@@ -51,15 +51,14 @@ impl SecurityContext {
                 ))
             })?;
         }
-    
+
         let first_segment: i64 = segments[0].parse().expect("validated above");
         if first_segment != org_id {
             return Err(QueryError::Security(format!(
                 "traversal_path '{path}' does not start with org_id {org_id}"
             )));
         }
-    
+
         Ok(())
     }
-    
 }
