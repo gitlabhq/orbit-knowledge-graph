@@ -28,8 +28,9 @@ use crate::constants::{
     cascade_cte, node_filter_cte,
 };
 use crate::input::{Input, InputNode, QueryType};
+use crate::passes::envs::HasSecurityCtx;
 use crate::passes::security::SecurityContext;
-use crate::pipeline::{CompilerContext, CompilerPass, Lowered, Optimized};
+use crate::pipeline::{CompilerContext, CompilerPass, Lowered, Optimized, PipelineEnv};
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
@@ -38,25 +39,19 @@ use ontology::constants::{
 const ROOT_SIP_CTE: &str = "_root_ids";
 
 /// Pipeline pass: applies query optimizations.
-pub struct OptimizePass<'a> {
-    pub security_context: &'a SecurityContext,
-}
+/// Reads security context from the environment.
+pub struct OptimizePass;
 
-impl<'a> OptimizePass<'a> {
-    pub fn new(security_context: &'a SecurityContext) -> Self {
-        Self { security_context }
-    }
-}
-
-impl CompilerPass for OptimizePass<'_> {
+impl<E: PipelineEnv + HasSecurityCtx> CompilerPass<E> for OptimizePass {
     const NAME: &'static str = "optimize";
     type In = Lowered;
     type Out = Optimized;
 
-    fn run(&self, ctx: &mut CompilerContext<Lowered>) -> crate::error::Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<Lowered, E>) -> crate::error::Result<()> {
+        let security_ctx = ctx.env().security_ctx().clone();
         let node = ctx.node.as_mut().expect("node must exist after lowering");
         let input = ctx.input.as_mut().expect("input must exist");
-        optimize(node, input, self.security_context);
+        optimize(node, input, &security_ctx);
         Ok(())
     }
 }

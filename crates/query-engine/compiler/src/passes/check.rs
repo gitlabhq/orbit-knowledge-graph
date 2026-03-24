@@ -11,28 +11,23 @@ use serde_json::Value;
 use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
+use crate::passes::envs::HasSecurityCtx;
 use crate::passes::security::{SecurityContext, collect_node_aliases};
-use crate::pipeline::{Checked, CompilerContext, CompilerPass, Secured};
+use crate::pipeline::{Checked, CompilerContext, CompilerPass, PipelineEnv, Secured};
 
 /// Pipeline pass: validates that all required security filters are present.
-pub struct CheckPass<'a> {
-    pub security_context: &'a SecurityContext,
-}
+/// Reads security context from the environment.
+pub struct CheckPass;
 
-impl<'a> CheckPass<'a> {
-    pub fn new(security_context: &'a SecurityContext) -> Self {
-        Self { security_context }
-    }
-}
-
-impl CompilerPass for CheckPass<'_> {
+impl<E: PipelineEnv + HasSecurityCtx> CompilerPass<E> for CheckPass {
     const NAME: &'static str = "check";
     type In = Secured;
     type Out = Checked;
 
-    fn run(&self, ctx: &mut CompilerContext<Secured>) -> Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<Secured, E>) -> Result<()> {
+        let security_ctx = ctx.env().security_ctx().clone();
         let node = ctx.node.as_ref().expect("node must exist after security");
-        check_ast(node, self.security_context)?;
+        check_ast(node, &security_ctx)?;
         Ok(())
     }
 }

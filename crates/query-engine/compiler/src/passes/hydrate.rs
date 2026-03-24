@@ -1,7 +1,7 @@
 use crate::constants::HYDRATION_NODE_ALIAS;
 use crate::input::{ColumnSelection, Input, QueryType};
 use crate::passes::codegen::{CompiledQueryContext, HydrationPlan, HydrationTemplate};
-use crate::pipeline::{CompilerContext, CompilerPass, Emitted, Enforced};
+use crate::pipeline::{CompilerContext, CompilerPass, Emitted, Enforced, PipelineEnv};
 
 /// Pipeline pass: codegen for hydration queries.
 ///
@@ -9,12 +9,12 @@ use crate::pipeline::{CompilerContext, CompilerPass, Emitted, Enforced};
 /// Hydration queries are internal-only and operate on pre-authorized IDs.
 pub struct HydrationCodegenPass;
 
-impl CompilerPass for HydrationCodegenPass {
+impl<E: PipelineEnv> CompilerPass<E> for HydrationCodegenPass {
     const NAME: &'static str = "hydration_codegen";
     type In = Enforced;
     type Out = Emitted;
 
-    fn run(&self, ctx: &mut CompilerContext<Enforced>) -> crate::error::Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<Enforced, E>) -> crate::error::Result<()> {
         let node = ctx.node.as_ref().expect("node must exist");
         let result_context = ctx
             .result_context

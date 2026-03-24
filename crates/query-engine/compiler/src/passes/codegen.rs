@@ -7,7 +7,7 @@ use crate::error::Result;
 use crate::input::Input;
 use crate::input::QueryType;
 use crate::passes::enforce::ResultContext;
-use crate::pipeline::{Checked, CompilerContext, CompilerPass, Emitted};
+use crate::pipeline::{Checked, CompilerContext, CompilerPass, Emitted, PipelineEnv};
 pub use gkg_utils::clickhouse::ParamValue;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -15,12 +15,12 @@ use std::collections::HashMap;
 /// Pipeline pass: generates parameterized SQL and a hydration plan.
 pub struct CodegenPass;
 
-impl CompilerPass for CodegenPass {
+impl<E: PipelineEnv> CompilerPass<E> for CodegenPass {
     const NAME: &'static str = "codegen";
     type In = Checked;
     type Out = Emitted;
 
-    fn run(&self, ctx: &mut CompilerContext<Checked>) -> Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<Checked, E>) -> Result<()> {
         let node = ctx.node.as_ref().expect("node must exist");
         let result_context = ctx
             .result_context

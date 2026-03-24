@@ -8,7 +8,8 @@
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
-use crate::pipeline::{CompilerContext, CompilerPass, Normalized, Validated};
+use crate::passes::envs::HasOntology;
+use crate::pipeline::{CompilerContext, CompilerPass, Normalized, PipelineEnv, Validated};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
@@ -18,27 +19,21 @@ use std::collections::{BTreeMap, HashMap};
 ///
 /// Resolves entity names to table names, coerces enum filter values,
 /// expands wildcard column selections, and builds entity auth config.
-pub struct NormalizePass<'a> {
-    pub ontology: &'a Ontology,
-}
+/// Reads ontology from the environment.
+pub struct NormalizePass;
 
-impl<'a> NormalizePass<'a> {
-    pub fn new(ontology: &'a Ontology) -> Self {
-        Self { ontology }
-    }
-}
-
-impl CompilerPass for NormalizePass<'_> {
+impl<E: PipelineEnv + HasOntology> CompilerPass<E> for NormalizePass {
     const NAME: &'static str = "normalize";
     type In = Validated;
     type Out = Normalized;
 
-    fn run(&self, ctx: &mut CompilerContext<Validated>) -> Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<Validated, E>) -> Result<()> {
         let input = ctx
             .input
             .take()
             .expect("input must exist at Validated phase");
-        ctx.input = Some(normalize(input, self.ontology)?);
+        let ontology = ctx.env().ontology();
+        ctx.input = Some(normalize(input, ontology)?);
         Ok(())
     }
 }

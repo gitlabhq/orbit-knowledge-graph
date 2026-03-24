@@ -10,29 +10,24 @@
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::error::{QueryError, Result};
-use crate::pipeline::{CompilerContext, CompilerPass, Enforced, Secured};
+use crate::passes::envs::HasSecurityCtx;
+use crate::pipeline::{CompilerContext, CompilerPass, Enforced, PipelineEnv, Secured};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
 /// Pipeline pass: injects `startsWith(traversal_path, ...)` security filters.
-pub struct SecurityPass<'a> {
-    pub security_context: &'a SecurityContext,
-}
+/// Reads security context from the environment.
+pub struct SecurityPass;
 
-impl<'a> SecurityPass<'a> {
-    pub fn new(security_context: &'a SecurityContext) -> Self {
-        Self { security_context }
-    }
-}
-
-impl CompilerPass for SecurityPass<'_> {
+impl<E: PipelineEnv + HasSecurityCtx> CompilerPass<E> for SecurityPass {
     const NAME: &'static str = "security";
     type In = Enforced;
     type Out = Secured;
 
-    fn run(&self, ctx: &mut CompilerContext<Enforced>) -> Result<()> {
+    fn run(&self, ctx: &mut CompilerContext<Enforced, E>) -> Result<()> {
+        let security_ctx = ctx.env().security_ctx().clone();
         let node = ctx.node.as_mut().expect("node must exist after enforce");
-        apply_security_context(node, self.security_context)?;
+        apply_security_context(node, &security_ctx)?;
         Ok(())
     }
 }

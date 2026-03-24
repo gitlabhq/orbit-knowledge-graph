@@ -1,30 +1,37 @@
 //! Composable, type-safe compiler pipeline.
 //!
-//! Each compiler pass is a [`CompilerPass`] that transforms a
-//! [`CompilerContext`] from one phase to the next. The [`CompilerRunner`]
-//! chains passes with compile-time phase checking so invalid orderings
-//! are rejected by `rustc`, not at runtime.
+//! The pipeline is generic over an environment type `E` that carries
+//! pipeline-specific configuration (ontology, security context, backend
+//! config, etc.). Passes read from the environment via the context.
+//!
+//! # Architecture
+//!
+//! - **`E: PipelineEnv`** — user-defined environment (e.g. `ClickHouseEnv`).
+//! - **[`CompilerContext<P, E>`]** — phase-tagged compilation state + environment.
+//! - **[`CompilerRunner<P, E>`]** — chains passes with compile-time phase checking.
+//! - **[`CompilerPass<E>`]** — unit struct implementing a single transformation.
 //!
 //! # Pipelines
 //!
 //! ```text
 //! ClickHouse:  Raw → Parse → Validate → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen
-//! Hydration:   Normalized → Lower → Optimize → Enforce → HydrationCodegen (no security)
+//! Hydration:   Normalized → Lower → Optimize → Enforce → HydrationCodegen
 //! DuckDB:      Raw → Parse → Validate → Normalize → Lower → Optimize → Enforce → DuckDbCodegen (future)
 //! ```
 //!
 //! # Example
 //!
 //! ```ignore
-//! let compiled = CompilerRunner::new(json)
+//! let env = ClickHouseEnv::new(ontology, security_ctx);
+//! let result = CompilerRunner::new(json, env)
 //!     .then(&ParsePass)?
-//!     .then(&ValidatePass::new(&ontology))?
-//!     .then(&NormalizePass::new(&ontology))?
+//!     .then(&ValidatePass)?
+//!     .then(&NormalizePass)?
 //!     .then(&LowerPass)?
-//!     .then(&OptimizePass::new(&security_ctx))?
+//!     .then(&OptimizePass)?
 //!     .then(&EnforcePass)?
-//!     .then(&SecurityPass::new(&security_ctx))?
-//!     .then(&CheckPass::new(&security_ctx))?
+//!     .then(&SecurityPass)?
+//!     .then(&CheckPass)?
 //!     .then(&CodegenPass)?
 //!     .into_context()
 //!     .take_output()
@@ -68,15 +75,28 @@ define_phases!(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PipelineEnv
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Marker trait for pipeline environment types.
+///
+/// Each pipeline variant (ClickHouse, DuckDB, etc.) defines its own env
+/// struct carrying backend-specific config. Passes access the env through
+/// [`CompilerContext::env()`].
+pub trait PipelineEnv: 'static {}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CompilerContext
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Compilation state, parameterized by the current pipeline phase.
+/// Compilation state, parameterized by the current phase `P` and
+/// the pipeline environment `E`.
 ///
-/// Fields are progressively populated as passes run. The phantom type
-/// parameter prevents accessing fields before the pass that populates
-/// them has executed.
-pub struct CompilerContext<P: Phase> {
+/// Pipeline state fields (`input`, `node`, etc.) are progressively
+/// populated as passes run. The environment is immutable and available
+/// at all phases.
+pub struct CompilerContext<P: Phase, E: PipelineEnv> {
+    env: E,
     pub(crate) json: Option<String>,
     pub(crate) input: Option<Input>,
     pub(crate) node: Option<Node>,
@@ -85,10 +105,11 @@ pub struct CompilerContext<P: Phase> {
     _phase: PhantomData<P>,
 }
 
-impl<P: Phase> CompilerContext<P> {
+impl<P: Phase, E: PipelineEnv> CompilerContext<P, E> {
     /// Zero-cost phase transition — same memory layout, different phantom type.
-    fn advance<Q: Phase>(self) -> CompilerContext<Q> {
+    fn advance<Q: Phase>(self) -> CompilerContext<Q, E> {
         CompilerContext {
+            env: self.env,
             json: self.json,
             input: self.input,
             node: self.node,
@@ -96,6 +117,11 @@ impl<P: Phase> CompilerContext<P> {
             output: self.output,
             _phase: PhantomData,
         }
+    }
+
+    /// The pipeline environment (ontology, security context, backend config, etc.).
+    pub fn env(&self) -> &E {
+        &self.env
     }
 }
 
@@ -106,7 +132,7 @@ impl<P: Phase> CompilerContext<P> {
 macro_rules! impl_input_accessors {
     ($($phase:ty),+ $(,)?) => {
         $(
-            impl CompilerContext<$phase> {
+            impl<E: PipelineEnv> CompilerContext<$phase, E> {
                 pub fn input(&self) -> &Input {
                     self.input.as_ref().expect("input must exist at this phase")
                 }
@@ -123,7 +149,7 @@ impl_input_accessors!(
 macro_rules! impl_node_accessors {
     ($($phase:ty),+ $(,)?) => {
         $(
-            impl CompilerContext<$phase> {
+            impl<E: PipelineEnv> CompilerContext<$phase, E> {
                 pub fn node(&self) -> &Node {
                     self.node.as_ref().expect("node must exist at this phase")
                 }
@@ -138,7 +164,7 @@ impl_node_accessors!(Lowered, Optimized, Enforced, Secured, Checked);
 macro_rules! impl_result_context_accessors {
     ($($phase:ty),+ $(,)?) => {
         $(
-            impl CompilerContext<$phase> {
+            impl<E: PipelineEnv> CompilerContext<$phase, E> {
                 pub fn result_context(&self) -> &ResultContext {
                     self.result_context.as_ref().expect("result_context must exist at this phase")
                 }
@@ -149,7 +175,7 @@ macro_rules! impl_result_context_accessors {
 
 impl_result_context_accessors!(Enforced, Secured, Checked);
 
-impl CompilerContext<Emitted> {
+impl<E: PipelineEnv> CompilerContext<Emitted, E> {
     /// Consume the context and extract the compiled output.
     pub fn take_output(self) -> Option<CompiledQueryContext> {
         self.output
@@ -162,10 +188,10 @@ impl CompilerContext<Emitted> {
 
 /// A single compiler pass that transforms the context in place.
 ///
-/// Passes carry their own dependencies (ontology, security context, etc.)
-/// so each pass declares exactly what it needs. The phase transition is
-/// handled by the [`CompilerRunner`] — passes never call `advance()`.
-pub trait CompilerPass {
+/// Generic over the environment `E` so passes can be shared across
+/// pipeline variants (when `E` is unconstrained) or specialized for
+/// a specific backend (when `E` is concrete).
+pub trait CompilerPass<E: PipelineEnv> {
     /// Human-readable name for observability.
     const NAME: &'static str;
 
@@ -178,7 +204,7 @@ pub trait CompilerPass {
     /// Execute the pass, mutating the context in place.
     ///
     /// The runner advances the phase automatically on success.
-    fn run(&self, ctx: &mut CompilerContext<Self::In>) -> Result<()>;
+    fn run(&self, ctx: &mut CompilerContext<Self::In, E>) -> Result<()>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -215,18 +241,19 @@ impl CompilerObserver for MetricsObserver {
 
 /// Typed pipeline runner that chains [`CompilerPass`] invocations.
 ///
-/// The phantom type `P` tracks the current phase. `.then(pass)` advances
-/// the phase; the compiler rejects chains where `pass.In != P`.
-pub struct CompilerRunner<P: Phase> {
-    ctx: CompilerContext<P>,
+/// Generic over the phase `P` and the environment `E`. The phase advances
+/// through `.then(pass)` calls; the environment is fixed at construction.
+pub struct CompilerRunner<P: Phase, E: PipelineEnv> {
+    ctx: CompilerContext<P, E>,
     observer: Option<Box<dyn CompilerObserver>>,
 }
 
-impl CompilerRunner<Raw> {
+impl<E: PipelineEnv> CompilerRunner<Raw, E> {
     /// Start a pipeline from a raw JSON query string.
-    pub fn new(json: impl Into<String>) -> Self {
+    pub fn new(json: impl Into<String>, env: E) -> Self {
         CompilerRunner {
             ctx: CompilerContext {
+                env,
                 json: Some(json.into()),
                 input: None,
                 node: None,
@@ -239,11 +266,12 @@ impl CompilerRunner<Raw> {
     }
 }
 
-impl CompilerRunner<Normalized> {
+impl<E: PipelineEnv> CompilerRunner<Normalized, E> {
     /// Start from a pre-built, normalized `Input` (for hydration queries or tests).
-    pub fn from_input(input: Input) -> Self {
+    pub fn from_input(input: Input, env: E) -> Self {
         CompilerRunner {
             ctx: CompilerContext {
+                env,
                 json: None,
                 input: Some(input),
                 node: None,
@@ -256,7 +284,7 @@ impl CompilerRunner<Normalized> {
     }
 }
 
-impl<P: Phase> CompilerRunner<P> {
+impl<P: Phase, E: PipelineEnv> CompilerRunner<P, E> {
     /// Attach an observer for pass-level timing and error recording.
     pub fn with_observer(mut self, obs: impl CompilerObserver + 'static) -> Self {
         self.observer = Some(Box::new(obs));
@@ -268,7 +296,10 @@ impl<P: Phase> CompilerRunner<P> {
     /// The compiler enforces `S::In == P` — you cannot call a pass that
     /// expects a different input phase. The runner handles the phase
     /// transition; the pass only mutates the context.
-    pub fn then<S: CompilerPass<In = P>>(mut self, pass: &S) -> Result<CompilerRunner<S::Out>> {
+    pub fn then<S: CompilerPass<E, In = P>>(
+        mut self,
+        pass: &S,
+    ) -> Result<CompilerRunner<S::Out, E>> {
         let start = Instant::now();
         match pass.run(&mut self.ctx) {
             Ok(()) => {
@@ -290,7 +321,7 @@ impl<P: Phase> CompilerRunner<P> {
     }
 
     /// Extract the context at the current phase (for tests/inspection).
-    pub fn into_context(self) -> CompilerContext<P> {
+    pub fn into_context(self) -> CompilerContext<P, E> {
         self.ctx
     }
 }
