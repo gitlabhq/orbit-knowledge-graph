@@ -4,7 +4,7 @@ GitLab Knowledge Graph (Orbit). Rust service that builds a property graph from G
 
 ## Quick start
 
-All tasks use mise. `mise build`, `mise test:fast`, `mise lint:code`, `mise server:start`, `mise server:dispatch`.
+All tasks use mise. `mise build`, `mise test:fast`, `mise test:compiler`, `mise lint:code`, `mise server:start`, `mise server:dispatch`.
 Fix linting issues: `mise lint:code:fix`. Validate docs: `mise lint:docs`. Validate ontology: `mise ontology:validate`.
 Integration tests need Docker: `mise test:integration`.
 
