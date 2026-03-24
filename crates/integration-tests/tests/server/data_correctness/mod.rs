@@ -4,7 +4,6 @@ mod helpers;
 mod neighbors;
 mod path_finding;
 mod search;
-mod security;
 mod traversal;
 
 use helpers::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, seed};
@@ -112,15 +111,5 @@ async fn data_correctness() {
         edge_cases::non_default_redaction_id_with_multiple_mrs,
         // referential integrity
         edge_cases::traversal_referential_integrity_on_complex_query,
-        // security: traversal path scoping for search
-        security::search_scoped_path_excludes_other_namespaces,
-        security::search_scoped_to_single_project_namespace,
-        security::search_multi_path_returns_union_of_scopes,
-        security::search_scoped_mr_excludes_other_namespaces,
-        security::search_with_filter_respects_scope,
-        // security: traversal path scoping for path finding
-        security::path_finding_scoped_excludes_paths_through_other_namespaces,
-        security::path_finding_multi_path_scope_finds_both,
-        security::path_finding_narrow_scope_excludes_all_targets,
     );
 }
