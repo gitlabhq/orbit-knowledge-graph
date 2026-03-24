@@ -1,2 +1,2 @@
-mod compiler_tests;
-mod ontology_tests;
+mod compiler;
+mod ontology;
