@@ -66,6 +66,28 @@
 --   HAS_DIFF edges:
 --     MR 2000 -> MergeRequestDiff 5000, MR 2000 -> MergeRequestDiff 5001
 --     MR 2001 -> MergeRequestDiff 5002
+--
+--   Milestones:
+--     6000 Sprint 1 (active,  path 1/100/)
+--     6001 Sprint 2 (closed,  path 1/101/)
+--
+--   Labels:
+--     7000 bug      (#d73a4a, path 1/100/)
+--     7001 feature  (#0075ca, path 1/100/)
+--     7002 urgent   (#e4e669, path 1/101/)
+--
+--   WorkItems:
+--     4000 Implement login page  (opened, issue,    not confidential, weight 3,  path 1/100/)
+--     4001 Fix auth bug          (closed, incident, confidential,     weight 8,  path 1/100/)
+--     4002 Write unit tests      (opened, task,     not confidential, no weight, path 1/101/)
+--     4003 Q1 Objective          (opened, epic,     not confidential, weight 13, path 1/102/)
+--
+--   WorkItem edges:
+--     AUTHORED:      User 1 -> WI 4000, User 2 -> WI 4001, User 1 -> WI 4002, User 3 -> WI 4003
+--     IN_GROUP:      WI 4000 -> Group 100, WI 4001 -> Group 100, WI 4002 -> Group 101, WI 4003 -> Group 102
+--     IN_MILESTONE:  WI 4000 -> Milestone 6000, WI 4001 -> Milestone 6000
+--     ASSIGNED:      User 1 -> WI 4000, User 2 -> WI 4000, User 3 -> WI 4001
+--     HAS_LABEL:     WI 4000 -> Label 7000, WI 4000 -> Label 7001, WI 4001 -> Label 7002
 
 INSERT INTO gl_user (id, username, name, state, user_type) VALUES
     (1, 'alice', 'Alice Admin', 'active', 'human'),
@@ -106,6 +128,21 @@ INSERT INTO gl_merge_request_diff (id, merge_request_id, state, traversal_path) 
     (5001, 2000, 'collected', '1/100/1000/'),
     (5002, 2001, 'collected', '1/100/1000/');
 
+INSERT INTO gl_milestone (id, iid, title, state, traversal_path) VALUES
+    (6000, 1, 'Sprint 1', 'active', '1/100/'),
+    (6001, 2, 'Sprint 2', 'closed', '1/101/');
+
+INSERT INTO gl_label (id, title, color, traversal_path) VALUES
+    (7000, 'bug', '#d73a4a', '1/100/'),
+    (7001, 'feature', '#0075ca', '1/100/'),
+    (7002, 'urgent', '#e4e669', '1/101/');
+
+INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, weight, created_at, updated_at, closed_at, traversal_path) VALUES
+    (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, '1/100/'),
+    (4001, 2, 'Fix auth bug', 'closed', 'incident', true, 8, '2024-03-05 11:30:00', '2024-03-15 16:00:00', '2024-03-15 16:00:00', '1/100/'),
+    (4002, 3, 'Write unit tests', 'opened', 'task', false, NULL, '2024-04-01 08:00:00', '2024-04-01 08:00:00', NULL, '1/101/'),
+    (4003, 4, 'Q1 Objective', 'opened', 'epic', false, 13, '2024-01-02 10:00:00', '2024-03-30 12:00:00', NULL, '1/102/');
+
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
     ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
     ('1/102/', 1, 'User', 'MEMBER_OF', 102, 'Group'),
@@ -134,4 +171,20 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/1000/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note'),
     ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5000, 'MergeRequestDiff'),
     ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5001, 'MergeRequestDiff'),
-    ('1/100/1000/', 2001, 'MergeRequest', 'HAS_DIFF', 5002, 'MergeRequestDiff');
+    ('1/100/1000/', 2001, 'MergeRequest', 'HAS_DIFF', 5002, 'MergeRequestDiff'),
+    ('1/100/', 1, 'User', 'AUTHORED', 4000, 'WorkItem'),
+    ('1/100/', 2, 'User', 'AUTHORED', 4001, 'WorkItem'),
+    ('1/101/', 1, 'User', 'AUTHORED', 4002, 'WorkItem'),
+    ('1/102/', 3, 'User', 'AUTHORED', 4003, 'WorkItem'),
+    ('1/100/', 4000, 'WorkItem', 'IN_GROUP', 100, 'Group'),
+    ('1/100/', 4001, 'WorkItem', 'IN_GROUP', 100, 'Group'),
+    ('1/101/', 4002, 'WorkItem', 'IN_GROUP', 101, 'Group'),
+    ('1/102/', 4003, 'WorkItem', 'IN_GROUP', 102, 'Group'),
+    ('1/100/', 4000, 'WorkItem', 'IN_MILESTONE', 6000, 'Milestone'),
+    ('1/100/', 4001, 'WorkItem', 'IN_MILESTONE', 6000, 'Milestone'),
+    ('1/100/', 1, 'User', 'ASSIGNED', 4000, 'WorkItem'),
+    ('1/100/', 2, 'User', 'ASSIGNED', 4000, 'WorkItem'),
+    ('1/100/', 3, 'User', 'ASSIGNED', 4001, 'WorkItem'),
+    ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7000, 'Label'),
+    ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7001, 'Label'),
+    ('1/101/', 4001, 'WorkItem', 'HAS_LABEL', 7002, 'Label');
