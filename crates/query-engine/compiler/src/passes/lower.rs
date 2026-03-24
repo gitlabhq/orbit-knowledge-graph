@@ -32,10 +32,7 @@ impl<E: PipelineEnv> CompilerPass<E> for LowerPass {
     const NAME: &'static str = "lower";
 
     fn run(&self, ctx: &mut CompilerContext<E>) -> crate::error::Result<()> {
-        let input = ctx
-            .input
-            .as_mut()
-            .expect("input must exist at Normalized phase");
+        let input = ctx.require_input_mut()?;
         ctx.node = Some(lower(input)?);
         Ok(())
     }

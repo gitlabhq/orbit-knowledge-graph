@@ -3,7 +3,7 @@
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::Input;
 use crate::input::QueryType;
 use crate::passes::enforce::ResultContext;
@@ -19,12 +19,9 @@ impl<E: PipelineEnv> CompilerPass<E> for CodegenPass {
     const NAME: &'static str = "codegen";
 
     fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
-        let node = ctx.node.as_ref().expect("node must exist");
-        let result_context = ctx
-            .result_context
-            .take()
-            .expect("result_context must exist");
-        let input_ref = ctx.input.as_ref().expect("input must exist");
+        let result_context = ctx.take_result_context()?;
+        let node = ctx.require_node()?;
+        let input_ref = ctx.require_input()?;
         let base = codegen(node, result_context)?;
         let hydration = crate::passes::hydrate::generate_hydration_plan(input_ref);
         let query_type = input_ref.query_type;

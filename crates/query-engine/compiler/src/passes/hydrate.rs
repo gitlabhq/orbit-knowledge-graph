@@ -10,12 +10,9 @@ impl<E: PipelineEnv> CompilerPass<E> for HydrationCodegenPass {
     const NAME: &'static str = "hydration_codegen";
 
     fn run(&self, ctx: &mut CompilerContext<E>) -> crate::error::Result<()> {
-        let node = ctx.node.as_ref().expect("node must exist");
-        let result_context = ctx
-            .result_context
-            .take()
-            .expect("result_context must exist");
-        let input_ref = ctx.input.as_ref().expect("input must exist");
+        let result_context = ctx.take_result_context()?;
+        let node = ctx.require_node()?;
+        let input_ref = ctx.require_input()?;
         let base = crate::passes::codegen::codegen(node, result_context)?;
         let query_type = input_ref.query_type;
         let input = input_ref.clone();

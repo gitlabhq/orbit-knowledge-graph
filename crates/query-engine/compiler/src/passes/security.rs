@@ -23,7 +23,7 @@ impl<E: PipelineEnv + HasSecurityCtx> CompilerPass<E> for SecurityPass {
 
     fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
         let security_ctx = ctx.env().security_ctx().clone();
-        let node = ctx.node.as_mut().expect("node must exist after enforce");
+        let node = ctx.require_node_mut()?;
         apply_security_context(node, &security_ctx)?;
         Ok(())
     }

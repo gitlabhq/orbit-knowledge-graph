@@ -63,7 +63,7 @@ pub use pipeline::{
 pub use envs::{ClickHouseEnv, HydrationEnv};
 pub use passes::{
     CheckPass, CodegenPass, EnforcePass, HydrationCodegenPass, LowerPass, NormalizePass,
-    OptimizePass, ParsePass, SecurityPass, ValidatePass,
+    OptimizePass, SecurityPass, ValidatePass,
 };
 
 // Re-export key types from pass modules.
@@ -152,7 +152,6 @@ pub fn compile_clickhouse(
     let env = ClickHouseEnv::new(ontology, security_ctx);
     CompilerRunner::new(json, env)
         .with_observer(MetricsObserver)
-        .then(&ParsePass)?
         .then(&ValidatePass)?
         .then(&NormalizePass)?
         .then(&LowerPass)?
@@ -264,8 +263,6 @@ mod pipeline_tests {
         }"#;
 
         let ctx = CompilerRunner::new(json, test_ch_env())
-            .then(&ParsePass)
-            .unwrap()
             .then(&ValidatePass)
             .unwrap()
             .then(&NormalizePass)
@@ -274,7 +271,7 @@ mod pipeline_tests {
             .unwrap()
             .into_context();
 
-        let Node::Query(q) = ctx.node();
+        let Node::Query(q) = ctx.require_node().unwrap();
         assert!(!q.select.is_empty());
     }
 
@@ -287,15 +284,13 @@ mod pipeline_tests {
         }"#;
 
         let ctx = CompilerRunner::new(json, test_ch_env())
-            .then(&ParsePass)
-            .unwrap()
             .then(&ValidatePass)
             .unwrap()
             .then(&NormalizePass)
             .unwrap()
             .into_context();
 
-        assert_eq!(ctx.input().query_type, QueryType::Search);
+        assert_eq!(ctx.require_input().unwrap().query_type, QueryType::Search);
     }
 
     #[test]
@@ -307,8 +302,6 @@ mod pipeline_tests {
         }"#;
 
         let ctx = CompilerRunner::new(json, test_ch_env())
-            .then(&ParsePass)
-            .unwrap()
             .then(&ValidatePass)
             .unwrap()
             .then(&NormalizePass)
@@ -319,14 +312,8 @@ mod pipeline_tests {
             .unwrap()
             .into_context();
 
-        let Node::Query(q) = ctx.node();
+        let Node::Query(q) = ctx.require_node().unwrap();
         assert!(q.limit.is_some());
-    }
-
-    #[test]
-    fn parse_error_propagates() {
-        let result = CompilerRunner::new("not valid json", test_ch_env()).then(&ParsePass);
-        assert!(result.is_err());
     }
 
     #[test]
@@ -358,8 +345,6 @@ mod pipeline_tests {
 
         let _ = CompilerRunner::new(json, test_ch_env())
             .with_observer(obs)
-            .then(&ParsePass)
-            .unwrap()
             .then(&ValidatePass)
             .unwrap()
             .then(&NormalizePass)
@@ -382,7 +367,6 @@ mod pipeline_tests {
         assert_eq!(
             names,
             vec![
-                "parse",
                 "validate",
                 "normalize",
                 "lower",

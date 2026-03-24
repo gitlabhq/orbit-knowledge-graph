@@ -47,8 +47,7 @@ impl<E: PipelineEnv + HasSecurityCtx> CompilerPass<E> for OptimizePass {
 
     fn run(&self, ctx: &mut CompilerContext<E>) -> crate::error::Result<()> {
         let security_ctx = ctx.env().security_ctx().clone();
-        let node = ctx.node.as_mut().expect("node must exist after lowering");
-        let input = ctx.input.as_mut().expect("input must exist");
+        let (node, input) = ctx.require_node_mut_and_input_mut()?;
         optimize(node, input, &security_ctx);
         Ok(())
     }

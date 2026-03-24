@@ -75,21 +75,81 @@ impl<E: PipelineEnv> CompilerContext<E> {
         &self.env
     }
 
-    /// The parsed input. Populated by ParsePass.
-    pub fn input(&self) -> &Input {
-        self.input.as_ref().expect("input not yet populated")
+    /// The raw JSON query string.
+    pub fn require_json(&self) -> Result<&str> {
+        self.json
+            .as_deref()
+            .ok_or_else(|| QueryError::PipelineInvariant("json not yet populated".into()))
     }
 
-    /// The lowered AST node. Populated by LowerPass.
-    pub fn node(&self) -> &Node {
-        self.node.as_ref().expect("node not yet populated")
+    /// The parsed and validated input.
+    pub fn require_input(&self) -> Result<&Input> {
+        self.input
+            .as_ref()
+            .ok_or_else(|| QueryError::PipelineInvariant("input not yet populated".into()))
     }
 
-    /// The result context for redaction. Populated by EnforcePass.
-    pub fn result_context(&self) -> &ResultContext {
+    /// Mutable access to the input.
+    pub fn require_input_mut(&mut self) -> Result<&mut Input> {
+        self.input
+            .as_mut()
+            .ok_or_else(|| QueryError::PipelineInvariant("input not yet populated".into()))
+    }
+
+    /// The lowered AST node.
+    pub fn require_node(&self) -> Result<&Node> {
+        self.node
+            .as_ref()
+            .ok_or_else(|| QueryError::PipelineInvariant("node not yet populated".into()))
+    }
+
+    /// Mutable access to the AST node.
+    pub fn require_node_mut(&mut self) -> Result<&mut Node> {
+        self.node
+            .as_mut()
+            .ok_or_else(|| QueryError::PipelineInvariant("node not yet populated".into()))
+    }
+
+    /// The result context for redaction.
+    pub fn require_result_context(&self) -> Result<&ResultContext> {
         self.result_context
             .as_ref()
-            .expect("result_context not yet populated")
+            .ok_or_else(|| QueryError::PipelineInvariant("result_context not yet populated".into()))
+    }
+
+    /// Take ownership of the result context (consumed by codegen).
+    pub fn take_result_context(&mut self) -> Result<ResultContext> {
+        self.result_context
+            .take()
+            .ok_or_else(|| QueryError::PipelineInvariant("result_context not yet populated".into()))
+    }
+
+    /// Mutable node + immutable input. Used by passes that transform the AST
+    /// based on input metadata (enforce).
+    pub fn require_node_mut_and_input(&mut self) -> Result<(&mut Node, &Input)> {
+        match (&mut self.node, &self.input) {
+            (Some(node), Some(input)) => Ok((node, input)),
+            (None, _) => Err(QueryError::PipelineInvariant(
+                "node not yet populated".into(),
+            )),
+            (_, None) => Err(QueryError::PipelineInvariant(
+                "input not yet populated".into(),
+            )),
+        }
+    }
+
+    /// Mutable node + mutable input. Used by passes that mutate both
+    /// (optimize).
+    pub fn require_node_mut_and_input_mut(&mut self) -> Result<(&mut Node, &mut Input)> {
+        match (&mut self.node, &mut self.input) {
+            (Some(node), Some(input)) => Ok((node, input)),
+            (None, _) => Err(QueryError::PipelineInvariant(
+                "node not yet populated".into(),
+            )),
+            (_, None) => Err(QueryError::PipelineInvariant(
+                "input not yet populated".into(),
+            )),
+        }
     }
 
     /// Consume the context and extract the compiled output.

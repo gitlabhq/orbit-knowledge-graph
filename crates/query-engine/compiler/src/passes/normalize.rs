@@ -29,7 +29,7 @@ impl<E: PipelineEnv + HasOntology> CompilerPass<E> for NormalizePass {
         let input = ctx
             .input
             .take()
-            .expect("input must exist at Validated phase");
+            .ok_or_else(|| QueryError::PipelineInvariant("input not yet populated".into()))?;
         let ontology = ctx.env().ontology();
         ctx.input = Some(normalize(input, ontology)?);
         Ok(())

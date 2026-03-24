@@ -22,16 +22,14 @@ impl<E: PipelineEnv + HasOntology> CompilerPass<E> for ValidatePass {
     const NAME: &'static str = "validate";
 
     fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
-        let json = ctx.json.as_deref().expect("json must exist");
+        let json = ctx.require_json()?;
         let ontology = ctx.env().ontology();
         let v = Validator::new(ontology);
         let value = v.check_json(json)?;
         v.check_ontology(&value)?;
-        let input = ctx
-            .input
-            .as_ref()
-            .expect("input must exist at Parsed phase");
-        v.check_references(input)?;
+        let input: Input = serde_json::from_value(value)?;
+        v.check_references(&input)?;
+        ctx.input = Some(input);
         Ok(())
     }
 }

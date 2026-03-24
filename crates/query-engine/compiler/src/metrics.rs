@@ -123,6 +123,7 @@ pub(crate) fn counter_info(err: &QueryError) -> (&Counter<u64>, &'static str) {
         QueryError::Lowering(_) => (&METRICS.pipeline_invariant_violated, "lowering"),
         QueryError::Enforcement(_) => (&METRICS.pipeline_invariant_violated, "enforcement"),
         QueryError::Codegen(_) => (&METRICS.pipeline_invariant_violated, "codegen"),
+        QueryError::PipelineInvariant(_) => (&METRICS.pipeline_invariant_violated, "pipeline"),
     }
 }
 

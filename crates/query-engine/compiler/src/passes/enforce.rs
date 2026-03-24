@@ -24,8 +24,7 @@ impl<E: PipelineEnv> CompilerPass<E> for EnforcePass {
     const NAME: &'static str = "enforce";
 
     fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
-        let node = ctx.node.as_mut().expect("node must exist after optimize");
-        let input = ctx.input.as_ref().expect("input must exist");
+        let (node, input) = ctx.require_node_mut_and_input()?;
         let result_context = enforce_return(node, input)?;
         ctx.result_context = Some(result_context);
         Ok(())
