@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 gkg-utils = { path = "../../utils" }
 ontology = { path = "../../ontology" }
+pipeline-macros = { path = "../pipeline-macros" }
+pastey = { workspace = true }
 once_cell = { workspace = true }
 opentelemetry = { workspace = true }
 regex = { workspace = true }

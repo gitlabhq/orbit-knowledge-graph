@@ -13,20 +13,27 @@ use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
-use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
+use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
+use crate::state::{HasInput, HasNode, HasResultCtx};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use std::collections::{HashMap, HashSet};
 
 /// Pipeline pass: enforces redaction return columns (`_gkg_*`).
 pub struct EnforcePass;
 
-impl<E: PipelineEnv> CompilerPass<E> for EnforcePass {
+impl<E, S> CompilerPass<E, S> for EnforcePass
+where
+    E: PipelineEnv,
+    S: PipelineState + HasNode + HasInput + HasResultCtx,
+{
     const NAME: &'static str = "enforce";
 
-    fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
-        let (node, input) = ctx.require_node_mut_and_input()?;
-        let result_context = enforce_return(node, input)?;
-        ctx.result_context = Some(result_context);
+    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let mut node = state.take_node()?;
+        let input = state.input()?;
+        let result_context = enforce_return(&mut node, input)?;
+        state.set_node(node);
+        state.set_result_ctx(result_context);
         Ok(())
     }
 }
@@ -616,26 +623,22 @@ mod tests {
 
         // Should only have columns for 'u' (group_by node), not 'n' (target node)
         assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
-        );
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
-        );
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string())));
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string())));
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string())));
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string())));
         assert_eq!(q.group_by.len(), 1); // u.id already present, no duplicate added
 
         // Context should only have the group_by node
@@ -964,28 +967,24 @@ mod tests {
         );
 
         // No _pk columns for default entities
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_u_pk"))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk"))
-        );
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_deref() == Some("_gkg_u_pk")));
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk")));
 
         // Type columns present
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_u_type"))
-        );
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_mr_type"))
-        );
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_deref() == Some("_gkg_u_type")));
+        assert!(q
+            .select
+            .iter()
+            .any(|s| s.alias.as_deref() == Some("_gkg_mr_type")));
     }
 
     #[test]
@@ -1063,11 +1062,10 @@ mod tests {
         );
 
         // mr (default) has no pk column
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk"))
-        );
+        assert!(!q
+            .select
+            .iter()
+            .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk")));
     }
 
     #[test]

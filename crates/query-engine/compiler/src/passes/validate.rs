@@ -11,25 +11,30 @@ use std::sync::OnceLock;
 use crate::envs::HasOntology;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
-use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
+use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
+use crate::state::{HasInput, HasJson};
 use ontology::{DataType, Ontology};
 
 /// Pipeline pass: validates a parsed `Input` against schema, ontology, and
 /// cross-reference rules. Reads ontology from the environment.
 pub struct ValidatePass;
 
-impl<E: PipelineEnv + HasOntology> CompilerPass<E> for ValidatePass {
+impl<E, S> CompilerPass<E, S> for ValidatePass
+where
+    E: PipelineEnv + HasOntology,
+    S: PipelineState + HasJson + HasInput,
+{
     const NAME: &'static str = "validate";
 
-    fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
-        let json = ctx.require_json()?;
-        let ontology = ctx.env().ontology();
+    fn run(&self, env: &E, state: &mut S) -> Result<()> {
+        let json = state.json()?;
+        let ontology = env.ontology();
         let v = Validator::new(ontology);
         let value = v.check_json(json)?;
         v.check_ontology(&value)?;
         let input: Input = serde_json::from_value(value)?;
         v.check_references(&input)?;
-        ctx.input = Some(input);
+        state.set_input(input);
         Ok(())
     }
 }

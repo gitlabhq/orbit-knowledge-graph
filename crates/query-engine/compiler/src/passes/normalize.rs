@@ -9,7 +9,8 @@
 use crate::envs::HasOntology;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input};
-use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
+use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
+use crate::state::HasInput;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
@@ -22,16 +23,17 @@ use std::collections::{BTreeMap, HashMap};
 /// Reads ontology from the environment.
 pub struct NormalizePass;
 
-impl<E: PipelineEnv + HasOntology> CompilerPass<E> for NormalizePass {
+impl<E, S> CompilerPass<E, S> for NormalizePass
+where
+    E: PipelineEnv + HasOntology,
+    S: PipelineState + HasInput,
+{
     const NAME: &'static str = "normalize";
 
-    fn run(&self, ctx: &mut CompilerContext<E>) -> Result<()> {
-        let input = ctx
-            .input
-            .take()
-            .ok_or_else(|| QueryError::PipelineInvariant("input not yet populated".into()))?;
-        let ontology = ctx.env().ontology();
-        ctx.input = Some(normalize(input, ontology)?);
+    fn run(&self, env: &E, state: &mut S) -> Result<()> {
+        let input = state.take_input()?;
+        let ontology = env.ontology();
+        state.set_input(normalize(input, ontology)?);
         Ok(())
     }
 }

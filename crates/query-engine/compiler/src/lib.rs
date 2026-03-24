@@ -33,13 +33,18 @@
 
 pub mod ast;
 pub mod constants;
-pub mod envs;
 pub mod error;
 pub mod input;
 pub mod metrics;
-pub mod passes;
-pub mod pipeline;
 pub mod types;
+
+// pipeline must come before envs/state — its macros.rs defines
+// `define_env_capabilities!` and `define_state_capabilities!` which
+// those modules invoke.
+pub mod pipeline;
+pub mod envs;
+pub mod state;
+pub mod passes;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
@@ -55,12 +60,10 @@ pub use input::{
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
-pub use pipeline::{
-    CompilerContext, CompilerObserver, CompilerPass, CompilerRunner, MetricsObserver, PipelineEnv,
-};
+pub use pipeline::{CompilerPass, Pipeline, PipelineEnv, PipelineState, SealedPipeline};
 
-// Re-export pass structs.
-pub use envs::{ClickHouseEnv, HydrationEnv};
+// Re-export env + state types.
+pub use envs::{HasOntology, HasSecurityCtx, LocalEnv, SecureEnv};
 pub use passes::{
     CheckPass, CodegenPass, EnforcePass, HydrationCodegenPass, LowerPass, NormalizePass,
     OptimizePass, SecurityPass, ValidatePass,
@@ -79,8 +82,6 @@ pub use passes::optimize::optimize;
 pub use passes::security::apply_security_context;
 pub use passes::validate::Validator;
 pub use types::SecurityContext;
-
-use std::sync::Arc;
 
 use metrics::CountErr;
 
@@ -135,303 +136,9 @@ pub fn compile_input(mut input: Input, ctx: &SecurityContext) -> Result<Compiled
     })
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Pipeline presets
-// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline presets are in `pipelines.rs`.
 
-/// Standard ClickHouse compilation pipeline.
-///
-/// ```text
-/// JSON → Parse → Validate → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen
-/// ```
-pub fn compile_clickhouse(
-    json: &str,
-    ontology: Arc<Ontology>,
-    security_ctx: SecurityContext,
-) -> Result<CompiledQueryContext> {
-    let env = ClickHouseEnv::new(ontology, security_ctx);
-    CompilerRunner::new(json, env)
-        .with_observer(MetricsObserver)
-        .then(&ValidatePass)?
-        .then(&NormalizePass)?
-        .then(&LowerPass)?
-        .then(&OptimizePass)?
-        .then(&EnforcePass)?
-        .then(&SecurityPass)?
-        .then(&CheckPass)?
-        .then(&CodegenPass)?
-        .into_context()
-        .take_output()
-        .ok_or_else(|| QueryError::Codegen("CodegenPass did not produce output".into()))
-}
 
-/// Hydration pipeline — skips security and check passes.
-///
-/// ```text
-/// Input → Lower → Optimize → Enforce → HydrationCodegen
-/// ```
-pub fn compile_hydration(
-    input: Input,
-    ontology: Arc<Ontology>,
-    security_ctx: SecurityContext,
-) -> Result<CompiledQueryContext> {
-    let env = HydrationEnv::new(ontology, security_ctx);
-    CompilerRunner::from_input(input, env)
-        .with_observer(MetricsObserver)
-        .then(&LowerPass)?
-        .then(&OptimizePass)?
-        .then(&EnforcePass)?
-        .then(&HydrationCodegenPass)?
-        .into_context()
-        .take_output()
-        .ok_or_else(|| QueryError::Codegen("HydrationCodegenPass did not produce output".into()))
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-#[allow(irrefutable_let_patterns)]
-mod pipeline_tests {
-    use super::*;
-    use std::time::Duration;
-
-    fn test_ontology() -> Arc<Ontology> {
-        Arc::new(Ontology::load_embedded().expect("ontology must load"))
-    }
-
-    fn test_security_ctx() -> SecurityContext {
-        SecurityContext::new(1, vec!["1/".into()]).unwrap()
-    }
-
-    fn test_ch_env() -> ClickHouseEnv {
-        ClickHouseEnv::new(test_ontology(), test_security_ctx())
-    }
-
-    #[test]
-    fn full_clickhouse_pipeline() {
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let compiled = compile_clickhouse(json, test_ontology(), test_security_ctx()).unwrap();
-        assert!(!compiled.base.sql.is_empty());
-        assert_eq!(compiled.query_type, QueryType::Search);
-    }
-
-    #[test]
-    fn full_traversal_pipeline() {
-        let json = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "mr", "entity": "MergeRequest"}
-            ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
-
-        let compiled = compile_clickhouse(json, test_ontology(), test_security_ctx()).unwrap();
-        assert!(!compiled.base.sql.is_empty());
-        assert_eq!(compiled.query_type, QueryType::Traversal);
-    }
-
-    #[test]
-    fn hydration_pipeline_skips_security() {
-        let ontology = test_ontology();
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-        let mut input = validated_input(json, &ontology).unwrap();
-        input.query_type = QueryType::Hydration;
-
-        let compiled = compile_hydration(input, test_ontology(), test_security_ctx()).unwrap();
-        assert!(!compiled.base.sql.is_empty());
-    }
-
-    #[test]
-    fn partial_pipeline_inspect_after_lower() {
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let ctx = CompilerRunner::new(json, test_ch_env())
-            .then(&ValidatePass)
-            .unwrap()
-            .then(&NormalizePass)
-            .unwrap()
-            .then(&LowerPass)
-            .unwrap()
-            .into_context();
-
-        let Node::Query(q) = ctx.require_node().unwrap();
-        assert!(!q.select.is_empty());
-    }
-
-    #[test]
-    fn partial_pipeline_inspect_after_normalize() {
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let ctx = CompilerRunner::new(json, test_ch_env())
-            .then(&ValidatePass)
-            .unwrap()
-            .then(&NormalizePass)
-            .unwrap()
-            .into_context();
-
-        assert_eq!(ctx.require_input().unwrap().query_type, QueryType::Search);
-    }
-
-    #[test]
-    fn partial_pipeline_inspect_after_optimize() {
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let ctx = CompilerRunner::new(json, test_ch_env())
-            .then(&ValidatePass)
-            .unwrap()
-            .then(&NormalizePass)
-            .unwrap()
-            .then(&LowerPass)
-            .unwrap()
-            .then(&OptimizePass)
-            .unwrap()
-            .into_context();
-
-        let Node::Query(q) = ctx.require_node().unwrap();
-        assert!(q.limit.is_some());
-    }
-
-    #[test]
-    fn observer_receives_pass_completions() {
-        use std::sync::{Arc, Mutex};
-
-        #[derive(Default)]
-        struct RecordingObserver {
-            completed: Arc<Mutex<Vec<(&'static str, Duration)>>>,
-        }
-
-        impl CompilerObserver for RecordingObserver {
-            fn pass_completed(&mut self, name: &'static str, elapsed: Duration) {
-                self.completed.lock().unwrap().push((name, elapsed));
-            }
-            fn pass_failed(&mut self, _name: &'static str, _error: &QueryError) {}
-        }
-
-        let completed = Arc::new(Mutex::new(Vec::new()));
-        let obs = RecordingObserver {
-            completed: Arc::clone(&completed),
-        };
-
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let _ = CompilerRunner::new(json, test_ch_env())
-            .with_observer(obs)
-            .then(&ValidatePass)
-            .unwrap()
-            .then(&NormalizePass)
-            .unwrap()
-            .then(&LowerPass)
-            .unwrap()
-            .then(&OptimizePass)
-            .unwrap()
-            .then(&EnforcePass)
-            .unwrap()
-            .then(&SecurityPass)
-            .unwrap()
-            .then(&CheckPass)
-            .unwrap()
-            .then(&CodegenPass)
-            .unwrap()
-            .into_context();
-
-        let names: Vec<_> = completed.lock().unwrap().iter().map(|(n, _)| *n).collect();
-        assert_eq!(
-            names,
-            vec![
-                "validate",
-                "normalize",
-                "lower",
-                "optimize",
-                "enforce",
-                "security",
-                "check",
-                "codegen"
-            ]
-        );
-    }
-
-    #[test]
-    fn observer_records_failures() {
-        use std::sync::{Arc, Mutex};
-
-        #[derive(Default)]
-        struct FailureObserver {
-            failed: Arc<Mutex<Vec<&'static str>>>,
-        }
-
-        impl CompilerObserver for FailureObserver {
-            fn pass_completed(&mut self, _name: &'static str, _elapsed: Duration) {}
-            fn pass_failed(&mut self, name: &'static str, _error: &QueryError) {
-                self.failed.lock().unwrap().push(name);
-            }
-        }
-
-        let failed = Arc::new(Mutex::new(Vec::new()));
-        let obs = FailureObserver {
-            failed: Arc::clone(&failed),
-        };
-
-        let bad_input = Input {
-            query_type: QueryType::Search,
-            ..Input::default()
-        };
-
-        let result = CompilerRunner::from_input(bad_input, test_ch_env())
-            .with_observer(obs)
-            .then(&LowerPass);
-
-        assert!(result.is_err());
-        let names = failed.lock().unwrap().clone();
-        assert_eq!(names, vec!["lower"]);
-    }
-
-    #[test]
-    fn compile_clickhouse_matches_legacy_compile() {
-        let ontology = test_ontology();
-        let ctx = test_security_ctx();
-
-        let json = r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "limit": 10
-        }"#;
-
-        let pipeline_result = compile_clickhouse(json, Arc::clone(&ontology), ctx.clone()).unwrap();
-        let legacy_result = compile(json, &ontology, &ctx).unwrap();
-
-        assert_eq!(pipeline_result.base.sql, legacy_result.base.sql);
-        assert_eq!(pipeline_result.query_type, legacy_result.query_type);
-    }
-}
 
 #[cfg(test)]
 #[allow(irrefutable_let_patterns)]

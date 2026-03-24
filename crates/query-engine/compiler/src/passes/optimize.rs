@@ -30,7 +30,8 @@ use crate::constants::{
 use crate::envs::HasSecurityCtx;
 use crate::input::{Input, InputNode, QueryType};
 use crate::passes::security::SecurityContext;
-use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
+use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
+use crate::state::{HasInput, HasNode};
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
@@ -42,13 +43,20 @@ const ROOT_SIP_CTE: &str = "_root_ids";
 /// Reads security context from the environment.
 pub struct OptimizePass;
 
-impl<E: PipelineEnv + HasSecurityCtx> CompilerPass<E> for OptimizePass {
+impl<E, S> CompilerPass<E, S> for OptimizePass
+where
+    E: PipelineEnv + HasSecurityCtx,
+    S: PipelineState + HasNode + HasInput,
+{
     const NAME: &'static str = "optimize";
 
-    fn run(&self, ctx: &mut CompilerContext<E>) -> crate::error::Result<()> {
-        let security_ctx = ctx.env().security_ctx().clone();
-        let (node, input) = ctx.require_node_mut_and_input_mut()?;
-        optimize(node, input, &security_ctx);
+    fn run(&self, env: &E, state: &mut S) -> crate::error::Result<()> {
+        let security_ctx = env.security_ctx().clone();
+        let mut node = state.take_node()?;
+        let mut input = state.take_input()?;
+        optimize(&mut node, &mut input, &security_ctx);
+        state.set_node(node);
+        state.set_input(input);
         Ok(())
     }
 }

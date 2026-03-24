@@ -1,22 +1,27 @@
 use crate::constants::HYDRATION_NODE_ALIAS;
 use crate::input::{ColumnSelection, Input, QueryType};
 use crate::passes::codegen::{CompiledQueryContext, HydrationPlan, HydrationTemplate};
-use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
+use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
+use crate::state::{HasInput, HasNode, HasOutput, HasResultCtx};
 
 /// Pipeline pass: codegen for hydration queries (no security/check passes).
 pub struct HydrationCodegenPass;
 
-impl<E: PipelineEnv> CompilerPass<E> for HydrationCodegenPass {
+impl<E, S> CompilerPass<E, S> for HydrationCodegenPass
+where
+    E: PipelineEnv,
+    S: PipelineState + HasNode + HasInput + HasResultCtx + HasOutput,
+{
     const NAME: &'static str = "hydration_codegen";
 
-    fn run(&self, ctx: &mut CompilerContext<E>) -> crate::error::Result<()> {
-        let result_context = ctx.take_result_context()?;
-        let node = ctx.require_node()?;
-        let input_ref = ctx.require_input()?;
+    fn run(&self, _env: &E, state: &mut S) -> crate::error::Result<()> {
+        let result_context = state.take_result_ctx()?;
+        let node = state.node()?;
+        let input = state.input()?;
         let base = crate::passes::codegen::codegen(node, result_context)?;
-        let query_type = input_ref.query_type;
-        let input = input_ref.clone();
-        ctx.output = Some(CompiledQueryContext {
+        let query_type = input.query_type;
+        let input = input.clone();
+        state.set_output(CompiledQueryContext {
             query_type,
             base,
             hydration: HydrationPlan::None,
