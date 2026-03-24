@@ -15,6 +15,7 @@ stages:
   - lint
   - security
   - test
+  - documentation
   - ai
   - build
   - publish
@@ -102,19 +103,6 @@ ontology-schema-validate:
   script:
     - test "$(wc -c < config/schemas/ontology.schema.json)" -le 32768 || (echo "config/schemas/ontology.schema.json must stay at or below 32 KB" && exit 1)
     - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
-
-check-docs:
-  stage: lint
-  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.22-vale-3.13.0-markdownlint2-0.19.0-lychee-0.21.0
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - markdownlint-cli2 '**/*.md'
-    - vale --minAlertLevel error .
-    - lychee --offline --include-fragments '**/*.md'
 
 fmt-check:
   stage: lint
@@ -230,6 +218,73 @@ integration-test:
   script:
     - cargo nextest run --profile ci --all-features --test '*'
     - sccache --show-stats || true
+
+# Documentation stage
+
+check_docs_markdown:
+  stage: documentation
+  extends: .mr-only-rules
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.22-vale-3.13.0-markdownlint2-0.19.0-lychee-0.21.0
+  script:
+    # Lint prose
+    - vale --minAlertLevel error docs
+    # Lint Markdown
+    - markdownlint-cli2 'docs/**/*.md' *.md
+    # Check links
+    - lychee --offline --include-fragments docs/**/*.md *.md
+
+docs_hugo_build:
+  stage: documentation
+  extends: .mr-only-rules
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.150.1
+  needs: []
+  dependencies: []
+  variables:
+    DOCS_BRANCH: "main"
+  before_script:
+    # Check if this a release branch, which would be the case for a backport.
+    # If this is a backport MR, we need to checkout the appropriate version
+    # of the Docs website.
+    - |
+      if [[ $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ [0-9]+-[0-9]+-stable ]]; then
+        BRANCH_NAME=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+        echo "Detected merge request to stable branch: $BRANCH_NAME"
+      # Check if we're directly on a stable branch (direct push/commit)
+      elif [[ $CI_COMMIT_BRANCH =~ [0-9]+-[0-9]+-stable ]]; then
+        BRANCH_NAME=$CI_COMMIT_BRANCH
+        echo "Detected direct commit to stable branch: $BRANCH_NAME"
+      fi
+
+      # Extract version info if we found a stable branch
+      if [[ -n $BRANCH_NAME ]]; then
+        MAJOR=$(echo $BRANCH_NAME | cut -d '-' -f 1)
+        MINOR=$(echo $BRANCH_NAME | cut -d '-' -f 2)
+        # Convert GitLab style (17-9-stable-ee) to Docs style (17.9)
+        DOCS_BRANCH_CANDIDATE="$MAJOR.$MINOR"
+
+        # Check if the branch exists in the Docs website repo, fallback to main if not
+        if git ls-remote --heads --exit-code https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com.git "refs/heads/$DOCS_BRANCH_CANDIDATE" >/dev/null 2>&1; then
+          DOCS_BRANCH="$DOCS_BRANCH_CANDIDATE"
+          echo "Using docs-gitlab-com branch $DOCS_BRANCH for release branch"
+        else
+          DOCS_BRANCH="main"
+          echo "Branch $DOCS_BRANCH_CANDIDATE does not exist, falling back to main"
+        fi
+      fi
+    # Clone the Docs website project
+    - git clone --depth 1 --filter=tree:0 --branch $DOCS_BRANCH https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com.git
+    - cd docs-gitlab-com
+    - make add-latest-icons
+  script:
+    # Remove unwanted files from CLI docs/ to avoid conflicts with docs/source/
+    # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/merge_requests/1554#note_2901887344
+    - rm -f ../docs/index.rst ../docs/*.md
+    # Test that Hugo will build
+    - hugo --gc --printPathWarnings --panicOnWarning  --environment test
+    # Test for invalid index pages
+    # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/blob/main/scripts/check-index-filenames.sh
+    - make check-index-pages SEARCH_DIR="../docs/source"
+    #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added
 
 # Build Stage
 
