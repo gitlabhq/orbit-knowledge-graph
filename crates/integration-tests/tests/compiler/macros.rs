@@ -7,9 +7,8 @@
 use std::sync::Arc;
 
 use compiler::{
-    HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx, Input,
-    LocalEnv, QueryError, QueryState, Seal, SealInput, SealJson, SealNode, SecureEnv,
-    SecurityContext,
+    HasInput, HasJson, HasOntology, HasSecurityCtx, Input, LocalEnv, QueryError, QueryState, Seal,
+    SealInput, SealJson, SealNode, SecureEnv, SecurityContext,
 };
 use ontology::Ontology;
 
@@ -30,7 +29,7 @@ fn secure_env_new_stores_fields() {
     let env = SecureEnv::new(ontology.clone(), ctx.clone());
 
     assert!(Arc::ptr_eq(env.ontology(), &ontology));
-    assert_eq!(env.security_ctx().org_id(), ctx.org_id());
+    assert_eq!(env.security_ctx().org_id, ctx.org_id);
 }
 
 #[test]
