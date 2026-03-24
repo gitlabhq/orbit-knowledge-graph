@@ -36,7 +36,7 @@ export it yourself:
 
 ```shell
 export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
-cargo nextest run --all-features --test '*'
+cargo nextest run --test docker
 ```
 
 ## Usage
