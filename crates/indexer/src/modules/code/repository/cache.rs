@@ -112,6 +112,7 @@ const REPOSITORY_DIR: &str = "repository";
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
     budget: CacheBudget,
+    metrics: CodeMetrics,
     phantom_bytes: AtomicU64,
     headroom: u64,
 }
@@ -133,11 +134,16 @@ impl LocalRepositoryCache {
                  increase disk_budget_bytes or decrease headroom_per_worker_bytes"
             );
         }
-        let budget = CacheBudget::new(usable_budget, config.large_repo_threshold_bytes, metrics);
+        let budget = CacheBudget::new(
+            usable_budget,
+            config.large_repo_threshold_bytes,
+            metrics.clone(),
+        );
         let headroom = config.disk_budget_bytes.saturating_sub(usable_budget);
         Self {
             base_dir,
             budget,
+            metrics,
             phantom_bytes: AtomicU64::new(0),
             headroom,
         }
@@ -249,7 +255,7 @@ impl LocalRepositoryCache {
         }
 
         if evicted_bytes > 0 {
-            self.budget.record_eviction(evicted_bytes);
+            self.metrics.record_cache_eviction(evicted_bytes);
         }
 
         if self.phantom_bytes.load(Ordering::Relaxed) > self.headroom {

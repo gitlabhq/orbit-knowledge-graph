@@ -243,10 +243,6 @@ impl CacheBudget {
         self.report_state();
     }
 
-    pub fn record_eviction(&self, evicted_bytes: u64) {
-        self.metrics.record_cache_eviction(evicted_bytes);
-    }
-
     #[cfg(test)]
     fn is_pinned(&self, key: &CacheKey) -> bool {
         self.pin_counts
