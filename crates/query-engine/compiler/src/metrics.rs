@@ -109,7 +109,7 @@ impl Default for QueryEngineMetrics {
 }
 
 /// Maps a [`QueryError`] variant to its counter and a low-cardinality reason label.
-fn counter_info(err: &QueryError) -> (&Counter<u64>, &'static str) {
+pub(crate) fn counter_info(err: &QueryError) -> (&Counter<u64>, &'static str) {
     match err {
         QueryError::Parse(_) => (&METRICS.validation_failed, "parse"),
         QueryError::Validation(_) => (&METRICS.validation_failed, "schema"),
@@ -123,6 +123,7 @@ fn counter_info(err: &QueryError) -> (&Counter<u64>, &'static str) {
         QueryError::Lowering(_) => (&METRICS.pipeline_invariant_violated, "lowering"),
         QueryError::Enforcement(_) => (&METRICS.pipeline_invariant_violated, "enforcement"),
         QueryError::Codegen(_) => (&METRICS.pipeline_invariant_violated, "codegen"),
+        QueryError::PipelineInvariant(_) => (&METRICS.pipeline_invariant_violated, "pipeline"),
     }
 }
 

@@ -1,0 +1,15 @@
+[package]
+name = "compiler-pipeline-macros"
+version.workspace = true
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+
+[lints]
+workspace = true

@@ -42,6 +42,9 @@ pub enum QueryError {
     #[error("security error: {0}")]
     Security(String),
 
+    #[error("pipeline invariant violated: {0}")]
+    PipelineInvariant(String),
+
     #[error("ontology error: {0}")]
     Ontology(#[from] OntologyError),
 }
