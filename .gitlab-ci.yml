@@ -103,18 +103,18 @@ ontology-schema-validate:
     - test "$(wc -c < config/schemas/ontology.schema.json)" -le 32768 || (echo "config/schemas/ontology.schema.json must stay at or below 32 KB" && exit 1)
     - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
 
-check-docs:
+check_docs_markdown:
   stage: lint
-  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.22-vale-3.13.0-markdownlint2-0.19.0-lychee-0.21.0
-  tags:
-    - saas-linux-medium-amd64
   extends:
-    - .mr-and-main-rules
-  needs: []
+    - .mr-only-rules
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.22-vale-3.13.0-markdownlint2-0.19.0-lychee-0.21.0
   script:
-    - markdownlint-cli2 '**/*.md'
-    - vale --minAlertLevel error .
-    - lychee --offline --include-fragments '**/*.md'
+    # Lint prose
+    - vale --minAlertLevel error docs
+    # Lint Markdown
+    - markdownlint-cli2 'docs/**/*.md' *.md
+    # Check links
+    - lychee --offline --include-fragments docs/**/*.md *.md
 
 fmt-check:
   stage: lint
