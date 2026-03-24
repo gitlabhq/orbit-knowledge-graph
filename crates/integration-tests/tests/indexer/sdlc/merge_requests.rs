@@ -76,12 +76,12 @@ pub async fn processes_merge_requests_closing_issues(ctx: &TestContext) {
     .await;
 
     ctx.execute(
-        "INSERT INTO hierarchy_work_items
-            (id, title, author_id, state_id, work_item_type_id, confidential,
-             namespace_id, traversal_path, version, custom_status_id, system_defined_status_id)
+        "INSERT INTO work_items
+            (id, iid, title, author_id, state_id, work_item_type_id, confidential,
+             namespace_id, traversal_path, _siphon_replicated_at)
         VALUES
-            (1, 'Bug: Login fails', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0),
-            (2, 'Bug: Signup broken', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00', 0, 0)",
+            (1, 1, 'Bug: Login fails', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00'),
+            (2, 2, 'Bug: Signup broken', 1, 1, 0, false, 100, '1/100/', '2024-01-20 12:00:00')",
     )
     .await;
 
