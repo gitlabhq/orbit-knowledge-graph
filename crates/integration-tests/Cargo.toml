@@ -6,8 +6,17 @@ publish = false
 
 # No src/lib.rs — this crate only contains integration tests.
 
+[[test]]
+name = "docker"
+path = "tests/entrypoints/docker.rs"
+
+[[test]]
+name = "compiler"
+path = "tests/entrypoints/compiler.rs"
+
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
+compiler = { path = "../query-engine/compiler" }
 gkg-server = { path = "../gkg-server", features = ["testkit"] }
 gkg-utils = { path = "../utils" }
 jsonschema = { workspace = true }
