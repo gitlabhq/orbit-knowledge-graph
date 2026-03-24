@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use futures::StreamExt;
 use tokio_util::io::{StreamReader, SyncIoBridge};
+use tracing::{error, info, warn};
 
 use super::cache_budget::{CacheBudget, RepositoryLease};
 use super::disk::{directory_size, hashed_branch_name};
@@ -15,12 +17,6 @@ use crate::modules::code::metrics::CodeMetrics;
 pub struct CachedRepository {
     pub path: PathBuf,
     pub commit: String,
-}
-
-#[derive(Debug)]
-pub struct ExtractionResult {
-    pub lease: RepositoryLease,
-    pub should_cleanup: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -61,7 +57,7 @@ pub trait RepositoryCacheLifecycle: Send + Sync {
         branch: &str,
         commit_sha: &str,
         archive_stream: ByteStream,
-    ) -> Result<ExtractionResult, RepositoryCacheError>;
+    ) -> Result<RepositoryLease, RepositoryCacheError>;
 
     /// Holds the eviction read lock across get+pin so an in-flight eviction
     /// cannot delete the entry between the two operations.
@@ -70,20 +66,16 @@ pub trait RepositoryCacheLifecycle: Send + Sync {
         project_id: i64,
         branch: &str,
     ) -> Result<Option<(CachedRepository, RepositoryLease)>, RepositoryCacheError>;
-
-    /// Avoids re-measuring the entire directory after incremental updates.
-    fn adjust_recorded_size(&self, project_id: i64, branch: &str, delta: i64);
 }
 
 #[async_trait]
 pub trait CachedRepositoryFiles: Send + Sync {
-    /// Returns the size of the removed file, or 0 if it did not exist.
     async fn delete_file(
         &self,
         project_id: i64,
         branch: &str,
         relative_path: &str,
-    ) -> Result<u64, RepositoryCacheError>;
+    ) -> Result<(), RepositoryCacheError>;
 
     async fn write_file(
         &self,
@@ -120,6 +112,8 @@ const REPOSITORY_DIR: &str = "repository";
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
     budget: CacheBudget,
+    phantom_bytes: AtomicU64,
+    headroom: u64,
 }
 
 impl LocalRepositoryCache {
@@ -131,7 +125,7 @@ impl LocalRepositoryCache {
     ) -> Self {
         let usable_budget = config.usable_budget(code_worker_count);
         if usable_budget == 0 {
-            tracing::warn!(
+            warn!(
                 disk_budget_bytes = config.disk_budget_bytes,
                 headroom_per_worker_bytes = config.headroom_per_worker_bytes,
                 code_worker_count,
@@ -139,14 +133,14 @@ impl LocalRepositoryCache {
                  increase disk_budget_bytes or decrease headroom_per_worker_bytes"
             );
         }
-        let budget = CacheBudget::new(
-            base_dir.clone(),
-            usable_budget,
-            config.disk_budget_bytes,
-            config.large_repo_threshold_bytes,
-            metrics,
-        );
-        Self { base_dir, budget }
+        let budget = CacheBudget::new(usable_budget, config.large_repo_threshold_bytes, metrics);
+        let headroom = config.disk_budget_bytes.saturating_sub(usable_budget);
+        Self {
+            base_dir,
+            budget,
+            phantom_bytes: AtomicU64::new(0),
+            headroom,
+        }
     }
 
     fn branch_dir(&self, project_id: i64, branch: &str) -> PathBuf {
@@ -209,24 +203,93 @@ impl LocalRepositoryCache {
         Ok(())
     }
 
+    async fn make_room_for(&self, needed_bytes: u64) -> Result<(), RepositoryCacheError> {
+        let _eviction_guard = self.budget.eviction_write_lock().await;
+
+        let keys_to_evict = match self.budget.entries_to_evict(needed_bytes) {
+            Ok(keys) => keys,
+            Err(exhausted) => {
+                if self.phantom_bytes.load(Ordering::Relaxed) > self.headroom {
+                    self.purge_entire_cache().await;
+                    return Ok(());
+                }
+                return Err(RepositoryCacheError::BudgetExhausted(exhausted.to_string()));
+            }
+        };
+
+        if keys_to_evict.is_empty() {
+            return Ok(());
+        }
+
+        let mut evicted_bytes = 0u64;
+
+        for (project_id, branch) in &keys_to_evict {
+            let entry_dir = self.branch_dir(*project_id, branch);
+            let removed_bytes = self.budget.remove(*project_id, branch);
+
+            if let Err(e) = tokio::fs::remove_dir_all(&entry_dir).await {
+                self.phantom_bytes
+                    .fetch_add(removed_bytes, Ordering::Relaxed);
+                warn!(
+                    project_id,
+                    branch = %branch,
+                    error = %e,
+                    phantom_bytes = self.phantom_bytes.load(Ordering::Relaxed),
+                    "failed to delete evicted repository from disk, removed from index anyway"
+                );
+            } else {
+                evicted_bytes += removed_bytes;
+                info!(
+                    project_id,
+                    branch = %branch,
+                    size_bytes = removed_bytes,
+                    "evicted cached repository"
+                );
+            }
+        }
+
+        if evicted_bytes > 0 {
+            self.budget.record_eviction(evicted_bytes);
+        }
+
+        if self.phantom_bytes.load(Ordering::Relaxed) > self.headroom {
+            self.purge_entire_cache().await;
+        }
+
+        Ok(())
+    }
+
+    /// Active workers holding leases will get I/O errors; their messages will be retried.
+    async fn purge_entire_cache(&self) {
+        error!(
+            phantom_bytes = self.phantom_bytes.load(Ordering::Relaxed),
+            headroom = self.headroom,
+            "phantom bytes exceeded headroom, purging entire cache"
+        );
+
+        if let Err(e) = tokio::fs::remove_dir_all(&self.base_dir).await {
+            error!(error = %e, "failed to purge cache directory");
+        }
+        let _ = tokio::fs::create_dir_all(&self.base_dir).await;
+
+        self.budget.clear();
+        self.phantom_bytes.store(0, Ordering::Relaxed);
+    }
+
     async fn measure_and_enforce_budget(
         &self,
         project_id: i64,
         branch: &str,
-    ) -> Result<bool, RepositoryCacheError> {
+    ) -> Result<(), RepositoryCacheError> {
         let repo_dir = self.repository_dir(project_id, branch);
         let size = tokio::task::spawn_blocking(move || directory_size(&repo_dir))
             .await
             .map_err(|e| RepositoryCacheError::Archive(format!("size calculation failed: {e}")))?;
 
-        self.budget
-            .make_room(size)
-            .await
-            .map_err(|e| RepositoryCacheError::BudgetExhausted(e.to_string()))?;
-
+        self.make_room_for(size).await?;
         self.budget.record_size(project_id, branch, size);
 
-        Ok(size < self.budget.large_repo_threshold())
+        Ok(())
     }
 }
 
@@ -300,7 +363,7 @@ impl RepositoryCacheLifecycle for LocalRepositoryCache {
         branch: &str,
         commit_sha: &str,
         archive_stream: ByteStream,
-    ) -> Result<ExtractionResult, RepositoryCacheError> {
+    ) -> Result<RepositoryLease, RepositoryCacheError> {
         self.clear_repository_dir(project_id, branch).await?;
         self.extract_stream_to_disk(project_id, branch, archive_stream)
             .await?;
@@ -308,11 +371,8 @@ impl RepositoryCacheLifecycle for LocalRepositoryCache {
             .await?;
 
         let lease = self.pin(project_id, branch);
-        let should_cleanup = self.measure_and_enforce_budget(project_id, branch).await?;
-        Ok(ExtractionResult {
-            lease,
-            should_cleanup,
-        })
+        self.measure_and_enforce_budget(project_id, branch).await?;
+        Ok(lease)
     }
 
     async fn acquire(
@@ -330,10 +390,6 @@ impl RepositoryCacheLifecycle for LocalRepositoryCache {
             None => Ok(None),
         }
     }
-
-    fn adjust_recorded_size(&self, project_id: i64, branch: &str, delta: i64) {
-        self.budget.adjust_size(project_id, branch, delta);
-    }
 }
 
 #[async_trait]
@@ -343,19 +399,13 @@ impl CachedRepositoryFiles for LocalRepositoryCache {
         project_id: i64,
         branch: &str,
         relative_path: &str,
-    ) -> Result<u64, RepositoryCacheError> {
+    ) -> Result<(), RepositoryCacheError> {
         let repo_dir = self.repository_dir(project_id, branch);
         let target = validated_path(&repo_dir, relative_path)?;
 
-        let size = match tokio::fs::metadata(&target).await {
-            Ok(meta) => meta.len(),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-            Err(e) => return Err(e.into()),
-        };
-
         match tokio::fs::remove_file(&target).await {
-            Ok(()) => Ok(size),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
         }
     }
@@ -409,18 +459,38 @@ impl CachedRepositoryFiles for LocalRepositoryCache {
 
 #[cfg(test)]
 mod tests {
+    use super::super::disk::hashed_branch_name;
     use super::*;
     use tempfile::TempDir;
+
+    fn default_config() -> RepositoryCacheConfiguration {
+        RepositoryCacheConfiguration::default()
+    }
 
     fn create_cache() -> (TempDir, LocalRepositoryCache) {
         let temp_dir = TempDir::new().unwrap();
         let cache = LocalRepositoryCache::new(
             temp_dir.path().to_path_buf(),
-            &RepositoryCacheConfiguration::default(),
+            &default_config(),
             4,
             CodeMetrics::default(),
         );
         (temp_dir, cache)
+    }
+
+    fn create_cache_with_budget(
+        temp_dir: &Path,
+        disk_budget_bytes: u64,
+        headroom_per_worker_bytes: u64,
+        large_repo_threshold_bytes: u64,
+    ) -> LocalRepositoryCache {
+        let config = RepositoryCacheConfiguration {
+            path: temp_dir.to_path_buf(),
+            disk_budget_bytes,
+            headroom_per_worker_bytes,
+            large_repo_threshold_bytes,
+        };
+        LocalRepositoryCache::new(temp_dir.to_path_buf(), &config, 1, CodeMetrics::default())
     }
 
     fn archive_stream(data: Vec<u8>) -> ByteStream {
@@ -456,6 +526,29 @@ mod tests {
             "expected path traversal error, got: {error}"
         );
     }
+
+    async fn write_entry_on_disk(base_dir: &Path, project_id: i64, branch: &str, size: usize) {
+        let branch_hash = hashed_branch_name(branch);
+        let branch_dir = base_dir.join(project_id.to_string()).join(branch_hash);
+        let meta_dir = branch_dir.join("meta");
+        let repo_dir = branch_dir.join("repository");
+        tokio::fs::create_dir_all(&meta_dir).await.unwrap();
+        tokio::fs::create_dir_all(&repo_dir).await.unwrap();
+        tokio::fs::write(meta_dir.join(".commit"), "abc123")
+            .await
+            .unwrap();
+        tokio::fs::write(repo_dir.join("data.bin"), vec![0u8; size])
+            .await
+            .unwrap();
+    }
+
+    fn entry_dir(base_dir: &Path, project_id: i64, branch: &str) -> PathBuf {
+        base_dir
+            .join(project_id.to_string())
+            .join(hashed_branch_name(branch))
+    }
+
+    // --- Lifecycle tests ---
 
     #[tokio::test]
     async fn get_returns_none_when_no_cache_exists() {
@@ -566,6 +659,8 @@ mod tests {
         assert!(cache.get(42, "develop").await.unwrap().is_some());
     }
 
+    // --- Archive tests ---
+
     #[tokio::test]
     async fn extract_archive_populates_cache() {
         let (_dir, cache) = create_cache();
@@ -574,16 +669,16 @@ mod tests {
             ("src/lib.rs", b"pub mod lib;"),
         ]);
 
-        let result = cache
+        let lease = cache
             .extract_archive(42, "main", "abc123", archive_stream(archive))
             .await
             .unwrap();
 
-        let content = tokio::fs::read_to_string(result.lease.join("src/main.rs"))
+        let content = tokio::fs::read_to_string(lease.join("src/main.rs"))
             .await
             .unwrap();
         assert_eq!(content, "fn main() {}");
-        let content = tokio::fs::read_to_string(result.lease.join("src/lib.rs"))
+        let content = tokio::fs::read_to_string(lease.join("src/lib.rs"))
             .await
             .unwrap();
         assert_eq!(content, "pub mod lib;");
@@ -602,13 +697,13 @@ mod tests {
             .unwrap();
 
         let second_archive = build_tar_gz(&[("new_file.rs", b"new content")]);
-        let result = cache
+        let lease = cache
             .extract_archive(42, "main", "commit2", archive_stream(second_archive))
             .await
             .unwrap();
 
-        assert!(!result.lease.join("old_file.rs").exists());
-        let content = tokio::fs::read_to_string(result.lease.join("new_file.rs"))
+        assert!(!lease.join("old_file.rs").exists());
+        let content = tokio::fs::read_to_string(lease.join("new_file.rs"))
             .await
             .unwrap();
         assert_eq!(content, "new content");
@@ -616,6 +711,22 @@ mod tests {
         let cached = cache.get(42, "main").await.unwrap().unwrap();
         assert_eq!(cached.commit, "commit2");
     }
+
+    #[tokio::test]
+    async fn extract_archive_records_size_in_budget() {
+        let (_dir, cache) = create_cache();
+        let archive = build_tar_gz(&[("file.rs", b"hello world")]);
+
+        cache
+            .extract_archive(42, "main", "abc123", archive_stream(archive))
+            .await
+            .unwrap();
+
+        let cached = cache.get(42, "main").await.unwrap();
+        assert!(cached.is_some(), "entry should be tracked in the cache");
+    }
+
+    // --- File operation tests ---
 
     #[tokio::test]
     async fn update_commit_changes_stored_sha() {
@@ -668,33 +779,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_file_removes_existing_file_and_returns_size() {
+    async fn delete_file_removes_existing_file() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
-        let content = b"content";
         cache
-            .write_file(42, "main", "file.rs", content)
+            .write_file(42, "main", "file.rs", b"content")
             .await
             .unwrap();
 
-        let freed = cache.delete_file(42, "main", "file.rs").await.unwrap();
+        cache.delete_file(42, "main", "file.rs").await.unwrap();
 
-        assert_eq!(freed, content.len() as u64);
         let repo_dir = cache.repository_dir(42, "main");
         assert!(!repo_dir.join("file.rs").exists());
     }
 
     #[tokio::test]
-    async fn delete_file_returns_zero_when_file_does_not_exist() {
+    async fn delete_file_succeeds_when_file_does_not_exist() {
         let (_dir, cache) = create_cache();
         cache.save(42, "main", "abc123").await.unwrap();
 
-        let freed = cache
+        cache
             .delete_file(42, "main", "nonexistent.rs")
             .await
             .unwrap();
-
-        assert_eq!(freed, 0);
     }
 
     #[tokio::test]
@@ -729,6 +836,8 @@ mod tests {
             .await
             .unwrap();
     }
+
+    // --- Path traversal tests ---
 
     #[tokio::test]
     async fn path_traversal_rejected_for_all_file_operations() {
@@ -766,21 +875,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn extract_archive_records_size_in_budget() {
-        let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"hello world")]);
-
-        let result = cache
-            .extract_archive(42, "main", "abc123", archive_stream(archive))
-            .await
-            .unwrap();
-
-        assert!(
-            result.should_cleanup,
-            "small repo should be below the default 100MB threshold"
-        );
-    }
+    // --- Acquire tests ---
 
     #[tokio::test]
     async fn acquire_returns_entry_and_guard_on_cache_hit() {
@@ -801,5 +896,154 @@ mod tests {
         let result = cache.acquire(42, "main").await.unwrap();
 
         assert!(result.is_none());
+    }
+
+    // --- Eviction tests ---
+
+    #[tokio::test]
+    async fn eviction_removes_entries_from_disk() {
+        let dir = TempDir::new().unwrap();
+        let cache = create_cache_with_budget(dir.path(), 1200, 0, 400);
+
+        write_entry_on_disk(dir.path(), 1, "main", 500).await;
+        cache.budget.record_size(1, "main", 500);
+        write_entry_on_disk(dir.path(), 2, "main", 300).await;
+        cache.budget.record_size(2, "main", 300);
+        write_entry_on_disk(dir.path(), 3, "main", 350).await;
+        cache.budget.record_size(3, "main", 350);
+
+        // Total: 1150. Budget: 1200. Making room for 400 → target = 800.
+        // Should evict small repos (300 + 350) before the large one (500).
+        cache.make_room_for(400).await.unwrap();
+
+        assert!(
+            entry_dir(dir.path(), 1, "main").exists(),
+            "large repo should survive"
+        );
+        assert!(
+            !entry_dir(dir.path(), 2, "main").exists(),
+            "small repo should be evicted"
+        );
+        assert!(
+            !entry_dir(dir.path(), 3, "main").exists(),
+            "small repo should be evicted"
+        );
+    }
+
+    #[tokio::test]
+    async fn eviction_skips_pinned_entries() {
+        let dir = TempDir::new().unwrap();
+        let cache = create_cache_with_budget(dir.path(), 500, 0, 400);
+
+        write_entry_on_disk(dir.path(), 1, "main", 600).await;
+        cache.budget.record_size(1, "main", 600);
+
+        let _guard = cache.pin(1, "main");
+
+        let result = cache.make_room_for(0).await;
+
+        assert!(result.is_err(), "should fail when all entries are pinned");
+        assert!(
+            entry_dir(dir.path(), 1, "main").exists(),
+            "pinned entry should not be evicted"
+        );
+    }
+
+    #[tokio::test]
+    async fn eviction_is_noop_when_under_budget() {
+        let dir = TempDir::new().unwrap();
+        let cache = create_cache_with_budget(dir.path(), 20_000, 0, 500);
+
+        write_entry_on_disk(dir.path(), 1, "main", 100).await;
+        cache.budget.record_size(1, "main", 100);
+
+        cache.make_room_for(100).await.unwrap();
+
+        assert!(entry_dir(dir.path(), 1, "main").exists());
+    }
+
+    #[tokio::test]
+    async fn purges_entire_cache_when_phantom_bytes_exceed_headroom() {
+        let dir = TempDir::new().unwrap();
+        // disk_budget=1200, headroom_per_worker=100, workers=1 → usable=1100, headroom=100
+        let cache = create_cache_with_budget(dir.path(), 1200, 100, 400);
+
+        write_entry_on_disk(dir.path(), 1, "main", 1150).await;
+        cache.budget.record_size(1, "main", 1150);
+        let _guard = cache.pin(1, "main");
+
+        // Simulate phantom bytes exceeding headroom (101 > 100)
+        cache.phantom_bytes.store(101, Ordering::Relaxed);
+
+        let result = cache.make_room_for(0).await;
+
+        assert!(
+            result.is_ok(),
+            "purge should recover instead of returning an error"
+        );
+        assert_eq!(cache.phantom_bytes.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn does_not_purge_when_phantom_bytes_within_headroom() {
+        let dir = TempDir::new().unwrap();
+        // disk_budget=1200, headroom_per_worker=100, workers=1 → usable=1100, headroom=100
+        let cache = create_cache_with_budget(dir.path(), 1200, 100, 400);
+
+        write_entry_on_disk(dir.path(), 1, "main", 1150).await;
+        cache.budget.record_size(1, "main", 1150);
+        let _guard = cache.pin(1, "main");
+
+        // Phantom bytes within headroom (50 <= 100) → no purge, returns error
+        cache.phantom_bytes.store(50, Ordering::Relaxed);
+
+        let result = cache.make_room_for(0).await;
+
+        assert!(result.is_err(), "should return budget exhausted, not purge");
+    }
+
+    #[tokio::test]
+    async fn concurrent_eviction_and_pin_do_not_race() {
+        let dir = TempDir::new().unwrap();
+        let cache = std::sync::Arc::new(LocalRepositoryCache::new(
+            dir.path().to_path_buf(),
+            &RepositoryCacheConfiguration {
+                path: dir.path().to_path_buf(),
+                disk_budget_bytes: 400,
+                headroom_per_worker_bytes: 0,
+                large_repo_threshold_bytes: 500,
+            },
+            1,
+            CodeMetrics::default(),
+        ));
+
+        write_entry_on_disk(dir.path(), 1, "main", 200).await;
+        cache.budget.record_size(1, "main", 200);
+
+        let entry_path = cache.repository_dir(1, "main");
+
+        let mut readers = Vec::new();
+        for _ in 0..10 {
+            let cache = std::sync::Arc::clone(&cache);
+            let path = entry_path.clone();
+            readers.push(tokio::spawn(async move {
+                let _read_guard = cache.budget.eviction_read_lock().await;
+                let guard = cache.budget.pin(path, 1, "main");
+                tokio::task::yield_now().await;
+                drop(guard);
+            }));
+        }
+
+        let evictor = {
+            let cache = std::sync::Arc::clone(&cache);
+            tokio::spawn(async move {
+                let _ = cache.make_room_for(200).await;
+            })
+        };
+
+        for reader in readers {
+            reader.await.unwrap();
+        }
+        evictor.await.unwrap();
     }
 }

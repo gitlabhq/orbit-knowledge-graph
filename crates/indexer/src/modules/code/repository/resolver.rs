@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::blob_stream::BlobStream;
-use super::cache::{ExtractionResult, RepositoryCache};
+use super::cache::RepositoryCache;
 use super::cache_budget::RepositoryLease;
 use super::changed_path_stream::{ChangeStatus, ChangedPath, ChangedPathStream};
 use super::service::RepositoryService;
@@ -14,14 +14,6 @@ use crate::modules::code::metrics::CodeMetrics;
 const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
 const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
-
-/// Drop the guard then call [`RepositoryResolver::cleanup_after_indexing`]
-/// if `should_cleanup` is set.
-#[derive(Debug)]
-pub struct ResolveResult {
-    pub guard: RepositoryLease,
-    pub should_cleanup: bool,
-}
 
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
@@ -47,7 +39,7 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: Option<&str>,
-    ) -> Result<ResolveResult, HandlerError> {
+    ) -> Result<RepositoryLease, HandlerError> {
         let ref_name = commit_sha.unwrap_or(branch);
 
         let cached = self
@@ -56,13 +48,9 @@ impl RepositoryResolver {
             .await
             .map_err(|e| HandlerError::Processing(format!("cache lookup failed: {e}")))?;
 
-        let Some((cached, guard)) = cached else {
+        let Some((cached, lease)) = cached else {
             self.metrics.record_resolution_strategy("full_download");
-            let extraction = self.full_download(project_id, branch, ref_name).await?;
-            return Ok(ResolveResult {
-                guard: extraction.lease,
-                should_cleanup: extraction.should_cleanup,
-            });
+            return self.full_download(project_id, branch, ref_name).await;
         };
 
         if cached.commit == ref_name {
@@ -73,10 +61,7 @@ impl RepositoryResolver {
                 commit = %ref_name,
                 "using cached repository"
             );
-            return Ok(ResolveResult {
-                guard,
-                should_cleanup: false,
-            });
+            return Ok(lease);
         }
 
         match self
@@ -85,34 +70,15 @@ impl RepositoryResolver {
         {
             Ok(()) => {
                 self.metrics.record_resolution_strategy("incremental");
-                Ok(ResolveResult {
-                    guard,
-                    should_cleanup: false,
-                })
+                Ok(lease)
             }
             Err(reason) => {
                 self.metrics
                     .record_resolution_strategy("full_download_fallback");
                 warn!(project_id, branch, reason, "falling back to full download");
-                drop(guard);
-                let extraction = self.full_download(project_id, branch, ref_name).await?;
-                Ok(ResolveResult {
-                    guard: extraction.lease,
-                    should_cleanup: extraction.should_cleanup,
-                })
+                drop(lease);
+                self.full_download(project_id, branch, ref_name).await
             }
-        }
-    }
-
-    /// Call after dropping the [`RepositoryLease`].
-    pub async fn cleanup_after_indexing(&self, project_id: i64, branch: &str) {
-        if let Err(e) = self.cache.invalidate(project_id, branch).await {
-            warn!(
-                project_id,
-                branch,
-                error = %e,
-                "failed to clean up small repository after indexing"
-            );
         }
     }
 
@@ -121,7 +87,7 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: &str,
-    ) -> Result<ExtractionResult, HandlerError> {
+    ) -> Result<RepositoryLease, HandlerError> {
         info!(project_id, branch, commit = %commit_sha, "starting full repository download");
 
         let archive_stream = self
@@ -155,7 +121,6 @@ impl RepositoryResolver {
             .map_err(|e| format!("failed to fetch changed paths: {e}"))?;
 
         let changeset = compute_changeset(changed_path_stream).await?;
-        let mut size_delta: i64 = 0;
 
         for (old_path, new_path) in &changeset.renames {
             self.cache
@@ -165,12 +130,10 @@ impl RepositoryResolver {
         }
 
         for path in &changeset.deletions {
-            let freed = self
-                .cache
+            self.cache
                 .delete_file(project_id, branch, path)
                 .await
                 .map_err(|e| format!("failed to delete cached file: {e}"))?;
-            size_delta -= freed as i64;
         }
 
         let expected_writes: usize = changeset.paths_by_blob_id.values().map(|v| v.len()).sum();
@@ -200,7 +163,6 @@ impl RepositoryResolver {
                         .write_file(project_id, branch, path, &blob.data)
                         .await
                         .map_err(|e| format!("failed to write cached file: {e}"))?;
-                    size_delta += blob.data.len() as i64;
                     write_count += 1;
                 }
             }
@@ -217,9 +179,6 @@ impl RepositoryResolver {
             .await
             .map_err(|e| format!("failed to update cache commit: {e}"))?;
 
-        self.cache
-            .adjust_recorded_size(project_id, branch, size_delta);
-
         info!(
             project_id,
             branch,
@@ -228,7 +187,6 @@ impl RepositoryResolver {
             renames = changeset.renames.len(),
             deletions = changeset.deletions.len(),
             writes = write_count,
-            size_delta,
             "incremental update complete"
         );
 
@@ -599,10 +557,10 @@ mod tests {
         let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
         let (_dir, resolver) = create_resolver(service);
 
-        let result = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let lease = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
 
-        assert!(result.guard.join("src/main.rs").exists());
-        let content = std::fs::read_to_string(result.guard.join("src/main.rs")).unwrap();
+        assert!(lease.join("src/main.rs").exists());
+        let content = std::fs::read_to_string(lease.join("src/main.rs")).unwrap();
         assert_eq!(content, "fn main() {}");
     }
 
@@ -612,10 +570,10 @@ mod tests {
         let (_dir, resolver) = create_resolver(service);
 
         let first = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        let first_path = first.guard.path().to_path_buf();
+        let first_path = first.path().to_path_buf();
         drop(first);
         let second = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        let second_path = second.guard.path().to_path_buf();
+        let second_path = second.path().to_path_buf();
 
         assert_eq!(first_path, second_path);
     }
@@ -635,10 +593,10 @@ mod tests {
             r#"{"path":"src/lib.rs","status":"ADDED","old_path":"","new_mode":33188,"old_mode":0,"old_blob_id":"","new_blob_id":"blob_src/lib.rs"}"#.to_string()
         ));
 
-        let result = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
+        let lease = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
-        assert!(result.guard.join("src/main.rs").exists());
-        assert!(result.guard.join("src/lib.rs").exists());
+        assert!(lease.join("src/main.rs").exists());
+        assert!(lease.join("src/lib.rs").exists());
     }
 
     #[tokio::test]
@@ -651,10 +609,10 @@ mod tests {
         service.set_changed_paths_response(Err(RepositoryServiceError::ForcePush(1)));
         service.set_archive(&[("src/new.rs", "fn new() {}")]);
 
-        let result = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
+        let lease = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
-        assert!(result.guard.join("src/new.rs").exists());
-        assert!(!result.guard.join("src/main.rs").exists());
+        assert!(lease.join("src/new.rs").exists());
+        assert!(!lease.join("src/main.rs").exists());
     }
 
     #[tokio::test]
@@ -662,54 +620,9 @@ mod tests {
         let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
         let (_dir, resolver) = create_resolver(service);
 
-        let result = resolver.resolve(1, "main", None).await.unwrap();
+        let lease = resolver.resolve(1, "main", None).await.unwrap();
 
-        assert!(result.guard.join("src/main.rs").exists());
-    }
-
-    #[tokio::test]
-    async fn resolve_full_download_marks_small_repo_for_cleanup() {
-        let service = ScriptedRepositoryService::with_archive(&[("tiny.rs", "x")]);
-        let (_dir, resolver) = create_resolver(service);
-
-        let result = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-
-        assert!(
-            result.should_cleanup,
-            "small repo should be marked for cleanup"
-        );
-    }
-
-    #[tokio::test]
-    async fn resolve_cache_hit_does_not_mark_for_cleanup() {
-        let service = ScriptedRepositoryService::with_archive(&[("tiny.rs", "x")]);
-        let (_dir, resolver) = create_resolver(service);
-
-        resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        let result = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-
-        assert!(
-            !result.should_cleanup,
-            "cache hit should not mark for cleanup"
-        );
-    }
-
-    #[tokio::test]
-    async fn cleanup_after_indexing_invalidates_cache() {
-        let service = ScriptedRepositoryService::with_archive(&[("tiny.rs", "x")]);
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
-
-        let result = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        assert!(result.should_cleanup);
-        drop(result.guard);
-
-        resolver.cleanup_after_indexing(1, "main").await;
-
-        let second = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        assert!(
-            second.should_cleanup,
-            "should full-download again after cleanup"
-        );
+        assert!(lease.join("src/main.rs").exists());
     }
 
     #[tokio::test]
