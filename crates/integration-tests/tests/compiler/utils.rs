@@ -4,8 +4,8 @@
 //! structured accessors so tests validate the AST, not string fragments.
 
 use sqlparser::ast::{
-    Cte, Expr, FromTable, GroupByExpr, JoinConstraint, JoinOperator, Query, Select, SelectItem,
-    SetExpr, Statement, TableFactor, TableWithJoins, With,
+    Cte, Expr, GroupByExpr, LimitClause, OrderByKind, Query, Select, SelectItem, SetExpr,
+    Statement, TableFactor, TableWithJoins, With,
 };
 use sqlparser::dialect::ClickHouseDialect;
 use sqlparser::parser::Parser;
@@ -50,7 +50,7 @@ impl ParsedSql {
         extract_select(self.query())
     }
 
-    /// True if any CTE name matches the predicate.
+    /// True if any CTE name matches.
     pub fn has_cte(&self, name: &str) -> bool {
         self.ctes().iter().any(|c| c.alias.name.value == name)
     }
@@ -63,7 +63,6 @@ impl ParsedSql {
         }
     }
 
-    /// True if the SQL string (rendered from AST) contains the given text.
     /// Fallback for things sqlparser doesn't model well.
     pub fn raw_contains(&self, s: &str) -> bool {
         self.raw.contains(s)
@@ -75,7 +74,6 @@ impl ParsedSql {
     }
 }
 
-/// Extract the Select from a Query body.
 fn extract_select(query: &Query) -> &Select {
     match query.body.as_ref() {
         SetExpr::Select(s) => s,
@@ -121,29 +119,48 @@ impl ParsedSql {
 
     /// True if there's a LIMIT clause.
     pub fn has_limit(&self) -> bool {
-        self.query().limit.is_some()
+        self.query().limit_clause.is_some()
     }
 
     /// Get the LIMIT value as u64.
     pub fn limit_value(&self) -> Option<u64> {
-        self.query().limit.as_ref().and_then(|expr| match expr {
-            Expr::Value(v) => v.to_string().parse().ok(),
-            _ => None,
-        })
+        match &self.query().limit_clause {
+            Some(LimitClause::LimitOffset { limit, .. }) => limit.as_ref().and_then(|e| match e {
+                Expr::Value(v) => v.to_string().parse().ok(),
+                _ => None,
+            }),
+            Some(LimitClause::OffsetCommaLimit { limit, .. }) => match limit {
+                Expr::Value(v) => v.to_string().parse().ok(),
+                _ => None,
+            },
+            None => None,
+        }
     }
 
     /// Get the OFFSET value as u64.
     pub fn offset_value(&self) -> Option<u64> {
-        self.query().offset.as_ref().and_then(|o| match &o.value {
-            Expr::Value(v) => v.to_string().parse().ok(),
-            _ => None,
-        })
+        match &self.query().limit_clause {
+            Some(LimitClause::LimitOffset { offset, .. }) => {
+                offset.as_ref().and_then(|o| match &o.value {
+                    Expr::Value(v) => v.to_string().parse().ok(),
+                    _ => None,
+                })
+            }
+            Some(LimitClause::OffsetCommaLimit { offset, .. }) => match offset {
+                Expr::Value(v) => v.to_string().parse().ok(),
+                _ => None,
+            },
+            None => None,
+        }
     }
 
     /// True if there's an ORDER BY clause.
     pub fn has_order_by(&self) -> bool {
         match &self.query().order_by {
-            Some(ob) => !ob.exprs.is_empty(),
+            Some(ob) => match &ob.kind {
+                OrderByKind::Expressions(exprs) => !exprs.is_empty(),
+                OrderByKind::All(_) => true,
+            },
             None => false,
         }
     }
@@ -158,7 +175,7 @@ impl ParsedSql {
         self.select().selection.is_some()
     }
 
-    /// The WHERE clause as a string (for partial matching when AST walking is overkill).
+    /// The WHERE clause as a string.
     pub fn where_str(&self) -> Option<String> {
         self.select().selection.as_ref().map(|e| e.to_string())
     }
@@ -216,7 +233,9 @@ fn table_factor_contains(tf: &TableFactor, name: &str) -> bool {
         TableFactor::Derived { alias, .. } => {
             alias.as_ref().is_some_and(|a| a.name.value.contains(name))
         }
-        TableFactor::NestedJoin { relation, .. } => table_contains(relation, name),
+        TableFactor::NestedJoin {
+            table_with_joins, ..
+        } => table_contains(table_with_joins, name),
         _ => false,
     }
 }
