@@ -10,7 +10,7 @@
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
 use crate::envs::HasSecurityCtx;
-use crate::error::{QueryError, Result};
+use crate::error::Result;
 use crate::pipeline::{CompilerContext, CompilerPass, PipelineEnv};
 pub use crate::types::SecurityContext;
 

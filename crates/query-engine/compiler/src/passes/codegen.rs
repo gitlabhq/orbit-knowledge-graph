@@ -3,7 +3,7 @@
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
-use crate::error::{QueryError, Result};
+use crate::error::Result;
 use crate::input::Input;
 use crate::input::QueryType;
 use crate::passes::enforce::ResultContext;
