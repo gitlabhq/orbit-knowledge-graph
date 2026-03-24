@@ -184,6 +184,11 @@ impl<E: PipelineEnv, S: PipelineState> Pipeline<E, S> {
         self
     }
 
+    pub fn observe(mut self, obs: impl PipelineObserver + 'static) -> Self {
+        self.observer = Some(Arc::new(obs));
+        self
+    }
+
     pub fn passes(&self) -> Vec<(&'static str, bool)> {
         self.steps
             .iter()

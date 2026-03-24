@@ -59,7 +59,9 @@ pub use input::{
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
-pub use pipeline::{CompilerPass, Pipeline, PipelineEnv, PipelineState, SealedPipeline};
+pub use pipeline::{
+    CompilerPass, Pipeline, PipelineEnv, PipelineObserver, PipelineState, Seal, SealedPipeline,
+};
 
 // Re-export env, state, and capability traits.
 pub use passes::{
@@ -68,7 +70,7 @@ pub use passes::{
 };
 pub use pipelines::{
     DuckDbState, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx,
-    LocalEnv, QueryState, SecureEnv,
+    LocalEnv, QueryState, SealInput, SealJson, SealNode, SecureEnv,
 };
 
 // Re-export key types from pass modules.
