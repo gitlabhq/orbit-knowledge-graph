@@ -43,15 +43,15 @@ run = "cargo build --release"
 description = "Build the crates"
 
 [tasks.test]
-run = "cargo nextest run --lib --bins"
+run = "cargo nextest run --lib --bins --test compiler_entrypoint"
 description = "Run unit tests with full debug symbols"
 
 [tasks."test:fast"]
-run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins"
+run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins --test compiler_entrypoint"
 description = "Run unit tests with reduced debug info for faster builds"
 
 [tasks."test:integration"]
-run = "cargo nextest run --all-features --test '*' --no-fail-fast --retries 0"
+run = "cargo nextest run --all-features --test entrypoint --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run integration tests (requires Docker and `mise colima:start`)"
 
