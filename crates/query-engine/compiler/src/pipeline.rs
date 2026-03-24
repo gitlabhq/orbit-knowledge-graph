@@ -123,60 +123,26 @@ impl<P: Phase, E: PipelineEnv> CompilerContext<P, E> {
     pub fn env(&self) -> &E {
         &self.env
     }
-}
 
-// Phase-gated accessors — each field is only accessible after the pass
-// that populates it.
+    /// The parsed input. Populated by ParsePass.
+    pub fn input(&self) -> &Input {
+        self.input.as_ref().expect("input not yet populated")
+    }
 
-// input is available from Parsed onward.
-macro_rules! impl_input_accessors {
-    ($($phase:ty),+ $(,)?) => {
-        $(
-            impl<E: PipelineEnv> CompilerContext<$phase, E> {
-                pub fn input(&self) -> &Input {
-                    self.input.as_ref().expect("input must exist at this phase")
-                }
-            }
-        )+
-    };
-}
+    /// The lowered AST node. Populated by LowerPass.
+    pub fn node(&self) -> &Node {
+        self.node.as_ref().expect("node not yet populated")
+    }
 
-impl_input_accessors!(
-    Parsed, Validated, Normalized, Lowered, Optimized, Enforced, Secured, Checked, Emitted
-);
+    /// The result context for redaction. Populated by EnforcePass.
+    pub fn result_context(&self) -> &ResultContext {
+        self.result_context
+            .as_ref()
+            .expect("result_context not yet populated")
+    }
 
-// node is available from Lowered onward.
-macro_rules! impl_node_accessors {
-    ($($phase:ty),+ $(,)?) => {
-        $(
-            impl<E: PipelineEnv> CompilerContext<$phase, E> {
-                pub fn node(&self) -> &Node {
-                    self.node.as_ref().expect("node must exist at this phase")
-                }
-            }
-        )+
-    };
-}
-
-impl_node_accessors!(Lowered, Optimized, Enforced, Secured, Checked);
-
-// result_context is available from Enforced onward.
-macro_rules! impl_result_context_accessors {
-    ($($phase:ty),+ $(,)?) => {
-        $(
-            impl<E: PipelineEnv> CompilerContext<$phase, E> {
-                pub fn result_context(&self) -> &ResultContext {
-                    self.result_context.as_ref().expect("result_context must exist at this phase")
-                }
-            }
-        )+
-    };
-}
-
-impl_result_context_accessors!(Enforced, Secured, Checked);
-
-impl<E: PipelineEnv> CompilerContext<Emitted, E> {
     /// Consume the context and extract the compiled output.
+    /// Populated by CodegenPass or HydrationCodegenPass.
     pub fn take_output(self) -> Option<CompiledQueryContext> {
         self.output
     }
