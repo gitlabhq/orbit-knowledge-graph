@@ -1,3 +1,5 @@
 mod ontology;
 mod queries;
 mod setup;
+#[allow(dead_code)]
+mod utils;
