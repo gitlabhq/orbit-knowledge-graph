@@ -16,11 +16,20 @@ use std::collections::HashMap;
 // existing call-sites (`codegen::codegen(...)`) keep working unchanged.
 pub use clickhouse::codegen;
 
+/// Which SQL dialect a [`ParameterizedQuery`] was generated for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SqlDialect {
+    #[default]
+    ClickHouse,
+    DuckDb,
+}
+
 #[derive(Debug, Clone)]
 pub struct ParameterizedQuery {
     pub sql: String,
     pub params: HashMap<String, ParamValue>,
     pub result_context: ResultContext,
+    pub dialect: SqlDialect,
 }
 
 #[derive(Debug, Clone)]
@@ -66,16 +75,39 @@ impl HydrationTemplate {
 impl ParameterizedQuery {
     /// Render SQL with parameters inlined for debugging/observability.
     ///
-    /// Replaces `{name:Type}` placeholders with literal values using
-    /// `ParamValue::render_literal`. Handles both scalar and array types.
+    /// Dispatches on [`SqlDialect`]:
+    /// - **ClickHouse:** replaces `{name:Type}` placeholders.
+    /// - **DuckDB:** replaces `$N` positional placeholders.
+    ///
     /// **Not for execution** — use parameterized queries to prevent injection.
     pub fn render(&self) -> String {
+        match self.dialect {
+            SqlDialect::ClickHouse => self.render_clickhouse(),
+            SqlDialect::DuckDb => self.render_duckdb(),
+        }
+    }
+
+    fn render_clickhouse(&self) -> String {
         use regex::Regex;
 
         let re = Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex");
         re.replace_all(&self.sql, |caps: &regex::Captures| {
             let name = &caps[1];
             match self.params.get(name) {
+                Some(param) => param.render_literal(),
+                None => caps[0].to_string(),
+            }
+        })
+        .into_owned()
+    }
+
+    fn render_duckdb(&self) -> String {
+        use regex::Regex;
+
+        let re = Regex::new(r"\$(\d+)").expect("valid regex");
+        re.replace_all(&self.sql, |caps: &regex::Captures| {
+            let name = format!("p{}", &caps[1]);
+            match self.params.get(&name) {
                 Some(param) => param.render_literal(),
                 None => caps[0].to_string(),
             }

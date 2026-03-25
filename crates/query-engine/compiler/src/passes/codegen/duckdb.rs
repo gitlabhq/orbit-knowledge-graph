@@ -17,7 +17,7 @@ use crate::passes::enforce::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
-use super::{ParamValue, ParameterizedQuery};
+use super::{ParamValue, ParameterizedQuery, SqlDialect};
 
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
@@ -28,6 +28,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
         sql,
         params: ctx.params,
         result_context,
+        dialect: SqlDialect::DuckDb,
     })
 }
 
@@ -504,6 +505,31 @@ mod tests {
             !result.sql.contains("ON 1"),
             "DuckDB should not use ON 1 hack: {}",
             result.sql
+        );
+    }
+
+    #[test]
+    fn render_inlines_positional_params() {
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
+            from: TableRef::scan("nodes", "n"),
+            where_clause: Some(Expr::eq(Expr::col("n", "name"), Expr::lit("alice"))),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(result.sql.contains("$1"), "{}", result.sql);
+
+        let rendered = result.render();
+        assert!(
+            rendered.contains("'alice'"),
+            "expected inlined value: {}",
+            rendered
+        );
+        assert!(
+            !rendered.contains('$'),
+            "should not contain $N after render: {}",
+            rendered
         );
     }
 }

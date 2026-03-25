@@ -9,7 +9,7 @@ use crate::passes::enforce::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
-use super::{ParamValue, ParameterizedQuery};
+use super::{ParamValue, ParameterizedQuery, SqlDialect};
 
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
@@ -20,6 +20,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
         sql,
         params: ctx.params,
         result_context,
+        dialect: SqlDialect::ClickHouse,
     })
 }
 
@@ -752,6 +753,7 @@ mod tests {
             sql: "SELECT * FROM t WHERE kind = {p0:String} AND state = {p1:String}".into(),
             params,
             result_context: empty_ctx(),
+            dialect: SqlDialect::ClickHouse,
         };
 
         assert_eq!(
@@ -782,6 +784,7 @@ mod tests {
             sql: "SELECT * FROM t WHERE x IN {p0:Array(String)} AND y IN {p1:Array(Int64)}".into(),
             params,
             result_context: empty_ctx(),
+            dialect: SqlDialect::ClickHouse,
         };
 
         assert_eq!(
@@ -796,6 +799,7 @@ mod tests {
             sql: "SELECT {p0:String} AND {p1:Int64}".into(),
             params: HashMap::new(),
             result_context: empty_ctx(),
+            dialect: SqlDialect::ClickHouse,
         };
 
         assert_eq!(pq.render(), "SELECT {p0:String} AND {p1:Int64}");
