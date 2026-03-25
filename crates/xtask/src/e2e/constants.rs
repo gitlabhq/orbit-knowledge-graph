@@ -37,7 +37,7 @@ pub const CONFIG_YAML: &str = concat!(env!("CONFIG_DIR"), "/e2e.yaml");
 ///   from the others and can lag behind, causing `gl_group: 0` if the
 ///   indexer runs before it arrives. Polling it here prevents that race.
 ///
-/// We intentionally do NOT poll `hierarchy_work_items` here — it may lag
+/// We intentionally do NOT poll `work_items` here — it may lag
 /// behind `merge_requests` and is not required pre-dispatch. The
 /// post-indexer poll (step 22) waits for every graph table including
 /// `gl_work_item`, which is the real gate.
@@ -121,8 +121,7 @@ pub const GKG_DEPLOYMENTS: &[&str] = &["gkg-indexer", "gkg-webserver", "gkg-heal
 /// Datalake tables dumped for diagnostics after indexing.
 pub const DATALAKE_DIAGNOSTIC_TABLES: &[&str] = &[
     "merge_requests",
-    "hierarchy_work_items",
-    "siphon_issues",
+    "work_items",
     "siphon_namespace_details",
     "siphon_namespaces",
     "project_namespace_traversal_paths",
