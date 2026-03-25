@@ -6,6 +6,7 @@ mod path_finding;
 mod search;
 mod security;
 mod traversal;
+mod work_items;
 
 use helpers::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, seed};
 use integration_testkit::run_subtests_shared;
@@ -122,5 +123,14 @@ async fn data_correctness() {
         security::path_finding_scoped_excludes_paths_through_other_namespaces,
         security::path_finding_multi_path_scope_finds_both,
         security::path_finding_narrow_scope_excludes_all_targets,
+        // work items: search
+        work_items::search_returns_correct_work_item_properties,
+        work_items::search_filter_work_item_type_returns_matching_rows,
+        // work items: traversal (all 5 edge types)
+        work_items::traversal_user_authored_work_item_returns_correct_edges,
+        work_items::traversal_work_item_in_group_returns_correct_edges,
+        work_items::traversal_work_item_in_milestone_returns_correct_edges,
+        work_items::traversal_user_assigned_work_item_returns_correct_edges,
+        work_items::traversal_work_item_has_label_returns_correct_edges,
     );
 }
