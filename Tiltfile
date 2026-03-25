@@ -93,6 +93,16 @@ for f in listdir('helm/local/dashboards'):
 k8s_yaml(blob(dashboards_cm))
 k8s_yaml('helm/local/grafana.yaml')
 
+# Vendor helm chart: bootstrap on fresh clone, re-sync when config changes
+if not os.path.exists('helm/gkg/Chart.yaml'):
+    local('helm/sync.sh')
+local_resource(
+    'helm-sync',
+    cmd='helm/sync.sh',
+    deps=['helm/vendir.yml', 'helm/vendir.lock.yml', 'helm/patches'],
+    labels=['setup'],
+)
+
 # Deploy gkg chart (vendored official chart + patches)
 k8s_yaml(helm(
     './helm/gkg',
