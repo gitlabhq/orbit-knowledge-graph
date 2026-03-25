@@ -96,6 +96,11 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "query-engine-utils"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "health-check"
 expression = "LicenseRef-EE"
 license-files = []

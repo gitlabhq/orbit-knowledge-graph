@@ -1,49 +1,37 @@
-//! Integration tests for the DuckDB codegen pipeline.
-//!
-//! These tests run `compile_local` end-to-end: JSON → validate → normalize →
-//! lower → DuckDB codegen, and verify the emitted SQL uses DuckDB syntax
-//! via structural assertions (sqlparser), not string matching.
+//! DuckDB dialect end-to-end tests.
 
 use crate::compiler::setup::test_ontology;
 use compiler::compile_local;
 use query_engine_utils::ParsedSql;
 
-fn compile_duckdb(json: &str) -> compiler::passes::codegen::ParameterizedQuery {
-    compile_local(json, &test_ontology()).unwrap().base
-}
-
 fn parse_duckdb(json: &str) -> ParsedSql {
-    ParsedSql::from_query(&compile_duckdb(json))
+    let result = compile_local(json, &test_ontology()).unwrap();
+    ParsedSql::from_query(&result.base)
 }
-
-// ─── Parameter syntax ────────────────────────────────────────────────────────
 
 #[test]
 fn search_uses_positional_params() {
-    let pq = compile_duckdb(
+    let result = compile_local(
         r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User", "columns": ["username"],
                  "filters": {"username": "alice"}},
         "limit": 10
     }"#,
-    );
+        &test_ontology(),
+    )
+    .unwrap();
 
-    // Rendered output should inline the param, proving it was a $N placeholder
-    let rendered = pq.render();
+    let rendered = result.base.render();
     assert!(
         rendered.contains("'alice'"),
-        "expected inlined param: {}",
-        rendered
+        "expected inlined param: {rendered}"
     );
 
-    // Structural: parsed SQL should have a WHERE clause
-    let sql = ParsedSql::from_query(&pq);
+    let sql = ParsedSql::from_query(&result.base);
     assert!(sql.has_where());
     assert!(sql.has_column_ref("username"));
 }
-
-// ─── Function remapping ──────────────────────────────────────────────────────
 
 #[test]
 fn no_clickhouse_functions_leak() {
@@ -60,10 +48,8 @@ fn no_clickhouse_functions_leak() {
     assert!(!sql.has_function("arrayConcat"));
 }
 
-// ─── No SET statements ──────────────────────────────────────────────────────
-
 #[test]
-fn no_set_statements_in_output() {
+fn no_set_statements() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "search",
@@ -72,17 +58,11 @@ fn no_set_statements_in_output() {
     }"#,
     );
 
-    assert!(
-        !sql.raw_contains("SET "),
-        "DuckDB SQL should not contain SET: {}",
-        sql.raw
-    );
+    assert!(!sql.raw_contains("SET "));
 }
 
-// ─── No security / enforce columns ──────────────────────────────────────────
-
 #[test]
-fn no_security_filter_in_output() {
+fn no_security_filter() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "search",
@@ -94,10 +74,8 @@ fn no_security_filter_in_output() {
     assert!(sql.lacks_column_ref("traversal_path"));
 }
 
-// ─── Traversal ──────────────────────────────────────────────────────────────
-
 #[test]
-fn traversal_compiles_to_duckdb() {
+fn traversal() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "traversal",
@@ -115,10 +93,8 @@ fn traversal_compiles_to_duckdb() {
     assert_eq!(sql.limit_value(), Some(25));
 }
 
-// ─── Aggregation ────────────────────────────────────────────────────────────
-
 #[test]
-fn aggregation_compiles_to_duckdb() {
+fn aggregation() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "aggregation",
@@ -138,10 +114,8 @@ fn aggregation_compiles_to_duckdb() {
     assert!(sql.has_group_by());
 }
 
-// ─── Path finding ───────────────────────────────────────────────────────────
-
 #[test]
-fn path_finding_compiles_to_duckdb() {
+fn path_finding() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "path_finding",
@@ -157,10 +131,8 @@ fn path_finding_compiles_to_duckdb() {
     assert!(sql.has_order_by());
 }
 
-// ─── Neighbors ──────────────────────────────────────────────────────────────
-
 #[test]
-fn neighbors_compiles_to_duckdb() {
+fn neighbors() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "neighbors",
@@ -175,10 +147,8 @@ fn neighbors_compiles_to_duckdb() {
     assert_eq!(sql.limit_value(), Some(10));
 }
 
-// ─── Array IN expansion ─────────────────────────────────────────────────────
-
 #[test]
-fn node_ids_filter_expands_params() {
+fn node_ids_expand_params() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "search",
@@ -188,9 +158,5 @@ fn node_ids_filter_expands_params() {
     );
 
     assert!(sql.has_operator("IN"));
-    assert!(
-        !sql.raw_contains("Array("),
-        "should not contain Array() type: {}",
-        sql.raw
-    );
+    assert!(!sql.raw_contains("Array("));
 }

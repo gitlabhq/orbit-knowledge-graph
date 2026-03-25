@@ -1,7 +1,7 @@
-//! Compiler unit tests using a hand-built ontology.
+//! ClickHouse dialect end-to-end tests.
 
-use super::setup::{compile_to_ast, test_ctx, test_ontology};
-use super::utils::{ParsedSql, has_param_value};
+use crate::compiler::setup::{compile_to_ast, test_ctx, test_ontology};
+use crate::compiler::utils::{ParsedSql, has_param_value};
 use compiler::{Node, QueryError, compile};
 
 #[test]
