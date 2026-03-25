@@ -95,13 +95,8 @@ pub(super) async fn run_query_with_security(
 
     let mut query_result = hydration_output.query_result;
     let pagination = compiled.input.cursor.map(|cursor| {
-        let slice = query_result.apply_cursor(cursor.offset, cursor.page_size);
-        query_engine::shared::PaginationMeta {
-            total_authorized: slice.total_authorized,
-            has_more: slice.has_more,
-            offset: cursor.offset,
-            page_size: cursor.page_size,
-        }
+        let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
+        query_engine::shared::PaginationMeta { has_more }
     });
 
     let pipeline_output = query_engine::shared::PipelineOutput {

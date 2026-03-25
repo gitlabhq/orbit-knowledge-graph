@@ -82,12 +82,6 @@ pub struct PipelineOutput {
 
 /// Pagination metadata returned when the query includes a cursor.
 pub struct PaginationMeta {
-    /// Total authorized rows before cursor slicing.
-    pub total_authorized: usize,
-    /// Whether more rows exist beyond the current page.
+    /// Whether more authorized rows exist beyond the current page.
     pub has_more: bool,
-    /// The offset that was applied.
-    pub offset: u32,
-    /// The page size that was applied.
-    pub page_size: u32,
 }

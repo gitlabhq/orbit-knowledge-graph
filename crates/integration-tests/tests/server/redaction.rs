@@ -3935,9 +3935,8 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     assert_eq!(result.len(), 5, "ClickHouse should return all 5 users");
 
     // Apply cursor: slice to [0..2]
-    let slice = result.apply_cursor(0, 2);
-    assert_eq!(slice.total_authorized, 5);
-    assert!(slice.has_more);
+    let has_more = result.apply_cursor(0, 2);
+    assert!(has_more);
     assert_eq!(result.authorized_count(), 2);
 
     let u = result.ctx().get("u").unwrap().clone();
@@ -3950,9 +3949,8 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     // cursor: offset=2, page_size=2 → users 3, 4
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let slice = result.apply_cursor(2, 2);
-    assert_eq!(slice.total_authorized, 5);
-    assert!(slice.has_more);
+    let has_more = result.apply_cursor(2, 2);
+    assert!(has_more);
     assert_eq!(result.authorized_count(), 2);
 
     let u = result.ctx().get("u").unwrap().clone();
@@ -3965,9 +3963,8 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     // cursor: offset=4, page_size=2 → user 5, has_more=false
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let slice = result.apply_cursor(4, 2);
-    assert_eq!(slice.total_authorized, 5);
-    assert!(!slice.has_more, "last page should not have more");
+    let has_more = result.apply_cursor(4, 2);
+    assert!(!has_more, "last page should not have more");
     assert_eq!(result.authorized_count(), 1);
 
     let u = result.ctx().get("u").unwrap().clone();
@@ -4008,9 +4005,8 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     );
 
     // Apply cursor on the authorized set: offset=0, page_size=2 → users 1, 3
-    let slice = result.apply_cursor(0, 2);
-    assert_eq!(slice.total_authorized, 3);
-    assert!(slice.has_more);
+    let has_more = result.apply_cursor(0, 2);
+    assert!(has_more);
     assert_eq!(result.authorized_count(), 2);
 
     let u = result.ctx().get("u").unwrap().clone();
@@ -4040,9 +4036,8 @@ async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    let slice = result.apply_cursor(100, 10);
-    assert_eq!(slice.total_authorized, 5);
-    assert!(!slice.has_more);
+    let has_more = result.apply_cursor(100, 10);
+    assert!(!has_more);
     assert_eq!(
         result.authorized_count(),
         0,
@@ -4067,9 +4062,8 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    let slice = result.apply_cursor(0, 2);
-    assert_eq!(slice.total_authorized, 4, "4 active users");
-    assert!(slice.has_more);
+    let has_more = result.apply_cursor(0, 2);
+    assert!(has_more);
     assert_eq!(result.authorized_count(), 2);
 
     let u = result.ctx().get("u").unwrap().clone();
@@ -4082,9 +4076,8 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
     // Second page
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let slice = result.apply_cursor(2, 2);
-    assert_eq!(slice.total_authorized, 4);
-    assert!(!slice.has_more);
+    let has_more = result.apply_cursor(2, 2);
+    assert!(!has_more);
 
     let u = result.ctx().get("u").unwrap().clone();
     let ids: Vec<i64> = result

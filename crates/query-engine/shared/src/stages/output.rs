@@ -38,13 +38,8 @@ impl PipelineStage for OutputStage {
         let mut query_result = input.query_result.clone();
 
         let pagination = compiled.input.cursor.map(|cursor| {
-            let slice = query_result.apply_cursor(cursor.offset, cursor.page_size);
-            PaginationMeta {
-                total_authorized: slice.total_authorized,
-                has_more: slice.has_more,
-                offset: cursor.offset,
-                page_size: cursor.page_size,
-            }
+            let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
+            PaginationMeta { has_more }
         });
 
         Ok(PipelineOutput {

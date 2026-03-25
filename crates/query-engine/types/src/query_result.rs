@@ -354,41 +354,23 @@ impl QueryResult {
 
     /// Slice the authorized result set to `[offset..offset+page_size]`.
     ///
-    /// Must be called **after** hydration — it marks out-of-window authorized
-    /// rows as unauthorized so that `authorized_rows()` returns only the
-    /// requested page.
-    ///
-    /// Returns the total authorized count (before slicing) and whether more
-    /// rows exist beyond the page.
-    pub fn apply_cursor(&mut self, offset: u32, page_size: u32) -> CursorSlice {
-        let total = self.authorized_count();
-        let offset = offset as usize;
-        let page_size = page_size as usize;
-
-        let mut seen = 0;
+    /// Must be called **after** hydration — marks out-of-window authorized
+    /// rows as unauthorized so `authorized_rows()` returns only the page.
+    /// Returns whether more authorized rows exist beyond this page.
+    pub fn apply_cursor(&mut self, offset: u32, page_size: u32) -> bool {
+        let end = (offset + page_size) as usize;
+        let mut i = 0usize;
         for row in &mut self.rows {
             if !row.authorized {
                 continue;
             }
-            if seen < offset || seen >= offset + page_size {
+            if i < offset as usize || i >= end {
                 row.authorized = false;
             }
-            seen += 1;
+            i += 1;
         }
-
-        CursorSlice {
-            total_authorized: total,
-            has_more: offset + page_size < total,
-        }
+        i > end
     }
-}
-
-/// Result of applying a cursor to the authorized result set.
-pub struct CursorSlice {
-    /// Total authorized rows before slicing.
-    pub total_authorized: usize,
-    /// True if more authorized rows exist beyond the requested page.
-    pub has_more: bool,
 }
 
 fn is_authorized(
