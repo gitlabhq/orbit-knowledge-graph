@@ -63,7 +63,8 @@
         "offset": {
           "type": "integer",
           "description": "0-based offset into the authorized (post-redaction) result set.",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 999
         },
         "page_size": {
           "type": "integer",
