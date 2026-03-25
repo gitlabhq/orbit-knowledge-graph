@@ -67,6 +67,7 @@ pub struct QueryExecution {
 #[derive(Debug, Clone, Default)]
 pub struct QueryExecutionLog(pub Vec<QueryExecution>);
 
+#[derive(Clone)]
 pub struct PipelineOutput {
     pub query_result: QueryResult,
     pub result_context: ResultContext,
@@ -81,6 +82,7 @@ pub struct PipelineOutput {
 }
 
 /// Pagination metadata returned when the query includes a cursor.
+#[derive(Clone)]
 pub struct PaginationMeta {
     /// Whether more authorized rows exist beyond the current page.
     pub has_more: bool,

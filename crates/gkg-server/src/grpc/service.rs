@@ -43,10 +43,14 @@ impl KnowledgeGraphServiceImpl {
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
+        let cache = Arc::new(crate::pipeline::QueryResultCache::new(
+            std::time::Duration::from_secs(60),
+        ));
         let pipeline = QueryPipelineService::new(
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
+            cache,
         );
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {

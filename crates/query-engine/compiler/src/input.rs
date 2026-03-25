@@ -144,12 +144,12 @@ fn default_limit() -> u32 {
 }
 
 /// Agent-driven pagination cursor. Slices the authorized (post-redaction)
-/// result set by `offset` and `page_size`. The server re-runs the query,
-/// authorizes all rows up to `limit`, and returns `[offset..offset+page_size]`.
+/// result set by `offset` and `page_size`. The server caches the full
+/// authorized result (keyed by user + query) so subsequent pages skip
+/// ClickHouse execution, authorization, redaction, and hydration.
 ///
 /// This model avoids SQL-level keyset pagination, which only generalizes to
 /// Search queries and breaks when redaction removes rows from the LIMIT window.
-// TODO: Server-side query caching with TTL to avoid re-running the same query on page 2+
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct InputCursor {
     pub offset: u32,
