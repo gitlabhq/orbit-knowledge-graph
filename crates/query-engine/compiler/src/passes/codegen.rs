@@ -3,10 +3,10 @@
 //! Pure transformation from AST to parameterized ClickHouse SQL.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
-use crate::enforce::ResultContext;
 use crate::error::Result;
 use crate::input::Input;
 use crate::input::QueryType;
+use crate::passes::enforce::ResultContext;
 pub use gkg_utils::clickhouse::ParamValue;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ pub struct CompiledQueryContext {
     pub input: Input,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HydrationPlan {
     /// No hydration needed (e.g., Aggregation).
     None,
@@ -37,7 +37,7 @@ pub enum HydrationPlan {
     Dynamic,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HydrationTemplate {
     pub entity_type: String,
     /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration

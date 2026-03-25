@@ -3,6 +3,7 @@
 //! Transforms validated input into a SQL-oriented AST.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+
 use crate::constants::{
     ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,
     EDGE_KINDS_COLUMN, END_ID_COLUMN, END_KIND_COLUMN, FORWARD_ALIAS, FORWARD_CTE,
@@ -1412,8 +1413,8 @@ fn resolve_table(node: &InputNode) -> Result<String> {
 mod tests {
     use super::*;
     use crate::input::parse_input;
-    use crate::normalize;
-    use crate::validate;
+    use crate::passes::normalize;
+    use crate::passes::validate;
     use ontology::Ontology;
 
     fn test_ontology() -> Ontology {

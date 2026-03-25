@@ -4,9 +4,9 @@ GitLab Knowledge Graph (Orbit). Rust service that builds a property graph from G
 
 ## Quick start
 
-All tasks use mise. `mise build`, `mise test:fast`, `mise lint:code`, `mise server:start`, `mise server:dispatch`.
+All tasks use mise. `mise build`, `mise test:fast`, `mise test:compiler`, `mise lint:code`, `mise server:start`, `mise server:dispatch`.
 Fix linting issues: `mise lint:code:fix`. Validate docs: `mise lint:docs`. Validate ontology: `mise ontology:validate`.
-Integration tests need Docker: `mise test:integration`.
+Integration tests need Docker: `mise test:integration`. Correctness subset: `mise test:integration:server`.
 
 **Worktrees:** after creating a git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
 
@@ -26,7 +26,7 @@ Integration tests need Docker: `mise test:integration`.
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
 - `cargo fmt` (`fmt-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
-- Unit tests via nextest (`unit-test`)
+- Unit tests via nextest, includes compiler tests (`unit-test`)
 - Integration tests with Docker testcontainers (`integration-test`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
@@ -57,7 +57,7 @@ Integration tests need Docker: `mise test:integration`.
 | Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |
 | Local development guide | `docs/dev/local-development.md` |
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
-| Operational runbook | `docs/dev/RUNBOOK.md` |
+| Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
 | Helm charts | `helm/gkg/` (vendored via vendir), `helm/local/` (dev Prometheus + Grafana) |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
@@ -74,7 +74,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 |---|---|
 | `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
-| `query-engine/compiler` | JSON DSL -> parameterized ClickHouse SQL, security context enforcement |
+| `query-engine/compiler` | JSON DSL -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
+| `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
 | `query-engine/types` | Type-safe result schema for redaction processing |
 | `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |
 | `query-engine/shared` | Shared pipeline stages (compilation, extraction, output) |
@@ -93,7 +94,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `cli` | Local `orbit index` and `orbit query` commands |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, and `ResponseView` assertion framework for integration tests |
-| `integration-tests` | Integration tests for server (health, redaction, hydration, data correctness, graph formatting); depends on gkg-server + integration-testkit |
+| `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness, graph formatting); depends on gkg-server, compiler, integration-testkit |
 | `xtask` | Developer task runner (data generation, query evaluation, ClickHouse management) |
 
 ## Code quality

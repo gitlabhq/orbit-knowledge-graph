@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 gkg-utils = { path = "../../utils" }
 ontology = { path = "../../ontology" }
+compiler-pipeline-macros = { path = "../compiler-pipeline-macros" }
+pastey = { workspace = true }
 once_cell = { workspace = true }
 opentelemetry = { workspace = true }
 regex = { workspace = true }
@@ -15,6 +17,7 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true }
 const_format = { workspace = true }
+
 
 [dev-dependencies]
 pretty_assertions = "1.4"
