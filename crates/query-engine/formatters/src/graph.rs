@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use compiler::{
-    EdgeMeta, QueryType, ResultContext, NEIGHBOR_IS_OUTGOING_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+    EdgeMeta, NEIGHBOR_IS_OUTGOING_COLUMN, QueryType, RELATIONSHIP_TYPE_COLUMN, ResultContext,
 };
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use serde_json::Value;
 use shared::PipelineOutput;
 use types::{QueryResult, QueryResultRow};
 
-use super::{column_value_to_json, ResultFormatter};
+use super::{ResultFormatter, column_value_to_json};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphResponse {

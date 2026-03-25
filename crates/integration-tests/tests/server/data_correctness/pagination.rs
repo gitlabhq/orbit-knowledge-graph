@@ -197,25 +197,29 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
         );
 
         let resp = run_query(ctx, &json, &allow_all()).await;
-        let page_ids = resp.node_ids("User");
+        let count = resp.node_count();
 
-        if page_ids.is_empty() {
+        if count == 0 {
+            resp.assert_node_count(0);
             break;
         }
 
+        let page_ids = resp.node_ids_ordered("User");
+
         // No overlap with previously seen IDs
         for id in &page_ids {
-            assert!(
-                !all_ids.contains(id),
-                "ID {id} appeared in multiple pages"
-            );
+            assert!(!all_ids.contains(id), "ID {id} appeared in multiple pages");
         }
         all_ids.extend(page_ids);
         resp.skip_requirement(Requirement::Cursor);
         resp.skip_requirement(Requirement::NodeCount);
     }
 
-    assert_eq!(all_ids, vec![1, 2, 3, 4, 5], "pages should cover all users in order");
+    assert_eq!(
+        all_ids,
+        vec![1, 2, 3, 4, 5],
+        "pages should cover all users in order"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

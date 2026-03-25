@@ -3941,7 +3941,10 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     assert_eq!(result.authorized_count(), 2);
 
     let u = result.ctx().get("u").unwrap().clone();
-    let page1_ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    let page1_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
     assert_eq!(page1_ids, vec![1, 2], "first page should be user IDs 1, 2");
 
     // cursor: offset=2, page_size=2 → users 3, 4
@@ -3953,7 +3956,10 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     assert_eq!(result.authorized_count(), 2);
 
     let u = result.ctx().get("u").unwrap().clone();
-    let page2_ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    let page2_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
     assert_eq!(page2_ids, vec![3, 4], "second page should be user IDs 3, 4");
 
     // cursor: offset=4, page_size=2 → user 5, has_more=false
@@ -3965,7 +3971,10 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     assert_eq!(result.authorized_count(), 1);
 
     let u = result.ctx().get("u").unwrap().clone();
-    let last_ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    let last_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
     assert_eq!(last_ids, vec![5], "last page should be user ID 5");
 }
 
@@ -3992,7 +4001,11 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     mock_service.deny("user", &[2, 4]);
     run_redaction(&mut result, &mock_service);
 
-    assert_eq!(result.authorized_count(), 3, "3 users should survive redaction");
+    assert_eq!(
+        result.authorized_count(),
+        3,
+        "3 users should survive redaction"
+    );
 
     // Apply cursor on the authorized set: offset=0, page_size=2 → users 1, 3
     let slice = result.apply_cursor(0, 2);
@@ -4001,7 +4014,10 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     assert_eq!(result.authorized_count(), 2);
 
     let u = result.ctx().get("u").unwrap().clone();
-    let page_ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    let page_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
     assert_eq!(
         page_ids,
         vec![1, 3],
@@ -4027,7 +4043,11 @@ async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
     let slice = result.apply_cursor(100, 10);
     assert_eq!(slice.total_authorized, 5);
     assert!(!slice.has_more);
-    assert_eq!(result.authorized_count(), 0, "offset beyond data should return 0 rows");
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "offset beyond data should return 0 rows"
+    );
 }
 
 async fn cursor_pagination_with_filters(ctx: &TestContext) {
@@ -4053,7 +4073,10 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
     assert_eq!(result.authorized_count(), 2);
 
     let u = result.ctx().get("u").unwrap().clone();
-    let ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    let ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
     assert_eq!(ids, vec![1, 2], "first page of filtered results");
 
     // Second page
@@ -4064,7 +4087,10 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
     assert!(!slice.has_more);
 
     let u = result.ctx().get("u").unwrap().clone();
-    let ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    let ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
     assert_eq!(ids, vec![3, 4], "second page of filtered results");
 }
 

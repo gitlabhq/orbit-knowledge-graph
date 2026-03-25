@@ -143,9 +143,7 @@ impl Context {
             parts.push(format!("ORDER BY {}", orders.join(", ")));
         }
 
-        if include_limit
-            && let Some(limit) = q.limit
-        {
+        if include_limit && let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
         }
 
