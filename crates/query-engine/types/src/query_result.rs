@@ -358,7 +358,7 @@ impl QueryResult {
     /// rows as unauthorized so `authorized_rows()` returns only the page.
     /// Returns whether more authorized rows exist beyond this page.
     pub fn apply_cursor(&mut self, offset: u32, page_size: u32) -> bool {
-        let end = (offset + page_size) as usize;
+        let end = (offset as usize).saturating_add(page_size as usize);
         let mut i = 0usize;
         for row in &mut self.rows {
             if !row.authorized {

@@ -356,7 +356,7 @@ impl<'a> Validator<'a> {
 
     fn check_pagination(&self, input: &Input) -> Result<()> {
         if let Some(ref cursor) = input.cursor
-            && cursor.offset + cursor.page_size > input.limit
+            && cursor.offset.saturating_add(cursor.page_size) > input.limit
         {
             return Err(QueryError::PaginationError(format!(
                 "cursor.offset ({}) + cursor.page_size ({}) must not exceed limit ({})",
