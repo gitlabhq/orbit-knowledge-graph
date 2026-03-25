@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# macOS defaults to 256 FDs which is too few for linking this project
+ulimit -n 10240 2>/dev/null || true
+
 IMAGE_TAG="${1:-gkg-server:dev}"
 
 HOST_OS="$(uname -s)"
