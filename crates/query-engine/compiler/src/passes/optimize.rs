@@ -40,7 +40,6 @@ const ROOT_SIP_CTE: &str = "_root_ids";
 pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
     match node {
         Node::Query(q) => {
-            apply_node_ids_offset_removal(q, input);
             if input.query_type == QueryType::Aggregation {
                 eliminate_agg_node_joins(q, input);
             }
@@ -237,19 +236,6 @@ fn rewrite_agg_column(expr: &mut Expr, rewrites: &HashMap<String, (String, &str)
     }
 }
 
-/// When node_ids are present, OFFSET is removed — the result set is already
-/// bounded by explicit IDs, so positional skipping is redundant.
-// TODO: Deprecate range/offset pagination in favor of agent-driven cursor
-fn apply_node_ids_offset_removal(q: &mut Query, input: &Input) {
-    let has_node_ids = input
-        .nodes
-        .first()
-        .is_some_and(|n| !n.node_ids.is_empty());
-    if has_node_ids {
-        q.offset = None;
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Keyset pagination (disabled)
 //
@@ -287,9 +273,6 @@ fn apply_node_ids_offset_removal(q: &mut Query, input: &Input) {
 //         };
 //
 //         q.where_clause = Expr::and_all([q.where_clause.take(), Some(keyset_predicate)]);
-//         q.offset = None;
-//     } else if has_node_ids {
-//         q.offset = None;
 //     }
 // }
 //

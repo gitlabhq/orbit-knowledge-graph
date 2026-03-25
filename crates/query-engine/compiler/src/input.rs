@@ -64,7 +64,6 @@ pub struct Input {
     pub neighbors: Option<InputNeighbors>,
     #[serde(default = "default_limit")]
     pub limit: u32,
-    pub range: Option<InputRange>,
     pub cursor: Option<InputCursor>,
     pub order_by: Option<InputOrderBy>,
     pub aggregation_sort: Option<InputAggSort>,
@@ -104,7 +103,6 @@ impl Default for Input {
             path: None,
             neighbors: None,
             limit: default_limit(),
-            range: None,
             cursor: None,
             order_by: None,
             aggregation_sort: None,
@@ -143,12 +141,6 @@ where
 
 fn default_limit() -> u32 {
     30
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct InputRange {
-    pub start: u32,
-    pub end: u32,
 }
 
 /// Agent-driven pagination cursor. Slices the authorized (post-redaction)
@@ -722,30 +714,6 @@ mod tests {
         let neighbors = input.neighbors.unwrap();
         assert_eq!(neighbors.node, "u");
         assert_eq!(neighbors.direction, Direction::Both);
-    }
-
-    #[test]
-    fn range_pagination() {
-        let input = parse_input(
-            r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User"},
-            "range": {"start": 10, "end": 50}
-        }"#,
-        )
-        .unwrap();
-
-        let range = input.range.unwrap();
-        assert_eq!(range.start, 10);
-        assert_eq!(range.end, 50);
-
-        // range absent by default validation
-        let input =
-            parse_input(r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}}"#)
-                .unwrap();
-
-        assert!(input.range.is_none());
-        assert_eq!(input.limit, 30);
     }
 
     #[test]

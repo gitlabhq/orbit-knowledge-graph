@@ -3,7 +3,7 @@
 use super::setup::{embedded_ontology, test_ctx};
 use super::utils::ParsedSql;
 use compiler::{
-    ColumnSelection, HydrationPlan, Input, InputNode, QueryError, QueryType, compile, compile_input,
+    compile, compile_input, ColumnSelection, HydrationPlan, Input, InputNode, QueryError, QueryType,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -436,104 +436,6 @@ fn project_still_uses_id_for_redaction() {
     assert!(
         sql.raw_contains("p.id AS _gkg_p_id"),
         "Project should use id for redaction"
-    );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pagination
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[test]
-fn range_pagination() {
-    let ontology = embedded_ontology();
-    let ctx = test_ctx();
-
-    let result = compile(
-        r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User", "columns": ["username"]},
-        "range": {"start": 40, "end": 50}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap();
-    let sql = ParsedSql::from_query(&result.base);
-    assert_eq!(sql.limit_value(), Some(10));
-    assert_eq!(sql.offset_value(), Some(40));
-
-    let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
-        "range": {"start": 0, "end": 30},
-        "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap();
-    let sql = ParsedSql::from_query(&result.base);
-    assert_eq!(sql.limit_value(), Some(30));
-    assert_eq!(sql.offset_value(), Some(0));
-    assert!(sql.has_order_by());
-
-    // Mutual exclusion: limit + range rejected
-    let err = compile(
-        r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "limit": 10,
-        "range": {"start": 0, "end": 5}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap_err();
-    assert!(matches!(err, QueryError::Validation(_)));
-
-    // end == start rejected
-    let err = compile(
-        r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 10, "end": 10}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("must be greater than"));
-
-    // window > 1000 rejected
-    let err = compile(
-        r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 0, "end": 1001}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("must not exceed 1000"));
-
-    // window == 1000 accepted
-    assert!(
-        compile(
-            r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 0, "end": 1000}
-    }"#,
-            &ontology,
-            &ctx
-        )
-        .is_ok()
     );
 }
 

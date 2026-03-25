@@ -55,27 +55,9 @@
       "maximum": 1000,
       "default": 30
     },
-    "range": {
-      "type": "object",
-      "description": "Bounded result window for pagination. Mutually exclusive with limit and cursor. Size (end - start) capped at 1000 by the server.",
-      "required": ["start", "end"],
-      "properties": {
-        "start": {
-          "type": "integer",
-          "description": "Index of the first row to return (0-based), applied after filtering and ordering",
-          "minimum": 0
-        },
-        "end": {
-          "type": "integer",
-          "description": "Index of the last row to return (exclusive). end - start must not exceed 1000.",
-          "minimum": 1
-        }
-      },
-      "additionalProperties": false
-    },
     "cursor": {
       "type": "object",
-      "description": "Agent-driven pagination cursor. Slices the authorized result set (after redaction) by offset and page_size. The server re-runs the query, authorizes all rows up to limit, and returns the requested slice. Mutually exclusive with range.",
+      "description": "Agent-driven pagination cursor. Slices the authorized result set (after redaction) by offset and page_size. The server re-runs the query, authorizes all rows up to limit, and returns the requested slice.",
       "required": ["offset", "page_size"],
       "properties": {
         "offset": {
@@ -106,16 +88,6 @@
     }
   },
   "allOf": [
-    {
-      "not": {
-        "required": ["limit", "range"]
-      }
-    },
-    {
-      "not": {
-        "required": ["cursor", "range"]
-      }
-    },
     {
       "if": {
         "properties": {

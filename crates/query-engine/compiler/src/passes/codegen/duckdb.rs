@@ -143,13 +143,10 @@ impl Context {
             parts.push(format!("ORDER BY {}", orders.join(", ")));
         }
 
-        if include_limit {
-            if let Some(limit) = q.limit {
-                parts.push(format!("LIMIT {limit}"));
-            }
-            if let Some(offset) = q.offset {
-                parts.push(format!("OFFSET {offset}"));
-            }
+        if include_limit
+            && let Some(limit) = q.limit
+        {
+            parts.push(format!("LIMIT {limit}"));
         }
 
         Ok(parts.join(" "))

@@ -47,15 +47,9 @@ fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
     )
 }
 
-/// Derive LIMIT and OFFSET from the input's pagination fields.
-/// If `range` is set, limit = end - start and offset = start.
-/// Otherwise, limit = input.limit and offset = None.
-fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
-    if let Some(ref range) = input.range {
-        (Some(range.end - range.start), Some(range.start))
-    } else {
-        (Some(input.limit), None)
-    }
+/// Derive LIMIT from the input's pagination fields.
+fn pagination(input: &Input) -> Option<u32> {
+    Some(input.limit)
 }
 
 /// Lower validated input into an AST node.
@@ -119,7 +113,7 @@ fn lower_search(input: &Input) -> Result<Node> {
             desc: ob.direction == OrderDirection::Desc,
         }]
     });
-    let (limit, offset) = pagination(input);
+    let limit = pagination(input);
 
     Ok(Node::Query(Box::new(Query {
         select,
@@ -127,7 +121,6 @@ fn lower_search(input: &Input) -> Result<Node> {
         where_clause,
         order_by,
         limit,
-        offset,
         ..Default::default()
     })))
 }
@@ -352,7 +345,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
             desc: ob.direction == OrderDirection::Desc,
         }]
     });
-    let (limit, offset) = pagination(input);
+    let limit = pagination(input);
 
     Ok(Node::Query(Box::new(Query {
         ctes,
@@ -361,7 +354,6 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
         where_clause,
         order_by,
         limit,
-        offset,
         ..Default::default()
     })))
 }
@@ -435,7 +427,7 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
             }]
         });
 
-    let (limit, offset) = pagination(input);
+    let limit = pagination(input);
 
     Ok(Node::Query(Box::new(Query {
         select,
@@ -444,7 +436,6 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         group_by,
         order_by,
         limit,
-        offset,
         ..Default::default()
     })))
 }
@@ -630,7 +621,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         TableRef::union_all(vec![direct_query, intersection_query], PATHS_ALIAS)
     };
 
-    let (limit, offset) = pagination(input);
+    let limit = pagination(input);
 
     // Outer query: select from the paths UNION ALL, ordered by depth.
     // Security filters are applied by the security pass to every gl_edge scan
@@ -656,7 +647,6 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             desc: false,
         }],
         limit,
-        offset,
         ..Default::default()
     })))
 }
@@ -817,7 +807,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
             desc: ob.direction == OrderDirection::Desc,
         }]
     });
-    let (limit, offset) = pagination(input);
+    let limit = pagination(input);
 
     // For Direction::Both, split into UNION ALL of outgoing + incoming so
     // ClickHouse can select the optimal access path for each direction
@@ -861,7 +851,6 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
         outgoing.order_by = order_by;
         outgoing.limit = limit;
-        outgoing.offset = offset;
         return Ok(Node::Query(Box::new(outgoing)));
     }
 
@@ -900,7 +889,6 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         where_clause,
         order_by,
         limit,
-        offset,
         ..Default::default()
     })))
 }

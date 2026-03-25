@@ -28,8 +28,6 @@ pub enum Requirement {
     Neighbors,
     /// Query has `aggregation_sort` — test must call `assert_node_order`.
     AggregationSort,
-    /// Query has `range` — test must call `assert_node_count`.
-    Range,
     /// Query returns nodes — test must call `assert_node_count`.
     ///
     /// Always derived for `search`, `traversal`, and `neighbors` queries
@@ -57,7 +55,6 @@ impl std::fmt::Display for Requirement {
                     "AggregationSort (query has aggregation_sort — call assert_node_order)"
                 )
             }
-            Self::Range => write!(f, "Range (query has range — call assert_node_count)"),
             Self::NodeCount => {
                 write!(f, "NodeCount (call assert_node_count to verify total rows)")
             }
@@ -128,10 +125,6 @@ impl QueryRequirements for Input {
 
         if self.aggregation_sort.is_some() {
             reqs.insert(Requirement::AggregationSort);
-        }
-
-        if self.range.is_some() {
-            reqs.insert(Requirement::Range);
         }
 
         reqs
@@ -418,20 +411,6 @@ mod tests {
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::AggregationSort));
         assert!(reqs.contains(&Requirement::Aggregation));
-        assert_eq!(reqs.len(), 2);
-    }
-
-    #[test]
-    fn requirements_from_range() {
-        let input = parse_test_input(
-            r#"{"query_type": "search",
-                "node": {"id": "u", "entity": "User"},
-                "range": {"start": 0, "end": 5},
-                "limit": 10}"#,
-        );
-        let reqs = input.requirements();
-        assert!(reqs.contains(&Requirement::Range));
-        assert!(reqs.contains(&Requirement::NodeCount));
         assert_eq!(reqs.len(), 2);
     }
 
