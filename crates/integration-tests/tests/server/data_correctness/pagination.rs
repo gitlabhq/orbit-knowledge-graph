@@ -271,7 +271,10 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
     .await;
 
     let page1_count = page1.node_count();
-    assert!(page1_count > 0 && page1_count < full_count, "page should be a subset");
+    assert!(
+        page1_count > 0 && page1_count < full_count,
+        "page should be a subset"
+    );
     page1.assert_node_count(page1_count);
     page1.skip_requirement(Requirement::Relationship {
         edge_type: "MEMBER_OF".into(),
