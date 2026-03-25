@@ -36,11 +36,13 @@ Tests are split across two binaries:
 
 ## Running
 
-Requires Docker via Colima. All tasks are defined in `mise.toml` at the repo root:
+All tasks are defined in `mise.toml` at the repo root:
 
 ```shell
+mise test:compiler                                  # compiler tests (no Docker)
 mise colima:start                                   # start Docker runtime (12 GB RAM)
-mise test:integration                               # run all integration tests
+mise test:integration                               # run all server integration tests
+mise test:integration:server                        # correctness, hydration, redaction, graph formatter
 mise colima:stop                                    # stop when done
 ```
 

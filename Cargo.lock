@@ -3498,6 +3498,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "siphon-proto",
+ "sqlparser",
  "tar",
  "tempfile",
  "testcontainers",
