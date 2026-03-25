@@ -30,7 +30,6 @@ Integration tests need Docker: `mise test:integration`. Correctness subset: `mis
 - Integration tests with Docker testcontainers (`integration-test`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
-- Helm chart linting and template validation (`helm-lint`)
 
 ## Where to find things
 
