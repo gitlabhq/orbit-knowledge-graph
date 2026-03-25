@@ -18,6 +18,7 @@ pub enum SupportLang {
     CSharp,
     Kotlin,
     Rust,
+    Go,
 }
 
 impl fmt::Display for SupportLang {
@@ -81,6 +82,11 @@ impl LanguageExt for SupportLang {
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-rust"))]
             Self::Rust => panic!("tree-sitter-rust feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-go")]
+            Self::Go => tree_sitter_go::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-go"))]
+            Self::Go => panic!("tree-sitter-go feature not enabled"),
         }
     }
 }
@@ -107,6 +113,13 @@ mod tests {
     #[cfg(feature = "tree-sitter-ruby")]
     fn test_ruby_parsing() {
         let root = SupportLang::Ruby.ast_grep("def hello; end");
+        assert!(!root.source().is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter-go")]
+    fn test_go_parsing() {
+        let root = SupportLang::Go.ast_grep("package main\nfunc Hello() {}");
         assert!(!root.source().is_empty());
     }
 }

@@ -7,6 +7,10 @@ use parser_core::{
         types::{CSharpDefinitionInfo, CSharpImportedSymbolInfo},
     },
     definitions::DefinitionTypeInfo,
+    go::{
+        analyzer::GoAnalyzer,
+        types::{GoDefinitionInfo, GoImportedSymbolInfo, GoReferenceInfo},
+    },
     java::{
         analyzer::JavaAnalyzer,
         types::{JavaDefinitionInfo, JavaImportedSymbolInfo, JavaReferenceInfo},
@@ -199,6 +203,7 @@ impl<'a> FileProcessor<'a> {
                 | SupportedLanguage::CSharp
                 | SupportedLanguage::TypeScript
                 | SupportedLanguage::Rust
+                | SupportedLanguage::Go
         );
         if !is_supported {
             return ProcessingResult::Skipped(SkippedFile {
@@ -453,6 +458,28 @@ impl<'a> FileProcessor<'a> {
                         self.path
                     ))
                 }
+            }
+            SupportedLanguage::Go => {
+                if let UnifiedParseResult::TreeSitter(ast_result) = parse_result {
+                    let analyzer = GoAnalyzer::new();
+                    match analyzer.analyze(ast_result) {
+                        Ok(analysis_result) => Ok((
+                            Definitions::Go(analysis_result.definitions),
+                            Some(ImportedSymbols::Go(analysis_result.imports)),
+                            Some(References::Go(analysis_result.references)),
+                        )),
+                        Err(e) => Err(anyhow::anyhow!(
+                            "Failed to analyze Go file '{}': {}",
+                            self.path,
+                            e
+                        )),
+                    }
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Expected TreeSitter parse result for Go file '{}'",
+                        self.path
+                    ))
+                }
             } // Note: Use _ => { Ok(Definitions::Unknown(vec![])) } if you want to comment out certain match arms
         };
         debug!("Finished analyzing file {}.", self.path);
@@ -470,6 +497,7 @@ pub enum Definitions {
     CSharp(Vec<CSharpDefinitionInfo>),
     TypeScript(Vec<TypeScriptDefinitionInfo>),
     Rust(Vec<RustDefinitionInfo>),
+    Go(Vec<GoDefinitionInfo>),
     Unknown(Vec<DefinitionInfo<(), ()>>),
 }
 
@@ -484,6 +512,7 @@ impl Definitions {
             Definitions::CSharp(defs) => defs.len(),
             Definitions::TypeScript(defs) => defs.len(),
             Definitions::Rust(defs) => defs.len(),
+            Definitions::Go(defs) => defs.len(),
             Definitions::Unknown(defs) => defs.len(),
         }
     }
@@ -521,6 +550,10 @@ impl Definitions {
                     .map(|def| def.definition_type.as_str().to_string()),
             ),
             Definitions::Rust(defs) => Box::new(
+                defs.iter()
+                    .map(|def| def.definition_type.as_str().to_string()),
+            ),
+            Definitions::Go(defs) => Box::new(
                 defs.iter()
                     .map(|def| def.definition_type.as_str().to_string()),
             ),
@@ -577,6 +610,13 @@ impl Definitions {
         }
     }
 
+    pub fn iter_go(&self) -> Option<impl Iterator<Item = &GoDefinitionInfo>> {
+        match self {
+            Definitions::Go(defs) => Some(defs.iter()),
+            _ => None,
+        }
+    }
+
     pub fn iter_unknown(&self) -> Option<impl Iterator<Item = &DefinitionInfo<(), ()>>> {
         match self {
             Definitions::Unknown(defs) => Some(defs.iter()),
@@ -595,6 +635,7 @@ pub enum ImportedSymbols {
     Ruby(Vec<RubyImportedSymbolInfo>),
     TypeScript(Vec<TypeScriptImportedSymbolInfo>),
     Rust(Vec<RustImportedSymbolInfo>),
+    Go(Vec<GoImportedSymbolInfo>),
 }
 
 impl ImportedSymbols {
@@ -608,6 +649,7 @@ impl ImportedSymbols {
             ImportedSymbols::Ruby(imported_symbols) => imported_symbols.len(),
             ImportedSymbols::TypeScript(imported_symbols) => imported_symbols.len(),
             ImportedSymbols::Rust(imported_symbols) => imported_symbols.len(),
+            ImportedSymbols::Go(imported_symbols) => imported_symbols.len(),
         }
     }
 
@@ -673,6 +715,13 @@ impl ImportedSymbols {
             _ => None,
         }
     }
+
+    pub fn iter_go(&self) -> Option<impl Iterator<Item = &GoImportedSymbolInfo>> {
+        match self {
+            ImportedSymbols::Go(imported_symbols) => Some(imported_symbols.iter()),
+            _ => None,
+        }
+    }
 }
 
 /// Type alias for Ruby references
@@ -690,6 +739,7 @@ pub enum References {
     TypeScript(Vec<TypeScriptReferenceInfo>),
     Java(Vec<JavaReferenceInfo>),
     Python(Vec<PythonReferenceInfo>),
+    Go(Vec<GoReferenceInfo>),
 }
 
 impl References {
@@ -701,6 +751,7 @@ impl References {
             References::TypeScript(references) => references.len(),
             References::Java(references) => references.len(),
             References::Python(references) => references.len(),
+            References::Go(references) => references.len(),
         }
     }
 
@@ -740,6 +791,13 @@ impl References {
     pub fn iter_python(&self) -> Option<impl Iterator<Item = &PythonReferenceInfo>> {
         match self {
             References::Python(references) => Some(references.iter()),
+            _ => None,
+        }
+    }
+
+    pub fn iter_go(&self) -> Option<impl Iterator<Item = &GoReferenceInfo>> {
+        match self {
+            References::Go(references) => Some(references.iter()),
             _ => None,
         }
     }

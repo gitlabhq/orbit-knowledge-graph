@@ -11,6 +11,7 @@ pub mod analyzer;
 pub mod csharp;
 pub mod definitions;
 pub mod fqn;
+pub mod go;
 pub mod imports;
 pub mod java;
 pub mod kotlin;

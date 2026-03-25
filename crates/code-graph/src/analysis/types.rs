@@ -11,6 +11,10 @@ use crate::graph::{RelationshipKind, RelationshipType};
 use parser_core::{
     csharp::types::{CSharpDefinitionType, CSharpFqn, CSharpImportType},
     definitions::DefinitionTypeInfo,
+    go::{
+        ast::go_fqn_to_string,
+        types::{GoDefinitionType, GoFqn, GoImportType},
+    },
     imports::ImportTypeInfo,
     java::ast::java_fqn_to_string,
     java::types::{JavaDefinitionType, JavaFqn, JavaImportType},
@@ -403,6 +407,7 @@ pub enum DefinitionType {
     CSharp(CSharpDefinitionType),
     TypeScript(TypeScriptDefinitionType),
     Rust(RustDefinitionType),
+    Go(GoDefinitionType),
     Unsupported(),
 }
 
@@ -416,6 +421,7 @@ impl DefinitionType {
             DefinitionType::CSharp(csharp_type) => csharp_type.as_str(),
             DefinitionType::TypeScript(typescript_type) => typescript_type.as_str(),
             DefinitionType::Rust(rust_type) => rust_type.as_str(),
+            DefinitionType::Go(go_type) => go_type.as_str(),
             DefinitionType::Unsupported() => "unsupported",
         }
     }
@@ -431,6 +437,7 @@ pub enum FqnType {
     CSharp(CSharpFqn),
     TypeScript(TypeScriptFqn),
     Rust(RustFqn),
+    Go(GoFqn),
 }
 
 impl std::fmt::Display for FqnType {
@@ -453,6 +460,7 @@ impl std::fmt::Display for FqnType {
                 write!(f, "{}", typescript_fqn_to_string(typescript_type))
             }
             FqnType::Rust(rust_type) => write!(f, "{}", rust_fqn_to_string(rust_type)),
+            FqnType::Go(go_type) => write!(f, "{}", go_fqn_to_string(go_type)),
         }
     }
 }
@@ -468,6 +476,7 @@ impl FqnType {
             FqnType::CSharp(csharp_type) => csharp_type.last().unwrap().node_name(),
             FqnType::TypeScript(typescript_type) => typescript_type.last().unwrap().node_name(),
             FqnType::Rust(rust_type) => rust_type.parts.last().unwrap().node_name(),
+            FqnType::Go(go_type) => &go_type.name,
         }
     }
 }
@@ -562,6 +571,7 @@ pub enum ImportType {
     CSharp(CSharpImportType),
     TypeScript(TypeScriptImportType),
     Rust(RustImportType),
+    Go(GoImportType),
 }
 
 impl ImportType {
@@ -573,6 +583,7 @@ impl ImportType {
             ImportType::CSharp(csharp_type) => csharp_type.as_str(),
             ImportType::TypeScript(typescript_type) => typescript_type.as_str(),
             ImportType::Rust(rust_type) => rust_type.as_str(),
+            ImportType::Go(go_type) => go_type.as_str(),
         }
     }
 }

@@ -200,6 +200,12 @@ define_languages! {
         extensions: ["rs"],
         names: ["rust"],
         exclude_extensions: []
+    },
+    Go {
+        name: "go",
+        extensions: ["go"],
+        names: ["go"],
+        exclude_extensions: []
     }
 }
 
@@ -613,7 +619,7 @@ mod tests {
         let extensions = get_supported_extensions();
 
         // NOTE: Make sure to also update the count in the macro when updating this test.
-        assert_eq!(extensions.len(), 12);
+        assert_eq!(extensions.len(), 13);
 
         assert!(extensions.contains(&"rb"));
         assert!(extensions.contains(&"rbw"));
@@ -627,6 +633,7 @@ mod tests {
         assert!(extensions.contains(&"cs"));
         assert!(extensions.contains(&"java"));
         assert!(extensions.contains(&"rs"));
+        assert!(extensions.contains(&"go"));
     }
 
     #[test]
@@ -663,6 +670,10 @@ mod tests {
         assert_eq!(
             supported_language_from_str("rust").unwrap(),
             SupportedLanguage::Rust
+        );
+        assert_eq!(
+            supported_language_from_str("go").unwrap(),
+            SupportedLanguage::Go
         );
 
         // Test case insensitivity

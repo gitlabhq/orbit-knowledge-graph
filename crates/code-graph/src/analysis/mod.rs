@@ -20,6 +20,7 @@ use std::{
 // Re-export the sub-module functionality
 pub use files::FileSystemAnalyzer;
 pub use languages::csharp::CSharpAnalyzer;
+pub use languages::go::GoAnalyzer;
 pub use languages::java::JavaAnalyzer;
 pub use languages::kotlin::KotlinAnalyzer;
 pub use languages::python::PythonAnalyzer;
@@ -39,6 +40,7 @@ pub struct AnalysisService {
     csharp_analyzer: CSharpAnalyzer,
     typescript_analyzer: TypeScriptAnalyzer,
     rust_analyzer: RustAnalyzer,
+    go_analyzer: GoAnalyzer,
 }
 
 impl AnalysisService {
@@ -53,6 +55,7 @@ impl AnalysisService {
         let csharp_analyzer = CSharpAnalyzer::new();
         let typescript_analyzer = TypeScriptAnalyzer::new();
         let rust_analyzer = RustAnalyzer::new();
+        let go_analyzer = GoAnalyzer::new();
 
         Self {
             repository_name,
@@ -65,6 +68,7 @@ impl AnalysisService {
             csharp_analyzer,
             typescript_analyzer,
             rust_analyzer,
+            go_analyzer,
         }
     }
 
@@ -342,6 +346,20 @@ impl AnalysisService {
                     imported_symbol_map,
                     relationships,
                 );
+            }
+            SupportedLanguage::Go => {
+                self.go_analyzer.process_definitions(
+                    file_result,
+                    &relative_path,
+                    definition_map,
+                    relationships,
+                );
+                self.go_analyzer.process_imports(
+                    file_result,
+                    &relative_path,
+                    imported_symbol_map,
+                    relationships,
+                );
             } // Note: use _ => {} as a catch-all if you want to disable some analyzers
         }
     }
@@ -482,6 +500,19 @@ impl AnalysisService {
                         relationships,
                     );
                 }
+                SupportedLanguage::Go => {
+                    if let Some(references) = references
+                        && let Some(go_refs) = references.iter_go()
+                    {
+                        let go_refs_vec: Vec<_> = go_refs.cloned().collect();
+                        self.go_analyzer.process_references(
+                            &go_refs_vec,
+                            &relative_path,
+                            definition_map,
+                            relationships,
+                        );
+                    }
+                }
                 _ => {}
             }
         }
@@ -555,6 +586,10 @@ impl AnalysisService {
                     imported_symbol_map,
                     relationships,
                 );
+            }
+            SupportedLanguage::Go => {
+                self.go_analyzer
+                    .add_definition_relationships(definition_map, relationships);
             } // Note: use _ => {} as a catch-all if you want to disable some analyzers
         }
     }
