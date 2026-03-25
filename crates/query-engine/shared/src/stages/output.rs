@@ -40,7 +40,10 @@ impl PipelineStage for OutputStage {
         let pagination = compiled.input.cursor.map(|cursor| {
             let total_rows = query_result.authorized_count();
             let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
-            PaginationMeta { has_more, total_rows }
+            PaginationMeta {
+                has_more,
+                total_rows,
+            }
         });
 
         Ok(PipelineOutput {
