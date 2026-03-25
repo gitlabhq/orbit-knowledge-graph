@@ -39,51 +39,51 @@ pub struct QueryEngineMetrics {
 
 impl QueryEngineMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("query_engine");
+        let meter = global::meter("gkg_query_engine");
 
         let validation_failed = meter
-            .u64_counter("qe.threat.validation_failed")
+            .u64_counter("gkg.query.engine.threat.validation_failed")
             .with_description(
                 "Query rejected by structural validation (schema, references, pagination)",
             )
             .build();
 
         let allowlist_rejected = meter
-            .u64_counter("qe.threat.allowlist_rejected")
+            .u64_counter("gkg.query.engine.threat.allowlist_rejected")
             .with_description(
                 "Query referenced an entity, column, or relationship not in the ontology allowlist",
             )
             .build();
 
         let auth_filter_missing = meter
-            .u64_counter("qe.threat.auth_filter_missing")
+            .u64_counter("gkg.query.engine.threat.auth_filter_missing")
             .with_description("Security context was invalid or absent when required")
             .build();
 
         let timeout = meter
-            .u64_counter("qe.threat.timeout")
+            .u64_counter("gkg.query.engine.threat.timeout")
             .with_description("Query compilation or execution exceeded the deadline")
             .build();
 
         let rate_limited = meter
-            .u64_counter("qe.threat.rate_limited")
+            .u64_counter("gkg.query.engine.threat.rate_limited")
             .with_description("Caller was throttled before query compilation")
             .build();
 
         let depth_exceeded = meter
-            .u64_counter("qe.threat.depth_exceeded")
+            .u64_counter("gkg.query.engine.threat.depth_exceeded")
             .with_description("Traversal depth or hop count exceeded the hard cap")
             .build();
 
         let limit_exceeded = meter
-            .u64_counter("qe.threat.limit_exceeded")
+            .u64_counter("gkg.query.engine.threat.limit_exceeded")
             .with_description(
                 "Array cardinality cap exceeded (node_ids count or IN filter value count)",
             )
             .build();
 
         let pipeline_invariant_violated = meter
-            .u64_counter("qe.internal.pipeline_invariant_violated")
+            .u64_counter("gkg.query.engine.internal.pipeline_invariant_violated")
             .with_description(
                 "Lowering or codegen hit a state that upstream validation should have prevented",
             )

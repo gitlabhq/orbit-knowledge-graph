@@ -7,17 +7,21 @@ use opentelemetry::metrics::{Counter, Histogram};
 
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
+const DURATION_BUCKETS: &[f64] = &[
+    0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+];
+
 static METRICS: LazyLock<QueryPipelineMetrics> = LazyLock::new(QueryPipelineMetrics::new);
 
 struct QueryPipelineMetrics {
-    queries_total: Counter<u64>,
-    compile_duration_ms: Histogram<f64>,
-    pipeline_duration_ms: Histogram<f64>,
-    execute_duration_ms: Histogram<f64>,
-    authorization_duration_ms: Histogram<f64>,
-    hydration_duration_ms: Histogram<f64>,
+    queries: Counter<u64>,
+    compile_duration: Histogram<f64>,
+    pipeline_duration: Histogram<f64>,
+    execute_duration: Histogram<f64>,
+    authorization_duration: Histogram<f64>,
+    hydration_duration: Histogram<f64>,
     result_set_size: Histogram<u64>,
-    node_count: Histogram<u64>,
+    batch_count: Histogram<u64>,
     redacted_count: Histogram<u64>,
     security_rejected: Counter<u64>,
     execution_failed: Counter<u64>,
@@ -27,61 +31,71 @@ struct QueryPipelineMetrics {
 
 impl QueryPipelineMetrics {
     fn new() -> Self {
-        let meter = global::meter("query_pipeline");
+        let meter = global::meter("gkg_query_pipeline");
 
         Self {
-            queries_total: meter
-                .u64_counter("qp.queries_total")
+            queries: meter
+                .u64_counter("gkg.query.pipeline.queries")
                 .with_description("Total queries processed through the pipeline")
                 .build(),
-            compile_duration_ms: meter
-                .f64_histogram("qp.compile_duration_ms")
+            compile_duration: meter
+                .f64_histogram("gkg.query.pipeline.compile.duration")
+                .with_unit("s")
                 .with_description("Time spent compiling a query from JSON to parameterized SQL")
+                .with_boundaries(DURATION_BUCKETS.to_vec())
                 .build(),
-            pipeline_duration_ms: meter
-                .f64_histogram("qp.pipeline_duration_ms")
+            pipeline_duration: meter
+                .f64_histogram("gkg.query.pipeline.duration")
+                .with_unit("s")
                 .with_description(
                     "End-to-end pipeline duration from security check to formatted output",
                 )
+                .with_boundaries(DURATION_BUCKETS.to_vec())
                 .build(),
-            execute_duration_ms: meter
-                .f64_histogram("qp.execute_duration_ms")
+            execute_duration: meter
+                .f64_histogram("gkg.query.pipeline.execute.duration")
+                .with_unit("s")
                 .with_description("Time spent executing the compiled query against ClickHouse")
+                .with_boundaries(DURATION_BUCKETS.to_vec())
                 .build(),
-            authorization_duration_ms: meter
-                .f64_histogram("qp.authorization_duration_ms")
+            authorization_duration: meter
+                .f64_histogram("gkg.query.pipeline.authorization.duration")
+                .with_unit("s")
                 .with_description("Time spent on authorization exchange with Rails")
+                .with_boundaries(DURATION_BUCKETS.to_vec())
                 .build(),
-            hydration_duration_ms: meter
-                .f64_histogram("qp.hydration_duration_ms")
+            hydration_duration: meter
+                .f64_histogram("gkg.query.pipeline.hydration.duration")
+                .with_unit("s")
                 .with_description("Time spent hydrating neighbor properties from ClickHouse")
+                .with_boundaries(DURATION_BUCKETS.to_vec())
                 .build(),
             result_set_size: meter
-                .u64_histogram("qp.result_set_size")
+                .u64_histogram("gkg.query.pipeline.result_set.size")
                 .with_description("Number of rows returned after formatting")
                 .build(),
-            node_count: meter
-                .u64_histogram("qp.node_count")
+            batch_count: meter
+                .u64_histogram("gkg.query.pipeline.batch.count")
                 .with_description("Number of Arrow record batches returned from ClickHouse")
                 .build(),
             redacted_count: meter
-                .u64_histogram("qp.redacted_count")
+                .u64_histogram("gkg.query.pipeline.redacted.count")
                 .with_description("Number of rows redacted per query")
                 .build(),
             security_rejected: meter
-                .u64_counter("qp.error.security_rejected")
+                .u64_counter("gkg.query.pipeline.error.security_rejected")
                 .with_description("Pipeline rejected due to invalid or missing security context")
                 .build(),
             execution_failed: meter
-                .u64_counter("qp.error.execution_failed")
+                .u64_counter("gkg.query.pipeline.error.execution_failed")
                 .with_description("ClickHouse query execution failed")
                 .build(),
             authorization_failed: meter
-                .u64_counter("qp.error.authorization_failed")
+                .u64_counter("gkg.query.pipeline.error.authorization_failed")
                 .with_description("Authorization exchange with Rails failed")
                 .build(),
             streaming_failed: meter
-                .u64_counter("qp.error.streaming_failed")
+                .u64_counter("gkg.query.pipeline.error.streaming_failed")
                 .with_description("Streaming channel unavailable during authorization")
                 .build(),
         }
@@ -103,10 +117,10 @@ fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {
 pub struct OTelPipelineObserver {
     query_type: &'static str,
     start: Instant,
-    compile_ms: f64,
-    execute_ms: f64,
-    authorization_ms: f64,
-    hydration_ms: f64,
+    compile_secs: f64,
+    execute_secs: f64,
+    authorization_secs: f64,
+    hydration_secs: f64,
     batch_count: usize,
 }
 
@@ -115,10 +129,10 @@ impl OTelPipelineObserver {
         Self {
             query_type: "unknown",
             start: Instant::now(),
-            compile_ms: 0.0,
-            execute_ms: 0.0,
-            authorization_ms: 0.0,
-            hydration_ms: 0.0,
+            compile_secs: 0.0,
+            execute_secs: 0.0,
+            authorization_secs: 0.0,
+            hydration_secs: 0.0,
             batch_count: 0,
         }
     }
@@ -130,20 +144,20 @@ impl PipelineObserver for OTelPipelineObserver {
     }
 
     fn compiled(&mut self, elapsed: Duration) {
-        self.compile_ms = elapsed.as_secs_f64() * 1000.0;
+        self.compile_secs = elapsed.as_secs_f64();
     }
 
     fn executed(&mut self, elapsed: Duration, batch_count: usize) {
-        self.execute_ms = elapsed.as_secs_f64() * 1000.0;
+        self.execute_secs = elapsed.as_secs_f64();
         self.batch_count = batch_count;
     }
 
     fn authorized(&mut self, elapsed: Duration) {
-        self.authorization_ms = elapsed.as_secs_f64() * 1000.0;
+        self.authorization_secs = elapsed.as_secs_f64();
     }
 
     fn hydrated(&mut self, elapsed: Duration) {
-        self.hydration_ms = elapsed.as_secs_f64() * 1000.0;
+        self.hydration_secs = elapsed.as_secs_f64();
     }
 
     fn record_error(&self, err: &PipelineError) {
@@ -151,10 +165,10 @@ impl PipelineObserver for OTelPipelineObserver {
             KeyValue::new("query_type", self.query_type),
             KeyValue::new("status", err.code()),
         ];
-        METRICS.queries_total.add(1, &attrs);
+        METRICS.queries.add(1, &attrs);
         METRICS
-            .pipeline_duration_ms
-            .record(self.start.elapsed().as_secs_f64() * 1000.0, &attrs);
+            .pipeline_duration
+            .record(self.start.elapsed().as_secs_f64(), &attrs);
 
         if let Some((counter, reason)) = counter_info(err) {
             counter.add(1, &[KeyValue::new("reason", reason)]);
@@ -167,17 +181,17 @@ impl PipelineObserver for OTelPipelineObserver {
             KeyValue::new("query_type", self.query_type),
             KeyValue::new("status", "ok"),
         ];
-        METRICS.queries_total.add(1, &attrs);
+        METRICS.queries.add(1, &attrs);
         METRICS
-            .pipeline_duration_ms
-            .record(self.start.elapsed().as_secs_f64() * 1000.0, &attrs);
-        METRICS.compile_duration_ms.record(self.compile_ms, &qt);
-        METRICS.execute_duration_ms.record(self.execute_ms, &qt);
+            .pipeline_duration
+            .record(self.start.elapsed().as_secs_f64(), &attrs);
+        METRICS.compile_duration.record(self.compile_secs, &qt);
+        METRICS.execute_duration.record(self.execute_secs, &qt);
         METRICS
-            .authorization_duration_ms
-            .record(self.authorization_ms, &qt);
-        METRICS.hydration_duration_ms.record(self.hydration_ms, &qt);
-        METRICS.node_count.record(self.batch_count as u64, &qt);
+            .authorization_duration
+            .record(self.authorization_secs, &qt);
+        METRICS.hydration_duration.record(self.hydration_secs, &qt);
+        METRICS.batch_count.record(self.batch_count as u64, &qt);
         METRICS.result_set_size.record(row_count as u64, &qt);
         METRICS.redacted_count.record(redacted_count as u64, &qt);
     }
