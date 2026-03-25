@@ -1,0 +1,12 @@
+[package]
+name = "query-engine-utils"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+compiler = { path = "../compiler" }
+sqlparser.workspace = true
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

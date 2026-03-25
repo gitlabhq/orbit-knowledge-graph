@@ -1,4 +1,4 @@
-mod duckdb;
+mod codegen;
 mod macros;
 mod ontology;
 mod pipeline;

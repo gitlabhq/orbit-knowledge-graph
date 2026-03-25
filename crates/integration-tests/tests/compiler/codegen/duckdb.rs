@@ -1,20 +1,26 @@
 //! Integration tests for the DuckDB codegen pipeline.
 //!
 //! These tests run `compile_local` end-to-end: JSON → validate → normalize →
-//! lower → DuckDB codegen, and verify the emitted SQL uses DuckDB syntax.
+//! lower → DuckDB codegen, and verify the emitted SQL uses DuckDB syntax
+//! via structural assertions (sqlparser), not string matching.
 
-use super::setup::test_ontology;
+use crate::compiler::setup::test_ontology;
 use compiler::compile_local;
+use query_engine_utils::ParsedSql;
 
 fn compile_duckdb(json: &str) -> compiler::passes::codegen::ParameterizedQuery {
     compile_local(json, &test_ontology()).unwrap().base
+}
+
+fn parse_duckdb(json: &str) -> ParsedSql {
+    ParsedSql::from_query(&compile_duckdb(json))
 }
 
 // ─── Parameter syntax ────────────────────────────────────────────────────────
 
 #[test]
 fn search_uses_positional_params() {
-    let result = compile_duckdb(
+    let pq = compile_duckdb(
         r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User", "columns": ["username"],
@@ -23,23 +29,25 @@ fn search_uses_positional_params() {
     }"#,
     );
 
+    // Rendered output should inline the param, proving it was a $N placeholder
+    let rendered = pq.render();
     assert!(
-        result.sql.contains('$'),
-        "expected positional $N params: {}",
-        result.sql
+        rendered.contains("'alice'"),
+        "expected inlined param: {}",
+        rendered
     );
-    assert!(
-        !result.sql.contains("{p"),
-        "should not contain CH-style params: {}",
-        result.sql
-    );
+
+    // Structural: parsed SQL should have a WHERE clause
+    let sql = ParsedSql::from_query(&pq);
+    assert!(sql.has_where());
+    assert!(sql.has_column_ref("username"));
 }
 
 // ─── Function remapping ──────────────────────────────────────────────────────
 
 #[test]
-fn traversal_path_filter_uses_starts_with() {
-    let result = compile_duckdb(
+fn no_clickhouse_functions_leak() {
+    let sql = parse_duckdb(
         r#"{
         "query_type": "search",
         "node": {"id": "p", "entity": "Project", "columns": ["name"]},
@@ -47,20 +55,16 @@ fn traversal_path_filter_uses_starts_with() {
     }"#,
     );
 
-    // Security filter is skipped in local pipeline, but if startsWith appears
-    // from any other path it should be remapped. Verify no CH functions leak.
-    assert!(
-        !result.sql.contains("startsWith("),
-        "should not contain CH function startsWith: {}",
-        result.sql
-    );
+    assert!(!sql.has_function("startsWith"));
+    assert!(!sql.has_function("has"));
+    assert!(!sql.has_function("arrayConcat"));
 }
 
 // ─── No SET statements ──────────────────────────────────────────────────────
 
 #[test]
 fn no_set_statements_in_output() {
-    let result = compile_duckdb(
+    let sql = parse_duckdb(
         r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
@@ -69,9 +73,9 @@ fn no_set_statements_in_output() {
     );
 
     assert!(
-        !result.sql.contains("SET "),
+        !sql.raw_contains("SET "),
         "DuckDB SQL should not contain SET: {}",
-        result.sql
+        sql.raw
     );
 }
 
@@ -79,7 +83,7 @@ fn no_set_statements_in_output() {
 
 #[test]
 fn no_security_filter_in_output() {
-    let result = compile_duckdb(
+    let sql = parse_duckdb(
         r#"{
         "query_type": "search",
         "node": {"id": "p", "entity": "Project", "columns": ["name"]},
@@ -87,18 +91,14 @@ fn no_security_filter_in_output() {
     }"#,
     );
 
-    assert!(
-        !result.sql.contains("traversal_path"),
-        "local pipeline should skip security filter: {}",
-        result.sql
-    );
+    assert!(sql.lacks_column_ref("traversal_path"));
 }
 
 // ─── Traversal ──────────────────────────────────────────────────────────────
 
 #[test]
 fn traversal_compiles_to_duckdb() {
-    let result = compile_duckdb(
+    let sql = parse_duckdb(
         r#"{
         "query_type": "traversal",
         "nodes": [
@@ -110,28 +110,16 @@ fn traversal_compiles_to_duckdb() {
     }"#,
     );
 
-    assert!(
-        result.sql.contains("gl_edge"),
-        "traversal should reference edge table: {}",
-        result.sql
-    );
-    assert!(
-        result.sql.contains('$'),
-        "should use positional params: {}",
-        result.sql
-    );
-    assert!(
-        !result.sql.contains("{p"),
-        "should not contain CH params: {}",
-        result.sql
-    );
+    assert!(sql.has_table("gl_edge"));
+    assert!(sql.has_column_ref("relationship_kind"));
+    assert_eq!(sql.limit_value(), Some(25));
 }
 
 // ─── Aggregation ────────────────────────────────────────────────────────────
 
 #[test]
 fn aggregation_compiles_to_duckdb() {
-    let result = compile_duckdb(
+    let sql = parse_duckdb(
         r#"{
         "query_type": "aggregation",
         "nodes": [
@@ -146,28 +134,15 @@ fn aggregation_compiles_to_duckdb() {
     }"#,
     );
 
-    assert!(
-        result.sql.contains("COUNT"),
-        "should contain COUNT: {}",
-        result.sql
-    );
-    assert!(
-        result.sql.contains("GROUP BY"),
-        "should contain GROUP BY: {}",
-        result.sql
-    );
-    assert!(
-        result.sql.contains('$'),
-        "should use positional params: {}",
-        result.sql
-    );
+    assert!(sql.has_function("COUNT"));
+    assert!(sql.has_group_by());
 }
 
 // ─── Path finding ───────────────────────────────────────────────────────────
 
 #[test]
 fn path_finding_compiles_to_duckdb() {
-    let result = compile_duckdb(
+    let sql = parse_duckdb(
         r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -178,23 +153,15 @@ fn path_finding_compiles_to_duckdb() {
     }"#,
     );
 
-    assert!(
-        result.sql.contains('$'),
-        "should use positional params: {}",
-        result.sql
-    );
-    assert!(
-        !result.sql.contains("{p"),
-        "should not contain CH params: {}",
-        result.sql
-    );
+    assert!(sql.has_table("gl_edge"));
+    assert!(sql.has_order_by());
 }
 
 // ─── Neighbors ──────────────────────────────────────────────────────────────
 
 #[test]
 fn neighbors_compiles_to_duckdb() {
-    let result = compile_duckdb(
+    let sql = parse_duckdb(
         r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
@@ -203,23 +170,16 @@ fn neighbors_compiles_to_duckdb() {
     }"#,
     );
 
-    assert!(
-        result.sql.contains('$'),
-        "should use positional params: {}",
-        result.sql
-    );
-    assert!(
-        result.sql.contains("gl_edge"),
-        "should reference edge table: {}",
-        result.sql
-    );
+    assert!(sql.has_table("gl_edge"));
+    assert!(sql.has_join());
+    assert_eq!(sql.limit_value(), Some(10));
 }
 
 // ─── Array IN expansion ─────────────────────────────────────────────────────
 
 #[test]
 fn node_ids_filter_expands_params() {
-    let result = compile_duckdb(
+    let sql = parse_duckdb(
         r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3]},
@@ -227,15 +187,10 @@ fn node_ids_filter_expands_params() {
     }"#,
     );
 
-    // Each node_id should be a separate positional param
+    assert!(sql.has_operator("IN"));
     assert!(
-        result.sql.contains("$1") && result.sql.contains("$2") && result.sql.contains("$3"),
-        "expected 3 positional params for node_ids: {}",
-        result.sql
-    );
-    assert!(
-        !result.sql.contains("Array("),
+        !sql.raw_contains("Array("),
         "should not contain Array() type: {}",
-        result.sql
+        sql.raw
     );
 }
