@@ -11,7 +11,7 @@
 //! - `if(cond, then, else)` is rewritten to `CASE WHEN ... THEN ... ELSE ... END`.
 //! - Recursive CTE bodies have LIMIT/OFFSET stripped (DuckDB restriction).
 
-use crate::ast::{ChScalar, ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -19,6 +19,9 @@ use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
 
+// TODO: DuckDB executors will need params in positional order. The current
+// HashMap with synthetic `p1`, `p2` keys works for codegen + render, but a
+// real executor should use `Vec<ParamValue>` or a `params_in_order()` API.
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
     let sql = match ast {
@@ -221,13 +224,9 @@ impl Context {
                         self.param_counter += 1;
                         let name = format!("p{}", self.param_counter);
                         let placeholder = format!("${}", self.param_counter);
+                        // TODO: This will be abstracted away with LLQM to generic scalar types
                         let scalar_type = match data_type {
-                            ChType::Array(inner) => match inner {
-                                ChScalar::String => ChType::String,
-                                ChScalar::Int64 => ChType::Int64,
-                                ChScalar::Float64 => ChType::Float64,
-                                ChScalar::Bool => ChType::Bool,
-                            },
+                            ChType::Array(inner) => ChType::from(inner),
                             _ => data_type,
                         };
                         self.params.insert(
