@@ -2,6 +2,8 @@
 //!
 //! Verifies that cursor-based pagination slices the authorized
 //! (post-redaction) result set correctly across query types.
+//!
+//! Seed data: 6 users (IDs 1-6), 5 active (1-4, 6), 1 blocked (5).
 
 use super::helpers::*;
 
@@ -59,9 +61,9 @@ pub(super) async fn cursor_last_page_partial(ctx: &TestContext) {
     )
     .await;
 
-    // 5 users total, offset=4 → only user 5 remains
-    resp.assert_node_count(1);
-    resp.assert_node_order("User", &[5]);
+    // 6 users total, offset=4 → users 5, 6
+    resp.assert_node_count(2);
+    resp.assert_node_order("User", &[5, 6]);
 }
 
 pub(super) async fn cursor_offset_beyond_data(ctx: &TestContext) {
@@ -85,12 +87,12 @@ pub(super) async fn cursor_offset_beyond_data(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(super) async fn cursor_with_filter(ctx: &TestContext) {
-    // Users 1-4 are active, user 5 is blocked. Cursor pages through active only.
+    // 5 active users (1-4, 6), 1 blocked (5). Cursor pages through active only.
     let resp = run_query(
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
@@ -110,17 +112,17 @@ pub(super) async fn cursor_with_filter_second_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
-            "cursor": {"offset": 2, "page_size": 10}
+            "cursor": {"offset": 2, "page_size": 2}
         }"#,
         &allow_all(),
     )
     .await;
 
-    // 4 active users total, offset=2 → users 3, 4
+    // 5 active users total, offset=2 → users 3, 4
     resp.assert_node_count(2);
     resp.assert_node_order("User", &[3, 4]);
     resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
@@ -131,10 +133,10 @@ pub(super) async fn cursor_with_filter_second_page(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
-    // Allow users 1, 3, 5 — deny 2, 4. 3 authorized users total.
+    // Allow users 1, 3, 5 — deny 2, 4, 6. 3 authorized users total.
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1, 3, 5]);
-    svc.deny("user", &[2, 4]);
+    svc.deny("user", &[2, 4, 6]);
 
     let resp = run_query(
         ctx,
@@ -157,7 +159,7 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
 pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1, 3, 5]);
-    svc.deny("user", &[2, 4]);
+    svc.deny("user", &[2, 4, 6]);
 
     let resp = run_query(
         ctx,
@@ -182,8 +184,8 @@ pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
-    // Page through all 5 users in pages of 2, collecting IDs from each page.
-    let mut all_ids = Vec::new();
+    // Page through all 6 users in pages of 2, collecting IDs from each page.
+    let mut all_ids: Vec<i64> = Vec::new();
 
     for offset in (0u32..).step_by(2) {
         let json = format!(
@@ -213,11 +215,12 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
         all_ids.extend(page_ids);
         resp.skip_requirement(Requirement::Cursor);
         resp.skip_requirement(Requirement::NodeCount);
+        resp.skip_requirement(Requirement::OrderBy);
     }
 
     assert_eq!(
         all_ids,
-        vec![1, 2, 3, 4, 5],
+        vec![1, 2, 3, 4, 5, 6],
         "pages should cover all users in order"
     );
 }
@@ -227,6 +230,7 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(super) async fn cursor_traversal(ctx: &TestContext) {
+    // 9 MEMBER_OF edges total, page_size=3 → first 3 rows
     let resp = run_query(
         ctx,
         r#"{
@@ -237,13 +241,13 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100,
-            "cursor": {"offset": 0, "page_size": 2}
+            "cursor": {"offset": 0, "page_size": 3}
         }"#,
         &allow_all(),
     )
     .await;
 
-    resp.assert_node_count(2);
+    resp.assert_node_count(3);
     resp.skip_requirement(Requirement::Relationship {
         edge_type: "MEMBER_OF".into(),
     });
