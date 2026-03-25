@@ -237,18 +237,28 @@ fn rewrite_agg_column(expr: &mut Expr, rewrites: &HashMap<String, (String, &str)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Keyset pagination (disabled)
+// Keyset CNF predicate (disabled)
 //
-// SQL-level keyset pagination only generalizes to Search queries on tables
-// with (traversal_path, id) primary keys. For traversal, aggregation,
-// path_finding, and neighbors the cursor model doesn't map to the result
-// structure. Additionally, redaction operates in entity-space while LIMIT
-// operates in row-space, making SQL-level pagination unreliable.
+// Decomposes (traversal_path, id) > (x, y) into CNF form that ClickHouse
+// can push into the primary key index:
+//   (tp > x) OR (tp = x AND id > y)
 //
-// The agent-driven model (cursor = {offset, page_size} into the authorized
-// result set) replaces this. The keyset CNF predicate is preserved here
-// for potential re-enablement on Search queries where the agent could
-// pass the last row's (traversal_path, id) for index-seek performance.
+// As a *pagination* mechanism this only works for Search (1:1 root-to-row).
+// For traversal/aggregation/path_finding/neighbors the root cursor doesn't
+// track position in edge-space, so it skips root entities but not result
+// rows. Redaction compounds the problem: LIMIT is in row-space, redaction
+// is in entity-space.
+//
+// Pagination is now agent-driven (cursor = {offset, page_size} into the
+// authorized result set). But the CNF predicate itself is a valid
+// *performance optimization* for any single-table scan on a
+// (traversal_path, id) PK — including:
+//   - Search: narrow the root scan on deep pages
+//   - Hydration: when fetching many entity IDs across traversal paths,
+//     a keyset bound could replace large IN (...) lists with a range scan
+//
+// Preserved here for potential re-enablement. Would need a cursor shape
+// that carries (traversal_path, id) rather than the current {offset, page_size}.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // fn apply_keyset_pagination(q: &mut Query, input: &Input, ctx: &SecurityContext) {
