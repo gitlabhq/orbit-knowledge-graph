@@ -82,6 +82,8 @@ struct EdgeMappingYaml {
     delimiter: Option<String>,
     #[serde(default)]
     array_field: Option<String>,
+    #[serde(default)]
+    array: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -197,9 +199,14 @@ fn convert_edge_mappings(
                     )));
                 }
             };
-            if mapping.delimiter.is_some() && mapping.array_field.is_some() {
+            let multi_value_options = [
+                mapping.delimiter.is_some(),
+                mapping.array_field.is_some(),
+                mapping.array,
+            ];
+            if multi_value_options.iter().filter(|&&v| v).count() > 1 {
                 return Err(OntologyError::Validation(format!(
-                    "edge '{}': use 'delimiter' or 'array_field', not both",
+                    "edge '{}': use only one of 'delimiter', 'array_field', or 'array'",
                     column
                 )));
             }
@@ -211,6 +218,7 @@ fn convert_edge_mappings(
                     direction: mapping.direction,
                     delimiter: mapping.delimiter,
                     array_field: mapping.array_field,
+                    array: mapping.array,
                 },
             ))
         })

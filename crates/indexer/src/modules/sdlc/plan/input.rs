@@ -60,6 +60,7 @@ pub(in crate::modules::sdlc) enum EdgeId {
     Column(String),
     Exploded { column: String, delimiter: String },
     ArrayElement { column: String, field: String },
+    ArrayUnnest { column: String },
 }
 
 pub(in crate::modules::sdlc) enum EdgeKind {
@@ -264,6 +265,15 @@ fn resolve_fk_edges(
                 let array_id = EdgeId::ArrayElement {
                     column: fk_column.clone(),
                     field: field.clone(),
+                };
+                match mapping.direction {
+                    EdgeDirection::Outgoing => target_id = array_id,
+                    EdgeDirection::Incoming => source_id = array_id,
+                }
+                filters.push(EdgeFilter::ArrayNotEmpty(fk_column.clone()));
+            } else if mapping.array {
+                let array_id = EdgeId::ArrayUnnest {
+                    column: fk_column.clone(),
                 };
                 match mapping.direction {
                     EdgeDirection::Outgoing => target_id = array_id,

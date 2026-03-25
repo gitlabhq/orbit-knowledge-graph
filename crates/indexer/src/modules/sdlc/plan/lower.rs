@@ -176,6 +176,7 @@ fn lower_edge_id(id: &EdgeId) -> Expr {
         EdgeId::ArrayElement { column, field } => {
             Expr::struct_field(Expr::func("unnest", vec![Expr::col("", column)]), field)
         }
+        EdgeId::ArrayUnnest { column } => Expr::func("unnest", vec![Expr::col("", column)]),
     }
 }
 
