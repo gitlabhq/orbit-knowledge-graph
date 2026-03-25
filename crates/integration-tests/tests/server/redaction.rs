@@ -3905,280 +3905,186 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Range Pagination Subtests
+// Cursor Pagination Subtests
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn range_pagination_comprehensive(ctx: &TestContext) {
+async fn cursor_pagination_basic(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // ── 1. First page: range {0, 2} returns exactly 2 users ─────────
+    // 5 users total. cursor: offset=0, page_size=2 → first 2 users
     let json = r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 0, "end": 2}
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
     assert!(
-        query.base.sql.contains("LIMIT 2"),
-        "range 0..2 should produce LIMIT 2: {}",
-        query.base.sql
-    );
-    assert!(
-        query.base.sql.contains("OFFSET 0"),
-        "range 0..2 should produce OFFSET 0: {}",
+        query.base.sql.contains("LIMIT 100"),
+        "SQL LIMIT should come from limit field, not cursor: {}",
         query.base.sql
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    assert_eq!(result.len(), 2, "first page should return exactly 2 rows");
-    let page1_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    // All 5 users returned from ClickHouse
+    assert_eq!(result.len(), 5, "ClickHouse should return all 5 users");
+
+    // Apply cursor: slice to [0..2]
+    let has_more = result.apply_cursor(0, 2);
+    assert!(has_more);
+    assert_eq!(result.authorized_count(), 2);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let page1_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
     assert_eq!(page1_ids, vec![1, 2], "first page should be user IDs 1, 2");
 
-    // ── 2. Second page: range {2, 5} returns remaining 3 users ──────
+    // cursor: offset=2, page_size=2 → users 3, 4
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let has_more = result.apply_cursor(2, 2);
+    assert!(has_more);
+    assert_eq!(result.authorized_count(), 2);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let page2_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(page2_ids, vec![3, 4], "second page should be user IDs 3, 4");
+
+    // cursor: offset=4, page_size=2 → user 5, has_more=false
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let has_more = result.apply_cursor(4, 2);
+    assert!(!has_more, "last page should not have more");
+    assert_eq!(result.authorized_count(), 1);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let last_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(last_ids, vec![5], "last page should be user ID 5");
+}
+
+async fn cursor_pagination_with_redaction(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // 5 users, but redaction will deny 2 of them
     let json = r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 2, "end": 5}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    assert!(
-        query.base.sql.contains("LIMIT 3"),
-        "range 2..5 should produce LIMIT 3: {}",
-        query.base.sql
-    );
-    assert!(
-        query.base.sql.contains("OFFSET 2"),
-        "range 2..5 should produce OFFSET 2: {}",
-        query.base.sql
-    );
-
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
-
-    assert_eq!(result.len(), 3, "second page should return exactly 3 rows");
-    let page2_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
-    assert_eq!(
-        page2_ids,
-        vec![3, 4, 5],
-        "second page should be user IDs 3, 4, 5"
-    );
-
-    // ── 3. Pages don't overlap ──────────────────────────────────────
-    let page1_set: HashSet<i64> = page1_ids.iter().copied().collect();
-    let page2_set: HashSet<i64> = page2_ids.iter().copied().collect();
-    assert!(page1_set.is_disjoint(&page2_set), "pages must not overlap");
-    let mut all_ids: HashSet<i64> = page1_set;
-    all_ids.extend(page2_set);
-    assert_eq!(
-        all_ids,
-        ALL_USER_IDS.iter().copied().collect::<HashSet<_>>(),
-        "union of pages must cover all users"
-    );
-
-    // ── 4. Offset beyond data returns empty ─────────────────────────
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 100, "end": 110}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    assert_eq!(
-        result.len(),
-        0,
-        "offset beyond data set should return 0 rows"
-    );
-
-    // ── 5. Range with filters ───────────────────────────────────────
-    // 4 active users (IDs 1-4), 1 blocked (ID 5). Page through active only.
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 0, "end": 2}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
-
-    assert_eq!(result.len(), 2, "filtered first page should have 2 rows");
-    let filtered_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
-    assert_eq!(
-        filtered_ids,
-        vec![1, 2],
-        "filtered range should return first 2 active users"
-    );
-
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 2, "end": 10}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
-
-    assert_eq!(
-        result.len(),
-        2,
-        "filtered second page should have 2 remaining active users"
-    );
-    let filtered_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
-    assert_eq!(
-        filtered_ids,
-        vec![3, 4],
-        "filtered range should return last 2 active users (not blocked user 5)"
-    );
-
-    // ── 6. Range on traversal query ─────────────────────────────────
-    // Group→Project CONTAINS edges: 100→1000, 100→1002, 101→1001, 101→1003, 102→1004 = 5 rows
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "g", "entity": "Group"},
-            {"id": "p", "entity": "Project"}
-        ],
-        "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-        "range": {"start": 0, "end": 3}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-
-    assert_eq!(
-        result.len(),
-        3,
-        "traversal with range 0..3 should return exactly 3 rows"
-    );
-
-    // ── 7. Redaction still works with range ──────────────────────────
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 0, "end": 5}
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
+
+    // Redact users 2 and 4 → 3 authorized (1, 3, 5)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1, 3, 5]);
+    mock_service.deny("user", &[2, 4]);
+    run_redaction(&mut result, &mock_service);
 
     assert_eq!(
-        result.len(),
-        5,
-        "all 5 users should be present before redaction"
+        result.authorized_count(),
+        3,
+        "3 users should survive redaction"
     );
 
-    let mut mock_service = MockRedactionService::new();
-    mock_service.allow("user", &[1, 3]);
-    mock_service.deny("user", &[2, 4, 5]);
-
-    let redacted = run_redaction(&mut result, &mock_service);
-
-    assert_eq!(redacted, 3, "3 denied users should be redacted");
+    // Apply cursor on the authorized set: offset=0, page_size=2 → users 1, 3
+    let has_more = result.apply_cursor(0, 2);
+    assert!(has_more);
     assert_eq!(result.authorized_count(), 2);
 
-    let authorized_ids: HashSet<i64> = result
+    let u = result.ctx().get("u").unwrap().clone();
+    let page_ids: Vec<i64> = result
         .authorized_rows()
         .filter_map(|r| r.get_id(&u))
         .collect();
     assert_eq!(
-        authorized_ids,
-        HashSet::from([1, 3]),
-        "only allowed users should survive redaction with range"
+        page_ids,
+        vec![1, 3],
+        "cursor should slice the authorized (post-redaction) set, not the raw set"
     );
+}
 
-    // ── 8. limit (no range) still works unchanged ───────────────────
+async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
     let json = r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "limit": 3
+        "limit": 1000,
+        "cursor": {"offset": 100, "page_size": 10}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    assert!(
-        query.base.sql.contains("LIMIT 3"),
-        "limit should still produce LIMIT clause: {}",
-        query.base.sql
-    );
-    assert!(
-        !query.base.sql.contains("OFFSET"),
-        "limit alone should not produce OFFSET: {}",
-        query.base.sql
-    );
-
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    assert_eq!(result.len(), 3, "limit: 3 should return exactly 3 rows");
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // ── 9. Mutual exclusion: limit + range rejected at schema level ─
+    let has_more = result.apply_cursor(100, 10);
+    assert!(!has_more);
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "offset beyond data should return 0 rows"
+    );
+}
+
+async fn cursor_pagination_with_filters(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // 4 active users (IDs 1-4), 1 blocked (ID 5)
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "limit": 10,
-        "range": {"start": 0, "end": 5}
+        "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
+        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
     }"#;
-    let err = compile(json, &ontology, &security_ctx).unwrap_err();
-    assert!(
-        matches!(err, query_engine::compiler::QueryError::Validation(_)),
-        "limit + range together should be a validation error, got: {err}"
-    );
 
-    // ── 10. Invalid ranges rejected ─────────────────────────────────
-    // end <= start
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 5, "end": 5}
-    }"#;
-    let err = compile(json, &ontology, &security_ctx).unwrap_err();
-    assert!(
-        err.to_string().contains("must be greater than"),
-        "end == start should fail: {err}"
-    );
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // window > 1000
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 0, "end": 1001}
-    }"#;
-    let err = compile(json, &ontology, &security_ctx).unwrap_err();
-    assert!(
-        err.to_string().contains("must not exceed 1000"),
-        "window > 1000 should fail: {err}"
-    );
+    let has_more = result.apply_cursor(0, 2);
+    assert!(has_more);
+    assert_eq!(result.authorized_count(), 2);
 
-    // end == 1000, start == 0 → window = 1000 → should succeed
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 0, "end": 1000}
-    }"#;
-    assert!(
-        compile(json, &ontology, &security_ctx).is_ok(),
-        "window == 1000 should be accepted"
-    );
+    let u = result.ctx().get("u").unwrap().clone();
+    let ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(ids, vec![1, 2], "first page of filtered results");
+
+    // Second page
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let has_more = result.apply_cursor(2, 2);
+    assert!(!has_more);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(ids, vec![3, 4], "second page of filtered results");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4461,8 +4367,11 @@ async fn redaction_integration() {
         traversal_edge_columns_preserved_through_redaction,
         multi_hop_edge_columns_survive_redaction,
         enum_filter_normalization_int_vs_string_enums,
-        // range pagination
-        range_pagination_comprehensive,
+        // cursor pagination
+        cursor_pagination_basic,
+        cursor_pagination_with_redaction,
+        cursor_pagination_offset_beyond_data,
+        cursor_pagination_with_filters,
         // merge request redaction
         search_merge_requests_with_redaction,
         // order preservation

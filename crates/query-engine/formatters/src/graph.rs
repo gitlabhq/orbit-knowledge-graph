@@ -458,6 +458,7 @@ mod tests {
             query_result: qr,
             result_context: result_ctx,
             execution_log: vec![],
+            pagination: None,
         }
     }
 

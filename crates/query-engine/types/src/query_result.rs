@@ -351,6 +351,26 @@ impl QueryResult {
     pub fn authorized_count(&self) -> usize {
         self.rows.iter().filter(|r| r.authorized).count()
     }
+
+    /// Slice the authorized result set to `[offset..offset+page_size]`.
+    ///
+    /// Must be called **after** hydration — marks out-of-window authorized
+    /// rows as unauthorized so `authorized_rows()` returns only the page.
+    /// Returns whether more authorized rows exist beyond this page.
+    pub fn apply_cursor(&mut self, offset: u32, page_size: u32) -> bool {
+        let end = (offset as usize).saturating_add(page_size as usize);
+        let mut i = 0usize;
+        for row in &mut self.rows {
+            if !row.authorized {
+                continue;
+            }
+            if i < offset as usize || i >= end {
+                row.authorized = false;
+            }
+            i += 1;
+        }
+        i > end
+    }
 }
 
 fn is_authorized(
