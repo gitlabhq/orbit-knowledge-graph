@@ -151,13 +151,19 @@ pub struct InputRange {
     pub end: u32,
 }
 
-/// Keyset pagination cursor. Encodes the last seen row's `id`.
-/// Combined with traversal paths from the security context to build the
-/// decomposed keyset predicate `(tp > x) OR (tp = x AND id > cursor_id)`.
+/// Agent-driven pagination cursor. Slices the authorized (post-redaction)
+/// result set by `offset` and `page_size`. The server re-runs the query,
+/// authorizes all rows up to `limit`, and returns `[offset..offset+page_size]`.
 /// Mutually exclusive with `range`.
-#[derive(Debug, Clone, Deserialize)]
+///
+/// This model avoids SQL-level keyset pagination, which only generalizes to
+/// Search queries and breaks when redaction removes rows from the LIMIT window.
+// TODO: Add cursor and has_more fields to QueryMetadata proto
+// TODO: Server-side query caching with TTL to avoid re-running the same query on page 2+
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct InputCursor {
-    pub id: i64,
+    pub offset: u32,
+    pub page_size: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display, strum::IntoStaticStr)]

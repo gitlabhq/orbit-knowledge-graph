@@ -374,6 +374,14 @@ impl<'a> Validator<'a> {
                 "cannot specify both 'cursor' and 'range'".to_string(),
             ));
         }
+        if let Some(ref cursor) = input.cursor
+            && cursor.offset + cursor.page_size > input.limit
+        {
+            return Err(QueryError::PaginationError(format!(
+                "cursor.offset ({}) + cursor.page_size ({}) must not exceed limit ({})",
+                cursor.offset, cursor.page_size, input.limit
+            )));
+        }
         Ok(())
     }
 
