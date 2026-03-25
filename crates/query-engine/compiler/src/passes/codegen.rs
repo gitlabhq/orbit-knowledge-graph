@@ -26,7 +26,7 @@ pub struct CompiledQueryContext {
     pub input: Input,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HydrationPlan {
     /// No hydration needed (e.g., Aggregation).
     None,
@@ -37,7 +37,7 @@ pub enum HydrationPlan {
     Dynamic,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HydrationTemplate {
     pub entity_type: String,
     /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
