@@ -445,6 +445,7 @@ mod tests {
                     sql: String::new(),
                     params: HashMap::new(),
                     result_context: result_ctx.clone(),
+                    dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({

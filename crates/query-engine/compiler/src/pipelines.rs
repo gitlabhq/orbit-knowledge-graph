@@ -79,6 +79,13 @@ pub struct DuckDbState {
     pub output: Option<CompiledQueryContext>,
 }
 
+impl DuckDbState {
+    pub fn into_output(self) -> Result<CompiledQueryContext> {
+        self.output
+            .ok_or_else(|| QueryError::PipelineInvariant("pipeline did not produce output".into()))
+    }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // Pipeline presets
 // ═════════════════════════════════════════════════════════════════════════════
@@ -131,5 +138,23 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
         .pass(OptimizePass)
         .pass(EnforcePass)
         .pass(HydrationCodegenPass)
+        .build()
+}
+
+/// Local DuckDB compilation pipeline.
+///
+/// Skips security, check, enforce, and optimize — those are ClickHouse/multi-tenant
+/// concerns. Emits DuckDB-dialect SQL via [`DuckDbCodegenPass`].
+///
+/// ```text
+/// JSON → Validate → Normalize → Lower → DuckDbCodegen
+/// ```
+pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
+    Pipeline::builder()
+        .pass(ValidatePass)
+        .seal(SealJson)
+        .pass(NormalizePass)
+        .pass(LowerPass)
+        .pass(DuckDbCodegenPass)
         .build()
 }

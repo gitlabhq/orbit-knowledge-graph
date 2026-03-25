@@ -65,8 +65,8 @@ pub use pipeline::{
 
 // Re-export env, state, and capability traits.
 pub use passes::{
-    CheckPass, CodegenPass, EnforcePass, HydrationCodegenPass, LowerPass, NormalizePass,
-    OptimizePass, SecurityPass, ValidatePass,
+    CheckPass, CodegenPass, DuckDbCodegenPass, EnforcePass, HydrationCodegenPass, LowerPass,
+    NormalizePass, OptimizePass, SecurityPass, ValidatePass,
 };
 pub use pipelines::{
     DuckDbState, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx,
@@ -76,7 +76,8 @@ pub use pipelines::{
 // Re-export key types from pass modules.
 pub use passes::check::check_ast;
 pub use passes::codegen::{
-    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery, codegen,
+    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery,
+    SqlDialect, codegen,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use passes::hydrate::generate_hydration_plan;
@@ -135,6 +136,23 @@ pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQuer
         .execute(state, &env)?
         .into_output()
         .count_err()
+}
+
+/// Compile a JSON query into DuckDB-dialect SQL for local/offline use.
+///
+/// Skips security, enforce, optimize, and hydration — the output has no
+/// redaction metadata and `HydrationPlan::None`. Do not use this where
+/// multi-tenant authorization or column redaction is required.
+///
+/// ```text
+/// JSON → Validate → Normalize → Lower → DuckDbCodegen
+/// ```
+#[must_use = "the compiled query context should be used"]
+pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQueryContext> {
+    let env = LocalEnv::new(Arc::new(ontology.clone()));
+    let state = DuckDbState::from_json(json_input);
+    let pipeline = pipelines::duckdb().seal();
+    pipeline.execute(state, &env)?.into_output().count_err()
 }
 
 // Pipeline presets are in `pipelines.rs`.
