@@ -46,4 +46,4 @@ You can use Orbit to get answers to questions like:
 ## Feedback
 
 Your feedback is valuable in helping us improve this feature.
-Share your experience in [issue 592436](https://gitlab.com/gitlab-org/gitlab/-/work_items/592436).
+Share your experiences in [issue 592436](https://gitlab.com/gitlab-org/gitlab/-/work_items/592436).
