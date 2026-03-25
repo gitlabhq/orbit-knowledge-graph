@@ -187,4 +187,4 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/', 3, 'User', 'ASSIGNED', 4001, 'WorkItem'),
     ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7000, 'Label'),
     ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7001, 'Label'),
-    ('1/101/', 4001, 'WorkItem', 'HAS_LABEL', 7002, 'Label');
+    ('1/100/', 4001, 'WorkItem', 'HAS_LABEL', 7002, 'Label');
