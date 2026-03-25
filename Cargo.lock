@@ -1144,7 +1144,6 @@ dependencies = [
  "opentelemetry",
  "pastey",
  "pretty_assertions",
- "query-engine-utils",
  "regex",
  "serde",
  "serde_json",
@@ -3495,7 +3494,6 @@ dependencies = [
  "parking_lot",
  "prost",
  "query-engine",
- "query-engine-utils",
  "serde",
  "serde_json",
  "sha2",
@@ -5295,15 +5293,6 @@ dependencies = [
  "pipeline",
  "shared",
  "types",
-]
-
-[[package]]
-name = "query-engine-utils"
-version = "0.1.0"
-dependencies = [
- "compiler",
- "serde_json",
- "sqlparser",
 ]
 
 [[package]]

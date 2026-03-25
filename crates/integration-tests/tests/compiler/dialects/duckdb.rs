@@ -1,8 +1,8 @@
 //! DuckDB dialect end-to-end tests.
 
 use crate::compiler::setup::test_ontology;
+use crate::compiler::utils::ParsedSql;
 use compiler::compile_local;
-use query_engine_utils::ParsedSql;
 
 fn parse_duckdb(json: &str) -> ParsedSql {
     let result = compile_local(json, &test_ontology()).unwrap();

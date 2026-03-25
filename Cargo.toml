@@ -17,7 +17,6 @@ members = [
   "crates/query-engine/formatters",
   "crates/query-engine/profiler",
   "crates/query-engine/compiler-pipeline-macros",
-  "crates/query-engine/utils",
   "crates/cli",
 
   "crates/gkg-server",
