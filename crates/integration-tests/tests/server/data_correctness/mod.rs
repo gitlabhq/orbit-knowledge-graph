@@ -131,6 +131,7 @@ async fn data_correctness() {
         pagination::cursor_with_filter_second_page,
         pagination::cursor_with_redaction,
         pagination::cursor_with_redaction_second_page,
+        pagination::cursor_pages_cover_all_data,
         pagination::cursor_traversal,
     );
 }

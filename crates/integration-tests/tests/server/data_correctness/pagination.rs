@@ -178,6 +178,47 @@ pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Page coverage: no overlap, no gaps
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
+    // Page through all 5 users in pages of 2, collecting IDs from each page.
+    let mut all_ids = Vec::new();
+
+    for offset in (0u32..).step_by(2) {
+        let json = format!(
+            r#"{{
+                "query_type": "search",
+                "node": {{"id": "u", "entity": "User", "columns": ["username"]}},
+                "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
+                "limit": 100,
+                "cursor": {{"offset": {offset}, "page_size": 2}}
+            }}"#
+        );
+
+        let resp = run_query(ctx, &json, &allow_all()).await;
+        let page_ids = resp.node_ids("User");
+
+        if page_ids.is_empty() {
+            break;
+        }
+
+        // No overlap with previously seen IDs
+        for id in &page_ids {
+            assert!(
+                !all_ids.contains(id),
+                "ID {id} appeared in multiple pages"
+            );
+        }
+        all_ids.extend(page_ids);
+        resp.skip_requirement(Requirement::Cursor);
+        resp.skip_requirement(Requirement::NodeCount);
+    }
+
+    assert_eq!(all_ids, vec![1, 2, 3, 4, 5], "pages should cover all users in order");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Traversal pagination
 // ─────────────────────────────────────────────────────────────────────────────
 
