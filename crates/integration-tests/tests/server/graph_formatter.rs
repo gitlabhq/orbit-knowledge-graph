@@ -188,6 +188,7 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
         query_result: hydration_output.query_result,
         result_context: hydration_output.result_context,
         execution_log: vec![],
+        pagination: None,
     };
 
     let value = GraphFormatter.format(&pipeline_output);

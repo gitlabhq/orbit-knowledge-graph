@@ -102,6 +102,7 @@ pub(super) async fn run_query_with_security(
         query_result: hydration_output.query_result,
         result_context: hydration_output.result_context,
         execution_log: vec![],
+        pagination: None,
     };
 
     let value = GraphFormatter.format(&pipeline_output);

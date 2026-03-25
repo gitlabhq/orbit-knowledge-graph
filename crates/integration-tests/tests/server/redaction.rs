@@ -3905,6 +3905,170 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Cursor Pagination Subtests
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn cursor_pagination_basic(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // 5 users total. cursor: offset=0, page_size=2 → first 2 users
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    assert!(
+        query.base.sql.contains("LIMIT 100"),
+        "SQL LIMIT should come from limit field, not cursor: {}",
+        query.base.sql
+    );
+
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    // All 5 users returned from ClickHouse
+    assert_eq!(result.len(), 5, "ClickHouse should return all 5 users");
+
+    // Apply cursor: slice to [0..2]
+    let slice = result.apply_cursor(0, 2);
+    assert_eq!(slice.total_authorized, 5);
+    assert!(slice.has_more);
+    assert_eq!(result.authorized_count(), 2);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let page1_ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    assert_eq!(page1_ids, vec![1, 2], "first page should be user IDs 1, 2");
+
+    // cursor: offset=2, page_size=2 → users 3, 4
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let slice = result.apply_cursor(2, 2);
+    assert_eq!(slice.total_authorized, 5);
+    assert!(slice.has_more);
+    assert_eq!(result.authorized_count(), 2);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let page2_ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    assert_eq!(page2_ids, vec![3, 4], "second page should be user IDs 3, 4");
+
+    // cursor: offset=4, page_size=2 → user 5, has_more=false
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let slice = result.apply_cursor(4, 2);
+    assert_eq!(slice.total_authorized, 5);
+    assert!(!slice.has_more, "last page should not have more");
+    assert_eq!(result.authorized_count(), 1);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let last_ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    assert_eq!(last_ids, vec![5], "last page should be user ID 5");
+}
+
+async fn cursor_pagination_with_redaction(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // 5 users, but redaction will deny 2 of them
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    // Redact users 2 and 4 → 3 authorized (1, 3, 5)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1, 3, 5]);
+    mock_service.deny("user", &[2, 4]);
+    run_redaction(&mut result, &mock_service);
+
+    assert_eq!(result.authorized_count(), 3, "3 users should survive redaction");
+
+    // Apply cursor on the authorized set: offset=0, page_size=2 → users 1, 3
+    let slice = result.apply_cursor(0, 2);
+    assert_eq!(slice.total_authorized, 3);
+    assert!(slice.has_more);
+    assert_eq!(result.authorized_count(), 2);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let page_ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    assert_eq!(
+        page_ids,
+        vec![1, 3],
+        "cursor should slice the authorized (post-redaction) set, not the raw set"
+    );
+}
+
+async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "limit": 100,
+        "cursor": {"offset": 100, "page_size": 10}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    let slice = result.apply_cursor(100, 10);
+    assert_eq!(slice.total_authorized, 5);
+    assert!(!slice.has_more);
+    assert_eq!(result.authorized_count(), 0, "offset beyond data should return 0 rows");
+}
+
+async fn cursor_pagination_with_filters(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // 4 active users (IDs 1-4), 1 blocked (ID 5)
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
+        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
+    }"#;
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+
+    let slice = result.apply_cursor(0, 2);
+    assert_eq!(slice.total_authorized, 4, "4 active users");
+    assert!(slice.has_more);
+    assert_eq!(result.authorized_count(), 2);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    assert_eq!(ids, vec![1, 2], "first page of filtered results");
+
+    // Second page
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let slice = result.apply_cursor(2, 2);
+    assert_eq!(slice.total_authorized, 4);
+    assert!(!slice.has_more);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let ids: Vec<i64> = result.authorized_rows().filter_map(|r| r.get_id(&u)).collect();
+    assert_eq!(ids, vec![3, 4], "second page of filtered results");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MergeRequest Redaction Subtests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4184,6 +4348,11 @@ async fn redaction_integration() {
         traversal_edge_columns_preserved_through_redaction,
         multi_hop_edge_columns_survive_redaction,
         enum_filter_normalization_int_vs_string_enums,
+        // cursor pagination
+        cursor_pagination_basic,
+        cursor_pagination_with_redaction,
+        cursor_pagination_offset_beyond_data,
+        cursor_pagination_with_filters,
         // merge request redaction
         search_merge_requests_with_redaction,
         // order preservation

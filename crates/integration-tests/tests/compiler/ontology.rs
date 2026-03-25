@@ -440,6 +440,73 @@ fn project_still_uses_id_for_redaction() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Cursor pagination (compiler-level validation)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn cursor_pagination_validation() {
+    use compiler::QueryError;
+
+    let ontology = embedded_ontology();
+    let ctx = test_ctx();
+
+    // Valid cursor: offset + page_size <= limit
+    let result = compile(
+        r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "columns": ["username"]},
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 20}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(result.is_ok(), "valid cursor should compile: {result:?}");
+
+    // Cursor does not affect SQL — LIMIT comes from the limit field
+    let result = result.unwrap();
+    let sql = ParsedSql::from_query(&result.base);
+    assert_eq!(sql.limit_value(), Some(100));
+
+    // offset + page_size > limit rejected
+    let err = compile(
+        r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "limit": 10,
+        "cursor": {"offset": 5, "page_size": 10}
+    }"#,
+        &ontology,
+        &ctx,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, QueryError::PaginationError(_)),
+        "offset + page_size > limit should be a pagination error, got: {err}"
+    );
+
+    // Cursor on traversal compiles fine (pagination is server-side)
+    let result = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "p", "entity": "Project", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
+        "limit": 50,
+        "cursor": {"offset": 10, "page_size": 20}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(
+        result.is_ok(),
+        "cursor on traversal should compile: {result:?}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Render (parameterized → inlined)
 // ─────────────────────────────────────────────────────────────────────────────
 
