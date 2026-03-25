@@ -7,7 +7,6 @@ pub mod hydrate;
 pub mod lower;
 pub mod normalize;
 pub mod optimize;
-pub mod paginate;
 pub mod security;
 pub mod validate;
 
@@ -77,36 +76,18 @@ pub struct OptimizePass;
 
 impl<E, S> CompilerPass<E, S> for OptimizePass
 where
-    E: PipelineEnv,
+    E: PipelineEnv + HasSecurityCtx,
     S: PipelineState + HasNode + HasInput,
 {
     const NAME: &'static str = "optimize";
 
-    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
-        let mut node = state.take_node()?;
-        let mut input = state.take_input()?;
-        optimize::optimize(&mut node, &mut input);
-        state.set_node(node);
-        state.set_input(input);
-        Ok(())
-    }
-}
-
-pub struct PaginatePass;
-
-impl<E, S> CompilerPass<E, S> for PaginatePass
-where
-    E: PipelineEnv + HasSecurityCtx,
-    S: PipelineState + HasNode + HasInput,
-{
-    const NAME: &'static str = "paginate";
-
     fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let security_ctx = env.security_ctx().clone();
         let mut node = state.take_node()?;
-        let input = state.input()?;
-        paginate::paginate(&mut node, input, &security_ctx);
+        let mut input = state.take_input()?;
+        optimize::optimize(&mut node, &mut input, &security_ctx);
         state.set_node(node);
+        state.set_input(input);
         Ok(())
     }
 }

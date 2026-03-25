@@ -229,7 +229,6 @@ fn observer_records_all_pass_completions() {
             "normalize",
             "lower",
             "optimize",
-            "paginate",
             "enforce",
             "security",
             "check",
@@ -438,13 +437,7 @@ fn hydration_preset_skips_security_and_check() {
 
     assert_eq!(
         pass_names,
-        vec![
-            "lower",
-            "optimize",
-            "paginate",
-            "enforce",
-            "hydration_codegen"
-        ]
+        vec!["lower", "optimize", "enforce", "hydration_codegen"]
     );
     assert!(!pass_names.contains(&"security"));
     assert!(!pass_names.contains(&"check"));
