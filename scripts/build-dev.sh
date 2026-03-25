@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
-# macOS defaults to 256 FDs which is too few for linking this project
-ulimit -n 10240 2>/dev/null || true
+# Linking this project needs many FDs open simultaneously
+if [ "$(ulimit -n)" != "unlimited" ] && [ "$(ulimit -n)" -lt 10240 ]; then
+    ulimit -n 10240 2>/dev/null || true
+fi
 
 IMAGE_TAG="${1:-gkg-server:dev}"
 
