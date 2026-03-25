@@ -84,4 +84,6 @@ pub struct PipelineOutput {
 pub struct PaginationMeta {
     /// Whether more authorized rows exist beyond the current page.
     pub has_more: bool,
+    /// Total authorized rows before cursor slicing.
+    pub total_rows: usize,
 }
