@@ -15,7 +15,8 @@ use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_er
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
     GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
-    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
+    ListToolsRequest, ListToolsResponse, PaginationInfo, QueryMetadata, ResponseFormat,
+    SchemaDomain, SchemaEdge,
     SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
@@ -139,6 +140,10 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                         query_type: output.query_type,
                         raw_query_strings: output.raw_query_strings,
                         row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                        pagination: output.pagination.map(|p| PaginationInfo {
+                            has_more: p.has_more,
+                            total_rows: i32::try_from(p.total_rows).unwrap_or(i32::MAX),
+                        }),
                     });
 
                     let _ = tx
