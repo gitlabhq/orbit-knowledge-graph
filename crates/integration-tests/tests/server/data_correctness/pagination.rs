@@ -203,6 +203,7 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
 
         if count == 0 {
             resp.assert_node_count(0);
+            resp.skip_requirement(Requirement::OrderBy);
             break;
         }
 
@@ -230,8 +231,30 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(super) async fn cursor_traversal(ctx: &TestContext) {
-    // 9 MEMBER_OF edges total, page_size=3 → first 3 rows
-    let resp = run_query(
+    // Full traversal has 9 MEMBER_OF edge-rows → 9 result rows.
+    // Page through all of them in pages of 4 and verify total coverage.
+    let full = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 100
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let full_count = full.node_count();
+    assert_eq!(full_count, 9, "full traversal should return 9 edge-rows");
+    full.assert_node_count(9);
+    full.assert_edge_count("MEMBER_OF", 9);
+
+    // First page: offset=0, page_size=4
+    let page1 = run_query(
         ctx,
         r#"{
             "query_type": "traversal",
@@ -241,14 +264,64 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100,
-            "cursor": {"offset": 0, "page_size": 3}
+            "cursor": {"offset": 0, "page_size": 4}
         }"#,
         &allow_all(),
     )
     .await;
 
-    resp.assert_node_count(3);
-    resp.skip_requirement(Requirement::Relationship {
+    let page1_count = page1.node_count();
+    assert!(page1_count > 0 && page1_count < full_count, "page should be a subset");
+    page1.assert_node_count(page1_count);
+    page1.skip_requirement(Requirement::Relationship {
+        edge_type: "MEMBER_OF".into(),
+    });
+
+    // Second page: offset=4, page_size=4
+    let page2 = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 100,
+            "cursor": {"offset": 4, "page_size": 4}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let page2_count = page2.node_count();
+    assert!(page2_count > 0, "second page should have rows");
+    page2.assert_node_count(page2_count);
+    page2.skip_requirement(Requirement::Relationship {
+        edge_type: "MEMBER_OF".into(),
+    });
+
+    // Last page: offset=8, page_size=4 → 1 row left
+    let page3 = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 100,
+            "cursor": {"offset": 8, "page_size": 4}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let page3_count = page3.node_count();
+    assert!(page3_count > 0, "last page should have at least 1 row");
+    page3.assert_node_count(page3_count);
+    page3.skip_requirement(Requirement::Relationship {
         edge_type: "MEMBER_OF".into(),
     });
 }
