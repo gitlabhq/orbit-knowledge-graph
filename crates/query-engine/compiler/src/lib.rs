@@ -138,9 +138,11 @@ pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQuer
         .count_err()
 }
 
-/// Compile a JSON query into DuckDB-dialect SQL.
+/// Compile a JSON query into DuckDB-dialect SQL for local/offline use.
 ///
-/// Local compilation pipeline — no security context, enforce, or optimize.
+/// Skips security, enforce, optimize, and hydration — the output has no
+/// redaction metadata and `HydrationPlan::None`. Do not use this where
+/// multi-tenant authorization or column redaction is required.
 ///
 /// ```text
 /// JSON → Validate → Normalize → Lower → DuckDbCodegen
