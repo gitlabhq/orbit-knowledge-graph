@@ -1,0 +1,91 @@
+//! Codegen: AST → SQL
+//!
+//! Backend-specific code generators translate the shared AST into parameterized
+//! SQL for a target database. Each backend lives in its own submodule and
+//! exposes a single `codegen()` entry point with the same signature.
+
+pub mod clickhouse;
+pub mod duckdb;
+
+use crate::input::{Input, QueryType};
+use crate::passes::enforce::ResultContext;
+pub use gkg_utils::clickhouse::ParamValue;
+use std::collections::HashMap;
+
+// Re-export the ClickHouse backend as the default `codegen` function so
+// existing call-sites (`codegen::codegen(...)`) keep working unchanged.
+pub use clickhouse::codegen;
+
+#[derive(Debug, Clone)]
+pub struct ParameterizedQuery {
+    pub sql: String,
+    pub params: HashMap<String, ParamValue>,
+    pub result_context: ResultContext,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledQueryContext {
+    pub query_type: QueryType,
+    pub base: ParameterizedQuery,
+    pub hydration: HydrationPlan,
+    pub input: Input,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HydrationPlan {
+    /// No hydration needed (e.g., Aggregation).
+    None,
+    /// Entity types known at compile time (Traversal, Search).
+    /// One template per entity type, with IDs to be filled at runtime.
+    Static(Vec<HydrationTemplate>),
+    /// Entity types discovered at runtime (PathFinding, Neighbors).
+    Dynamic,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HydrationTemplate {
+    pub entity_type: String,
+    /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
+    /// results back to the base query's `_gkg_{alias}_id` / `_gkg_{alias}_type` columns.
+    pub node_alias: String,
+    /// Base JSON for the hydration query (without node_ids).
+    /// Call `with_ids` to produce the final query JSON for execution.
+    pub query_json: String,
+}
+
+impl HydrationTemplate {
+    /// Produce a complete query JSON with the given entity IDs injected.
+    pub fn with_ids(&self, ids: &[i64]) -> String {
+        let mut value: serde_json::Value =
+            serde_json::from_str(&self.query_json).expect("template is valid JSON");
+        value["node"]["node_ids"] = serde_json::json!(ids);
+        value.to_string()
+    }
+}
+
+impl ParameterizedQuery {
+    /// Render SQL with parameters inlined for debugging/observability.
+    ///
+    /// Replaces `{name:Type}` placeholders with literal values using
+    /// `ParamValue::render_literal`. Handles both scalar and array types.
+    /// **Not for execution** — use parameterized queries to prevent injection.
+    pub fn render(&self) -> String {
+        use regex::Regex;
+
+        let re = Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex");
+        re.replace_all(&self.sql, |caps: &regex::Captures| {
+            let name = &caps[1];
+            match self.params.get(name) {
+                Some(param) => param.render_literal(),
+                None => caps[0].to_string(),
+            }
+        })
+        .into_owned()
+    }
+}
+
+impl std::fmt::Display for ParameterizedQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.render())
+    }
+}

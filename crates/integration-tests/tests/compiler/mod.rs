@@ -1,3 +1,4 @@
+mod duckdb;
 mod macros;
 mod ontology;
 mod pipeline;

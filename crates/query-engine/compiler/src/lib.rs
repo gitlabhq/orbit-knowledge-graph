@@ -65,8 +65,8 @@ pub use pipeline::{
 
 // Re-export env, state, and capability traits.
 pub use passes::{
-    CheckPass, CodegenPass, EnforcePass, HydrationCodegenPass, LowerPass, NormalizePass,
-    OptimizePass, SecurityPass, ValidatePass,
+    CheckPass, CodegenPass, DuckDbCodegenPass, EnforcePass, HydrationCodegenPass, LowerPass,
+    NormalizePass, OptimizePass, SecurityPass, ValidatePass,
 };
 pub use pipelines::{
     DuckDbState, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx,
@@ -135,6 +135,21 @@ pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQuer
         .execute(state, &env)?
         .into_output()
         .count_err()
+}
+
+/// Compile a JSON query into DuckDB-dialect SQL.
+///
+/// Local compilation pipeline — no security context, enforce, or optimize.
+///
+/// ```text
+/// JSON → Validate → Normalize → Lower → DuckDbCodegen
+/// ```
+#[must_use = "the compiled query context should be used"]
+pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQueryContext> {
+    let env = LocalEnv::new(Arc::new(ontology.clone()));
+    let state = DuckDbState::from_json(json_input);
+    let pipeline = pipelines::duckdb().seal();
+    pipeline.execute(state, &env)?.into_output().count_err()
 }
 
 // Pipeline presets are in `pipelines.rs`.
