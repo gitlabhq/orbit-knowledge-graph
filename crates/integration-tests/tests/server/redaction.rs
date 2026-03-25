@@ -4028,7 +4028,7 @@ async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
     let json = r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
-        "limit": 100,
+        "limit": 1000,
         "cursor": {"offset": 100, "page_size": 10}
     }"#;
 
