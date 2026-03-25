@@ -76,4 +76,14 @@ pub struct PipelineOutput {
     pub row_count: usize,
     pub redacted_count: usize,
     pub execution_log: Vec<QueryExecution>,
+    /// Pagination metadata, present when the query included a cursor.
+    pub pagination: Option<PaginationMeta>,
+}
+
+/// Pagination metadata returned when the query includes a cursor.
+pub struct PaginationMeta {
+    /// Whether more authorized rows exist beyond the current page.
+    pub has_more: bool,
+    /// Total authorized rows before cursor slicing.
+    pub total_rows: usize,
 }

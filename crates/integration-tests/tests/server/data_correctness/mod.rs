@@ -2,6 +2,7 @@ mod aggregation;
 mod edge_cases;
 mod helpers;
 mod neighbors;
+mod pagination;
 mod path_finding;
 mod search;
 mod security;
@@ -35,8 +36,7 @@ async fn data_correctness() {
         search::search_boolean_columns_have_correct_values,
         search::search_datetime_columns_serialize_as_strings,
         search::search_nullable_datetime_returns_null_when_unset,
-        // search: pagination, limits, combined
-        search::search_range_returns_paginated_results,
+        // search: limits
         search::search_limit_truncates_results,
         search::search_filter_no_match_returns_empty,
         search::search_combined_filter_node_ids_order_by,
@@ -123,6 +123,17 @@ async fn data_correctness() {
         security::path_finding_scoped_excludes_paths_through_other_namespaces,
         security::path_finding_multi_path_scope_finds_both,
         security::path_finding_narrow_scope_excludes_all_targets,
+        // cursor pagination
+        pagination::cursor_first_page,
+        pagination::cursor_second_page,
+        pagination::cursor_last_page_partial,
+        pagination::cursor_offset_beyond_data,
+        pagination::cursor_with_filter,
+        pagination::cursor_with_filter_second_page,
+        pagination::cursor_with_redaction,
+        pagination::cursor_with_redaction_second_page,
+        pagination::cursor_pages_cover_all_data,
+        pagination::cursor_traversal,
         // work items: search
         work_items::search_returns_correct_work_item_properties,
         work_items::search_filter_work_item_type_returns_matching_rows,

@@ -93,15 +93,26 @@ pub(super) async fn run_query_with_security(
         .await
         .expect("pipeline should succeed");
 
+    let mut query_result = hydration_output.query_result;
+    let pagination = compiled.input.cursor.map(|cursor| {
+        let total_rows = query_result.authorized_count();
+        let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
+        query_engine::shared::PaginationMeta {
+            has_more,
+            total_rows,
+        }
+    });
+
     let pipeline_output = query_engine::shared::PipelineOutput {
-        row_count: hydration_output.query_result.authorized_count(),
+        row_count: query_result.authorized_count(),
         redacted_count: hydration_output.redacted_count,
         query_type: compiled.query_type.to_string(),
         raw_query_strings: vec![compiled.base.sql.clone()],
         compiled: Arc::clone(&compiled),
-        query_result: hydration_output.query_result,
+        query_result,
         result_context: hydration_output.result_context,
         execution_log: vec![],
+        pagination,
     };
 
     let value = GraphFormatter.format(&pipeline_output);

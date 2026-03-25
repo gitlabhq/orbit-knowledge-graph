@@ -3,7 +3,7 @@
 use super::setup::{embedded_ontology, test_ctx};
 use super::utils::ParsedSql;
 use compiler::{
-    ColumnSelection, HydrationPlan, Input, InputNode, QueryError, QueryType, compile, compile_input,
+    ColumnSelection, HydrationPlan, Input, InputNode, QueryType, compile, compile_input,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -440,28 +440,52 @@ fn project_still_uses_id_for_redaction() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Pagination
+// Cursor pagination (compiler-level validation)
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn range_pagination() {
+fn cursor_pagination_validation() {
+    use compiler::QueryError;
+
     let ontology = embedded_ontology();
     let ctx = test_ctx();
 
+    // Valid cursor: offset + page_size <= limit
     let result = compile(
         r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User", "columns": ["username"]},
-        "range": {"start": 40, "end": 50}
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 20}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(result.is_ok(), "valid cursor should compile: {result:?}");
+
+    // Cursor does not affect SQL — LIMIT comes from the limit field
+    let result = result.unwrap();
+    let sql = ParsedSql::from_query(&result.base);
+    assert_eq!(sql.limit_value(), Some(100));
+
+    // offset + page_size > limit rejected
+    let err = compile(
+        r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "limit": 10,
+        "cursor": {"offset": 5, "page_size": 10}
     }"#,
         &ontology,
         &ctx,
     )
-    .unwrap();
-    let sql = ParsedSql::from_query(&result.base);
-    assert_eq!(sql.limit_value(), Some(10));
-    assert_eq!(sql.offset_value(), Some(40));
+    .unwrap_err();
+    assert!(
+        matches!(err, QueryError::PaginationError(_)),
+        "offset + page_size > limit should be a pagination error, got: {err}"
+    );
 
+    // Cursor on traversal compiles fine (pagination is server-side)
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -470,71 +494,106 @@ fn range_pagination() {
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
-        "range": {"start": 0, "end": 30},
-        "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
+        "limit": 50,
+        "cursor": {"offset": 10, "page_size": 20}
     }"#,
         &ontology,
         &ctx,
-    )
-    .unwrap();
-    let sql = ParsedSql::from_query(&result.base);
-    assert_eq!(sql.limit_value(), Some(30));
-    assert_eq!(sql.offset_value(), Some(0));
-    assert!(sql.has_order_by());
+    );
+    assert!(
+        result.is_ok(),
+        "cursor on traversal should compile: {result:?}"
+    );
 
-    // Mutual exclusion: limit + range rejected
+    // offset + page_size == limit is valid (boundary)
+    let result = compile(
+        r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "limit": 10,
+        "cursor": {"offset": 5, "page_size": 5}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(
+        result.is_ok(),
+        "offset + page_size == limit should be valid"
+    );
+
+    // offset == 0, page_size == limit is valid (full window)
+    let result = compile(
+        r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "limit": 30,
+        "cursor": {"offset": 0, "page_size": 30}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(result.is_ok(), "page_size == limit should be valid");
+
+    // Missing required cursor fields rejected at deserialization
+    let err = compile(
+        r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "cursor": {"offset": 0}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(err.is_err(), "cursor missing page_size should fail");
+
+    let err = compile(
+        r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "cursor": {"page_size": 10}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(err.is_err(), "cursor missing offset should fail");
+
+    // Empty cursor object rejected
+    let err = compile(
+        r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"},
+        "cursor": {}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(err.is_err(), "empty cursor should fail");
+
+    // page_size = 0 rejected (schema minimum: 1)
     let err = compile(
         r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
         "limit": 10,
-        "range": {"start": 0, "end": 5}
+        "cursor": {"offset": 0, "page_size": 0}
     }"#,
         &ontology,
         &ctx,
-    )
-    .unwrap_err();
-    assert!(matches!(err, QueryError::Validation(_)));
-
-    // end == start rejected
-    let err = compile(
-        r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 10, "end": 10}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("must be greater than"));
-
-    // window > 1000 rejected
-    let err = compile(
-        r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 0, "end": 1001}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("must not exceed 1000"));
-
-    // window == 1000 accepted
-    assert!(
-        compile(
-            r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 0, "end": 1000}
-    }"#,
-            &ontology,
-            &ctx
-        )
-        .is_ok()
     );
+    assert!(err.is_err(), "page_size = 0 should fail");
+
+    // No cursor: default limit still works
+    let result = compile(
+        r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User"}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(result.is_ok(), "no cursor should compile fine");
+    let sql = ParsedSql::from_query(&result.unwrap().base);
+    assert_eq!(sql.limit_value(), Some(30), "default limit should be 30");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

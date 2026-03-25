@@ -31,7 +31,7 @@ use crate::input::{Input, InputNode, QueryType};
 use crate::passes::security::SecurityContext;
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
-    SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
+    SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
 };
 
 const ROOT_SIP_CTE: &str = "_root_ids";
@@ -40,7 +40,6 @@ const ROOT_SIP_CTE: &str = "_root_ids";
 pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
     match node {
         Node::Query(q) => {
-            apply_keyset_pagination(q, input, ctx);
             if input.query_type == QueryType::Aggregation {
                 eliminate_agg_node_joins(q, input);
             }
@@ -237,44 +236,6 @@ fn rewrite_agg_column(expr: &mut Expr, rewrites: &HashMap<String, (String, &str)
     }
 }
 
-/// Keyset pagination and OFFSET elimination.
-///
-/// When a cursor is present, decomposes it into a PK predicate:
-///   (traversal_path > :tp) OR (traversal_path = :tp AND id > :cursor_id)
-/// for each traversal path in the security context. This lets ClickHouse
-/// seek directly via the primary key instead of scanning + skipping via OFFSET.
-///
-/// When node_ids are present (with or without a cursor), OFFSET is also
-/// removed -- the result set is already bounded by explicit IDs, so
-/// positional skipping is redundant.
-fn apply_keyset_pagination(q: &mut Query, input: &Input, ctx: &SecurityContext) {
-    let root_node = match input.nodes.first() {
-        Some(n) => n,
-        None => return,
-    };
-
-    let has_node_ids = !root_node.node_ids.is_empty();
-
-    if let Some(cursor) = &input.cursor {
-        let root_alias = &root_node.id;
-        let keyset_predicate = if ctx.traversal_paths.len() == 1 {
-            build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
-        } else {
-            Expr::or_all(
-                ctx.traversal_paths
-                    .iter()
-                    .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor.id))),
-            )
-            .unwrap_or_else(|| Expr::param(ChType::Bool, false))
-        };
-
-        q.where_clause = Expr::and_all([q.where_clause.take(), Some(keyset_predicate)]);
-        q.offset = None;
-    } else if has_node_ids {
-        q.offset = None;
-    }
-}
-
 /// Choose the SIP root: the node with pinned `node_ids` (fewest wins).
 /// Falls back to the `from` node of the first relationship.
 ///
@@ -314,7 +275,7 @@ fn choose_sip_root(input: &Input) -> Option<&InputNode> {
 /// When source_id IN (...) is present without startsWith, ClickHouse selects
 /// the `by_source` projection instead. When both are present, the base table
 /// PK handles both predicates via prefix matching.
-fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
+fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
     if !matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Aggregation
@@ -336,11 +297,10 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         None => return,
     };
 
-    let has_cursor = input.cursor.is_some();
     let has_filters = !root_node.filters.is_empty();
     let has_node_ids = !root_node.node_ids.is_empty();
     let has_id_range = root_node.id_range.is_some();
-    let has_explicit_selectivity = has_cursor || has_filters || has_node_ids || has_id_range;
+    let has_explicit_selectivity = has_filters || has_node_ids || has_id_range;
 
     // When the root node's table was eliminated from the FROM (edge-only
     // aggregation), SIP is only worthwhile if the node has explicit selectivity
@@ -370,20 +330,6 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
         None => return,
     };
 
-    // Build optional keyset predicate for the CTE (narrows the materialized set)
-    let keyset_predicate = input.cursor.as_ref().map(|cursor| {
-        if ctx.traversal_paths.len() == 1 {
-            build_keyset_expr(root_alias, &ctx.traversal_paths[0], cursor.id)
-        } else {
-            Expr::or_all(
-                ctx.traversal_paths
-                    .iter()
-                    .map(|tp| Some(build_keyset_expr(root_alias, tp, cursor.id))),
-            )
-            .unwrap_or_else(|| Expr::param(ChType::Bool, false))
-        }
-    });
-
     // Build the CTE: SELECT id FROM root_table WHERE <root-only filters>
     // Extract only WHERE conjuncts that reference the root node alias.
     // The security pass will inject startsWith(traversal_path, ...) automatically.
@@ -401,12 +347,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, ctx: &SecurityContext) {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let cte_where = Expr::and_all(
-        root_only_conds
-            .into_iter()
-            .map(Some)
-            .chain(std::iter::once(keyset_predicate)),
-    );
+    let cte_where = Expr::and_all(root_only_conds.into_iter().map(Some));
 
     let cte_query = Query {
         select: vec![SelectExpr::new(
@@ -661,28 +602,6 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
             &aliases,
         );
     }
-}
-
-/// Build a decomposed keyset predicate for one traversal path:
-///   (traversal_path > :tp) OR (traversal_path = :tp AND id > :cursor_id)
-fn build_keyset_expr(alias: &str, tp: &str, cursor_id: i64) -> Expr {
-    let tp_gt = Expr::binary(
-        Op::Gt,
-        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-        Expr::param(ChType::String, tp.to_string()),
-    );
-    let tp_eq_and_id_gt = Expr::and(
-        Expr::eq(
-            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-            Expr::param(ChType::String, tp.to_string()),
-        ),
-        Expr::binary(
-            Op::Gt,
-            Expr::col(alias, DEFAULT_PRIMARY_KEY),
-            Expr::param(ChType::Int64, cursor_id),
-        ),
-    );
-    Expr::or(tp_gt, tp_eq_and_id_gt)
 }
 
 /// Walk the FROM tree and inject `{edge_alias}.{edge_col} IN (SELECT <id_col> FROM <cte>)`
