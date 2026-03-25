@@ -1,6 +1,6 @@
 //! SQL assertion utilities backed by sqlparser's Visitor.
 //!
-//! Parses compiled SQL with the ClickHouse dialect, then walks the
+//! Parses compiled SQL with the appropriate dialect, then walks the
 //! entire AST (CTEs, subqueries, unions) to collect function names,
 //! column references, table names, aliases, and operators. Tests
 //! assert against these collected sets instead of raw string matching.
@@ -8,14 +8,14 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
+use compiler::SqlDialect;
+use compiler::passes::codegen::{ParamValue, ParameterizedQuery};
 use sqlparser::ast::{
     Expr, Function, GroupByExpr, LimitClause, ObjectName, OrderByKind, Query, Select, SelectItem,
     SetExpr, Statement, TableFactor, Visit, Visitor,
 };
-use sqlparser::dialect::ClickHouseDialect;
+use sqlparser::dialect::{ClickHouseDialect, DuckDbDialect};
 use sqlparser::parser::Parser;
-
-use compiler::passes::codegen::{ParamValue, ParameterizedQuery};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Collector — walks the full AST via Visitor
@@ -116,26 +116,30 @@ pub struct ParsedSql {
 
 impl ParsedSql {
     /// Parse a `ParameterizedQuery` by rendering (inlining params) first.
-    /// This is the preferred entry point — parameterized placeholders like
-    /// `{p0:String}` aren't valid SQL and can't be parsed directly.
+    /// Uses the query's dialect to select the sqlparser dialect.
     pub fn from_query(query: &ParameterizedQuery) -> Self {
-        Self::parse(&query.render())
+        Self::parse_with_dialect(&query.render(), query.dialect)
     }
 
     /// Parse raw SQL using ClickHouse dialect. Panics on parse failure.
-    /// Prefer `from_query` for compiler output.
     pub fn parse(sql: &str) -> Self {
-        let dialect = ClickHouseDialect {};
-        let statements = Parser::parse_sql(&dialect, sql)
-            .unwrap_or_else(|e| panic!("failed to parse SQL:\n{sql}\n\nerror: {e}"));
+        Self::parse_with_dialect(sql, SqlDialect::ClickHouse)
+    }
+
+    /// Parse raw SQL using the specified dialect.
+    pub fn parse_with_dialect(sql: &str, dialect: SqlDialect) -> Self {
+        let statements = match dialect {
+            SqlDialect::ClickHouse => Parser::parse_sql(&ClickHouseDialect {}, sql)
+                .unwrap_or_else(|e| panic!("failed to parse SQL:\n{sql}\n\nerror: {e}")),
+            SqlDialect::DuckDb => Parser::parse_sql(&DuckDbDialect {}, sql)
+                .unwrap_or_else(|e| panic!("failed to parse SQL:\n{sql}\n\nerror: {e}")),
+        };
 
         let mut collected = Collector::default();
         for stmt in &statements {
             let _ = stmt.visit(&mut collected);
         }
 
-        // Also collect SELECT aliases (ExprWithAlias) which the visitor
-        // doesn't traverse as relations/identifiers.
         for stmt in &statements {
             if let Statement::Query(q) = stmt {
                 collect_select_aliases(q, &mut collected.aliases);
@@ -277,6 +281,15 @@ impl ParsedSql {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Param helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// True if any param value matches the given JSON value.
+pub fn has_param_value(params: &HashMap<String, ParamValue>, val: &serde_json::Value) -> bool {
+    params.values().any(|p| &p.value == val)
+}
+
 fn expr_to_u64(expr: &Expr) -> Option<u64> {
     match expr {
         Expr::Value(v) => v.to_string().parse().ok(),
@@ -303,13 +316,4 @@ fn collect_select_aliases(query: &Query, aliases: &mut HashSet<String>) {
             }
         }
     }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Param helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// True if any param value matches the given JSON value.
-pub fn has_param_value(params: &HashMap<String, ParamValue>, val: &serde_json::Value) -> bool {
-    params.values().any(|p| &p.value == val)
 }

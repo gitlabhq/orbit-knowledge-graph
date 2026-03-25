@@ -50,6 +50,17 @@ impl fmt::Display for ChType {
     }
 }
 
+impl From<ChScalar> for ChType {
+    fn from(s: ChScalar) -> Self {
+        match s {
+            ChScalar::String => ChType::String,
+            ChScalar::Int64 => ChType::Int64,
+            ChScalar::Float64 => ChType::Float64,
+            ChScalar::Bool => ChType::Bool,
+        }
+    }
+}
+
 impl ChType {
     /// Infer ClickHouse type from a JSON value.
     /// For arrays, inspects the first element to determine the element type.
