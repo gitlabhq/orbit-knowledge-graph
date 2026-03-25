@@ -23,7 +23,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum(rate(etl_messages_processed_total{job=\"gkg-indexer\"}[5m]) * 60)",
+          "expr": "sum(rate(gkg_etl_messages_processed_total{job=\"gkg-indexer\"}[5m]) * 60)",
           "refId": "A"
         }
       ],
@@ -55,7 +55,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum(rate(etl_messages_processed_total{job=\"gkg-indexer\", outcome=\"nack\"}[5m])) / sum(rate(etl_messages_processed_total{job=\"gkg-indexer\"}[5m]))",
+          "expr": "sum(rate(gkg_etl_messages_processed_total{job=\"gkg-indexer\", outcome=\"nack\"}[5m])) / sum(rate(gkg_etl_messages_processed_total{job=\"gkg-indexer\"}[5m]))",
           "refId": "A"
         }
       ],
@@ -90,7 +90,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "etl_permits_active{job=\"gkg-indexer\", permit_kind=\"global\"}",
+          "expr": "gkg_etl_permits_active{job=\"gkg-indexer\", permit_kind=\"global\"}",
           "legendFormat": "active",
           "refId": "A"
         }
@@ -130,7 +130,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum by (topic) (rate(etl_messages_processed_total{job=\"gkg-indexer\"}[5m]) * 60)",
+          "expr": "sum by (topic) (rate(gkg_etl_messages_processed_total{job=\"gkg-indexer\"}[5m]) * 60)",
           "legendFormat": "{{ topic }}",
           "refId": "A"
         }
@@ -161,7 +161,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum by (topic) (rate(etl_messages_processed_total{job=\"gkg-indexer\", outcome=\"nack\"}[5m]) * 60)",
+          "expr": "sum by (topic) (rate(gkg_etl_messages_processed_total{job=\"gkg-indexer\", outcome=\"nack\"}[5m]) * 60)",
           "legendFormat": "{{ topic }}",
           "refId": "A"
         }
@@ -202,19 +202,19 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(etl_message_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gkg_etl_message_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(etl_message_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_etl_message_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(etl_message_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_etl_message_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -245,7 +245,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.95, sum by (le, handler) (rate(etl_handler_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, handler) (rate(gkg_etl_handler_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "{{ handler }}",
           "refId": "A"
         }
@@ -283,19 +283,19 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(etl_permit_wait_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gkg_etl_permit_wait_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(etl_permit_wait_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_etl_permit_wait_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(etl_permit_wait_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_etl_permit_wait_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -326,19 +326,19 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(etl_nats_fetch_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gkg_etl_nats_fetch_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(etl_nats_fetch_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_etl_nats_fetch_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(etl_nats_fetch_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_etl_nats_fetch_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -376,7 +376,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.95, sum by (le, table) (rate(etl_destination_write_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "{{ table }}",
           "refId": "A"
         }
@@ -407,7 +407,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum by (table) (rate(etl_destination_rows_written_total{job=\"gkg-indexer\"}[5m]) * 60)",
+          "expr": "sum by (table) (rate(gkg_etl_destination_rows_written_total{job=\"gkg-indexer\"}[5m]) * 60)",
           "legendFormat": "{{ table }}",
           "refId": "A"
         }

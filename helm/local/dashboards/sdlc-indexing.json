@@ -16,7 +16,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "1 - (sum(rate(indexer_sdlc_pipeline_errors_total{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])) or vector(0)) / clamp_min(sum(rate(indexer_sdlc_pipeline_duration_seconds_count{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])), 1)",
+          "expr": "1 - (sum(rate(gkg_indexer_sdlc_pipeline_errors_total{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])) or vector(0)) / clamp_min(sum(rate(gkg_indexer_sdlc_pipeline_duration_seconds_count{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])), 1)",
           "refId": "A"
         }
       ],
@@ -53,7 +53,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum(rate(indexer_sdlc_pipeline_rows_processed_total{job=\"gkg-indexer\", entity=~\"$entity\"}[5m]) * 60)",
+          "expr": "sum(rate(gkg_indexer_sdlc_pipeline_rows_processed_total{job=\"gkg-indexer\", entity=~\"$entity\"}[5m]) * 60)",
           "refId": "A"
         }
       ],
@@ -86,7 +86,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "max(indexer_sdlc_watermark_lag_seconds{job=\"gkg-indexer\", entity=~\"$entity\"})",
+          "expr": "max(gkg_indexer_sdlc_watermark_lag_seconds{job=\"gkg-indexer\", entity=~\"$entity\"})",
           "refId": "A"
         }
       ],
@@ -121,7 +121,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(indexer_sdlc_pipeline_duration_seconds_bucket{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])))",
           "legendFormat": "{{ entity }}",
           "refId": "A"
         }
@@ -152,7 +152,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum by (entity) (rate(indexer_sdlc_pipeline_rows_processed_total{job=\"gkg-indexer\", entity=~\"$entity\"}[5m]) * 60)",
+          "expr": "sum by (entity) (rate(gkg_indexer_sdlc_pipeline_rows_processed_total{job=\"gkg-indexer\", entity=~\"$entity\"}[5m]) * 60)",
           "legendFormat": "{{ entity }}",
           "refId": "A"
         }
@@ -183,7 +183,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(indexer_sdlc_datalake_query_duration_seconds_bucket{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])))",
           "legendFormat": "{{ entity }}",
           "refId": "A"
         }
@@ -214,7 +214,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(indexer_sdlc_transform_duration_seconds_bucket{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{job=\"gkg-indexer\", entity=~\"$entity\"}[5m])))",
           "legendFormat": "{{ entity }}",
           "refId": "A"
         }
@@ -245,7 +245,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum by (entity, error_kind) (rate(indexer_sdlc_pipeline_errors_total{job=\"gkg-indexer\", entity=~\"$entity\"}[5m]) * 60)",
+          "expr": "sum by (entity, error_kind) (rate(gkg_indexer_sdlc_pipeline_errors_total{job=\"gkg-indexer\", entity=~\"$entity\"}[5m]) * 60)",
           "legendFormat": "{{ entity }} ({{ error_kind }})",
           "refId": "A"
         }
@@ -279,7 +279,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "histogram_quantile(0.95, sum by (le, handler) (rate(indexer_sdlc_handler_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, handler) (rate(gkg_indexer_sdlc_handler_duration_seconds_bucket{job=\"gkg-indexer\"}[5m])))",
           "legendFormat": "{{ handler }}",
           "refId": "A"
         }
@@ -310,13 +310,13 @@
       {
         "current": { "selected": true, "text": "All", "value": "$__all" },
         "datasource": "Prometheus",
-        "definition": "label_values(indexer_sdlc_pipeline_duration_seconds_count{job=\"gkg-indexer\"}, entity)",
+        "definition": "label_values(gkg_indexer_sdlc_pipeline_duration_seconds_count{job=\"gkg-indexer\"}, entity)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
         "name": "entity",
         "options": [],
-        "query": "label_values(indexer_sdlc_pipeline_duration_seconds_count{job=\"gkg-indexer\"}, entity)",
+        "query": "label_values(gkg_indexer_sdlc_pipeline_duration_seconds_count{job=\"gkg-indexer\"}, entity)",
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,

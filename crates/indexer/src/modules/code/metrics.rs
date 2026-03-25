@@ -20,56 +20,56 @@ pub struct CodeMetrics {
 
 impl CodeMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("indexer_code");
+        let meter = global::meter("gkg_indexer_code");
         Self::with_meter(&meter)
     }
 
     pub fn with_meter(meter: &Meter) -> Self {
         let events_processed = meter
-            .u64_counter("indexer.code.events.processed")
+            .u64_counter("gkg.indexer.code.events.processed")
             .with_description("Total push events processed by the code indexing handler")
             .build();
 
         let handler_duration = meter
-            .f64_histogram("indexer.code.handler.duration")
+            .f64_histogram("gkg.indexer.code.handler.duration")
             .with_unit("s")
             .with_description("End-to-end duration of processing a single push event")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let repository_fetch_duration = meter
-            .f64_histogram("indexer.code.repository.fetch.duration")
+            .f64_histogram("gkg.indexer.code.repository.fetch.duration")
             .with_unit("s")
             .with_description("Duration of downloading a repository archive")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let repository_resolution_strategy = meter
-            .u64_counter("indexer.code.repository.resolution")
+            .u64_counter("gkg.indexer.code.repository.resolution")
             .with_description(
                 "Repository resolution strategy used (cache_hit, incremental, full_download, full_download_fallback)",
             )
             .build();
 
         let indexing_duration = meter
-            .f64_histogram("indexer.code.indexing.duration")
+            .f64_histogram("gkg.indexer.code.indexing.duration")
             .with_unit("s")
             .with_description("Duration of code-graph parsing and analysis")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let files_processed = meter
-            .u64_counter("indexer.code.files.processed")
+            .u64_counter("gkg.indexer.code.files.processed")
             .with_description("Total files seen by the code-graph indexer")
             .build();
 
         let nodes_indexed = meter
-            .u64_counter("indexer.code.nodes.indexed")
+            .u64_counter("gkg.indexer.code.nodes.indexed")
             .with_description("Total graph nodes and edges indexed by the code handler")
             .build();
 
         let errors = meter
-            .u64_counter("indexer.code.errors")
+            .u64_counter("gkg.indexer.code.errors")
             .with_description("Total code indexing errors by pipeline stage")
             .build();
 
