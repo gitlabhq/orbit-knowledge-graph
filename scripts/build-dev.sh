@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# Linking this project needs many FDs open simultaneously
+if [ "$(ulimit -n)" != "unlimited" ] && [ "$(ulimit -n)" -lt 10240 ]; then
+    ulimit -n 10240 2>/dev/null || true
+fi
+
 IMAGE_TAG="${1:-gkg-server:dev}"
 
 HOST_OS="$(uname -s)"
