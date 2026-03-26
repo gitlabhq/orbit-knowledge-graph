@@ -15,7 +15,7 @@ use gkg_server::pipeline::HydrationStage;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
 use query_engine::compiler::compile;
-use query_engine::formatters::{GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GraphFormatter, ResultFormatter, graph::SCALAR_AGGREGATION_TYPE};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
 use serde_json::Value;
@@ -1331,7 +1331,7 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
     assert_eq!(nodes.len(), 1, "ungrouped aggregation should have one synthetic node");
 
     let node = &nodes[0];
-    assert_eq!(node["type"], "Aggregation");
+    assert_eq!(node["type"], SCALAR_AGGREGATION_TYPE);
     assert_eq!(node["id"], 0);
     assert_eq!(node["total"].as_i64().unwrap(), 5, "should count all 5 users");
 }
@@ -1354,7 +1354,7 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
     .await;
 
     let node = &value["nodes"].as_array().unwrap()[0];
-    assert_eq!(node["type"], "Aggregation");
+    assert_eq!(node["type"], SCALAR_AGGREGATION_TYPE);
     assert_eq!(node["total"].as_i64().unwrap(), 5);
     assert_eq!(node["min_id"].as_i64().unwrap(), 1);
     assert_eq!(node["max_id"].as_i64().unwrap(), 5);
@@ -1380,7 +1380,7 @@ async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
     let nodes = value["nodes"].as_array().unwrap();
     assert!(!nodes.is_empty(), "grouped aggregation should have entity nodes");
     assert!(
-        nodes.iter().all(|n| n["type"] != "Aggregation"),
+        nodes.iter().all(|n| n["type"] != SCALAR_AGGREGATION_TYPE),
         "grouped aggregation should not have synthetic Aggregation node"
     );
 }
@@ -1403,7 +1403,7 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
 
     // Count is SQL-level (pre-redaction), so it reflects all 5 users.
     let node = &value["nodes"].as_array().unwrap()[0];
-    assert_eq!(node["type"], "Aggregation");
+    assert_eq!(node["type"], SCALAR_AGGREGATION_TYPE);
     assert_eq!(node["total"].as_i64().unwrap(), 5);
 }
 
