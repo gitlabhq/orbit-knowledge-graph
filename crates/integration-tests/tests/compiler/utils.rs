@@ -8,8 +8,8 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
-use compiler::SqlDialect;
 use compiler::passes::codegen::{ParamValue, ParameterizedQuery};
+use compiler::SqlDialect;
 use sqlparser::ast::{
     Expr, Function, GroupByExpr, LimitClause, ObjectName, OrderByKind, Query, Select, SelectItem,
     SetExpr, Statement, TableFactor, Visit, Visitor,
@@ -157,10 +157,19 @@ impl ParsedSql {
 
     pub fn query(&self) -> &Query {
         assert!(!self.statements.is_empty(), "parsed SQL has no statements");
-        match &self.statements[0] {
-            Statement::Query(q) => q,
-            other => panic!("expected Query, got: {other:?}"),
+        // Skip SET statements (e.g. CH query cache settings) to find the SELECT.
+        for stmt in &self.statements {
+            if let Statement::Query(q) = stmt {
+                return q;
+            }
         }
+        panic!(
+            "no Query statement found in: {:?}",
+            self.statements
+                .iter()
+                .map(|s| std::mem::discriminant(s))
+                .collect::<Vec<_>>()
+        );
     }
 
     pub fn select(&self) -> &Select {
