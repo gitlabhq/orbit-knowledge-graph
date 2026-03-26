@@ -122,6 +122,22 @@ With `--health`:
 - `temp_files_*` -- active memory spills across the server
 - `table_parts` -- high part count per table means fragmentation, which slows reads
 
+## Multi-query files
+
+The profiler can run all queries from a file where keys are query names and values are query objects:
+
+```bash
+cargo run -p query-profiler -- -t '1/' --explain @fixtures/queries/optimization_showcase.json
+```
+
+Filter to a subset by name substring:
+
+```bash
+cargo run -p query-profiler -- -t '1/' --explain --filter aggregation @fixtures/queries/optimization_showcase.json
+```
+
+Progress is printed to stderr. Output is a JSON object keyed by query name, each value being the standard profiler output. Queries that fail are recorded with an `{"error": "..."}` value and the run continues.
+
 ## A/B comparison
 
 1. Run the query and save output: `cargo run -p query-profiler -- -t '1/' --explain QUERY > before.json`

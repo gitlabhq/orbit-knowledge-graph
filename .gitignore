@@ -22,6 +22,9 @@ evaluation_results*/
 # Tilt secrets (contains passwords)
 .tilt-secrets
 
+# Local environment (credentials)
+.env
+
 # Local dev environment config (user-specific paths)
 .gkg-dev.conf
 
