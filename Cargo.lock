@@ -2795,6 +2795,7 @@ dependencies = [
  "jsonschema",
  "jsonwebtoken",
  "labkit",
+ "moka",
  "ontology",
  "opentelemetry",
  "parking_lot",

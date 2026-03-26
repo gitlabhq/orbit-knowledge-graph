@@ -130,7 +130,7 @@ tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"
 tower = "0.5.3"
 base64 = "0.22.1"
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12", features = ["future", "sync"] }
 
 # Server dependencies
 axum = { version = "0.8.8", features = ["macros"] }

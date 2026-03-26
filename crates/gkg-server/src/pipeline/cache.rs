@@ -8,12 +8,13 @@
 //! from the query JSON with the `cursor` field stripped. TTL-based
 //! expiry ensures authorization changes propagate within the configured
 //! window.
+//!
+//! Uses `moka` for lock-free concurrent caching with automatic TTL eviction.
 
-use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use moka::sync::Cache;
 use query_engine::shared::PipelineOutput;
 
 /// Cache key: (user_id, hash of query JSON without cursor).
@@ -23,52 +24,26 @@ struct CacheKey {
     query_hash: u64,
 }
 
-struct CacheEntry {
-    output: PipelineOutput,
-    inserted_at: Instant,
-}
-
 pub struct QueryResultCache {
-    entries: Mutex<HashMap<CacheKey, CacheEntry>>,
-    ttl: Duration,
+    cache: Cache<CacheKey, PipelineOutput>,
 }
 
 impl QueryResultCache {
     pub fn new(ttl: Duration) -> Self {
         Self {
-            entries: Mutex::new(HashMap::new()),
-            ttl,
+            cache: Cache::builder().time_to_live(ttl).build(),
         }
     }
 
     /// Look up a cached result for this user and query.
-    /// Returns `None` on miss or if the entry has expired.
     pub fn get(&self, user_id: u64, query_json: &str) -> Option<PipelineOutput> {
-        let key = Self::make_key(user_id, query_json);
-        let entries = self.entries.lock().unwrap();
-        let entry = entries.get(&key)?;
-        if entry.inserted_at.elapsed() > self.ttl {
-            return None;
-        }
-        Some(entry.output.clone())
+        self.cache.get(&Self::make_key(user_id, query_json))
     }
 
-    /// Store a result in the cache. Evicts expired entries opportunistically.
+    /// Store a result in the cache.
     pub fn put(&self, user_id: u64, query_json: &str, output: PipelineOutput) {
-        let key = Self::make_key(user_id, query_json);
-        let mut entries = self.entries.lock().unwrap();
-
-        // Opportunistic eviction of expired entries.
-        let ttl = self.ttl;
-        entries.retain(|_, e| e.inserted_at.elapsed() <= ttl);
-
-        entries.insert(
-            key,
-            CacheEntry {
-                output,
-                inserted_at: Instant::now(),
-            },
-        );
+        self.cache
+            .insert(Self::make_key(user_id, query_json), output);
     }
 
     fn make_key(user_id: u64, query_json: &str) -> CacheKey {
