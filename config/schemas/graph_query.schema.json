@@ -50,7 +50,7 @@
     },
     "limit": {
       "type": "integer",
-      "description": "Maximum number of results to return. Mutually exclusive with range.",
+      "description": "Maximum number of results to return.",
       "minimum": 1,
       "maximum": 1000,
       "default": 30
