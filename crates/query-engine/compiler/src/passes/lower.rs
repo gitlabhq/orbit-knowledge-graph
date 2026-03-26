@@ -52,7 +52,7 @@ fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
 /// ClickHouse query cache TTL in seconds. Applied via SET when the query
 /// includes a cursor, so that subsequent pages of the same query benefit
 /// from CH-level caching of the raw SQL result.
-const CH_QUERY_CACHE_TTL: u32 = 60;
+const CH_QUERY_CACHE_TTL: u32 = 30;
 
 /// Lower validated input into an AST node.
 ///
