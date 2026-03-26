@@ -16,9 +16,9 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use moka::sync::Cache;
-use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+use opentelemetry::KeyValue;
 use query_engine::compiler::input::InputCursor;
 use query_engine::shared::PipelineOutput;
 use tracing::{debug, info, warn};
@@ -30,6 +30,12 @@ const MAX_CACHE_ENTRIES: u64 = 16_384;
 /// Maximum cached entries per user to prevent a single user from
 /// flooding the cache.
 const MAX_ENTRIES_PER_USER: usize = 2;
+
+/// Maximum byte size for a result to be cacheable. Results larger than
+/// this are not stored — a single oversized entry would consume a
+/// disproportionate share of the cache budget. 512 KB accommodates
+/// a 1000-row result with typical hydrated properties.
+const MAX_CACHEABLE_BYTES: usize = 512 * 1024;
 
 /// Cache TTL in seconds. Short enough that authorization changes
 /// propagate quickly, long enough for multi-page browsing.
@@ -143,6 +149,17 @@ impl QueryResultCache {
             }
         };
 
+        // Reject oversized results to prevent a single entry from
+        // consuming a disproportionate share of the cache budget.
+        let size_bytes = compute_result_bytes(&output);
+        if size_bytes > MAX_CACHEABLE_BYTES {
+            debug!(user_id, size_bytes, "result too large to cache, skipping");
+            METRICS
+                .stores
+                .add(1, &[KeyValue::new("outcome", "too_large")]);
+            return;
+        }
+
         // Enforce per-user entry limit.
         let user_entries: Vec<CacheKey> = self
             .cache
@@ -188,6 +205,35 @@ impl QueryResultCache {
         canonical.hash(&mut hasher);
         Ok(hasher.finish())
     }
+}
+
+/// Compute the heap byte size of a `PipelineOutput`'s query result by
+/// walking every column value in every row. Uses `std::mem::size_of`
+/// for struct sizes and `String::capacity()` for heap allocations.
+fn compute_result_bytes(output: &PipelineOutput) -> usize {
+    use gkg_utils::arrow::ColumnValue;
+    use query_engine::types::QueryResultRow;
+    use std::mem::size_of;
+
+    output
+        .query_result
+        .iter()
+        .map(|row| {
+            size_of::<QueryResultRow>()
+                + row
+                    .columns()
+                    .map(|(key, val)| {
+                        size_of::<String>()
+                            + key.capacity()
+                            + size_of::<ColumnValue>()
+                            + match val {
+                                ColumnValue::String(s) => s.capacity(),
+                                _ => 0,
+                            }
+                    })
+                    .sum::<usize>()
+        })
+        .sum()
 }
 
 /// Parse the cursor from raw query JSON without going through the full
