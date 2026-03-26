@@ -15,7 +15,7 @@ use gkg_server::pipeline::HydrationStage;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared};
 use query_engine::compiler::compile;
-use query_engine::formatters::{GraphFormatter, ResultFormatter, graph::SCALAR_AGGREGATION_TYPE};
+use query_engine::formatters::{GraphFormatter, ResultFormatter, SCALAR_AGGREGATION_TYPE};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
 use serde_json::Value;
@@ -1328,12 +1328,26 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
     assert!(value["edges"].as_array().unwrap().is_empty());
 
     let nodes = value["nodes"].as_array().unwrap();
-    assert_eq!(nodes.len(), 1, "ungrouped aggregation should have one synthetic node");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "ungrouped aggregation should have one synthetic node"
+    );
 
     let node = &nodes[0];
     assert_eq!(node["type"], SCALAR_AGGREGATION_TYPE);
     assert_eq!(node["id"], 0);
-    assert_eq!(node["total"].as_i64().unwrap(), 5, "should count all 5 users");
+    assert_eq!(
+        node["total"].as_i64().unwrap(),
+        5,
+        "should count all 5 users"
+    );
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 1);
+    assert_eq!(columns[0]["name"], "total");
+    assert_eq!(columns[0]["function"], "count");
+    assert_eq!(columns[0]["target"], "u");
 }
 
 async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
@@ -1358,6 +1372,17 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
     assert_eq!(node["total"].as_i64().unwrap(), 5);
     assert_eq!(node["min_id"].as_i64().unwrap(), 1);
     assert_eq!(node["max_id"].as_i64().unwrap(), 5);
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 3);
+    assert_eq!(columns[0]["name"], "total");
+    assert_eq!(columns[0]["function"], "count");
+    assert_eq!(columns[1]["name"], "min_id");
+    assert_eq!(columns[1]["function"], "min");
+    assert_eq!(columns[1]["property"], "id");
+    assert_eq!(columns[2]["name"], "max_id");
+    assert_eq!(columns[2]["function"], "max");
+    assert_eq!(columns[2]["property"], "id");
 }
 
 async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
@@ -1378,11 +1403,20 @@ async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
     .await;
 
     let nodes = value["nodes"].as_array().unwrap();
-    assert!(!nodes.is_empty(), "grouped aggregation should have entity nodes");
+    assert!(
+        !nodes.is_empty(),
+        "grouped aggregation should have entity nodes"
+    );
     assert!(
         nodes.iter().all(|n| n["type"] != SCALAR_AGGREGATION_TYPE),
-        "grouped aggregation should not have synthetic Aggregation node"
+        "grouped aggregation should not have synthetic node"
     );
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 1);
+    assert_eq!(columns[0]["name"], "group_count");
+    assert_eq!(columns[0]["function"], "count");
+    assert_eq!(columns[0]["target"], "g");
 }
 
 async fn ungrouped_count_with_redaction(ctx: &TestContext) {
@@ -1405,6 +1439,11 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
     let node = &value["nodes"].as_array().unwrap()[0];
     assert_eq!(node["type"], SCALAR_AGGREGATION_TYPE);
     assert_eq!(node["total"].as_i64().unwrap(), 5);
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 1);
+    assert_eq!(columns[0]["name"], "total");
+    assert_eq!(columns[0]["function"], "count");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

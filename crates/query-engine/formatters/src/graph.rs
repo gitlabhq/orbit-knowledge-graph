@@ -18,7 +18,19 @@ pub struct GraphResponse {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub columns: Option<Vec<ColumnDescriptor>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pagination: Option<PaginationResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ColumnDescriptor {
+    pub name: String,
+    pub function: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub property: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -53,7 +65,8 @@ pub struct GraphEdge {
 }
 
 /// Entity type for synthetic nodes emitted by ungrouped scalar aggregations.
-pub const SCALAR_AGGREGATION_TYPE: &str = "Aggregation";
+/// Matches `query_type` so the consumer doesn't encounter a new concept.
+pub const SCALAR_AGGREGATION_TYPE: &str = "aggregation";
 
 type EdgeKey = (String, i64, String, i64, String, Option<i64>);
 
@@ -79,6 +92,7 @@ impl GraphFormatter {
         let mut node_map: IndexMap<(String, i64), GraphNode> = IndexMap::new();
         let mut edges: Vec<GraphEdge> = Vec::new();
         let mut edge_set: HashSet<EdgeKey> = HashSet::new();
+        let mut columns: Option<Vec<ColumnDescriptor>> = None;
         let aggregations = Some(&output.compiled.input.aggregations);
 
         let edge_prefixes: Vec<&str> = result_context
@@ -101,7 +115,7 @@ impl GraphFormatter {
                 );
             }
             Some(QueryType::Aggregation) => {
-                self.extract_aggregation(
+                columns = self.extract_aggregation(
                     result,
                     result_context,
                     &edge_prefixes,
@@ -134,6 +148,7 @@ impl GraphFormatter {
             query_type,
             nodes: node_map.into_values().collect(),
             edges,
+            columns,
             pagination,
         }
     }
@@ -239,6 +254,22 @@ impl GraphFormatter {
             .collect()
     }
 
+    fn build_column_descriptors(
+        aggs: &[compiler::input::InputAggregation],
+    ) -> Vec<ColumnDescriptor> {
+        aggs.iter()
+            .map(|agg| ColumnDescriptor {
+                name: agg
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| agg.function.to_string()),
+                function: agg.function.to_string(),
+                target: agg.target.clone(),
+                property: agg.property.clone(),
+            })
+            .collect()
+    }
+
     fn extract_aggregation(
         &self,
         result: &QueryResult,
@@ -246,14 +277,13 @@ impl GraphFormatter {
         edge_prefixes: &[&str],
         aggregations: Option<&Vec<compiler::input::InputAggregation>>,
         node_map: &mut IndexMap<(String, i64), GraphNode>,
-    ) {
-        let Some(aggs) = aggregations else { return };
+    ) -> Option<Vec<ColumnDescriptor>> {
+        let aggs = aggregations?;
         let agg_col_names = Self::agg_col_names(aggs);
+        let columns = Self::build_column_descriptors(aggs);
         let is_ungrouped = aggs.iter().all(|a| a.group_by.is_none());
 
         if is_ungrouped {
-            // Scalar aggregation: emit a synthetic node with the aggregate
-            // values as properties so the result fits the nodes[] contract.
             if let Some(row) = result.authorized_rows().next() {
                 let mut properties = serde_json::Map::new();
                 for col_name in &agg_col_names {
@@ -268,10 +298,13 @@ impl GraphFormatter {
                     properties,
                 });
             }
-            return;
+            return if columns.is_empty() {
+                None
+            } else {
+                Some(columns)
+            };
         }
 
-        // Grouped aggregation: attach values as properties on group_by nodes.
         for row in result.authorized_rows() {
             for node in result_context.nodes() {
                 let Some(id) = row.get_public_id(node) else {
@@ -296,6 +329,12 @@ impl GraphFormatter {
                     properties,
                 });
             }
+        }
+
+        if columns.is_empty() {
+            None
+        } else {
+            Some(columns)
         }
     }
 
@@ -510,6 +549,7 @@ mod tests {
         assert_eq!(response.query_type, "search");
         assert_eq!(response.nodes.len(), 2);
         assert!(response.edges.is_empty());
+        assert!(response.columns.is_none(), "search should not have columns");
     }
 
     #[test]
