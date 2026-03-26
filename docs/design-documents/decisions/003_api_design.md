@@ -479,6 +479,12 @@ message QueryMetadata {
   string query_type = 1;
   repeated string raw_query_strings = 2;
   int32 row_count = 3;
+  PaginationInfo pagination = 4;      // present when query included a cursor
+}
+
+message PaginationInfo {
+  bool has_more = 1;
+  int64 total_rows = 2;
 }
 
 message ExecuteQueryError {

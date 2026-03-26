@@ -61,6 +61,7 @@ The JSON query schema supports five query types through a single unified structu
 | `limit` | `integer` | Max results (1-1000, default: 30) |
 | `order_by` | `object` | Result ordering specification |
 | `aggregation_sort` | `object` | Ordering for aggregation outputs |
+| `cursor` | `object` | Agent-driven pagination cursor `{ offset, page_size }`. Slices the authorized (post-redaction) result set. |
 | `options` | `object` | Consumer-level preferences that affect result presentation, not query semantics. See [Query Options](#query-options). |
 
 ## Node Selectors
@@ -424,6 +425,8 @@ Each relationship step has a hard-coded `max_hops` cap, and the schema enforces 
 - Path `max_depth` limited to 3
 - `node_ids` capped at 500 per node selector
 - `IN` filter values capped at 100 per filter
+- `cursor.offset` capped at 999, `cursor.page_size` capped at 100
+- `cursor.offset + cursor.page_size` must not exceed `limit`
 
 > **Note:** These limits will be tuned as we collect usage data.
 

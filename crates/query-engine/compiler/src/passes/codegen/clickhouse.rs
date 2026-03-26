@@ -3,7 +3,7 @@
 //! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax and
 //! ClickHouse-specific functions (`startsWith`, `has`, `array`, etc.).
 
-use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, QuerySetting, TableRef};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -130,6 +130,20 @@ impl Context {
 
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
+        }
+
+        if !q.query_settings.is_empty() {
+            let settings: Vec<String> = q
+                .query_settings
+                .iter()
+                .map(|s| match s {
+                    QuerySetting::UseQueryCache(v) => {
+                        format!("use_query_cache = {}", u8::from(*v))
+                    }
+                    QuerySetting::QueryCacheTtl(v) => format!("query_cache_ttl = {v}"),
+                })
+                .collect();
+            parts.push(format!("SETTINGS {}", settings.join(", ")));
         }
 
         Ok(parts.join(" "))
@@ -769,6 +783,49 @@ mod tests {
         assert_eq!(
             pq.render(),
             "SELECT * FROM t WHERE x IN ['a', 'b'] AND y IN [10, 20]"
+        );
+    }
+
+    #[test]
+    fn query_settings_emitted_after_limit() {
+        use crate::ast::QuerySetting;
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            limit: Some(100),
+            query_settings: vec![
+                QuerySetting::UseQueryCache(true),
+                QuerySetting::QueryCacheTtl(60),
+            ],
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT n.id FROM nodes AS n LIMIT 100 SETTINGS use_query_cache = 1, query_cache_ttl = 60"
+        );
+    }
+
+    #[test]
+    fn no_query_settings_when_empty() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            !result.sql.contains("SETTINGS"),
+            "no SETTINGS without query_settings: {}",
+            result.sql
         );
     }
 

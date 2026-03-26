@@ -197,6 +197,18 @@ pub struct Query {
     pub union_all: Vec<Query>,
     /// ClickHouse SET statements prepended to the query (for recursive CTEs).
     pub set_statements: Vec<(String, String)>,
+    /// ClickHouse inline SETTINGS clause appended after LIMIT.
+    /// Uses a closed enum to prevent SQL injection — only known safe
+    /// settings can be emitted.
+    pub query_settings: Vec<QuerySetting>,
+}
+
+/// Allowed ClickHouse query-level settings. Closed enum prevents
+/// arbitrary user input from reaching the SETTINGS clause (CWE-89).
+#[derive(Debug, Clone, PartialEq)]
+pub enum QuerySetting {
+    UseQueryCache(bool),
+    QueryCacheTtl(u32),
 }
 
 impl Default for Query {
@@ -215,6 +227,7 @@ impl Default for Query {
             limit: None,
             union_all: vec![],
             set_statements: vec![],
+            query_settings: Vec::new(),
         }
     }
 }
