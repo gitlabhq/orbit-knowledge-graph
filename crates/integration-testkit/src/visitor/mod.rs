@@ -725,6 +725,7 @@ pub(crate) mod tests {
                 make_edge("User", 1, "Group", 101, "MEMBER_OF"),
                 make_edge("User", 2, "Group", 100, "MEMBER_OF"),
             ],
+            pagination: None,
         }
     }
 
@@ -736,6 +737,7 @@ pub(crate) mod tests {
                 make_node("User", 2, &[("username", json!("bob"))]),
             ],
             edges: vec![],
+            pagination: None,
         }
     }
 
@@ -747,6 +749,7 @@ pub(crate) mod tests {
                 make_node("User", 2, &[("username", json!("bob"))]),
             ],
             edges: vec![],
+            pagination: None,
         }
     }
 
@@ -762,6 +765,7 @@ pub(crate) mod tests {
                 make_edge("User", 1, "Group", 100, "MEMBER_OF"),
                 make_edge("User", 1, "Group", 101, "MEMBER_OF"),
             ],
+            pagination: None,
         }
     }
 
@@ -912,6 +916,7 @@ pub(crate) mod tests {
                 make_path_edge("User", 1, "Group", 100, "MEMBER_OF", 2, 0),
                 make_path_edge("Group", 100, "Project", 1000, "CONTAINS", 2, 1),
             ],
+            pagination: None,
         };
         let view = ResponseView::new(resp);
         assert_eq!(view.path_ids(), HashSet::from([0, 2]));
@@ -930,6 +935,7 @@ pub(crate) mod tests {
                 make_path_edge("Group", 100, "Project", 1000, "CONTAINS", 0, 1),
                 make_path_edge("User", 1, "Group", 100, "MEMBER_OF", 0, 0),
             ],
+            pagination: None,
         };
         let view = ResponseView::new(resp);
         let path = view.path(0);
@@ -1053,6 +1059,7 @@ pub(crate) mod tests {
             query_type: "traversal".to_string(),
             nodes: vec![make_node("User", 1, &[])],
             edges: vec![make_edge("User", 1, "Group", 999, "MEMBER_OF")],
+            pagination: None,
         };
         ResponseView::new(resp).assert_referential_integrity();
     }
@@ -1161,6 +1168,7 @@ pub(crate) mod tests {
             query_type: "search".to_string(),
             nodes: vec![],
             edges: vec![],
+            pagination: None,
         };
         let view = ResponseView::new(resp);
         assert_eq!(view.node_count(), 0);
