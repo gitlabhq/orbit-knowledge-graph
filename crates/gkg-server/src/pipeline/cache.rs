@@ -12,9 +12,13 @@
 //! Uses `moka` for lock-free concurrent caching with automatic TTL eviction.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use moka::sync::Cache;
+use opentelemetry::global;
+use opentelemetry::metrics::Counter;
+use opentelemetry::KeyValue;
 use query_engine::compiler::input::InputCursor;
 use query_engine::shared::PipelineOutput;
 use tracing::{debug, info, warn};
@@ -31,6 +35,42 @@ const MAX_ENTRIES_PER_USER: usize = 2;
 /// propagate quickly, long enough for multi-page browsing.
 const CACHE_TTL_SECS: u64 = 60;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Metrics
+// ─────────────────────────────────────────────────────────────────────────────
+
+static METRICS: LazyLock<CacheMetrics> = LazyLock::new(CacheMetrics::new);
+
+struct CacheMetrics {
+    lookups: Counter<u64>,
+    stores: Counter<u64>,
+    evictions: Counter<u64>,
+}
+
+impl CacheMetrics {
+    fn new() -> Self {
+        let meter = global::meter("gkg_query_cache");
+        Self {
+            lookups: meter
+                .u64_counter("gkg.query.cache.lookups")
+                .with_description("Total cache lookup attempts")
+                .build(),
+            stores: meter
+                .u64_counter("gkg.query.cache.stores")
+                .with_description("Total cache store operations")
+                .build(),
+            evictions: meter
+                .u64_counter("gkg.query.cache.evictions")
+                .with_description("Total cache evictions")
+                .build(),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cache key
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Cache key: (user_id, hash of canonicalized query JSON without cursor).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
@@ -44,6 +84,10 @@ pub enum CacheError {
     #[error("failed to compute cache key: {0}")]
     Key(#[from] serde_json::Error),
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cache
+// ─────────────────────────────────────────────────────────────────────────────
 
 pub struct QueryResultCache {
     cache: Cache<CacheKey, PipelineOutput>,
@@ -66,37 +110,40 @@ impl QueryResultCache {
     }
 
     /// Look up a cached result for this user and query.
-    /// Returns `None` on miss. Logs a warning and returns `None` on key errors.
+    /// Returns `None` on miss or key error.
     pub fn get(&self, user_id: u64, query_json: &str) -> Option<PipelineOutput> {
         let key = match Self::make_key(user_id, query_json) {
             Ok(k) => k,
             Err(e) => {
-                warn!(user_id, error = %e, "cache key error on get, skipping cache");
+                warn!(user_id, error = %e, "cache key error on get");
+                METRICS.lookups.add(1, &[KeyValue::new("outcome", "error")]);
                 return None;
             }
         };
         let result = self.cache.get(&key);
         if result.is_some() {
             debug!(user_id, "query result cache hit");
+            METRICS.lookups.add(1, &[KeyValue::new("outcome", "hit")]);
         } else {
             debug!(user_id, "query result cache miss");
+            METRICS.lookups.add(1, &[KeyValue::new("outcome", "miss")]);
         }
         result
     }
 
     /// Store a result in the cache. Enforces per-user entry limit by
     /// evicting the user's oldest entries when the limit is exceeded.
-    /// Logs a warning and skips caching on key errors.
     pub fn put(&self, user_id: u64, query_json: &str, output: PipelineOutput) {
         let key = match Self::make_key(user_id, query_json) {
             Ok(k) => k,
             Err(e) => {
-                warn!(user_id, error = %e, "cache key error on put, skipping cache");
+                warn!(user_id, error = %e, "cache key error on put");
+                METRICS.stores.add(1, &[KeyValue::new("outcome", "error")]);
                 return;
             }
         };
 
-        // Count existing entries for this user and evict oldest if over limit.
+        // Enforce per-user entry limit.
         let user_entries: Vec<CacheKey> = self
             .cache
             .iter()
@@ -109,14 +156,17 @@ impl QueryResultCache {
             for evict_key in user_entries.into_iter().take(to_evict) {
                 self.cache.invalidate(&evict_key);
             }
-            info!(
-                user_id,
-                evicted = to_evict,
-                "evicted cached queries to enforce per-user limit"
+            METRICS.evictions.add(
+                to_evict as u64,
+                &[KeyValue::new("reason", "per_user_limit")],
             );
+            info!(user_id, evicted = to_evict, "per-user cache eviction");
         }
 
         self.cache.insert(key, output);
+        METRICS
+            .stores
+            .add(1, &[KeyValue::new("outcome", "success")]);
     }
 
     fn make_key(user_id: u64, query_json: &str) -> Result<CacheKey, CacheError> {
@@ -127,9 +177,7 @@ impl QueryResultCache {
     }
 
     /// Hash the query JSON with the cursor field stripped and keys
-    /// canonicalized per RFC 8785 (JCS). This ensures semantically
-    /// equivalent queries with different key ordering or whitespace
-    /// produce the same hash.
+    /// canonicalized per RFC 8785 (JCS).
     fn hash_query(query_json: &str) -> Result<u64, CacheError> {
         let mut v: serde_json::Value = serde_json::from_str(query_json)?;
         if let Some(obj) = v.as_object_mut() {
