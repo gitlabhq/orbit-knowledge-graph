@@ -179,16 +179,23 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
         .await
         .expect("pipeline should succeed");
 
+    let mut query_result = hydration_output.query_result;
+    let pagination = compiled.input.cursor.map(|cursor| {
+        let total_rows = query_result.authorized_count();
+        let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
+        query_engine::shared::PaginationMeta { has_more, total_rows }
+    });
+
     let pipeline_output = query_engine::shared::PipelineOutput {
-        row_count: hydration_output.query_result.authorized_count(),
+        row_count: query_result.authorized_count(),
         redacted_count: hydration_output.redacted_count,
         query_type: compiled.query_type.to_string(),
         raw_query_strings: vec![compiled.base.sql.clone()],
         compiled: Arc::clone(&compiled),
-        query_result: hydration_output.query_result,
+        query_result,
         result_context: hydration_output.result_context,
         execution_log: vec![],
-        pagination: None,
+        pagination,
     };
 
     let value = GraphFormatter.format(&pipeline_output);
@@ -2158,6 +2165,102 @@ async fn traversal_chain_user_mr_note(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pagination in formatted output
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn pagination_present_in_response(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "limit": 100,
+            "cursor": {"offset": 0, "page_size": 2}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert!(
+        value.get("pagination").is_some(),
+        "response should include pagination when cursor is present"
+    );
+    let pagination = &value["pagination"];
+    assert_eq!(pagination["has_more"], true, "5 users, page_size=2 → has_more");
+    assert_eq!(pagination["total_rows"], 5, "5 authorized users total");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2, "cursor should slice to 2 nodes");
+}
+
+async fn pagination_absent_without_cursor(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert!(
+        value.get("pagination").is_none(),
+        "response should not include pagination when no cursor"
+    );
+}
+
+async fn pagination_last_page_has_more_false(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 100,
+            "cursor": {"offset": 4, "page_size": 10}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pagination = &value["pagination"];
+    assert_eq!(pagination["has_more"], false, "offset=4, 5 users → last page");
+    assert_eq!(pagination["total_rows"], 5);
+
+    let nodes = value["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "only 1 user left on last page");
+}
+
+async fn pagination_with_redaction(ctx: &TestContext) {
+    let mut svc = MockRedactionService::new();
+    svc.allow("user", &[1, 3, 5]);
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "limit": 100,
+            "cursor": {"offset": 0, "page_size": 2}
+        }"#,
+        &svc,
+    )
+    .await;
+
+    let pagination = &value["pagination"];
+    assert_eq!(pagination["total_rows"], 3, "3 authorized users after redaction");
+    assert_eq!(pagination["has_more"], true, "3 authorized, page_size=2 → has_more");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2);
+    let ids: Vec<i64> = nodes.iter().filter_map(|n| n["id"].as_i64()).collect();
+    assert_eq!(ids, vec![1, 3], "first page of authorized users");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Test runner
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2228,6 +2331,11 @@ async fn graph_formatter_e2e() {
         giant_string_survives_pipeline,
         sql_injection_string_preserved,
         empty_result_all_fields_present,
+        // Pagination
+        pagination_present_in_response,
+        pagination_absent_without_cursor,
+        pagination_last_page_has_more_false,
+        pagination_with_redaction,
     );
 
     // Mutating subtests need their own forked databases.
