@@ -93,13 +93,14 @@ etl:
     file.too_large AS too_large, file.new_path AS new_path,
     file.old_path AS old_path, file.new_file AS new_file,
     file.renamed_file AS renamed_file, file.deleted_file AS deleted_file,
-    file.binary AS binary, diff.traversal_path AS traversal_path,
+    file.binary AS binary, 
+    file.traversal_path AS traversal_path,
     file.relative_order AS relative_order
   from: >-
     siphon_merge_request_diff_files file
     INNER JOIN siphon_merge_request_diffs diff
     ON file.merge_request_diff_id = diff.id
-  traversal_path_filter: "startsWith(diff.traversal_path, {traversal_path:String})"
+  traversal_path_filter: "startsWith(file.traversal_path, {traversal_path:String})"
   watermark: file._siphon_replicated_at
   deleted: file._siphon_deleted
   order_by: [traversal_path, merge_request_diff_id, relative_order]

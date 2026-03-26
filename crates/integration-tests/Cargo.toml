@@ -6,8 +6,17 @@ publish = false
 
 # No src/lib.rs — this crate only contains integration tests.
 
+[[test]]
+name = "docker"
+path = "tests/entrypoints/docker.rs"
+
+[[test]]
+name = "compiler"
+path = "tests/entrypoints/compiler.rs"
+
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
+compiler = { path = "../query-engine/compiler" }
 gkg-server = { path = "../gkg-server", features = ["testkit"] }
 gkg-utils = { path = "../utils" }
 jsonschema = { workspace = true }
@@ -27,6 +36,8 @@ futures = { workspace = true }
 gitlab-client = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
 serde = { workspace = true }
 health-check = { workspace = true }
 serde_json = { workspace = true }
@@ -44,3 +55,4 @@ labkit = { workspace = true, features = ["http"] }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio", "testing"] }
 zstd = "0.13.3"
+sqlparser.workspace = true

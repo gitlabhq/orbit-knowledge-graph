@@ -3,6 +3,7 @@
 //! Transforms validated input into a SQL-oriented AST.
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+
 use crate::constants::{
     ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,
     EDGE_KINDS_COLUMN, END_ID_COLUMN, END_KIND_COLUMN, FORWARD_ALIAS, FORWARD_CTE,
@@ -44,17 +45,6 @@ fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
         Expr::col(alias, PATH_NODES_COLUMN),
         format!("{alias}_{PATH_NODES_COLUMN}"),
     )
-}
-
-/// Derive LIMIT and OFFSET from the input's pagination fields.
-/// If `range` is set, limit = end - start and offset = start.
-/// Otherwise, limit = input.limit and offset = None.
-fn pagination(input: &Input) -> (Option<u32>, Option<u32>) {
-    if let Some(ref range) = input.range {
-        (Some(range.end - range.start), Some(range.start))
-    } else {
-        (Some(input.limit), None)
-    }
 }
 
 /// Lower validated input into an AST node.
@@ -118,7 +108,7 @@ fn lower_search(input: &Input) -> Result<Node> {
             desc: ob.direction == OrderDirection::Desc,
         }]
     });
-    let (limit, offset) = pagination(input);
+    let limit = Some(input.limit);
 
     Ok(Node::Query(Box::new(Query {
         select,
@@ -126,7 +116,6 @@ fn lower_search(input: &Input) -> Result<Node> {
         where_clause,
         order_by,
         limit,
-        offset,
         ..Default::default()
     })))
 }
@@ -351,7 +340,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
             desc: ob.direction == OrderDirection::Desc,
         }]
     });
-    let (limit, offset) = pagination(input);
+    let limit = Some(input.limit);
 
     Ok(Node::Query(Box::new(Query {
         ctes,
@@ -360,7 +349,6 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
         where_clause,
         order_by,
         limit,
-        offset,
         ..Default::default()
     })))
 }
@@ -434,7 +422,7 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
             }]
         });
 
-    let (limit, offset) = pagination(input);
+    let limit = Some(input.limit);
 
     Ok(Node::Query(Box::new(Query {
         select,
@@ -443,7 +431,6 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         group_by,
         order_by,
         limit,
-        offset,
         ..Default::default()
     })))
 }
@@ -629,7 +616,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         TableRef::union_all(vec![direct_query, intersection_query], PATHS_ALIAS)
     };
 
-    let (limit, offset) = pagination(input);
+    let limit = Some(input.limit);
 
     // Outer query: select from the paths UNION ALL, ordered by depth.
     // Security filters are applied by the security pass to every gl_edge scan
@@ -655,7 +642,6 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             desc: false,
         }],
         limit,
-        offset,
         ..Default::default()
     })))
 }
@@ -816,7 +802,7 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
             desc: ob.direction == OrderDirection::Desc,
         }]
     });
-    let (limit, offset) = pagination(input);
+    let limit = Some(input.limit);
 
     // For Direction::Both, split into UNION ALL of outgoing + incoming so
     // ClickHouse can select the optimal access path for each direction
@@ -860,7 +846,6 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
         outgoing.order_by = order_by;
         outgoing.limit = limit;
-        outgoing.offset = offset;
         return Ok(Node::Query(Box::new(outgoing)));
     }
 
@@ -899,7 +884,6 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
         where_clause,
         order_by,
         limit,
-        offset,
         ..Default::default()
     })))
 }
@@ -1412,8 +1396,8 @@ fn resolve_table(node: &InputNode) -> Result<String> {
 mod tests {
     use super::*;
     use crate::input::parse_input;
-    use crate::normalize;
-    use crate::validate;
+    use crate::passes::normalize;
+    use crate::passes::validate;
     use ontology::Ontology;
 
     fn test_ontology() -> Ontology {

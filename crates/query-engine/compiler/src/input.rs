@@ -64,7 +64,6 @@ pub struct Input {
     pub neighbors: Option<InputNeighbors>,
     #[serde(default = "default_limit")]
     pub limit: u32,
-    pub range: Option<InputRange>,
     pub cursor: Option<InputCursor>,
     pub order_by: Option<InputOrderBy>,
     pub aggregation_sort: Option<InputAggSort>,
@@ -104,7 +103,6 @@ impl Default for Input {
             path: None,
             neighbors: None,
             limit: default_limit(),
-            range: None,
             cursor: None,
             order_by: None,
             aggregation_sort: None,
@@ -145,19 +143,17 @@ fn default_limit() -> u32 {
     30
 }
 
+/// Agent-driven pagination cursor. Slices the authorized (post-redaction)
+/// result set by `offset` and `page_size`. The server re-runs the query,
+/// authorizes all rows up to `limit`, and returns `[offset..offset+page_size]`.
+///
+/// This model avoids SQL-level keyset pagination, which only generalizes to
+/// Search queries and breaks when redaction removes rows from the LIMIT window.
+// TODO: Server-side query caching with TTL to avoid re-running the same query on page 2+
 #[derive(Debug, Clone, Copy, Deserialize)]
-pub struct InputRange {
-    pub start: u32,
-    pub end: u32,
-}
-
-/// Keyset pagination cursor. Encodes the last seen row's `id`.
-/// Combined with traversal paths from the security context to build the
-/// decomposed keyset predicate `(tp > x) OR (tp = x AND id > cursor_id)`.
-/// Mutually exclusive with `range`.
-#[derive(Debug, Clone, Deserialize)]
 pub struct InputCursor {
-    pub id: i64,
+    pub offset: u32,
+    pub page_size: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display, strum::IntoStaticStr)]
@@ -716,30 +712,6 @@ mod tests {
         let neighbors = input.neighbors.unwrap();
         assert_eq!(neighbors.node, "u");
         assert_eq!(neighbors.direction, Direction::Both);
-    }
-
-    #[test]
-    fn range_pagination() {
-        let input = parse_input(
-            r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User"},
-            "range": {"start": 10, "end": 50}
-        }"#,
-        )
-        .unwrap();
-
-        let range = input.range.unwrap();
-        assert_eq!(range.start, 10);
-        assert_eq!(range.end, 50);
-
-        // range absent by default validation
-        let input =
-            parse_input(r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}}"#)
-                .unwrap();
-
-        assert!(input.range.is_none());
-        assert_eq!(input.limit, 30);
     }
 
     #[test]

@@ -12,17 +12,17 @@ pub struct DeletionMetrics {
 
 impl DeletionMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("indexer_namespace_deletion");
+        let meter = global::meter("gkg_indexer_namespace_deletion");
 
         let table_deletion_duration = meter
-            .f64_histogram("indexer.namespace_deletion.table.duration")
+            .f64_histogram("gkg.indexer.namespace_deletion.table.duration")
             .with_unit("s")
             .with_description("Duration of a single table's soft-delete INSERT-SELECT")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let table_deletion_errors = meter
-            .u64_counter("indexer.namespace_deletion.table.errors")
+            .u64_counter("gkg.indexer.namespace_deletion.table.errors")
             .with_description("Total per-table deletion failures")
             .build();
 

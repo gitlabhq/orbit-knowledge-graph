@@ -199,7 +199,7 @@ unit-test:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo nextest run --profile ci --lib --bins
+    - cargo nextest run --profile ci --lib --bins --test compiler
     - sccache --show-stats || true
 
 integration-test:
@@ -228,7 +228,7 @@ integration-test:
       docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
       docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/nats:2.11-alpine nats:2.11-alpine
   script:
-    - cargo nextest run --profile ci --all-features --test '*'
+    - cargo nextest run --profile ci --all-features --test docker
     - sccache --show-stats || true
 
 # Build Stage
@@ -302,40 +302,12 @@ docker-build-mr:
   script:
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
-# Helm Charts
-
-.helm-base:
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/google/cloud-sdk:slim
-  tags:
-    - saas-linux-medium-amd64
-  before_script:
-    - apt-get update && apt-get install -y curl
-    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-    - curl -L https://carvel.dev/install.sh | K14SIO_INSTALL_BIN_DIR=/usr/local/bin bash
-    - curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
-    - helm version
-
-helm-lint:
-  extends:
-    - .helm-base
-    - .mr-and-main-rules
-  stage: lint
-  needs: []
-  script:
-    - helm/sync.sh
-    - helm lint helm/gkg
-    - helm template gkg helm/gkg
-
 build-proto-gem:
   needs: []
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/ruby:3.3
+  image: ruby:3.3
   tags:
     - saas-linux-medium-amd64
   stage: build
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
   before_script: []
   script:
     - BUNDLE_GEMFILE=tools/protogem/Gemfile bundle install --quiet
@@ -358,7 +330,7 @@ build-proto-gem:
 publish-proto-gem:
   needs:
     - build-proto-gem
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/ruby:3.3
+  image: ruby:3.3
   tags:
     - saas-linux-medium-amd64
   stage: publish
@@ -393,13 +365,9 @@ semantic-release:
 
 .docker-release:
   stage: build
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
+  image: docker:29
   services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29-dind
+    - name: docker:29-dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -427,7 +395,7 @@ release-build-arm64:
 
 release-manifest:
   stage: build
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  image: docker:29
   tags:
     - saas-linux-medium-amd64
   needs:

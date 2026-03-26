@@ -9,7 +9,8 @@ pub(super) async fn path_finding_returns_valid_complete_paths(ctx: &TestContext)
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &allow_all(),
     )
@@ -59,7 +60,8 @@ pub(super) async fn path_finding_multiple_destinations_returns_distinct_paths(ct
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &allow_all(),
     )
@@ -94,7 +96,8 @@ pub(super) async fn path_finding_consecutive_edges_connect(ctx: &TestContext) {
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &allow_all(),
     )
@@ -179,7 +182,8 @@ pub(super) async fn path_finding_all_shortest_returns_valid_paths(ctx: &TestCont
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "all_shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "all_shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &allow_all(),
     )
@@ -273,7 +277,8 @@ pub(super) async fn path_finding_step_indices_are_sequential(ctx: &TestContext) 
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &allow_all(),
     )

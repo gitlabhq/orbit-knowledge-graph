@@ -36,107 +36,107 @@ Each service exposes a Prometheus `/metrics` endpoint. We use LabKit for instrum
 
 **KG Indexer Service:**
 
-The indexer emits metrics under five OpenTelemetry meters: `etl_engine` for the core engine, `scheduler` for the scheduled task loop, `indexer_sdlc` for the SDLC module, `indexer_code` for the code indexing module, and `indexer_namespace_deletion` for the namespace deletion module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
+The indexer emits metrics under five OpenTelemetry meters: `gkg_etl` for the core engine, `gkg_scheduler` for the scheduled task loop, `gkg_indexer_sdlc` for the SDLC module, `gkg_indexer_code` for the code indexing module, and `gkg_indexer_namespace_deletion` for the namespace deletion module. All duration histograms use OTel-recommended buckets (5 ms to 10 s).
 
-*Engine metrics (`etl_engine`):*
-
-| Metric | Type | Unit | Labels | Description |
-|---|---|---|---|---|
-| `etl.messages.processed` | Counter | count | `topic`, `outcome` (ack/nack/term/dead_letter) | Total messages processed |
-| `etl.message.duration` | Histogram | s | `topic` | End-to-end time per message through dispatch |
-| `etl.handler.duration` | Histogram | s | `handler` | Time inside each handler's `handle()` call |
-| `etl.handler.errors` | Counter | count | `handler`, `error_kind` | Handler errors at the engine dispatch level |
-| `etl.permit.wait.duration` | Histogram | s | `permit_kind` (global/group), `group` | Time waiting for a worker pool permit |
-| `etl.permits.active` | UpDownCounter | count | `permit_kind` | Worker permits currently held (global or per concurrency group) |
-| `etl.nats.fetch.duration` | Histogram | s | `outcome` (success/error) | Time to fetch a batch from NATS |
-| `etl.destination.write.duration` | Histogram | s | `table` | Time to write a batch to ClickHouse |
-| `etl.destination.rows.written` | Counter | count | `table` | Total rows written to ClickHouse |
-| `etl.destination.bytes.written` | Counter | bytes | `table` | Total bytes written to ClickHouse |
-| `etl.destination.write.errors` | Counter | count | `table` | Total failed writes to ClickHouse |
-
-*Scheduled task metrics (`scheduler`):*
+*Engine metrics (`gkg_etl`):*
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `scheduler.task.runs` | Counter | count | `task`, `outcome` (success/error) | Total scheduled task runs |
-| `scheduler.task.duration` | Histogram | s | `task` | End-to-end duration of a scheduled task run |
-| `scheduler.task.requests.published` | Counter | count | `task` | Requests successfully published |
-| `scheduler.task.requests.skipped` | Counter | count | `task` | Requests skipped (already in-flight) |
-| `scheduler.task.query.duration` | Histogram | s | `query` | Duration of a scheduled task ClickHouse query |
-| `scheduler.task.errors` | Counter | count | `task`, `stage` (publish/query) | Scheduled task errors by stage |
+| `gkg.etl.messages.processed` | Counter | count | `topic`, `outcome` (ack/nack/term/dead_letter) | Total messages processed |
+| `gkg.etl.message.duration` | Histogram | s | `topic` | End-to-end time per message through dispatch |
+| `gkg.etl.handler.duration` | Histogram | s | `handler` | Time inside each handler's `handle()` call |
+| `gkg.etl.handler.errors` | Counter | count | `handler`, `error_kind` | Handler errors at the engine dispatch level |
+| `gkg.etl.permit.wait.duration` | Histogram | s | `permit_kind` (global/group), `group` | Time waiting for a worker pool permit |
+| `gkg.etl.permits.active` | UpDownCounter | count | `permit_kind` | Worker permits currently held (global or per concurrency group) |
+| `gkg.etl.nats.fetch.duration` | Histogram | s | `outcome` (success/error) | Time to fetch a batch from NATS |
+| `gkg.etl.destination.write.duration` | Histogram | s | `table` | Time to write a batch to ClickHouse |
+| `gkg.etl.destination.rows.written` | Counter | count | `table` | Total rows written to ClickHouse |
+| `gkg.etl.destination.bytes.written` | Counter | bytes | `table` | Total bytes written to ClickHouse |
+| `gkg.etl.destination.write.errors` | Counter | count | `table` | Total failed writes to ClickHouse |
 
-*SDLC module metrics (`indexer_sdlc`):*
-
-| Metric | Type | Unit | Labels | Description |
-|---|---|---|---|---|
-| `indexer.sdlc.pipeline.duration` | Histogram | s | `entity` | End-to-end duration of an entity or edge pipeline run |
-| `indexer.sdlc.pipeline.rows.processed` | Counter | count | `entity` | Total rows extracted and written |
-| `indexer.sdlc.pipeline.errors` | Counter | count | `entity`, `error_kind` | SDLC pipeline failures |
-| `indexer.sdlc.handler.duration` | Histogram | s | `handler` | Duration of a full handler invocation |
-| `indexer.sdlc.datalake.query.duration` | Histogram | s | `entity` | Duration of ClickHouse datalake extraction queries |
-| `indexer.sdlc.datalake.query.bytes` | Counter | bytes | `entity` | Total bytes returned by ClickHouse datalake extraction queries |
-| `indexer.sdlc.transform.duration` | Histogram | s | `entity` | Duration of DataFusion SQL transform per batch |
-| `indexer.sdlc.watermark.lag` | Gauge | s | `entity` | Seconds between the current watermark and wall clock (data freshness) |
-
-*Code module metrics (`indexer_code`):*
+*Scheduled task metrics (`gkg_scheduler`):*
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, skipped_lock, error) | Total code indexing tasks processed |
-| `indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single code indexing task |
-| `indexer.code.repository.fetch.duration` | Histogram | s | | Duration of resolving a repository (cache check + optional download and extraction) |
-| `indexer.code.repository.resolution` | Counter | count | `strategy` (cache_hit, incremental, full_download, full_download_fallback) | Repository resolution strategy used |
-| `indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
-| `indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |
-| `indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
-| `indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage |
+| `gkg.scheduler.task.runs` | Counter | count | `task`, `outcome` (success/error) | Total scheduled task runs |
+| `gkg.scheduler.task.duration` | Histogram | s | `task` | End-to-end duration of a scheduled task run |
+| `gkg.scheduler.task.requests.published` | Counter | count | `task` | Requests successfully published |
+| `gkg.scheduler.task.requests.skipped` | Counter | count | `task` | Requests skipped (already in-flight) |
+| `gkg.scheduler.task.query.duration` | Histogram | s | `query` | Duration of a scheduled task ClickHouse query |
+| `gkg.scheduler.task.errors` | Counter | count | `task`, `stage` (publish/query) | Scheduled task errors by stage |
 
-*Namespace deletion module metrics (`indexer_namespace_deletion`):*
+*SDLC module metrics (`gkg_indexer_sdlc`):*
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `indexer.namespace_deletion.table.duration` | Histogram | s | `table` | Duration of a single table's soft-delete INSERT-SELECT |
-| `indexer.namespace_deletion.table.errors` | Counter | count | `table` | Total per-table deletion failures |
+| `gkg.indexer.sdlc.pipeline.duration` | Histogram | s | `entity` | End-to-end duration of an entity or edge pipeline run |
+| `gkg.indexer.sdlc.pipeline.rows.processed` | Counter | count | `entity` | Total rows extracted and written |
+| `gkg.indexer.sdlc.pipeline.errors` | Counter | count | `entity`, `error_kind` | SDLC pipeline failures |
+| `gkg.indexer.sdlc.handler.duration` | Histogram | s | `handler` | Duration of a full handler invocation |
+| `gkg.indexer.sdlc.datalake.query.duration` | Histogram | s | `entity` | Duration of ClickHouse datalake extraction queries |
+| `gkg.indexer.sdlc.datalake.query.bytes` | Counter | bytes | `entity` | Total bytes returned by ClickHouse datalake extraction queries |
+| `gkg.indexer.sdlc.transform.duration` | Histogram | s | `entity` | Duration of DataFusion SQL transform per batch |
+| `gkg.indexer.sdlc.watermark.lag` | Gauge | s | `entity` | Seconds between the current watermark and wall clock (data freshness) |
+
+*Code module metrics (`gkg_indexer_code`):*
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, skipped_lock, error) | Total code indexing tasks processed |
+| `gkg.indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single code indexing task |
+| `gkg.indexer.code.repository.fetch.duration` | Histogram | s | | Duration of resolving a repository (cache check + optional download and extraction) |
+| `gkg.indexer.code.repository.resolution` | Counter | count | `strategy` (cache_hit, incremental, full_download, full_download_fallback) | Repository resolution strategy used |
+| `gkg.indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
+| `gkg.indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |
+| `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
+| `gkg.indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage |
+
+*Namespace deletion module metrics (`gkg_indexer_namespace_deletion`):*
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.indexer.namespace_deletion.table.duration` | Histogram | s | `table` | Duration of a single table's soft-delete INSERT-SELECT |
+| `gkg.indexer.namespace_deletion.table.errors` | Counter | count | `table` | Total per-table deletion failures |
 
 **KG Web Service:**
 
 - **Query Health**: p50/p95 latency by tool (`find_nodes`, `traverse`, `explore`, `aggregate`), memory spikes, and rows/bytes read per query.
 - MCP tools latency (p50, p95, p99), usage and success rate
 
-*Query pipeline metrics (`query_pipeline`):*
+*Query pipeline metrics (`gkg_query_pipeline`):*
 
-The query pipeline instruments end-to-end query execution from security check through formatted output. All histograms and counters carry a `query_type` label (for example, `find_nodes`, `traverse`, `explore`, `aggregate`).
+The query pipeline instruments end-to-end query execution from security check through formatted output. All duration histograms use seconds with OTel-recommended buckets. All histograms and counters carry a `query_type` label (for example, `find_nodes`, `traverse`, `explore`, `aggregate`).
 
-| Metric | Type | Labels | Description |
-|---|---|---|---|
-| `qp.queries_total` | Counter | `query_type`, `status` (ok / error code) | Total queries processed through the pipeline |
-| `qp.pipeline_duration_ms` | Histogram | `query_type`, `status` | End-to-end pipeline duration from security check to formatted output |
-| `qp.compile_duration_ms` | Histogram | `query_type` | Time spent compiling a query from JSON to parameterized SQL |
-| `qp.execute_duration_ms` | Histogram | `query_type` | Time spent executing the compiled query against ClickHouse |
-| `qp.authorization_duration_ms` | Histogram | `query_type` | Time spent on authorization exchange with Rails |
-| `qp.hydration_duration_ms` | Histogram | `query_type` | Time spent hydrating neighbor properties from ClickHouse |
-| `qp.result_set_size` | Histogram | `query_type` | Number of rows returned after formatting |
-| `qp.node_count` | Histogram | `query_type` | Number of Arrow record batches returned from ClickHouse |
-| `qp.redacted_count` | Histogram | `query_type` | Number of rows redacted per query |
-| `qp.error.security_rejected` | Counter | `reason` (security) | Pipeline rejected due to invalid or missing security context |
-| `qp.error.execution_failed` | Counter | `reason` (execution) | ClickHouse query execution failed |
-| `qp.error.authorization_failed` | Counter | `reason` (authorization) | Authorization exchange with Rails failed |
-| `qp.error.streaming_failed` | Counter | `reason` (streaming) | Streaming channel unavailable during authorization |
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.query.pipeline.queries` | Counter | count | `query_type`, `status` (ok / error code) | Total queries processed through the pipeline |
+| `gkg.query.pipeline.duration` | Histogram | s | `query_type`, `status` | End-to-end pipeline duration from security check to formatted output |
+| `gkg.query.pipeline.compile.duration` | Histogram | s | `query_type` | Time spent compiling a query from JSON to parameterized SQL |
+| `gkg.query.pipeline.execute.duration` | Histogram | s | `query_type` | Time spent executing the compiled query against ClickHouse |
+| `gkg.query.pipeline.authorization.duration` | Histogram | s | `query_type` | Time spent on authorization exchange with Rails |
+| `gkg.query.pipeline.hydration.duration` | Histogram | s | `query_type` | Time spent hydrating neighbor properties from ClickHouse |
+| `gkg.query.pipeline.result_set.size` | Histogram | count | `query_type` | Number of rows returned after formatting |
+| `gkg.query.pipeline.batch.count` | Histogram | count | `query_type` | Number of Arrow record batches returned from ClickHouse |
+| `gkg.query.pipeline.redacted.count` | Histogram | count | `query_type` | Number of rows redacted per query |
+| `gkg.query.pipeline.error.security_rejected` | Counter | count | `reason` (security) | Pipeline rejected due to invalid or missing security context |
+| `gkg.query.pipeline.error.execution_failed` | Counter | count | `reason` (execution) | ClickHouse query execution failed |
+| `gkg.query.pipeline.error.authorization_failed` | Counter | count | `reason` (authorization) | Authorization exchange with Rails failed |
+| `gkg.query.pipeline.error.streaming_failed` | Counter | count | `reason` (streaming) | Streaming channel unavailable during authorization |
 
-*Query engine metrics (`query_engine`):*
+*Query engine metrics (`gkg_query_engine`):*
 
 The query engine fires counters during compilation to track security-relevant rejections. Each counter uses a `reason` label for low-cardinality breakdown. Counters marked "server layer" are exported for the gRPC/HTTP layer to increment.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `qe.threat.validation_failed` | Counter | `reason` (parse/schema/reference/pagination) | Query rejected by structural validation |
-| `qe.threat.allowlist_rejected` | Counter | `reason` (ontology/ontology_internal) | Entity, column, or relationship not in the ontology allowlist |
-| `qe.threat.auth_filter_missing` | Counter | `reason` (security) | Security context invalid or absent (server layer) |
-| `qe.threat.timeout` | Counter | `reason` | Query compilation or execution exceeded deadline (server layer) |
-| `qe.threat.rate_limited` | Counter | `reason` | Caller throttled before compilation (server layer) |
-| `qe.threat.depth_exceeded` | Counter | `reason` (depth) | Traversal depth or hop count exceeded the hard cap |
-| `qe.threat.limit_exceeded` | Counter | `reason` (limit) | Array cardinality cap exceeded (node_ids count or IN filter value count) |
-| `qe.internal.pipeline_invariant_violated` | Counter | `reason` (lowering/codegen) | Lowering or codegen hit a state upstream validation should have prevented |
+| `gkg.query.engine.threat.validation_failed` | Counter | `reason` (parse/schema/reference/pagination) | Query rejected by structural validation |
+| `gkg.query.engine.threat.allowlist_rejected` | Counter | `reason` (ontology/ontology_internal) | Entity, column, or relationship not in the ontology allowlist |
+| `gkg.query.engine.threat.auth_filter_missing` | Counter | `reason` (security) | Security context invalid or absent (server layer) |
+| `gkg.query.engine.threat.timeout` | Counter | `reason` | Query compilation or execution exceeded deadline (server layer) |
+| `gkg.query.engine.threat.rate_limited` | Counter | `reason` | Caller throttled before compilation (server layer) |
+| `gkg.query.engine.threat.depth_exceeded` | Counter | `reason` (depth) | Traversal depth or hop count exceeded the hard cap |
+| `gkg.query.engine.threat.limit_exceeded` | Counter | `reason` (limit) | Array cardinality cap exceeded (node_ids count or IN filter value count) |
+| `gkg.query.engine.internal.pipeline_invariant_violated` | Counter | `reason` (lowering/codegen) | Lowering or codegen hit a state upstream validation should have prevented |
 
 **Shared Infrastructure Metrics:**
 
@@ -149,33 +149,33 @@ Prometheus scrapes these metrics into Grafana Mimir. We also maintain dashboards
 
 Alert rules are defined as `PrometheusRule` CRDs, automatically discovered by the Prometheus Operator. Thresholds are configurable via Helm values.
 
-Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the GKG chart. The OTel-to-Prometheus conversion replaces dots with underscores and appends `_total` for counters (e.g., `qe.threat.auth_filter_missing` → `qe_threat_auth_filter_missing_total`).
+Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the GKG chart. The OTel-to-Prometheus conversion replaces dots with underscores, appends unit suffixes (`_seconds` for "s", `_bytes` for "By"), and appends `_total` for counters (e.g., `gkg.query.engine.threat.auth_filter_missing` → `gkg_query_engine_threat_auth_filter_missing_total`).
 
 **Security alerts** (any non-zero count is anomalous):
 
 | Alert | Metric | Default Threshold | Severity | `for` | Fires when |
 |---|---|---|---|---|---|
-| `GKGAuthFilterMissing` | `qe_threat_auth_filter_missing_total` | > 0 in 5m | critical | 1m | A query was processed without a valid security context, meaning authorization filtering was bypassed |
-| `GKGPipelineInvariantViolated` | `qe_internal_pipeline_invariant_violated_total` | > 0 in 5m | critical | 1m | The query compiler reached a state that upstream validation should have prevented — may produce incorrect SQL |
-| `GKGSecurityRejected` | `qp_error_security_rejected_total` | > 0 in 5m | warning | 5m | Pipeline rejected a request due to invalid or missing security context |
+| `GKGAuthFilterMissing` | `gkg_query_engine_threat_auth_filter_missing_total` | > 0 in 5m | critical | 1m | A query was processed without a valid security context, meaning authorization filtering was bypassed |
+| `GKGPipelineInvariantViolated` | `gkg_query_engine_internal_pipeline_invariant_violated_total` | > 0 in 5m | critical | 1m | The query compiler reached a state that upstream validation should have prevented — may produce incorrect SQL |
+| `GKGSecurityRejected` | `gkg_query_pipeline_error_security_rejected_total` | > 0 in 5m | warning | 5m | Pipeline rejected a request due to invalid or missing security context |
 
 **Query health alerts** (sustained error rates or latency degradation):
 
 | Alert | Metric | Default Threshold | Severity | `for` | Fires when |
 |---|---|---|---|---|---|
-| `GKGQueryingErrorRateHigh` | `qp_queries_total_total{status!="ok"}` / `qp_queries_total_total` | > 5% | warning | 5m | Aggregate error rate across all failure modes exceeds threshold — the availability SLI |
-| `GKGQueryTimeoutRateHigh` | `qe_threat_timeout_total` / `qp_queries_total_total` | > 5% | warning | 5m | More than 5% of queries time out, indicating ClickHouse saturation or pathological queries |
-| `GKGValidationFailedBurst` | `qe_threat_validation_failed_total` | > 10/min | warning | 5m | Sustained burst of structural validation failures (broken client or probing) |
-| `GKGAllowlistRejectedBurst` | `qe_threat_allowlist_rejected_total` | > 5/min | warning | 5m | Sustained ontology violations (schema drift or enumeration attempt) |
-| `GKGExecutionFailureRate` | `qp_error_execution_failed_total` | > 1/min | warning | 5m | ClickHouse query execution is failing |
-| `GKGAuthorizationFailureRate` | `qp_error_authorization_failed_total` | > 1/min | warning | 5m | Rails authorization exchange is failing |
-| `GKGPipelineLatencyP95High` | `qp_pipeline_duration_ms` (histogram) | > 5000ms | warning | 10m | p95 end-to-end pipeline latency exceeds threshold |
+| `GKGQueryingErrorRateHigh` | `gkg_query_pipeline_queries_total{status!="ok"}` / `gkg_query_pipeline_queries_total` | > 5% | warning | 5m | Aggregate error rate across all failure modes exceeds threshold — the availability SLI |
+| `GKGQueryTimeoutRateHigh` | `gkg_query_engine_threat_timeout_total` / `gkg_query_pipeline_queries_total` | > 5% | warning | 5m | More than 5% of queries time out, indicating ClickHouse saturation or pathological queries |
+| `GKGValidationFailedBurst` | `gkg_query_engine_threat_validation_failed_total` | > 10/min | warning | 5m | Sustained burst of structural validation failures (broken client or probing) |
+| `GKGAllowlistRejectedBurst` | `gkg_query_engine_threat_allowlist_rejected_total` | > 5/min | warning | 5m | Sustained ontology violations (schema drift or enumeration attempt) |
+| `GKGExecutionFailureRate` | `gkg_query_pipeline_error_execution_failed_total` | > 1/min | warning | 5m | ClickHouse query execution is failing |
+| `GKGAuthorizationFailureRate` | `gkg_query_pipeline_error_authorization_failed_total` | > 1/min | warning | 5m | Rails authorization exchange is failing |
+| `GKGPipelineLatencyP95High` | `gkg_query_pipeline_duration_seconds` (histogram) | > 5s | warning | 10m | p95 end-to-end pipeline latency exceeds threshold |
 
 **Capacity alerts** (traffic and limit pressure):
 
 | Alert | Metric | Default Threshold | Severity | `for` | Fires when |
 |---|---|---|---|---|---|
-| `GKGRateLimitedHigh` | `qe_threat_rate_limited_total` | > 10/min | warning | 5m | High rate of throttled callers — may need capacity scaling |
+| `GKGRateLimitedHigh` | `gkg_query_engine_threat_rate_limited_total` | > 10/min | warning | 5m | High rate of throttled callers — may need capacity scaling |
 
 ### Logging
 

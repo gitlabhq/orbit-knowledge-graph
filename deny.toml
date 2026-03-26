@@ -86,6 +86,11 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "compiler-pipeline-macros"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "compiler"
 expression = "LicenseRef-EE"
 license-files = []

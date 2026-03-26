@@ -1,6 +1,6 @@
-use crate::codegen::{HydrationPlan, HydrationTemplate};
 use crate::constants::HYDRATION_NODE_ALIAS;
 use crate::input::{ColumnSelection, Input, QueryType};
+use crate::passes::codegen::{HydrationPlan, HydrationTemplate};
 
 /// Build the hydration context for a compiled query.
 ///

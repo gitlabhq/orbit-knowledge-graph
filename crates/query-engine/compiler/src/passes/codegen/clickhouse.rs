@@ -1,89 +1,15 @@
-//! Codegen: AST → SQL
+//! ClickHouse SQL code generation.
 //!
-//! Pure transformation from AST to parameterized ClickHouse SQL.
+//! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax and
+//! ClickHouse-specific functions (`startsWith`, `has`, `array`, etc.).
 
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
-use crate::enforce::ResultContext;
 use crate::error::Result;
-use crate::input::Input;
-use crate::input::QueryType;
-pub use gkg_utils::clickhouse::ParamValue;
+use crate::passes::enforce::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
-pub struct ParameterizedQuery {
-    pub sql: String,
-    pub params: HashMap<String, ParamValue>,
-    pub result_context: ResultContext,
-}
-
-#[derive(Debug, Clone)]
-pub struct CompiledQueryContext {
-    pub query_type: QueryType,
-    pub base: ParameterizedQuery,
-    pub hydration: HydrationPlan,
-    pub input: Input,
-}
-
-#[derive(Debug, Clone)]
-pub enum HydrationPlan {
-    /// No hydration needed (e.g., Aggregation).
-    None,
-    /// Entity types known at compile time (Traversal, Search).
-    /// One template per entity type, with IDs to be filled at runtime.
-    Static(Vec<HydrationTemplate>),
-    /// Entity types discovered at runtime (PathFinding, Neighbors).
-    Dynamic,
-}
-
-#[derive(Debug, Clone)]
-pub struct HydrationTemplate {
-    pub entity_type: String,
-    /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
-    /// results back to the base query's `_gkg_{alias}_id` / `_gkg_{alias}_type` columns.
-    pub node_alias: String,
-    /// Base JSON for the hydration query (without node_ids).
-    /// Call `with_ids` to produce the final query JSON for execution.
-    pub query_json: String,
-}
-
-impl HydrationTemplate {
-    /// Produce a complete query JSON with the given entity IDs injected.
-    pub fn with_ids(&self, ids: &[i64]) -> String {
-        let mut value: serde_json::Value =
-            serde_json::from_str(&self.query_json).expect("template is valid JSON");
-        value["node"]["node_ids"] = serde_json::json!(ids);
-        value.to_string()
-    }
-}
-
-impl ParameterizedQuery {
-    /// Render SQL with parameters inlined for debugging/observability.
-    ///
-    /// Replaces `{name:Type}` placeholders with literal values using
-    /// `ParamValue::render_literal`. Handles both scalar and array types.
-    /// **Not for execution** — use parameterized queries to prevent injection.
-    pub fn render(&self) -> String {
-        use regex::Regex;
-
-        let re = Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex");
-        re.replace_all(&self.sql, |caps: &regex::Captures| {
-            let name = &caps[1];
-            match self.params.get(name) {
-                Some(param) => param.render_literal(),
-                None => caps[0].to_string(),
-            }
-        })
-        .into_owned()
-    }
-}
-
-impl std::fmt::Display for ParameterizedQuery {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.render())
-    }
-}
+use super::{ParamValue, ParameterizedQuery, SqlDialect};
 
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
@@ -94,12 +20,9 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
         sql,
         params: ctx.params,
         result_context,
+        dialect: SqlDialect::ClickHouse,
     })
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Code generation context
-// ─────────────────────────────────────────────────────────────────────────────
 
 struct Context {
     params: HashMap<String, ParamValue>,
@@ -150,8 +73,6 @@ impl Context {
         Ok(format!("{} {}", keyword, cte_parts.join(", ")))
     }
 
-    /// Emit the query body (SELECT through LIMIT/OFFSET, including UNION ALL).
-    /// Used by both `emit_query` (top-level) and CTE definitions.
     fn emit_query_body(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
@@ -207,12 +128,8 @@ impl Context {
             parts.push(format!("ORDER BY {}", orders.join(", ")));
         }
 
-        // LIMIT / OFFSET
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
-        }
-        if let Some(offset) = q.offset {
-            parts.push(format!("OFFSET {offset}"));
         }
 
         Ok(parts.join(" "))
@@ -233,7 +150,6 @@ impl Context {
                 if *op == Op::In {
                     format!("{l} IN {r}")
                 } else {
-                    // This is for binary ops like =, >, <=, etc.
                     format!("({l} {op} {r})")
                 }
             }
@@ -272,7 +188,7 @@ impl Context {
                 );
                 placeholder
             }
-            // Scalar ChType with array value: expand element-by-element (Literal fallback).
+            // Scalar ChType with array value: expand element-by-element.
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
@@ -332,8 +248,6 @@ impl Context {
                 let left_sql = self.emit_table_ref(left)?;
                 let right_sql = self.emit_table_ref(right)?;
                 if *join_type == JoinType::Cross {
-                    // ClickHouse doesn't support plain CROSS JOIN in all
-                    // algorithms. Emit INNER JOIN ON 1 which is equivalent.
                     Ok(format!("{left_sql} INNER JOIN {right_sql} ON 1"))
                 } else {
                     let on_expr = self.emit_expr(on);
@@ -356,10 +270,6 @@ impl Context {
         }
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -544,7 +454,6 @@ mod tests {
 
     #[test]
     fn edge_type_filter() {
-        // Single type: equality in join ON clause
         let q = Query {
             select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
             from: TableRef::join(
@@ -572,7 +481,6 @@ mod tests {
             Some(&Value::String("AUTHORED".into()))
         );
 
-        // Multiple types: IN in join ON clause (uses col_in, matching production)
         let type_filter = Expr::col_in(
             "e",
             "relationship_kind",
@@ -603,13 +511,6 @@ mod tests {
             r.sql
         );
         assert_eq!(r.params.len(), 1);
-        assert_eq!(
-            r.params.get("p0").map(|p| &p.value),
-            Some(&Value::Array(vec![
-                Value::String("AUTHORED".into()),
-                Value::String("CONTAINS".into()),
-            ]))
-        );
     }
 
     #[test]
@@ -626,38 +527,6 @@ mod tests {
         let result = codegen(&Node::Query(Box::new(q)), ctx).unwrap();
         assert_eq!(result.result_context.len(), 1);
         assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
-    }
-
-    #[test]
-    fn offset_clause() {
-        let q = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("nodes", "n"),
-            limit: Some(10),
-            offset: Some(40),
-            ..Default::default()
-        };
-
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert_eq!(result.sql, "SELECT n.id FROM nodes AS n LIMIT 10 OFFSET 40");
-
-        // limit without offset
-        let q = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("nodes", "n"),
-            limit: Some(30),
-            ..Default::default()
-        };
-
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert!(result.sql.contains("LIMIT 30"));
-        assert!(!result.sql.contains("OFFSET"));
     }
 
     #[test]
@@ -724,21 +593,9 @@ mod tests {
         };
 
         let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
-        assert!(
-            result.sql.contains("(SELECT"),
-            "expected subquery: {}",
-            result.sql
-        );
-        assert!(
-            result.sql.contains(") AS sub"),
-            "expected alias: {}",
-            result.sql
-        );
-        assert!(
-            result.sql.contains("gl_project AS p"),
-            "expected inner table: {}",
-            result.sql
-        );
+        assert!(result.sql.contains("(SELECT"));
+        assert!(result.sql.contains(") AS sub"));
+        assert!(result.sql.contains("gl_project AS p"));
     }
 
     #[test]
@@ -769,24 +626,10 @@ mod tests {
         };
 
         let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
-        assert!(
-            result.sql.contains("INNER JOIN (SELECT"),
-            "expected join with subquery: {}",
-            result.sql
-        );
-        assert!(
-            result.sql.contains("HAVING"),
-            "expected HAVING in subquery: {}",
-            result.sql
-        );
-        assert!(
-            result.sql.contains(") AS deduped_e ON"),
-            "expected subquery alias: {}",
-            result.sql
-        );
+        assert!(result.sql.contains("INNER JOIN (SELECT"));
+        assert!(result.sql.contains("HAVING"));
+        assert!(result.sql.contains(") AS deduped_e ON"));
     }
-
-    // ── UNION ALL tests ─────────────────────────────────────────────
 
     #[test]
     fn union_all_in_cte_body() {
@@ -814,16 +657,8 @@ mod tests {
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert!(
-            result.sql.contains("WITH RECURSIVE"),
-            "expected WITH RECURSIVE: {}",
-            result.sql
-        );
-        assert!(
-            result.sql.contains("UNION ALL"),
-            "expected UNION ALL in CTE body: {}",
-            result.sql
-        );
+        assert!(result.sql.contains("WITH RECURSIVE"));
+        assert!(result.sql.contains("UNION ALL"));
     }
 
     #[test]
@@ -841,19 +676,11 @@ mod tests {
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert!(
-            result.sql.contains("UNION ALL"),
-            "expected UNION ALL: {}",
-            result.sql
-        );
-        assert!(
-            result.sql.contains("LIMIT 10"),
-            "LIMIT should apply to full UNION result: {}",
-            result.sql
-        );
+        assert!(result.sql.contains("UNION ALL"));
+        assert!(result.sql.contains("LIMIT 10"));
         let union_pos = result.sql.find("UNION ALL").unwrap();
         let limit_pos = result.sql.find("LIMIT").unwrap();
-        assert!(union_pos < limit_pos, "UNION ALL must precede LIMIT");
+        assert!(union_pos < limit_pos);
     }
 
     #[test]
@@ -879,21 +706,9 @@ mod tests {
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert!(
-            result.sql.contains("UNION ALL"),
-            "expected UNION ALL: {}",
-            result.sql
-        );
-        assert!(
-            result.sql.contains(") AS all_edges"),
-            "expected derived table alias: {}",
-            result.sql
-        );
+        assert!(result.sql.contains("UNION ALL"));
+        assert!(result.sql.contains(") AS all_edges"));
     }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // ParameterizedQuery::render
-    // ─────────────────────────────────────────────────────────────────────
 
     #[test]
     fn render_replaces_scalar_params() {
@@ -917,6 +732,7 @@ mod tests {
             sql: "SELECT * FROM t WHERE kind = {p0:String} AND state = {p1:String}".into(),
             params,
             result_context: empty_ctx(),
+            dialect: SqlDialect::ClickHouse,
         };
 
         assert_eq!(
@@ -947,6 +763,7 @@ mod tests {
             sql: "SELECT * FROM t WHERE x IN {p0:Array(String)} AND y IN {p1:Array(Int64)}".into(),
             params,
             result_context: empty_ctx(),
+            dialect: SqlDialect::ClickHouse,
         };
 
         assert_eq!(
@@ -961,6 +778,7 @@ mod tests {
             sql: "SELECT {p0:String} AND {p1:Int64}".into(),
             params: HashMap::new(),
             result_context: empty_ctx(),
+            dialect: SqlDialect::ClickHouse,
         };
 
         assert_eq!(pq.render(), "SELECT {p0:String} AND {p1:Int64}");

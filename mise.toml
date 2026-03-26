@@ -33,6 +33,7 @@ node = "24"
 vale = "3.13.0"
 lychee = "0.21.0"
 lefthook = "2.1.3"
+protoc = "34.1"
 
 [tasks."hooks:install"]
 run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
@@ -43,20 +44,24 @@ run = "cargo build --release"
 description = "Build the crates"
 
 [tasks.test]
-run = "cargo nextest run --lib --bins"
+run = "cargo nextest run --lib --bins --test compiler"
 description = "Run unit tests with full debug symbols"
 
 [tasks."test:fast"]
-run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins"
+run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins --test compiler"
 description = "Run unit tests with reduced debug info for faster builds"
 
+[tasks."test:compiler"]
+run = "cargo nextest run --test compiler"
+description = "Run compiler integration tests (no Docker)"
+
 [tasks."test:integration"]
-run = "cargo nextest run --all-features --test '*' --no-fail-fast --retries 0"
+run = "cargo nextest run --all-features --test docker --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run integration tests (requires Docker and `mise colima:start`)"
 
 [tasks."test:integration:server"]
-run = "cargo nextest run --all-features --test '*' -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
+run = "cargo nextest run --all-features --test docker -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, hydration, redaction, graph formatter)"
 

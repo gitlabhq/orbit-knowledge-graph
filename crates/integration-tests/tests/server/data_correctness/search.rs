@@ -364,23 +364,6 @@ pub(super) async fn search_nullable_datetime_returns_null_when_unset(ctx: &TestC
     });
 }
 
-pub(super) async fn search_range_returns_paginated_results(ctx: &TestContext) {
-    let resp = run_query(
-        ctx,
-        r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-            "range": {"start": 1, "end": 3}
-        }"#,
-        &allow_all(),
-    )
-    .await;
-
-    resp.assert_node_count(2);
-    resp.assert_node_order("User", &[2, 3]);
-}
-
 pub(super) async fn search_limit_truncates_results(ctx: &TestContext) {
     let resp = run_query(
         ctx,

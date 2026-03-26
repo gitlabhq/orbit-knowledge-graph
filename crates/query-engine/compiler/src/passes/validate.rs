@@ -355,24 +355,13 @@ impl<'a> Validator<'a> {
     }
 
     fn check_pagination(&self, input: &Input) -> Result<()> {
-        if let Some(ref range) = input.range {
-            if range.end <= range.start {
-                return Err(QueryError::PaginationError(format!(
-                    "range.end ({}) must be greater than range.start ({})",
-                    range.end, range.start
-                )));
-            }
-            let window = range.end - range.start;
-            if window > 1000 {
-                return Err(QueryError::PaginationError(format!(
-                    "range window size ({window}) must not exceed 1000"
-                )));
-            }
-        }
-        if input.cursor.is_some() && input.range.is_some() {
-            return Err(QueryError::PaginationError(
-                "cannot specify both 'cursor' and 'range'".to_string(),
-            ));
+        if let Some(ref cursor) = input.cursor
+            && cursor.offset.saturating_add(cursor.page_size) > input.limit
+        {
+            return Err(QueryError::PaginationError(format!(
+                "cursor.offset ({}) + cursor.page_size ({}) must not exceed limit ({})",
+                cursor.offset, cursor.page_size, input.limit
+            )));
         }
         Ok(())
     }

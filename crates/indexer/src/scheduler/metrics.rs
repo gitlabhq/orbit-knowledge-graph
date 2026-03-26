@@ -16,42 +16,42 @@ pub struct ScheduledTaskMetrics {
 
 impl ScheduledTaskMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("scheduler");
+        let meter = global::meter("gkg_scheduler");
         Self::with_meter(&meter)
     }
 
     pub fn with_meter(meter: &Meter) -> Self {
         let runs = meter
-            .u64_counter("scheduler.task.runs")
+            .u64_counter("gkg.scheduler.task.runs")
             .with_description("Total scheduled task runs")
             .build();
 
         let duration = meter
-            .f64_histogram("scheduler.task.duration")
+            .f64_histogram("gkg.scheduler.task.duration")
             .with_unit("s")
             .with_description("End-to-end duration of a scheduled task run")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let requests_published = meter
-            .u64_counter("scheduler.task.requests.published")
+            .u64_counter("gkg.scheduler.task.requests.published")
             .with_description("Requests successfully published")
             .build();
 
         let requests_skipped = meter
-            .u64_counter("scheduler.task.requests.skipped")
+            .u64_counter("gkg.scheduler.task.requests.skipped")
             .with_description("Requests skipped because already in-flight")
             .build();
 
         let query_duration = meter
-            .f64_histogram("scheduler.task.query.duration")
+            .f64_histogram("gkg.scheduler.task.query.duration")
             .with_unit("s")
             .with_description("Duration of a scheduled task ClickHouse query")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let errors = meter
-            .u64_counter("scheduler.task.errors")
+            .u64_counter("gkg.scheduler.task.errors")
             .with_description("Scheduled task errors by stage")
             .build();
 

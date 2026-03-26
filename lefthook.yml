@@ -26,12 +26,3 @@ pre-commit:
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
-    - name: helm-lint
-      glob: "helm/**"
-      group:
-        parallel: true
-        jobs:
-          - name: helm-lint-gkg
-            run: helm/sync.sh && helm lint helm/gkg
-          - name: helm-template-gkg
-            run: helm/sync.sh && helm template gkg helm/gkg

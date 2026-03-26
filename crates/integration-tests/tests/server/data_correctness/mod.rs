@@ -2,9 +2,12 @@ mod aggregation;
 mod edge_cases;
 mod helpers;
 mod neighbors;
+mod pagination;
 mod path_finding;
 mod search;
+mod security;
 mod traversal;
+mod work_items;
 
 use helpers::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, seed};
 use integration_testkit::run_subtests_shared;
@@ -33,8 +36,7 @@ async fn data_correctness() {
         search::search_boolean_columns_have_correct_values,
         search::search_datetime_columns_serialize_as_strings,
         search::search_nullable_datetime_returns_null_when_unset,
-        // search: pagination, limits, combined
-        search::search_range_returns_paginated_results,
+        // search: limits
         search::search_limit_truncates_results,
         search::search_filter_no_match_returns_empty,
         search::search_combined_filter_node_ids_order_by,
@@ -111,5 +113,35 @@ async fn data_correctness() {
         edge_cases::non_default_redaction_id_with_multiple_mrs,
         // referential integrity
         edge_cases::traversal_referential_integrity_on_complex_query,
+        // security: traversal path scoping for search
+        security::search_scoped_path_excludes_other_namespaces,
+        security::search_scoped_to_single_project_namespace,
+        security::search_multi_path_returns_union_of_scopes,
+        security::search_scoped_mr_excludes_other_namespaces,
+        security::search_with_filter_respects_scope,
+        // security: traversal path scoping for path finding
+        security::path_finding_scoped_excludes_paths_through_other_namespaces,
+        security::path_finding_multi_path_scope_finds_both,
+        security::path_finding_narrow_scope_excludes_all_targets,
+        // cursor pagination
+        pagination::cursor_first_page,
+        pagination::cursor_second_page,
+        pagination::cursor_last_page_partial,
+        pagination::cursor_offset_beyond_data,
+        pagination::cursor_with_filter,
+        pagination::cursor_with_filter_second_page,
+        pagination::cursor_with_redaction,
+        pagination::cursor_with_redaction_second_page,
+        pagination::cursor_pages_cover_all_data,
+        pagination::cursor_traversal,
+        // work items: search
+        work_items::search_returns_correct_work_item_properties,
+        work_items::search_filter_work_item_type_returns_matching_rows,
+        // work items: traversal (all 5 edge types)
+        work_items::traversal_user_authored_work_item_returns_correct_edges,
+        work_items::traversal_work_item_in_group_returns_correct_edges,
+        work_items::traversal_work_item_in_milestone_returns_correct_edges,
+        work_items::traversal_user_assigned_work_item_returns_correct_edges,
+        work_items::traversal_work_item_has_label_returns_correct_edges,
     );
 }

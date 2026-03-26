@@ -167,20 +167,20 @@ async fn pipeline_observer_records_query_metrics() {
     let metrics = exporter.get_finished_metrics().unwrap();
 
     assert!(
-        find_metric(&metrics, "qp.queries_total").is_some(),
-        "qp.queries_total should be recorded"
+        find_metric(&metrics, "gkg.query.pipeline.queries").is_some(),
+        "gkg.query.pipeline.queries should be recorded"
     );
     assert!(
-        find_metric(&metrics, "qp.pipeline_duration_ms").is_some(),
-        "qp.pipeline_duration_ms should be recorded"
+        find_metric(&metrics, "gkg.query.pipeline.duration").is_some(),
+        "gkg.query.pipeline.duration should be recorded"
     );
     assert!(
-        find_metric(&metrics, "qp.compile_duration_ms").is_some(),
-        "qp.compile_duration_ms should be recorded"
+        find_metric(&metrics, "gkg.query.pipeline.compile.duration").is_some(),
+        "gkg.query.pipeline.compile.duration should be recorded"
     );
     assert!(
-        find_metric(&metrics, "qp.execute_duration_ms").is_some(),
-        "qp.execute_duration_ms should be recorded"
+        find_metric(&metrics, "gkg.query.pipeline.execute.duration").is_some(),
+        "gkg.query.pipeline.execute.duration should be recorded"
     );
 
     provider.shutdown().unwrap();

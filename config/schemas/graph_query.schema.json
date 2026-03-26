@@ -55,33 +55,22 @@
       "maximum": 1000,
       "default": 30
     },
-    "range": {
-      "type": "object",
-      "description": "Bounded result window for pagination. Mutually exclusive with limit and cursor. Size (end - start) capped at 1000 by the server.",
-      "required": ["start", "end"],
-      "properties": {
-        "start": {
-          "type": "integer",
-          "description": "Index of the first row to return (0-based), applied after filtering and ordering",
-          "minimum": 0
-        },
-        "end": {
-          "type": "integer",
-          "description": "Index of the last row to return (exclusive). end - start must not exceed 1000.",
-          "minimum": 1
-        }
-      },
-      "additionalProperties": false
-    },
     "cursor": {
       "type": "object",
-      "description": "Keyset pagination cursor. Returns results after the given id position. Combined with traversal paths from the security context for full primary key utilization. Mutually exclusive with range.",
-      "required": ["id"],
+      "description": "Agent-driven pagination cursor. Slices the authorized result set (after redaction) by offset and page_size.",
+      "required": ["offset", "page_size"],
       "properties": {
-        "id": {
+        "offset": {
           "type": "integer",
-          "description": "The id of the last row from the previous page. Results will start after this position in (traversal_path, id) sort order.",
-          "minimum": 0
+          "description": "0-based offset into the authorized (post-redaction) result set.",
+          "minimum": 0,
+          "maximum": 999
+        },
+        "page_size": {
+          "type": "integer",
+          "description": "Number of rows to return from the offset position. offset + page_size must not exceed limit.",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "additionalProperties": false
@@ -100,16 +89,6 @@
     }
   },
   "allOf": [
-    {
-      "not": {
-        "required": ["limit", "range"]
-      }
-    },
-    {
-      "not": {
-        "required": ["cursor", "range"]
-      }
-    },
     {
       "if": {
         "properties": {

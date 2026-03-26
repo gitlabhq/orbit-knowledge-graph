@@ -183,9 +183,9 @@ The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexi
 
 Example NATS KV:
 
-- Key: `/gkg-indexer/indexing/{project_id}/{branch_name}/lock`
+- Key: `project.{project_id}.{base64_encoded_branch}`
 - Value: `{ "worker_id": String, "started_at": Instant }`
-- TTL: 1 hour (estimated based on the amount of resources)
+- TTL: 60 seconds
 
 After acquiring the lock, the service resolves the repository using a three-tier strategy: if the branch is already cached at the same commit, the cached files are reused directly. If the cache exists at an older commit, an incremental update fetches only the changed paths and their blob content from the Rails internal API, applying renames, deletions, and writes to the cache. If no cache exists or the incremental update fails (e.g. due to a force push), the service falls back to downloading the full repository archive.
 

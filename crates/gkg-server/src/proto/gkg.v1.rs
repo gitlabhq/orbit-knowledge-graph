@@ -61,9 +61,23 @@ pub struct QueryMetadata {
     /// compiled ClickHouse SQL(s) for debugging
     #[prost(string, repeated, tag = "2")]
     pub raw_query_strings: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// rows returned after redaction
+    /// rows returned after redaction (and cursor slicing if applicable)
     #[prost(int32, tag = "3")]
     pub row_count: i32,
+    /// present when query included a cursor
+    #[prost(message, optional, tag = "4")]
+    pub pagination: ::core::option::Option<PaginationInfo>,
+}
+/// Pagination metadata returned when the query includes a cursor.
+/// Absent for queries without cursor — the agent interprets absence as "no pagination".
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PaginationInfo {
+    /// true if more authorized rows exist beyond this page
+    #[prost(bool, tag = "1")]
+    pub has_more: bool,
+    /// total authorized rows before cursor slicing
+    #[prost(int64, tag = "2")]
+    pub total_rows: i64,
 }
 /// Server-sent error when query compilation or execution fails.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

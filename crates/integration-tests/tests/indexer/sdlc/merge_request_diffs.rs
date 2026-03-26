@@ -76,11 +76,11 @@ pub async fn processes_merge_request_diff_files_with_edges(ctx: &TestContext) {
     ctx.execute(
         "INSERT INTO siphon_merge_request_diff_files
             (merge_request_diff_id, relative_order, old_path, new_path, new_file, renamed_file,
-             deleted_file, too_large, binary, a_mode, b_mode, _siphon_replicated_at)
+             deleted_file, too_large, binary, a_mode, b_mode, traversal_path, _siphon_replicated_at)
         VALUES
-            (10, 0, 'src/main.rs', 'src/main.rs', false, false, false, false, false, '100644', '100644', '2024-01-20 12:00:00'),
-            (10, 1, '', 'src/new_file.rs', true, false, false, false, false, '000000', '100644', '2024-01-20 12:00:00'),
-            (10, 2, 'src/old_file.rs', '', false, false, true, false, false, '100644', '000000', '2024-01-20 12:00:00')",
+            (10, 0, 'src/main.rs', 'src/main.rs', false, false, false, false, false, '100644', '100644', '1/100/', '2024-01-20 12:00:00'),
+            (10, 1, '', 'src/new_file.rs', true, false, false, false, false, '000000', '100644', '1/100/', '2024-01-20 12:00:00'),
+            (10, 2, 'src/old_file.rs', '', false, false, true, false, false, '100644', '000000', '1/100/', '2024-01-20 12:00:00')",
     )
     .await;
 

@@ -17,7 +17,7 @@ mv gkg/values.yaml.tmp gkg/values.yaml
 echo "  Merged extra values"
 
 if [ -f patches/chart-deps.yaml ]; then
-  yq eval -i '.dependencies = (.dependencies // []) + load("patches/chart-deps.yaml")' gkg/Chart.yaml
+  yq eval -i '.dependencies = load("patches/chart-deps.yaml")' gkg/Chart.yaml
   mkdir -p gkg/charts
   cp -r charts/nats gkg/charts/nats
   cp -r charts/siphon gkg/charts/siphon
