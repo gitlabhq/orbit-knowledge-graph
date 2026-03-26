@@ -71,8 +71,7 @@ pub fn lower(input: &mut Input) -> Result<Node> {
     // subsequent pages reuse the cached SQL result at the CH layer.
     if input.cursor.is_some() {
         let Node::Query(q) = &mut node;
-        q.query_settings
-            .push(QuerySetting::UseQueryCache(true));
+        q.query_settings.push(QuerySetting::UseQueryCache(true));
         q.query_settings
             .push(QuerySetting::QueryCacheTtl(CH_QUERY_CACHE_TTL));
     }
@@ -2749,8 +2748,7 @@ mod tests {
             "cursor should enable CH query cache"
         );
         assert!(
-            q.query_settings
-                .contains(&QuerySetting::QueryCacheTtl(60)),
+            q.query_settings.contains(&QuerySetting::QueryCacheTtl(60)),
             "CH query cache TTL should be 60s"
         );
     }
