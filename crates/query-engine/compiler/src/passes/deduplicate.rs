@@ -110,59 +110,52 @@ fn pushdown_columns(table: &str) -> &'static [&'static str] {
 
 // ─── Column collection ───────────────────────────────────────────────────
 
+/// Map of `alias → {column names}` referenced at this query level.
 fn collect_used_columns(q: &Query) -> HashMap<String, HashSet<String>> {
     let mut out: HashMap<String, HashSet<String>> = HashMap::new();
     for sel in &q.select {
-        collect_from_expr(&sel.expr, &mut out);
+        walk_columns(&sel.expr, &mut out);
     }
     if let Some(w) = &q.where_clause {
-        collect_from_expr(w, &mut out);
+        walk_columns(w, &mut out);
     }
-    collect_from_table_ref(&q.from, &mut out);
+    walk_join_conditions(&q.from, &mut out);
     for g in &q.group_by {
-        collect_from_expr(g, &mut out);
+        walk_columns(g, &mut out);
     }
     if let Some(h) = &q.having {
-        collect_from_expr(h, &mut out);
+        walk_columns(h, &mut out);
     }
     for o in &q.order_by {
-        collect_from_expr(&o.expr, &mut out);
+        walk_columns(&o.expr, &mut out);
     }
     out
 }
 
-fn collect_from_expr(expr: &Expr, out: &mut HashMap<String, HashSet<String>>) {
+fn walk_columns(expr: &Expr, out: &mut HashMap<String, HashSet<String>>) {
     match expr {
         Expr::Column { table, column } => {
             out.entry(table.clone()).or_default().insert(column.clone());
         }
         Expr::BinaryOp { left, right, .. } => {
-            collect_from_expr(left, out);
-            collect_from_expr(right, out);
+            walk_columns(left, out);
+            walk_columns(right, out);
         }
-        Expr::UnaryOp { expr, .. } => collect_from_expr(expr, out),
-        Expr::FuncCall { args, .. } => {
-            for a in args {
-                collect_from_expr(a, out);
-            }
-        }
-        Expr::InSubquery { expr, .. } => collect_from_expr(expr, out),
+        Expr::UnaryOp { expr, .. } => walk_columns(expr, out),
+        Expr::FuncCall { args, .. } => args.iter().for_each(|a| walk_columns(a, out)),
+        Expr::InSubquery { expr, .. } => walk_columns(expr, out),
         Expr::Literal(_) | Expr::Param { .. } => {}
     }
 }
 
-fn collect_from_table_ref(tr: &TableRef, out: &mut HashMap<String, HashSet<String>>) {
-    match tr {
-        TableRef::Scan { .. } => {}
-        TableRef::Join {
-            left, right, on, ..
-        } => {
-            collect_from_table_ref(left, out);
-            collect_from_table_ref(right, out);
-            collect_from_expr(on, out);
-        }
-        // Derived tables have their own column scope.
-        TableRef::Union { .. } | TableRef::Subquery { .. } => {}
+fn walk_join_conditions(tr: &TableRef, out: &mut HashMap<String, HashSet<String>>) {
+    if let TableRef::Join {
+        left, right, on, ..
+    } = tr
+    {
+        walk_join_conditions(left, out);
+        walk_join_conditions(right, out);
+        walk_columns(on, out);
     }
 }
 
@@ -175,72 +168,46 @@ fn wrap_scans(
 ) {
     match from {
         TableRef::Scan { table, alias } if is_node_table(table) => {
-            let columns = match used.get(alias.as_str()) {
-                Some(c) => c,
-                None => return,
+            let Some(columns) = used.get(alias.as_str()) else {
+                return;
             };
-
             let table_name = table.clone();
-            let scan_alias = alias.clone();
-            let dk: &[&str] = &["id"];
-            let dk_set: HashSet<&str> = dk.iter().copied().collect();
-            let pd_set: HashSet<&str> = pushdown_columns(&table_name).iter().copied().collect();
+            let alias = alias.clone();
+            let pk: HashSet<&str> = pushdown_columns(&table_name).iter().copied().collect();
 
-            // Split outer WHERE into pushable (PK-only) and remaining.
-            let (pushable, remaining) = extract_pushable(where_clause.take(), &scan_alias, &pd_set);
+            let (pushable, remaining) = extract_pushable(where_clause.take(), &alias, &pk);
             *where_clause = rebuild_and(remaining);
 
-            // Inner SELECT: dedup-key columns as-is, everything else via argMax.
-            let mut inner_select: Vec<SelectExpr> = Vec::new();
-            for col in dk {
-                inner_select.push(SelectExpr::new(Expr::col(&scan_alias, *col), *col));
-            }
-            for col in columns {
-                if dk_set.contains(col.as_str()) {
-                    continue;
-                }
-                inner_select.push(SelectExpr::new(
-                    Expr::func(
-                        "argMax",
-                        vec![
-                            Expr::col(&scan_alias, col),
-                            Expr::col(&scan_alias, VERSION_COLUMN),
-                        ],
-                    ),
-                    col.clone(),
-                ));
-            }
-
-            let group_by: Vec<Expr> = dk.iter().map(|c| Expr::col(&scan_alias, *c)).collect();
-
-            let having = Expr::eq(
+            let argmax = |col: &str| {
                 Expr::func(
                     "argMax",
-                    vec![
-                        Expr::col(&scan_alias, DELETED_COLUMN),
-                        Expr::col(&scan_alias, VERSION_COLUMN),
-                    ],
-                ),
-                Expr::lit(false),
-            );
-
-            let inner = Query {
-                select: inner_select,
-                from: TableRef::scan(table_name, &scan_alias),
-                where_clause: rebuild_and(pushable),
-                group_by,
-                having: Some(having),
-                ..Default::default()
+                    vec![Expr::col(&alias, col), Expr::col(&alias, VERSION_COLUMN)],
+                )
             };
 
-            *from = TableRef::subquery(inner, scan_alias);
+            let mut select = vec![SelectExpr::new(Expr::col(&alias, "id"), "id")];
+            for col in columns {
+                if col == "id" {
+                    continue;
+                }
+                select.push(SelectExpr::new(argmax(col), col.clone()));
+            }
+
+            let inner = Query {
+                select,
+                from: TableRef::scan(table_name, &alias),
+                where_clause: rebuild_and(pushable),
+                group_by: vec![Expr::col(&alias, "id")],
+                having: Some(Expr::eq(argmax(DELETED_COLUMN), Expr::lit(false))),
+                ..Default::default()
+            };
+            *from = TableRef::subquery(inner, alias);
         }
-        TableRef::Scan { .. } => {} // CTE reference or non-graph table
+        TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
             wrap_scans(left, where_clause, used);
             wrap_scans(right, where_clause, used);
         }
-        // Already processed by recurse_into_derived_tables.
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
 }
@@ -260,12 +227,7 @@ fn extract_pushable(
     let mut pushable = Vec::new();
     let mut remaining = Vec::new();
     for conjunct in flatten_and(e) {
-        let refs = column_refs(&conjunct);
-        let ok = !refs.is_empty()
-            && refs
-                .iter()
-                .all(|(t, c)| t == alias && pk_cols.contains(c.as_str()));
-        if ok {
+        if is_pushable(&conjunct, alias, pk_cols) {
             pushable.push(conjunct);
         } else {
             remaining.push(conjunct);
@@ -274,27 +236,17 @@ fn extract_pushable(
     (pushable, remaining)
 }
 
-fn column_refs(expr: &Expr) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    column_refs_inner(expr, &mut out);
-    out
-}
-
-fn column_refs_inner(expr: &Expr, out: &mut Vec<(String, String)>) {
+/// True when every column reference in `expr` targets `alias` with a PK column.
+fn is_pushable(expr: &Expr, alias: &str, pk_cols: &HashSet<&str>) -> bool {
     match expr {
-        Expr::Column { table, column } => out.push((table.clone(), column.clone())),
+        Expr::Column { table, column } => table == alias && pk_cols.contains(column.as_str()),
         Expr::BinaryOp { left, right, .. } => {
-            column_refs_inner(left, out);
-            column_refs_inner(right, out);
+            is_pushable(left, alias, pk_cols) && is_pushable(right, alias, pk_cols)
         }
-        Expr::UnaryOp { expr, .. } => column_refs_inner(expr, out),
-        Expr::FuncCall { args, .. } => {
-            for a in args {
-                column_refs_inner(a, out);
-            }
-        }
-        Expr::InSubquery { expr, .. } => column_refs_inner(expr, out),
-        Expr::Literal(_) | Expr::Param { .. } => {}
+        Expr::UnaryOp { expr, .. } => is_pushable(expr, alias, pk_cols),
+        Expr::FuncCall { args, .. } => args.iter().all(|a| is_pushable(a, alias, pk_cols)),
+        Expr::InSubquery { expr, .. } => is_pushable(expr, alias, pk_cols),
+        Expr::Literal(_) | Expr::Param { .. } => true,
     }
 }
 
