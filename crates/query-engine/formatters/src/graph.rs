@@ -52,6 +52,9 @@ pub struct GraphEdge {
     pub step: Option<usize>,
 }
 
+/// Entity type for synthetic nodes emitted by ungrouped scalar aggregations.
+pub const SCALAR_AGGREGATION_TYPE: &str = "Aggregation";
+
 type EdgeKey = (String, i64, String, i64, String, Option<i64>);
 
 #[derive(Clone, Copy)]
@@ -258,9 +261,9 @@ impl GraphFormatter {
                         properties.insert(col_name.clone(), column_value_to_json(value));
                     }
                 }
-                let key = ("Aggregation".to_string(), 0);
+                let key = (SCALAR_AGGREGATION_TYPE.to_string(), 0);
                 node_map.entry(key).or_insert_with(|| GraphNode {
-                    entity_type: "Aggregation".to_string(),
+                    entity_type: SCALAR_AGGREGATION_TYPE.to_string(),
                     id: 0,
                     properties,
                 });
