@@ -526,6 +526,7 @@ mod tests {
             query_type: "path_finding".to_string(),
             nodes: vec![make_node("User", 1, &[]), make_node("Project", 1000, &[])],
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
+            pagination: None,
         };
         let view = ResponseView::for_query(&input, resp);
         assert_eq!(view.path_ids().len(), 1);
@@ -843,6 +844,7 @@ mod tests {
             query_type: "path_finding".to_string(),
             nodes: vec![make_node("User", 1, &[]), make_node("Project", 1000, &[])],
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
+            pagination: None,
         };
         let view = ResponseView::for_query(&input, resp);
         drop(view);
