@@ -77,7 +77,10 @@ impl TlsConfig {
                 let identity = Identity::from_pem(cert, key);
                 Ok(Some(ServerTlsConfig::new().identity(identity)))
             }
-            _ => Ok(None),
+            (Some(_), None) | (None, Some(_)) => {
+                anyhow::bail!("both `tls.cert_path` and `tls.key_path` must be set to enable TLS")
+            }
+            (None, None) => Ok(None),
         }
     }
 }
