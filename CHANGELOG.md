@@ -1,3 +1,45 @@
+## [0.17.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.16.0...v0.17.0) (2026-03-26)
+
+### Features
+
+* **compiler:** add composable, type-safe compiler pipeline scaffolding ([0cce46d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0cce46d037039eadff445fb45b3a7e55d03368aa)) by Michael Usachenko
+* **compiler:** add DuckDB codegen backend and local compilation pipeline ([e05f8f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e05f8f913454471b0eb954b7c84eb7d99e9c9ffd)) by Michael Usachenko
+* **compiler:** replace keyset cursor with agent-driven pagination ([091d761](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/091d7617d97879e9a0f224e186d42ef1f52d0215)) by Michael Usachenko
+* **indexer:** leverage traversal_path projection in Group and Project ETL ([856e0d3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/856e0d310b1e2eacfd65d8f9a11f52cceb7c9e21)) by Jean-Gabriel Doyon
+* migrate work items from hierarchy_work_items to work_items table ([0ca40dd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0ca40dd82b5e84ce5f79733ce31ab1d0c4b33c48)) by Jean-Gabriel Doyon PTO until 2024-04-17
+* **pagination:** surface cursor data to proto, and raw + llm formatters ([274637f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/274637f5b79f1c1f6773b97138fdf4960a335f82)) by Michael Usachenko
+* **query-engine:** wire pipeline presets into compile() and compile_input() ([21312c7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/21312c70388e9d8a9f4e528a63ced8bff7ea07d4)) by Michael Usachenko
+* **schema:** add aggregation projection to gl_edge and by_id to gl_stage/gl_finding ([968d06b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/968d06b311594b77897d061e613dfa0a8bbe34e3)) by Michael Angelo Rivera
+* **server:** add optional TLS for gRPC ([457a044](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/457a04467a3746f371c70cbd0bb866f05da323d9)) by Bohdan Parkhomchuk
+* **testing:** sqlparser-based test assertions in compiler integration tests ([49e003d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/49e003d83501d7076e58f42a076b7a2c8395f8fd)) by Michael Usachenko
+
+### Fixes
+
+* **build:** unbreak CI docker build ([1433ba8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1433ba8064495ee04a373810394d2e607ec34292)) by Bohdan Parkhomchuk
+* **compiler:** emit correct redaction columns for non-default id entities ([d62ac2b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d62ac2b12bc8d7744605340474f92d168883d4e9)) by Michael Angelo Rivera
+* **compiler:** join node table when order_by references non-id property ([da4dd8d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da4dd8df457dd299048ee2c76f53d4c830a1cbc6)) by Michael Angelo Rivera
+* **ontology:** read traversal_path from file table in MergeRequestDiffFile ETL ([5b51617](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5b51617b5cbf2ba404e97ebb94e2f0812567957b)) by Jean-Gabriel Doyon PTO until 2024-04-17
+* **tilt:** auto-sync vendored helm chart and bump fd limit ([6a90329](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6a90329854ebf1f17bc27f463346b477da02d000)) by Bohdan Parkhomchuk
+
+### Other
+
+* add indexing and configuration runbooks ([e23efee](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e23efee625700bb265bcef03a867a67b523e4103)) by Jean-Gabriel Doyon PTO until 2024-04-17
+* add Orbit landing page ([55e7b1a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/55e7b1a777c227df90f00a570167f9080c58d0ea)) by Phillip Wells
+* **build:** simplify build-dev.sh ([8970980](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/89709800d21f88cdd4f89b3323891e5a59d566c6)) by Bohdan Parkhomchuk
+* **ci:** drop helm-lint and fix tag release jobs ([1f89d80](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1f89d806df0f475ac11415990e772abec9767215)) by Bohdan Parkhomchuk
+* **compiler:** consolidate _gkg_* column emission in enforce pass ([7a416af](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a416af8a7c390cacf278239632a937db4adff57)) by Michael Usachenko
+* **compiler:** replace hardcoded strings with named constants ([6130bf9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6130bf999b15da70f7d39a731cf7662d411ba4db)) by Michael Usachenko
+* **deps:** update rust crate arrow-ipc to v58.1.0 ([e8ecf38](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e8ecf3803b0c04dc9dbfc5808acd8634c4a1b897)) by GitLab Renovate Bot
+* **deps:** update rust crate datafusion to v53 ([41a7e87](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/41a7e87f176c1c975504197915177bc581e33f02)) by GitLab Dependency Bot
+* **deps:** update rust crate moka to v0.12.15 ([020deca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/020deca8157e26fd328e9d1ddd0fada602ccf955)) by GitLab Renovate Bot
+* **deps:** update rust crate toml to v1.1.0 ([6e93c25](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6e93c25a9bb57a44db42a394891fa4a32a626d00)) by GitLab Renovate Bot
+* **helm:** replace helm-dev with vendored official charts ([aa9181a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aa9181ac8c71feb2c7e21e5e37bf56e5ca4961a7)) by Bohdan Parkhomchuk
+* **metrics:** standardize OTel metric names ([114425b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/114425be0262e9f070295bf17c2e9359718253ff)) by Bohdan Parkhomchuk
+* remove datalake-generator crate ([d5f3fc3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d5f3fc33673c7fd45d58b140b7e909912d9b1c12)) by Jean-Gabriel Doyon
+* **security:** traversal path scoping tests for search and path_finding ([8fe2c91](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8fe2c9169a69d9ae151caaf85e203e1222baa1f4)) by Michael Usachenko
+* **tests:** extract compiler tests into standalone test files ([2981328](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/29813287d4262a15d26ca553d3badfda345909fb)) by Michael Usachenko
+* **tests:** extract data correctness seeds to SQL file ([1a57768](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1a57768b49b4ccb3a4e98a5b5783bf9346cce582)) by Michael Usachenko
+
 ## [0.16.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.15.0...v0.16.0) (2026-03-23)
 
 ### Features
