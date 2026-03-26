@@ -69,6 +69,11 @@ domains:
       File: nodes/source_code/file.yaml
       Definition: nodes/source_code/definition.yaml
       ImportedSymbol: nodes/source_code/imported_symbol.yaml
+  sessions:
+    description: "Entities related to AI coding sessions and their metadata."
+    nodes:
+      Session: nodes/sessions/session.yaml
+      Topic: nodes/sessions/topic.yaml
 edges:
   CONTAINS: edges/contains.yaml
   HAS_DIFF: edges/has_diff.yaml
@@ -107,3 +112,5 @@ edges:
   SCANS: edges/scans.yaml
   RAN_BY: edges/ran_by.yaml
   IN_PIPELINE: edges/in_pipeline.yaml
+  LINKED_TO: edges/linked_to.yaml
+  HAS_TOPIC: edges/has_topic.yaml

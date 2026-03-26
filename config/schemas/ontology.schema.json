@@ -13,7 +13,7 @@
   "definitions": {
     "domainName": {
       "type": "string",
-      "enum": ["core", "source_code", "code_review", "ci", "security", "plan"],
+      "enum": ["core", "source_code", "code_review", "ci", "security", "plan", "sessions"],
       "description": "Domain classification for organizing entities."
     },
 

@@ -1,3 +1,4 @@
+mod sessions;
 mod workspace;
 
 use anyhow::{Context, Result};
@@ -14,7 +15,7 @@ use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
-enum OutputFormat {
+pub enum OutputFormat {
     #[default]
     Pretty,
     Json,
@@ -96,6 +97,11 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Manage the local session knowledge graph
+    Sessions {
+        #[command(subcommand)]
+        command: sessions::SessionsCommand,
+    },
     /// Execute query engine on JSON payloads and output SQL
     ///
     /// Takes a JSON object where each key is a query description and each value
@@ -154,6 +160,7 @@ async fn main() -> Result<()> {
 
             run_index(path, threads, stats).await
         }
+        Commands::Sessions { command } => sessions::run(command),
         Commands::Query {
             file,
             json,

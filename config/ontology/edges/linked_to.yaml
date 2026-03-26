@@ -1,0 +1,6 @@
+description: "Links two related coding sessions."
+
+variants:
+  - from_node: { type: Session, id: id }
+    to_node: { type: Session, id: id }
+    description: "Session linked to another session."

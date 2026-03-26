@@ -1,0 +1,29 @@
+node_type: Topic
+domain: sessions
+description: "A topic tag for categorizing sessions."
+label: name
+destination_table: gl_topic
+default_columns: [id, name]
+sort_key: [name]
+
+style:
+  size: 24
+  color: "#C084FC"
+
+redaction:
+  resource_type: topic
+  id_column: id
+  ability: read_session
+
+properties:
+  id:
+    type: string
+    source: id
+    nullable: false
+    description: "Topic ID."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Topic name."

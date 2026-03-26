@@ -1,0 +1,23 @@
+[package]
+name = "session-graph"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+duckdb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+ontology = { path = "../ontology" }
+compiler = { path = "../query-engine/compiler" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

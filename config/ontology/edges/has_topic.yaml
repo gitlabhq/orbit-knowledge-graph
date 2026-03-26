@@ -1,0 +1,6 @@
+description: "A session is tagged with a topic."
+
+variants:
+  - from_node: { type: Session, id: id }
+    to_node: { type: Topic, id: id }
+    description: "Session tagged with a topic."

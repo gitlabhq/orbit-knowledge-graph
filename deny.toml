@@ -110,6 +110,11 @@ name = "gkg-utils"
 expression = "LicenseRef-EE"
 license-files = []
 
+[[licenses.clarify]]
+name = "session-graph"
+expression = "LicenseRef-EE"
+license-files = []
+
 [[licenses.exceptions]]
 name = "ruby-prism"
 allow = ["MIT"]

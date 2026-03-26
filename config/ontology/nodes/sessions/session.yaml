@@ -1,0 +1,83 @@
+node_type: Session
+domain: sessions
+description: "An AI coding session from Claude Code, Codex, or OpenCode."
+label: title
+destination_table: gl_session
+default_columns: [id, tool, project, title, model, git_branch, created_at]
+sort_key: [created_at]
+
+style:
+  size: 32
+  color: "#8B5CF6"
+
+redaction:
+  resource_type: session
+  id_column: id
+  ability: read_session
+
+properties:
+  id:
+    type: string
+    source: id
+    nullable: false
+    description: "Session UUID from the originating tool."
+
+  tool:
+    type: string
+    source: tool
+    nullable: false
+    description: "Tool that created the session."
+
+  project:
+    type: string
+    source: project
+    nullable: false
+    description: "Working directory or project path."
+
+  title:
+    type: string
+    source: title
+    nullable: false
+    description: "Session title or first user message."
+
+  summary:
+    type: string
+    source: summary
+    nullable: true
+    description: "Agent-written session summary."
+
+  model:
+    type: string
+    source: model
+    nullable: true
+    description: "LLM model used."
+
+  git_branch:
+    type: string
+    source: git_branch
+    nullable: true
+    description: "Active git branch during session."
+
+  message_count:
+    type: int64
+    source: message_count
+    nullable: false
+    description: "Number of messages in the session."
+
+  filepath:
+    type: string
+    source: filepath
+    nullable: false
+    description: "Path to session transcript file."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    description: "When the session started."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "When the session was last active."

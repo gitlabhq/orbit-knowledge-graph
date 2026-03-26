@@ -1358,6 +1358,8 @@ style:
             "Directory",
             "Definition",
             "ImportedSymbol",
+            "Session",
+            "Topic",
         ];
 
         for entity in &expected {
