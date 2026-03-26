@@ -93,7 +93,7 @@ impl DuckDbState {
 /// Standard ClickHouse compilation pipeline.
 ///
 /// ```text
-/// JSON → Validate → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen
+/// JSON → Validate → Normalize → Lower → Optimize → Enforce → Security → Deduplicate → Check → Codegen
 /// ```
 pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
@@ -104,6 +104,7 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
         .pass(OptimizePass)
         .pass(EnforcePass)
         .pass(SecurityPass)
+        .pass(DeduplicatePass)
         .pass(CheckPass)
         .pass(CodegenPass)
         .build()
@@ -114,7 +115,7 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
 /// Used by tests and the `compile_input()` public API for non-hydration queries.
 ///
 /// ```text
-/// Input → Lower → Optimize → Enforce → Security → Check → Codegen
+/// Input → Lower → Optimize → Enforce → Security → Deduplicate → Check → Codegen
 /// ```
 pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
@@ -122,6 +123,7 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
         .pass(OptimizePass)
         .pass(EnforcePass)
         .pass(SecurityPass)
+        .pass(DeduplicatePass)
         .pass(CheckPass)
         .pass(CodegenPass)
         .build()
