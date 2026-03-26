@@ -14,7 +14,7 @@ use query_engine::shared::{
     CompilationStage, ExtractionStage, OutputStage, PaginationMeta, PipelineOutput,
 };
 
-use super::cache::QueryResultCache;
+use super::cache::{QueryResultCache, parse_cursor_from_json};
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
@@ -99,8 +99,9 @@ impl QueryPipelineService {
             output
         };
 
-        // Apply cursor slicing after the pipeline (or cache hit).
-        if let Some(cursor) = output.compiled.input.cursor {
+        // Apply cursor slicing from the current request (not the cached
+        // compiled input, which may carry a different page's cursor).
+        if let Some(cursor) = parse_cursor_from_json(query_json) {
             let total_rows = output.query_result.authorized_count();
             let has_more = output
                 .query_result
