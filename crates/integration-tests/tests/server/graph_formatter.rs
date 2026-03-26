@@ -1412,13 +1412,13 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
     .await;
 
     // The count is computed at the SQL level (before redaction), so it
-    // reflects all 5 users, not the 3 authorized ones. This is correct
-    // behavior — the aggregate is over the full authorized query result.
+    // reflects all 5 users, not the 3 authorized ones.
     let aggregates = &value["aggregates"];
     assert!(aggregates.is_object(), "should have aggregates: {value}");
-    assert!(
-        aggregates["total"].as_i64().unwrap() > 0,
-        "count should be positive"
+    assert_eq!(
+        aggregates["total"].as_i64().unwrap(),
+        5,
+        "SQL-level count should be 5 (all users, pre-redaction)"
     );
 }
 

@@ -239,6 +239,16 @@ impl GraphFormatter {
         }
     }
 
+    fn agg_col_names(aggs: &[compiler::input::InputAggregation]) -> Vec<String> {
+        aggs.iter()
+            .map(|agg| {
+                agg.alias
+                    .clone()
+                    .unwrap_or_else(|| agg.function.to_string())
+            })
+            .collect()
+    }
+
     fn extract_aggregation(
         &self,
         result: &QueryResult,
@@ -248,15 +258,7 @@ impl GraphFormatter {
         node_map: &mut IndexMap<(String, i64), GraphNode>,
     ) {
         let Some(aggs) = aggregations else { return };
-
-        let agg_col_names: Vec<String> = aggs
-            .iter()
-            .map(|agg| {
-                agg.alias
-                    .clone()
-                    .unwrap_or_else(|| agg.function.to_string())
-            })
-            .collect();
+        let agg_col_names = Self::agg_col_names(aggs);
 
         for row in result.authorized_rows() {
             for node in result_context.nodes() {
@@ -286,7 +288,8 @@ impl GraphFormatter {
     }
 
     /// Extract scalar aggregate values for ungrouped aggregations.
-    /// Returns `None` for grouped aggregations or non-aggregation queries.
+    /// Returns `None` for grouped or mixed aggregations (where any
+    /// aggregation has a `group_by` — mixed mode is not supported).
     fn extract_scalar_aggregates(
         output: &PipelineOutput,
     ) -> Option<serde_json::Map<String, Value>> {
@@ -295,28 +298,16 @@ impl GraphFormatter {
             return None;
         }
 
-        let agg_col_names: Vec<String> = aggs
-            .iter()
-            .map(|agg| {
-                agg.alias
-                    .clone()
-                    .unwrap_or_else(|| agg.function.to_string())
-            })
-            .collect();
-
-        let row = output.query_result.authorized_rows().next()?;
+        let col_names = Self::agg_col_names(aggs);
         let mut map = serde_json::Map::new();
-        for col_name in &agg_col_names {
-            if let Some(value) = row.get(col_name) {
-                map.insert(col_name.clone(), column_value_to_json(value));
+        if let Some(row) = output.query_result.authorized_rows().next() {
+            for col_name in &col_names {
+                if let Some(value) = row.get(col_name) {
+                    map.insert(col_name.clone(), column_value_to_json(value));
+                }
             }
         }
-
-        if map.is_empty() {
-            None
-        } else {
-            Some(map)
-        }
+        Some(map)
     }
 
     fn extract_path_finding(
