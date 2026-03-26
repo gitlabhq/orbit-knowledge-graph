@@ -130,6 +130,7 @@ tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"
 tower = "0.5.3"
 base64 = "0.22.1"
+json-canon = "0.1.3"
 moka = { version = "0.12", features = ["future", "sync"] }
 
 # Server dependencies

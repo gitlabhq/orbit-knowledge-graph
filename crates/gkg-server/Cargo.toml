@@ -26,6 +26,7 @@ clickhouse-client = { path = "../clickhouse-client" }
 gkg-utils = { path = "../utils" }
 health-check = { path = "../health-check" }
 indexmap = { workspace = true }
+json-canon = { workspace = true }
 moka = { workspace = true }
 indexer = { path = "../indexer" }
 ontology = { path = "../ontology" }

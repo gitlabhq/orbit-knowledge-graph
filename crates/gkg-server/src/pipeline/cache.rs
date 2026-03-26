@@ -5,9 +5,9 @@
 //! ClickHouse execution, authorization, redaction, and hydration.
 //!
 //! Keyed by `(user_id, canonical_query_hash)` where the hash is computed
-//! from the query JSON with the `cursor` field stripped and keys sorted
-//! for canonical ordering. TTL-based expiry ensures authorization changes
-//! propagate within the configured window.
+//! from the query JSON with the `cursor` field stripped and keys
+//! canonicalized per RFC 8785. TTL-based expiry ensures authorization
+//! changes propagate within the configured window.
 //!
 //! Uses `moka` for lock-free concurrent caching with automatic TTL eviction.
 
@@ -17,7 +17,7 @@ use std::time::Duration;
 use moka::sync::Cache;
 use query_engine::compiler::input::InputCursor;
 use query_engine::shared::PipelineOutput;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Maximum number of cached query results. At ~5 KB per entry (typical
 /// search with 30 hydrated rows), 16 384 entries ≈ 80 MB worst case.
@@ -38,8 +38,21 @@ struct CacheKey {
     query_hash: u64,
 }
 
+/// Errors that can occur during cache key computation.
+#[derive(Debug, thiserror::Error)]
+pub enum CacheError {
+    #[error("failed to compute cache key: {0}")]
+    Key(#[from] serde_json::Error),
+}
+
 pub struct QueryResultCache {
     cache: Cache<CacheKey, PipelineOutput>,
+}
+
+impl Default for QueryResultCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl QueryResultCache {
@@ -53,8 +66,15 @@ impl QueryResultCache {
     }
 
     /// Look up a cached result for this user and query.
+    /// Returns `None` on miss. Logs a warning and returns `None` on key errors.
     pub fn get(&self, user_id: u64, query_json: &str) -> Option<PipelineOutput> {
-        let key = Self::make_key(user_id, query_json);
+        let key = match Self::make_key(user_id, query_json) {
+            Ok(k) => k,
+            Err(e) => {
+                warn!(user_id, error = %e, "cache key error on get, skipping cache");
+                return None;
+            }
+        };
         let result = self.cache.get(&key);
         if result.is_some() {
             debug!(user_id, "query result cache hit");
@@ -66,8 +86,15 @@ impl QueryResultCache {
 
     /// Store a result in the cache. Enforces per-user entry limit by
     /// evicting the user's oldest entries when the limit is exceeded.
+    /// Logs a warning and skips caching on key errors.
     pub fn put(&self, user_id: u64, query_json: &str, output: PipelineOutput) {
-        let key = Self::make_key(user_id, query_json);
+        let key = match Self::make_key(user_id, query_json) {
+            Ok(k) => k,
+            Err(e) => {
+                warn!(user_id, error = %e, "cache key error on put, skipping cache");
+                return;
+            }
+        };
 
         // Count existing entries for this user and evict oldest if over limit.
         let user_entries: Vec<CacheKey> = self
@@ -78,7 +105,6 @@ impl QueryResultCache {
             .collect();
 
         if user_entries.len() >= MAX_ENTRIES_PER_USER {
-            // Evict all but (MAX - 1) to make room for the new entry.
             let to_evict = user_entries.len() - (MAX_ENTRIES_PER_USER - 1);
             for evict_key in user_entries.into_iter().take(to_evict) {
                 self.cache.invalidate(&evict_key);
@@ -93,29 +119,26 @@ impl QueryResultCache {
         self.cache.insert(key, output);
     }
 
-    fn make_key(user_id: u64, query_json: &str) -> CacheKey {
-        CacheKey {
+    fn make_key(user_id: u64, query_json: &str) -> Result<CacheKey, CacheError> {
+        Ok(CacheKey {
             user_id,
-            query_hash: Self::hash_query(query_json),
-        }
+            query_hash: Self::hash_query(query_json)?,
+        })
     }
 
-    /// Hash the query JSON with the cursor field stripped and keys sorted
-    /// for canonical ordering. This ensures semantically equivalent queries
-    /// with different key ordering or whitespace produce the same hash.
-    fn hash_query(query_json: &str) -> u64 {
-        let normalized = match serde_json::from_str::<serde_json::Value>(query_json) {
-            Ok(mut v) => {
-                if let Some(obj) = v.as_object_mut() {
-                    obj.remove("cursor");
-                }
-                canonical_json(&v)
-            }
-            Err(_) => query_json.to_string(),
-        };
+    /// Hash the query JSON with the cursor field stripped and keys
+    /// canonicalized per RFC 8785 (JCS). This ensures semantically
+    /// equivalent queries with different key ordering or whitespace
+    /// produce the same hash.
+    fn hash_query(query_json: &str) -> Result<u64, CacheError> {
+        let mut v: serde_json::Value = serde_json::from_str(query_json)?;
+        if let Some(obj) = v.as_object_mut() {
+            obj.remove("cursor");
+        }
+        let canonical = json_canon::to_string(&v)?;
         let mut hasher = DefaultHasher::new();
-        normalized.hash(&mut hasher);
-        hasher.finish()
+        canonical.hash(&mut hasher);
+        Ok(hasher.finish())
     }
 }
 
@@ -126,34 +149,6 @@ pub fn parse_cursor_from_json(query_json: &str) -> Option<InputCursor> {
     let v: serde_json::Value = serde_json::from_str(query_json).ok()?;
     let cursor_val = v.get("cursor")?;
     serde_json::from_value(cursor_val.clone()).ok()
-}
-
-/// Produce a canonical JSON string with sorted object keys at all levels.
-/// This ensures `{"a":1,"b":2}` and `{"b":2,"a":1}` hash identically.
-fn canonical_json(value: &serde_json::Value) -> String {
-    use serde_json::Value;
-    match value {
-        Value::Object(map) => {
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            let entries: Vec<String> = keys
-                .iter()
-                .map(|k| {
-                    format!(
-                        "{}:{}",
-                        serde_json::to_string(k).unwrap(),
-                        canonical_json(&map[*k])
-                    )
-                })
-                .collect();
-            format!("{{{}}}", entries.join(","))
-        }
-        Value::Array(arr) => {
-            let items: Vec<String> = arr.iter().map(canonical_json).collect();
-            format!("[{}]", items.join(","))
-        }
-        other => serde_json::to_string(other).unwrap_or_default(),
-    }
 }
 
 #[cfg(test)]
@@ -167,13 +162,13 @@ mod tests {
         let q3 = r#"{"query_type":"search","node":{"id":"u","entity":"User"},"limit":100}"#;
 
         assert_eq!(
-            QueryResultCache::hash_query(q1),
-            QueryResultCache::hash_query(q2),
+            QueryResultCache::hash_query(q1).unwrap(),
+            QueryResultCache::hash_query(q2).unwrap(),
             "different cursors should produce the same hash"
         );
         assert_eq!(
-            QueryResultCache::hash_query(q1),
-            QueryResultCache::hash_query(q3),
+            QueryResultCache::hash_query(q1).unwrap(),
+            QueryResultCache::hash_query(q3).unwrap(),
             "cursor vs no-cursor should produce the same hash"
         );
     }
@@ -184,8 +179,8 @@ mod tests {
         let q2 = r#"{"query_type":"search","node":{"id":"p","entity":"Project"},"limit":100}"#;
 
         assert_ne!(
-            QueryResultCache::hash_query(q1),
-            QueryResultCache::hash_query(q2),
+            QueryResultCache::hash_query(q1).unwrap(),
+            QueryResultCache::hash_query(q2).unwrap(),
         );
     }
 
@@ -195,10 +190,15 @@ mod tests {
         let q2 = r#"{"limit":100,"node":{"entity":"User","id":"u"},"query_type":"search"}"#;
 
         assert_eq!(
-            QueryResultCache::hash_query(q1),
-            QueryResultCache::hash_query(q2),
+            QueryResultCache::hash_query(q1).unwrap(),
+            QueryResultCache::hash_query(q2).unwrap(),
             "different key order should produce the same hash"
         );
+    }
+
+    #[test]
+    fn invalid_json_returns_error() {
+        assert!(QueryResultCache::hash_query("not json").is_err());
     }
 
     #[test]
