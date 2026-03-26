@@ -151,7 +151,7 @@ impl QueryResultCache {
 
         // Reject oversized results to prevent a single entry from
         // consuming a disproportionate share of the cache budget.
-        let size_bytes = compute_result_bytes(&output);
+        let size_bytes = output.query_result.heap_size();
         if size_bytes > MAX_CACHEABLE_BYTES {
             debug!(user_id, size_bytes, "result too large to cache, skipping");
             METRICS
@@ -205,35 +205,6 @@ impl QueryResultCache {
         canonical.hash(&mut hasher);
         Ok(hasher.finish())
     }
-}
-
-/// Compute the heap byte size of a `PipelineOutput`'s query result by
-/// walking every column value in every row. Uses `std::mem::size_of`
-/// for struct sizes and `String::capacity()` for heap allocations.
-fn compute_result_bytes(output: &PipelineOutput) -> usize {
-    use gkg_utils::arrow::ColumnValue;
-    use query_engine::types::QueryResultRow;
-    use std::mem::size_of;
-
-    output
-        .query_result
-        .iter()
-        .map(|row| {
-            size_of::<QueryResultRow>()
-                + row
-                    .columns()
-                    .map(|(key, val)| {
-                        size_of::<String>()
-                            + key.capacity()
-                            + size_of::<ColumnValue>()
-                            + match val {
-                                ColumnValue::String(s) => s.capacity(),
-                                _ => 0,
-                            }
-                    })
-                    .sum::<usize>()
-        })
-        .sum()
 }
 
 /// Parse the cursor from raw query JSON without going through the full

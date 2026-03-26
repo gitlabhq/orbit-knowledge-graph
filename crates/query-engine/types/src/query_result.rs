@@ -163,6 +163,27 @@ impl QueryResultRow {
     pub fn set_column(&mut self, column: String, value: ColumnValue) {
         self.columns.insert(column, value);
     }
+
+    /// Compute the heap byte size of this row: struct size + all column
+    /// key/value heap allocations.
+    pub fn heap_size(&self) -> usize {
+        use std::mem::size_of;
+
+        size_of::<Self>()
+            + self
+                .columns
+                .iter()
+                .map(|(key, val)| {
+                    size_of::<String>()
+                        + key.capacity()
+                        + size_of::<ColumnValue>()
+                        + match val {
+                            ColumnValue::String(s) => s.capacity(),
+                            _ => 0,
+                        }
+                })
+                .sum::<usize>()
+    }
 }
 
 /// Type-safe wrapper around Arrow RecordBatch results for redaction processing.
@@ -357,6 +378,11 @@ impl QueryResult {
     /// Must be called **after** hydration — marks out-of-window authorized
     /// rows as unauthorized so `authorized_rows()` returns only the page.
     /// Returns whether more authorized rows exist beyond this page.
+    /// Compute the total heap byte size of all rows in this result.
+    pub fn heap_size(&self) -> usize {
+        self.rows.iter().map(|r| r.heap_size()).sum()
+    }
+
     pub fn apply_cursor(&mut self, offset: u32, page_size: u32) -> bool {
         let end = (offset as usize).saturating_add(page_size as usize);
         let mut i = 0usize;
