@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use opentelemetry::global;
-use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::metrics::{Counter, Gauge, Histogram};
 use opentelemetry::KeyValue;
 
 use query_engine::pipeline::{PipelineError, PipelineObserver};
@@ -31,6 +31,8 @@ struct QueryPipelineMetrics {
     cache_lookups: Counter<u64>,
     cache_stores: Counter<u64>,
     cache_evictions: Counter<u64>,
+    cache_entry_bytes: Histogram<u64>,
+    cache_entries: Gauge<u64>,
 }
 
 impl QueryPipelineMetrics {
@@ -114,6 +116,17 @@ impl QueryPipelineMetrics {
                 .u64_counter("gkg.query.pipeline.cache.evictions")
                 .with_description("Cache evictions (reason: per_user_limit)")
                 .build(),
+            cache_entry_bytes: meter
+                .u64_histogram("gkg.query.pipeline.cache.entry.bytes")
+                .with_unit("By")
+                .with_description(
+                    "Data size of each cached query result in bytes. Compare against MAX_CACHEABLE_BYTES (512 KB) for budget utilization.",
+                )
+                .build(),
+            cache_entries: meter
+                .u64_gauge("gkg.query.pipeline.cache.entries")
+                .with_description("Current number of entries in the query result cache")
+                .build(),
         }
     }
 }
@@ -138,6 +151,14 @@ pub(super) fn record_cache_eviction(reason: &'static str, count: u64) {
     METRICS
         .cache_evictions
         .add(count, &[KeyValue::new("reason", reason)]);
+}
+
+pub(super) fn record_cache_entry_bytes(bytes: u64) {
+    METRICS.cache_entry_bytes.record(bytes, &[]);
+}
+
+pub(super) fn record_cache_entries(count: u64) {
+    METRICS.cache_entries.record(count, &[]);
 }
 
 fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {

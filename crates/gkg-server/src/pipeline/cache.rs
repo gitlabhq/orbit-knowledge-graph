@@ -20,7 +20,10 @@ use query_engine::compiler::input::InputCursor;
 use query_engine::shared::PipelineOutput;
 use tracing::{debug, info, warn};
 
-use super::metrics::{record_cache_eviction, record_cache_lookup, record_cache_store};
+use super::metrics::{
+    record_cache_entries, record_cache_entry_bytes, record_cache_eviction, record_cache_lookup,
+    record_cache_store,
+};
 
 /// Maximum number of cached query results. At ~5 KB per entry (typical
 /// search with 30 hydrated rows), 16 384 entries ≈ 80 MB worst case.
@@ -92,6 +95,7 @@ impl QueryResultCache {
             debug!(user_id, "query result cache miss");
             record_cache_lookup("miss");
         }
+        record_cache_entries(self.cache.entry_count());
         result
     }
 
@@ -132,8 +136,10 @@ impl QueryResultCache {
             info!(user_id, evicted = to_evict, "per-user cache eviction");
         }
 
+        record_cache_entry_bytes(size_bytes as u64);
         self.cache.insert(key, output);
         record_cache_store("success");
+        record_cache_entries(self.cache.entry_count());
     }
 
     fn make_key(user_id: u64, query_json: &str) -> Result<CacheKey, CacheError> {
