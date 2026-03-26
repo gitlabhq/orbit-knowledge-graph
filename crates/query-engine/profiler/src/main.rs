@@ -3,6 +3,7 @@ mod executor;
 mod output;
 mod service;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -15,7 +16,7 @@ use tracing_subscriber::EnvFilter;
 
 use config::ProfilingConfig;
 use executor::enrich_output;
-use output::build_output;
+use output::{ProfilerOutput, build_output};
 use service::ProfilerPipelineService;
 
 #[derive(Parser)]
@@ -24,7 +25,7 @@ use service::ProfilerPipelineService;
     about = "Profile GKG queries against ClickHouse"
 )]
 struct Cli {
-    /// JSON query string or @filepath
+    /// JSON query string or @filepath (single query or named query collection)
     query: String,
 
     /// ClickHouse HTTP URL
@@ -74,12 +75,72 @@ struct Cli {
     /// Extra ClickHouse settings (repeatable, e.g. max_threads=4)
     #[arg(long)]
     settings: Vec<String>,
+
+    /// Filter multi-query files by name substring (e.g. --filter aggregation)
+    #[arg(long)]
+    filter: Option<String>,
+
+    /// Write output to a file instead of stdout
+    #[arg(short = 'o', long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Clone, clap::ValueEnum)]
 enum OutputFormat {
     Json,
     Pretty,
+}
+
+struct RunContext<'a> {
+    service: &'a ProfilerPipelineService,
+    client: &'a ArrowClickHouseClient,
+    security_ctx: &'a SecurityContext,
+    profiling_config: &'a ProfilingConfig,
+    org_id: i64,
+    traversal_paths: &'a [String],
+}
+
+async fn run_single(
+    ctx: &RunContext<'_>,
+    query_json: &str,
+    instance_health: Option<serde_json::Value>,
+) -> Result<ProfilerOutput> {
+    let mut output = ctx
+        .service
+        .run_query(ctx.security_ctx.clone(), query_json)
+        .await
+        .map_err(|e| anyhow::anyhow!("pipeline failed: {e}"))?;
+
+    enrich_output(ctx.client, &mut output, ctx.profiling_config).await;
+
+    Ok(build_output(
+        query_json,
+        ctx.org_id,
+        ctx.traversal_paths,
+        &output,
+        instance_health,
+    ))
+}
+
+fn emit_output(
+    format: &OutputFormat,
+    value: &impl serde::Serialize,
+    output_path: Option<&PathBuf>,
+) -> Result<()> {
+    let serialized = match format {
+        OutputFormat::Json => serde_json::to_string(value)?,
+        OutputFormat::Pretty => serde_json::to_string_pretty(value)?,
+    };
+
+    if let Some(path) = output_path {
+        std::fs::write(path, &serialized)
+            .with_context(|| format!("failed to write output to {}", path.display()))?;
+        eprintln!("wrote {}", path.display());
+    } else {
+        println!("{serialized}");
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -138,13 +199,10 @@ async fn main() -> Result<()> {
         instance_health: cli.health,
     };
 
-    let service = ProfilerPipelineService::new(ontology, Arc::clone(&client));
-    let mut output = service
-        .run_query(security_ctx, &query_json)
-        .await
-        .map_err(|e| anyhow::anyhow!("pipeline failed: {e}"))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&query_json).context("failed to parse query JSON")?;
 
-    enrich_output(&client, &mut output, &profiling_config).await;
+    let is_single_query = matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
 
     let instance_health = if profiling_config.instance_health {
         match client.profiler().fetch_instance_health().await {
@@ -158,17 +216,72 @@ async fn main() -> Result<()> {
         None
     };
 
-    let profiler_output = build_output(
-        &query_json,
+    let service = ProfilerPipelineService::new(ontology, Arc::clone(&client));
+    let run_ctx = RunContext {
+        service: &service,
+        client: &client,
+        security_ctx: &security_ctx,
+        profiling_config: &profiling_config,
         org_id,
-        &cli.traversal_paths,
-        &output,
-        instance_health,
-    );
+        traversal_paths: &cli.traversal_paths,
+    };
 
-    match cli.format {
-        OutputFormat::Json => println!("{}", serde_json::to_string(&profiler_output)?),
-        OutputFormat::Pretty => println!("{}", serde_json::to_string_pretty(&profiler_output)?),
+    if is_single_query {
+        if cli.filter.is_some() {
+            eprintln!("warning: --filter is ignored for single-query input");
+        }
+
+        let profiler_output = run_single(&run_ctx, &query_json, instance_health).await?;
+
+        emit_output(&cli.format, &profiler_output, cli.output.as_ref())?;
+    } else {
+        let queries = parsed.as_object().context(if parsed.is_array() {
+            "input is a JSON array; expected a single query object or a named query collection"
+        } else {
+            "multi-query file must be a JSON object with named queries"
+        })?;
+
+        let entries: Vec<_> = match &cli.filter {
+            Some(f) => queries
+                .iter()
+                .filter(|(k, _)| k.contains(f.as_str()))
+                .collect(),
+            None => queries.iter().collect(),
+        };
+
+        if entries.is_empty() {
+            anyhow::bail!(
+                "no queries matched filter {:?}",
+                cli.filter.as_deref().unwrap_or("")
+            );
+        }
+
+        let total = entries.len();
+        let mut results: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+
+        for (i, (name, query_value)) in entries.into_iter().enumerate() {
+            eprintln!("[{}/{}] {}...", i + 1, total, name);
+
+            let single_json =
+                serde_json::to_string(query_value).context("failed to serialize query value")?;
+
+            match run_single(&run_ctx, &single_json, instance_health.clone()).await {
+                Ok(output) => {
+                    let value = serde_json::to_value(&output)
+                        .context("failed to serialize profiler output")?;
+                    results.insert(name.clone(), value);
+                }
+                Err(e) => {
+                    eprintln!("  FAILED: {e}");
+                    results.insert(
+                        name.clone(),
+                        serde_json::json!({ "error": format!("{e:#}") }),
+                    );
+                }
+            }
+        }
+
+        emit_output(&cli.format, &results, cli.output.as_ref())?;
     }
 
     Ok(())
