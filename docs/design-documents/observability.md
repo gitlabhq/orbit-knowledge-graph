@@ -122,6 +122,9 @@ The query pipeline instruments end-to-end query execution from security check th
 | `gkg.query.pipeline.error.execution_failed` | Counter | count | `reason` (execution) | ClickHouse query execution failed |
 | `gkg.query.pipeline.error.authorization_failed` | Counter | count | `reason` (authorization) | Authorization exchange with Rails failed |
 | `gkg.query.pipeline.error.streaming_failed` | Counter | count | `reason` (streaming) | Streaming channel unavailable during authorization |
+| `gkg.query.pipeline.cache.lookups` | Counter | count | `outcome` (hit / miss / error) | Query result cache lookup attempts |
+| `gkg.query.pipeline.cache.stores` | Counter | count | `outcome` (success / error / too_large) | Query result cache store operations |
+| `gkg.query.pipeline.cache.evictions` | Counter | count | `reason` (per_user_limit) | Query result cache evictions |
 
 *Query engine metrics (`gkg_query_engine`):*
 
