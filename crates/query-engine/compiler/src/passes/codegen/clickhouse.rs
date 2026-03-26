@@ -3,7 +3,7 @@
 //! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax and
 //! ClickHouse-specific functions (`startsWith`, `has`, `array`, etc.).
 
-use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, QuerySetting, TableRef};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -132,12 +132,16 @@ impl Context {
             parts.push(format!("LIMIT {limit}"));
         }
 
-        // Inline SETTINGS clause (e.g. query cache for cursor pagination)
         if !q.query_settings.is_empty() {
             let settings: Vec<String> = q
                 .query_settings
                 .iter()
-                .map(|(k, v)| format!("{k} = {v}"))
+                .map(|s| match s {
+                    QuerySetting::UseQueryCache(v) => {
+                        format!("use_query_cache = {}", u8::from(*v))
+                    }
+                    QuerySetting::QueryCacheTtl(v) => format!("query_cache_ttl = {v}"),
+                })
                 .collect();
             parts.push(format!("SETTINGS {}", settings.join(", ")));
         }
@@ -784,6 +788,7 @@ mod tests {
 
     #[test]
     fn query_settings_emitted_after_limit() {
+        use crate::ast::QuerySetting;
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
@@ -792,8 +797,8 @@ mod tests {
             from: TableRef::scan("nodes", "n"),
             limit: Some(100),
             query_settings: vec![
-                ("use_query_cache".into(), "1".into()),
-                ("query_cache_ttl".into(), "60".into()),
+                QuerySetting::UseQueryCache(true),
+                QuerySetting::QueryCacheTtl(60),
             ],
             ..Default::default()
         };

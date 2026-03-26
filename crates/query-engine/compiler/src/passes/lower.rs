@@ -2,7 +2,9 @@
 //!
 //! Transforms validated input into a SQL-oriented AST.
 
-use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+use crate::ast::{
+    ChType, Cte, Expr, JoinType, Node, Op, OrderExpr, Query, QuerySetting, SelectExpr, TableRef,
+};
 
 use crate::constants::{
     ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,
@@ -70,9 +72,9 @@ pub fn lower(input: &mut Input) -> Result<Node> {
     if input.cursor.is_some() {
         let Node::Query(q) = &mut node;
         q.query_settings
-            .push(("use_query_cache".into(), "1".into()));
+            .push(QuerySetting::UseQueryCache(true));
         q.query_settings
-            .push(("query_cache_ttl".into(), CH_QUERY_CACHE_TTL.to_string()));
+            .push(QuerySetting::QueryCacheTtl(CH_QUERY_CACHE_TTL));
     }
 
     Ok(node)
@@ -2743,14 +2745,12 @@ mod tests {
 
         assert!(
             q.query_settings
-                .iter()
-                .any(|(k, v)| k == "use_query_cache" && v == "1"),
+                .contains(&QuerySetting::UseQueryCache(true)),
             "cursor should enable CH query cache"
         );
         assert!(
             q.query_settings
-                .iter()
-                .any(|(k, v)| k == "query_cache_ttl" && v == "60"),
+                .contains(&QuerySetting::QueryCacheTtl(60)),
             "CH query cache TTL should be 60s"
         );
     }
