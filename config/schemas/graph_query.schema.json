@@ -57,7 +57,7 @@
     },
     "cursor": {
       "type": "object",
-      "description": "Agent-driven pagination cursor. Slices the authorized result set (after redaction) by offset and page_size. The server re-runs the query, authorizes all rows up to limit, and returns the requested slice.",
+      "description": "Agent-driven pagination cursor. Slices the authorized result set (after redaction) by offset and page_size.",
       "required": ["offset", "page_size"],
       "properties": {
         "offset": {

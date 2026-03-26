@@ -76,8 +76,8 @@ pub struct PaginationInfo {
     #[prost(bool, tag = "1")]
     pub has_more: bool,
     /// total authorized rows before cursor slicing
-    #[prost(int32, tag = "2")]
-    pub total_rows: i32,
+    #[prost(int64, tag = "2")]
+    pub total_rows: i64,
 }
 /// Server-sent error when query compilation or execution fails.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

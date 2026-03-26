@@ -17,6 +17,14 @@ pub struct GraphResponse {
     pub query_type: String,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<PaginationResponse>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PaginationResponse {
+    pub has_more: bool,
+    pub total_rows: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -116,10 +124,16 @@ impl GraphFormatter {
             Some(QueryType::Hydration) | None => {}
         }
 
+        let pagination = output.pagination.as_ref().map(|p| PaginationResponse {
+            has_more: p.has_more,
+            total_rows: p.total_rows,
+        });
+
         GraphResponse {
             query_type,
             nodes: node_map.into_values().collect(),
             edges,
+            pagination,
         }
     }
 

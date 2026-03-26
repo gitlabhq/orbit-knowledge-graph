@@ -90,7 +90,7 @@ message QueryMetadata {
 // Absent for queries without cursor — the agent interprets absence as "no pagination".
 message PaginationInfo {
   bool has_more = 1;     // true if more authorized rows exist beyond this page
-  int32 total_rows = 2;  // total authorized rows before cursor slicing
+  int64 total_rows = 2;  // total authorized rows before cursor slicing
 }
 
 // Server-sent error when query compilation or execution fails.

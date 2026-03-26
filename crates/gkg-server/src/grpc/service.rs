@@ -16,9 +16,9 @@ use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
     GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
     ListToolsRequest, ListToolsResponse, PaginationInfo, QueryMetadata, ResponseFormat,
-    SchemaDomain, SchemaEdge,
-    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
-    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
+    SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty,
+    StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
 use query_engine::formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
@@ -146,7 +146,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                         row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
                         pagination: output.pagination.map(|p| PaginationInfo {
                             has_more: p.has_more,
-                            total_rows: i32::try_from(p.total_rows).unwrap_or(i32::MAX),
+                            total_rows: p.total_rows as i64,
                         }),
                     });
 
