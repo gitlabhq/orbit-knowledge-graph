@@ -31,7 +31,7 @@ pub struct QueryResultCache {
 impl QueryResultCache {
     pub fn new(ttl: Duration) -> Self {
         Self {
-            cache: Cache::builder().time_to_live(ttl).build(),
+            cache: Cache::builder().time_to_live(ttl).max_capacity(256).build(),
         }
     }
 
