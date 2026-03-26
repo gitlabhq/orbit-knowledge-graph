@@ -80,7 +80,7 @@ These choices preserve factorization: each hop operates on a compact frontier an
 
 ### Unified Response Format
 
-After ClickHouse returns rows, the formatting stage transforms the raw `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ query_type, nodes, edges }` shape for all five query types (search, traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
+After ClickHouse returns rows and redaction completes, the server applies agent-driven cursor pagination (`{ offset, page_size }`) to slice the authorized result set. A query result cache (moka, 60s TTL) stores the full authorized result so subsequent pages skip ClickHouse, authorization, and redaction. The formatting stage then transforms the sliced `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ query_type, nodes, edges, pagination? }` shape for all five query types (search, traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
 
@@ -94,9 +94,10 @@ Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](.
 
 ## Observability
 
-- Per‑phase timings (parse/plan/render/execute) and row counts.
+- Per-phase timings (parse/plan/render/execute) and row counts.
 - Emitted SQL and parameter map for debugging.
 - ClickHouse query metrics (system.query_log) correlated by request ID.
+- Query result cache metrics: lookups (hit/miss/error), stores (success/error/too_large), evictions (per_user_limit).
 
 ## Integration with Indexing
 
