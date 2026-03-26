@@ -1,14 +1,17 @@
-//! Row deduplication pass for ReplacingMergeTree tables.
+//! Row deduplication pass for ReplacingMergeTree node tables.
 //!
 //! ClickHouse's `ReplacingMergeTree` engine deduplicates rows during
 //! background merges, but between merges queries can return stale or
-//! duplicate rows. This pass wraps every graph table scan in a subquery
-//! that uses `GROUP BY` + `argMax(_deleted, _version)` to deduplicate
-//! at query time.
+//! duplicate rows. This pass wraps every **node** table scan in a
+//! subquery that uses `GROUP BY id` + `argMax(_deleted, _version)` to
+//! deduplicate at query time.
+//!
+//! Edge tables (`gl_edge`) are intentionally excluded: their ORDER BY key
+//! is the full column tuple, making RMT dedup highly effective. Wrapping
+//! edges would add 6-column GROUP BY overhead on the hottest table,
+//! kill LIMIT pushdown, and block streaming joins.
 //!
 //! ## Pattern
-//!
-//! For node tables (dedup by `id`):
 //!
 //! ```sql
 //! -- before
@@ -27,52 +30,22 @@
 //! WHERE mr.state = 'merged'
 //! ```
 //!
-//! For the edge table (all columns are part of the ORDER BY key):
-//!
-//! ```sql
-//! -- before
-//! SELECT e.source_id FROM gl_edge AS e WHERE e.relationship_kind = 'AUTHORED'
-//!
-//! -- after
-//! SELECT e.source_id
-//! FROM (
-//!   SELECT traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind
-//!   FROM gl_edge AS e
-//!   WHERE e.relationship_kind = 'AUTHORED'
-//!   GROUP BY traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind
-//!   HAVING argMax(_deleted, _version) = false
-//! ) AS e
-//! ```
-//!
 //! Rules (per <https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/308>):
 //! - Primary key filters go into the inner subquery (granule pruning).
 //! - Property filters stay in the outer query (argMax must see all versions).
 //! - `FINAL` is avoided; `GROUP BY` + `argMax` is lighter.
 //!
-//! Runs after the security pass so that `startsWith(traversal_path, ...)`
-//! filters are available for pushdown, and before the check pass which
-//! verifies their presence on every `gl_*` scan.
+//! Runs before the security pass so that security's subquery recursion
+//! injects `startsWith(traversal_path, ...)` directly into inner queries.
 
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::{
-    DELETED_COLUMN, EDGE_TABLE, GL_TABLE_PREFIX, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
-    SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
-    VERSION_COLUMN,
+    DELETED_COLUMN, EDGE_TABLE, GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 
 use crate::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
 use crate::constants::SKIP_SECURITY_FILTER_TABLES;
-
-/// All edge ORDER BY columns — also the dedup key and pushdown set.
-const EDGE_ORDER_BY: &[&str] = &[
-    TRAVERSAL_PATH_COLUMN,
-    SOURCE_ID_COLUMN,
-    SOURCE_KIND_COLUMN,
-    RELATIONSHIP_KIND_COLUMN,
-    TARGET_ID_COLUMN,
-    TARGET_KIND_COLUMN,
-];
 
 /// Apply row deduplication to all graph table scans in the AST.
 pub fn deduplicate(node: &mut Node) {
@@ -120,29 +93,15 @@ fn recurse_into_derived_tables(from: &mut TableRef) {
 
 // ─── Table metadata ──────────────────────────────────────────────────────
 
-fn is_graph_table(table: &str) -> bool {
-    table.starts_with(GL_TABLE_PREFIX)
-}
-
-/// Deduplication GROUP BY key.
-///
-/// Node tables: `[id]` — the semantic primary key.
-/// Edge table: full ORDER BY (all non-version columns).
-fn dedup_key(table: &str) -> &'static [&'static str] {
-    if table == EDGE_TABLE {
-        EDGE_ORDER_BY
-    } else {
-        &["id"]
-    }
+/// Node tables start with `gl_` but are not the edge table.
+fn is_node_table(table: &str) -> bool {
+    table.starts_with(GL_TABLE_PREFIX) && table != EDGE_TABLE
 }
 
 /// Columns whose filters are safe to push into the inner subquery.
-/// These are columns in the table's ORDER BY / PRIMARY KEY that ClickHouse
-/// can use for granule pruning. Property filters must stay outer.
+/// Only ORDER BY / PRIMARY KEY columns — property filters must stay outer.
 fn pushdown_columns(table: &str) -> &'static [&'static str] {
-    if table == EDGE_TABLE {
-        EDGE_ORDER_BY
-    } else if SKIP_SECURITY_FILTER_TABLES.contains(&table) {
+    if SKIP_SECURITY_FILTER_TABLES.contains(&table) {
         &["id"] // gl_user: ORDER BY (id)
     } else {
         &[TRAVERSAL_PATH_COLUMN, "id"]
@@ -215,7 +174,7 @@ fn wrap_scans(
     used: &HashMap<String, HashSet<String>>,
 ) {
     match from {
-        TableRef::Scan { table, alias } if is_graph_table(table) => {
+        TableRef::Scan { table, alias } if is_node_table(table) => {
             let columns = match used.get(alias.as_str()) {
                 Some(c) => c,
                 None => return,
@@ -223,7 +182,7 @@ fn wrap_scans(
 
             let table_name = table.clone();
             let scan_alias = alias.clone();
-            let dk = dedup_key(&table_name);
+            let dk: &[&str] = &["id"];
             let dk_set: HashSet<&str> = dk.iter().copied().collect();
             let pd_set: HashSet<&str> = pushdown_columns(&table_name).iter().copied().collect();
 
@@ -470,35 +429,27 @@ mod tests {
         assert!(q.where_clause.is_none(), "outer WHERE should be empty");
     }
 
-    // ── Edge table dedup ─────────────────────────────────────────────
+    // ── Edge table skipped ──────────────────────────────────────────
 
     #[test]
-    fn wraps_edge_scan_with_full_group_by() {
+    fn skips_edge_table() {
         let mut node = Node::Query(Box::new(Query {
             select: vec![
                 SelectExpr::new(Expr::col("e", "source_id"), "src"),
                 SelectExpr::new(Expr::col("e", "target_id"), "dst"),
             ],
             from: TableRef::scan("gl_edge", "e"),
-            where_clause: Some(Expr::and(
-                starts_with("e", "1/"),
-                eq_filter("e", "relationship_kind", "AUTHORED"),
-            )),
+            where_clause: Some(eq_filter("e", "relationship_kind", "AUTHORED")),
             ..Default::default()
         }));
 
         deduplicate(&mut node);
 
         let Node::Query(q) = &node;
-        let inner = find_subquery(&q.from, "e").expect("e should be wrapped");
-
-        // Edge dedup groups by all ORDER BY columns.
-        assert_eq!(inner.group_by.len(), EDGE_ORDER_BY.len());
-        assert!(has_argmax_having(inner));
-
-        // All edge columns are PK → both conjuncts pushed down.
-        assert!(inner.where_clause.is_some());
-        assert!(q.where_clause.is_none(), "no outer WHERE for edge-only");
+        assert!(
+            matches!(&q.from, TableRef::Scan { table, .. } if table == "gl_edge"),
+            "edge table should not be wrapped"
+        );
     }
 
     // ── gl_user: no traversal_path ───────────────────────────────────
@@ -528,10 +479,10 @@ mod tests {
         assert!(q.where_clause.is_none());
     }
 
-    // ── Join: wraps both sides ───────────────────────────────────────
+    // ── Join: wraps node side only ──────────────────────────────────
 
     #[test]
-    fn wraps_both_sides_of_join() {
+    fn wraps_node_side_of_join_not_edge() {
         let mut node = Node::Query(Box::new(Query {
             select: vec![
                 SelectExpr::new(Expr::col("p", "name"), "p_name"),
@@ -550,8 +501,14 @@ mod tests {
         deduplicate(&mut node);
 
         let Node::Query(q) = &node;
-        assert!(find_subquery(&q.from, "p").is_some(), "p should be wrapped");
-        assert!(find_subquery(&q.from, "e").is_some(), "e should be wrapped");
+        assert!(
+            find_subquery(&q.from, "p").is_some(),
+            "node should be wrapped"
+        );
+        assert!(
+            find_subquery(&q.from, "e").is_none(),
+            "edge should NOT be wrapped"
+        );
     }
 
     // ── CTE dedup ────────────────────────────────────────────────────
