@@ -7,6 +7,8 @@ config:
   # Per-rule settings in alphabetical order
   code-block-style:                 # MD046
     style: "fenced"
+  # Temporarily disable MD014 until we fix problems
+  commands-show-output: false       # MD014
   emphasis-style: false             # MD049
   header-style:                     # MD003
     style: "atx"
@@ -17,29 +19,150 @@ config:
     tables: false
     headings: true
     heading_line_length: 100
-    line_length: 5000
-  no-bare-urls: false               # MD034
+    line_length: 800
   no-duplicate-heading:             # MD024
     siblings_only: true
   no-emphasis-as-heading: false     # MD036
   no-inline-html: false             # MD033
   no-trailing-punctuation:          # MD026
-    punctuation: ".,;:!。，；：！"
+    punctuation: ".,;:!。，；：！？"
   no-trailing-spaces: false         # MD009
-  ol-prefix:                        # MD029
-    style: "ordered"
-  proper-names: false               # MD044 - too noisy with gitlab in URLs/paths
   reference-links-images: false     # MD052
-  table-column-style: false         # MD060
   ul-style:                         # MD004
     style: "dash"
+  table-column-style: false         # MD060
 
-ignores:
-  - "target/**"
-  - "node_modules/**"
-  - ".git/**"
-  - ".claude/**"
-  - ".opencode/**"
-  - ".gitlab/**"
-  - "CHANGELOG.md"
-  - "LICENSE.md"
+  # Disable this rule in the CLI project, because 1. 1. 1. 1. numbering
+  # is rendered verbatim in CLI output
+  ol-prefix: false                  # MD029
+
+  # Keep this item last due to length
+  proper-names:                     # MD044
+    code_blocks: false
+    html_elements: false
+    names: [
+      "Akismet",
+      "Alertmanager",
+      "AlmaLinux",
+      "API",
+      "Asana",
+      "Auth0",
+      "Azure",
+      "Bamboo",
+      "Bitbucket",
+      "Bugzilla",
+      "CAS",
+      "CentOS",
+      "Consul",
+      "Debian",
+      "DevOps",
+      "Docker",
+      "DockerSlim",
+      "Elasticsearch",
+      "Facebook",
+      "fastlane",
+      "fluent-plugin-redis-slowlog",
+      "GDK",
+      "Geo",
+      "Git LFS",
+      "git-annex",
+      "git-credential-oauth",
+      "git-sizer",
+      "Git",
+      "Gitaly",
+      "GitHub",
+      "gitlab-duo",
+      "gitlab.vim",
+      "GitLab chart",
+      "GitLab Geo",
+      "GitLab Monitor",
+      "GitLab Operator",
+      "GitLab Pages",
+      "GitLab Rails",
+      "GitLab Runner",
+      "GitLab Shell",
+      "GitLab Workhorse",
+      "GitLab",
+      "Gitleaks",
+      "Gmail",
+      "Google",
+      "Grafana",
+      "Gzip",
+      "Helm",
+      "HipChat",
+      "ID",
+      "IP",
+      "Ingress",
+      "jasmine-jquery",
+      "JavaScript",
+      "Jaeger",
+      "Jenkins",
+      "Jira",
+      "Jira Cloud",
+      "Jira Server",
+      "jQuery",
+      "JSON",
+      "JupyterHub",
+      "Karma",
+      "Kerberos",
+      "Knative",
+      "Kubernetes",
+      "LDAP",
+      "Let's Encrypt",
+      "Markdown",
+      "markdownlint",
+      "Mattermost",
+      "Microsoft",
+      "minikube",
+      "MinIO",
+      "ModSecurity",
+      "Neovim",
+      "NGINX Ingress",
+      "NGINX",
+      "OAuth",
+      "OAuth 2",
+      "OmniAuth",
+      "OpenID",
+      "OpenShift",
+      "PgBouncer",
+      "Postfix",
+      "PostgreSQL",
+      "PowerShell",
+      "Praefect",
+      "Prometheus",
+      "Puma",
+      "puma-worker-killer",
+      "Python",
+      "Rake",
+      "Redis",
+      "Redmine",
+      "reCAPTCHA",
+      "Ruby",
+      "runit",
+      "Salesforce",
+      "SAML",
+      "Sendmail",
+      "Sentry",
+      "Service Desk",
+      "Sidekiq",
+      "Shibboleth",
+      "Slack",
+      "SMTP",
+      "SpotBugs",
+      "SSH",
+      "Tiller",
+      "Tiptap",
+      "TOML",
+      "Trello",
+      "Trello Power-Ups",
+      "TypeScript",
+      "Twitter",
+      "Ubuntu",
+      "Ultra Auth",
+      "Unicorn",
+      "unicorn-worker-killer",
+      "URL",
+      "WebdriverIO",
+      "YAML",
+      "YouTrack"
+    ]
