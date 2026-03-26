@@ -18,7 +18,21 @@ pub struct GraphResponse {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub columns: Option<Vec<ColumnDescriptor>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pagination: Option<PaginationResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ColumnDescriptor {
+    pub name: String,
+    pub function: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub property: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,8 +73,7 @@ pub struct GraphFormatter;
 
 impl ResultFormatter for GraphFormatter {
     fn format(&self, output: &PipelineOutput) -> Value {
-        let response = self.build_response(output);
-        serde_json::to_value(response).unwrap_or(Value::Null)
+        serde_json::to_value(self.build_response(output)).unwrap_or(Value::Null)
     }
 }
 
@@ -77,7 +90,7 @@ impl GraphFormatter {
         let mut node_map: IndexMap<(String, i64), GraphNode> = IndexMap::new();
         let mut edges: Vec<GraphEdge> = Vec::new();
         let mut edge_set: HashSet<EdgeKey> = HashSet::new();
-
+        let mut columns: Option<Vec<ColumnDescriptor>> = None;
         let aggregations = Some(&output.compiled.input.aggregations);
 
         let edge_prefixes: Vec<&str> = result_context
@@ -100,7 +113,7 @@ impl GraphFormatter {
                 );
             }
             Some(QueryType::Aggregation) => {
-                self.extract_aggregation(
+                columns = self.extract_aggregation(
                     result,
                     result_context,
                     &edge_prefixes,
@@ -133,6 +146,7 @@ impl GraphFormatter {
             query_type,
             nodes: node_map.into_values().collect(),
             edges,
+            columns,
             pagination,
         }
     }
@@ -228,6 +242,33 @@ impl GraphFormatter {
         }
     }
 
+    fn agg_col_names(aggs: &[compiler::input::InputAggregation]) -> Vec<String> {
+        aggs.iter()
+            .map(|agg| {
+                agg.alias
+                    .clone()
+                    .unwrap_or_else(|| agg.function.to_string())
+            })
+            .collect()
+    }
+
+    fn build_column_descriptors(
+        aggs: &[compiler::input::InputAggregation],
+    ) -> Vec<ColumnDescriptor> {
+        aggs.iter()
+            .map(|agg| ColumnDescriptor {
+                name: agg
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| agg.function.to_string()),
+                function: agg.function.to_string(),
+                target: agg.target.clone(),
+                property: agg.property.clone(),
+                value: None,
+            })
+            .collect()
+    }
+
     fn extract_aggregation(
         &self,
         result: &QueryResult,
@@ -235,17 +276,31 @@ impl GraphFormatter {
         edge_prefixes: &[&str],
         aggregations: Option<&Vec<compiler::input::InputAggregation>>,
         node_map: &mut IndexMap<(String, i64), GraphNode>,
-    ) {
-        let Some(aggs) = aggregations else { return };
+    ) -> Option<Vec<ColumnDescriptor>> {
+        let aggs = aggregations?;
+        let agg_col_names = Self::agg_col_names(aggs);
+        // The compiler rejects mixed grouped/ungrouped aggregations in the
+        // same query, so this is always all-or-nothing.
+        let is_ungrouped = aggs.iter().all(|a| a.group_by.is_none());
 
-        let agg_col_names: Vec<String> = aggs
-            .iter()
-            .map(|agg| {
-                agg.alias
-                    .clone()
-                    .unwrap_or_else(|| agg.function.to_string())
-            })
-            .collect();
+        if is_ungrouped {
+            let mut columns = Self::build_column_descriptors(aggs);
+            if let Some(row) = result.authorized_rows().next() {
+                for (col, col_name) in columns.iter_mut().zip(&agg_col_names) {
+                    if let Some(val) = row.get(col_name) {
+                        col.value = Some(column_value_to_json(val));
+                    }
+                }
+            }
+            return if columns.is_empty() {
+                None
+            } else {
+                Some(columns)
+            };
+        }
+
+        // Grouped: values live on entity nodes, columns just describe them.
+        let columns = Self::build_column_descriptors(aggs);
 
         for row in result.authorized_rows() {
             for node in result_context.nodes() {
@@ -271,6 +326,12 @@ impl GraphFormatter {
                     properties,
                 });
             }
+        }
+
+        if columns.is_empty() {
+            None
+        } else {
+            Some(columns)
         }
     }
 
@@ -485,6 +546,7 @@ mod tests {
         assert_eq!(response.query_type, "search");
         assert_eq!(response.nodes.len(), 2);
         assert!(response.edges.is_empty());
+        assert!(response.columns.is_none(), "search should not have columns");
     }
 
     #[test]

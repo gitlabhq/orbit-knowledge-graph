@@ -395,6 +395,14 @@ impl<'a> Validator<'a> {
 
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
+        let has_grouped = input.aggregations.iter().any(|a| a.group_by.is_some());
+        let has_ungrouped = input.aggregations.iter().any(|a| a.group_by.is_none());
+        if has_grouped && has_ungrouped {
+            return Err(QueryError::Validation(
+                "cannot mix grouped and ungrouped aggregations in the same query".into(),
+            ));
+        }
+
         for (i, agg) in input.aggregations.iter().enumerate() {
             if agg.function == AggFunction::Collect {
                 return Err(QueryError::Validation(format!(
@@ -960,6 +968,25 @@ mod tests {
                     "alias": "first_username"
                 }]
             }"#,
+        );
+    }
+
+    #[test]
+    fn rejects_mixed_grouped_and_ungrouped_aggregations() {
+        assert_rejects(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "g", "entity": "Group"}
+                ],
+                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+                "aggregations": [
+                    {"function": "count", "target": "u", "alias": "total"},
+                    {"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}
+                ]
+            }"#,
+            "cannot mix grouped and ungrouped aggregations",
         );
     }
 

@@ -1308,6 +1308,140 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Ungrouped aggregation
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "total"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert_eq!(value["query_type"], "aggregation");
+    assert!(value["edges"].as_array().unwrap().is_empty());
+    assert!(
+        value["nodes"].as_array().unwrap().is_empty(),
+        "ungrouped aggregation should have no nodes"
+    );
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 1);
+    assert_eq!(columns[0]["name"], "total");
+    assert_eq!(columns[0]["function"], "count");
+    assert_eq!(columns[0]["target"], "u");
+    assert_eq!(
+        columns[0]["value"].as_i64().unwrap(),
+        5,
+        "should count all 5 users"
+    );
+}
+
+async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User"}],
+            "aggregations": [
+                {"function": "count", "target": "u", "alias": "total"},
+                {"function": "min", "target": "u", "property": "id", "alias": "min_id"},
+                {"function": "max", "target": "u", "property": "id", "alias": "max_id"}
+            ],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert!(value["nodes"].as_array().unwrap().is_empty());
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 3);
+    assert_eq!(columns[0]["name"], "total");
+    assert_eq!(columns[0]["function"], "count");
+    assert_eq!(columns[0]["value"].as_i64().unwrap(), 5);
+    assert_eq!(columns[1]["name"], "min_id");
+    assert_eq!(columns[1]["function"], "min");
+    assert_eq!(columns[1]["property"], "id");
+    assert_eq!(columns[1]["value"].as_i64().unwrap(), 1);
+    assert_eq!(columns[2]["name"], "max_id");
+    assert_eq!(columns[2]["function"], "max");
+    assert_eq!(columns[2]["property"], "id");
+    assert_eq!(columns[2]["value"].as_i64().unwrap(), 5);
+}
+
+async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let nodes = value["nodes"].as_array().unwrap();
+    assert!(
+        !nodes.is_empty(),
+        "grouped aggregation should have entity nodes"
+    );
+    assert!(
+        nodes.iter().all(|n| n["type"] == "User"),
+        "grouped aggregation should only have entity nodes"
+    );
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 1);
+    assert_eq!(columns[0]["name"], "group_count");
+    assert_eq!(columns[0]["function"], "count");
+    assert_eq!(columns[0]["target"], "g");
+    assert!(
+        columns[0].get("value").is_none() || columns[0]["value"].is_null(),
+        "grouped columns should not carry values"
+    );
+}
+
+async fn ungrouped_count_with_redaction(ctx: &TestContext) {
+    let mut svc = MockRedactionService::new();
+    svc.allow("user", &[1, 3, 5]);
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "total"}],
+            "limit": 10
+        }"#,
+        &svc,
+    )
+    .await;
+
+    assert!(value["nodes"].as_array().unwrap().is_empty());
+
+    // Count is SQL-level (pre-redaction), so it reflects all 5 users.
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 1);
+    assert_eq!(columns[0]["name"], "total");
+    assert_eq!(columns[0]["function"], "count");
+    assert_eq!(columns[0]["value"].as_i64().unwrap(), 5);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Traversal — direction variants
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2321,6 +2455,11 @@ async fn graph_formatter_e2e() {
         aggregation_min_string,
         aggregation_multiple_functions,
         aggregation_redaction,
+        // Ungrouped aggregation
+        ungrouped_count_emits_aggregates,
+        ungrouped_multiple_functions_emits_aggregates,
+        grouped_aggregation_uses_entity_nodes,
+        ungrouped_count_with_redaction,
         // Path finding — type variations
         path_finding_exact_path,
         path_finding_all_shortest,
