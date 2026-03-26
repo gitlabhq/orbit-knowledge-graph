@@ -71,10 +71,8 @@ pub fn lower(input: &mut Input) -> Result<Node> {
         let Node::Query(q) = &mut node;
         q.set_statements
             .push(("use_query_cache".into(), "1".into()));
-        q.set_statements.push((
-            "query_cache_ttl".into(),
-            CH_QUERY_CACHE_TTL.to_string(),
-        ));
+        q.set_statements
+            .push(("query_cache_ttl".into(), CH_QUERY_CACHE_TTL.to_string()));
     }
 
     Ok(node)
