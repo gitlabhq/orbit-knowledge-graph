@@ -18,7 +18,7 @@ View the [Intermediate Query Language](./intermediary_llm_query_language.md) des
 
 ### Unified Response Schema
 
-All five query types (search, traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ query_type, nodes, edges, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. When the query includes a `cursor`, the response includes a `pagination` object with `has_more` and `total_rows`.
+All five query types (search, traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ query_type, nodes, edges, columns?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value. When the query includes a `cursor`, the response includes a `pagination` object with `has_more` and `total_rows`.
 
 - **ADR**: [ADR 004 — Unified Response Schema](../decisions/004_unified_response_schema.md)
 
@@ -65,4 +65,4 @@ flowchart LR
 
 - All query paths reuse the shared schema and query helpers in `crates/database`, so code and namespace graphs adhere to the same table/relationship definitions.
 - SQL generation is guard-railed: hop limits (max three for namespace traversals), explicit relationship lists, and schema-driven validation prevent runaway queries.
-- The response format is defined by [ADR 004](../decisions/004_unified_response_schema.md). Every query returns a unified `{ query_type, nodes, edges, pagination? }` payload with deduplicated entity objects and instance-level edges. Proto-level metadata (row count, generated SQL, pagination info) travels alongside the JSON payload in `QueryMetadata`.
+- The response format is defined by [ADR 004](../decisions/004_unified_response_schema.md). Every query returns a unified `{ query_type, nodes, edges, columns?, pagination? }` payload with deduplicated entity objects and instance-level edges. Aggregation queries include `columns` to describe computed values. Proto-level metadata (row count, generated SQL, pagination info) travels alongside the JSON payload in `QueryMetadata`.

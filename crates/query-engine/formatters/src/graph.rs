@@ -279,6 +279,8 @@ impl GraphFormatter {
     ) -> Option<Vec<ColumnDescriptor>> {
         let aggs = aggregations?;
         let agg_col_names = Self::agg_col_names(aggs);
+        // The compiler rejects mixed grouped/ungrouped aggregations in the
+        // same query, so this is always all-or-nothing.
         let is_ungrouped = aggs.iter().all(|a| a.group_by.is_none());
 
         if is_ungrouped {
