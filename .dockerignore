@@ -1,2 +1,9 @@
-*
+target/
 !target/*/debug/gkg-server
+.*
+docs/
+e2e/
+fixtures/
+helm/
+scripts/
+tools/
