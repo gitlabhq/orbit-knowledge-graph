@@ -16,9 +16,9 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use moka::sync::Cache;
+use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
-use opentelemetry::KeyValue;
 use query_engine::compiler::input::InputCursor;
 use query_engine::shared::PipelineOutput;
 use tracing::{debug, info, warn};
