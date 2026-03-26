@@ -69,7 +69,7 @@ struct Cli {
     health: bool,
 
     /// Output format
-    #[arg(long, default_value = "json")]
+    #[arg(long, default_value = "pretty")]
     format: OutputFormat,
 
     /// Extra ClickHouse settings (repeatable, e.g. max_threads=4)
@@ -79,6 +79,10 @@ struct Cli {
     /// Filter multi-query files by name substring (e.g. --filter aggregation)
     #[arg(long)]
     filter: Option<String>,
+
+    /// Write output to a file instead of stdout
+    #[arg(short = 'o', long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Clone, clap::ValueEnum)]
@@ -118,11 +122,25 @@ async fn run_single(
     ))
 }
 
-fn serialize_output(format: &OutputFormat, value: &impl serde::Serialize) -> Result<String> {
-    match format {
-        OutputFormat::Json => Ok(serde_json::to_string(value)?),
-        OutputFormat::Pretty => Ok(serde_json::to_string_pretty(value)?),
+fn emit_output(
+    format: &OutputFormat,
+    value: &impl serde::Serialize,
+    output_path: Option<&PathBuf>,
+) -> Result<()> {
+    let serialized = match format {
+        OutputFormat::Json => serde_json::to_string(value)?,
+        OutputFormat::Pretty => serde_json::to_string_pretty(value)?,
+    };
+
+    if let Some(path) = output_path {
+        std::fs::write(path, &serialized)
+            .with_context(|| format!("failed to write output to {}", path.display()))?;
+        eprintln!("wrote {}", path.display());
+    } else {
+        println!("{serialized}");
     }
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -211,7 +229,7 @@ async fn main() -> Result<()> {
     if is_single_query {
         let profiler_output = run_single(&run_ctx, &query_json, instance_health).await?;
 
-        println!("{}", serialize_output(&cli.format, &profiler_output)?);
+        emit_output(&cli.format, &profiler_output, cli.output.as_ref())?;
     } else {
         let queries: BTreeMap<String, serde_json::Value> = serde_json::from_str(&query_json)
             .context("multi-query file must be a JSON object with named queries")?;
@@ -251,7 +269,7 @@ async fn main() -> Result<()> {
             }
         }
 
-        println!("{}", serialize_output(&cli.format, &results)?);
+        emit_output(&cli.format, &results, cli.output.as_ref())?;
     }
 
     Ok(())
