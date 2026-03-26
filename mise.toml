@@ -50,11 +50,11 @@ run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git
 description = "Install git hooks (lefthook + worktree support)"
 
 [tasks."fuzz:compile"]
-run = "cargo bolero run fuzz_compile -p gkg-fuzz"
+run = "cargo bolero test fuzz_compile -p gkg-fuzz"
 description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
 
 [tasks."fuzz:ruby"]
-run = "cargo bolero run fuzz_ruby -p gkg-fuzz"
+run = "cargo bolero test fuzz_ruby -p gkg-fuzz"
 description = "Fuzz the Ruby code parser"
 
 [tasks.build]
