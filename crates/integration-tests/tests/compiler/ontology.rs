@@ -3,7 +3,7 @@
 use super::setup::{embedded_ontology, test_ctx};
 use super::utils::ParsedSql;
 use compiler::{
-    ColumnSelection, HydrationPlan, Input, InputNode, QueryType, compile, compile_input,
+    compile, compile_input, ColumnSelection, HydrationPlan, Input, InputNode, QueryType,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -468,6 +468,18 @@ fn cursor_pagination_validation() {
     let sql = ParsedSql::from_query(&result.base);
     assert_eq!(sql.limit_value(), Some(100));
 
+    // Cursor query emits SETTINGS for CH query cache
+    assert!(
+        result.base.sql.contains("SETTINGS use_query_cache = 1"),
+        "cursor query should enable CH query cache: {}",
+        result.base.sql
+    );
+    assert!(
+        result.base.sql.contains("query_cache_ttl ="),
+        "cursor query should set CH query cache TTL: {}",
+        result.base.sql
+    );
+
     // offset + page_size > limit rejected
     let err = compile(
         r#"{
@@ -582,7 +594,7 @@ fn cursor_pagination_validation() {
     );
     assert!(err.is_err(), "page_size = 0 should fail");
 
-    // No cursor: default limit still works
+    // No cursor: default limit still works, no SETTINGS emitted
     let result = compile(
         r#"{
         "query_type": "search",
@@ -592,8 +604,14 @@ fn cursor_pagination_validation() {
         &ctx,
     );
     assert!(result.is_ok(), "no cursor should compile fine");
-    let sql = ParsedSql::from_query(&result.unwrap().base);
+    let result = result.unwrap();
+    let sql = ParsedSql::from_query(&result.base);
     assert_eq!(sql.limit_value(), Some(30), "default limit should be 30");
+    assert!(
+        !result.base.sql.contains("SETTINGS"),
+        "non-cursor query should not emit SETTINGS: {}",
+        result.base.sql
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
