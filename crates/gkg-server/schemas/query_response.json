@@ -21,6 +21,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/edge" }
     },
+    "columns": {
+      "description": "Present for aggregation queries. Describes each computed column: its output name, the aggregation function used, the target node alias, and the property being aggregated. Lets the consumer distinguish aggregate values from entity properties without inspecting the ontology.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/column" }
+    },
     "pagination": {
       "description": "Present when the query included a cursor. Tells the agent whether more pages exist and how many total authorized rows are available.",
       "$ref": "#/$defs/pagination"
@@ -86,6 +91,34 @@
         }
       },
       "additionalProperties": false
+    },
+    "column": {
+      "type": "object",
+      "required": ["name", "function"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Output column name. Matches the key on the node where the aggregate value appears. Either the user-supplied alias or the function name (e.g. 'count')."
+        },
+        "function": {
+          "type": "string",
+          "description": "Aggregation function applied (count, sum, avg, min, max, collect).",
+          "enum": ["count", "sum", "avg", "min", "max", "collect"]
+        },
+        "target": {
+          "type": "string",
+          "description": "Node alias being aggregated over (e.g. 'u' for User). Absent when the function has no explicit target."
+        },
+        "property": {
+          "type": "string",
+          "description": "Property being aggregated (e.g. 'id'). Absent for count without a property."
+        },
+        "value": {
+          "description": "Computed value for ungrouped (scalar) aggregations. Absent for grouped aggregations where values live on entity nodes.",
+          "type": ["string", "integer", "number", "boolean", "null"]
+        }
+      }
     },
     "pagination": {
       "type": "object",
