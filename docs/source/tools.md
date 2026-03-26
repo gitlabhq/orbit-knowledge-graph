@@ -19,7 +19,7 @@ Query the knowledge graph and return matching nodes, relationships, and aggregat
 ### Example
 
 ```plaintext
-Find merge requests merged in this project in the last 7 days.
+Find merge requests merged in my-group/my-project in the last 7 days.
 ```
 
 ## `get_graph_schema`
