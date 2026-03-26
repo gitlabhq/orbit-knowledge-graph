@@ -2551,9 +2551,12 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
         query.base.sql
     );
 
-    // All user columns should be in GROUP BY (required by ClickHouse)
-    let group_by_count = query.base.sql.matches("GROUP BY").count();
-    assert_eq!(group_by_count, 1, "should have exactly one GROUP BY clause");
+    // The aggregation query should contain a GROUP BY clause.
+    // Dedup subqueries also add GROUP BY, so just verify presence.
+    assert!(
+        query.base.sql.contains("GROUP BY"),
+        "aggregation query must have a GROUP BY clause"
+    );
 
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
