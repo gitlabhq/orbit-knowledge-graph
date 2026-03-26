@@ -142,7 +142,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                         row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
                         pagination: output.pagination.map(|p| PaginationInfo {
                             has_more: p.has_more,
-                            total_rows: i32::try_from(p.total_rows).unwrap_or(i32::MAX),
+                            total_rows: p.total_rows as i64,
                         }),
                     });
 
