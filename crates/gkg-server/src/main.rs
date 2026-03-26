@@ -94,7 +94,6 @@ async fn main() -> anyhow::Result<()> {
                 Box::new(NamespaceCodeBackfillDispatcher::new(
                     services.nats.clone(),
                     config.datalake.build_client(),
-                    config.graph.build_client(),
                     metrics.clone(),
                     config.schedule.tasks.namespace_code_backfill.clone(),
                 )),

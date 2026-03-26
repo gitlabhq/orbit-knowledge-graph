@@ -64,7 +64,6 @@ impl Default for NamespaceCodeBackfillDispatcherConfig {
 pub struct NamespaceCodeBackfillDispatcher {
     nats: Arc<dyn NatsServices>,
     datalake: ArrowClickHouseClient,
-    graph: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     config: NamespaceCodeBackfillDispatcherConfig,
 }
@@ -73,14 +72,12 @@ impl NamespaceCodeBackfillDispatcher {
     pub fn new(
         nats: Arc<dyn NatsServices>,
         datalake: ArrowClickHouseClient,
-        graph: ArrowClickHouseClient,
         metrics: ScheduledTaskMetrics,
         config: NamespaceCodeBackfillDispatcherConfig,
     ) -> Self {
         Self {
             nats,
             datalake,
-            graph,
             metrics,
             config,
         }
@@ -322,7 +319,7 @@ impl NamespaceCodeBackfillDispatcher {
     ) -> Result<Vec<PendingProject>, TaskError> {
         let query_start = Instant::now();
         let batches = self
-            .graph
+            .datalake
             .query(NAMESPACE_PROJECTS_QUERY)
             .param("traversal_path", traversal_path)
             .fetch_arrow()
@@ -372,17 +369,9 @@ mod tests {
             None,
             &std::collections::HashMap::new(),
         );
-        let graph = ArrowClickHouseClient::new(
-            "http://localhost:0",
-            "default",
-            "default",
-            None,
-            &std::collections::HashMap::new(),
-        );
         NamespaceCodeBackfillDispatcher::new(
             nats,
             datalake,
-            graph,
             test_metrics(),
             NamespaceCodeBackfillDispatcherConfig::default(),
         )
