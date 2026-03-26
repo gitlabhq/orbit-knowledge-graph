@@ -132,6 +132,16 @@ impl Context {
             parts.push(format!("LIMIT {limit}"));
         }
 
+        // Inline SETTINGS clause (e.g. query cache for cursor pagination)
+        if !q.query_settings.is_empty() {
+            let settings: Vec<String> = q
+                .query_settings
+                .iter()
+                .map(|(k, v)| format!("{k} = {v}"))
+                .collect();
+            parts.push(format!("SETTINGS {}", settings.join(", ")));
+        }
+
         Ok(parts.join(" "))
     }
 
@@ -773,14 +783,15 @@ mod tests {
     }
 
     #[test]
-    fn set_statements_emitted_before_query() {
+    fn query_settings_emitted_after_limit() {
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
                 alias: None,
             }],
             from: TableRef::scan("nodes", "n"),
-            set_statements: vec![
+            limit: Some(100),
+            query_settings: vec![
                 ("use_query_cache".into(), "1".into()),
                 ("query_cache_ttl".into(), "60".into()),
             ],
@@ -788,18 +799,14 @@ mod tests {
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert!(
-            result
-                .sql
-                .starts_with("SET use_query_cache = 1; SET query_cache_ttl = 60;"),
-            "SET statements should precede the SELECT: {}",
-            result.sql
+        assert_eq!(
+            result.sql,
+            "SELECT n.id FROM nodes AS n LIMIT 100 SETTINGS use_query_cache = 1, query_cache_ttl = 60"
         );
-        assert!(result.sql.contains("SELECT n.id FROM nodes AS n"));
     }
 
     #[test]
-    fn no_set_statements_when_empty() {
+    fn no_query_settings_when_empty() {
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
@@ -811,8 +818,8 @@ mod tests {
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert!(
-            !result.sql.contains("SET"),
-            "no SET statements without set_statements: {}",
+            !result.sql.contains("SETTINGS"),
+            "no SETTINGS without query_settings: {}",
             result.sql
         );
     }
