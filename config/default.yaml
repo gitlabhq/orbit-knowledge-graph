@@ -25,6 +25,10 @@ graph:
 #     signing_key: ""
 #     verifying_key: ""
 
+# grpc_tls:
+#   cert_path: "/path/to/cert.pem"
+#   key_path: "/path/to/key.pem"
+
 engine:
   max_concurrent_workers: 16
   concurrency_groups:

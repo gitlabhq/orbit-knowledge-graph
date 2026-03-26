@@ -4,6 +4,7 @@ use std::sync::Arc;
 use clickhouse_client::ClickHouseConfiguration;
 use ontology::Ontology;
 use tonic::transport::Server as TonicServer;
+use tonic::transport::server::ServerTlsConfig;
 use tracing::info;
 
 use crate::auth::JwtValidator;
@@ -15,6 +16,7 @@ use super::service::KnowledgeGraphServiceImpl;
 pub struct GrpcServer {
     addr: SocketAddr,
     service: KnowledgeGraphServiceServer<KnowledgeGraphServiceImpl>,
+    tls_config: Option<ServerTlsConfig>,
 }
 
 impl GrpcServer {
@@ -24,12 +26,14 @@ impl GrpcServer {
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
+        tls_config: Option<ServerTlsConfig>,
     ) -> Self {
         let service =
             KnowledgeGraphServiceImpl::new(validator, ontology, clickhouse_config, cluster_health);
         Self {
             addr,
             service: KnowledgeGraphServiceServer::new(service),
+            tls_config,
         }
     }
 
@@ -38,9 +42,15 @@ impl GrpcServer {
     }
 
     pub async fn run(self) -> Result<(), tonic::transport::Error> {
-        info!(addr = %self.addr, "Starting gRPC server");
+        let tls_enabled = self.tls_config.is_some();
+        info!(addr = %self.addr, tls = tls_enabled, "Starting gRPC server");
 
-        TonicServer::builder()
+        let mut builder = TonicServer::builder();
+        if let Some(tls) = self.tls_config {
+            builder = builder.tls_config(tls)?;
+        }
+
+        builder
             .layer(labkit::grpc::GrpcMetricsLayer::new())
             .layer(labkit::grpc::GrpcTraceLayer::new())
             .layer(labkit::grpc::GrpcCorrelationLayer::new())
@@ -69,6 +79,7 @@ mod tests {
             ontology,
             &clickhouse_config,
             cluster_health,
+            None,
         );
         assert_eq!(server.addr(), addr);
     }

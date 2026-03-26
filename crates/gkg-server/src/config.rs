@@ -8,6 +8,8 @@ use indexer::configuration::EngineConfiguration;
 use indexer::nats::NatsConfiguration;
 use indexer::scheduler::ScheduleConfig;
 use serde::{Deserialize, Serialize};
+use tonic::transport::Identity;
+use tonic::transport::server::ServerTlsConfig;
 
 use crate::constants::SECRET_FILE_DIR;
 use crate::secret_file_source::SecretFileSource;
@@ -58,6 +60,28 @@ impl GitlabConfig {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct GrpcTlsConfig {
+    #[serde(default)]
+    pub cert_path: Option<String>,
+    #[serde(default)]
+    pub key_path: Option<String>,
+}
+
+impl GrpcTlsConfig {
+    pub async fn load_tls_config(&self) -> anyhow::Result<Option<ServerTlsConfig>> {
+        match (&self.cert_path, &self.key_path) {
+            (Some(cert_path), Some(key_path)) => {
+                let cert = tokio::fs::read(cert_path).await?;
+                let key = tokio::fs::read(key_path).await?;
+                let identity = Identity::from_pem(cert, key);
+                Ok(Some(ServerTlsConfig::new().identity(identity)))
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default = "default_bind_address")]
@@ -86,6 +110,8 @@ pub struct AppConfig {
     pub indexer_health_bind_address: SocketAddr,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub grpc_tls: GrpcTlsConfig,
 }
 
 impl AppConfig {
