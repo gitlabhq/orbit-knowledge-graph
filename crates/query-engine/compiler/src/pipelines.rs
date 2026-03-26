@@ -93,8 +93,12 @@ impl DuckDbState {
 /// Standard ClickHouse compilation pipeline.
 ///
 /// ```text
-/// JSON → Validate → Normalize → Lower → Optimize → Enforce → Security → Deduplicate → Check → Codegen
+/// JSON → Validate → Normalize → Lower → Optimize → Enforce → Deduplicate → Security → Check → Codegen
 /// ```
+///
+/// Deduplicate runs before Security so that Security's subquery recursion
+/// injects `startsWith(traversal_path, ...)` directly into inner queries
+/// where the `gl_*` Scans live.
 pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(ValidatePass)
@@ -103,8 +107,8 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
-        .pass(SecurityPass)
         .pass(DeduplicatePass)
+        .pass(SecurityPass)
         .pass(CheckPass)
         .pass(CodegenPass)
         .build()
@@ -115,15 +119,15 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
 /// Used by tests and the `compile_input()` public API for non-hydration queries.
 ///
 /// ```text
-/// Input → Lower → Optimize → Enforce → Security → Deduplicate → Check → Codegen
+/// Input → Lower → Optimize → Enforce → Deduplicate → Security → Check → Codegen
 /// ```
 pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
-        .pass(SecurityPass)
         .pass(DeduplicatePass)
+        .pass(SecurityPass)
         .pass(CheckPass)
         .pass(CodegenPass)
         .build()

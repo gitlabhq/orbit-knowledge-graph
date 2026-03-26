@@ -230,8 +230,8 @@ fn observer_records_all_pass_completions() {
             "lower",
             "optimize",
             "enforce",
-            "security",
             "deduplicate",
+            "security",
             "check",
             "codegen"
         ]
