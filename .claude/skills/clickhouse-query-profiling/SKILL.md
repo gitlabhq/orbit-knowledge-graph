@@ -10,12 +10,12 @@ Run GKG JSON DSL queries directly against any ClickHouse instance and get back e
 ## Build
 
 ```bash
-cargo build -p query-profiler
+mise build
 ```
 
 ## Configuration
 
-Set connection via env vars:
+Set connection via env vars or a `.env` file:
 
 ```bash
 export CLICKHOUSE_URL=http://localhost:8123
@@ -31,7 +31,7 @@ Or use CLI flags: `--ch-url`, `--ch-database`, `--ch-user`, `--ch-password`.
 Basic search with stats:
 
 ```bash
-cargo run -p query-profiler -- \
+mise query:profile -- \
   -t '1/' \
   '{"query_type":"search","node":{"id":"p","entity":"Project","columns":["name"]},"limit":5}'
 ```
@@ -39,7 +39,7 @@ cargo run -p query-profiler -- \
 With EXPLAIN plans:
 
 ```bash
-cargo run -p query-profiler -- \
+mise query:profile -- \
   -t '1/' --explain \
   '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"limit":10}'
 ```
@@ -47,7 +47,7 @@ cargo run -p query-profiler -- \
 With CPU/memory profiling from `system.query_log`:
 
 ```bash
-cargo run -p query-profiler -- \
+mise query:profile -- \
   -t '1/' --explain --profile --processors \
   '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"function":"count","target":"mr","group_by":"p","alias":"mr_count"}],"limit":10}'
 ```
@@ -55,19 +55,19 @@ cargo run -p query-profiler -- \
 With instance health snapshot:
 
 ```bash
-cargo run -p query-profiler -- -t '1/' --health '{"query_type":"search","node":{"id":"p","entity":"Project"},"limit":1}'
+mise query:profile -- -t '1/' --health '{"query_type":"search","node":{"id":"p","entity":"Project"},"limit":1}'
 ```
 
 Multiple traversal paths:
 
 ```bash
-cargo run -p query-profiler -- -t '1/2/3/' -t '1/4/5/' '{"query_type":"search","node":{"id":"p","entity":"Project"},"limit":5}'
+mise query:profile -- -t '1/2/3/' -t '1/4/5/' '{"query_type":"search","node":{"id":"p","entity":"Project"},"limit":5}'
 ```
 
 Query from file:
 
 ```bash
-cargo run -p query-profiler -- -t '1/' --explain @fixtures/queries/my_query.json
+mise query:profile -- -t '1/' --explain @fixtures/queries/my_query.json
 ```
 
 ## Output
@@ -77,18 +77,17 @@ By default output is pretty-printed JSON to stdout. Use `--format json` for comp
 Write results to a file with `--output` (`-o`):
 
 ```bash
-cargo run -p query-profiler -- -t '1/' --explain -o results.json @fixtures/queries/my_query.json
+mise query:profile -- -t '1/' --explain -o results.json @fixtures/queries/my_query.json
 ```
 
 When `--output` is used, the profiler writes the JSON file and prints the path to stderr. When omitted, results go to stdout. Progress and errors always go to stderr, so they never mix with JSON output.
 
 ### Workflow: run, wait, then analyze
 
-When profiling against a remote ClickHouse (e.g. via port-forward), queries take time. Use `--output` so results are written to disk when the run finishes, then read the output file to analyze results:
+Use `--output` so results are written to disk when the run finishes, then read the output file to analyze results:
 
 ```bash
-# Run all queries, wait for completion, results land in the file
-cargo run -p query-profiler -- -t '1/' --explain --profile \
+mise query:profile -- -t '1/' --explain --profile \
   -o profiling_results.json \
   @fixtures/queries/optimization_showcase.json
 
@@ -146,19 +145,19 @@ With `--health`:
 The profiler can run all queries from a file where keys are query names and values are query objects. Queries are executed sequentially so profiling numbers are not polluted by concurrent load.
 
 ```bash
-cargo run -p query-profiler -- -t '1/' --explain @fixtures/queries/optimization_showcase.json
+mise query:profile -- -t '1/' --explain @fixtures/queries/optimization_showcase.json
 ```
 
 Filter to a subset by name substring:
 
 ```bash
-cargo run -p query-profiler -- -t '1/' --explain --filter aggregation @fixtures/queries/optimization_showcase.json
+mise query:profile -- -t '1/' --explain --filter aggregation @fixtures/queries/optimization_showcase.json
 ```
 
 Write multi-query results to a file:
 
 ```bash
-cargo run -p query-profiler -- -t '1/' --explain \
+mise query:profile -- -t '1/' --explain \
   -o showcase_results.json \
   @fixtures/queries/optimization_showcase.json
 ```
@@ -167,10 +166,10 @@ Progress is printed to stderr (`[3/25] query_name...`). Output is a JSON object 
 
 ## A/B comparison
 
-1. Run the query and save output: `cargo run -p query-profiler -- -t '1/' --explain -o before.json QUERY`
+1. Run the query and save output: `mise query:profile -- -t '1/' --explain -o before.json QUERY`
 2. Make your optimizer change
-3. Rebuild: `cargo build -p query-profiler`
-4. Run the same query: `cargo run -p query-profiler -- -t '1/' --explain -o after.json QUERY`
+3. Rebuild: `mise build`
+4. Run the same query: `mise query:profile -- -t '1/' --explain -o after.json QUERY`
 5. Compare `read_rows` and `elapsed_ns` between the two files
 
 ## Things to know
