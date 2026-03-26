@@ -69,7 +69,7 @@ struct Cli {
     health: bool,
 
     /// Output format
-    #[arg(long, default_value = "pretty")]
+    #[arg(long, default_value = "json")]
     format: OutputFormat,
 
     /// Extra ClickHouse settings (repeatable, e.g. max_threads=4)

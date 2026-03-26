@@ -180,4 +180,4 @@ Progress is printed to stderr (`[3/25] query_name...`). Output is a JSON object 
 - A single GKG query can produce multiple ClickHouse queries: 1 base + N hydration queries. Each one is profiled independently.
 - `--profile` runs `SYSTEM FLUSH LOGS` before querying `system.query_log`, which adds about 100ms.
 - `--profile` and `--health` require the ClickHouse user to have SELECT on system tables.
-- Default output format is `pretty` (pretty-printed JSON). Use `--format json` for compact single-line JSON.
+- Default output format is `json` (compact). Use `--format pretty` for human-readable output.
