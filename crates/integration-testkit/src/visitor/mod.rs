@@ -849,10 +849,9 @@ pub(crate) mod tests {
     #[test]
     fn find_edge_returns_none_for_wrong_type() {
         let view = ResponseView::new(sample_response());
-        assert!(
-            view.find_edge("User", 1, "Group", 100, "CONTAINS")
-                .is_none()
-        );
+        assert!(view
+            .find_edge("User", 1, "Group", 100, "CONTAINS")
+            .is_none());
     }
 
     #[test]
