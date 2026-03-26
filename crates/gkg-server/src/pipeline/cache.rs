@@ -27,6 +27,10 @@ const MAX_CACHE_ENTRIES: u64 = 16_384;
 /// flooding the cache.
 const MAX_ENTRIES_PER_USER: usize = 2;
 
+/// Cache TTL in seconds. Short enough that authorization changes
+/// propagate quickly, long enough for multi-page browsing.
+const CACHE_TTL_SECS: u64 = 60;
+
 /// Cache key: (user_id, hash of canonicalized query JSON without cursor).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
@@ -39,10 +43,10 @@ pub struct QueryResultCache {
 }
 
 impl QueryResultCache {
-    pub fn new(ttl: Duration) -> Self {
+    pub fn new() -> Self {
         Self {
             cache: Cache::builder()
-                .time_to_live(ttl)
+                .time_to_live(Duration::from_secs(CACHE_TTL_SECS))
                 .max_capacity(MAX_CACHE_ENTRIES)
                 .build(),
         }
