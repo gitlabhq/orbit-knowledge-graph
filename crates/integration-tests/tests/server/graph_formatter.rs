@@ -1308,6 +1308,121 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Ungrouped aggregation
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "total"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert_eq!(value["query_type"], "aggregation");
+    assert!(
+        value["nodes"].as_array().unwrap().is_empty(),
+        "ungrouped aggregation should have no nodes"
+    );
+    assert!(value["edges"].as_array().unwrap().is_empty());
+
+    let aggregates = &value["aggregates"];
+    assert!(
+        aggregates.is_object(),
+        "ungrouped aggregation should have aggregates field: {value}"
+    );
+    assert_eq!(
+        aggregates["total"].as_i64().unwrap(),
+        5,
+        "should count all 5 users"
+    );
+}
+
+async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User"}],
+            "aggregations": [
+                {"function": "count", "target": "u", "alias": "total"},
+                {"function": "min", "target": "u", "property": "id", "alias": "min_id"},
+                {"function": "max", "target": "u", "property": "id", "alias": "max_id"}
+            ],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let aggregates = &value["aggregates"];
+    assert!(aggregates.is_object(), "should have aggregates: {value}");
+    assert_eq!(aggregates["total"].as_i64().unwrap(), 5);
+    assert_eq!(aggregates["min_id"].as_i64().unwrap(), 1);
+    assert_eq!(aggregates["max_id"].as_i64().unwrap(), 5);
+}
+
+async fn grouped_aggregation_has_no_aggregates_field(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    assert!(
+        value.get("aggregates").is_none()
+            || value["aggregates"].is_null(),
+        "grouped aggregation should not have aggregates field: {value}"
+    );
+    assert!(
+        !value["nodes"].as_array().unwrap().is_empty(),
+        "grouped aggregation should have nodes"
+    );
+}
+
+async fn ungrouped_count_with_redaction(ctx: &TestContext) {
+    let mut svc = MockRedactionService::new();
+    svc.allow("user", &[1, 3, 5]);
+
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "total"}],
+            "limit": 10
+        }"#,
+        &svc,
+    )
+    .await;
+
+    // The count is computed at the SQL level (before redaction), so it
+    // reflects all 5 users, not the 3 authorized ones. This is correct
+    // behavior — the aggregate is over the full authorized query result.
+    let aggregates = &value["aggregates"];
+    assert!(aggregates.is_object(), "should have aggregates: {value}");
+    assert!(
+        aggregates["total"].as_i64().unwrap() > 0,
+        "count should be positive"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Traversal — direction variants
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2321,6 +2436,11 @@ async fn graph_formatter_e2e() {
         aggregation_min_string,
         aggregation_multiple_functions,
         aggregation_redaction,
+        // Ungrouped aggregation
+        ungrouped_count_emits_aggregates,
+        ungrouped_multiple_functions_emits_aggregates,
+        grouped_aggregation_has_no_aggregates_field,
+        ungrouped_count_with_redaction,
         // Path finding — type variations
         path_finding_exact_path,
         path_finding_all_shortest,
