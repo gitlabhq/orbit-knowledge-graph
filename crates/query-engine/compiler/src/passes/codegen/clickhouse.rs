@@ -773,6 +773,51 @@ mod tests {
     }
 
     #[test]
+    fn set_statements_emitted_before_query() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            set_statements: vec![
+                ("use_query_cache".into(), "1".into()),
+                ("query_cache_ttl".into(), "60".into()),
+            ],
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result
+                .sql
+                .starts_with("SET use_query_cache = 1; SET query_cache_ttl = 60;"),
+            "SET statements should precede the SELECT: {}",
+            result.sql
+        );
+        assert!(result.sql.contains("SELECT n.id FROM nodes AS n"));
+    }
+
+    #[test]
+    fn no_set_statements_when_empty() {
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            !result.sql.contains("SET"),
+            "no SET statements without set_statements: {}",
+            result.sql
+        );
+    }
+
+    #[test]
     fn render_leaves_unknown_params() {
         let pq = ParameterizedQuery {
             sql: "SELECT {p0:String} AND {p1:Int64}".into(),

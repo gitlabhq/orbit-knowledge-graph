@@ -47,18 +47,37 @@ fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
     )
 }
 
+/// ClickHouse query cache TTL in seconds. Applied via SET when the query
+/// includes a cursor, so that subsequent pages of the same query benefit
+/// from CH-level caching of the raw SQL result.
+const CH_QUERY_CACHE_TTL: u32 = 60;
+
 /// Lower validated input into an AST node.
 ///
 /// Writes metadata to `input.compiler` for downstream passes.
 pub fn lower(input: &mut Input) -> Result<Node> {
-    match input.query_type {
+    let mut node = match input.query_type {
         QueryType::Search => lower_search(input),
         QueryType::Traversal => lower_traversal(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
         QueryType::Hydration => lower_hydration(input),
+    }?;
+
+    // Enable ClickHouse query cache for cursor pagination queries so that
+    // subsequent pages reuse the cached SQL result at the CH layer.
+    if input.cursor.is_some() {
+        let Node::Query(q) = &mut node;
+        q.set_statements
+            .push(("use_query_cache".into(), "1".into()));
+        q.set_statements.push((
+            "query_cache_ttl".into(),
+            CH_QUERY_CACHE_TTL.to_string(),
+        ));
     }
+
+    Ok(node)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2707,5 +2726,55 @@ mod tests {
 
         assert!(q.ctes.iter().any(|c| c.name == "_nf_mr"));
         assert_eq!(input.compiler.node_edge_col.len(), 2);
+    }
+
+    #[test]
+    fn cursor_enables_ch_query_cache() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
+            "limit": 100,
+            "cursor": {"offset": 0, "page_size": 20}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert!(
+            q.set_statements
+                .iter()
+                .any(|(k, v)| k == "use_query_cache" && v == "1"),
+            "cursor should enable CH query cache"
+        );
+        assert!(
+            q.set_statements
+                .iter()
+                .any(|(k, v)| k == "query_cache_ttl" && v == "60"),
+            "CH query cache TTL should be 60s"
+        );
+    }
+
+    #[test]
+    fn no_cursor_no_ch_query_cache() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User"},
+            "limit": 100
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert!(
+            q.set_statements.is_empty(),
+            "no cursor should not set CH query cache: {:?}",
+            q.set_statements
+        );
     }
 }
