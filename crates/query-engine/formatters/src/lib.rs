@@ -10,7 +10,6 @@ use shared::PipelineOutput;
 pub use goon::GoonFormatter;
 pub use graph::{
     ColumnDescriptor, GraphEdge, GraphFormatter, GraphNode, GraphResponse, PaginationResponse,
-    SCALAR_AGGREGATION_TYPE,
 };
 pub use raw_row::row_to_json;
 

@@ -113,6 +113,10 @@
         "property": {
           "type": "string",
           "description": "Property being aggregated (e.g. 'id'). Absent for count without a property."
+        },
+        "value": {
+          "description": "Computed value for ungrouped (scalar) aggregations. Absent for grouped aggregations where values live on entity nodes.",
+          "type": ["string", "integer", "number", "boolean", "null"]
         }
       }
     },

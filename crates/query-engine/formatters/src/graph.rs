@@ -31,6 +31,8 @@ pub struct ColumnDescriptor {
     pub target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub property: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -63,10 +65,6 @@ pub struct GraphEdge {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<usize>,
 }
-
-/// Entity type for synthetic nodes emitted by ungrouped scalar aggregations.
-/// Matches `query_type` so the consumer doesn't encounter a new concept.
-pub const SCALAR_AGGREGATION_TYPE: &str = "aggregation";
 
 type EdgeKey = (String, i64, String, i64, String, Option<i64>);
 
@@ -266,6 +264,7 @@ impl GraphFormatter {
                 function: agg.function.to_string(),
                 target: agg.target.clone(),
                 property: agg.property.clone(),
+                value: None,
             })
             .collect()
     }
@@ -280,23 +279,16 @@ impl GraphFormatter {
     ) -> Option<Vec<ColumnDescriptor>> {
         let aggs = aggregations?;
         let agg_col_names = Self::agg_col_names(aggs);
-        let columns = Self::build_column_descriptors(aggs);
         let is_ungrouped = aggs.iter().all(|a| a.group_by.is_none());
 
         if is_ungrouped {
+            let mut columns = Self::build_column_descriptors(aggs);
             if let Some(row) = result.authorized_rows().next() {
-                let mut properties = serde_json::Map::new();
-                for col_name in &agg_col_names {
-                    if let Some(value) = row.get(col_name) {
-                        properties.insert(col_name.clone(), column_value_to_json(value));
+                for (col, col_name) in columns.iter_mut().zip(&agg_col_names) {
+                    if let Some(val) = row.get(col_name) {
+                        col.value = Some(column_value_to_json(val));
                     }
                 }
-                let key = (SCALAR_AGGREGATION_TYPE.to_string(), 0);
-                node_map.entry(key).or_insert_with(|| GraphNode {
-                    entity_type: SCALAR_AGGREGATION_TYPE.to_string(),
-                    id: 0,
-                    properties,
-                });
             }
             return if columns.is_empty() {
                 None
@@ -304,6 +296,9 @@ impl GraphFormatter {
                 Some(columns)
             };
         }
+
+        // Grouped: values live on entity nodes, columns just describe them.
+        let columns = Self::build_column_descriptors(aggs);
 
         for row in result.authorized_rows() {
             for node in result_context.nodes() {

@@ -165,18 +165,16 @@ Computed values are inlined on the group-by nodes. `columns` describes each aggr
 
 #### Aggregation (ungrouped / scalar)
 
-When no `group_by` is specified, the SQL returns only aggregate values with no entity columns. The formatter emits a single synthetic node with `type: "aggregation"` and `id: 0` to carry the values. The type matches `query_type` so the consumer doesn't encounter a new concept. `columns` describes each computed value so the consumer knows what the numbers mean without any ontology lookup.
+When no `group_by` is specified, the SQL returns only aggregate values with no entity columns. There are no nodes to carry the values, so `columns` holds both the metadata and the computed `value` directly. `nodes` is empty.
 
 ```json
 {
   "query_type": "aggregation",
-  "nodes": [
-    { "type": "aggregation", "id": 0, "total": 42, "avg_size": 128.5 }
-  ],
+  "nodes": [],
   "edges": [],
   "columns": [
-    { "name": "total", "function": "count", "target": "p" },
-    { "name": "avg_size", "function": "avg", "target": "p", "property": "size" }
+    { "name": "total", "function": "count", "target": "p", "value": 42 },
+    { "name": "avg_size", "function": "avg", "target": "p", "property": "size", "value": 128.5 }
   ]
 }
 ```
@@ -238,13 +236,13 @@ The center node (Project:101) is just another node in the list. Neighbor types a
 
 The frontend builds composite IDs (`"User:42"`) for deduplication. Property names match the ontology, so the frontend can look up data types from the cached schema. For aggregation queries, computed values (like `mr_count`) are inlined as additional properties on the node.
 
-**Column:** describes a computed aggregation value on a node.
+**Column:** describes a computed aggregation value.
 
 ```json
 { "name": "mr_count", "function": "count", "target": "m" }
 ```
 
-Optional fields: `target` (node alias being aggregated), `property` (field being aggregated, absent for plain `count`). Present for all aggregation queries so the consumer can distinguish computed values from entity properties and display correct table headers.
+Optional fields: `target` (node alias being aggregated), `property` (field being aggregated, absent for plain `count`), `value` (the computed result, present only for ungrouped aggregations where `nodes` is empty). Present for all aggregation queries so the consumer can distinguish computed values from entity properties and display correct table headers.
 
 **Edge:** two nodes connected by type and ID.
 
