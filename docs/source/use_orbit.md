@@ -9,22 +9,20 @@ title: Use Orbit
 
 - Tier: Ultimate
 - Offering: GitLab.com
+- Status: Experiment
 
 {{< /details >}}
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](../administration/feature_flags.md) named `knowledge_graph`. Disabled by default.
-- Enabled on GitLab.com in GitLab 18.XX.
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
 
 {{< /history >}}
 
-{{< alert type="flag" >}}
-
-The availability of this feature is controlled by a feature flag.
-For more information, see the history.
-
-{{< /alert >}}
+> [!flag]
+> The availability of this feature is controlled by a feature flag.
+> For more information, see the history.
+> This feature is available for testing, but not ready for production use.
 
 ## Turn Orbit on or off
 
@@ -82,17 +80,83 @@ Example prompts:
 - "Show all projects where `@alice` has authored merge requests, with a count of merged vs open merge requests per project."
 - "List the top 10 files in `my-group/my-project` that changed in the most failed pipelines over the past month."
 
-## With an external AI agent
+## Use an external AI agent
 
-Use the Model Context Protocol (MCP) server to use external AI tools like Claude Code with Orbit.
+Use the Model Context Protocol (MCP) server to integrate external AI tools like Claude Code with Orbit.
 
-To configure the Orbit MCP server:
+GitLab uses `mcp-remote` to establish secure connections between Orbit and AI tools running on your local machine. A known issue can cause the connection to fail with a `403 incorrect_scope` error. To resolve this issue, you must manually register the client before establishing the connection.
 
-- Follow the instructions in [connect a client to the GitLab MCP server](https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server/#connect-a-client-to-the-gitlab-mcp-server).
+### Manually register the client
 
-  To configure the MCP for only Orbit, use the URL `https://gitlab.com/api/v4/mcp_orbit`.
+To register the client:
 
-For a list of available tools, see [Orbit MCP tools](tools.md).
+1. From the command line, run:
+
+   ```shell
+   npx mcp-remote "https://gitlab.com/api/v4/orbit/mcp"
+   ```
+
+1. In your browser, review and approve the authorization request.
+
+   The `mcp-remote` command fails to establish a connection and displays a `403 incorrect_scope` error. It creates a cache directory at `~/.mcp-auth/mcp-remote-<version>/` with two files:
+   - `<hash>-_client_info.json`
+   - `<hash>_tokens.json`
+
+   Save the file names for the next steps.
+
+1. Register a new client:
+
+   ```shell
+   curl --request POST \
+     --header "Content-Type: application/json" \
+     --data '{"redirect_uris": ["http://localhost:42826/oauth/callback"], "client_name": "MCP CLI Proxy", "resource": "https://gitlab.com/api/v4/orbit/mcp"}' \
+     --url "https://gitlab.com/oauth/register"
+   ```
+
+1. From the response, save:
+   - The value of `client_id`
+   - The value of `client_id_issued_at`
+   - Verify that `scope` is set to `mcp_orbit`
+
+1. Edit `~/.mcp-auth/mcp-remote-<version>/<hash>_client_info.json` and replace its content with:
+
+   ```json
+   {
+     "redirect_uris": ["http://localhost:42826/oauth/callback"],
+     "token_endpoint_auth_method": "none",
+     "grant_types": ["authorization_code"],
+     "client_name": "[Unverified Dynamic Application] MCP CLI Proxy",
+     "scope": "mcp_orbit",
+     "client_id": "<client_id_from_response>",
+     "client_id_issued_at": <client_id_issued_at_from_response>
+   }
+   ```
+
+1. Replace the content of `~/.mcp-auth/mcp-remote-<version>/<hash>_tokens.json` with:
+
+   ```json
+   {}
+   ```
+
+1. From the command line, run `mcp-remote` again:
+
+   ```shell
+   npx mcp-remote "https://gitlab.com/api/v4/orbit/mcp"
+   ```
+
+1. In your browser, review and approve the authorization request.
+
+   The connection should now succeed.
+
+### Configure MCP
+
+To connect to the Orbit MCP server:
+
+- Follow the instructions to [connect a client to the GitLab MCP server](https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server/#connect-a-client-to-the-gitlab-mcp-server).
+
+  Use the URL `https://gitlab.com/api/v4/orbit/mcp`.
+
+You can now start a new chat with your AI agent.
 
 ## With the UI
 

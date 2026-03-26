@@ -6,6 +6,25 @@ description: Use Orbit MCP tools to query the knowledge graph and discover avail
 title: Orbit MCP tools
 ---
 
+{{< details >}}
+
+- Tier: Ultimate
+- Offering: GitLab.com
+- Status: Experiment
+
+{{< /details >}}
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
+
+{{< /history >}}
+
+> [!flag]
+> The availability of this feature is controlled by a feature flag.
+> For more information, see the history.
+> This feature is available for testing, but not ready for production use.
+
 ## `execute_query`
 
 Query the knowledge graph and return matching nodes, relationships, and aggregations.

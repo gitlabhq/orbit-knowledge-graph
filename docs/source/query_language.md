@@ -5,6 +5,25 @@ info: To determine the technical writer assigned to the Stage/Group associated w
 title: Orbit query language
 ---
 
+{{< details >}}
+
+- Tier: Ultimate
+- Offering: GitLab.com
+- Status: Experiment
+
+{{< /details >}}
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
+
+{{< /history >}}
+
+> [!flag]
+> The availability of this feature is controlled by a feature flag.
+> For more information, see the history.
+> This feature is available for testing, but not ready for production use.
+
 The Orbit query language is a JSON-based domain specific language for
 interacting with the knowledge graph.
 
