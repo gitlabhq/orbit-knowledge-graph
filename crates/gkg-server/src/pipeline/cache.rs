@@ -17,6 +17,10 @@ use std::time::Duration;
 use moka::sync::Cache;
 use query_engine::shared::PipelineOutput;
 
+/// Maximum number of cached query results. At ~5 KB per entry (typical
+/// search with 30 hydrated rows), 16 384 entries ≈ 80 MB worst case.
+const MAX_CACHE_ENTRIES: u64 = 16_384;
+
 /// Cache key: (user_id, hash of query JSON without cursor).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
@@ -31,7 +35,10 @@ pub struct QueryResultCache {
 impl QueryResultCache {
     pub fn new(ttl: Duration) -> Self {
         Self {
-            cache: Cache::builder().time_to_live(ttl).max_capacity(256).build(),
+            cache: Cache::builder()
+                .time_to_live(ttl)
+                .max_capacity(MAX_CACHE_ENTRIES)
+                .build(),
         }
     }
 
