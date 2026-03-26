@@ -227,13 +227,19 @@ async fn main() -> Result<()> {
     };
 
     if is_single_query {
+        if cli.filter.is_some() {
+            eprintln!("warning: --filter is ignored for single-query input");
+        }
+
         let profiler_output = run_single(&run_ctx, &query_json, instance_health).await?;
 
         emit_output(&cli.format, &profiler_output, cli.output.as_ref())?;
     } else {
-        let queries = parsed
-            .as_object()
-            .context("multi-query file must be a JSON object with named queries")?;
+        let queries = parsed.as_object().context(if parsed.is_array() {
+            "input is a JSON array; expected a single query object or a named query collection"
+        } else {
+            "multi-query file must be a JSON object with named queries"
+        })?;
 
         let entries: Vec<_> = match &cli.filter {
             Some(f) => queries
