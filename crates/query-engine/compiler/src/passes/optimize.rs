@@ -864,7 +864,7 @@ fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
         Expr::InSubquery { expr, .. } => {
             collect_aliases_inner(expr, aliases);
         }
-        Expr::Literal(_) | Expr::Param { .. } => {}
+        Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
     }
 }
 

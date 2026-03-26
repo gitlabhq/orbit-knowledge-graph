@@ -42,6 +42,8 @@ pub enum Expr {
         cte_name: String,
         column: String,
     },
+    /// Wildcard → `*`
+    Star,
 }
 
 /// SQL operators for expressions.
@@ -141,6 +143,13 @@ impl SelectExpr {
             alias: Some(alias.into()),
         }
     }
+
+    pub fn star() -> Self {
+        Self {
+            expr: Expr::Star,
+            alias: None,
+        }
+    }
 }
 
 /// Ordering specification → `expr ASC` or `expr DESC`
@@ -192,6 +201,8 @@ pub struct Query {
     pub group_by: Vec<Expr>,
     pub having: Option<Expr>,
     pub order_by: Vec<OrderExpr>,
+    /// `LIMIT n BY col1, col2` — ClickHouse per-group limit (applied after ORDER BY).
+    pub limit_by: Option<(u32, Vec<Expr>)>,
     pub limit: Option<u32>,
     /// Additional queries to UNION ALL with this one (for recursive CTEs).
     pub union_all: Vec<Query>,
@@ -224,6 +235,7 @@ impl Default for Query {
             group_by: vec![],
             having: None,
             order_by: vec![],
+            limit_by: None,
             limit: None,
             union_all: vec![],
             set_statements: vec![],

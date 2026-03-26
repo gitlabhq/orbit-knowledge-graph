@@ -128,6 +128,11 @@ impl Context {
             parts.push(format!("ORDER BY {}", orders.join(", ")));
         }
 
+        if let Some((n, ref cols)) = q.limit_by {
+            let cols: Vec<_> = cols.iter().map(|c| self.emit_expr(c)).collect();
+            parts.push(format!("LIMIT {n} BY {}", cols.join(", ")));
+        }
+
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
         }
@@ -183,6 +188,7 @@ impl Context {
                 let e = self.emit_expr(expr);
                 format!("{e} IN (SELECT {column} FROM {cte_name})")
             }
+            Expr::Star => "*".to_string(),
         }
     }
 

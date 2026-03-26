@@ -2,7 +2,8 @@
 //!
 //! ClickHouse's `ReplacingMergeTree` deduplicates during background merges,
 //! but between merges queries can see stale duplicates. This pass wraps
-//! every node table scan in a subquery with `GROUP BY id` + `argMax`.
+//! every node table scan in a subquery that picks the latest row per `id`
+//! using `ORDER BY _version DESC LIMIT 1 BY id`, then filters deleted rows.
 //!
 //! Edge tables are excluded — their full-tuple ORDER BY makes RMT dedup
 //! effective, and wrapping them would kill LIMIT pushdown.
@@ -12,25 +13,20 @@
 //! FROM gl_merge_request AS mr WHERE mr.state = 'merged'
 //!
 //! -- after
-//! FROM (SELECT id, argMax(state, _version) AS state
-//!       FROM gl_merge_request AS mr
-//!       GROUP BY id
-//!       HAVING argMax(_deleted, _version) = false) AS mr
-//! WHERE mr.state = 'merged'
+//! FROM (SELECT * FROM gl_merge_request AS mr
+//!       ORDER BY _version DESC LIMIT 1 BY id) AS mr
+//! WHERE mr._deleted = false AND mr.state = 'merged'
 //! ```
 //!
-//! The pass doesn't touch WHERE — property filters stay outer naturally,
-//! security injects `startsWith(traversal_path)` into inner queries via
-//! its own subquery recursion, and ClickHouse pushes `id` predicates
-//! through `GROUP BY id` automatically.
+//! No column tracking needed — `SELECT *` passes all columns through.
+//! Security injects `startsWith(traversal_path)` into inner queries via
+//! its own subquery recursion.
 //!
 //! Refs: <https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/308>
 
-use std::collections::{HashMap, HashSet};
-
 use ontology::constants::{DELETED_COLUMN, EDGE_TABLE, GL_TABLE_PREFIX, VERSION_COLUMN};
 
-use crate::ast::{Expr, Node, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
 
 fn is_node_table(table: &str) -> bool {
     table.starts_with(GL_TABLE_PREFIX) && table != EDGE_TABLE
@@ -49,13 +45,11 @@ pub fn deduplicate(node: &mut Node) {
 }
 
 fn dedup_query(q: &mut Query) {
-    // Bottom-up: derived tables first, then wrap scans at this level.
     visit_derived_tables(&mut q.from);
     for arm in &mut q.union_all {
         dedup_query(arm);
     }
-    let used = used_columns(q);
-    wrap_node_scans(&mut q.from, &used);
+    wrap_node_scans(&mut q.from, &mut q.where_clause);
 }
 
 fn visit_derived_tables(from: &mut TableRef) {
@@ -70,89 +64,28 @@ fn visit_derived_tables(from: &mut TableRef) {
     }
 }
 
-// ─── Column collection ───────────────────────────────────────────────────
-
-/// Collect `alias → {columns}` referenced at this query level.
-fn used_columns(q: &Query) -> HashMap<String, HashSet<String>> {
-    let mut out = HashMap::new();
-    for sel in &q.select {
-        walk_expr(&sel.expr, &mut out);
-    }
-    if let Some(w) = &q.where_clause {
-        walk_expr(w, &mut out);
-    }
-    walk_joins(&q.from, &mut out);
-    for g in &q.group_by {
-        walk_expr(g, &mut out);
-    }
-    if let Some(h) = &q.having {
-        walk_expr(h, &mut out);
-    }
-    for o in &q.order_by {
-        walk_expr(&o.expr, &mut out);
-    }
-    out
-}
-
-fn walk_expr(expr: &Expr, out: &mut HashMap<String, HashSet<String>>) {
-    match expr {
-        Expr::Column { table, column } => {
-            out.entry(table.clone()).or_default().insert(column.clone());
-        }
-        Expr::BinaryOp { left, right, .. } => {
-            walk_expr(left, out);
-            walk_expr(right, out);
-        }
-        Expr::UnaryOp { expr, .. } => walk_expr(expr, out),
-        Expr::FuncCall { args, .. } => args.iter().for_each(|a| walk_expr(a, out)),
-        Expr::InSubquery { expr, .. } => walk_expr(expr, out),
-        Expr::Literal(_) | Expr::Param { .. } => {}
-    }
-}
-
-fn walk_joins(tr: &TableRef, out: &mut HashMap<String, HashSet<String>>) {
-    if let TableRef::Join {
-        left, right, on, ..
-    } = tr
-    {
-        walk_joins(left, out);
-        walk_joins(right, out);
-        walk_expr(on, out);
-    }
-}
-
-// ─── Wrapping ────────────────────────────────────────────────────────────
-
-fn wrap_node_scans(from: &mut TableRef, used: &HashMap<String, HashSet<String>>) {
+fn wrap_node_scans(from: &mut TableRef, where_clause: &mut Option<Expr>) {
     match from {
         TableRef::Scan { table, alias } if is_node_table(table) => {
-            let Some(columns) = used.get(alias.as_str()) else {
-                return;
-            };
             let table_name = table.clone();
             let alias = alias.clone();
 
-            let argmax = |col: &str| {
-                Expr::func(
-                    "argMax",
-                    vec![Expr::col(&alias, col), Expr::col(&alias, VERSION_COLUMN)],
-                )
-            };
-
-            let mut select = vec![SelectExpr::new(Expr::col(&alias, "id"), "id")];
-            for col in columns {
-                if col == "id" {
-                    continue;
-                }
-                select.push(SelectExpr::new(argmax(col), col.clone()));
-            }
+            // _deleted = false filter goes on the outer query.
+            let deleted_filter = Expr::eq(Expr::col(&alias, DELETED_COLUMN), Expr::lit(false));
+            *where_clause = Some(match where_clause.take() {
+                Some(existing) => Expr::and(deleted_filter, existing),
+                None => deleted_filter,
+            });
 
             *from = TableRef::subquery(
                 Query {
-                    select,
+                    select: vec![SelectExpr::star()],
                     from: TableRef::scan(table_name, &alias),
-                    group_by: vec![Expr::col(&alias, "id")],
-                    having: Some(Expr::eq(argmax(DELETED_COLUMN), Expr::lit(false))),
+                    order_by: vec![OrderExpr {
+                        expr: Expr::col(&alias, VERSION_COLUMN),
+                        desc: true,
+                    }],
+                    limit_by: Some((1, vec![Expr::col(&alias, "id")])),
                     ..Default::default()
                 },
                 alias,
@@ -160,8 +93,8 @@ fn wrap_node_scans(from: &mut TableRef, used: &HashMap<String, HashSet<String>>)
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            wrap_node_scans(left, used);
-            wrap_node_scans(right, used);
+            wrap_node_scans(left, where_clause);
+            wrap_node_scans(right, where_clause);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
@@ -173,13 +106,6 @@ mod tests {
     use crate::ast::Cte;
     use ontology::constants::TRAVERSAL_PATH_COLUMN;
 
-    fn starts_with(alias: &str, path: &str) -> Expr {
-        Expr::func(
-            "startsWith",
-            vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(path)],
-        )
-    }
-
     fn find_subquery<'a>(from: &'a TableRef, target: &str) -> Option<&'a Query> {
         match from {
             TableRef::Subquery { query, alias, .. } if alias == target => Some(query),
@@ -190,11 +116,16 @@ mod tests {
         }
     }
 
-    fn has_argmax_having(q: &Query) -> bool {
-        q.having.as_ref().is_some_and(|h| {
-            matches!(h, Expr::BinaryOp { left, .. }
-                if matches!(left.as_ref(), Expr::FuncCall { name, .. } if name == "argMax"))
-        })
+    fn has_limit_by(q: &Query) -> bool {
+        q.limit_by
+            .as_ref()
+            .is_some_and(|(n, cols)| *n == 1 && !cols.is_empty())
+    }
+
+    fn outer_where_contains(q: &Query, needle: &str) -> bool {
+        q.where_clause
+            .as_ref()
+            .is_some_and(|w| format!("{w:?}").contains(needle))
     }
 
     #[test]
@@ -209,10 +140,10 @@ mod tests {
 
         let Node::Query(q) = &node;
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
-        assert_eq!(inner.group_by.len(), 1);
-        assert!(has_argmax_having(inner));
-        // Property filter stays in outer WHERE, untouched.
-        assert!(q.where_clause.is_some());
+        assert!(has_limit_by(inner));
+        assert!(inner.order_by[0].desc);
+        assert!(outer_where_contains(q, "_deleted"));
+        assert!(outer_where_contains(q, "state"));
     }
 
     #[test]
@@ -254,7 +185,10 @@ mod tests {
                 TableRef::scan("gl_edge", "e"),
                 Expr::eq(Expr::col("p", "id"), Expr::col("e", "target_id")),
             ),
-            where_clause: Some(starts_with("p", "1/")),
+            where_clause: Some(Expr::func(
+                "startsWith",
+                vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
+            )),
             ..Default::default()
         }));
         deduplicate(&mut node);
@@ -262,6 +196,7 @@ mod tests {
         let Node::Query(q) = &node;
         assert!(find_subquery(&q.from, "p").is_some());
         assert!(find_subquery(&q.from, "e").is_none());
+        assert!(outer_where_contains(q, "_deleted"));
     }
 
     #[test]
@@ -283,37 +218,12 @@ mod tests {
 
         let Node::Query(q) = &node;
         let inner = find_subquery(&q.ctes[0].query.from, "mr").expect("CTE scan wrapped");
-        assert!(has_argmax_having(inner));
+        assert!(has_limit_by(inner));
         assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "_nf_mr"));
     }
 
     #[test]
-    fn argmax_covers_used_columns() {
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![
-                SelectExpr::new(Expr::col("mr", "id"), "id"),
-                SelectExpr::new(Expr::col("mr", "title"), "title"),
-                SelectExpr::new(Expr::col("mr", "state"), "state"),
-            ],
-            from: TableRef::scan("gl_merge_request", "mr"),
-            ..Default::default()
-        }));
-        deduplicate(&mut node);
-
-        let Node::Query(q) = &node;
-        let inner = find_subquery(&q.from, "mr").unwrap();
-        let cols: HashSet<_> = inner
-            .select
-            .iter()
-            .filter_map(|s| s.alias.as_deref())
-            .collect();
-        assert!(cols.contains("id"));
-        assert!(cols.contains("title"));
-        assert!(cols.contains("state"));
-    }
-
-    #[test]
-    fn user_table_dedup_by_id() {
+    fn user_table_dedup() {
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr::new(Expr::col("u", "username"), "name")],
             from: TableRef::scan("gl_user", "u"),
@@ -323,7 +233,6 @@ mod tests {
 
         let Node::Query(q) = &node;
         let inner = find_subquery(&q.from, "u").expect("user should be wrapped");
-        assert_eq!(inner.group_by.len(), 1);
-        assert!(has_argmax_having(inner));
+        assert!(has_limit_by(inner));
     }
 }
