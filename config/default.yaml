@@ -25,7 +25,7 @@ graph:
 #     signing_key: ""
 #     verifying_key: ""
 
-# grpc_tls:
+# tls:
 #   cert_path: "/path/to/cert.pem"
 #   key_path: "/path/to/key.pem"
 

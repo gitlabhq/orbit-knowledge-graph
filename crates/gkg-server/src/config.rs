@@ -61,14 +61,14 @@ impl GitlabConfig {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct GrpcTlsConfig {
+pub struct TlsConfig {
     #[serde(default)]
     pub cert_path: Option<String>,
     #[serde(default)]
     pub key_path: Option<String>,
 }
 
-impl GrpcTlsConfig {
+impl TlsConfig {
     pub async fn load_tls_config(&self) -> anyhow::Result<Option<ServerTlsConfig>> {
         match (&self.cert_path, &self.key_path) {
             (Some(cert_path), Some(key_path)) => {
@@ -111,7 +111,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub metrics: MetricsConfig,
     #[serde(default)]
-    pub grpc_tls: GrpcTlsConfig,
+    pub tls: TlsConfig,
 }
 
 impl AppConfig {
