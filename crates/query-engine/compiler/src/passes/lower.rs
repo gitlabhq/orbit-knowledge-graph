@@ -2748,7 +2748,8 @@ mod tests {
             "cursor should enable CH query cache"
         );
         assert!(
-            q.query_settings.contains(&QuerySetting::QueryCacheTtl(60)),
+            q.query_settings
+                .contains(&QuerySetting::QueryCacheTtl(CH_QUERY_CACHE_TTL)),
             "CH query cache TTL should be 60s"
         );
     }
