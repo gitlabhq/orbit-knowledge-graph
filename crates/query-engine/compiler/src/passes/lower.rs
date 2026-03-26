@@ -68,11 +68,7 @@ pub fn lower(input: &mut Input) -> Result<Node> {
     // Enable ClickHouse query cache for cursor pagination queries so that
     // subsequent pages reuse the cached SQL result at the CH layer.
     if input.cursor.is_some() {
-        let Node::Query(q) = &mut node else {
-            return Err(QueryError::Lowering(
-                "expected lowered node to be Node::Query".into(),
-            ));
-        };
+        let Node::Query(q) = &mut node;
         q.query_settings
             .push(("use_query_cache".into(), "1".into()));
         q.query_settings
