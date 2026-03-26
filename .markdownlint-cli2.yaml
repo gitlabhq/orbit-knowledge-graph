@@ -41,5 +41,6 @@ ignores:
   - ".claude/**"
   - ".opencode/**"
   - ".gitlab/**"
+  - "helm/**/charts/**"
   - "CHANGELOG.md"
   - "LICENSE.md"

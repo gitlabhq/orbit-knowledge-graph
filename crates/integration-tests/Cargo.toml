@@ -36,6 +36,8 @@ futures = { workspace = true }
 gitlab-client = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
 serde = { workspace = true }
 health-check = { workspace = true }
 serde_json = { workspace = true }

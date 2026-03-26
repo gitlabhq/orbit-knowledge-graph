@@ -113,6 +113,7 @@ tabled = "0.20"
 indicatif = "0.18"
 
 
+rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
 sqlparser = { version = "0.61.0", features = ["visitor"] }
 hex = "0.4.3"
@@ -124,7 +125,7 @@ prost-types = "0.14.3"
 protoc-bin-vendored = "3.2.0"
 sha2 = "0.10.9"
 tar = "0.4.44"
-tonic = "0.14.2"
+tonic = { version = "0.14.2", features = ["tls-aws-lc"] }
 tonic-build = "0.14.2"
 tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"
