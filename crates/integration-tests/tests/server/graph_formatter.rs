@@ -183,7 +183,10 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
     let pagination = compiled.input.cursor.map(|cursor| {
         let total_rows = query_result.authorized_count();
         let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
-        query_engine::shared::PaginationMeta { has_more, total_rows }
+        query_engine::shared::PaginationMeta {
+            has_more,
+            total_rows,
+        }
     });
 
     let pipeline_output = query_engine::shared::PipelineOutput {
@@ -2187,7 +2190,10 @@ async fn pagination_present_in_response(ctx: &TestContext) {
         "response should include pagination when cursor is present"
     );
     let pagination = &value["pagination"];
-    assert_eq!(pagination["has_more"], true, "5 users, page_size=2 → has_more");
+    assert_eq!(
+        pagination["has_more"], true,
+        "5 users, page_size=2 → has_more"
+    );
     assert_eq!(pagination["total_rows"], 5, "5 authorized users total");
 
     let nodes = value["nodes"].as_array().unwrap();
@@ -2226,7 +2232,10 @@ async fn pagination_last_page_has_more_false(ctx: &TestContext) {
     .await;
 
     let pagination = &value["pagination"];
-    assert_eq!(pagination["has_more"], false, "offset=4, 5 users → last page");
+    assert_eq!(
+        pagination["has_more"], false,
+        "offset=4, 5 users → last page"
+    );
     assert_eq!(pagination["total_rows"], 5);
 
     let nodes = value["nodes"].as_array().unwrap();
@@ -2251,8 +2260,14 @@ async fn pagination_with_redaction(ctx: &TestContext) {
     .await;
 
     let pagination = &value["pagination"];
-    assert_eq!(pagination["total_rows"], 3, "3 authorized users after redaction");
-    assert_eq!(pagination["has_more"], true, "3 authorized, page_size=2 → has_more");
+    assert_eq!(
+        pagination["total_rows"], 3,
+        "3 authorized users after redaction"
+    );
+    assert_eq!(
+        pagination["has_more"], true,
+        "3 authorized, page_size=2 → has_more"
+    );
 
     let nodes = value["nodes"].as_array().unwrap();
     assert_eq!(nodes.len(), 2);
