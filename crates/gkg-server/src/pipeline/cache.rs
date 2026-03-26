@@ -151,7 +151,7 @@ impl QueryResultCache {
 
         // Reject oversized results to prevent a single entry from
         // consuming a disproportionate share of the cache budget.
-        let size_bytes = output.query_result.heap_size();
+        let size_bytes = output.query_result.data_size();
         if size_bytes > MAX_CACHEABLE_BYTES {
             debug!(user_id, size_bytes, "result too large to cache, skipping");
             METRICS

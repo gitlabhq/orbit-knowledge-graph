@@ -164,25 +164,37 @@ impl QueryResultRow {
         self.columns.insert(column, value);
     }
 
-    /// Compute the heap byte size of this row: struct size + all column
-    /// key/value heap allocations.
-    pub fn heap_size(&self) -> usize {
-        use std::mem::size_of;
+    /// Byte size of all data in this row: columns, dynamic nodes, edge kinds.
+    pub fn data_size(&self) -> usize {
+        let columns: usize = self
+            .columns
+            .iter()
+            .map(|(key, val)| key.len() + column_value_size(val))
+            .sum();
 
-        size_of::<Self>()
-            + self
-                .columns
-                .iter()
-                .map(|(key, val)| {
-                    size_of::<String>()
-                        + key.capacity()
-                        + size_of::<ColumnValue>()
-                        + match val {
-                            ColumnValue::String(s) => s.capacity(),
-                            _ => 0,
-                        }
-                })
-                .sum::<usize>()
+        let dynamic_nodes: usize = self
+            .dynamic_nodes
+            .iter()
+            .map(|n| {
+                8 + n.entity_type.len()
+                    + n.properties
+                        .iter()
+                        .map(|(k, v)| k.len() + column_value_size(v))
+                        .sum::<usize>()
+            })
+            .sum();
+
+        let edge_kinds: usize = self.edge_kinds.iter().map(|s| s.len()).sum();
+
+        columns + dynamic_nodes + edge_kinds
+    }
+}
+
+fn column_value_size(val: &ColumnValue) -> usize {
+    match val {
+        ColumnValue::String(s) => s.len(),
+        ColumnValue::Int64(_) | ColumnValue::Float64(_) => 8,
+        ColumnValue::Null => 0,
     }
 }
 
@@ -378,9 +390,9 @@ impl QueryResult {
     /// Must be called **after** hydration — marks out-of-window authorized
     /// rows as unauthorized so `authorized_rows()` returns only the page.
     /// Returns whether more authorized rows exist beyond this page.
-    /// Compute the total heap byte size of all rows in this result.
-    pub fn heap_size(&self) -> usize {
-        self.rows.iter().map(|r| r.heap_size()).sum()
+    /// Total byte size of all row data in this result.
+    pub fn data_size(&self) -> usize {
+        self.rows.iter().map(|r| r.data_size()).sum()
     }
 
     pub fn apply_cursor(&mut self, offset: u32, page_size: u32) -> bool {
