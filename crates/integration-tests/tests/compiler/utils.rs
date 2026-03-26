@@ -8,8 +8,8 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
-use compiler::passes::codegen::{ParamValue, ParameterizedQuery};
 use compiler::SqlDialect;
+use compiler::passes::codegen::{ParamValue, ParameterizedQuery};
 use sqlparser::ast::{
     Expr, Function, GroupByExpr, LimitClause, ObjectName, OrderByKind, Query, Select, SelectItem,
     SetExpr, Statement, TableFactor, Visit, Visitor,
@@ -167,7 +167,7 @@ impl ParsedSql {
             "no Query statement found in: {:?}",
             self.statements
                 .iter()
-                .map(|s| std::mem::discriminant(s))
+                .map(std::mem::discriminant)
                 .collect::<Vec<_>>()
         );
     }
