@@ -70,13 +70,32 @@ Query from file:
 cargo run -p query-profiler -- -t '1/' --explain @fixtures/queries/my_query.json
 ```
 
-Pretty-printed output:
+## Output
+
+By default output is pretty-printed JSON to stdout. Use `--format json` for compact JSON.
+
+Write results to a file with `--output` (`-o`):
 
 ```bash
-cargo run -p query-profiler -- -t '1/' --format pretty '...'
+cargo run -p query-profiler -- -t '1/' --explain -o results.json @fixtures/queries/my_query.json
 ```
 
-## Output structure
+When `--output` is used, the profiler writes the JSON file and prints the path to stderr. When omitted, results go to stdout. Progress and errors always go to stderr, so they never mix with JSON output.
+
+### Workflow: run, wait, then analyze
+
+When profiling against a remote ClickHouse (e.g. via port-forward), queries take time. Use `--output` so results are written to disk when the run finishes, then read the output file to analyze results:
+
+```bash
+# Run all queries, wait for completion, results land in the file
+cargo run -p query-profiler -- -t '1/' --explain --profile \
+  -o profiling_results.json \
+  @fixtures/queries/optimization_showcase.json
+
+# Then read profiling_results.json to analyze
+```
+
+### Output structure
 
 The JSON output has these sections:
 
@@ -124,7 +143,7 @@ With `--health`:
 
 ## Multi-query files
 
-The profiler can run all queries from a file where keys are query names and values are query objects:
+The profiler can run all queries from a file where keys are query names and values are query objects. Queries are executed sequentially so profiling numbers are not polluted by concurrent load.
 
 ```bash
 cargo run -p query-profiler -- -t '1/' --explain @fixtures/queries/optimization_showcase.json
@@ -136,14 +155,22 @@ Filter to a subset by name substring:
 cargo run -p query-profiler -- -t '1/' --explain --filter aggregation @fixtures/queries/optimization_showcase.json
 ```
 
-Progress is printed to stderr. Output is a JSON object keyed by query name, each value being the standard profiler output. Queries that fail are recorded with an `{"error": "..."}` value and the run continues.
+Write multi-query results to a file:
+
+```bash
+cargo run -p query-profiler -- -t '1/' --explain \
+  -o showcase_results.json \
+  @fixtures/queries/optimization_showcase.json
+```
+
+Progress is printed to stderr (`[3/25] query_name...`). Output is a JSON object keyed by query name, each value being the standard profiler output. Queries that fail are recorded with an `{"error": "..."}` value and the run continues with the rest.
 
 ## A/B comparison
 
-1. Run the query and save output: `cargo run -p query-profiler -- -t '1/' --explain QUERY > before.json`
+1. Run the query and save output: `cargo run -p query-profiler -- -t '1/' --explain -o before.json QUERY`
 2. Make your optimizer change
 3. Rebuild: `cargo build -p query-profiler`
-4. Run the same query: `cargo run -p query-profiler -- -t '1/' --explain QUERY > after.json`
+4. Run the same query: `cargo run -p query-profiler -- -t '1/' --explain -o after.json QUERY`
 5. Compare `read_rows` and `elapsed_ns` between the two files
 
 ## Things to know
@@ -154,3 +181,4 @@ Progress is printed to stderr. Output is a JSON object keyed by query name, each
 - A single GKG query can produce multiple ClickHouse queries: 1 base + N hydration queries. Each one is profiled independently.
 - `--profile` runs `SYSTEM FLUSH LOGS` before querying `system.query_log`, which adds about 100ms.
 - `--profile` and `--health` require the ClickHouse user to have SELECT on system tables.
+- Default output format is `pretty` (pretty-printed JSON). Use `--format json` for compact single-line JSON.
