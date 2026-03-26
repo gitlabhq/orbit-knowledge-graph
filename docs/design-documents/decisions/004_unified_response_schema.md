@@ -162,6 +162,7 @@ Computed values are inlined on the group-by nodes. `columns` describes each aggr
     { "name": "avg_mr", "function": "avg", "target": "m", "property": "id" }
   ]
 }
+```
 
 #### Aggregation (ungrouped / scalar)
 
