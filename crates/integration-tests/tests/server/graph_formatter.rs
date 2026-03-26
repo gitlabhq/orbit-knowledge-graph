@@ -1325,22 +1325,15 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
     .await;
 
     assert_eq!(value["query_type"], "aggregation");
-    assert!(
-        value["nodes"].as_array().unwrap().is_empty(),
-        "ungrouped aggregation should have no nodes"
-    );
     assert!(value["edges"].as_array().unwrap().is_empty());
 
-    let aggregates = &value["aggregates"];
-    assert!(
-        aggregates.is_object(),
-        "ungrouped aggregation should have aggregates field: {value}"
-    );
-    assert_eq!(
-        aggregates["total"].as_i64().unwrap(),
-        5,
-        "should count all 5 users"
-    );
+    let nodes = value["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "ungrouped aggregation should have one synthetic node");
+
+    let node = &nodes[0];
+    assert_eq!(node["type"], "Aggregation");
+    assert_eq!(node["id"], 0);
+    assert_eq!(node["total"].as_i64().unwrap(), 5, "should count all 5 users");
 }
 
 async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
@@ -1360,14 +1353,14 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
     )
     .await;
 
-    let aggregates = &value["aggregates"];
-    assert!(aggregates.is_object(), "should have aggregates: {value}");
-    assert_eq!(aggregates["total"].as_i64().unwrap(), 5);
-    assert_eq!(aggregates["min_id"].as_i64().unwrap(), 1);
-    assert_eq!(aggregates["max_id"].as_i64().unwrap(), 5);
+    let node = &value["nodes"].as_array().unwrap()[0];
+    assert_eq!(node["type"], "Aggregation");
+    assert_eq!(node["total"].as_i64().unwrap(), 5);
+    assert_eq!(node["min_id"].as_i64().unwrap(), 1);
+    assert_eq!(node["max_id"].as_i64().unwrap(), 5);
 }
 
-async fn grouped_aggregation_has_no_aggregates_field(ctx: &TestContext) {
+async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
@@ -1384,14 +1377,11 @@ async fn grouped_aggregation_has_no_aggregates_field(ctx: &TestContext) {
     )
     .await;
 
+    let nodes = value["nodes"].as_array().unwrap();
+    assert!(!nodes.is_empty(), "grouped aggregation should have entity nodes");
     assert!(
-        value.get("aggregates").is_none()
-            || value["aggregates"].is_null(),
-        "grouped aggregation should not have aggregates field: {value}"
-    );
-    assert!(
-        !value["nodes"].as_array().unwrap().is_empty(),
-        "grouped aggregation should have nodes"
+        nodes.iter().all(|n| n["type"] != "Aggregation"),
+        "grouped aggregation should not have synthetic Aggregation node"
     );
 }
 
@@ -1411,15 +1401,10 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
     )
     .await;
 
-    // The count is computed at the SQL level (before redaction), so it
-    // reflects all 5 users, not the 3 authorized ones.
-    let aggregates = &value["aggregates"];
-    assert!(aggregates.is_object(), "should have aggregates: {value}");
-    assert_eq!(
-        aggregates["total"].as_i64().unwrap(),
-        5,
-        "SQL-level count should be 5 (all users, pre-redaction)"
-    );
+    // Count is SQL-level (pre-redaction), so it reflects all 5 users.
+    let node = &value["nodes"].as_array().unwrap()[0];
+    assert_eq!(node["type"], "Aggregation");
+    assert_eq!(node["total"].as_i64().unwrap(), 5);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2439,7 +2424,7 @@ async fn graph_formatter_e2e() {
         // Ungrouped aggregation
         ungrouped_count_emits_aggregates,
         ungrouped_multiple_functions_emits_aggregates,
-        grouped_aggregation_has_no_aggregates_field,
+        grouped_aggregation_uses_entity_nodes,
         ungrouped_count_with_redaction,
         // Path finding — type variations
         path_finding_exact_path,

@@ -1,8 +1,8 @@
 use serde_json::Value;
 use shared::PipelineOutput;
 
-use super::graph::GraphFormatter;
 use super::ResultFormatter;
+use super::graph::GraphFormatter;
 
 #[derive(Clone, Copy)]
 pub struct GoonFormatter;

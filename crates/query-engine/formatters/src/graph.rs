@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use compiler::{
-    EdgeMeta, QueryType, ResultContext, NEIGHBOR_IS_OUTGOING_COLUMN, RELATIONSHIP_TYPE_COLUMN,
+    EdgeMeta, NEIGHBOR_IS_OUTGOING_COLUMN, QueryType, RELATIONSHIP_TYPE_COLUMN, ResultContext,
 };
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use serde_json::Value;
 use shared::PipelineOutput;
 use types::{QueryResult, QueryResultRow};
 
-use super::{column_value_to_json, ResultFormatter};
+use super::{ResultFormatter, column_value_to_json};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphResponse {
@@ -59,20 +59,7 @@ pub struct GraphFormatter;
 
 impl ResultFormatter for GraphFormatter {
     fn format(&self, output: &PipelineOutput) -> Value {
-        let response = self.build_response(output);
-        let mut value = serde_json::to_value(response).unwrap_or(Value::Null);
-
-        // For ungrouped aggregations, extract scalar values from the
-        // authorized rows and inject them into the JSON. This only affects
-        // the formatted response — the proto layer sees GraphResponse
-        // without aggregates.
-        if let Some(aggs) = Self::extract_scalar_aggregates(output) {
-            if let Some(obj) = value.as_object_mut() {
-                obj.insert("aggregates".to_string(), Value::Object(aggs));
-            }
-        }
-
-        value
+        serde_json::to_value(self.build_response(output)).unwrap_or(Value::Null)
     }
 }
 
@@ -259,7 +246,29 @@ impl GraphFormatter {
     ) {
         let Some(aggs) = aggregations else { return };
         let agg_col_names = Self::agg_col_names(aggs);
+        let is_ungrouped = aggs.iter().all(|a| a.group_by.is_none());
 
+        if is_ungrouped {
+            // Scalar aggregation: emit a synthetic node with the aggregate
+            // values as properties so the result fits the nodes[] contract.
+            if let Some(row) = result.authorized_rows().next() {
+                let mut properties = serde_json::Map::new();
+                for col_name in &agg_col_names {
+                    if let Some(value) = row.get(col_name) {
+                        properties.insert(col_name.clone(), column_value_to_json(value));
+                    }
+                }
+                let key = ("Aggregation".to_string(), 0);
+                node_map.entry(key).or_insert_with(|| GraphNode {
+                    entity_type: "Aggregation".to_string(),
+                    id: 0,
+                    properties,
+                });
+            }
+            return;
+        }
+
+        // Grouped aggregation: attach values as properties on group_by nodes.
         for row in result.authorized_rows() {
             for node in result_context.nodes() {
                 let Some(id) = row.get_public_id(node) else {
@@ -285,29 +294,6 @@ impl GraphFormatter {
                 });
             }
         }
-    }
-
-    /// Extract scalar aggregate values for ungrouped aggregations.
-    /// Returns `None` for grouped or mixed aggregations (where any
-    /// aggregation has a `group_by` — mixed mode is not supported).
-    fn extract_scalar_aggregates(
-        output: &PipelineOutput,
-    ) -> Option<serde_json::Map<String, Value>> {
-        let aggs = &output.compiled.input.aggregations;
-        if aggs.is_empty() || aggs.iter().any(|a| a.group_by.is_some()) {
-            return None;
-        }
-
-        let col_names = Self::agg_col_names(aggs);
-        let mut map = serde_json::Map::new();
-        if let Some(row) = output.query_result.authorized_rows().next() {
-            for col_name in &col_names {
-                if let Some(value) = row.get(col_name) {
-                    map.insert(col_name.clone(), column_value_to_json(value));
-                }
-            }
-        }
-        Some(map)
     }
 
     fn extract_path_finding(
