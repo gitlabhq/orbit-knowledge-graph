@@ -125,6 +125,8 @@ The query pipeline instruments end-to-end query execution from security check th
 | `gkg.query.pipeline.cache.lookups` | Counter | count | `outcome` (hit / miss / error) | Query result cache lookup attempts |
 | `gkg.query.pipeline.cache.stores` | Counter | count | `outcome` (success / error / too_large) | Query result cache store operations |
 | `gkg.query.pipeline.cache.evictions` | Counter | count | `reason` (per_user_limit) | Query result cache evictions |
+| `gkg.query.pipeline.cache.entry.bytes` | Histogram | By | | Data size of each cached result in bytes |
+| `gkg.query.pipeline.cache.entries` | Gauge | count | | Current number of entries in the cache |
 
 *Query engine metrics (`gkg_query_engine`):*
 

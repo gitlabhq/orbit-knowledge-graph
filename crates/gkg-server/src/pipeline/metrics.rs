@@ -1,9 +1,9 @@
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
+use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Gauge, Histogram};
-use opentelemetry::KeyValue;
 
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
