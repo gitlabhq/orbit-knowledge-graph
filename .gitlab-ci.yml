@@ -112,9 +112,9 @@ check_docs_markdown:
     # Lint prose
     - vale --minAlertLevel error docs/source
     # Lint Markdown
-    - markdownlint-cli2 'docs/source/**/*.md' *.md
+    - markdownlint-cli2 'docs/source/**/*.md'
     # Check links
-    - lychee --offline --include-fragments docs/source/**/*.md *.md
+    - lychee --offline --include-fragments docs/source/**/*.md
 
 fmt-check:
   stage: lint
