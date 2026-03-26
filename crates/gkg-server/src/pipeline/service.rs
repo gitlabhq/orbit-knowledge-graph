@@ -102,9 +102,14 @@ impl QueryPipelineService {
         // Apply cursor slicing after the pipeline (or cache hit).
         if let Some(cursor) = output.compiled.input.cursor {
             let total_rows = output.query_result.authorized_count();
-            let has_more = output.query_result.apply_cursor(cursor.offset, cursor.page_size);
+            let has_more = output
+                .query_result
+                .apply_cursor(cursor.offset, cursor.page_size);
             output.row_count = output.query_result.authorized_count();
-            output.pagination = Some(PaginationMeta { has_more, total_rows });
+            output.pagination = Some(PaginationMeta {
+                has_more,
+                total_rows,
+            });
         }
 
         obs.finish(output.row_count, output.redacted_count);
