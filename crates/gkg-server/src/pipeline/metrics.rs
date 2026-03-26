@@ -1,9 +1,9 @@
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
-use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::KeyValue;
 
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
@@ -27,6 +27,10 @@ struct QueryPipelineMetrics {
     execution_failed: Counter<u64>,
     authorization_failed: Counter<u64>,
     streaming_failed: Counter<u64>,
+    // Cache
+    cache_lookups: Counter<u64>,
+    cache_stores: Counter<u64>,
+    cache_evictions: Counter<u64>,
 }
 
 impl QueryPipelineMetrics {
@@ -98,8 +102,42 @@ impl QueryPipelineMetrics {
                 .u64_counter("gkg.query.pipeline.error.streaming_failed")
                 .with_description("Streaming channel unavailable during authorization")
                 .build(),
+            cache_lookups: meter
+                .u64_counter("gkg.query.pipeline.cache.lookups")
+                .with_description("Cache lookup attempts (outcome: hit, miss, error)")
+                .build(),
+            cache_stores: meter
+                .u64_counter("gkg.query.pipeline.cache.stores")
+                .with_description("Cache store operations (outcome: success, error, too_large)")
+                .build(),
+            cache_evictions: meter
+                .u64_counter("gkg.query.pipeline.cache.evictions")
+                .with_description("Cache evictions (reason: per_user_limit)")
+                .build(),
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cache metrics — called from cache.rs via these public functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(super) fn record_cache_lookup(outcome: &'static str) {
+    METRICS
+        .cache_lookups
+        .add(1, &[KeyValue::new("outcome", outcome)]);
+}
+
+pub(super) fn record_cache_store(outcome: &'static str) {
+    METRICS
+        .cache_stores
+        .add(1, &[KeyValue::new("outcome", outcome)]);
+}
+
+pub(super) fn record_cache_eviction(reason: &'static str, count: u64) {
+    METRICS
+        .cache_evictions
+        .add(count, &[KeyValue::new("reason", reason)]);
 }
 
 fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {
