@@ -202,7 +202,7 @@ async fn main() -> Result<()> {
     let parsed: serde_json::Value =
         serde_json::from_str(&query_json).context("failed to parse query JSON")?;
 
-    let is_single_query = parsed.get("query_type").is_some();
+    let is_single_query = matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
 
     let instance_health = if profiling_config.instance_health {
         match client.profiler().fetch_instance_health().await {
@@ -231,15 +231,16 @@ async fn main() -> Result<()> {
 
         emit_output(&cli.format, &profiler_output, cli.output.as_ref())?;
     } else {
-        let queries: BTreeMap<String, serde_json::Value> = serde_json::from_str(&query_json)
+        let queries = parsed
+            .as_object()
             .context("multi-query file must be a JSON object with named queries")?;
 
         let entries: Vec<_> = match &cli.filter {
             Some(f) => queries
-                .into_iter()
+                .iter()
                 .filter(|(k, _)| k.contains(f.as_str()))
                 .collect(),
-            None => queries.into_iter().collect(),
+            None => queries.iter().collect(),
         };
 
         if entries.is_empty() {
@@ -256,15 +257,20 @@ async fn main() -> Result<()> {
             eprintln!("[{}/{}] {}...", i + 1, total, name);
 
             let single_json =
-                serde_json::to_string(&query_value).context("failed to serialize query value")?;
+                serde_json::to_string(query_value).context("failed to serialize query value")?;
 
             match run_single(&run_ctx, &single_json, instance_health.clone()).await {
                 Ok(output) => {
-                    results.insert(name, serde_json::to_value(&output).unwrap_or_default());
+                    let value = serde_json::to_value(&output)
+                        .context("failed to serialize profiler output")?;
+                    results.insert(name.clone(), value);
                 }
                 Err(e) => {
                     eprintln!("  FAILED: {e}");
-                    results.insert(name, serde_json::json!({ "error": format!("{e:#}") }));
+                    results.insert(
+                        name.clone(),
+                        serde_json::json!({ "error": format!("{e:#}") }),
+                    );
                 }
             }
         }
