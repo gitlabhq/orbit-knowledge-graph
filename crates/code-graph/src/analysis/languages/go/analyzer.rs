@@ -126,7 +126,28 @@ impl GoAnalyzer {
         definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
+        // Build a list of definitions in this file for enclosing-definition lookup.
+        // We use byte offsets to find which definition contains each call site.
+        let file_definitions: Vec<&DefinitionNode> = definition_map
+            .iter()
+            .filter_map(|((_, file_path), (node, _))| {
+                if file_path == relative_file_path {
+                    Some(node)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         for reference in references {
+            // Find the enclosing definition: the smallest definition whose byte range
+            // contains the call site. "Smallest" avoids picking a class when the call
+            // is inside one of its methods.
+            let enclosing_def = file_definitions
+                .iter()
+                .filter(|node| reference.range.is_contained_within(node.range))
+                .min_by_key(|node| node.range.byte_length());
+
             // Try to find any definition whose short name matches the referenced symbol
             let matching_def = definition_map.iter().find(|((fqn_str, file_path), _)| {
                 // Match the last segment of the FQN against the reference name
@@ -147,6 +168,7 @@ impl GoAnalyzer {
                 rel.relationship_type = rel_type;
                 rel.source_range = ArcIntern::new(reference.range);
                 rel.target_range = ArcIntern::new(def_node.range);
+                rel.source_definition_range = enclosing_def.map(|d| ArcIntern::new(d.range));
                 rel.target_definition_range = Some(ArcIntern::new(def_node.range));
                 relationships.push(rel);
             }
@@ -314,6 +336,64 @@ func main() {}
                 &mut relationships,
             );
             assert!(!imported_symbol_map.is_empty(), "Should have imports");
+        }
+    }
+
+    #[test]
+    fn test_go_process_references_sets_source_definition_range() {
+        let code = r#"
+package main
+
+func Callee() {}
+
+func Caller() {
+    Callee()
+}
+"#;
+        let processor = FileProcessor::new("main.go".to_string(), code);
+        let result = processor.process();
+        assert!(result.is_success(), "Go file should process successfully");
+
+        if let crate::parsing::processor::ProcessingResult::Success(file_result) = result {
+            let mut definition_map = HashMap::new();
+            let mut relationships = Vec::new();
+            let analyzer = GoAnalyzer::new();
+            analyzer.process_definitions(
+                &file_result,
+                "main.go",
+                &mut definition_map,
+                &mut relationships,
+            );
+
+            // Process references — this requires extracting them from the file result
+            if let Some(references) = file_result.references.as_ref()
+                && let Some(go_refs) = references.iter_go()
+            {
+                let go_refs_vec: Vec<_> = go_refs.cloned().collect();
+                analyzer.process_references(
+                    &go_refs_vec,
+                    "main.go",
+                    &definition_map,
+                    &mut relationships,
+                );
+            }
+
+            // Find Calls relationships and verify source_definition_range is set
+            let calls_rels: Vec<_> = relationships
+                .iter()
+                .filter(|r| r.relationship_type == crate::graph::RelationshipType::Calls)
+                .collect();
+
+            assert!(
+                !calls_rels.is_empty(),
+                "Should have at least one Calls relationship"
+            );
+            for rel in &calls_rels {
+                assert!(
+                    rel.source_definition_range.is_some(),
+                    "source_definition_range must be set on Calls relationships so assign_node_ids can resolve source_id"
+                );
+            }
         }
     }
 }
