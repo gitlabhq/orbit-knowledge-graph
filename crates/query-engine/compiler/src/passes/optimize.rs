@@ -24,11 +24,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
-    BACKWARD_CTE, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS, SKIP_SECURITY_FILTER_TABLES,
-    cascade_cte, node_filter_cte,
+    BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS,
+    SKIP_SECURITY_FILTER_TABLES, START_ID_COLUMN, cascade_cte, node_filter_cte,
 };
 use crate::input::{Input, InputNode, QueryType};
-use crate::passes::lower::edge_kind_column;
 use crate::passes::security::SecurityContext;
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
@@ -87,6 +86,17 @@ fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
         let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
         parts.extend(kind_filters);
         q.where_clause = Expr::conjoin(parts);
+    }
+}
+
+/// Map an edge ID column to its corresponding entity kind column.
+/// Works for both single-hop columns (source_id/target_id) and
+/// multi-hop union columns (start_id/end_id).
+fn edge_kind_column(edge_col: &str) -> Option<&'static str> {
+    match edge_col {
+        SOURCE_ID_COLUMN | START_ID_COLUMN => Some(SOURCE_KIND_COLUMN),
+        TARGET_ID_COLUMN | END_ID_COLUMN => Some(TARGET_KIND_COLUMN),
+        _ => None,
     }
 }
 

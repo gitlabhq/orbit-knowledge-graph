@@ -1152,17 +1152,6 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
     }
 }
 
-/// Map an edge ID column to its corresponding entity kind column.
-/// Works for both single-hop columns (source_id/target_id) and
-/// multi-hop union columns (start_id/end_id).
-pub(crate) fn edge_kind_column(edge_col: &str) -> Option<&'static str> {
-    match edge_col {
-        SOURCE_ID_COLUMN | START_ID_COLUMN => Some(SOURCE_KIND_COLUMN),
-        TARGET_ID_COLUMN | END_ID_COLUMN => Some(TARGET_KIND_COLUMN),
-        _ => None,
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Join Building
 // ─────────────────────────────────────────────────────────────────────────────
