@@ -22,10 +22,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
-    BACKWARD_CTE, CASCADE_EDGE_ALIAS, FORWARD_CTE, HOP_EDGE_ALIAS, SKIP_SECURITY_FILTER_TABLES,
-    cascade_cte, node_filter_cte,
+    BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS,
+    SKIP_SECURITY_FILTER_TABLES, START_ID_COLUMN, cascade_cte, node_filter_cte,
 };
 use crate::input::{Input, InputNode, QueryType};
 use crate::passes::security::SecurityContext;
@@ -40,6 +40,7 @@ const ROOT_SIP_CTE: &str = "_root_ids";
 pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
     match node {
         Node::Query(q) => {
+            inject_entity_kind_filters(q, input);
             if input.query_type == QueryType::Aggregation {
                 eliminate_agg_node_joins(q, input);
             }
@@ -57,6 +58,45 @@ pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
                 apply_path_hop_frontiers(q, input);
             }
         }
+    }
+}
+
+/// Inject `source_kind`/`target_kind` filters for each node with a known
+/// entity type whose edge column mapping is recorded in `node_edge_col`.
+/// Gives ClickHouse an extra predicate for granule pruning on the
+/// `by_source`/`by_target` projections whose PK includes the kind column.
+fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
+    let node_edge_col = &input.compiler.node_edge_col;
+    if node_edge_col.is_empty() {
+        return;
+    }
+    let mut kind_filters: Vec<Expr> = Vec::new();
+    for node in &input.nodes {
+        if let Some(entity) = &node.entity
+            && let Some((alias, edge_col)) = node_edge_col.get(&node.id)
+            && let Some(kind_col) = edge_kind_column(edge_col)
+        {
+            kind_filters.push(Expr::eq(
+                Expr::col(alias, kind_col),
+                Expr::param(ChType::String, entity.to_string()),
+            ));
+        }
+    }
+    if !kind_filters.is_empty() {
+        let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
+        parts.extend(kind_filters);
+        q.where_clause = Expr::conjoin(parts);
+    }
+}
+
+/// Map an edge ID column to its corresponding entity kind column.
+/// Works for both single-hop columns (source_id/target_id) and
+/// multi-hop union columns (start_id/end_id).
+fn edge_kind_column(edge_col: &str) -> Option<&'static str> {
+    match edge_col {
+        SOURCE_ID_COLUMN | START_ID_COLUMN => Some(SOURCE_KIND_COLUMN),
+        TARGET_ID_COLUMN | END_ID_COLUMN => Some(TARGET_KIND_COLUMN),
+        _ => None,
     }
 }
 
@@ -103,16 +143,54 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
         }
     }
 
-    if skippable.is_empty() {
-        return;
-    }
-
-    // Build rewrite map: skipped node alias → (edge alias, edge id column, kind column, entity name).
     let edge_alias = if rel.max_hops > 1 {
         "hop_e0".to_string()
     } else {
         "e0".to_string()
     };
+
+    // Inject kind filters for group-by nodes. Their table JOINs are kept
+    // (for property access), but the kind predicate on the edge lets
+    // ClickHouse prune edges that don't connect to the expected entity
+    // before the JOIN.
+    {
+        let mut gb_kind_filters: Vec<Expr> = Vec::new();
+        for gb_id in &group_by_ids {
+            let node = match input.nodes.iter().find(|n| n.id == *gb_id) {
+                Some(n) => n,
+                None => continue,
+            };
+            let entity = match node.entity.as_deref() {
+                Some(e) => e,
+                None => continue,
+            };
+            let (start_col, end_col) = rel.direction.edge_columns();
+            let id_col = if *gb_id == rel.from {
+                start_col
+            } else {
+                end_col
+            };
+            let kind_col = match edge_kind_column(id_col) {
+                Some(k) => k,
+                None => continue,
+            };
+            gb_kind_filters.push(Expr::eq(
+                Expr::col(&edge_alias, kind_col),
+                Expr::param(ChType::String, entity.to_string()),
+            ));
+        }
+        if !gb_kind_filters.is_empty() {
+            let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
+            parts.extend(gb_kind_filters);
+            q.where_clause = Expr::conjoin(parts);
+        }
+    }
+
+    if skippable.is_empty() {
+        return;
+    }
+
+    // Build rewrite map: skipped node alias → (edge alias, edge id column, kind column, entity name).
     let mut rewrites: HashMap<String, (String, &str)> = HashMap::new();
     let mut kind_filters: Vec<Expr> = Vec::new();
 
@@ -125,12 +203,11 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
             Some(e) => e,
             None => continue,
         };
-        let (id_col, kind_col) = if *node_id == rel.from {
-            let (start, _) = rel.direction.edge_columns();
-            (start, SOURCE_KIND_COLUMN)
-        } else {
-            let (_, end) = rel.direction.edge_columns();
-            (end, TARGET_KIND_COLUMN)
+        let (start, end) = rel.direction.edge_columns();
+        let id_col = if *node_id == rel.from { start } else { end };
+        let kind_col = match edge_kind_column(id_col) {
+            Some(k) => k,
+            None => continue,
         };
         rewrites.insert(node_id.clone(), (edge_alias.clone(), id_col));
         kind_filters.push(Expr::eq(
@@ -158,7 +235,7 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
     // Strip WHERE conjuncts that reference the eliminated node aliases,
     // and add kind filters + rescued join conditions.
     if let Some(w) = q.where_clause.take() {
-        let conjuncts = flatten_and(w);
+        let conjuncts = w.flatten_and();
         let mut remaining: Vec<Expr> = conjuncts
             .into_iter()
             .filter(|c| {
@@ -168,10 +245,10 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
             .collect();
         remaining.extend(kind_filters);
         remaining.extend(rescued_conditions);
-        q.where_clause = rebuild_and(remaining);
+        q.where_clause = Expr::conjoin(remaining);
     } else {
         kind_filters.extend(rescued_conditions);
-        q.where_clause = rebuild_and(kind_filters);
+        q.where_clause = Expr::conjoin(kind_filters);
     }
 
     input.compiler.skipped_node_joins = skippable;
@@ -189,14 +266,14 @@ fn prune_join_for_alias(from: &mut TableRef, alias: &str, rescued: &mut Vec<Expr
             left, right, on, ..
         } => {
             if matches!(right.as_ref(), TableRef::Scan { alias: a, .. } if a == alias) {
-                let conjuncts = flatten_and(on.clone());
+                let conjuncts = on.clone().flatten_and();
                 rescued.extend(conjuncts.into_iter().filter(|c| {
                     let aliases = collect_column_aliases(c);
                     !aliases.contains(alias)
                 }));
                 Some(*left.clone())
             } else if matches!(left.as_ref(), TableRef::Scan { alias: a, .. } if a == alias) {
-                let conjuncts = flatten_and(on.clone());
+                let conjuncts = on.clone().flatten_and();
                 rescued.extend(conjuncts.into_iter().filter(|c| {
                     let aliases = collect_column_aliases(c);
                     !aliases.contains(alias)
@@ -337,7 +414,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
         .where_clause
         .as_ref()
         .map(|w| {
-            let conjuncts = flatten_and(w.clone());
+            let conjuncts = w.clone().flatten_and();
             conjuncts
                 .into_iter()
                 .filter(|c| {
@@ -558,7 +635,7 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
             .where_clause
             .as_ref()
             .map(|w| {
-                let conjuncts = flatten_and(w.clone());
+                let conjuncts = w.clone().flatten_and();
                 conjuncts
                     .into_iter()
                     .filter(|c| {
@@ -692,7 +769,7 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
         None => return,
     };
 
-    let conjuncts = flatten_and(where_clause);
+    let conjuncts = where_clause.flatten_and();
 
     // Build target alias set from Input aggregations (node ID = table alias after lowering).
     let target_aliases: HashSet<&str> = input
@@ -743,7 +820,7 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
     }
 
     if folded_by_alias.is_empty() {
-        q.where_clause = rebuild_and(remaining);
+        q.where_clause = Expr::conjoin(remaining);
         return;
     }
 
@@ -761,7 +838,7 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
         }
     }
 
-    q.where_clause = rebuild_and(remaining);
+    q.where_clause = Expr::conjoin(remaining);
 }
 
 /// Check if an expression is an aggregate targeting an alias with folded conditions.
@@ -810,31 +887,6 @@ fn extract_agg_target_alias(expr: &Expr) -> Option<String> {
         }),
         _ => None,
     }
-}
-
-/// Flatten nested AND expressions into a flat list of conjuncts.
-fn flatten_and(expr: Expr) -> Vec<Expr> {
-    match expr {
-        Expr::BinaryOp {
-            op: Op::And,
-            left,
-            right,
-        } => {
-            let mut out = flatten_and(*left);
-            out.extend(flatten_and(*right));
-            out
-        }
-        other => vec![other],
-    }
-}
-
-/// Rebuild an AND chain from conjuncts. Returns None if empty.
-fn rebuild_and(mut conjuncts: Vec<Expr>) -> Option<Expr> {
-    if conjuncts.is_empty() {
-        return None;
-    }
-    let first = conjuncts.remove(0);
-    Some(conjuncts.into_iter().fold(first, Expr::and))
 }
 
 /// Collect all unique table aliases referenced by column expressions.
@@ -1242,7 +1294,7 @@ fn apply_edge_led_reorder(q: &mut Query, input: &Input) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{OrderExpr, SelectExpr, TableRef};
+    use crate::ast::{Op, OrderExpr, SelectExpr, TableRef};
     use crate::input::{AggFunction, InputAggregation};
 
     fn count_expr(table: &str, col: &str) -> Expr {
@@ -1697,6 +1749,257 @@ mod tests {
         assert!(
             q.ctes.is_empty(),
             "no CTE should be created without target filters"
+        );
+    }
+
+    fn has_kind_filter(expr: &Expr, edge_alias: &str, kind_col: &str, entity: &str) -> bool {
+        match expr {
+            Expr::BinaryOp {
+                op: Op::Eq,
+                left,
+                right,
+            } => {
+                matches!(
+                    (left.as_ref(), right.as_ref()),
+                    (
+                        Expr::Column { table, column },
+                        Expr::Param { value: serde_json::Value::String(val), .. }
+                    ) if table == edge_alias && column == kind_col && val == entity
+                )
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                has_kind_filter(left, edge_alias, kind_col, entity)
+                    || has_kind_filter(right, edge_alias, kind_col, entity)
+            }
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn group_by_kind_filter_injected() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let mut input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "p".into(),
+                to: "mr".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![count_agg("mr", Some("p"))],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(count_expr("mr", "id"), "mr_count"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_project", "p"),
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_edge", "e0"),
+                    TableRef::scan("gl_merge_request", "mr"),
+                    Expr::eq(Expr::col("e0", "target_id"), Expr::col("mr", "id")),
+                ),
+                Expr::eq(Expr::col("p", "id"), Expr::col("e0", "source_id")),
+            ),
+            where_clause: Some(eq_filter("mr", "state", "merged")),
+            group_by: vec![Expr::col("p", "name")],
+            ..Default::default()
+        };
+
+        eliminate_agg_node_joins(&mut q, &mut input);
+
+        let w = q.where_clause.as_ref().expect("WHERE should exist");
+
+        // Group-by node (p = Project, source side) should get source_kind filter
+        assert!(
+            has_kind_filter(w, "e0", "source_kind", "Project"),
+            "WHERE should contain e0.source_kind = 'Project'"
+        );
+
+        // Target node (mr = MergeRequest, target side) should also get
+        // target_kind filter (from the existing skippable logic)
+        assert!(
+            has_kind_filter(w, "e0", "target_kind", "MergeRequest"),
+            "WHERE should contain e0.target_kind = 'MergeRequest'"
+        );
+    }
+
+    #[test]
+    fn group_by_kind_filter_without_skippable_nodes() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        // mr has a filter, so it's NOT skippable — but the group-by node
+        // (p = Project) should still get its kind filter.
+        let mut input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    filters: [(
+                        "state".into(),
+                        crate::input::InputFilter {
+                            op: None,
+                            value: Some(serde_json::json!("merged")),
+                        },
+                    )]
+                    .into(),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "p".into(),
+                to: "mr".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            aggregations: vec![count_agg("mr", Some("p"))],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(count_expr("mr", "id"), "mr_count"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_project", "p"),
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_edge", "e0"),
+                    TableRef::scan("gl_merge_request", "mr"),
+                    Expr::eq(Expr::col("e0", "target_id"), Expr::col("mr", "id")),
+                ),
+                Expr::eq(Expr::col("p", "id"), Expr::col("e0", "source_id")),
+            ),
+            where_clause: Some(eq_filter("mr", "state", "merged")),
+            group_by: vec![Expr::col("p", "name")],
+            ..Default::default()
+        };
+
+        eliminate_agg_node_joins(&mut q, &mut input);
+
+        let w = q.where_clause.as_ref().expect("WHERE should exist");
+        assert!(
+            has_kind_filter(w, "e0", "source_kind", "Project"),
+            "group-by kind filter should be injected even when no nodes are skippable"
+        );
+
+        // mr is NOT skippable (has filters), so its join should remain
+        assert!(
+            input.compiler.skipped_node_joins.is_empty(),
+            "no nodes should be skipped when target has filters"
+        );
+    }
+
+    #[test]
+    fn group_by_kind_filter_incoming_direction() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        // Incoming: rel.from = "mr", rel.to = "p".
+        // edge_columns() for Incoming returns (target_id, source_id),
+        // so mr (from) maps to target_id → target_kind,
+        // and p (to) maps to source_id → source_kind.
+        let mut input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "mr".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Incoming,
+                filters: Default::default(),
+            }],
+            aggregations: vec![count_agg("mr", Some("p"))],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("p", "name"), "p_name"),
+                SelectExpr::new(count_expr("mr", "id"), "mr_count"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_project", "p"),
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_edge", "e0"),
+                    TableRef::scan("gl_merge_request", "mr"),
+                    Expr::eq(Expr::col("e0", "target_id"), Expr::col("mr", "id")),
+                ),
+                Expr::eq(Expr::col("p", "id"), Expr::col("e0", "source_id")),
+            ),
+            where_clause: Some(eq_filter("mr", "state", "merged")),
+            group_by: vec![Expr::col("p", "name")],
+            ..Default::default()
+        };
+
+        eliminate_agg_node_joins(&mut q, &mut input);
+
+        let w = q.where_clause.as_ref().expect("WHERE should exist");
+
+        // p is the group-by node. With Incoming direction, p (to) maps to
+        // source_id → source_kind.
+        assert!(
+            has_kind_filter(w, "e0", "source_kind", "Project"),
+            "group-by node p should get source_kind for Incoming direction"
+        );
+
+        // mr is the target node (skippable). With Incoming direction, mr (from)
+        // maps to target_id → target_kind.
+        assert!(
+            has_kind_filter(w, "e0", "target_kind", "MergeRequest"),
+            "skippable node mr should get target_kind for Incoming direction"
         );
     }
 }
