@@ -816,6 +816,8 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
     let rel_type_filter = type_filter(&neighbors_config.rel_types);
     let edge_alias = "e";
     let center_id = center_node.id.clone();
+    let center_uses_default_pk = center_node.redaction_id_column == DEFAULT_PRIMARY_KEY;
+    let center_redaction_col = center_node.redaction_id_column.clone();
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         vec![OrderExpr {
             expr: Expr::col(&ob.node, &ob.property),
@@ -889,27 +891,51 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
             where_parts.push(tc);
         }
 
-        Query {
-            select: vec![
-                SelectExpr::new(Expr::col(edge_alias, neighbor_id), NEIGHBOR_ID_COLUMN),
-                SelectExpr::new(Expr::col(edge_alias, neighbor_type), NEIGHBOR_TYPE_COLUMN),
-                SelectExpr::new(
-                    Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
-                    RELATIONSHIP_TYPE_COLUMN,
-                ),
-                SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
-                // Center node _gkg_* columns emitted per-arm with the correct
-                // edge column (source_id for outgoing, target_id for incoming).
-                SelectExpr::new(
+        let mut select = vec![
+            SelectExpr::new(Expr::col(edge_alias, neighbor_id), NEIGHBOR_ID_COLUMN),
+            SelectExpr::new(Expr::col(edge_alias, neighbor_type), NEIGHBOR_TYPE_COLUMN),
+            SelectExpr::new(
+                Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
+                RELATIONSHIP_TYPE_COLUMN,
+            ),
+            SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
+        ];
+
+        let mut from = edge_table;
+
+        if center_uses_default_pk {
+            select.push(SelectExpr::new(
+                Expr::col(edge_alias, center_edge_col),
+                format!("_gkg_{center_id}_id"),
+            ));
+        } else {
+            // Indirect auth: JOIN center node table to read the auth column.
+            from = TableRef::join(
+                JoinType::Inner,
+                from,
+                TableRef::scan(&center_table, &center_id),
+                Expr::eq(
                     Expr::col(edge_alias, center_edge_col),
-                    format!("_gkg_{center_id}_id"),
+                    Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
                 ),
-                SelectExpr::new(
-                    Expr::string(center_entity.as_str()),
-                    format!("_gkg_{center_id}_type"),
-                ),
-            ],
-            from: edge_table,
+            );
+            select.push(SelectExpr::new(
+                Expr::col(&center_id, &center_redaction_col),
+                format!("_gkg_{center_id}_id"),
+            ));
+            select.push(SelectExpr::new(
+                Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
+                format!("_gkg_{center_id}_pk"),
+            ));
+        }
+        select.push(SelectExpr::new(
+            Expr::string(center_entity.as_str()),
+            format!("_gkg_{center_id}_type"),
+        ));
+
+        Query {
+            select,
+            from,
             where_clause: Expr::conjoin(where_parts),
             ..Default::default()
         }
