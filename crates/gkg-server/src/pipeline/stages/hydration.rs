@@ -6,7 +6,7 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
 use query_engine::compiler::{
-    ColumnSelection, DynamicColumnMode, HydrationPlan, HydrationTemplate, Input, InputNode,
+    ColumnSelection, DynamicEntityColumns, HydrationPlan, HydrationTemplate, Input, InputNode,
     QueryType, compile_input,
 };
 
@@ -65,15 +65,14 @@ impl HydrationStage {
         Self::execute_hydration(ctx, nodes, total_ids).await
     }
 
-    /// Consolidated dynamic hydration: builds an `Input` with one node per entity
-    /// type, compiles it as `QueryType::Hydration` (which generates a UNION ALL
-    /// with proper parameterization), and executes a single query.
+    /// Consolidated dynamic hydration: builds an `Input` with one node per
+    /// discovered entity type using pre-resolved column specs from the
+    /// compilation plan. No ontology lookups at runtime.
     async fn hydrate_dynamic_consolidated(
         ctx: &QueryPipelineContext,
+        entity_specs: &[DynamicEntityColumns],
         refs: &HashMap<String, Vec<i64>>,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let base_input = &ctx.compiled()?.input;
-
         let mut nodes = Vec::new();
         let mut total_ids: usize = 0;
 
@@ -81,35 +80,15 @@ impl HydrationStage {
             if ids.is_empty() {
                 continue;
             }
-            let node = ctx.ontology.get_node(entity_type).ok_or_else(|| {
-                PipelineError::Execution(format!(
-                    "entity type not found in ontology: {entity_type}"
-                ))
-            })?;
 
-            let columns = match base_input.options.dynamic_columns {
-                DynamicColumnMode::All => node
-                    .fields
-                    .iter()
-                    .filter(|f| !f.is_virtual() && f.name != "_version" && f.name != "_deleted")
-                    .map(|f| f.name.clone())
-                    .collect::<Vec<_>>(),
-                DynamicColumnMode::Default => {
-                    if node.default_columns.is_empty() {
-                        continue;
-                    }
-                    node.default_columns
-                        .iter()
-                        .filter(|col| {
-                            node.fields
-                                .iter()
-                                .find(|f| &f.name == *col)
-                                .is_none_or(|f| !f.is_virtual())
-                        })
-                        .cloned()
-                        .collect()
-                }
+            let spec = match entity_specs.iter().find(|s| s.entity_type == *entity_type) {
+                Some(s) => s,
+                None => continue,
             };
+
+            if spec.columns.is_empty() {
+                continue;
+            }
 
             let capped_ids: Vec<i64> = ids
                 .iter()
@@ -121,8 +100,8 @@ impl HydrationStage {
             nodes.push(InputNode {
                 id: HYDRATION_NODE_ALIAS.to_string(),
                 entity: Some(entity_type.clone()),
-                table: Some(node.destination_table.clone()),
-                columns: Some(ColumnSelection::List(columns)),
+                table: Some(spec.destination_table.clone()),
+                columns: Some(ColumnSelection::List(spec.columns.clone())),
                 node_ids: capped_ids,
                 ..InputNode::default()
             });
@@ -408,11 +387,11 @@ impl PipelineStage for HydrationStage {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
                 }
             }
-            HydrationPlan::Dynamic => {
+            HydrationPlan::Dynamic(entity_specs) => {
                 let refs = Self::extract_dynamic_refs(&query_result);
                 if !refs.is_empty() {
                     let (property_map, debug, executions) =
-                        Self::hydrate_dynamic_consolidated(ctx, &refs)
+                        Self::hydrate_dynamic_consolidated(ctx, entity_specs, &refs)
                             .await
                             .inspect_err(|e| obs.record_error(e))?;
                     hydration_queries = debug;

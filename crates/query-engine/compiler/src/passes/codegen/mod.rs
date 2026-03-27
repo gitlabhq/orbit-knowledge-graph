@@ -44,11 +44,13 @@ pub struct CompiledQueryContext {
 pub enum HydrationPlan {
     /// No hydration needed (e.g., Aggregation).
     None,
-    /// Entity types known at compile time (Traversal, Search).
-    /// One template per entity type, with IDs to be filled at runtime.
+    /// Entity types known at compile time (Traversal).
+    /// One template per input node, with IDs to be filled at runtime.
     Static(Vec<HydrationTemplate>),
     /// Entity types discovered at runtime (PathFinding, Neighbors).
-    Dynamic,
+    /// Column specs are pre-resolved for every ontology entity type so
+    /// the server just looks up the matching spec — no ontology queries.
+    Dynamic(Vec<DynamicEntityColumns>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,6 +67,19 @@ pub struct HydrationTemplate {
     pub columns: Vec<String>,
     /// Virtual columns that need to be resolved from remote services after
     /// ClickHouse hydration completes.
+    pub virtual_columns: Vec<VirtualColumnRequest>,
+}
+
+/// Pre-resolved column spec for an entity type in dynamic hydration.
+/// Built at compile time for every entity type in the ontology so the
+/// server avoids runtime ontology lookups.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityColumns {
+    pub entity_type: String,
+    pub destination_table: String,
+    /// Column-backed columns to fetch from ClickHouse.
+    pub columns: Vec<String>,
+    /// Virtual columns that need remote resolution.
     pub virtual_columns: Vec<VirtualColumnRequest>,
 }
 

@@ -76,8 +76,8 @@ pub use pipelines::{
 // Re-export key types from pass modules.
 pub use passes::check::check_ast;
 pub use passes::codegen::{
-    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery,
-    SqlDialect, VirtualColumnRequest, codegen,
+    CompiledQueryContext, DynamicEntityColumns, HydrationPlan, HydrationTemplate, ParamValue,
+    ParameterizedQuery, SqlDialect, VirtualColumnRequest, codegen,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use passes::hydrate::generate_hydration_plan;
