@@ -105,7 +105,7 @@ Relationships are the edges that connect nodes.
 Each relationship defines a directed connection between two node types.
 
 Relationships can cross domain boundaries.
-For example, a `HAS_FILE` relationship connects a `MergeRequest` node in the `code_review` domain to a `File` node in the `source_code` domain.
+For example, an `IN_PROJECT` relationship can connect a `Job` node in the `ci` domain to a `Project` node in the `Core` domain.
 
 The following relationships are available by default:
 
