@@ -7,7 +7,7 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
 use query_engine::compiler::{
     ColumnSelection, DynamicEntityColumns, HydrationPlan, HydrationTemplate, Input, InputNode,
-    QueryType, compile_input,
+    QueryType, VirtualColumnRequest, compile_input,
 };
 
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
@@ -35,6 +35,19 @@ impl HydrationStage {
         ctx.server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
+    }
+
+    /// Resolve virtual columns from remote services (e.g. Gitaly) and merge
+    /// the results into the property map. Currently a no-op — all virtual
+    /// fields are `disabled: true` in the ontology and excluded from plans.
+    ///
+    /// When #379 lands, this will dispatch to the appropriate service client
+    /// based on `VirtualColumnRequest.service` and `lookup`.
+    async fn resolve_virtual_columns<'a>(
+        _requests: impl Iterator<Item = &'a VirtualColumnRequest>,
+        _property_map: &mut PropertyMap,
+    ) -> Result<(), PipelineError> {
+        Ok(())
     }
 
     async fn hydrate_static(
@@ -380,11 +393,12 @@ impl PipelineStage for HydrationStage {
                     .get_or_insert_default::<QueryExecutionLog>()
                     .0
                     .extend(executions);
-                // TODO(#379): resolve template.virtual_columns here.
-                // For each template with non-empty virtual_columns, dispatch
-                // to the remote service (e.g. Gitaly) using the same IDs
-                // collected above, then merge the returned values into
-                // property_map before the merge_static_properties call.
+                let mut property_map = property_map;
+                Self::resolve_virtual_columns(
+                    templates.iter().flat_map(|t| &t.virtual_columns),
+                    &mut property_map,
+                )
+                .await?;
 
                 if !property_map.is_empty() {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
@@ -410,10 +424,12 @@ impl PipelineStage for HydrationStage {
                         .get_or_insert_default::<QueryExecutionLog>()
                         .0
                         .extend(executions);
-                    // TODO(#379): resolve spec.virtual_columns here.
-                    // Same pattern as static: dispatch to remote services
-                    // using the discovered (entity_type, id) pairs, merge
-                    // results into property_map.
+                    let mut property_map = property_map;
+                    Self::resolve_virtual_columns(
+                        entity_specs.iter().flat_map(|s| &s.virtual_columns),
+                        &mut property_map,
+                    )
+                    .await?;
 
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
                 }
