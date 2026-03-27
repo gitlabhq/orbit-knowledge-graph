@@ -83,7 +83,7 @@ fn dispatch(q: &mut Query, input: &Input) {
                 | QueryType::Neighbors => {
                     apply_limit_by_dedup(&mut q.from, &mut q.where_clause, table_name, alias);
                 }
-                QueryType::Hydration => {}
+                QueryType::Hydration => {} // separate pipeline, no dedup
             }
         }
         TableRef::Scan { .. } => {}
