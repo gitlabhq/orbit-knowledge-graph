@@ -17,9 +17,14 @@
 //! dedup effective, and wrapping them would kill LIMIT pushdown.
 //!
 
+use std::collections::HashSet;
+
 use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
+use crate::constants::node_filter_cte;
 use crate::input::{Input, QueryType};
-use ontology::constants::{DELETED_COLUMN, EDGE_TABLE, GL_TABLE_PREFIX, VERSION_COLUMN};
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_TABLE, GL_TABLE_PREFIX, VERSION_COLUMN,
+};
 
 fn is_node_table(table: &str) -> bool {
     table.starts_with(GL_TABLE_PREFIX) && table != EDGE_TABLE
@@ -73,7 +78,6 @@ fn dispatch(q: &mut Query, input: &Input) {
     match &q.from {
         TableRef::Scan { table, alias } if is_node_table(table) => {
             let alias = alias.clone();
-            let table_name = table.clone();
 
             match input.query_type {
                 QueryType::Search => apply_argmax_dedup(q, &alias),
@@ -81,14 +85,15 @@ fn dispatch(q: &mut Query, input: &Input) {
                 | QueryType::Aggregation
                 | QueryType::PathFinding
                 | QueryType::Neighbors => {
-                    apply_limit_by_dedup(&mut q.from, &mut q.where_clause, table_name, alias);
+                    apply_limit_by_dedup(&mut q.from, &mut q.where_clause);
                 }
                 QueryType::Hydration => {} // separate pipeline, no dedup
             }
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { .. } => {
-            wrap_join_scans(&mut q.from, &mut q.where_clause);
+            let nf_cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
+            wrap_join_scans(&mut q.from, &mut q.where_clause, &nf_cte_names);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
@@ -238,13 +243,23 @@ fn make_dedup_subquery(table_name: String, alias: &str, inner_filters: Vec<Expr>
     )
 }
 
-fn apply_limit_by_dedup(
+fn apply_limit_by_dedup(from: &mut TableRef, where_clause: &mut Option<Expr>) {
+    let (table_name, alias) = match from {
+        TableRef::Scan { table, alias } => (table.clone(), alias.clone()),
+        _ => return,
+    };
+    wrap_scan_with_limit_by(from, where_clause, table_name, alias, None);
+}
+
+fn wrap_scan_with_limit_by(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
     table_name: String,
     alias: String,
+    extra_inner_filter: Option<Expr>,
 ) {
-    let (inner_filters, mut outer_filters) = partition_filters(where_clause.take(), &alias);
+    let (mut inner_filters, mut outer_filters) = partition_filters(where_clause.take(), &alias);
+    inner_filters.extend(extra_inner_filter);
 
     let deleted_filter = Expr::eq(Expr::col(&alias, DELETED_COLUMN), Expr::lit(false));
     outer_filters.insert(0, deleted_filter);
@@ -253,17 +268,29 @@ fn apply_limit_by_dedup(
 }
 
 /// Recurse into join children, wrapping node table scans with LIMIT 1 BY.
-fn wrap_join_scans(from: &mut TableRef, where_clause: &mut Option<Expr>) {
+/// When a `_nf_{alias}` CTE exists, its filter is pushed into the dedup
+/// subquery so ClickHouse sorts only the filtered subset.
+fn wrap_join_scans(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    cte_names: &HashSet<String>,
+) {
     match from {
         TableRef::Scan { table, alias } if is_node_table(table) => {
             let table_name = table.clone();
-            let alias = alias.clone();
-            apply_limit_by_dedup(from, where_clause, table_name, alias);
+            let alias_str = alias.clone();
+            let nf_cte = node_filter_cte(&alias_str);
+            let nf_filter = cte_names.contains(&nf_cte).then(|| Expr::InSubquery {
+                expr: Box::new(Expr::col(&alias_str, DEFAULT_PRIMARY_KEY)),
+                cte_name: nf_cte,
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            });
+            wrap_scan_with_limit_by(from, where_clause, table_name, alias_str, nf_filter);
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            wrap_join_scans(left, where_clause);
-            wrap_join_scans(right, where_clause);
+            wrap_join_scans(left, where_clause, cte_names);
+            wrap_join_scans(right, where_clause, cte_names);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
