@@ -6,17 +6,16 @@
 //!
 //! | Query type   | Strategy                 | Why                                        |
 //! |--------------|--------------------------|--------------------------------------------|
-//! | Search       | argMaxIfOrNull + GROUP BY | Preserves LIMIT pushdown                   |
-//! | Traversal    | LIMIT 1 BY subquery      | Needs all columns for hydration/properties |
-//! | Aggregation  | LIMIT 1 BY subquery      | Needs property columns for countIf/sumIf   |
-//! | Neighbors    | LIMIT 1 BY subquery      | Joins need all columns                     |
-//! | PathFinding  | LIMIT 1 BY subquery      | Recursive CTEs, multi-hop joins            |
-//! | Hydration    | (skipped)                | Separate pipeline, no dedup pass           |
+//! | Search       | argMaxIfOrNull + GROUP BY     | Preserves LIMIT pushdown                   |
+//! | Traversal    | LIMIT 1 BY subquery           | Needs all columns for hydration/properties |
+//! | Aggregation  | LIMIT 1 BY subquery           | Needs property columns for countIf/sumIf   |
+//! | Neighbors    | LIMIT 1 BY subquery (CTEs)    | Edge-only lowering, node dedup via _nf CTE |
+//! | PathFinding  | LIMIT 1 BY subquery           | Recursive CTEs, multi-hop joins            |
+//! | Hydration    | (skipped)                     | Separate pipeline, no dedup pass           |
 //!
 //! Edge tables are always excluded -- their full-tuple ORDER BY makes RMT
 //! dedup effective, and wrapping them would kill LIMIT pushdown.
 //!
-//! Refs: <https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/308>
 
 use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
 use crate::input::{Input, QueryType};

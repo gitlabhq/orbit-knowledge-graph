@@ -64,6 +64,7 @@ pub fn lower(input: &mut Input) -> Result<Node> {
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
+
         QueryType::Hydration => lower_hydration(input),
     }?;
 
@@ -798,7 +799,7 @@ fn build_frontier_arm(
 // Neighbors
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn lower_neighbors(input: &Input) -> Result<Node> {
+fn lower_neighbors(input: &mut Input) -> Result<Node> {
     let neighbors_config = input
         .neighbors
         .as_ref()
@@ -809,11 +810,14 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
     let center_entity = center_node
         .entity
         .as_ref()
-        .ok_or_else(|| QueryError::Lowering("center node entity missing".into()))?;
+        .ok_or_else(|| QueryError::Lowering("center node entity missing".into()))?
+        .clone();
 
-    let type_filter = type_filter(&neighbors_config.rel_types);
+    let rel_type_filter = type_filter(&neighbors_config.rel_types);
     let edge_alias = "e";
-    let where_clause = id_filter(&center_node.id, DEFAULT_PRIMARY_KEY, &center_node.node_ids);
+    let center_id = center_node.id.clone();
+    let center_uses_default_pk = center_node.redaction_id_column == DEFAULT_PRIMARY_KEY;
+    let center_redaction_col = center_node.redaction_id_column.clone();
     let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
         vec![OrderExpr {
             expr: Expr::col(&ob.node, &ob.property),
@@ -822,69 +826,72 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
     });
     let limit = Some(input.limit);
 
-    // For Direction::Both, split into UNION ALL of outgoing + incoming so
-    // ClickHouse can select the optimal access path for each direction
-    // (base table PK or by_source/by_target projections). An OR join
-    // (source_id = X OR target_id = X) prevents index use.
-    if neighbors_config.direction == Direction::Both {
-        let build_arm = |dir: Direction| -> Query {
-            let (edge_table, edge_type_cond) = edge_scan(edge_alias, &type_filter);
-            let mut join_cond =
-                source_join_cond_with_kind(&center_node.id, edge_alias, center_entity, dir);
-            if let Some(tc) = edge_type_cond {
-                join_cond = Expr::and(join_cond, tc);
-            }
-            let (neighbor_id, neighbor_type, is_outgoing) = match dir {
-                Direction::Outgoing => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN, 1),
-                Direction::Incoming => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, 0),
-                Direction::Both => unreachable!(),
-            };
+    // Build _nf CTE for center node filtering (IDs + filters).
+    // Dedup pass will wrap this CTE's scan for soft-delete correctness.
+    let has_conditions = !center_node.node_ids.is_empty() || !center_node.filters.is_empty();
+    let cte_name = node_filter_cte(&center_id);
+    let ctes = if has_conditions {
+        let node_where = build_node_where(center_node);
+        vec![Cte::new(
+            &cte_name,
             Query {
-                select: vec![
-                    SelectExpr::new(Expr::col(edge_alias, neighbor_id), NEIGHBOR_ID_COLUMN),
-                    SelectExpr::new(Expr::col(edge_alias, neighbor_type), NEIGHBOR_TYPE_COLUMN),
-                    SelectExpr::new(
-                        Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
-                        RELATIONSHIP_TYPE_COLUMN,
-                    ),
-                    SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
-                ],
-                from: TableRef::join(
-                    JoinType::Inner,
-                    TableRef::scan(&center_table, &center_node.id),
-                    edge_table,
-                    join_cond,
-                ),
-                where_clause: where_clause.clone(),
+                select: vec![SelectExpr::new(
+                    Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
+                    DEFAULT_PRIMARY_KEY,
+                )],
+                from: TableRef::scan(&center_table, &center_id),
+                where_clause: node_where,
                 ..Default::default()
-            }
-        };
-
-        let mut outgoing = build_arm(Direction::Outgoing);
-        outgoing.union_all = vec![build_arm(Direction::Incoming)];
-        outgoing.order_by = order_by;
-        outgoing.limit = limit;
-        return Ok(Node::Query(Box::new(outgoing)));
-    }
-
-    let (edge_table, edge_type_cond) = edge_scan(edge_alias, &type_filter);
-    let mut join_cond = source_join_cond_with_kind(
-        &center_node.id,
-        edge_alias,
-        center_entity,
-        neighbors_config.direction,
-    );
-    if let Some(tc) = edge_type_cond {
-        join_cond = Expr::and(join_cond, tc);
-    }
-    let (neighbor_id, neighbor_type, is_outgoing) = match neighbors_config.direction {
-        Direction::Outgoing => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN, 1i64),
-        Direction::Incoming => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, 0i64),
-        Direction::Both => unreachable!(),
+            },
+        )]
+    } else {
+        vec![]
     };
 
-    Ok(Node::Query(Box::new(Query {
-        select: vec![
+    // Edge-only: scan gl_edge directly, filter by center node IDs via IN subquery.
+    let build_arm = |dir: Direction| -> Query {
+        let (edge_table, edge_type_cond) = edge_scan(edge_alias, &rel_type_filter);
+        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
+        {
+            Direction::Outgoing => (
+                SOURCE_ID_COLUMN,
+                SOURCE_KIND_COLUMN,
+                TARGET_ID_COLUMN,
+                TARGET_KIND_COLUMN,
+                1i64,
+            ),
+            Direction::Incoming => (
+                TARGET_ID_COLUMN,
+                TARGET_KIND_COLUMN,
+                SOURCE_ID_COLUMN,
+                SOURCE_KIND_COLUMN,
+                0i64,
+            ),
+            Direction::Both => unreachable!(),
+        };
+
+        let mut where_parts: Vec<Expr> = Vec::new();
+
+        // Entity kind filter on the edge's center side.
+        where_parts.push(Expr::eq(
+            Expr::col(edge_alias, center_kind_col),
+            Expr::string(center_entity.as_str()),
+        ));
+
+        // Center node IN filter: either via CTE or literal IDs on the edge column.
+        if has_conditions {
+            where_parts.push(Expr::InSubquery {
+                expr: Box::new(Expr::col(edge_alias, center_edge_col)),
+                cte_name: cte_name.clone(),
+                column: DEFAULT_PRIMARY_KEY.into(),
+            });
+        }
+
+        if let Some(tc) = edge_type_cond {
+            where_parts.push(tc);
+        }
+
+        let mut select = vec![
             SelectExpr::new(Expr::col(edge_alias, neighbor_id), NEIGHBOR_ID_COLUMN),
             SelectExpr::new(Expr::col(edge_alias, neighbor_type), NEIGHBOR_TYPE_COLUMN),
             SelectExpr::new(
@@ -892,18 +899,62 @@ fn lower_neighbors(input: &Input) -> Result<Node> {
                 RELATIONSHIP_TYPE_COLUMN,
             ),
             SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
-        ],
-        from: TableRef::join(
-            JoinType::Inner,
-            TableRef::scan(&center_table, &center_node.id),
-            edge_table,
-            join_cond,
-        ),
-        where_clause,
-        order_by,
-        limit,
-        ..Default::default()
-    })))
+        ];
+
+        let mut from = edge_table;
+
+        if center_uses_default_pk {
+            select.push(SelectExpr::new(
+                Expr::col(edge_alias, center_edge_col),
+                format!("_gkg_{center_id}_id"),
+            ));
+        } else {
+            // Indirect auth: JOIN center node table to read the auth column.
+            from = TableRef::join(
+                JoinType::Inner,
+                from,
+                TableRef::scan(&center_table, &center_id),
+                Expr::eq(
+                    Expr::col(edge_alias, center_edge_col),
+                    Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
+                ),
+            );
+            select.push(SelectExpr::new(
+                Expr::col(&center_id, &center_redaction_col),
+                format!("_gkg_{center_id}_id"),
+            ));
+            select.push(SelectExpr::new(
+                Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
+                format!("_gkg_{center_id}_pk"),
+            ));
+        }
+        select.push(SelectExpr::new(
+            Expr::string(center_entity.as_str()),
+            format!("_gkg_{center_id}_type"),
+        ));
+
+        Query {
+            select,
+            from,
+            where_clause: Expr::conjoin(where_parts),
+            ..Default::default()
+        }
+    };
+
+    if neighbors_config.direction == Direction::Both {
+        let mut outgoing = build_arm(Direction::Outgoing);
+        outgoing.union_all = vec![build_arm(Direction::Incoming)];
+        outgoing.order_by = order_by;
+        outgoing.limit = limit;
+        outgoing.ctes = ctes;
+        return Ok(Node::Query(Box::new(outgoing)));
+    }
+
+    let mut arm = build_arm(neighbors_config.direction);
+    arm.order_by = order_by;
+    arm.limit = limit;
+    arm.ctes = ctes;
+    Ok(Node::Query(Box::new(arm)))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1249,30 +1300,6 @@ fn source_join_cond(node: &str, edge: &str, dir: Direction) -> Expr {
                 Expr::col(node, DEFAULT_PRIMARY_KEY),
                 Expr::col(edge, TARGET_ID_COLUMN),
             ),
-        ),
-    }
-}
-
-/// Join from source node to edge table, with entity type filter.
-/// Unlike `source_join_cond`, this also filters on source_kind/target_kind
-/// to prevent ID collisions across entity types.
-fn source_join_cond_with_kind(node: &str, edge: &str, entity: &str, dir: Direction) -> Expr {
-    let id_and_kind = |id_col, kind_col| {
-        Expr::and(
-            Expr::eq(
-                Expr::col(node, DEFAULT_PRIMARY_KEY),
-                Expr::col(edge, id_col),
-            ),
-            Expr::eq(Expr::col(edge, kind_col), Expr::string(entity)),
-        )
-    };
-
-    match dir {
-        Direction::Outgoing => id_and_kind(SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
-        Direction::Incoming => id_and_kind(TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
-        Direction::Both => Expr::or(
-            id_and_kind(SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
-            id_and_kind(TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
         ),
     }
 }
