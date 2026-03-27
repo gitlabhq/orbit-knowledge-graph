@@ -49,6 +49,10 @@ Rails does not emit billing events. It acts as a proxy. Billing events are emitt
 
 **Use correlation IDs to zero-rate GKG billing events.** Rejected for billing purposes. The idea was to link the DAP billing event and the GKG billing event by correlation ID so CDot could suppress the GKG charge when it sees a matching DAP event. At the [zero-rating meeting](https://docs.google.com/document/d/1JbzhTtlF4rDMhmIjNkmDwLQyLovRmDlaGprw5yc-rOw), Fulfillment confirmed: *"We don't support that currently. We have a CorrelationId field but we use it for logging/tracing purposes only."* Each billing event must stand alone with its own `source_type` to determine its multiplier. Correlation IDs are still propagated end-to-end for observability and tracing (Rails → GKG via gRPC metadata, as they are today), just not used for billing decisions.
 
+**Do quota checks in Rails instead of GKG.** Considered since Rails already has CDot subscription data via `ServiceAccessToken`. Rejected because GKG already connects to the billing service for event emission (orbit/kg#307), so it can query quota from the same endpoint. Doing the check in GKG keeps the billing logic co-located with the service that executes queries and avoids adding latency to the Rails proxy layer. This also matches AIGW's pattern where the executing service (not the proxy) owns quota enforcement.
+
+**Use Cloud Connector IJWTs for GKG auth.** Not needed for the Rails→GKG gRPC connection (co-located, HS256 shared secret is fine). Cloud Connector is designed for SM/Dedicated instances reaching GitLab-operated cloud services over the internet. GKG runs alongside the GitLab instance, not as a centralized cloud service. However, for GA, registering `orbit_query` as a [unit primitive](https://docs.gitlab.com/ee/development/cloud_connector/architecture.html) in `gitlab-cloud-connector` is the right path if Orbit becomes a separately purchasable add-on. This would let CDot control Orbit access via subscription status and is additive to the current approach.
+
 ---
 
 ## 3. Architecture overview
@@ -248,13 +252,14 @@ Rails sets `source_type` when constructing the JWT before calling GKG. GKG reads
 **Blocks:** Phase 3 (zero-rating), Phase 4 (CDot billing pipeline)
 **Owner:** GKG team (@michaelangeloio, @bohdanpk, with @nbelokolodov for Rust Snowplow SDK)
 
-### 1.1 Three instrumentation layers
+### 1.1 Four instrumentation layers
 
 | Layer | Service | What it does | Billing-relevant? |
 |-------|---------|-------------|-------------------|
 | A. Source type propagation | Rails → GKG | Rails detects caller channel via OAuth scope and passes `source_type` to GKG in JWT claims. | Prerequisite. GKG needs this to tag billing events. |
 | B. GKG billable events | GKG webserver + indexer | Emits billable events to `billing.prdsub.gitlab.net` via JWT OIDC. Includes source type, query type, namespace, latency, result count. | Yes, billing source of truth. |
 | C. GKG OTel metrics | GKG webserver + indexer | Tags existing pipeline metrics (`gkg.query.pipeline.*`) and indexer metrics (`gkg.indexer.*`) with `source_type` label. | Operational only, for Grafana dashboards. |
+| D. Pre-execution quota check | GKG webserver | Checks namespace quota against billing service before executing a query. Cached per namespace. Returns gRPC `RESOURCE_EXHAUSTED` if quota is met. | Yes, enforces credit limits for metered channels (MCP, REST). |
 
 ### 1.2 Layer A: Source type propagation (Rails → GKG)
 
@@ -383,7 +388,35 @@ let base_attrs = vec![
 
 This lets us query Prometheus/Grafana for metrics like `gkg.query.pipeline.duration{source_type="dws"}` vs `{source_type="mcp"}` without depending on the billing pipeline.
 
-### 1.5 Proto changes
+### 1.5 Layer D: Pre-execution quota check
+
+Before executing a query, the GKG webserver checks whether the namespace has remaining quota by calling the billing service. The result is cached per namespace to avoid a round-trip on every request.
+
+```rust
+// In the gRPC service handler, before entering the query pipeline:
+let quota = quota_cache.check(claims.organization_id).await;
+if quota.exceeded {
+    return Err(tonic::Status::resource_exhausted(
+        format!("Namespace {} has reached its Orbit query quota", claims.organization_id)
+    ));
+}
+```
+
+**Cache behavior.** The billing service response includes a cache TTL (similar to AIGW's `UsageQuotaClient` pattern, which reads `Cache-Control: max-age` from CDot). GKG caches the quota status per `namespace_id` for that duration. On cache miss or expiry, GKG makes a request to `billing.prdsub.gitlab.net` using the same JWT OIDC connection from Layer B.
+
+**Fail-open vs fail-closed.** If the billing service is unreachable, the query proceeds (fail-open). This matches AIGW's behavior. A billing service outage should not block query execution.
+
+**Which channels are checked.** Only `mcp` and `rest` source types are quota-checked (these are the charged channels). `dws`, `frontend`, and `core` are zero-rated or included, so they skip the quota check entirely.
+
+```rust
+// Skip quota check for zero-rated/included channels
+let needs_quota_check = matches!(
+    claims.source_type,
+    Some(SourceType::Mcp) | Some(SourceType::Rest)
+);
+```
+
+### 1.6 Proto changes
 
 Add `SourceType` enum to `gkg.proto`:
 
@@ -411,6 +444,7 @@ pub struct Claims {
 
 - **Billing events:** Confirm events arrive at `billing.prdsub.gitlab.net` from staging GKG deployment. Verify all source types produce events.
 - **OTel metrics:** Query Prometheus for `gkg_query_pipeline_duration_bucket` with `source_type` label and confirm breakdown by channel.
+- **Quota check:** Verify that a namespace at quota receives gRPC `RESOURCE_EXHAUSTED` for MCP/REST queries, while DWS/frontend/core queries still succeed.
 
 ---
 
