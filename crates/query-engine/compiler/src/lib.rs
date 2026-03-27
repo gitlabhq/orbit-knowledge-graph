@@ -65,8 +65,8 @@ pub use pipeline::{
 
 // Re-export env, state, and capability traits.
 pub use passes::{
-    CheckPass, CodegenPass, DeduplicatePass, DuckDbCodegenPass, EnforcePass,
-    HydrationCodegenPass, LowerPass, NormalizePass, OptimizePass, SecurityPass, ValidatePass,
+    CheckPass, CodegenPass, DeduplicatePass, DuckDbCodegenPass, EnforcePass, HydrationCodegenPass,
+    LowerPass, NormalizePass, OptimizePass, SecurityPass, ValidatePass,
 };
 pub use pipelines::{
     DuckDbState, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx,

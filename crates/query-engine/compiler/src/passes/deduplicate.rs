@@ -143,6 +143,11 @@ fn wrap_in_argmax_if(expr: &Expr, alias: &str) -> Expr {
 }
 
 /// Apply argMaxIfOrNull dedup to a search query in-place.
+///
+/// Value filters stay in WHERE for prewhere pruning AND are duplicated into
+/// HAVING (wrapped in argMaxIfOrNull) to verify the latest version matches.
+/// This is both fast (prewhere reduces rows before GROUP BY) and correct
+/// (HAVING rejects groups whose latest version no longer matches the filter).
 fn apply_argmax_dedup(q: &mut Query, alias: &str) {
     for sel in q.select.iter_mut() {
         let is_id = matches!(&sel.expr, Expr::Column { table, column, .. }
@@ -155,8 +160,12 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
 
     q.group_by.push(Expr::col(alias, "id"));
 
+    // Build HAVING: isNotNull check (filters fully-deleted groups) + value
+    // filters wrapped in argMaxIfOrNull (verifies latest version matches).
+    // Dedup runs before Security, so all WHERE filters here are value filters
+    // from the user query -- namespace filters are added later by Security.
     let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
-    q.having = Some(Expr::func(
+    let mut having_parts = vec![Expr::func(
         "isNotNull",
         vec![Expr::func(
             "argMaxIfOrNull",
@@ -166,7 +175,17 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
                 not_deleted,
             ],
         )],
-    ));
+    )];
+
+    if let Some(where_expr) = &q.where_clause {
+        for conjunct in where_expr.clone().flatten_and() {
+            if references_only(&conjunct, alias) {
+                having_parts.push(wrap_in_argmax_if(&conjunct, alias));
+            }
+        }
+    }
+
+    q.having = Expr::conjoin(having_parts);
 
     for ord in q.order_by.iter_mut() {
         let refs_alias = references_only(&ord.expr, alias)
@@ -428,6 +447,11 @@ mod tests {
         assert!(
             having_str.contains("isNotNull") && having_str.contains("argMaxIfOrNull"),
             "HAVING should use isNotNull(argMaxIfOrNull(...))"
+        );
+        // Value filters duplicated into HAVING for correctness
+        assert!(
+            having_str.contains("failed"),
+            "HAVING should re-check value filters via argMaxIfOrNull"
         );
         let status_sel = &q.select[1];
         let sel_str = format!("{:?}", status_sel.expr);

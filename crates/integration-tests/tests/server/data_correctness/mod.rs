@@ -147,6 +147,8 @@ async fn data_correctness() {
         // dedup: LIMIT 1 BY correctness
         dedup::search_returns_latest_version,
         dedup::search_excludes_deleted_rows,
+        dedup::search_filter_returns_latest_matching_version,
+        dedup::search_filter_excludes_stale_match,
         dedup::aggregation_dedup_counts_unique_entities,
         dedup::traversal_dedup_returns_single_edge,
     );

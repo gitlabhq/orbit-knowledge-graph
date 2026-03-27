@@ -14,7 +14,7 @@ use super::helpers::*;
 
 fn dedup_svc() -> MockRedactionService {
     let mut svc = allow_all();
-    svc.allow("user", &[9001, 9002, 9003]);
+    svc.allow("user", &[9001, 9002, 9003, 9010, 9011]);
     svc.allow("merge_request", &[9100, 9101]);
     svc
 }
@@ -115,6 +115,73 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
     resp.assert_node("Project", 1000, |n| {
         n.prop_str("name") == Some("Public Project") && n.prop_i64("mr_count") == Some(1)
     });
+}
+
+/// Search with filter: latest version matches the filter. Should return the row.
+pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestContext) {
+    ctx.execute(
+        "INSERT INTO gl_user (id, username, name, state, user_type, _version, _deleted) VALUES
+         (9010, 'evolving', 'Evolving User', 'blocked', 'human', '2024-01-01 00:00:00', false),
+         (9010, 'evolving', 'Evolving User', 'active',  'human', '2024-06-01 00:00:00', false)",
+    )
+    .await;
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+                     "filters": {"state": "active"}},
+            "limit": 100
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    // Unpinned search uses argMaxIfOrNull. Our test user 9010 has latest
+    // version state='active', so it should appear. Other seed users with
+    // state='active' also appear -- we just verify 9010 is among them.
+    resp.skip_requirement(Requirement::NodeCount);
+    resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
+    let node = resp.find_node("User", 9010).unwrap();
+    node.assert_str("state", "active");
+}
+
+/// Search with filter: latest version does NOT match, but a stale version does.
+/// Value filters are checked in both WHERE (prewhere pruning) and HAVING
+/// (argMaxIfOrNull verifies the latest version). The row should be excluded
+/// because the latest version's state is 'blocked', not 'active'.
+pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
+    ctx.execute(
+        "INSERT INTO gl_user (id, username, name, state, user_type, _version, _deleted) VALUES
+         (9011, 'flipper', 'Flipper User', 'active',  'human', '2024-01-01 00:00:00', false),
+         (9011, 'flipper', 'Flipper User', 'blocked', 'human', '2024-06-01 00:00:00', false)",
+    )
+    .await;
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+                     "filters": {"state": "active"}},
+            "limit": 100
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    // v1 (state='active') passes WHERE, but HAVING checks argMaxIfOrNull(state)
+    // which returns 'blocked' (latest version). The HAVING filter rejects the group.
+    // User 9011 should NOT appear in results.
+    resp.skip_requirement(Requirement::NodeCount);
+    resp.skip_requirement(Requirement::Filter {
+        field: "state".into(),
+    });
+    assert!(
+        resp.find_node("User", 9011).is_none(),
+        "user 9011 should be excluded (latest version is blocked, not active)"
+    );
 }
 
 /// Duplicate user rows. Traversal should produce one edge, not two.
