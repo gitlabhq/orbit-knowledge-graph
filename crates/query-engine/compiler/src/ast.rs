@@ -366,6 +366,28 @@ impl Expr {
         Expr::binary(Op::And, left, right)
     }
 
+    /// Flatten an AND tree into a list of conjuncts.
+    /// `(A AND B) AND C` becomes `[A, B, C]`.
+    pub fn flatten_and(self) -> Vec<Expr> {
+        match self {
+            Expr::BinaryOp {
+                op: Op::And,
+                left,
+                right,
+            } => {
+                let mut out = left.flatten_and();
+                out.extend(right.flatten_and());
+                out
+            }
+            other => vec![other],
+        }
+    }
+
+    /// Rebuild an AND chain from conjuncts. Returns None if empty.
+    pub fn conjoin(exprs: Vec<Expr>) -> Option<Expr> {
+        exprs.into_iter().reduce(Expr::and)
+    }
+
     /// Combine two expressions with OR.
     pub fn or(left: Expr, right: Expr) -> Expr {
         Expr::binary(Op::Or, left, right)

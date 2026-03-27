@@ -22,7 +22,7 @@
 //!
 //! Refs: <https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/308>
 
-use crate::ast::{Expr, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
 use crate::input::{Input, QueryType};
 use ontology::constants::{DELETED_COLUMN, EDGE_TABLE, GL_TABLE_PREFIX, VERSION_COLUMN};
 
@@ -68,27 +68,6 @@ fn visit_derived_tables(from: &mut TableRef, input: &Input) {
 
 // ── Predicate analysis helpers ───────────────────────────────────────────────
 
-/// Flatten an AND tree into a list of conjuncts.
-fn flatten_and(expr: Expr) -> Vec<Expr> {
-    match expr {
-        Expr::BinaryOp {
-            op: Op::And,
-            left,
-            right,
-        } => {
-            let mut out = flatten_and(*left);
-            out.extend(flatten_and(*right));
-            out
-        }
-        other => vec![other],
-    }
-}
-
-/// Rebuild an AND chain from conjuncts. Returns None if empty.
-fn conjoin(exprs: Vec<Expr>) -> Option<Expr> {
-    exprs.into_iter().reduce(Expr::and)
-}
-
 /// Check if an expression only references columns from `alias`.
 fn references_only(expr: &Expr, alias: &str) -> bool {
     match expr {
@@ -119,7 +98,7 @@ fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec
         return (vec![], vec![]);
     };
 
-    let conjuncts = flatten_and(expr);
+    let conjuncts = expr.flatten_and();
     let mut inner = vec![];
     let mut outer = vec![];
 
@@ -134,7 +113,7 @@ fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec
     (inner, outer)
 }
 
-// ── argMaxIfOrNull strategy for search queries ───────────────────────────────
+// ── argMaxIfOrNull strategy ─────────────────────────────────────────────────
 
 /// Wrap column references in `argMaxIfOrNull(col, _version, _deleted = false)`.
 fn wrap_in_argmax_if(expr: &Expr, alias: &str) -> Expr {
@@ -202,7 +181,7 @@ fn make_dedup_subquery(table_name: String, alias: &str, inner_filters: Vec<Expr>
         Query {
             select: vec![SelectExpr::star()],
             from: TableRef::scan(table_name, alias),
-            where_clause: conjoin(inner_filters),
+            where_clause: Expr::conjoin(inner_filters),
             order_by: vec![OrderExpr {
                 expr: Expr::col(alias, VERSION_COLUMN),
                 desc: true,
@@ -226,7 +205,7 @@ fn apply_limit_by_dedup(
 
     let deleted_filter = Expr::eq(Expr::col(&alias, DELETED_COLUMN), Expr::lit(false));
     outer_filters.insert(0, deleted_filter);
-    *where_clause = conjoin(outer_filters);
+    *where_clause = Expr::conjoin(outer_filters);
     *from = make_dedup_subquery(table_name, &alias, inner_filters);
 }
 

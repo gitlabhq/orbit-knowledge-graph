@@ -785,7 +785,7 @@ fn rewrite_agg_to_if(expr: &Expr, if_names: &HashMap<&str, &str>, conditions: &[
                 Some(n) => *n,
                 None => return expr.clone(),
             };
-            let condition = match conditions.iter().cloned().reduce(Expr::and) {
+            let condition = match Expr::conjoin(conditions.to_vec()) {
                 Some(c) => c,
                 None => return expr.clone(),
             };
