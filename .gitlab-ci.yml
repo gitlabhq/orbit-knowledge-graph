@@ -20,6 +20,7 @@ stages:
   - build
   - publish
   - release
+  - review
 
 # Job Templates
 
@@ -241,52 +242,6 @@ docs_hugo_build:
     # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/blob/main/scripts/check-index-filenames.sh
     - make check-index-pages SEARCH_DIR="../docs/source"
     #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added
-
-.review-docs:
-  image: ruby:3.3-alpine3.23
-  extends:
-    - .mr-only-rules
-  stage: docs
-  cache: {}
-  dependencies: []
-  before_script:
-  - gem install gitlab --no-doc
-  # We need to download the script rather than clone the repo since the
-  # review-docs-cleanup job will not be able to run when the branch gets
-  # deleted (when merging the MR).
-  - apk add --update openssl
-  - wget https://gitlab.com/gitlab-org/gitlab/-/raw/master/scripts/trigger-build.rb
-  - chmod 755 trigger-build.rb
-  variables:
-    GIT_STRATEGY: none
-    DOCS_GITLAB_REPO_SUFFIX: orbit
-    # By default, deploy the Review App using the `main` branch of the `gitlab-org/gitlab-docs` project
-    DOCS_BRANCH: main
-  when: manual
-
-# Trigger a docs build in docs-gitlab-com project
-# Useful to preview the docs changes live
-# https://docs.gitlab.com/development/documentation/review_apps/
-review-docs-deploy:
-  extends:
-  - .review-docs
-  environment:
-    name: review/mr-${CI_MERGE_REQUEST_IID}
-    url: https://docs.gitlab.com/upstream-review-mr-${DOCS_GITLAB_REPO_SUFFIX}-${CI_MERGE_REQUEST_IID}/${DOCS_GITLAB_REPO_SUFFIX}
-    auto_stop_in: 2 weeks
-    on_stop: review-docs-cleanup
-  script:
-  - ./trigger-build.rb docs deploy
-
-# Cleanup remote environment of docs-gitlab-com
-review-docs-cleanup:
-  extends:
-  - .review-docs
-  environment:
-    name: review/mr-${CI_MERGE_REQUEST_IID}
-    action: stop
-  script:
-  - ./trigger-build.rb docs cleanup
 
 # Test Stage
 
@@ -511,6 +466,54 @@ release-manifest:
         -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
+
+# Review stage
+
+.review-docs:
+  image: ruby:3.3-alpine3.23
+  extends:
+    - .mr-only-rules
+  stage: review
+  cache: {}
+  dependencies: []
+  before_script:
+  - gem install gitlab --no-doc
+  # We need to download the script rather than clone the repo since the
+  # review-docs-cleanup job will not be able to run when the branch gets
+  # deleted (when merging the MR).
+  - apk add --update openssl
+  - wget https://gitlab.com/gitlab-org/gitlab/-/raw/master/scripts/trigger-build.rb
+  - chmod 755 trigger-build.rb
+  variables:
+    GIT_STRATEGY: none
+    DOCS_GITLAB_REPO_SUFFIX: orbit
+    # By default, deploy the Review App using the `main` branch of the `gitlab-org/gitlab-docs` project
+    DOCS_BRANCH: main
+  when: manual
+
+# Trigger a docs build in docs-gitlab-com project
+# Useful to preview the docs changes live
+# https://docs.gitlab.com/development/documentation/review_apps/
+review-docs-deploy:
+  extends:
+  - .review-docs
+  environment:
+    name: review/mr-${CI_MERGE_REQUEST_IID}
+    url: https://docs.gitlab.com/upstream-review-mr-${DOCS_GITLAB_REPO_SUFFIX}-${CI_MERGE_REQUEST_IID}/${DOCS_GITLAB_REPO_SUFFIX}
+    auto_stop_in: 2 weeks
+    on_stop: review-docs-cleanup
+  script:
+  - ./trigger-build.rb docs deploy
+
+# Cleanup remote environment of docs-gitlab-com
+review-docs-cleanup:
+  extends:
+  - .review-docs
+  environment:
+    name: review/mr-${CI_MERGE_REQUEST_IID}
+    action: stop
+  script:
+  - ./trigger-build.rb docs cleanup
 
 # AI Review Stage
 #
