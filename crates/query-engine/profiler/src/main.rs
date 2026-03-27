@@ -133,6 +133,12 @@ fn emit_output(
     };
 
     if let Some(path) = output_path {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create directory {}", parent.display()))?;
+        }
         std::fs::write(path, &serialized)
             .with_context(|| format!("failed to write output to {}", path.display()))?;
         eprintln!("wrote {}", path.display());

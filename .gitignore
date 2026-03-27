@@ -54,3 +54,6 @@ plan.md
 
 # Benchmark results
 benchmark_results/
+
+# Profiler result files (local benchmarks)
+fixtures/profiling/
