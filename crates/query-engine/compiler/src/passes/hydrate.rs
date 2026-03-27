@@ -1,19 +1,79 @@
+//! Hydration plan: decides how the server fetches entity properties after
+//! the base query returns IDs.
+
 use ontology::{FieldSource, Ontology, VirtualSource};
 
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
-use crate::passes::codegen::{
-    DynamicEntityColumns, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
-};
 
-/// Build the hydration context for a compiled query.
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HydrationPlan {
+    /// No hydration needed (e.g., Aggregation).
+    None,
+    /// Entity types known at compile time (Traversal).
+    /// One template per input node, with IDs to be filled at runtime.
+    Static(Vec<HydrationTemplate>),
+    /// Entity types discovered at runtime (PathFinding, Neighbors).
+    /// Column specs are pre-resolved for every ontology entity type so
+    /// the server just looks up the matching spec — no ontology queries.
+    Dynamic(Vec<DynamicEntityColumns>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HydrationTemplate {
+    pub entity_type: String,
+    /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
+    /// results back to the base query's `_gkg_{alias}_id` / `_gkg_{alias}_type` columns.
+    pub node_alias: String,
+    /// ClickHouse table to query (resolved from ontology at compile time).
+    pub destination_table: String,
+    /// Column-backed columns to fetch from ClickHouse. Resolved at compile time
+    /// from the user's explicit column selection or the ontology's default_columns,
+    /// with virtual columns filtered out.
+    pub columns: Vec<String>,
+    /// Virtual columns that need to be resolved from remote services after
+    /// ClickHouse hydration completes.
+    pub virtual_columns: Vec<VirtualColumnRequest>,
+}
+
+/// Pre-resolved column spec for an entity type in dynamic hydration.
+/// Built at compile time for every entity type in the ontology so the
+/// server avoids runtime ontology lookups.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityColumns {
+    pub entity_type: String,
+    pub destination_table: String,
+    /// Column-backed columns to fetch from ClickHouse.
+    pub columns: Vec<String>,
+    /// Virtual columns that need remote resolution.
+    pub virtual_columns: Vec<VirtualColumnRequest>,
+}
+
+/// A column that must be resolved from a remote service rather than ClickHouse.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VirtualColumnRequest {
+    /// The column name as the user sees it (e.g. "content").
+    pub column_name: String,
+    /// Logical service name (e.g. "gitaly").
+    pub service: String,
+    /// Logical operation name within the service (e.g. "blob_content").
+    pub lookup: String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Plan generation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Build the hydration plan for a compiled query.
 ///
 /// - Aggregation: no hydration (results are aggregate values, not entity rows).
 /// - Search: no hydration (base query already carries node columns).
 /// - Traversal (edge-centric): static hydration — entity types are known at
 ///   compile time, so we build one template per entity type with pre-resolved
 ///   destination table, column-backed columns, and virtual column requests.
-/// - Traversal (join-based fallback): no hydration — base query already joins
-///   node tables and carries their columns.
 /// - PathFinding/Neighbors: dynamic hydration — entity types are discovered at
 ///   runtime. Column specs are pre-resolved for all ontology entity types so
 ///   the server just does a lookup, no ontology re-queries.

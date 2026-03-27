@@ -9,6 +9,7 @@ pub mod duckdb;
 
 use crate::input::{Input, QueryType};
 use crate::passes::enforce::ResultContext;
+use crate::passes::hydrate::HydrationPlan;
 pub use gkg_utils::clickhouse::ParamValue;
 use std::collections::HashMap;
 
@@ -38,60 +39,6 @@ pub struct CompiledQueryContext {
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
     pub input: Input,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum HydrationPlan {
-    /// No hydration needed (e.g., Aggregation).
-    None,
-    /// Entity types known at compile time (Traversal).
-    /// One template per input node, with IDs to be filled at runtime.
-    Static(Vec<HydrationTemplate>),
-    /// Entity types discovered at runtime (PathFinding, Neighbors).
-    /// Column specs are pre-resolved for every ontology entity type so
-    /// the server just looks up the matching spec — no ontology queries.
-    Dynamic(Vec<DynamicEntityColumns>),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct HydrationTemplate {
-    pub entity_type: String,
-    /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
-    /// results back to the base query's `_gkg_{alias}_id` / `_gkg_{alias}_type` columns.
-    pub node_alias: String,
-    /// ClickHouse table to query (resolved from ontology at compile time).
-    pub destination_table: String,
-    /// Column-backed columns to fetch from ClickHouse. Resolved at compile time
-    /// from the user's explicit column selection or the ontology's default_columns,
-    /// with virtual columns filtered out.
-    pub columns: Vec<String>,
-    /// Virtual columns that need to be resolved from remote services after
-    /// ClickHouse hydration completes.
-    pub virtual_columns: Vec<VirtualColumnRequest>,
-}
-
-/// Pre-resolved column spec for an entity type in dynamic hydration.
-/// Built at compile time for every entity type in the ontology so the
-/// server avoids runtime ontology lookups.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DynamicEntityColumns {
-    pub entity_type: String,
-    pub destination_table: String,
-    /// Column-backed columns to fetch from ClickHouse.
-    pub columns: Vec<String>,
-    /// Virtual columns that need remote resolution.
-    pub virtual_columns: Vec<VirtualColumnRequest>,
-}
-
-/// A column that must be resolved from a remote service rather than ClickHouse.
-#[derive(Debug, Clone, PartialEq)]
-pub struct VirtualColumnRequest {
-    /// The column name as the user sees it (e.g. "content").
-    pub column_name: String,
-    /// Logical service name (e.g. "gitaly").
-    pub service: String,
-    /// Logical operation name within the service (e.g. "blob_content").
-    pub lookup: String,
 }
 
 impl ParameterizedQuery {

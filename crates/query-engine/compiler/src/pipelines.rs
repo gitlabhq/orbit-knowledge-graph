@@ -10,6 +10,7 @@ use crate::error::{QueryError, Result};
 use crate::input::Input;
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
+use crate::passes::hydrate::HydrationPlan;
 use crate::passes::*;
 use crate::pipeline::{Pipeline, PipelineEnv, PipelineState};
 use crate::types::SecurityContext;
@@ -32,6 +33,7 @@ crate::define_state_capabilities! {
     pub input: Input,
     pub node: Node,
     pub result_ctx: ResultContext,
+    pub hydration_plan: HydrationPlan,
     pub output: CompiledQueryContext,
 }
 
@@ -60,6 +62,7 @@ pub struct QueryState {
     pub input: Option<Input>,
     pub node: Option<Node>,
     pub result_ctx: Option<ResultContext>,
+    pub hydration_plan: Option<HydrationPlan>,
     pub output: Option<CompiledQueryContext>,
 }
 
@@ -93,7 +96,7 @@ impl DuckDbState {
 /// Standard ClickHouse compilation pipeline.
 ///
 /// ```text
-/// JSON → Validate → Normalize → Lower → Optimize → Enforce → Deduplicate → Security → Check → Codegen
+/// JSON → Validate → Normalize → Lower → Optimize → Enforce → Deduplicate → Security → Check → HydratePlan → Codegen
 /// ```
 ///
 /// Deduplicate runs before Security so that Security's subquery recursion
@@ -110,6 +113,7 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
         .pass(DeduplicatePass)
         .pass(SecurityPass)
         .pass(CheckPass)
+        .pass(HydratePlanPass)
         .pass(CodegenPass)
         .build()
 }
@@ -119,7 +123,7 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
 /// Used by tests and the `compile_input()` public API for non-hydration queries.
 ///
 /// ```text
-/// Input → Lower → Optimize → Enforce → Deduplicate → Security → Check → Codegen
+/// Input → Lower → Optimize → Enforce → Deduplicate → Security → Check → HydratePlan → Codegen
 /// ```
 pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
@@ -129,21 +133,25 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
         .pass(DeduplicatePass)
         .pass(SecurityPass)
         .pass(CheckPass)
+        .pass(HydratePlanPass)
         .pass(CodegenPass)
         .build()
 }
 
 /// Hydration compilation — skips security, check, and hydration plan generation.
 ///
+/// No `HydratePlanPass` means `CodegenPass` defaults to `HydrationPlan::None`,
+/// preventing recursive hydration.
+///
 /// ```text
-/// Input → Lower → Optimize → Enforce → HydrationCodegen
+/// Input → Lower → Optimize → Enforce → Codegen
 /// ```
 pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
-        .pass(HydrationCodegenPass)
+        .pass(CodegenPass)
         .build()
 }
 

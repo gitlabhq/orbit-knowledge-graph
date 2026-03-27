@@ -15,7 +15,8 @@ use crate::error::Result;
 use crate::input::Input;
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
 use crate::pipelines::{
-    HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx,
+    HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx,
+    HasSecurityCtx,
 };
 
 pub struct ValidatePass;
@@ -159,53 +160,46 @@ where
     }
 }
 
+pub struct HydratePlanPass;
+
+impl<E, S> CompilerPass<E, S> for HydratePlanPass
+where
+    E: PipelineEnv + HasOntology,
+    S: PipelineState + HasInput + HasHydrationPlan,
+{
+    const NAME: &'static str = "hydrate_plan";
+
+    fn run(&self, env: &E, state: &mut S) -> Result<()> {
+        let input = state.input()?;
+        let plan = hydrate::generate_hydration_plan(input, env.ontology());
+        state.set_hydration_plan(plan);
+        Ok(())
+    }
+}
+
 pub struct CodegenPass;
 
 impl<E, S> CompilerPass<E, S> for CodegenPass
 where
-    E: PipelineEnv + HasOntology,
-    S: PipelineState + HasNode + HasInput + HasResultCtx + HasOutput,
+    E: PipelineEnv,
+    S: PipelineState + HasNode + HasInput + HasResultCtx + HasHydrationPlan + HasOutput,
 {
     const NAME: &'static str = "codegen";
 
-    fn run(&self, env: &E, state: &mut S) -> Result<()> {
+    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
         let result_context = state.take_result_ctx()?;
+        let hydration = state
+            .take_hydration_plan()
+            .unwrap_or(hydrate::HydrationPlan::None);
         let node = state.node()?;
         let input = state.input()?;
         let base = codegen::codegen(node, result_context)?;
-        let hydration = hydrate::generate_hydration_plan(input, env.ontology());
         let query_type = input.query_type;
         let input = input.clone();
         state.set_output(codegen::CompiledQueryContext {
             query_type,
             base,
             hydration,
-            input,
-        });
-        Ok(())
-    }
-}
-
-pub struct HydrationCodegenPass;
-
-impl<E, S> CompilerPass<E, S> for HydrationCodegenPass
-where
-    E: PipelineEnv,
-    S: PipelineState + HasNode + HasInput + HasResultCtx + HasOutput,
-{
-    const NAME: &'static str = "hydration_codegen";
-
-    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
-        let result_context = state.take_result_ctx()?;
-        let node = state.node()?;
-        let input = state.input()?;
-        let base = codegen::codegen(node, result_context)?;
-        let query_type = input.query_type;
-        let input = input.clone();
-        state.set_output(codegen::CompiledQueryContext {
-            query_type,
-            base,
-            hydration: codegen::HydrationPlan::None,
             input,
         });
         Ok(())
@@ -231,7 +225,7 @@ where
         state.set_output(codegen::CompiledQueryContext {
             query_type,
             base,
-            hydration: codegen::HydrationPlan::None,
+            hydration: hydrate::HydrationPlan::None,
             input,
         });
         Ok(())
