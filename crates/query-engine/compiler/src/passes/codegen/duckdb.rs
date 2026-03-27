@@ -181,6 +181,7 @@ impl Context {
                 let e = self.emit_expr(expr);
                 format!("{e} IN (SELECT {column} FROM {cte_name})")
             }
+            Expr::Star => "*".to_string(),
         }
     }
 

@@ -200,7 +200,10 @@ fn filter_operators() {
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
-    assert!(rendered.contains("WHERE"));
+    // Search uses argMax dedup: value filters move to HAVING,
+    // namespace filters stay in WHERE (gl_user has none).
+    assert!(rendered.contains("HAVING"));
+    assert!(rendered.contains("argMax"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));
     assert!(rendered.contains("LIKE"));
