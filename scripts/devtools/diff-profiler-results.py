@@ -91,6 +91,11 @@ def main():
         help="Show all metrics in separate tables",
     )
     parser.add_argument(
+        "--wide",
+        action="store_true",
+        help="Unified table with rows + memory side by side (2-way only)",
+    )
+    parser.add_argument(
         "--format",
         choices=["markdown", "csv"],
         default="markdown",
@@ -109,6 +114,10 @@ def main():
 
     all_queries = sorted(set().union(*(d.keys() for d in datasets)))
 
+    if args.wide and len(datasets) == 2:
+        print_wide(all_queries, datasets, labels, args.format)
+        return
+
     metrics_to_show = list(METRICS.keys()) if args.all_metrics else [args.metric]
 
     for metric_name in metrics_to_show:
@@ -121,6 +130,57 @@ def main():
             print_two_way(all_queries, datasets, labels, metric_key, unit, args.format)
         else:
             print_n_way(all_queries, datasets, labels, metric_key, unit, args.format)
+
+
+def print_wide(queries, datasets, labels, fmt):
+    """Unified table: rows + memory side by side for 2-way comparison."""
+    a_data, b_data = datasets
+    a_label, b_label = labels
+    rows_key, rows_unit = METRICS["read_rows"]
+    mem_key, mem_unit = METRICS["memory"]
+
+    if fmt == "csv":
+        print(
+            f"query,{a_label}_rows,{b_label}_rows,delta_rows,{a_label}_mem,{b_label}_mem,delta_mem"
+        )
+        for q in queries:
+            ar = extract_metric(a_data.get(q, {"error": True}), rows_key)
+            br = extract_metric(b_data.get(q, {"error": True}), rows_key)
+            am = extract_metric(a_data.get(q, {"error": True}), mem_key)
+            bm = extract_metric(b_data.get(q, {"error": True}), mem_key)
+            dr = fmt_delta(ar, br) if ar and br else "n/a"
+            dm = fmt_delta(am, bm) if am and bm else "n/a"
+            print(f"{q},{ar},{br},{dr},{am},{bm},{dm}")
+        return
+
+    print(
+        f"| Query | Type | Old rows | New rows | \u0394 rows | Old mem | New mem | \u0394 mem |"
+    )
+    print("|---|---|---|---|---|---|---|---|")
+
+    for q in queries:
+        a_result = a_data.get(q)
+        b_result = b_data.get(q)
+
+        qtype = ""
+        for d in [a_result, b_result]:
+            if d and "compilation" in d:
+                qtype = d["compilation"]["query_type"]
+                break
+
+        ar = extract_metric(a_result, rows_key) if a_result else None
+        br = extract_metric(b_result, rows_key) if b_result else None
+        am = extract_metric(a_result, mem_key) if a_result else None
+        bm = extract_metric(b_result, mem_key) if b_result else None
+
+        ar_s = fmt_value(ar, rows_unit) if ar is not None else "ERR"
+        br_s = fmt_value(br, rows_unit) if br is not None else "ERR"
+        am_s = fmt_value(am, mem_unit) if am is not None else "ERR"
+        bm_s = fmt_value(bm, mem_unit) if bm is not None else "ERR"
+        dr = fmt_delta(ar, br) if ar is not None and br is not None else "n/a"
+        dm = fmt_delta(am, bm) if am is not None and bm is not None else "n/a"
+
+        print(f"| {q} | {qtype} | {ar_s} | {br_s} | {dr} | {am_s} | {bm_s} | {dm} |")
 
 
 def print_two_way(queries, datasets, labels, metric_key, unit, fmt):
