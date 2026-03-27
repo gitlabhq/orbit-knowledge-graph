@@ -69,10 +69,10 @@ impl HydrationStage {
         Self::execute_hydration(ctx, nodes, total_ids).await
     }
 
-    /// Consolidated dynamic hydration: builds an `Input` with one node per
+    /// Dynamic hydration: builds an `Input` with one node per
     /// discovered entity type using pre-resolved column specs from the
     /// compilation plan. No ontology lookups at runtime.
-    async fn hydrate_dynamic_consolidated(
+    async fn hydrate_dynamic(
         ctx: &QueryPipelineContext,
         entity_specs: &[DynamicEntityColumns],
         refs: &HashMap<String, Vec<i64>>,
@@ -165,7 +165,7 @@ impl HydrationStage {
             let elapsed = t.elapsed();
 
             let mut execution = QueryExecution {
-                label: "hydration:consolidated".into(),
+                label: "hydration:dynamic".into(),
                 rendered_sql,
                 query_id: query_stats.query_id.clone(),
                 elapsed_ms: elapsed.as_secs_f64() * 1000.0,
@@ -202,7 +202,7 @@ impl HydrationStage {
             let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
 
             let execution = QueryExecution {
-                label: "hydration:consolidated".into(),
+                label: "hydration:dynamic".into(),
                 rendered_sql,
                 query_id: String::new(),
                 elapsed_ms: elapsed.as_secs_f64() * 1000.0,
@@ -220,11 +220,11 @@ impl HydrationStage {
             (batches, execution)
         };
 
-        let props = Self::parse_consolidated_batches(&batches)?;
+        let props = Self::parse_dynamic_batches(&batches)?;
         Ok((props, vec![debug], vec![execution]))
     }
 
-    fn parse_consolidated_batches(batches: &[RecordBatch]) -> Result<PropertyMap, PipelineError> {
+    fn parse_dynamic_batches(batches: &[RecordBatch]) -> Result<PropertyMap, PipelineError> {
         let alias = HYDRATION_NODE_ALIAS;
         let entity_type_col = format!("{alias}_entity_type");
         let props_col = format!("{alias}_props");
@@ -258,20 +258,13 @@ impl HydrationStage {
                     })
                     .map(|m| {
                         m.into_iter()
-                            .filter_map(|(k, v)| match v {
-                                serde_json::Value::String(s) => Some((k, ColumnValue::String(s))),
-                                serde_json::Value::Number(n) => {
-                                    if let Some(i) = n.as_i64() {
-                                        Some((k, ColumnValue::Int64(i)))
-                                    } else {
-                                        n.as_f64().map(|f| (k, ColumnValue::Float64(f)))
-                                    }
+                            .filter_map(|(k, v)| {
+                                let cv = ColumnValue::from(v);
+                                if cv == ColumnValue::Null {
+                                    None
+                                } else {
+                                    Some((k, cv))
                                 }
-                                serde_json::Value::Bool(b) => {
-                                    Some((k, ColumnValue::String(b.to_string())))
-                                }
-                                serde_json::Value::Null => None,
-                                _ => Some((k, ColumnValue::String(v.to_string()))),
                             })
                             .collect()
                     })
@@ -395,7 +388,7 @@ impl PipelineStage for HydrationStage {
                 let refs = Self::extract_dynamic_refs(&query_result);
                 if !refs.is_empty() {
                     let (property_map, debug, executions) =
-                        Self::hydrate_dynamic_consolidated(ctx, entity_specs, &refs)
+                        Self::hydrate_dynamic(ctx, entity_specs, &refs)
                             .await
                             .inspect_err(|e| obs.record_error(e))?;
                     hydration_queries = debug;
