@@ -46,6 +46,10 @@ impl HydrationStage {
         let mut total_ids: usize = 0;
 
         for template in templates {
+            if template.columns.is_empty() {
+                continue;
+            }
+
             let ids = Self::collect_static_ids(query_result, template);
             if ids.is_empty() {
                 continue;
