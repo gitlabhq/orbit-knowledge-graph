@@ -96,9 +96,9 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
             let entity = node.entity.as_ref()?;
             let ont_node = ontology.get_node(entity)?;
 
-            let requested: Vec<String> = match &node.columns {
-                Some(ColumnSelection::List(cols)) => cols.clone(),
-                _ => ont_node.default_columns.clone(),
+            // Normalize expands All and None into List before this pass runs.
+            let Some(ColumnSelection::List(requested)) = &node.columns else {
+                return None;
             };
 
             let (columns, virtual_columns) = split_columns(&requested, ont_node);
