@@ -543,17 +543,6 @@ impl<'a> Validator<'a> {
             )));
         }
 
-        let center = input.nodes.iter().find(|n| n.id == neighbors.node);
-        if let Some(node) = center
-            && node.node_ids.is_empty()
-            && node.filters.is_empty()
-        {
-            return Err(QueryError::Validation(
-                "neighbors center node must have node_ids or filters to avoid unbounded edge scans"
-                    .into(),
-            ));
-        }
-
         Ok(())
     }
 
@@ -856,16 +845,6 @@ mod tests {
                 "neighbors": {"node": "ghost", "direction": "both"}
             }"#,
             "undefined node \"ghost\"",
-        );
-
-        // Neighbors without node_ids or filters
-        assert_rejects(
-            r#"{
-                "query_type": "neighbors",
-                "node": {"id": "u", "entity": "User"},
-                "neighbors": {"node": "u", "direction": "both"}
-            }"#,
-            "must have node_ids or filters",
         );
     }
 
