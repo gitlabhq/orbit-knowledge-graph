@@ -2,6 +2,7 @@
 
 pub mod check;
 pub mod codegen;
+pub mod deduplicate;
 pub mod enforce;
 pub mod hydrate;
 pub mod lower;
@@ -123,6 +124,23 @@ where
     fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let node = state.node_mut()?;
         security::apply_security_context(node, env.security_ctx())
+    }
+}
+
+pub struct DeduplicatePass;
+
+impl<E, S> CompilerPass<E, S> for DeduplicatePass
+where
+    E: PipelineEnv,
+    S: PipelineState + HasNode + HasInput,
+{
+    const NAME: &'static str = "deduplicate";
+
+    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let input = state.input()?.clone();
+        let node = state.node_mut()?;
+        deduplicate::deduplicate(node, &input);
+        Ok(())
     }
 }
 

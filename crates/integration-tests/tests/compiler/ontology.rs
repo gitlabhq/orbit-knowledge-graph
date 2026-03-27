@@ -142,12 +142,24 @@ fn basic_search_query() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_where());
-    assert!(sql.has_column_ref("username"));
-    assert_eq!(sql.limit_value(), Some(10));
-    assert!(sql.lacks_join(), "search queries should not have joins");
+    // Search uses argMax dedup: value filters go to HAVING with argMax.
+    assert!(
+        rendered.contains("HAVING"),
+        "search should have HAVING clause"
+    );
+    assert!(
+        rendered.contains("argMax"),
+        "search should use argMax for dedup"
+    );
+    assert!(rendered.contains("GROUP BY"), "search should GROUP BY id");
+    assert!(rendered.contains("username"));
+    assert!(rendered.contains("LIMIT 10"));
+    assert!(
+        !rendered.contains("JOIN"),
+        "search queries should not have joins"
+    );
 }
 
 #[test]
@@ -172,7 +184,9 @@ fn complex_search_query() {
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
-    assert!(rendered.contains("WHERE"));
+    // Search uses argMax dedup: value filters go to HAVING.
+    assert!(rendered.contains("HAVING"));
+    assert!(rendered.contains("argMax"));
     assert!(rendered.contains("username"));
     assert!(rendered.contains("state"));
     assert!(rendered.contains("created_at"));
@@ -415,9 +429,10 @@ fn definition_uses_project_id_for_redaction() {
 
     assert!(sql.has_select_column("_gkg_d_id"));
     assert!(sql.has_select_column("_gkg_d_type"));
+    // Search uses argMaxIfOrNull dedup, so project_id is wrapped.
     assert!(
-        sql.raw_contains("d.project_id AS _gkg_d_id"),
-        "Definition should use project_id for redaction"
+        sql.raw_contains("argMaxIfOrNull(d.project_id") && sql.raw_contains("_gkg_d_id"),
+        "Definition should use project_id for redaction (via argMaxIfOrNull in search)"
     );
 }
 
