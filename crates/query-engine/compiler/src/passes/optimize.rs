@@ -432,20 +432,29 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
         .unwrap_or_default();
     let cte_where = Expr::and_all(root_only_conds.into_iter().map(Some));
 
-    let cte_query = Query {
-        select: vec![SelectExpr::new(
-            Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
-            DEFAULT_PRIMARY_KEY,
-        )],
-        from: TableRef::scan(&root_table, root_alias),
-        where_clause: cte_where,
-        ..Default::default()
+    // Reuse an existing _nf_* CTE for the root node if one was already
+    // created by the lowerer. ClickHouse inlines CTEs, so duplicating
+    // the same query under two names doubles the scan.
+    let existing_nf = node_filter_cte(root_alias);
+    let sip_cte_name = if q.ctes.iter().any(|c| c.name == existing_nf) {
+        existing_nf
+    } else {
+        let cte_query = Query {
+            select: vec![SelectExpr::new(
+                Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
+                DEFAULT_PRIMARY_KEY,
+            )],
+            from: TableRef::scan(&root_table, root_alias),
+            where_clause: cte_where,
+            ..Default::default()
+        };
+        q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
+        ROOT_SIP_CTE.to_string()
     };
-    q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
 
     // Inject root SIP into edges adjacent to the root node.
     let mut node_ctes: HashMap<String, String> = HashMap::new();
-    node_ctes.insert(root_alias.clone(), ROOT_SIP_CTE.to_string());
+    node_ctes.insert(root_alias.clone(), sip_cte_name.clone());
 
     for (i, rel) in input.relationships.iter().enumerate() {
         let from_cte = node_ctes.get(&rel.from).cloned();
@@ -509,7 +518,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
     // with a cascade CTE gets `node.id IN (SELECT id FROM cascade_cte)`,
     // allowing ClickHouse to prewhere-filter large node tables (e.g. gl_job).
     for (alias, cte_name) in &node_ctes {
-        if cte_name == ROOT_SIP_CTE {
+        if *cte_name == sip_cte_name {
             continue;
         }
         let node_filter = Expr::InSubquery {
