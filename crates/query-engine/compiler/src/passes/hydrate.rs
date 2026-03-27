@@ -101,7 +101,7 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 return None;
             };
 
-            let (columns, virtual_columns) = split_columns(&requested, ont_node);
+            let (columns, virtual_columns) = split_columns(requested, ont_node);
 
             if columns.is_empty() && virtual_columns.is_empty() {
                 return None;
