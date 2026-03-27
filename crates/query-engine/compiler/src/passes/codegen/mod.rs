@@ -57,19 +57,6 @@ pub struct HydrationTemplate {
     /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
     /// results back to the base query's `_gkg_{alias}_id` / `_gkg_{alias}_type` columns.
     pub node_alias: String,
-    /// Base JSON for the hydration query (without node_ids).
-    /// Call `with_ids` to produce the final query JSON for execution.
-    pub query_json: String,
-}
-
-impl HydrationTemplate {
-    /// Produce a complete query JSON with the given entity IDs injected.
-    pub fn with_ids(&self, ids: &[i64]) -> String {
-        let mut value: serde_json::Value =
-            serde_json::from_str(&self.query_json).expect("template is valid JSON");
-        value["node"]["node_ids"] = serde_json::json!(ids);
-        value.to_string()
-    }
 }
 
 impl ParameterizedQuery {

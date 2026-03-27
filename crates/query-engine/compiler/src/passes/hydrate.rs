@@ -1,5 +1,4 @@
-use crate::constants::HYDRATION_NODE_ALIAS;
-use crate::input::{ColumnSelection, Input, QueryType};
+use crate::input::{Input, QueryType};
 use crate::passes::codegen::{HydrationPlan, HydrationTemplate};
 
 /// Build the hydration context for a compiled query.
@@ -27,26 +26,9 @@ fn build_static_templates(input: &Input) -> Vec<HydrationTemplate> {
         .iter()
         .filter_map(|node| {
             let entity = node.entity.as_ref()?;
-            let columns = match &node.columns {
-                Some(ColumnSelection::List(cols)) => serde_json::json!(cols),
-                Some(ColumnSelection::All) => serde_json::json!("*"),
-                None => serde_json::json!(null),
-            };
-            let mut query = serde_json::json!({
-                "query_type": "search",
-                "node": {
-                    "id": HYDRATION_NODE_ALIAS,
-                    "entity": entity,
-                },
-                "limit": 1000
-            });
-            if !columns.is_null() {
-                query["node"]["columns"] = columns;
-            }
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
                 node_alias: node.id.clone(),
-                query_json: query.to_string(),
             })
         })
         .collect()
