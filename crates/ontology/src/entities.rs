@@ -201,7 +201,7 @@ impl fmt::Display for EdgeEntity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldSource {
     /// Backed by a ClickHouse column.
-    Column(String),
+    DatabaseColumn(String),
     /// Resolved at query time from a remote service.
     Virtual(VirtualSource),
 }
@@ -213,6 +213,9 @@ pub struct VirtualSource {
     pub service: String,
     /// Logical operation name (e.g. "blob_content").
     pub lookup: String,
+    /// When true, the field is declared in the ontology but not yet resolvable.
+    /// The compiler will exclude it from hydration plans.
+    pub disabled: bool,
 }
 
 /// A field definition within an entity.
@@ -237,7 +240,7 @@ impl Field {
     /// if the field is virtual.
     pub fn column_name(&self) -> Option<&str> {
         match &self.source {
-            FieldSource::Column(name) => Some(name),
+            FieldSource::DatabaseColumn(name) => Some(name),
             FieldSource::Virtual(_) => None,
         }
     }

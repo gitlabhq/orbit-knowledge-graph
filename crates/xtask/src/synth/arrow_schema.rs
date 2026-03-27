@@ -143,7 +143,7 @@ mod tests {
             fields: vec![
                 Field {
                     name: "id".to_string(),
-                    source: FieldSource::Column("id".to_string()),
+                    source: FieldSource::DatabaseColumn("id".to_string()),
                     data_type: DataType::Int,
                     nullable: false,
                     enum_values: None,
@@ -151,7 +151,7 @@ mod tests {
                 },
                 Field {
                     name: "username".to_string(),
-                    source: FieldSource::Column("username".to_string()),
+                    source: FieldSource::DatabaseColumn("username".to_string()),
                     data_type: DataType::String,
                     nullable: false,
                     enum_values: None,
@@ -159,7 +159,7 @@ mod tests {
                 },
                 Field {
                     name: "email".to_string(),
-                    source: FieldSource::Column("email".to_string()),
+                    source: FieldSource::DatabaseColumn("email".to_string()),
                     data_type: DataType::String,
                     nullable: true,
                     enum_values: None,

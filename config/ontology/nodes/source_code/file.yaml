@@ -71,5 +71,6 @@ properties:
     virtual:
       service: gitaly
       lookup: blob_content
+      disabled: true
     nullable: true
     description: "Raw source text of the file. Resolved from Gitaly at query time."

@@ -219,7 +219,7 @@ impl Ontology {
             }
             node.fields.push(Field {
                 name: field_name_string.clone(),
-                source: FieldSource::Column(field_name_string),
+                source: FieldSource::DatabaseColumn(field_name_string),
                 data_type,
                 nullable,
                 enum_values: None,
@@ -711,7 +711,7 @@ mod tests {
 
         let field = Field {
             name: "email".into(),
-            source: FieldSource::Column("email".into()),
+            source: FieldSource::DatabaseColumn("email".into()),
             data_type: DataType::String,
             nullable: true,
             enum_values: None,
@@ -720,7 +720,7 @@ mod tests {
         assert_eq!(format!("{field}"), "email: String?");
         let field = Field {
             name: "id".into(),
-            source: FieldSource::Column("id".into()),
+            source: FieldSource::DatabaseColumn("id".into()),
             data_type: DataType::Int,
             nullable: false,
             enum_values: None,
@@ -910,7 +910,7 @@ mod tests {
             label: "username".to_string(),
             fields: vec![Field {
                 name: "status".to_string(),
-                source: FieldSource::Column("status".to_string()),
+                source: FieldSource::DatabaseColumn("status".to_string()),
                 data_type: DataType::Enum,
                 nullable: false,
                 enum_values: Some(enum_values),

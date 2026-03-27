@@ -111,6 +111,8 @@ struct PropertyYaml {
 struct VirtualSourceYaml {
     service: String,
     lookup: String,
+    #[serde(default)]
+    disabled: bool,
 }
 
 impl NodeYaml {
@@ -131,10 +133,11 @@ impl NodeYaml {
                 }
 
                 let source = match (prop_def.source, prop_def.virtual_config) {
-                    (Some(col), None) => FieldSource::Column(col),
+                    (Some(col), None) => FieldSource::DatabaseColumn(col),
                     (None, Some(v)) => FieldSource::Virtual(VirtualSource {
                         service: v.service,
                         lookup: v.lookup,
+                        disabled: v.disabled,
                     }),
                     (Some(_), Some(_)) => {
                         return Err(OntologyError::Validation(format!(

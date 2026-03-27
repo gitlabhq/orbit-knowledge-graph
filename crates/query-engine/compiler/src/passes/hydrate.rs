@@ -169,13 +169,19 @@ fn split_columns(
     for col_name in requested {
         match node.fields.iter().find(|f| &f.name == col_name) {
             Some(field) => match &field.source {
-                FieldSource::Column(_) => columns.push(col_name.clone()),
-                FieldSource::Virtual(VirtualSource { service, lookup }) => {
-                    virtual_columns.push(VirtualColumnRequest {
-                        column_name: col_name.clone(),
-                        service: service.clone(),
-                        lookup: lookup.clone(),
-                    });
+                FieldSource::DatabaseColumn(_) => columns.push(col_name.clone()),
+                FieldSource::Virtual(VirtualSource {
+                    service,
+                    lookup,
+                    disabled,
+                }) => {
+                    if !disabled {
+                        virtual_columns.push(VirtualColumnRequest {
+                            column_name: col_name.clone(),
+                            service: service.clone(),
+                            lookup: lookup.clone(),
+                        });
+                    }
                 }
             },
             None => columns.push(col_name.clone()),
