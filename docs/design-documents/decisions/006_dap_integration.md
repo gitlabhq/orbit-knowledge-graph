@@ -14,7 +14,7 @@ Orbit (GitLab Knowledge Graph / GKG) has two tools -- `get_graph_schema` and `qu
 
 Today these tools are only reachable via the Rails REST API (`/api/v4/orbit/*`) and the MCP server (`/api/v4/orbit/mcp`). DAP agents can't use them because there's no wiring between the Duo Workflow Service and Orbit.
 
-This spec covers getting Orbit tools into DWS for agentic web chat and building Duo Evals to measure how much the tools help. For billing and usage tracking, see the [usage billing spec](orbit-usage-billing-spec.md).
+This spec covers getting Orbit tools into DWS for agentic web chat. For billing and usage tracking, see the [usage billing spec](orbit-usage-billing-spec.md).
 
 ---
 
@@ -94,7 +94,7 @@ Treat the Orbit MCP server as a first-class citizen in `McpConfigService`, the s
 5. When the agent calls a tool, DWS sends a `RunMCPTool` action back to Workhorse, which proxies to the MCP server
 
 **What we'd add for Orbit:**
-- Add an `orbit` entry to `McpConfigService` (similar to the `gitlab` entry), gated behind the `knowledge_graph_agent` feature flag
+- Add an `orbit` entry to `McpConfigService` (similar to the `gitlab` entry), gated behind the `knowledge_graph` feature flag
 - The MCP server URL is `{gitlab_url}/api/v4/orbit/mcp` (already implemented in Rails)
 - Auth uses the same user OAuth token already available in `McpConfigService`
 - Tool allowlist: `query_graph`, `get_graph_schema`
@@ -147,7 +147,7 @@ Create two new `DuoBaseTool` subclasses in DWS that call the Orbit REST API dire
 
 Both paths work. They're not mutually exclusive -- we can do MCP first for rapid internal testing (proof of concept behind a feature flag, no DWS deploy needed), then build native tools for production.
 
-**Phase 1 (internal testing):** MCP path. Define Orbit as a first-class MCP server in `McpConfigService` behind `knowledge_graph_agent` FF. This lets us test Orbit tools in agentic chat on staging without any DWS code changes. Custom agents can also use the Orbit MCP server.
+**Phase 1 (internal testing):** MCP path. Define Orbit as a first-class MCP server in `McpConfigService` behind the existing `knowledge_graph` feature flag. This lets us test Orbit tools in agentic chat on staging without any DWS code changes. Custom agents can also use the Orbit MCP server.
 
 **Phase 2 (production):** Native DWS tools. Build the `DuoBaseTool` subclasses that call the REST API directly, add to `BuiltInToolDefinitions` for catalog selection. This gives us the control we need for production quality: proper error handling, description caching from `GET /api/v4/orbit/tools`, and no MCP overhead.
 
@@ -167,7 +167,7 @@ The Orbit REST API (`/api/v4/orbit/*`) needs to accept the `ai_workflows` OAuth 
 
 ### 5.2 MCP config update (Path A)
 
-Add Orbit as a first-class MCP server in `McpConfigService`, gated behind the `knowledge_graph_agent` feature flag. When enabled, the service includes an `orbit` entry pointing at `/api/v4/orbit/mcp` with the user's OAuth token and a tool allowlist of `query_graph` and `get_graph_schema`.
+Add Orbit as a first-class MCP server in `McpConfigService`, gated behind the existing `knowledge_graph` feature flag. When enabled, the service includes an `orbit` entry pointing at `/api/v4/orbit/mcp` with the user's OAuth token and a tool allowlist of `query_graph` and `get_graph_schema`.
 
 Unlike the GitLab MCP server (which is only included for `workflow_definition == 'chat'`), the Orbit MCP entry should be included for all workflow definitions so it's available to foundational flows like `developer` too.
 
@@ -200,31 +200,14 @@ Log the channel on every Orbit API request so we can answer:
 **Files to modify:**
 - `ee/lib/api/orbit/data.rb` -- detect caller channel, include in structured logging / internal events
 
-### 5.4 Feature flag for DAP integration
-
-**Files to create:**
-- `ee/config/feature_flags/wip/knowledge_graph_agent.yml`
-
-```yaml
-name: knowledge_graph_agent
-feature_issue_url: https://gitlab.com/gitlab-org/gitlab/-/issues/TBD
-introduced_by_url: https://gitlab.com/gitlab-org/gitlab/-/merge_requests/TBD
-rollout_issue_url: https://gitlab.com/gitlab-org/gitlab/-/issues/TBD
-milestone: '18.11'
-type: wip
-group: group::knowledge graph
-default_enabled: false
-```
-
-### 5.5 WorkflowConfig update (Path B)
+### 5.4 WorkflowConfig update (Path B)
 
 **Files to modify:**
 - Rails GraphQL that returns `WorkflowConfig` -- include `"orbit"` in `agent_privileges_names` when Orbit is available for the user's namespace.
 
 ```ruby
 # In WorkflowConfig resolver:
-if Feature.enabled?(:knowledge_graph, user) &&
-   Feature.enabled?(:knowledge_graph_agent, user)
+if Feature.enabled?(:knowledge_graph, user)
   privileges << "orbit"
 end
 ```
@@ -349,125 +332,7 @@ Eventually this could feed into whatever prompt catalog DAP builds. The GKG repo
 
 ---
 
-## 8. Duo Evals
-
-### 8.1 Existing infrastructure
-
-The Agent Foundations team already runs SWE-bench evals via an [experiment tracker spreadsheet](https://docs.google.com/spreadsheets/d/14SL54hhvLiE0fAmdJiUxGoUGyqS-RGI7809oK3cqyew/edit?gid=0#gid=0). Key details:
-
-- 27 experiment runs to date, testing `developer`, `developer_next`, and `developer_unstable` workflow definitions
-- Best SWE-bench resolved rate: 75% (Opus 4.6) with ~1.1M median tokens per task
-- Eval orchestration is being automated by `#subteam-one-click-evals`
-- Datasets and traces are tracked in LangSmith
-- Existing evals cover **Issue -> implementation -> create MR** but not issue refinement or post-MR workflows
-
-The Orbit Duo Evals should plug into this existing infrastructure rather than building a separate eval pipeline. The key difference: SWE-bench measures coding agent performance, while Orbit evals measure SDLC query performance -- a different type of task that requires its own methodology and dataset.
-
-Tracking issue: https://gitlab.com/gitlab-org/rust/knowledge-graph/-/work_items/319
-
-### 8.2 What we're measuring
-
-1. **Tool call reduction** -- how many fewer tool calls does the agent make with Orbit vs. baseline (`GitLabApiGet`, etc.)?
-2. **Response quality** -- are agent responses more accurate/complete with Orbit?
-3. **Latency** -- does the graph query hop add noticeable time?
-4. **Fallback behavior** -- when Orbit returns empty (replication lag), does the agent recover correctly?
-
-### 8.3 Duo Eval methodology
-
-These are Duo Evals -- they test how the DWS agent performs with Orbit tools vs. without. GKG also has its own non-Duo eval framework (29 benchmark queries testing query correctness and ClickHouse performance). The two are complementary: GKG evals validate the engine, Duo Evals validate the agent experience.
-
-**Approach:** A/B comparison. Same test cases, two configurations:
-- **Control:** Standard DWS tools only (GitLabApiGet, GitLabGraphQL, etc.)
-- **Treatment:** Standard tools + Orbit tools (with fallback to standard)
-
-Compare tool call count, response accuracy, and latency between the two groups. Run on staging with real indexed data.
-
-**Test case categories:**
-
-| Category | Example prompt | What we're looking for |
-|----------|---------------|----------------------|
-| Single-entity lookup | "What's the status of issue #1234?" | Single Orbit tool call vs. GitLabApiGet |
-| Cross-entity query | "Show me all open MRs that fix vulnerabilities in project X" | Multi-hop traversal, 1-2 calls vs. 3-4 |
-| Aggregation | "How many pipelines failed this week in group Y?" | Orbit aggregation query (impossible with standard tools) |
-| Schema discovery | "What data does Orbit have about security?" | Agent explores the schema before querying |
-| Fallback | "What's in the MR I just created?" (< 30 seconds ago) | Agent tries Orbit, gets empty, falls back correctly |
-| Pathfinding | "How are user X and vulnerability Y related?" | Single pathfinding call |
-| Neighbor exploration | "What's connected to this merge request?" | Neighbor query |
-
-**Metrics:**
-
-| Metric | Comparison | Target |
-|--------|-----------|--------|
-| Tool call count per conversation | Orbit-enabled vs. disabled | 30%+ reduction |
-| Response accuracy | Orbit-enabled vs. disabled | No regression (parity or better) |
-| End-to-end latency (p50) | Orbit-enabled vs. disabled | Within 120% of baseline |
-| Fallback success rate | When Orbit returns empty | 100% |
-| Tool selection accuracy | Does agent pick the right tool? | 90%+ |
-
-### 8.4 SDLC evals (future, not SWE-bench)
-
-The existing SWE-bench evals test coding performance (issue -> implementation -> MR). Orbit's value is broader -- it covers SDLC queries that don't involve writing code. Examples:
-
-- "Which vulnerabilities were introduced in the last release?"
-- "Show me the blast radius of changing this service"
-- "Who are the top contributors to this area of the codebase?"
-
-These require a different eval methodology than SWE-bench. Designing this is tracked in the work item above and will likely require a custom dataset of SDLC questions with known-good answers derived from the staging graph data.
-
----
-
-## 9. Rollout plan
-
-### Phase 1 -- MCP proof of concept (target: April 2026)
-
-| Task | Owner | Dependency |
-|------|-------|------------|
-| Add `knowledge_graph_agent` feature flag to Rails | GKG | None |
-| Add `ai_workflows` scope to Orbit API endpoints | GKG | None |
-| Add caller channel detection + metrics logging to Orbit API | GKG | Scope update |
-| Add Orbit as first-class MCP server in `McpConfigService` behind FF | GKG + AF | Flag + scope |
-| Test Orbit tools in agentic chat on staging via MCP | GKG + AF | MCP config |
-| Write initial Duo Eval test cases (10-15 cases) | GKG | Staging data |
-| Run first A/B Duo Eval sweep (MCP path) | GKG + AF | All above |
-
-### Phase 2 -- native DWS tools + production (target: May 2026)
-
-| Task | Owner | Dependency |
-|------|-------|------------|
-| Create native Orbit tool classes in DWS (using REST API + `GET /api/v4/orbit/tools` for descriptions) | GKG + AF | Phase 1 learnings |
-| Add `orbit_query_graph` and `orbit_get_graph_schema` to `BuiltInToolDefinitions` | GKG | None |
-| Add `"orbit"` agent privilege to DWS `ToolsRegistry` | AF | Tool classes |
-| Wire `"orbit"` privilege in WorkflowConfig | GKG + AF | Flag exists |
-| Enable `knowledge_graph_agent` flag for internal users in production | GKG | All above |
-| Monitor tool call reduction metrics in production | GKG + AF | Flag enabled |
-| Expand Duo Eval suite to 30+ test cases | GKG | Production data |
-| Add `caller_type` to GKG JWT claims (telemetry) | GKG | None |
-
-### Phase 3 -- default Orbit agent (target: June 2026)
-
-| Task | Owner | Dependency |
-|------|-------|------------|
-| Evaluate: replace standard tools vs. supplement | GKG + AF | Phase 2 Duo Eval data |
-| Create "Orbit-enabled" default agent in catalog | AF + Chat | Phase 2 |
-| Admin/TLGO toggle for Orbit in DAP | Chat + GKG | Phase 3 |
-| GA readiness review | All | All above |
-
----
-
-## 10. Open questions
-
-| # | Question | Proposed answer | Decide by |
-|---|----------|-----------------|-----------|
-| 1 | Native DWS tools vs MCP path? | MCP first (fast, no DWS deploy), native tools for production (more control). Both paths complement each other. | Phase 1 -> Phase 2 |
-| 2 | Should Orbit tools replace or supplement standard tools? | Supplement for MVP (fallback), data-driven decision for GA | Phase 2 Duo Evals |
-| 3 | Should the skill prompt live in GKG repo or DWS repo? | GKG repo (source of truth for ontology-aware prompting). DWS fetches it. | GKG + AF |
-| 4 | How does the agent know about replication lag? | Skill prompt instructs fallback. No lag metadata in MVP. | Phase 1 |
-| 5 | Subagent paradigm impact? | Build standalone tools first. Subagent wiring is additive. | AF team (18.11) |
-| 6 | Which DWS flow configs get Orbit tools? | Start with `developer` flow only. Expand to others based on Duo Eval results. | Phase 1 |
-
----
-
-## 11. Risks
+## 8. Risks
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
@@ -475,107 +340,3 @@ These require a different eval methodology than SWE-bench. Designing this is tra
 | Tool description too large for LLM context | Agent can't use Orbit tools | TOON-encoded descriptions are ~3k tokens each; within budget |
 | Orbit query latency degrades agent response time | Slower agent responses | Measure in Duo Evals; ClickHouse queries are typically <200ms |
 | `ai_workflows` scope too broad for Orbit | Security concern | Orbit endpoints already require `read_knowledge_graph` permission; scope just allows the token type |
-
----
-
-## 12. Success criteria
-
-| Metric | Target | How we measure |
-|--------|--------|----------------|
-| Tool call reduction (Orbit vs. baseline) | 30%+ fewer calls | A/B Duo Eval sweep |
-| Response accuracy | No regression | Human-judged Duo Eval |
-| End-to-end latency | Within 120% of baseline | Automated timing |
-| Fallback success rate | 100% | Duo Eval test cases |
-| Tool selection accuracy | 90%+ | Duo Eval test cases |
-| First Orbit tool call in production | Within 4 weeks of spec approval | Calendar |
-
----
-
-## Appendix A: change summary by phase
-
-### Phase 1 (MCP path)
-
-| Area | What changes |
-|------|-------------|
-| Rails | Add `knowledge_graph_agent` feature flag |
-| Rails | Add `ai_workflows` scope to Orbit API endpoints |
-| Rails | Add caller channel detection + metrics to Orbit API |
-| Rails | Add Orbit entry to `McpConfigService` behind FF |
-
-### Phase 2 (native DWS tools)
-
-| Area | What changes |
-|------|-------------|
-| DWS | Create `OrbitQueryGraph` and `OrbitGetGraphSchema` tool classes (calling REST API, fetching descriptions from `GET /api/v4/orbit/tools`) |
-| DWS | Add `"orbit"` agent privilege to tool registry |
-| Rails | Add `orbit_query_graph` and `orbit_get_graph_schema` to `BuiltInToolDefinitions` |
-| Rails | Wire `"orbit"` privilege in WorkflowConfig |
-| DWS | Duo Eval test cases plugging into existing eval infrastructure |
-
-### Phase 3 (follow-up)
-
-| Area | What changes |
-|------|-------------|
-| GKG | Add optional `caller_type` to JWT claims (telemetry) |
-| GKG | Add `system_prompt` to `ListToolsResponse` proto |
-
----
-
-## Appendix B: sequence diagrams
-
-### B.1 Agentic web chat with Orbit (happy path)
-
-```
-User           Rails          DWS            Rails(Orbit)    GKG
-  │               │              │               │             │
-  │──chat msg────▶│              │               │             │
-  │               │──gRPC stream─▶│              │             │
-  │               │  (OAuth token │               │             │
-  │               │   in metadata)│               │             │
-  │               │              │               │             │
-  │               │              │ Agent thinks:  │             │
-  │               │              │ "I should use  │             │
-  │               │              │  orbit_query"  │             │
-  │               │              │               │             │
-  │               │              │──POST /api/v4/orbit/query──▶│
-  │               │              │  (Bearer <oauth_token>)     │
-  │               │              │               │──gRPC───────▶│
-  │               │              │               │  ExecuteQuery│
-  │               │              │               │◀─result──────│
-  │               │              │◀─200 JSON─────│             │
-  │               │              │               │             │
-  │               │              │ Agent thinks:  │             │
-  │               │              │ "I have the    │             │
-  │               │              │  answer"       │             │
-  │               │              │               │             │
-  │               │◀─final_answer│               │             │
-  │◀──stream──────│              │               │             │
-  │               │              │               │             │
-```
-
-### B.2 Agentic web chat fallback (replication lag)
-
-```
-User           Rails          DWS            Rails(Orbit)    GKG
-  │               │              │               │             │
-  │──"impl issue  │              │               │             │
-  │   I just      │              │               │             │
-  │   created"───▶│              │               │             │
-  │               │──gRPC stream─▶│              │             │
-  │               │              │               │             │
-  │               │              │ Agent: try     │             │
-  │               │              │ orbit_query    │             │
-  │               │              │──POST /orbit/query─────────▶│
-  │               │              │               │──gRPC──────▶│
-  │               │              │               │◀─empty───────│
-  │               │              │◀─200 {rows: 0}│             │
-  │               │              │               │             │
-  │               │              │ Agent: empty,  │             │
-  │               │              │ fall back to   │             │
-  │               │              │ GitLabApiGet   │             │
-  │               │              │──GET /api/v4/projects/.../issues/...──▶
-  │               │              │◀─200 issue data│             │
-  │               │              │               │             │
-  │               │◀─final_answer│               │             │
-  │◀──stream──────│              │               │             │
-```
