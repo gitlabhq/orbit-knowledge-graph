@@ -2,23 +2,19 @@
 //!
 //! ClickHouse's `ReplacingMergeTree` deduplicates during background merges,
 //! but between merges queries can see stale duplicates. This pass ensures
-//! query-time correctness by applying one of two strategies per node table:
+//! query-time correctness using a per-query-type strategy:
 //!
-//! 1. **Subquery with LIMIT 1 BY** (default): wraps the scan in a subquery
-//!    that picks the latest row per `id`, then filters `_deleted = false`.
-//!    Pushes sargable filters into the inner subquery for index utilization.
-//!
-//! 2. **argMaxIfOrNull aggregation** (search queries): rewrites SELECT/ORDER BY
-//!    columns with `argMaxIfOrNull(col, _version, _deleted = false)` and adds
-//!    GROUP BY id + HAVING. Preserves ClickHouse's LIMIT pushdown which the
-//!    subquery approach breaks. Value filters stay in WHERE for prewhere pruning.
+//! | Query type   | Strategy                 | Why                                        |
+//! |--------------|--------------------------|--------------------------------------------|
+//! | Search       | argMaxIfOrNull + GROUP BY | Preserves LIMIT pushdown                   |
+//! | Traversal    | LIMIT 1 BY subquery      | Needs all columns for hydration/properties |
+//! | Aggregation  | LIMIT 1 BY subquery      | Needs property columns for countIf/sumIf   |
+//! | Neighbors    | LIMIT 1 BY subquery      | Joins need all columns                     |
+//! | PathFinding  | LIMIT 1 BY subquery      | Recursive CTEs, multi-hop joins            |
+//! | Hydration    | (skipped)                | Separate pipeline, no dedup pass           |
 //!
 //! Edge tables are always excluded -- their full-tuple ORDER BY makes RMT
 //! dedup effective, and wrapping them would kill LIMIT pushdown.
-//!
-//! Hydration queries skip dedup entirely (separate pipeline without this
-//! pass) since they read by pre-authorized IDs and stale property values
-//! are acceptable.
 //!
 //! Refs: <https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/308>
 
@@ -29,6 +25,10 @@ use ontology::constants::{DELETED_COLUMN, EDGE_TABLE, GL_TABLE_PREFIX, VERSION_C
 fn is_node_table(table: &str) -> bool {
     table.starts_with(GL_TABLE_PREFIX) && table != EDGE_TABLE
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entry point
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// Apply row deduplication to all node table scans in the AST.
 pub fn deduplicate(node: &mut Node, input: &Input) {
@@ -47,7 +47,7 @@ fn dedup_query(q: &mut Query, input: &Input) {
     for arm in &mut q.union_all {
         dedup_query(arm, input);
     }
-    wrap_node_scans(q, input);
+    dispatch(q, input);
 }
 
 fn visit_derived_tables(from: &mut TableRef, input: &Input) {
@@ -66,7 +66,38 @@ fn visit_derived_tables(from: &mut TableRef, input: &Input) {
     }
 }
 
-// ── Predicate analysis helpers ───────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-query-type dispatch
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn dispatch(q: &mut Query, input: &Input) {
+    match &q.from {
+        TableRef::Scan { table, alias } if is_node_table(table) => {
+            let alias = alias.clone();
+            let table_name = table.clone();
+
+            match input.query_type {
+                QueryType::Search => apply_argmax_dedup(q, &alias),
+                QueryType::Traversal
+                | QueryType::Aggregation
+                | QueryType::PathFinding
+                | QueryType::Neighbors => {
+                    apply_limit_by_dedup(&mut q.from, &mut q.where_clause, table_name, alias);
+                }
+                QueryType::Hydration => {} // separate pipeline, no dedup
+            }
+        }
+        TableRef::Scan { .. } => {}
+        TableRef::Join { .. } => {
+            wrap_join_scans(&mut q.from, &mut q.where_clause);
+        }
+        TableRef::Union { .. } | TableRef::Subquery { .. } => {}
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Predicate helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// Check if an expression only references columns from `alias`.
 fn references_only(expr: &Expr, alias: &str) -> bool {
@@ -90,9 +121,7 @@ fn is_deleted_filter(expr: &Expr) -> bool {
     )
 }
 
-/// Split outer WHERE into (pushable into dedup subquery, must stay outside).
-/// Filters referencing only `alias` are pushable. `_deleted` is never pushed
-/// because it must filter *after* dedup picks the latest version.
+/// Split WHERE into (pushable into dedup subquery, must stay outside).
 fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec<Expr>) {
     let Some(expr) = where_clause else {
         return (vec![], vec![]);
@@ -113,7 +142,9 @@ fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec
     (inner, outer)
 }
 
-// ── argMaxIfOrNull strategy ─────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Strategy: argMaxIfOrNull (search)
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// Wrap column references in `argMaxIfOrNull(col, _version, _deleted = false)`.
 fn wrap_in_argmax_if(expr: &Expr, alias: &str) -> Expr {
@@ -142,12 +173,6 @@ fn wrap_in_argmax_if(expr: &Expr, alias: &str) -> Expr {
     }
 }
 
-/// Apply argMaxIfOrNull dedup to a search query in-place.
-///
-/// Value filters stay in WHERE for prewhere pruning AND are duplicated into
-/// HAVING (wrapped in argMaxIfOrNull) to verify the latest version matches.
-/// This is both fast (prewhere reduces rows before GROUP BY) and correct
-/// (HAVING rejects groups whose latest version no longer matches the filter).
 fn apply_argmax_dedup(q: &mut Query, alias: &str) {
     for sel in q.select.iter_mut() {
         let is_id = matches!(&sel.expr, Expr::Column { table, column, .. }
@@ -160,10 +185,6 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
 
     q.group_by.push(Expr::col(alias, "id"));
 
-    // Build HAVING: isNotNull check (filters fully-deleted groups) + value
-    // filters wrapped in argMaxIfOrNull (verifies latest version matches).
-    // Dedup runs before Security, so all WHERE filters here are value filters
-    // from the user query -- namespace filters are added later by Security.
     let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
     let mut having_parts = vec![Expr::func(
         "isNotNull",
@@ -177,6 +198,7 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
         )],
     )];
 
+    // Value filters duplicated into HAVING for correctness.
     if let Some(where_expr) = &q.where_clause {
         for conjunct in where_expr.clone().flatten_and() {
             if references_only(&conjunct, alias) {
@@ -196,7 +218,10 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
     }
 }
 
-/// Build a dedup subquery: `(SELECT * FROM table WHERE <inner> ORDER BY _version DESC LIMIT 1 BY id)`.
+// ─────────────────────────────────────────────────────────────────────────────
+// Strategy: LIMIT 1 BY subquery (traversal, aggregation, neighbors, path)
+// ─────────────────────────────────────────────────────────────────────────────
+
 fn make_dedup_subquery(table_name: String, alias: &str, inner_filters: Vec<Expr>) -> TableRef {
     TableRef::subquery(
         Query {
@@ -214,8 +239,6 @@ fn make_dedup_subquery(table_name: String, alias: &str, inner_filters: Vec<Expr>
     )
 }
 
-/// Partition filters and replace the FROM with a dedup subquery.
-/// Pushable filters go inside; _deleted + cross-table filters stay outside.
 fn apply_limit_by_dedup(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
@@ -228,28 +251,6 @@ fn apply_limit_by_dedup(
     outer_filters.insert(0, deleted_filter);
     *where_clause = Expr::conjoin(outer_filters);
     *from = make_dedup_subquery(table_name, &alias, inner_filters);
-}
-
-// ── Main dispatch ────────────────────────────────────────────────────────────
-
-fn wrap_node_scans(q: &mut Query, input: &Input) {
-    match &q.from {
-        TableRef::Scan { table, alias } if is_node_table(table) => {
-            let alias = alias.clone();
-            let table_name = table.clone();
-
-            if input.query_type == QueryType::Search {
-                apply_argmax_dedup(q, &alias);
-            } else {
-                apply_limit_by_dedup(&mut q.from, &mut q.where_clause, table_name, alias);
-            }
-        }
-        TableRef::Scan { .. } => {}
-        TableRef::Join { .. } => {
-            wrap_join_scans(&mut q.from, &mut q.where_clause);
-        }
-        TableRef::Union { .. } | TableRef::Subquery { .. } => {}
-    }
 }
 
 /// Recurse into join children, wrapping node table scans with LIMIT 1 BY.
@@ -268,6 +269,10 @@ fn wrap_join_scans(from: &mut TableRef, where_clause: &mut Option<Expr>) {
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -304,8 +309,10 @@ mod tests {
             .is_some_and(|w| format!("{w:?}").contains(needle))
     }
 
+    // ── LIMIT 1 BY tests ────────────────────────────────────────────────
+
     #[test]
-    fn wraps_node_scan() {
+    fn traversal_wraps_node_scan() {
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
             from: TableRef::scan("gl_merge_request", "mr"),
@@ -321,6 +328,48 @@ mod tests {
         assert!(where_contains(&inner.where_clause, "state"));
         assert!(where_contains(&q.where_clause, "_deleted"));
         assert!(!where_contains(&q.where_clause, "state"));
+    }
+
+    #[test]
+    fn aggregation_wraps_node_scan() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Aggregation));
+
+        let Node::Query(q) = &node;
+        let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
+        assert!(has_limit_by(inner));
+    }
+
+    #[test]
+    fn neighbors_wraps_node_scan() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Neighbors));
+
+        let Node::Query(q) = &node;
+        let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
+        assert!(has_limit_by(inner));
+    }
+
+    #[test]
+    fn path_finding_wraps_node_scan() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::PathFinding));
+
+        let Node::Query(q) = &node;
+        let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
+        assert!(has_limit_by(inner));
     }
 
     #[test]
@@ -373,6 +422,7 @@ mod tests {
         let Node::Query(q) = &node;
         let inner_p = find_subquery(&q.from, "p").expect("project should be wrapped");
         assert!(find_subquery(&q.from, "e").is_none());
+        assert!(has_limit_by(inner_p));
         assert!(where_contains(&inner_p.where_clause, "traversal_path"));
         assert!(where_contains(&q.where_clause, "_deleted"));
         assert!(!where_contains(&q.where_clause, "traversal_path"));
@@ -415,6 +465,8 @@ mod tests {
         assert!(has_limit_by(inner));
     }
 
+    // ── argMaxIfOrNull tests ────────────────────────────────────────────
+
     #[test]
     fn search_uses_argmax() {
         let mut node = Node::Query(Box::new(Query {
@@ -448,7 +500,6 @@ mod tests {
             having_str.contains("isNotNull") && having_str.contains("argMaxIfOrNull"),
             "HAVING should use isNotNull(argMaxIfOrNull(...))"
         );
-        // Value filters duplicated into HAVING for correctness
         assert!(
             having_str.contains("failed"),
             "HAVING should re-check value filters via argMaxIfOrNull"
