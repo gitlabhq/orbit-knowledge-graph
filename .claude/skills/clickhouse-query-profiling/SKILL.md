@@ -170,7 +170,43 @@ Progress is printed to stderr (`[3/25] query_name...`). Output is a JSON object 
 2. Make your optimizer change
 3. Rebuild: `mise build`
 4. Run the same query: `mise query:profile -- -t '1/' --explain -o after.json QUERY`
-5. Compare `read_rows` and `elapsed_ns` between the two files
+5. Diff the results: `mise query:diff -- before.json after.json --labels before,after`
+
+## Diffing result files
+
+`mise query:diff` compares two or more profiler result files and produces a markdown table.
+
+Two-way comparison (default metric is `read_rows`):
+
+```bash
+mise query:diff -- baseline.json dedup.json --labels baseline,dedup
+```
+
+Compare memory usage:
+
+```bash
+mise query:diff -- baseline.json dedup.json --labels baseline,dedup --metric memory
+```
+
+All metrics in separate tables:
+
+```bash
+mise query:diff -- baseline.json dedup.json --labels baseline,dedup --all-metrics
+```
+
+N-way comparison (3+ files):
+
+```bash
+mise query:diff -- v1.json v2.json v3.json --labels v1,v2,v3
+```
+
+CSV output for spreadsheets:
+
+```bash
+mise query:diff -- baseline.json dedup.json --format csv
+```
+
+Available metrics: `read_rows` (default), `read_bytes`, `memory`, `elapsed_ms`.
 
 ## Things to know
 

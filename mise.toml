@@ -104,6 +104,10 @@ usage = 'arg "[base]" default="main" help="Branch on origin to diff against"'
 run = 'cargo run -p query-profiler -- "$@"'
 description = "Profile a GKG query against ClickHouse (use -- to pass args)"
 
+[tasks."query:diff"]
+run = 'python3 scripts/devtools/diff-profiler-results.py "$@"'
+description = "Compare query-profiler result files (use -- to pass args)"
+
 [tasks."perf:gtime"]
 run = "./scripts/devtools/gtime.sh"
 

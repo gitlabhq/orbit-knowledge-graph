@@ -1,8 +1,8 @@
 //! ClickHouse dialect end-to-end tests.
 
 use crate::compiler::setup::{compile_to_ast, test_ctx, test_ontology};
-use crate::compiler::utils::{ParsedSql, has_param_value};
-use compiler::{Node, QueryError, compile};
+use crate::compiler::utils::{has_param_value, ParsedSql};
+use compiler::{compile, Node, QueryError};
 
 #[test]
 fn compile_to_ast_works() {
@@ -200,7 +200,10 @@ fn filter_operators() {
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
-    assert!(rendered.contains("WHERE"));
+    // Search uses argMax dedup: value filters move to HAVING,
+    // namespace filters stay in WHERE (gl_user has none).
+    assert!(rendered.contains("HAVING"));
+    assert!(rendered.contains("argMax"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));
     assert!(rendered.contains("LIKE"));
@@ -213,14 +216,12 @@ fn invalid_json_rejected() {
 
 #[test]
 fn missing_required_fields_rejected() {
-    assert!(
-        compile(
-            r#"{"query_type": "traversal"}"#,
-            &test_ontology(),
-            &test_ctx()
-        )
-        .is_err()
-    );
+    assert!(compile(
+        r#"{"query_type": "traversal"}"#,
+        &test_ontology(),
+        &test_ctx()
+    )
+    .is_err());
 }
 
 #[test]
@@ -251,14 +252,12 @@ fn sql_injection_in_relationship() {
 
 #[test]
 fn empty_node_id_rejected() {
-    assert!(
-        compile(
-            r#"{"query_type": "traversal", "nodes": [{"id": ""}]}"#,
-            &test_ontology(),
-            &test_ctx(),
-        )
-        .is_err()
-    );
+    assert!(compile(
+        r#"{"query_type": "traversal", "nodes": [{"id": ""}]}"#,
+        &test_ontology(),
+        &test_ctx(),
+    )
+    .is_err());
 }
 
 #[test]
