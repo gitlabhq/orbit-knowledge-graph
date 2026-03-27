@@ -285,21 +285,6 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
     input.compiler.node_edge_col = node_edge_col;
     let node_edge_col = &input.compiler.node_edge_col;
 
-    // Inject source_kind/target_kind filters for each node with a known entity
-    // type. Gives ClickHouse an extra predicate for granule pruning on the
-    // by_source/by_target projections whose PK includes the kind column.
-    for node in &input.nodes {
-        if let Some(entity) = &node.entity
-            && let Some((alias, edge_col)) = node_edge_col.get(&node.id)
-            && let Some(kind_col) = edge_kind_column(edge_col)
-        {
-            where_parts.push(Expr::eq(
-                Expr::col(alias, kind_col),
-                Expr::param(ChType::String, entity.to_string()),
-            ));
-        }
-    }
-
     // Add IN subquery for each node that has conditions
     for node in &input.nodes {
         let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();

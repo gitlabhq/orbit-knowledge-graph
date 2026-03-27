@@ -41,6 +41,7 @@ const ROOT_SIP_CTE: &str = "_root_ids";
 pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
     match node {
         Node::Query(q) => {
+            inject_entity_kind_filters(q, input);
             if input.query_type == QueryType::Aggregation {
                 eliminate_agg_node_joins(q, input);
             }
@@ -58,6 +59,34 @@ pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
                 apply_path_hop_frontiers(q, input);
             }
         }
+    }
+}
+
+/// Inject `source_kind`/`target_kind` filters for each node with a known
+/// entity type whose edge column mapping is recorded in `node_edge_col`.
+/// Gives ClickHouse an extra predicate for granule pruning on the
+/// `by_source`/`by_target` projections whose PK includes the kind column.
+fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
+    let node_edge_col = &input.compiler.node_edge_col;
+    if node_edge_col.is_empty() {
+        return;
+    }
+    let mut kind_filters: Vec<Expr> = Vec::new();
+    for node in &input.nodes {
+        if let Some(entity) = &node.entity
+            && let Some((alias, edge_col)) = node_edge_col.get(&node.id)
+            && let Some(kind_col) = edge_kind_column(edge_col)
+        {
+            kind_filters.push(Expr::eq(
+                Expr::col(alias, kind_col),
+                Expr::param(ChType::String, entity.to_string()),
+            ));
+        }
+    }
+    if !kind_filters.is_empty() {
+        let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
+        parts.extend(kind_filters);
+        q.where_clause = Expr::conjoin(parts);
     }
 }
 
