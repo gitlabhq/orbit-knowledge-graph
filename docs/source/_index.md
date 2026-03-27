@@ -117,9 +117,11 @@ Orbit supports code indexing for the following languages:
 | Ruby       | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
 | Java       | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
 | Kotlin     | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
-| Python     | {{< yes >}}           | {{< yes >}}             | {{< no >}}              |
-| TypeScript | {{< yes >}}           | {{< yes >}}             | {{< no >}}              |
-| JavaScript | {{< yes >}}           | {{< yes >}}             | {{< no >}}              |
+| Python     | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
+| TypeScript | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
+| JavaScript | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
+| Rust       | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
+| C#         | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
 
 ## Feedback
 
