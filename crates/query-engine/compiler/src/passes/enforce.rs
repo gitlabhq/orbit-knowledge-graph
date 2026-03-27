@@ -187,7 +187,10 @@ fn enforce_return_columns(
     ctx: &mut ResultContext,
 ) -> Result<()> {
     let select_len_before = q.select.len();
-    let is_traversal = input.query_type == QueryType::Traversal;
+    let is_edge_centric = matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Neighbors
+    );
     let node_edge_col = &input.compiler.node_edge_col;
 
     for node in &input.nodes {
@@ -206,7 +209,7 @@ fn enforce_return_columns(
 
         let needs_separate_pk = node.redaction_id_column != DEFAULT_PRIMARY_KEY;
 
-        if is_traversal {
+        if is_edge_centric {
             let (edge_alias, edge_col) = node_edge_col.get(&node.id).ok_or_else(|| {
                 QueryError::Enforcement(format!(
                     "traversal node '{}' has no edge mapping in node_edge_col",

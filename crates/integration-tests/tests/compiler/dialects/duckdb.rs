@@ -143,7 +143,7 @@ fn neighbors() {
     );
 
     assert!(sql.has_table("gl_edge"));
-    assert!(sql.has_join());
+    // Edge-only: no JOIN, edge scan with IN subquery.
     assert_eq!(sql.limit_value(), Some(10));
 }
 

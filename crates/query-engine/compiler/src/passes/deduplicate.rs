@@ -7,9 +7,9 @@
 //! | Query type   | Strategy                 | Why                                        |
 //! |--------------|--------------------------|--------------------------------------------|
 //! | Search       | argMaxIfOrNull + GROUP BY     | Preserves LIMIT pushdown                   |
-//! | Neighbors    | id-only argMax in join        | Join only needs IDs, preserves projections |
 //! | Traversal    | LIMIT 1 BY subquery           | Needs all columns for hydration/properties |
 //! | Aggregation  | LIMIT 1 BY subquery           | Needs property columns for countIf/sumIf   |
+//! | Neighbors    | LIMIT 1 BY subquery (CTEs)    | Edge-only lowering, node dedup via _nf CTE |
 //! | PathFinding  | LIMIT 1 BY subquery           | Recursive CTEs, multi-hop joins            |
 //! | Hydration    | (skipped)                     | Separate pipeline, no dedup pass           |
 //!
@@ -88,7 +88,7 @@ fn dispatch(q: &mut Query, input: &Input) {
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { .. } => {
-            wrap_join_scans(&mut q.from, &mut q.where_clause, input);
+            wrap_join_scans(&mut q.from, &mut q.where_clause);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
@@ -252,79 +252,18 @@ fn apply_limit_by_dedup(
     *from = make_dedup_subquery(table_name, &alias, inner_filters);
 }
 
-/// Build an id-only argMax dedup subquery: `SELECT id GROUP BY id HAVING ...`.
-/// Lighter than LIMIT 1 BY because it avoids sorting all columns and lets
-/// ClickHouse keep using projections for join planning.
-fn make_id_only_dedup_subquery(
-    table_name: String,
-    alias: &str,
-    inner_filters: Vec<Expr>,
-) -> TableRef {
-    let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
-
-    let mut having_parts = vec![Expr::func(
-        "isNotNull",
-        vec![Expr::func(
-            "argMaxIfOrNull",
-            vec![
-                Expr::col(alias, "id"),
-                Expr::col(alias, VERSION_COLUMN),
-                not_deleted,
-            ],
-        )],
-    )];
-
-    for filter in &inner_filters {
-        having_parts.push(wrap_in_argmax_if(filter, alias));
-    }
-
-    TableRef::subquery(
-        Query {
-            select: vec![SelectExpr::new(Expr::col(alias, "id"), "id")],
-            from: TableRef::scan(table_name, alias),
-            where_clause: Expr::conjoin(inner_filters),
-            group_by: vec![Expr::col(alias, "id")],
-            having: Expr::conjoin(having_parts),
-            ..Default::default()
-        },
-        alias.to_string(),
-    )
-}
-
-fn apply_id_only_dedup(
-    from: &mut TableRef,
-    where_clause: &mut Option<Expr>,
-    table_name: String,
-    alias: String,
-) {
-    let (inner_filters, outer_filters) = partition_filters(where_clause.take(), &alias);
-    // _deleted handled by HAVING inside the subquery.
-    *where_clause = Expr::conjoin(outer_filters);
-    *from = make_id_only_dedup_subquery(table_name, &alias, inner_filters);
-}
-
-/// Recurse into join children. Neighbors use id-only argMax (the join only
-/// needs IDs from the node table). Other query types use LIMIT 1 BY (the
-/// outer query may reference property columns like `p.name`).
-fn wrap_join_scans(from: &mut TableRef, where_clause: &mut Option<Expr>, input: &Input) {
+/// Recurse into join children, wrapping node table scans with LIMIT 1 BY.
+fn wrap_join_scans(from: &mut TableRef, where_clause: &mut Option<Expr>) {
     match from {
         TableRef::Scan { table, alias } if is_node_table(table) => {
             let table_name = table.clone();
             let alias = alias.clone();
-
-            match input.query_type {
-                QueryType::Neighbors => {
-                    apply_id_only_dedup(from, where_clause, table_name, alias);
-                }
-                _ => {
-                    apply_limit_by_dedup(from, where_clause, table_name, alias);
-                }
-            }
+            apply_limit_by_dedup(from, where_clause, table_name, alias);
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            wrap_join_scans(left, where_clause, input);
-            wrap_join_scans(right, where_clause, input);
+            wrap_join_scans(left, where_clause);
+            wrap_join_scans(right, where_clause);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
@@ -486,39 +425,6 @@ mod tests {
         assert!(where_contains(&inner_p.where_clause, "traversal_path"));
         assert!(where_contains(&q.where_clause, "_deleted"));
         assert!(!where_contains(&q.where_clause, "traversal_path"));
-    }
-
-    #[test]
-    fn neighbors_join_uses_id_only_argmax() {
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![
-                SelectExpr::new(Expr::col("mr", "id"), "mr_id"),
-                SelectExpr::new(Expr::col("e", "target_id"), "target"),
-            ],
-            from: TableRef::join(
-                crate::ast::JoinType::Inner,
-                TableRef::scan("gl_merge_request", "mr"),
-                TableRef::scan("gl_edge", "e"),
-                Expr::eq(Expr::col("mr", "id"), Expr::col("e", "source_id")),
-            ),
-            where_clause: Some(Expr::func(
-                "startsWith",
-                vec![Expr::col("mr", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
-            )),
-            ..Default::default()
-        }));
-        deduplicate(&mut node, &input_for(QueryType::Neighbors));
-
-        let Node::Query(q) = &node;
-        let inner_mr = find_subquery(&q.from, "mr").expect("mr should be wrapped");
-        assert!(find_subquery(&q.from, "e").is_none());
-        // Neighbors join: id-only argMax, not LIMIT 1 BY
-        assert!(!inner_mr.group_by.is_empty(), "should GROUP BY id");
-        assert!(inner_mr.limit_by.is_none(), "should NOT use LIMIT 1 BY");
-        let having_str = format!("{:?}", inner_mr.having);
-        assert!(having_str.contains("argMaxIfOrNull"));
-        // _deleted handled inside HAVING, not outer WHERE
-        assert!(!where_contains(&q.where_clause, "_deleted"));
     }
 
     #[test]

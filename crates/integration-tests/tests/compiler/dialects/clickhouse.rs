@@ -176,7 +176,9 @@ fn neighbors_query() {
         rendered.contains("_gkg_neighbor_is_outgoing"),
         "bidirectional should include direction"
     );
-    assert!(rendered.contains("JOIN"));
+    // Edge-only: no JOIN, edge scan with IN subquery for center node IDs.
+    assert!(rendered.contains("gl_edge"));
+    assert!(rendered.contains("UNION ALL"));
 }
 
 #[test]
