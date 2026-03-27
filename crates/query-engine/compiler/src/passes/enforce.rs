@@ -212,7 +212,7 @@ fn enforce_return_columns(
         if is_edge_centric {
             let (edge_alias, edge_col) = node_edge_col.get(&node.id).ok_or_else(|| {
                 QueryError::Enforcement(format!(
-                    "traversal node '{}' has no edge mapping in node_edge_col",
+                    "node '{}' has no edge mapping in node_edge_col",
                     node.id
                 ))
             })?;
