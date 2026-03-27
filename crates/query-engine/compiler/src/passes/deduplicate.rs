@@ -196,28 +196,38 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
     }
 }
 
-/// Apply LIMIT 1 BY dedup subquery with predicate pushdown.
-fn apply_limit_by_dedup(q: &mut Query, table_name: String, alias: String) {
-    let (inner_filters, mut outer_filters) = partition_filters(q.where_clause.take(), &alias);
+/// Build a dedup subquery: `(SELECT * FROM table WHERE <inner> ORDER BY _version DESC LIMIT 1 BY id)`.
+fn make_dedup_subquery(table_name: String, alias: &str, inner_filters: Vec<Expr>) -> TableRef {
+    TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan(table_name, alias),
+            where_clause: conjoin(inner_filters),
+            order_by: vec![OrderExpr {
+                expr: Expr::col(alias, VERSION_COLUMN),
+                desc: true,
+            }],
+            limit_by: Some((1, vec![Expr::col(alias, "id")])),
+            ..Default::default()
+        },
+        alias.to_string(),
+    )
+}
+
+/// Partition filters and replace the FROM with a dedup subquery.
+/// Pushable filters go inside; _deleted + cross-table filters stay outside.
+fn apply_limit_by_dedup(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    table_name: String,
+    alias: String,
+) {
+    let (inner_filters, mut outer_filters) = partition_filters(where_clause.take(), &alias);
 
     let deleted_filter = Expr::eq(Expr::col(&alias, DELETED_COLUMN), Expr::lit(false));
     outer_filters.insert(0, deleted_filter);
-    q.where_clause = conjoin(outer_filters);
-
-    q.from = TableRef::subquery(
-        Query {
-            select: vec![SelectExpr::star()],
-            from: TableRef::scan(table_name, &alias),
-            where_clause: conjoin(inner_filters),
-            order_by: vec![OrderExpr {
-                expr: Expr::col(&alias, VERSION_COLUMN),
-                desc: true,
-            }],
-            limit_by: Some((1, vec![Expr::col(&alias, "id")])),
-            ..Default::default()
-        },
-        alias,
-    );
+    *where_clause = conjoin(outer_filters);
+    *from = make_dedup_subquery(table_name, &alias, inner_filters);
 }
 
 // ── Main dispatch ────────────────────────────────────────────────────────────
@@ -231,49 +241,29 @@ fn wrap_node_scans(q: &mut Query, input: &Input) {
             if input.query_type == QueryType::Search {
                 apply_argmax_dedup(q, &alias);
             } else {
-                apply_limit_by_dedup(q, table_name, alias);
+                apply_limit_by_dedup(&mut q.from, &mut q.where_clause, table_name, alias);
             }
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { .. } => {
-            wrap_join_children(&mut q.from, &mut q.where_clause, input);
+            wrap_join_scans(&mut q.from, &mut q.where_clause);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
 }
 
-fn wrap_join_children(from: &mut TableRef, where_clause: &mut Option<Expr>, _input: &Input) {
+/// Recurse into join children, wrapping node table scans with LIMIT 1 BY.
+fn wrap_join_scans(from: &mut TableRef, where_clause: &mut Option<Expr>) {
     match from {
         TableRef::Scan { table, alias } if is_node_table(table) => {
-            let alias_str = alias.clone();
             let table_name = table.clone();
-
-            let (inner_filters, mut outer_filters) =
-                partition_filters(where_clause.take(), &alias_str);
-
-            let deleted_filter = Expr::eq(Expr::col(&alias_str, DELETED_COLUMN), Expr::lit(false));
-            outer_filters.insert(0, deleted_filter);
-            *where_clause = conjoin(outer_filters);
-
-            *from = TableRef::subquery(
-                Query {
-                    select: vec![SelectExpr::star()],
-                    from: TableRef::scan(table_name, &alias_str),
-                    where_clause: conjoin(inner_filters),
-                    order_by: vec![OrderExpr {
-                        expr: Expr::col(&alias_str, VERSION_COLUMN),
-                        desc: true,
-                    }],
-                    limit_by: Some((1, vec![Expr::col(&alias_str, "id")])),
-                    ..Default::default()
-                },
-                alias_str,
-            );
+            let alias = alias.clone();
+            apply_limit_by_dedup(from, where_clause, table_name, alias);
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            wrap_join_children(left, where_clause, _input);
-            wrap_join_children(right, where_clause, _input);
+            wrap_join_scans(left, where_clause);
+            wrap_join_scans(right, where_clause);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
