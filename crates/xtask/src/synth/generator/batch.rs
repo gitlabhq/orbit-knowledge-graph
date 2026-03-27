@@ -213,6 +213,7 @@ impl ColumnValues {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ontology::FieldSource;
 
     fn fake_data_path() -> String {
         crate::synth::fixture_path(crate::synth::constants::DEFAULT_FAKE_DATA_PATH)
@@ -227,7 +228,7 @@ mod tests {
             fields: vec![
                 Field {
                     name: "id".to_string(),
-                    source: "id".to_string(),
+                    source: FieldSource::Column("id".to_string()),
                     data_type: DataType::Int,
                     nullable: false,
                     enum_values: None,
@@ -235,7 +236,7 @@ mod tests {
                 },
                 Field {
                     name: "name".to_string(),
-                    source: "name".to_string(),
+                    source: FieldSource::Column("name".to_string()),
                     data_type: DataType::String,
                     nullable: true,
                     enum_values: None,
@@ -243,7 +244,7 @@ mod tests {
                 },
                 Field {
                     name: "active".to_string(),
-                    source: "active".to_string(),
+                    source: FieldSource::Column("active".to_string()),
                     data_type: DataType::Bool,
                     nullable: false,
                     enum_values: None,
