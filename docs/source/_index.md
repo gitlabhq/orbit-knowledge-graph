@@ -25,7 +25,8 @@ title: Orbit
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit indexes your groups, projects, and repositories, then analyzes
+Orbit is a data analysis and observability engine for GitLab.
+It indexes your groups, projects, and repositories, then analyzes
 the relationships between them to build a knowledge graph of your
 instance. The knowledge graph is a structured, queryable map of your
 entire software development lifecycle. Use it to understand how your
@@ -43,7 +44,84 @@ You can use Orbit to get answers to questions like:
 - Which projects depend on this module or library?
 - What work items are assigned to this user in these projects?
 
+## Data sources
+
+Orbit indexes two categories of data:
+
+1. GitLab data includes the software development lifecycle objects that make up your instance:
+
+   - Groups and projects
+   - Users
+   - Work items
+   - Merge requests
+   - Pipelines
+   - Vulnerabilities and security findings
+
+1. Code includes the content of your repositories:
+
+   - Source files and directories
+   - Function, class, and module definitions
+   - Imports and cross-file references
+
+```mermaid
+%%{init: { "fontFamily": "GitLab Sans" }}%%
+flowchart LR
+  accTitle: Orbit architecture
+  accDescr: Data flows from PostgreSQL through the Data Insights Platform into ClickHouse. Orbit reads data from ClickHouse and code from internal archives to serve AI agents and services. 
+
+  subgraph GitLabCore[GitLab Core]
+    PG[(PostgreSQL)]
+    Repo[Repository archives]
+  end
+
+  subgraph DataPipeline[Data Insights Platform]
+    Siphon[Siphon]
+    NATS[NATS JetStream]
+  end
+
+  PG -- "CDC events" --> Siphon
+  Siphon --> NATS
+  NATS --> CH[ClickHouse]
+  Repo --> Rails[Rails internal API]
+  Rails --> Orbit
+  CH <--> Orbit[Orbit service]
+  Clients[AI agents and services] --> Orbit
+```
+
+PostgreSQL emits change data capture (CDC) events to Siphon, which forwards them through NATS JetStream into ClickHouse.
+In parallel, Orbit downloads code from repository archives through the Rails internal API. Orbit combines GitLab data and code,
+then writes the unified property graph to ClickHouse. Users and AI agents can query the graph through the unified context API.
+
+## Performance
+
+The Orbit indexer runs in a separate Kubernetes cluster and does not
+impact the performance of your instance.  The indexer job completes in
+seconds, even for large groups.
+
+Changes to a group, project, or repository are reindexed automatically.
+Reindexing typically completes a few minutes after a change.
+
+## Coverage
+
+Orbit indexes only the top-level groups where it is turned on.
+Subgroups and projects inherit indexing from the top-level group.
+
+Code is indexed from only the default branch.
+
+### Supported languages
+
+Orbit supports code indexing for the following languages:
+
+| Language   | Definitions & imports | References within files | References across files |
+|------------|-----------------------|-------------------------|-------------------------|
+| Ruby       | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
+| Java       | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
+| Kotlin     | {{< yes >}}           | {{< yes >}}             | {{< yes >}}             |
+| Python     | {{< yes >}}           | {{< yes >}}             | {{< no >}}              |
+| TypeScript | {{< yes >}}           | {{< yes >}}             | {{< no >}}              |
+| JavaScript | {{< yes >}}           | {{< yes >}}             | {{< no >}}              |
+
 ## Feedback
 
 Your feedback is valuable in helping us improve this feature.
-Share your experiences in [issue 592436](https://gitlab.com/gitlab-org/gitlab/-/work_items/592436).
+Share your experience in [issue 592436](https://gitlab.com/gitlab-org/gitlab/-/work_items/592436).

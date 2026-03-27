@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Understand the node types and relationships that make up the knowledge graph.
-title: Graph schema
+title: Knowledge graph schema
 ---
 
 {{< details >}}
@@ -107,9 +107,7 @@ Each relationship defines a directed connection between two node types.
 Relationships can cross domain boundaries.
 For example, a `HAS_FILE` relationship connects a `MergeRequest` node in the `code_review` domain to a `File` node in the `source_code` domain.
 
-### Available relationships
-
-The following table lists the relationships available by default:
+The following relationships are available by default:
 
 | Relationship       | Source node                | Target node                  |
 |--------------------|----------------------------|------------------------------|
