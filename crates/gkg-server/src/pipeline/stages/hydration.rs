@@ -380,6 +380,12 @@ impl PipelineStage for HydrationStage {
                     .get_or_insert_default::<QueryExecutionLog>()
                     .0
                     .extend(executions);
+                // TODO(#379): resolve template.virtual_columns here.
+                // For each template with non-empty virtual_columns, dispatch
+                // to the remote service (e.g. Gitaly) using the same IDs
+                // collected above, then merge the returned values into
+                // property_map before the merge_static_properties call.
+
                 if !property_map.is_empty() {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
                 }
@@ -404,6 +410,11 @@ impl PipelineStage for HydrationStage {
                         .get_or_insert_default::<QueryExecutionLog>()
                         .0
                         .extend(executions);
+                    // TODO(#379): resolve spec.virtual_columns here.
+                    // Same pattern as static: dispatch to remote services
+                    // using the discovered (entity_type, id) pairs, merge
+                    // results into property_map.
+
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
                 }
             }
