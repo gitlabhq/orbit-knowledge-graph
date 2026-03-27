@@ -130,6 +130,10 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
         if group_by_ids.contains(node.id.as_str()) {
             continue;
         }
+        // Already edge-only from the lowerer — nothing to eliminate.
+        if input.compiler.node_edge_col.contains_key(&node.id) {
+            continue;
+        }
         if !node.node_ids.is_empty() || !node.filters.is_empty() {
             continue;
         }
@@ -384,7 +388,9 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
     // (filters/node_ids). A traversal_path-only SIP on a large table (e.g. 8M
     // jobs) scans more rows than it saves. For small tables the source_kind
     // filter on the edge already narrows sufficiently.
-    if input.compiler.skipped_node_joins.contains(&root_node.id) && !has_explicit_selectivity {
+    let node_is_edge_only = input.compiler.skipped_node_joins.contains(&root_node.id)
+        || input.compiler.node_edge_col.contains_key(&root_node.id);
+    if node_is_edge_only && !has_explicit_selectivity {
         return;
     }
 
@@ -772,10 +778,12 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
     let conjuncts = where_clause.flatten_and();
 
     // Build target alias set from Input aggregations (node ID = table alias after lowering).
+    // Exclude edge-only targets — their filters are already in _nf_* CTEs.
     let target_aliases: HashSet<&str> = input
         .aggregations
         .iter()
         .filter_map(|agg| agg.target.as_deref())
+        .filter(|t| !input.compiler.node_edge_col.contains_key(*t))
         .collect();
 
     // Build group-by alias set to avoid folding their filters.
