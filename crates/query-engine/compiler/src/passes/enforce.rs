@@ -187,10 +187,9 @@ fn enforce_return_columns(
     ctx: &mut ResultContext,
 ) -> Result<()> {
     let select_len_before = q.select.len();
-    let is_edge_centric = matches!(
-        input.query_type,
-        QueryType::Traversal | QueryType::Neighbors
-    );
+    // Neighbors emit _gkg_* columns directly in the lowerer (per UNION arm)
+    // because the center edge column differs per direction.
+    let is_edge_centric = input.query_type == QueryType::Traversal;
     let node_edge_col = &input.compiler.node_edge_col;
 
     for node in &input.nodes {
@@ -206,6 +205,12 @@ fn enforce_return_columns(
         let pk_col = redaction_node.pk_column.clone();
         let id_col = redaction_node.id_column.clone();
         let type_col = redaction_node.type_column.clone();
+
+        // Neighbors emit _gkg_* columns directly in the lowerer per UNION arm.
+        let already_emitted = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+        if already_emitted {
+            continue;
+        }
 
         let needs_separate_pk = node.redaction_id_column != DEFAULT_PRIMARY_KEY;
 

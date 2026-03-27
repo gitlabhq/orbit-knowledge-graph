@@ -898,25 +898,22 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
                     RELATIONSHIP_TYPE_COLUMN,
                 ),
                 SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
+                // Center node _gkg_* columns emitted per-arm with the correct
+                // edge column (source_id for outgoing, target_id for incoming).
+                SelectExpr::new(
+                    Expr::col(edge_alias, center_edge_col),
+                    format!("_gkg_{center_id}_id"),
+                ),
+                SelectExpr::new(
+                    Expr::string(center_entity.as_str()),
+                    format!("_gkg_{center_id}_type"),
+                ),
             ],
             from: edge_table,
             where_clause: Expr::conjoin(where_parts),
             ..Default::default()
         }
     };
-
-    // Surface edge-to-node mapping for enforce to emit _gkg_* columns.
-    // For Direction::Both, the center ID comes from source_id (outgoing arm)
-    // and target_id (incoming arm). Use source_id as the canonical mapping;
-    // enforce adds the _gkg columns to the first UNION arm and they propagate.
-    let center_edge_col = match neighbors_config.direction {
-        Direction::Outgoing | Direction::Both => SOURCE_ID_COLUMN,
-        Direction::Incoming => TARGET_ID_COLUMN,
-    };
-    input.compiler.node_edge_col.insert(
-        center_id.clone(),
-        (edge_alias.to_string(), center_edge_col.to_string()),
-    );
 
     if neighbors_config.direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);
