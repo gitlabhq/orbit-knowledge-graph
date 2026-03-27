@@ -144,13 +144,12 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
     let mut node_columns: Vec<ExtractColumn> = node
         .fields
         .iter()
-        .filter(|field| !field.is_virtual())
-        .map(|field| {
-            let col = field.column_name().expect("filtered to column-backed");
-            match &field.data_type {
+        .filter_map(|field| {
+            let col = field.column_name()?;
+            Some(match &field.data_type {
                 DataType::Uuid => ExtractColumn::ToString(col.to_string()),
                 _ => ExtractColumn::Bare(col.to_string()),
-            }
+            })
         })
         .collect();
 
@@ -190,27 +189,26 @@ fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> Vec<String> 
 fn resolve_node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
     fields
         .iter()
-        .filter(|field| !field.is_virtual())
-        .map(|field| {
-            let col = field.column_name().expect("filtered to column-backed");
+        .filter_map(|field| {
+            let col = field.column_name()?;
             if field.data_type == DataType::Enum
                 && field.enum_type == EnumType::Int
                 && field.enum_values.is_some()
             {
-                return NodeColumn::IntEnum {
+                return Some(NodeColumn::IntEnum {
                     source: col.to_string(),
                     target: field.name.clone(),
                     values: field.enum_values.clone().unwrap(),
-                };
+                });
             }
-            if col == field.name {
+            Some(if col == field.name {
                 NodeColumn::Identity(field.name.clone())
             } else {
                 NodeColumn::Rename {
                     source: col.to_string(),
                     target: field.name.clone(),
                 }
-            }
+            })
         })
         .collect()
 }
