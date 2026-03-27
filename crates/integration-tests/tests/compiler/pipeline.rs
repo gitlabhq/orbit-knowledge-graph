@@ -233,6 +233,7 @@ fn observer_records_all_pass_completions() {
             "deduplicate",
             "security",
             "check",
+            "hydrate_plan",
             "codegen"
         ]
     );
