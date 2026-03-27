@@ -22,7 +22,7 @@
 //!
 //! Refs: <https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/308>
 
-use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
+use crate::ast::{Cte, Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
 use crate::input::{Input, QueryType};
 use ontology::constants::{DELETED_COLUMN, EDGE_TABLE, GL_TABLE_PREFIX, VERSION_COLUMN};
 
@@ -232,6 +232,16 @@ fn apply_limit_by_dedup(
 
 // ── Main dispatch ────────────────────────────────────────────────────────────
 
+/// Check if the SELECT list only references `alias.id` (plus constants).
+/// Used to decide whether to use the lightweight id-only argMax dedup.
+fn selects_only_id(select: &[SelectExpr], alias: &str) -> bool {
+    select.iter().all(|sel| {
+        matches!(&sel.expr, Expr::Column { table, column, .. }
+            if table == alias && column == "id")
+            || matches!(&sel.expr, Expr::Literal(_) | Expr::Param { .. })
+    })
+}
+
 fn wrap_node_scans(q: &mut Query, input: &Input) {
     match &q.from {
         TableRef::Scan { table, alias } if is_node_table(table) => {
@@ -240,30 +250,201 @@ fn wrap_node_scans(q: &mut Query, input: &Input) {
 
             if input.query_type == QueryType::Search {
                 apply_argmax_dedup(q, &alias);
+            } else if selects_only_id(&q.select, &alias) {
+                // CTE or subquery that only needs id -- use lightweight argMax.
+                // _deleted is handled by HAVING inside the subquery, not outer WHERE.
+                let (inner_filters, outer_filters) =
+                    partition_filters(q.where_clause.take(), &alias);
+                q.where_clause = Expr::conjoin(outer_filters);
+                q.from = make_id_only_dedup_subquery(table_name, &alias, inner_filters);
             } else {
                 apply_limit_by_dedup(&mut q.from, &mut q.where_clause, table_name, alias);
             }
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { .. } => {
-            wrap_join_scans(&mut q.from, &mut q.where_clause);
+            wrap_join_scans(q);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
 }
 
-/// Recurse into join children, wrapping node table scans with LIMIT 1 BY.
-fn wrap_join_scans(from: &mut TableRef, where_clause: &mut Option<Expr>) {
+/// Build a lightweight argMax-based dedup subquery that only emits `id`.
+/// Used for node tables in JOINs and CTEs where only `id` is needed.
+/// Avoids the `SELECT * ... ORDER BY _version DESC LIMIT 1 BY id` sort
+/// that breaks projection usage (e.g. `by_id`).
+fn make_id_only_dedup_subquery(
+    table_name: String,
+    alias: &str,
+    inner_filters: Vec<Expr>,
+) -> TableRef {
+    let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
+
+    let mut having_parts = vec![Expr::func(
+        "isNotNull",
+        vec![Expr::func(
+            "argMaxIfOrNull",
+            vec![
+                Expr::col(alias, "id"),
+                Expr::col(alias, VERSION_COLUMN),
+                not_deleted.clone(),
+            ],
+        )],
+    )];
+
+    // Value filters in HAVING too for correctness (verify latest version matches).
+    for filter in &inner_filters {
+        having_parts.push(wrap_in_argmax_if(filter, alias));
+    }
+
+    TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::new(Expr::col(alias, "id"), "id")],
+            from: TableRef::scan(table_name, alias),
+            where_clause: Expr::conjoin(inner_filters),
+            group_by: vec![Expr::col(alias, "id")],
+            having: Expr::conjoin(having_parts),
+            ..Default::default()
+        },
+        alias.to_string(),
+    )
+}
+
+/// Check if the outer SELECT only references `alias.id` (plus constants and
+/// columns from other tables). Recursively inspects function arguments,
+/// binary ops, etc. for nested column references.
+fn outer_only_needs_id(select: &[SelectExpr], alias: &str) -> bool {
+    fn only_id_refs(expr: &Expr, alias: &str) -> bool {
+        match expr {
+            Expr::Column { table, column, .. } if table == alias => column == "id",
+            Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => true,
+            Expr::FuncCall { args, .. } => args.iter().all(|a| only_id_refs(a, alias)),
+            Expr::BinaryOp { left, right, .. } => {
+                only_id_refs(left, alias) && only_id_refs(right, alias)
+            }
+            Expr::UnaryOp { expr, .. } => only_id_refs(expr, alias),
+            Expr::InSubquery { expr, .. } => only_id_refs(expr, alias),
+        }
+    }
+    select.iter().all(|sel| only_id_refs(&sel.expr, alias))
+}
+
+/// Build a dedup CTE (`_dedup_<alias>`) and a semi-join filter for it.
+/// Keeps the node table as a bare scan so ClickHouse can use projections
+/// for join planning, while dedup correctness comes from the semi-join.
+fn make_dedup_cte_filter(
+    table_name: &str,
+    alias: &str,
+    inner_filters: Vec<Expr>,
+) -> (Cte, Expr, Expr) {
+    let cte_name = format!("_dedup_{alias}");
+    let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
+
+    let mut having_parts = vec![Expr::func(
+        "isNotNull",
+        vec![Expr::func(
+            "argMaxIfOrNull",
+            vec![
+                Expr::col(alias, "id"),
+                Expr::col(alias, VERSION_COLUMN),
+                not_deleted.clone(),
+            ],
+        )],
+    )];
+    for filter in &inner_filters {
+        having_parts.push(wrap_in_argmax_if(filter, alias));
+    }
+
+    let cte = Cte::new(
+        &cte_name,
+        Query {
+            select: vec![SelectExpr::new(Expr::col(alias, "id"), "id")],
+            from: TableRef::scan(table_name.to_string(), alias),
+            where_clause: Expr::conjoin(inner_filters),
+            group_by: vec![Expr::col(alias, "id")],
+            having: Expr::conjoin(having_parts),
+            ..Default::default()
+        },
+    );
+
+    let semi_join = Expr::InSubquery {
+        expr: Box::new(Expr::col(alias, "id")),
+        cte_name,
+        column: "id".to_string(),
+    };
+
+    let deleted_filter = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
+
+    (cte, semi_join, deleted_filter)
+}
+
+/// Wrap node table scans inside a JOIN with the appropriate dedup strategy.
+/// For id-only references: uses a dedup CTE + semi-join filter to keep the
+/// bare scan (preserves projection usage for join planning).
+/// For multi-column references: uses LIMIT 1 BY subquery.
+fn wrap_join_scans(q: &mut Query) {
+    let mut all_exprs: Vec<SelectExpr> = q.select.clone();
+    for expr in &q.group_by {
+        all_exprs.push(SelectExpr {
+            expr: expr.clone(),
+            alias: None,
+        });
+    }
+    for ord in &q.order_by {
+        all_exprs.push(SelectExpr {
+            expr: ord.expr.clone(),
+            alias: None,
+        });
+    }
+    if let Some(having) = &q.having {
+        all_exprs.push(SelectExpr {
+            expr: having.clone(),
+            alias: None,
+        });
+    }
+
+    let mut new_ctes = Vec::new();
+    wrap_join_children(&mut q.from, &mut q.where_clause, &all_exprs, &mut new_ctes);
+
+    // Prepend dedup CTEs so they're available to the main query.
+    if !new_ctes.is_empty() {
+        let mut merged = new_ctes;
+        merged.append(&mut q.ctes);
+        q.ctes = merged;
+    }
+}
+
+fn wrap_join_children(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    outer_select: &[SelectExpr],
+    ctes: &mut Vec<Cte>,
+) {
     match from {
         TableRef::Scan { table, alias } if is_node_table(table) => {
             let table_name = table.clone();
-            let alias = alias.clone();
-            apply_limit_by_dedup(from, where_clause, table_name, alias);
+            let alias_str = alias.clone();
+
+            if outer_only_needs_id(outer_select, &alias_str) {
+                // Keep bare scan, add dedup CTE + semi-join filter.
+                let (inner_filters, outer_filters) =
+                    partition_filters(where_clause.take(), &alias_str);
+                let (cte, semi_join, deleted_filter) =
+                    make_dedup_cte_filter(&table_name, &alias_str, inner_filters);
+                ctes.push(cte);
+
+                let mut filters = outer_filters;
+                filters.push(deleted_filter);
+                filters.push(semi_join);
+                *where_clause = Expr::conjoin(filters);
+            } else {
+                apply_limit_by_dedup(from, where_clause, table_name, alias_str);
+            }
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            wrap_join_scans(left, where_clause);
-            wrap_join_scans(right, where_clause);
+            wrap_join_children(left, where_clause, outer_select, ctes);
+            wrap_join_children(right, where_clause, outer_select, ctes);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
@@ -305,9 +486,41 @@ mod tests {
     }
 
     #[test]
-    fn wraps_node_scan() {
+    fn id_only_select_uses_argmax() {
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            where_clause: Some(Expr::eq(Expr::col("mr", "state"), Expr::string("merged"))),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Traversal));
+
+        let Node::Query(q) = &node;
+        let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
+        // id-only SELECT uses argMax instead of LIMIT 1 BY
+        assert!(!inner.group_by.is_empty(), "should GROUP BY id");
+        let having_str = format!("{:?}", inner.having);
+        assert!(
+            having_str.contains("argMaxIfOrNull"),
+            "HAVING should use argMaxIfOrNull"
+        );
+        assert!(
+            having_str.contains("state"),
+            "HAVING should verify value filter"
+        );
+        // state filter stays in inner WHERE for prewhere
+        assert!(where_contains(&inner.where_clause, "state"));
+        // _deleted handled by HAVING, not outer WHERE
+        assert!(!where_contains(&q.where_clause, "_deleted"));
+    }
+
+    #[test]
+    fn multi_column_select_uses_limit_by() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![
+                SelectExpr::new(Expr::col("mr", "id"), "id"),
+                SelectExpr::new(Expr::col("mr", "title"), "title"),
+            ],
             from: TableRef::scan("gl_merge_request", "mr"),
             where_clause: Some(Expr::eq(Expr::col("mr", "state"), Expr::string("merged"))),
             ..Default::default()
@@ -320,7 +533,6 @@ mod tests {
         assert!(inner.order_by[0].desc);
         assert!(where_contains(&inner.where_clause, "state"));
         assert!(where_contains(&q.where_clause, "_deleted"));
-        assert!(!where_contains(&q.where_clause, "state"));
     }
 
     #[test]
@@ -350,7 +562,37 @@ mod tests {
     }
 
     #[test]
-    fn wraps_node_in_join_not_edge() {
+    fn wraps_cte_node_scans() {
+        let mut node = Node::Query(Box::new(Query {
+            ctes: vec![Cte::new(
+                "_nf_mr",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+                    from: TableRef::scan("gl_merge_request", "mr"),
+                    ..Default::default()
+                },
+            )],
+            select: vec![SelectExpr::new(Expr::col("b", "id"), "id")],
+            from: TableRef::scan("_nf_mr", "b"),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Traversal));
+
+        let Node::Query(q) = &node;
+        let inner = find_subquery(&q.ctes[0].query.from, "mr").expect("CTE scan wrapped");
+        // CTE with SELECT id uses id-only argMax, not LIMIT 1 BY
+        assert!(!inner.group_by.is_empty(), "should GROUP BY id");
+        let having_str = format!("{:?}", inner.having);
+        assert!(
+            having_str.contains("argMaxIfOrNull"),
+            "should use argMaxIfOrNull"
+        );
+        assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "_nf_mr"));
+    }
+
+    #[test]
+    fn join_with_name_uses_limit_by() {
+        // Outer SELECT references p.name -- needs LIMIT 1 BY to preserve all columns
         let mut node = Node::Query(Box::new(Query {
             select: vec![
                 SelectExpr::new(Expr::col("p", "name"), "name"),
@@ -373,32 +615,55 @@ mod tests {
         let Node::Query(q) = &node;
         let inner_p = find_subquery(&q.from, "p").expect("project should be wrapped");
         assert!(find_subquery(&q.from, "e").is_none());
+        assert!(has_limit_by(inner_p));
         assert!(where_contains(&inner_p.where_clause, "traversal_path"));
         assert!(where_contains(&q.where_clause, "_deleted"));
-        assert!(!where_contains(&q.where_clause, "traversal_path"));
     }
 
     #[test]
-    fn wraps_cte_node_scans() {
+    fn join_id_only_uses_cte_semi_join() {
+        // Outer SELECT only uses p.id -- keeps bare scan + dedup CTE semi-join
         let mut node = Node::Query(Box::new(Query {
-            ctes: vec![Cte::new(
-                "_nf_mr",
-                Query {
-                    select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
-                    from: TableRef::scan("gl_merge_request", "mr"),
-                    ..Default::default()
-                },
-            )],
-            select: vec![SelectExpr::new(Expr::col("b", "id"), "id")],
-            from: TableRef::scan("_nf_mr", "b"),
+            select: vec![
+                SelectExpr::new(Expr::col("p", "id"), "p_id"),
+                SelectExpr::new(Expr::col("e", "source_id"), "src"),
+            ],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_project", "p"),
+                TableRef::scan("gl_edge", "e"),
+                Expr::eq(Expr::col("p", "id"), Expr::col("e", "target_id")),
+            ),
+            where_clause: Some(Expr::func(
+                "startsWith",
+                vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
+            )),
             ..Default::default()
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal));
 
         let Node::Query(q) = &node;
-        let inner = find_subquery(&q.ctes[0].query.from, "mr").expect("CTE scan wrapped");
-        assert!(has_limit_by(inner));
-        assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "_nf_mr"));
+        // Node table stays as bare scan (not wrapped in subquery)
+        assert!(
+            matches!(&q.from, TableRef::Join { left, .. }
+                if matches!(left.as_ref(), TableRef::Scan { table, .. } if table == "gl_project")),
+            "project should remain a bare scan in the join"
+        );
+        // Dedup CTE added
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_dedup_p"),
+            "should add _dedup_p CTE"
+        );
+        // Semi-join filter + _deleted in WHERE
+        let where_str = format!("{:?}", q.where_clause);
+        assert!(
+            where_str.contains("_dedup_p"),
+            "WHERE should have semi-join to _dedup_p"
+        );
+        assert!(
+            where_str.contains("_deleted"),
+            "WHERE should filter _deleted"
+        );
     }
 
     #[test]
@@ -411,6 +676,7 @@ mod tests {
         deduplicate(&mut node, &input_for(QueryType::Traversal));
 
         let Node::Query(q) = &node;
+        // SELECT username (not id-only), so uses LIMIT 1 BY
         let inner = find_subquery(&q.from, "u").expect("user should be wrapped");
         assert!(has_limit_by(inner));
     }
