@@ -74,13 +74,15 @@ mise query:profile -- -t '1/' --explain @fixtures/queries/my_query.json
 
 By default output is pretty-printed JSON to stdout. Use `--format json` for compact JSON.
 
-Write results to a file with `--output` (`-o`):
+Write results to a file with `--output` (`-o`). Parent directories are created automatically:
 
 ```bash
-mise query:profile -- -t '1/' --explain -o results.json @fixtures/queries/my_query.json
+mise query:profile -- -t '1/' --explain -o fixtures/profiling/results.json @fixtures/queries/my_query.json
 ```
 
 When `--output` is used, the profiler writes the JSON file and prints the path to stderr. When omitted, results go to stdout. Progress and errors always go to stderr, so they never mix with JSON output.
+
+Result files go in `fixtures/profiling/` (gitignored).
 
 ### Workflow: run, wait, then analyze
 
@@ -88,10 +90,10 @@ Use `--output` so results are written to disk when the run finishes, then read t
 
 ```bash
 mise query:profile -- -t '1/' --explain --profile \
-  -o profiling_results.json \
+  -o fixtures/profiling/showcase.json \
   @fixtures/queries/optimization_showcase.json
 
-# Then read profiling_results.json to analyze
+# Then read fixtures/profiling/showcase.json to analyze
 ```
 
 ### Output structure
@@ -158,7 +160,7 @@ Write multi-query results to a file:
 
 ```bash
 mise query:profile -- -t '1/' --explain \
-  -o showcase_results.json \
+  -o fixtures/profiling/showcase.json \
   @fixtures/queries/optimization_showcase.json
 ```
 
@@ -166,11 +168,47 @@ Progress is printed to stderr (`[3/25] query_name...`). Output is a JSON object 
 
 ## A/B comparison
 
-1. Run the query and save output: `mise query:profile -- -t '1/' --explain -o before.json QUERY`
+1. Run the query and save output: `mise query:profile -- -t '1/' --explain -o fixtures/profiling/before.json QUERY`
 2. Make your optimizer change
 3. Rebuild: `mise build`
-4. Run the same query: `mise query:profile -- -t '1/' --explain -o after.json QUERY`
-5. Compare `read_rows` and `elapsed_ns` between the two files
+4. Run the same query: `mise query:profile -- -t '1/' --explain -o fixtures/profiling/after.json QUERY`
+5. Diff the results: `mise query:diff -- fixtures/profiling/before.json fixtures/profiling/after.json --labels before,after`
+
+## Diffing result files
+
+`mise query:diff` compares two or more profiler result files and produces a markdown table.
+
+Two-way comparison (default metric is `read_rows`):
+
+```bash
+mise query:diff -- fixtures/profiling/baseline.json fixtures/profiling/dedup.json --labels baseline,dedup
+```
+
+Compare memory usage:
+
+```bash
+mise query:diff -- fixtures/profiling/baseline.json fixtures/profiling/dedup.json --labels baseline,dedup --metric memory
+```
+
+All metrics in separate tables:
+
+```bash
+mise query:diff -- fixtures/profiling/baseline.json fixtures/profiling/dedup.json --labels baseline,dedup --all-metrics
+```
+
+N-way comparison (3+ files):
+
+```bash
+mise query:diff -- fixtures/profiling/v1.json fixtures/profiling/v2.json fixtures/profiling/v3.json --labels v1,v2,v3
+```
+
+CSV output for spreadsheets:
+
+```bash
+mise query:diff -- fixtures/profiling/baseline.json fixtures/profiling/dedup.json --format csv
+```
+
+Available metrics: `read_rows` (default), `read_bytes`, `memory`, `elapsed_ms`.
 
 ## Things to know
 
