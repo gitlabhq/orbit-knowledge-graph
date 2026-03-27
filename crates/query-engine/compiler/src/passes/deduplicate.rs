@@ -117,12 +117,14 @@ fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec
 
 /// Wrap column references in `argMaxIfOrNull(col, _version, _deleted = false)`.
 fn wrap_in_argmax_if(expr: &Expr, alias: &str) -> Expr {
-    let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
     match expr {
-        Expr::Column { table, column, .. } if table == alias && column != "id" => Expr::func(
-            "argMaxIfOrNull",
-            vec![expr.clone(), Expr::col(alias, VERSION_COLUMN), not_deleted],
-        ),
+        Expr::Column { table, column, .. } if table == alias && column != "id" => {
+            let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
+            Expr::func(
+                "argMaxIfOrNull",
+                vec![expr.clone(), Expr::col(alias, VERSION_COLUMN), not_deleted],
+            )
+        }
         Expr::BinaryOp { op, left, right } => Expr::BinaryOp {
             op: *op,
             left: Box::new(wrap_in_argmax_if(left, alias)),

@@ -5,7 +5,7 @@
 //! # Pipeline
 //!
 //! ```text
-//! JSON → Schema Validate → Parse → Validate → Lower → Optimize → Enforce → Security → Check → Codegen → SQL
+//! JSON → Schema Validate → Parse → Validate → Lower → Optimize → Enforce → Deduplicate → Security → Check → Codegen → SQL
 //! ```
 //!
 //! # Example
@@ -65,8 +65,8 @@ pub use pipeline::{
 
 // Re-export env, state, and capability traits.
 pub use passes::{
-    CheckPass, CodegenPass, DuckDbCodegenPass, EnforcePass, HydrationCodegenPass, LowerPass,
-    NormalizePass, OptimizePass, SecurityPass, ValidatePass,
+    CheckPass, CodegenPass, DeduplicatePass, DuckDbCodegenPass, EnforcePass,
+    HydrationCodegenPass, LowerPass, NormalizePass, OptimizePass, SecurityPass, ValidatePass,
 };
 pub use pipelines::{
     DuckDbState, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx,
@@ -101,7 +101,7 @@ use std::sync::Arc;
 /// for redaction, hydration plan, and the validated input.
 ///
 /// Runs the full ClickHouse compilation pipeline:
-/// `JSON → Validate → Normalize → Lower → Optimize → Enforce → Security → Check → Codegen`
+/// `JSON → Validate → Normalize → Lower → Optimize → Enforce → Deduplicate → Security → Check → Codegen`
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     json_input: &str,
