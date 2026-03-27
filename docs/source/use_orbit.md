@@ -66,7 +66,7 @@ Use the Model Context Protocol (MCP) server to integrate external AI tools like 
 
 GitLab uses `mcp-remote` to establish secure connections between Orbit and AI tools running on your local machine. A known issue can cause the connection to fail with a `403 incorrect_scope` error. To resolve this issue, you must manually register the client before establishing the connection.
 
-#### Manually register the client
+#### Step 1: Manually register the client
 
 To register the client:
 
@@ -77,7 +77,6 @@ To register the client:
    ```
 
 1. In your browser, review and approve the authorization request.
-
    The `mcp-remote` command fails to establish a connection and displays a `403 incorrect_scope` error. It creates a cache directory at `~/.mcp-auth/mcp-remote-<version>/` with two files:
    - `<hash>-_client_info.json`
    - `<hash>_tokens.json`
@@ -93,12 +92,11 @@ To register the client:
      --url "https://gitlab.com/oauth/register"
    ```
 
-1. From the response, save:
-   - The value of `client_id`
-   - The value of `client_id_issued_at`
-   - Verify that `scope` is set to `mcp_orbit`
+1. In the response, verify that `scope` is set to `mcp_orbit` and save the values of:
+   - `client_id`
+   - `client_id_issued_at`
 
-1. Edit `~/.mcp-auth/mcp-remote-<version>/<hash>_client_info.json` and replace its content with:
+1. Replace the content of `~/.mcp-auth/mcp-remote-<version>/<hash>_client_info.json` with:
 
    ```json
    {
@@ -125,15 +123,13 @@ To register the client:
    ```
 
 1. In your browser, review and approve the authorization request.
-
    The connection should now succeed.
 
-#### Configure MCP
+#### Step 2: Configure MCP
 
 To connect to the Orbit MCP server:
 
 - Follow the instructions to [connect a client to the GitLab MCP server](https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server/#connect-a-client-to-the-gitlab-mcp-server).
-
   Use the URL `https://gitlab.com/api/v4/orbit/mcp`.
 
 You can now start a chat with your AI agent. For a list of available MCP tools, see [Orbit MCP tools](tools.md).
