@@ -91,14 +91,23 @@ impl HydrationStage {
                 DynamicColumnMode::All => node
                     .fields
                     .iter()
-                    .filter(|f| f.name != "_version" && f.name != "_deleted")
+                    .filter(|f| !f.is_virtual() && f.name != "_version" && f.name != "_deleted")
                     .map(|f| f.name.clone())
                     .collect::<Vec<_>>(),
                 DynamicColumnMode::Default => {
                     if node.default_columns.is_empty() {
                         continue;
                     }
-                    node.default_columns.clone()
+                    node.default_columns
+                        .iter()
+                        .filter(|col| {
+                            node.fields
+                                .iter()
+                                .find(|f| &f.name == *col)
+                                .is_none_or(|f| !f.is_virtual())
+                        })
+                        .cloned()
+                        .collect()
                 }
             };
 

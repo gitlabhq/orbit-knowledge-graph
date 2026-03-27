@@ -77,7 +77,7 @@ pub use pipelines::{
 pub use passes::check::check_ast;
 pub use passes::codegen::{
     CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery,
-    SqlDialect, codegen,
+    SqlDialect, VirtualColumnRequest, codegen,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use passes::hydrate::generate_hydration_plan;

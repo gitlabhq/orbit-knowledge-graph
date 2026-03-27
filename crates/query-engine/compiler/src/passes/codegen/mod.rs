@@ -59,9 +59,24 @@ pub struct HydrationTemplate {
     pub node_alias: String,
     /// ClickHouse table to query (resolved from ontology at compile time).
     pub destination_table: String,
-    /// Columns to fetch. Resolved at compile time from the user's explicit
-    /// column selection or the ontology's default_columns for the entity type.
+    /// Column-backed columns to fetch from ClickHouse. Resolved at compile time
+    /// from the user's explicit column selection or the ontology's default_columns,
+    /// with virtual columns filtered out.
     pub columns: Vec<String>,
+    /// Virtual columns that need to be resolved from remote services after
+    /// ClickHouse hydration completes.
+    pub virtual_columns: Vec<VirtualColumnRequest>,
+}
+
+/// A column that must be resolved from a remote service rather than ClickHouse.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VirtualColumnRequest {
+    /// The column name as the user sees it (e.g. "content").
+    pub column_name: String,
+    /// Logical service name (e.g. "gitaly").
+    pub service: String,
+    /// Logical operation name within the service (e.g. "blob_content").
+    pub lookup: String,
 }
 
 impl ParameterizedQuery {

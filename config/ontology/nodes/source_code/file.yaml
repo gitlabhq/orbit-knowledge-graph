@@ -65,3 +65,11 @@ properties:
     source: language
     nullable: false
     description: "Programming language of the file (e.g., ruby, python, java)."
+
+  content:
+    type: string
+    virtual:
+      service: gitaly
+      lookup: blob_content
+    nullable: true
+    description: "Raw source text of the file. Resolved from Gitaly at query time."

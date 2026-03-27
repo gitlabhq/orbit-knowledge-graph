@@ -48,35 +48,78 @@
       "default": "int"
     },
 
-    "propertyDefinition": {
+    "virtualSourceDefinition": {
       "type": "object",
-      "description": "Definition of a node property/field.",
+      "description": "Configuration for a field resolved from a remote service at query time.",
       "properties": {
-        "type": { "$ref": "#/definitions/propertyType" },
-        "source": {
+        "service": {
           "type": "string",
-          "description": "Source column name in the database table."
+          "description": "Logical service name (e.g. 'gitaly')."
         },
-        "nullable": {
-          "type": "boolean",
-          "description": "Whether this field can be null.",
-          "default": false
-        },
-        "description": {
+        "lookup": {
           "type": "string",
-          "description": "Human-readable description of the property."
-        },
-        "values": {
-          "$ref": "#/definitions/enumValues",
-          "description": "For enum types, maps integer values to string labels."
-        },
-        "enum_type": {
-          "$ref": "#/definitions/enumType",
-          "description": "For enum types, specifies how the enum is stored in the source database."
+          "description": "Logical operation name (e.g. 'blob_content')."
         }
       },
-      "required": ["type", "source"],
+      "required": ["service", "lookup"],
       "additionalProperties": false
+    },
+
+    "propertyDefinition": {
+      "description": "Definition of a node property/field. Exactly one of 'source' (column-backed) or 'virtual' (remote-resolved) must be present.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Column-backed property read from ClickHouse.",
+          "properties": {
+            "type": { "$ref": "#/definitions/propertyType" },
+            "source": {
+              "type": "string",
+              "description": "Source column name in the database table."
+            },
+            "nullable": {
+              "type": "boolean",
+              "description": "Whether this field can be null.",
+              "default": false
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable description of the property."
+            },
+            "values": {
+              "$ref": "#/definitions/enumValues",
+              "description": "For enum types, maps integer values to string labels."
+            },
+            "enum_type": {
+              "$ref": "#/definitions/enumType",
+              "description": "For enum types, specifies how the enum is stored in the source database."
+            }
+          },
+          "required": ["type", "source"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "Virtual property resolved from a remote service at query time.",
+          "properties": {
+            "type": { "$ref": "#/definitions/propertyType" },
+            "virtual": {
+              "$ref": "#/definitions/virtualSourceDefinition"
+            },
+            "nullable": {
+              "type": "boolean",
+              "description": "Whether this field can be null.",
+              "default": false
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable description of the property."
+            }
+          },
+          "required": ["type", "virtual"],
+          "additionalProperties": false
+        }
+      ]
     },
 
     "edgeMappingDefinition": {

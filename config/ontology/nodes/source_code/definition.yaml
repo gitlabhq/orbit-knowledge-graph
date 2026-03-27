@@ -89,3 +89,11 @@ properties:
     source: end_byte
     nullable: false
     description: "Ending byte offset of the definition in the file."
+
+  content:
+    type: string
+    virtual:
+      service: gitaly
+      lookup: blob_content
+    nullable: true
+    description: "Source text of the definition. Resolved from Gitaly at query time using start_byte/end_byte."
