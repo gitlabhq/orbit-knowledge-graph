@@ -206,9 +206,11 @@ fn enforce_return_columns(
         let id_col = redaction_node.id_column.clone();
         let type_col = redaction_node.type_column.clone();
 
-        // Neighbors emit _gkg_* columns directly in the lowerer per UNION arm.
-        let already_emitted = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
-        if already_emitted {
+        // Neighbors emit _gkg_* columns directly in the lowerer per UNION arm
+        // because the center edge column differs per direction.
+        if input.query_type == QueryType::Neighbors
+            && q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col))
+        {
             continue;
         }
 
