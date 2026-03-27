@@ -137,9 +137,9 @@ where
     const NAME: &'static str = "deduplicate";
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
-        let query_type = state.input()?.query_type;
+        let input = state.input()?.clone();
         let node = state.node_mut()?;
-        deduplicate::deduplicate(node, query_type);
+        deduplicate::deduplicate(node, &input);
         Ok(())
     }
 }
