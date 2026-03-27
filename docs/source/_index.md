@@ -95,7 +95,7 @@ then writes the unified property graph to ClickHouse. Users and AI agents can qu
 ## Performance
 
 The Orbit indexer runs in a separate Kubernetes cluster and does not
-impact the performance of your instance.  The indexer job completes in
+impact the performance of your instance. The indexer job completes in
 seconds, even for large groups.
 
 Changes to a group, project, or repository are reindexed automatically.
