@@ -57,6 +57,11 @@ pub struct HydrationTemplate {
     /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
     /// results back to the base query's `_gkg_{alias}_id` / `_gkg_{alias}_type` columns.
     pub node_alias: String,
+    /// ClickHouse table to query (resolved from ontology at compile time).
+    pub destination_table: String,
+    /// Columns to fetch. Resolved at compile time from the user's explicit
+    /// column selection or the ontology's default_columns for the entity type.
+    pub columns: Vec<String>,
 }
 
 impl ParameterizedQuery {

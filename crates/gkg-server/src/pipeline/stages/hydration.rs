@@ -42,8 +42,6 @@ impl HydrationStage {
         templates: &[HydrationTemplate],
         query_result: &QueryResult,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let base_input = &ctx.compiled()?.input;
-
         let mut nodes = Vec::new();
         let mut total_ids: usize = 0;
 
@@ -53,39 +51,12 @@ impl HydrationStage {
                 continue;
             }
 
-            let node = ctx
-                .ontology
-                .get_node(&template.entity_type)
-                .ok_or_else(|| {
-                    PipelineError::Execution(format!(
-                        "entity type not found in ontology: {}",
-                        template.entity_type
-                    ))
-                })?;
-
-            // Use columns from the original input node (user-specified) rather
-            // than ontology defaults, so explicit column requests like
-            // ["username", "user_type"] are preserved.
-            let columns = base_input
-                .nodes
-                .iter()
-                .find(|n| n.id == template.node_alias)
-                .and_then(|n| match &n.columns {
-                    Some(ColumnSelection::List(cols)) => Some(cols.clone()),
-                    _ => None,
-                })
-                .unwrap_or_else(|| node.default_columns.clone());
-
-            if columns.is_empty() {
-                continue;
-            }
-
             total_ids += ids.len();
             nodes.push(InputNode {
                 id: HYDRATION_NODE_ALIAS.to_string(),
                 entity: Some(template.entity_type.clone()),
-                table: Some(node.destination_table.clone()),
-                columns: Some(ColumnSelection::List(columns)),
+                table: Some(template.destination_table.clone()),
+                columns: Some(ColumnSelection::List(template.columns.clone())),
                 node_ids: ids,
                 ..InputNode::default()
             });
