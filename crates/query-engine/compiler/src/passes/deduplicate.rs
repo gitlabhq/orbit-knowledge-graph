@@ -99,23 +99,13 @@ fn dispatch(q: &mut Query, input: &Input) {
     }
 }
 
+fn not_deleted(alias: &str) -> Expr {
+    Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Predicate helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Check if an expression only references columns from `alias`.
-fn references_only(expr: &Expr, alias: &str) -> bool {
-    match expr {
-        Expr::Column { table, .. } => table == alias,
-        Expr::Literal(_) | Expr::Param { .. } | Expr::Star => true,
-        Expr::FuncCall { args, .. } => args.iter().all(|a| references_only(a, alias)),
-        Expr::BinaryOp { left, right, .. } => {
-            references_only(left, alias) && references_only(right, alias)
-        }
-        Expr::UnaryOp { expr, .. } => references_only(expr, alias),
-        Expr::InSubquery { expr, .. } => references_only(expr, alias),
-    }
-}
 
 fn is_deleted_filter(expr: &Expr) -> bool {
     matches!(
@@ -136,7 +126,7 @@ fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec
     let mut outer = vec![];
 
     for c in conjuncts {
-        if !is_deleted_filter(&c) && references_only(&c, alias) {
+        if !is_deleted_filter(&c) && c.references_only(alias) {
             inner.push(c);
         } else {
             outer.push(c);
@@ -153,13 +143,14 @@ fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec
 /// Wrap column references in `argMaxIfOrNull(col, _version, _deleted = false)`.
 fn wrap_in_argmax_if(expr: &Expr, alias: &str) -> Expr {
     match expr {
-        Expr::Column { table, column, .. } if table == alias && column != "id" => {
-            let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
-            Expr::func(
-                "argMaxIfOrNull",
-                vec![expr.clone(), Expr::col(alias, VERSION_COLUMN), not_deleted],
-            )
-        }
+        Expr::Column { table, column, .. } if table == alias && column != "id" => Expr::func(
+            "argMaxIfOrNull",
+            vec![
+                expr.clone(),
+                Expr::col(alias, VERSION_COLUMN),
+                not_deleted(alias),
+            ],
+        ),
         Expr::BinaryOp { op, left, right } => Expr::BinaryOp {
             op: *op,
             left: Box::new(wrap_in_argmax_if(left, alias)),
@@ -189,7 +180,6 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
 
     q.group_by.push(Expr::col(alias, "id"));
 
-    let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
     let mut having_parts = vec![Expr::func(
         "isNotNull",
         vec![Expr::func(
@@ -197,7 +187,7 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
             vec![
                 Expr::col(alias, "id"),
                 Expr::col(alias, VERSION_COLUMN),
-                not_deleted,
+                not_deleted(alias),
             ],
         )],
     )];
@@ -205,7 +195,7 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
     // Value filters duplicated into HAVING for correctness.
     if let Some(where_expr) = &q.where_clause {
         for conjunct in where_expr.clone().flatten_and() {
-            if references_only(&conjunct, alias) {
+            if conjunct.references_only(alias) {
                 having_parts.push(wrap_in_argmax_if(&conjunct, alias));
             }
         }
@@ -214,7 +204,7 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
     q.having = Expr::conjoin(having_parts);
 
     for ord in q.order_by.iter_mut() {
-        let refs_alias = references_only(&ord.expr, alias)
+        let refs_alias = ord.expr.references_only(alias)
             && !matches!(&ord.expr, Expr::Column { column, .. } if column == "id");
         if refs_alias {
             ord.expr = wrap_in_argmax_if(&ord.expr, alias);
@@ -261,8 +251,7 @@ fn wrap_scan_with_limit_by(
     let (mut inner_filters, mut outer_filters) = partition_filters(where_clause.take(), &alias);
     inner_filters.extend(extra_inner_filter);
 
-    let deleted_filter = Expr::eq(Expr::col(&alias, DELETED_COLUMN), Expr::lit(false));
-    outer_filters.insert(0, deleted_filter);
+    outer_filters.insert(0, not_deleted(&alias));
     *where_clause = Expr::conjoin(outer_filters);
     *from = make_dedup_subquery(table_name, &alias, inner_filters);
 }
