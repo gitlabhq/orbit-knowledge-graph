@@ -189,7 +189,7 @@ fn enforce_return_columns(
     let select_len_before = q.select.len();
     // Neighbors emit _gkg_* columns directly in the lowerer (per UNION arm)
     // because the center edge column differs per direction.
-    let is_edge_centric = matches!(
+    let globally_edge_centric = matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Neighbors
     );
@@ -219,7 +219,12 @@ fn enforce_return_columns(
 
         let needs_separate_pk = node.redaction_id_column != DEFAULT_PRIMARY_KEY;
 
-        if is_edge_centric {
+        // Use edge-centric path if the query type is globally edge-centric,
+        // or if this specific node has an edge column mapping (e.g. edge-only
+        // aggregation targets).
+        let node_is_edge_centric = globally_edge_centric || node_edge_col.contains_key(&node.id);
+
+        if node_is_edge_centric {
             let (edge_alias, edge_col) = node_edge_col.get(&node.id).ok_or_else(|| {
                 QueryError::Enforcement(format!(
                     "node '{}' has no edge mapping in node_edge_col",
