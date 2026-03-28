@@ -102,6 +102,15 @@ impl HydrationStage {
                     .resolve_batch(&vcr.lookup, &prop_refs, org_id)
                     .await?;
 
+                if results.len() != prop_refs.len() {
+                    return Err(PipelineError::ContentResolution(format!(
+                        "service '{}' returned {} results for {} rows",
+                        vcr.service,
+                        results.len(),
+                        prop_refs.len(),
+                    )));
+                }
+
                 for (i, value) in results.into_iter().enumerate() {
                     if let Some(value) = value
                         && let Some(props) = property_map.get_mut(&entity_keys[i])
