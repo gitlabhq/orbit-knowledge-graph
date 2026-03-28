@@ -26,6 +26,7 @@ struct QueryPipelineMetrics {
     security_rejected: Counter<u64>,
     execution_failed: Counter<u64>,
     authorization_failed: Counter<u64>,
+    content_resolution_failed: Counter<u64>,
     streaming_failed: Counter<u64>,
 }
 
@@ -94,6 +95,10 @@ impl QueryPipelineMetrics {
                 .u64_counter("gkg.query.pipeline.error.authorization_failed")
                 .with_description("Authorization exchange with Rails failed")
                 .build(),
+            content_resolution_failed: meter
+                .u64_counter("gkg.query.pipeline.error.content_resolution_failed")
+                .with_description("Virtual column resolution from remote service failed")
+                .build(),
             streaming_failed: meter
                 .u64_counter("gkg.query.pipeline.error.streaming_failed")
                 .with_description("Streaming channel unavailable during authorization")
@@ -108,7 +113,9 @@ fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {
         PipelineError::Compile(_) => None,
         PipelineError::Execution(_) => Some((&METRICS.execution_failed, "execution")),
         PipelineError::Authorization(_) => Some((&METRICS.authorization_failed, "authorization")),
-        PipelineError::ContentResolution(_) => None,
+        PipelineError::ContentResolution(_) => {
+            Some((&METRICS.content_resolution_failed, "content_resolution"))
+        }
         PipelineError::Streaming(_) => Some((&METRICS.streaming_failed, "streaming")),
         PipelineError::Custom(_) => None,
     }

@@ -69,6 +69,25 @@ impl HydrationStage {
         let org_id = ctx.security_context()?.org_id;
 
         for &(entity_type, virtual_columns) in entity_virtual_columns {
+            // Collect matching keys once per entity type — avoids rescanning
+            // property_map for each virtual column.
+            let entity_keys: Vec<(String, i64)> = property_map
+                .keys()
+                .filter(|(etype, _)| etype == entity_type)
+                .cloned()
+                .collect();
+
+            if entity_keys.is_empty() {
+                continue;
+            }
+
+            if entity_keys.len() > MAX_VIRTUAL_BATCH_SIZE {
+                return Err(PipelineError::ContentResolution(format!(
+                    "virtual column batch size {} exceeds limit {MAX_VIRTUAL_BATCH_SIZE}",
+                    entity_keys.len(),
+                )));
+            }
+
             for vcr in virtual_columns {
                 let service = registry.get(&vcr.service).ok_or_else(|| {
                     PipelineError::ContentResolution(format!(
@@ -77,37 +96,23 @@ impl HydrationStage {
                     ))
                 })?;
 
-                let mut entity_keys: Vec<(String, i64)> = Vec::new();
-                let mut prop_refs: Vec<&HashMap<String, ColumnValue>> = Vec::new();
-
-                for ((etype, id), props) in property_map.iter() {
-                    if etype == entity_type {
-                        entity_keys.push((etype.clone(), *id));
-                        prop_refs.push(props);
-                    }
-                }
-
-                if prop_refs.is_empty() {
-                    continue;
-                }
-
-                if prop_refs.len() > MAX_VIRTUAL_BATCH_SIZE {
-                    return Err(PipelineError::ContentResolution(format!(
-                        "virtual column batch size {} exceeds limit {MAX_VIRTUAL_BATCH_SIZE}",
-                        prop_refs.len(),
-                    )));
-                }
+                // Build prop_refs scoped to this iteration so the immutable
+                // borrows are dropped before the mutable merge below.
+                let prop_refs: Vec<&HashMap<String, ColumnValue>> = entity_keys
+                    .iter()
+                    .filter_map(|k| property_map.get(k))
+                    .collect();
 
                 let results = service
                     .resolve_batch(&vcr.lookup, &prop_refs, org_id)
                     .await?;
 
-                if results.len() != prop_refs.len() {
+                if results.len() != entity_keys.len() {
                     return Err(PipelineError::ContentResolution(format!(
                         "service '{}' returned {} results for {} rows",
                         vcr.service,
                         results.len(),
-                        prop_refs.len(),
+                        entity_keys.len(),
                     )));
                 }
 

@@ -60,6 +60,11 @@ impl GitalyContentService {
         let start_byte = props.get("start_byte").and_then(|v| v.as_int64().copied());
         let end_byte = props.get("end_byte").and_then(|v| v.as_int64().copied());
 
+        match (start_byte, end_byte) {
+            (Some(s), Some(e)) if s < 0 || e < 0 || s > e => return None,
+            _ => {}
+        }
+
         Some(GitalyBlobRequest {
             project_id,
             branch,
@@ -140,6 +145,38 @@ mod tests {
 
         let req = GitalyContentService::build_request(&props, 1).unwrap();
         assert_eq!(req.file_path, "new.rs");
+    }
+
+    #[test]
+    fn build_request_rejects_negative_start_byte() {
+        let props = definition_props(-1, 200);
+        assert!(GitalyContentService::build_request(&props, 9970).is_none());
+    }
+
+    #[test]
+    fn build_request_rejects_start_after_end() {
+        let props = definition_props(200, 100);
+        assert!(GitalyContentService::build_request(&props, 9970).is_none());
+    }
+
+    #[test]
+    fn build_request_accepts_equal_start_end() {
+        let props = definition_props(100, 100);
+        assert!(GitalyContentService::build_request(&props, 9970).is_some());
+    }
+
+    fn definition_props(start: i64, end: i64) -> HashMap<String, ColumnValue> {
+        let mut props = HashMap::new();
+        props.insert("project_id".into(), ColumnValue::Int64(42));
+        props.insert("branch".into(), ColumnValue::String("main".into()));
+        props.insert("file_path".into(), ColumnValue::String("src/lib.rs".into()));
+        props.insert(
+            "traversal_path".into(),
+            ColumnValue::String("9970/123/".into()),
+        );
+        props.insert("start_byte".into(), ColumnValue::Int64(start));
+        props.insert("end_byte".into(), ColumnValue::Int64(end));
+        props
     }
 
     #[tokio::test]
