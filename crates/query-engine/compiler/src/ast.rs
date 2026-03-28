@@ -423,7 +423,7 @@ impl Expr {
                 left.references_only(alias) && right.references_only(alias)
             }
             Expr::UnaryOp { expr, .. } => expr.references_only(alias),
-            Expr::InSubquery { .. } => false,
+            Expr::InSubquery { expr, .. } => expr.references_only(alias),
         }
     }
 }
