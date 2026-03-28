@@ -99,6 +99,10 @@ fn dispatch(q: &mut Query, input: &Input) {
     }
 }
 
+fn not_deleted(alias: &str) -> Expr {
+    Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Predicate helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,13 +143,14 @@ fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec
 /// Wrap column references in `argMaxIfOrNull(col, _version, _deleted = false)`.
 fn wrap_in_argmax_if(expr: &Expr, alias: &str) -> Expr {
     match expr {
-        Expr::Column { table, column, .. } if table == alias && column != "id" => {
-            let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
-            Expr::func(
-                "argMaxIfOrNull",
-                vec![expr.clone(), Expr::col(alias, VERSION_COLUMN), not_deleted],
-            )
-        }
+        Expr::Column { table, column, .. } if table == alias && column != "id" => Expr::func(
+            "argMaxIfOrNull",
+            vec![
+                expr.clone(),
+                Expr::col(alias, VERSION_COLUMN),
+                not_deleted(alias),
+            ],
+        ),
         Expr::BinaryOp { op, left, right } => Expr::BinaryOp {
             op: *op,
             left: Box::new(wrap_in_argmax_if(left, alias)),
@@ -175,7 +180,6 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
 
     q.group_by.push(Expr::col(alias, "id"));
 
-    let not_deleted = Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::lit(false));
     let mut having_parts = vec![Expr::func(
         "isNotNull",
         vec![Expr::func(
@@ -183,7 +187,7 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
             vec![
                 Expr::col(alias, "id"),
                 Expr::col(alias, VERSION_COLUMN),
-                not_deleted,
+                not_deleted(alias),
             ],
         )],
     )];
@@ -247,8 +251,7 @@ fn wrap_scan_with_limit_by(
     let (mut inner_filters, mut outer_filters) = partition_filters(where_clause.take(), &alias);
     inner_filters.extend(extra_inner_filter);
 
-    let deleted_filter = Expr::eq(Expr::col(&alias, DELETED_COLUMN), Expr::lit(false));
-    outer_filters.insert(0, deleted_filter);
+    outer_filters.insert(0, not_deleted(&alias));
     *where_clause = Expr::conjoin(outer_filters);
     *from = make_dedup_subquery(table_name, &alias, inner_filters);
 }
