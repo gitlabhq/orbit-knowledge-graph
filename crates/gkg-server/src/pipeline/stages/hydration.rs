@@ -25,6 +25,8 @@ use query_engine::compiler::constants::{
     HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
 };
 
+use crate::content::{MAX_VIRTUAL_BATCH_SIZE, VirtualServiceRegistry};
+
 type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
 
 #[derive(Clone)]
@@ -37,16 +39,79 @@ impl HydrationStage {
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }
 
-    /// Resolve virtual columns from remote services (e.g. Gitaly) and merge
-    /// the results into the property map. Currently a no-op — all virtual
-    /// fields are `disabled: true` in the ontology and excluded from plans.
+    /// Resolve virtual columns from remote services and merge results into
+    /// the property map. Dispatches to the appropriate [`VirtualService`]
+    /// by the `service` name declared in the ontology.
     ///
-    /// When #379 lands, this will dispatch to the appropriate service client
-    /// based on `VirtualColumnRequest.service` and `lookup`.
-    async fn resolve_virtual_columns<'a>(
-        _requests: impl Iterator<Item = &'a VirtualColumnRequest>,
-        _property_map: &mut PropertyMap,
+    /// Currently a no-op in practice because all virtual fields are
+    /// `disabled: true` in the ontology. The full pipeline is wired up so
+    /// that enabling a virtual field only requires removing the `disabled`
+    /// flag and registering the service in [`VirtualServiceRegistry`].
+    async fn resolve_virtual_columns(
+        ctx: &QueryPipelineContext,
+        entity_virtual_columns: &[(&str, &[VirtualColumnRequest])],
+        property_map: &mut PropertyMap,
     ) -> Result<(), PipelineError> {
+        let has_work = entity_virtual_columns.iter().any(|(_, vc)| !vc.is_empty());
+        if !has_work {
+            return Ok(());
+        }
+
+        let registry = ctx
+            .server_extensions
+            .get::<VirtualServiceRegistry>()
+            .ok_or_else(|| {
+                PipelineError::ContentResolution(
+                    "virtual columns requested but no VirtualServiceRegistry available".into(),
+                )
+            })?;
+
+        let org_id = ctx.security_context()?.org_id;
+
+        for &(entity_type, virtual_columns) in entity_virtual_columns {
+            for vcr in virtual_columns {
+                let service = registry.get(&vcr.service).ok_or_else(|| {
+                    PipelineError::ContentResolution(format!(
+                        "no virtual service registered for '{}'",
+                        vcr.service,
+                    ))
+                })?;
+
+                let mut entity_keys: Vec<(String, i64)> = Vec::new();
+                let mut prop_refs: Vec<&HashMap<String, ColumnValue>> = Vec::new();
+
+                for ((etype, id), props) in property_map.iter() {
+                    if etype == entity_type {
+                        entity_keys.push((etype.clone(), *id));
+                        prop_refs.push(props);
+                    }
+                }
+
+                if prop_refs.is_empty() {
+                    continue;
+                }
+
+                if prop_refs.len() > MAX_VIRTUAL_BATCH_SIZE {
+                    return Err(PipelineError::ContentResolution(format!(
+                        "virtual column batch size {} exceeds limit {MAX_VIRTUAL_BATCH_SIZE}",
+                        prop_refs.len(),
+                    )));
+                }
+
+                let results = service
+                    .resolve_batch(&vcr.lookup, &prop_refs, org_id)
+                    .await?;
+
+                for (i, value) in results.into_iter().enumerate() {
+                    if let Some(value) = value
+                        && let Some(props) = property_map.get_mut(&entity_keys[i])
+                    {
+                        props.insert(vcr.column_name.clone(), value);
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -394,11 +459,11 @@ impl PipelineStage for HydrationStage {
                     .0
                     .extend(executions);
                 let mut property_map = property_map;
-                Self::resolve_virtual_columns(
-                    templates.iter().flat_map(|t| &t.virtual_columns),
-                    &mut property_map,
-                )
-                .await?;
+                let entity_virtuals: Vec<(&str, &[VirtualColumnRequest])> = templates
+                    .iter()
+                    .map(|t| (t.entity_type.as_str(), t.virtual_columns.as_slice()))
+                    .collect();
+                Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
 
                 if !property_map.is_empty() {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
@@ -425,11 +490,11 @@ impl PipelineStage for HydrationStage {
                         .0
                         .extend(executions);
                     let mut property_map = property_map;
-                    Self::resolve_virtual_columns(
-                        entity_specs.iter().flat_map(|s| &s.virtual_columns),
-                        &mut property_map,
-                    )
-                    .await?;
+                    let entity_virtuals: Vec<(&str, &[VirtualColumnRequest])> = entity_specs
+                        .iter()
+                        .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
+                        .collect();
+                    Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
 
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
                 }

@@ -108,6 +108,7 @@ fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {
         PipelineError::Compile(_) => None,
         PipelineError::Execution(_) => Some((&METRICS.execution_failed, "execution")),
         PipelineError::Authorization(_) => Some((&METRICS.authorization_failed, "authorization")),
+        PipelineError::ContentResolution(_) => None,
         PipelineError::Streaming(_) => Some((&METRICS.streaming_failed, "streaming")),
         PipelineError::Custom(_) => None,
     }
