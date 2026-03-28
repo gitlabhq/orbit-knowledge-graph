@@ -60,7 +60,7 @@ const CH_QUERY_CACHE_TTL: u32 = 30;
 pub fn lower(input: &mut Input) -> Result<Node> {
     let mut node = match input.query_type {
         QueryType::Search => lower_search(input),
-        QueryType::Traversal => lower_traversal(input),
+        QueryType::Traversal => lower_traversal_edge_only(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
@@ -142,10 +142,6 @@ fn lower_search(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Traversal
 // ─────────────────────────────────────────────────────────────────────────────
-
-fn lower_traversal(input: &mut Input) -> Result<Node> {
-    lower_traversal_edge_only(input)
-}
 
 /// Edge-only traversal: edges are the FROM tables, node tables are
 /// referenced only via IN subqueries for filtering. Node properties are
@@ -434,11 +430,11 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         let table = resolve_table(node)?;
         (TableRef::scan(&table, &node.id), HashMap::new())
     } else {
-        build_agg_joins(&input.nodes, &input.relationships, &edge_only_targets)?
+        build_joins(&input.nodes, &input.relationships, &edge_only_targets)?
     };
 
     // Build WHERE from non-edge-only nodes + edge filters.
-    let where_clause = build_agg_where(
+    let where_clause = build_where(
         &input.nodes,
         &input.relationships,
         &edge_aliases,
@@ -450,53 +446,8 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     let mut ctes = Vec::new();
     let mut where_parts: Vec<Expr> = where_clause.into_iter().collect();
 
-    if !edge_only_targets.is_empty() && input.relationships.len() == 1 {
-        let rel = &input.relationships[0];
-        let (start_col, end_col) = rel.direction.edge_columns();
-        let edge_alias = edge_aliases
-            .get(&0)
-            .cloned()
-            .unwrap_or_else(|| "e0".to_string());
-
-        for node in &input.nodes {
-            if !edge_only_targets.contains(&node.id) {
-                continue;
-            }
-            let edge_col = if node.id == rel.from {
-                start_col
-            } else {
-                end_col
-            };
-            node_edge_col.insert(node.id.clone(), (edge_alias.clone(), edge_col.to_string()));
-
-            // Create _nf_* CTE if the node has filters or pinned IDs.
-            let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
-            if has_conditions {
-                let table = resolve_table(node)?;
-                let node_where = build_node_where(node);
-                let cte_name = node_filter_cte(&node.id);
-                let cte_query = Query {
-                    select: vec![SelectExpr::new(
-                        Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                        DEFAULT_PRIMARY_KEY,
-                    )],
-                    from: TableRef::scan(&table, &node.id),
-                    where_clause: node_where,
-                    ..Default::default()
-                };
-                ctes.push(Cte::new(&cte_name, cte_query));
-                where_parts.push(Expr::InSubquery {
-                    expr: Box::new(Expr::col(&edge_alias, edge_col)),
-                    cte_name,
-                    column: DEFAULT_PRIMARY_KEY.into(),
-                });
-            }
-        }
-    }
-
-    // For property targets (not edge-only) that have filters, create _nf_*
-    // CTEs and push them into the edge WHERE so the dedup subquery sorts
-    // fewer rows.
+    // Build _nf_* CTEs for non-group-by nodes with conditions. Edge-only
+    // targets also get their node_edge_col mapping populated here.
     if input.relationships.len() == 1 {
         let rel = &input.relationships[0];
         let (start_col, end_col) = rel.direction.edge_columns();
@@ -506,11 +457,7 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
             .unwrap_or_else(|| "e0".to_string());
 
         for node in &input.nodes {
-            if edge_only_targets.contains(&node.id) || group_by_ids.contains(&node.id) {
-                continue;
-            }
-            let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
-            if !has_conditions {
+            if group_by_ids.contains(&node.id) {
                 continue;
             }
             let edge_col = if node.id == rel.from {
@@ -518,6 +465,15 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
             } else {
                 end_col
             };
+
+            if edge_only_targets.contains(&node.id) {
+                node_edge_col.insert(node.id.clone(), (edge_alias.clone(), edge_col.to_string()));
+            }
+
+            let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
+            if !has_conditions {
+                continue;
+            }
             let table = resolve_table(node)?;
             let node_where = build_node_where(node);
             let cte_name = node_filter_cte(&node.id);
@@ -1309,9 +1265,10 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
 // Join Building
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Like `build_joins` but skips node table scans for `skip_nodes`.
-/// Those nodes are handled edge-only via `node_edge_col` + `_nf_*` CTEs.
-fn build_agg_joins(
+/// Build a FROM tree that JOINs node tables and edge tables.
+/// Nodes in `skip_nodes` are omitted from the tree — they are handled
+/// edge-only via `node_edge_col` + `_nf_*` CTEs instead.
+fn build_joins(
     nodes: &[InputNode],
     rels: &[InputRelationship],
     skip_nodes: &HashSet<String>,
@@ -1489,8 +1446,10 @@ fn build_agg_joins(
     Ok((result, edge_aliases))
 }
 
-/// Like `build_full_where` but excludes conditions for `skip_nodes`.
-fn build_agg_where(
+/// Build a WHERE clause from node conditions and edge filters.
+/// Conditions for nodes in `skip_nodes` are excluded — those filters
+/// are handled via `_nf_*` CTEs instead.
+fn build_where(
     nodes: &[InputNode],
     rels: &[InputRelationship],
     edge_aliases: &HashMap<usize, String>,
