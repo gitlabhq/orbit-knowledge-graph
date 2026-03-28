@@ -839,55 +839,18 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 continue; // already cascaded
             }
 
-            let target = input.nodes.iter().find(|n| n.id == *target_id);
-            let alias = CASCADE_EDGE_ALIAS;
-
-            let edge_filter = Expr::InSubquery {
-                expr: Box::new(Expr::col(alias, edge_filter_col)),
-                cte_name: source_cte.clone(),
-                column: DEFAULT_PRIMARY_KEY.to_string(),
+            let cte_query = match build_cascade_for_node(
+                input,
+                target_id,
+                edge_select_col,
+                edge_filter_col,
+                &source_cte,
+                &rel.types,
+            ) {
+                Some(q) => q,
+                None => continue,
             };
-            let rel_filter = if rel.types.len() == 1 {
-                Expr::eq(
-                    Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
-                    Expr::param(ChType::String, rel.types[0].clone()),
-                )
-            } else {
-                Expr::col_in(
-                    alias,
-                    RELATIONSHIP_KIND_COLUMN,
-                    ChType::String,
-                    rel.types
-                        .iter()
-                        .map(|t| serde_json::Value::String(t.clone()))
-                        .collect(),
-                )
-                .unwrap_or_else(|| Expr::param(ChType::Bool, true))
-            };
-            let kind_filter = target.and_then(|n| n.entity.as_ref()).map(|entity| {
-                let kind_col = if edge_select_col == SOURCE_ID_COLUMN {
-                    SOURCE_KIND_COLUMN
-                } else {
-                    TARGET_KIND_COLUMN
-                };
-                Expr::eq(
-                    Expr::col(alias, kind_col),
-                    Expr::param(ChType::String, entity.clone()),
-                )
-            });
-
-            q.ctes.push(Cte::new(
-                &cascade_name,
-                Query {
-                    select: vec![SelectExpr::new(
-                        Expr::col(alias, edge_select_col),
-                        DEFAULT_PRIMARY_KEY,
-                    )],
-                    from: TableRef::scan(EDGE_TABLE, alias),
-                    where_clause: Expr::and_all([Some(edge_filter), Some(rel_filter), kind_filter]),
-                    ..Default::default()
-                },
-            ));
+            q.ctes.push(Cte::new(&cascade_name, cte_query));
 
             let target_nf = node_filter_cte(target_id);
             if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_nf) {
