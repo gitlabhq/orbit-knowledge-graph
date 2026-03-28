@@ -1616,6 +1616,15 @@ mod tests {
     use crate::passes::validate;
     use ontology::Ontology;
 
+    fn has_scan(t: &TableRef, tbl: &str) -> bool {
+        match t {
+            TableRef::Scan { table, .. } => table == tbl,
+            TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+            TableRef::Union { queries, .. } => queries.iter().any(|q| has_scan(&q.from, tbl)),
+            TableRef::Subquery { query, .. } => has_scan(&query.from, tbl),
+        }
+    }
+
     fn test_ontology() -> Ontology {
         use ontology::DataType;
         Ontology::new()
@@ -2618,13 +2627,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         assert!(
             has_scan(&q.from, "gl_note"),
             "order_by on node property should JOIN the node table"
@@ -2659,13 +2661,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         assert!(
             !has_scan(&q.from, "gl_user"),
             "order_by id should not add a node table JOIN"
@@ -2700,13 +2695,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         // source-side node should get its table joined for username
         assert!(has_scan(&q.from, "gl_user"));
         assert!(!q.order_by[0].desc);
@@ -2767,13 +2755,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         // gl_note joined for order_by
         assert!(has_scan(&q.from, "gl_note"));
         // node_ids filter CTE present
@@ -2805,13 +2786,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         // Multi-hop gets user table joined for ordering
         assert!(has_scan(&q.from, "gl_user"));
         assert_eq!(q.order_by.len(), 1);
@@ -2836,13 +2810,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         assert!(
             has_scan(&q.from, "gl_mergerequest"),
             "order_by mr.title should JOIN gl_mergerequest"
