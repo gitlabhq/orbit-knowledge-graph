@@ -269,7 +269,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
             conjuncts
                 .into_iter()
                 .filter(|c| {
-                    let aliases = collect_column_aliases(c);
+                    let aliases = c.column_aliases();
                     !aliases.is_empty() && aliases.iter().all(|a| a == root_alias)
                 })
                 .collect::<Vec<_>>()
@@ -499,7 +499,7 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
                 conjuncts
                     .into_iter()
                     .filter(|c| {
-                        let aliases = collect_column_aliases(c);
+                        let aliases = c.column_aliases();
                         !aliases.is_empty() && aliases.iter().all(|a| a == target_alias)
                     })
                     .collect()
@@ -662,7 +662,7 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
     let mut remaining: Vec<Expr> = Vec::new();
 
     for conjunct in conjuncts {
-        let aliases = collect_column_aliases(&conjunct);
+        let aliases = conjunct.column_aliases();
 
         // Keep in WHERE if:
         //   - references no columns (constant expression)
@@ -748,37 +748,6 @@ fn extract_agg_target_alias(expr: &Expr) -> Option<String> {
             _ => None,
         }),
         _ => None,
-    }
-}
-
-/// Collect all unique table aliases referenced by column expressions.
-fn collect_column_aliases(expr: &Expr) -> HashSet<String> {
-    let mut aliases = HashSet::new();
-    collect_aliases_inner(expr, &mut aliases);
-    aliases
-}
-
-fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
-    match expr {
-        Expr::Column { table, .. } => {
-            aliases.insert(table.clone());
-        }
-        Expr::BinaryOp { left, right, .. } => {
-            collect_aliases_inner(left, aliases);
-            collect_aliases_inner(right, aliases);
-        }
-        Expr::UnaryOp { expr: inner, .. } => {
-            collect_aliases_inner(inner, aliases);
-        }
-        Expr::FuncCall { args, .. } => {
-            for arg in args {
-                collect_aliases_inner(arg, aliases);
-            }
-        }
-        Expr::InSubquery { expr, .. } => {
-            collect_aliases_inner(expr, aliases);
-        }
-        Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
     }
 }
 
@@ -1206,7 +1175,7 @@ mod tests {
         }
 
         // Group-by node filter stays in WHERE.
-        let where_aliases = collect_column_aliases(q.where_clause.as_ref().unwrap());
+        let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
         assert!(where_aliases.contains("p"));
         assert!(!where_aliases.contains("mr"));
     }
@@ -1235,7 +1204,7 @@ mod tests {
             other => panic!("expected countIf, got {other:?}"),
         }
 
-        let where_aliases = collect_column_aliases(q.where_clause.as_ref().unwrap());
+        let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
         assert!(where_aliases.contains("p"));
     }
 

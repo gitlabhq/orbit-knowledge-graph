@@ -103,20 +103,6 @@ fn dispatch(q: &mut Query, input: &Input) {
 // Predicate helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Check if an expression only references columns from `alias`.
-fn references_only(expr: &Expr, alias: &str) -> bool {
-    match expr {
-        Expr::Column { table, .. } => table == alias,
-        Expr::Literal(_) | Expr::Param { .. } | Expr::Star => true,
-        Expr::FuncCall { args, .. } => args.iter().all(|a| references_only(a, alias)),
-        Expr::BinaryOp { left, right, .. } => {
-            references_only(left, alias) && references_only(right, alias)
-        }
-        Expr::UnaryOp { expr, .. } => references_only(expr, alias),
-        Expr::InSubquery { expr, .. } => references_only(expr, alias),
-    }
-}
-
 fn is_deleted_filter(expr: &Expr) -> bool {
     matches!(
         expr,
@@ -136,7 +122,7 @@ fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec
     let mut outer = vec![];
 
     for c in conjuncts {
-        if !is_deleted_filter(&c) && references_only(&c, alias) {
+        if !is_deleted_filter(&c) && c.references_only(alias) {
             inner.push(c);
         } else {
             outer.push(c);
@@ -205,7 +191,7 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
     // Value filters duplicated into HAVING for correctness.
     if let Some(where_expr) = &q.where_clause {
         for conjunct in where_expr.clone().flatten_and() {
-            if references_only(&conjunct, alias) {
+            if conjunct.references_only(alias) {
                 having_parts.push(wrap_in_argmax_if(&conjunct, alias));
             }
         }
@@ -214,7 +200,7 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
     q.having = Expr::conjoin(having_parts);
 
     for ord in q.order_by.iter_mut() {
-        let refs_alias = references_only(&ord.expr, alias)
+        let refs_alias = ord.expr.references_only(alias)
             && !matches!(&ord.expr, Expr::Column { column, .. } if column == "id");
         if refs_alias {
             ord.expr = wrap_in_argmax_if(&ord.expr, alias);

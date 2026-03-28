@@ -3,6 +3,8 @@
 //! Intermediate representation between JSON input and SQL output.
 //! Each node maps directly to ClickHouse SQL constructs.
 
+use std::collections::HashSet;
+
 use serde_json::Value;
 
 pub use gkg_utils::clickhouse::{ChScalar, ChType};
@@ -391,6 +393,48 @@ impl Expr {
     /// Combine two expressions with OR.
     pub fn or(left: Expr, right: Expr) -> Expr {
         Expr::binary(Op::Or, left, right)
+    }
+
+    /// Collect all unique table aliases referenced by column expressions.
+    pub fn column_aliases(&self) -> HashSet<String> {
+        let mut aliases = HashSet::new();
+        self.collect_aliases(&mut aliases);
+        aliases
+    }
+
+    fn collect_aliases(&self, out: &mut HashSet<String>) {
+        match self {
+            Expr::Column { table, .. } => {
+                out.insert(table.clone());
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                left.collect_aliases(out);
+                right.collect_aliases(out);
+            }
+            Expr::FuncCall { args, .. } => {
+                for a in args {
+                    a.collect_aliases(out);
+                }
+            }
+            Expr::UnaryOp { expr, .. } => expr.collect_aliases(out),
+            Expr::InSubquery { expr, .. } => expr.collect_aliases(out),
+            Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
+        }
+    }
+
+    /// Check if this expression only references columns from `alias`
+    /// (or is a constant/literal).
+    pub fn references_only(&self, alias: &str) -> bool {
+        match self {
+            Expr::Column { table, .. } => table == alias,
+            Expr::Literal(_) | Expr::Param { .. } | Expr::Star => true,
+            Expr::FuncCall { args, .. } => args.iter().all(|a| a.references_only(alias)),
+            Expr::BinaryOp { left, right, .. } => {
+                left.references_only(alias) && right.references_only(alias)
+            }
+            Expr::UnaryOp { expr, .. } => expr.references_only(alias),
+            Expr::InSubquery { .. } => false,
+        }
     }
 }
 
