@@ -364,6 +364,15 @@ mod tests {
     use crate::ast::{JoinType, TableRef};
     use crate::input::{InputNode, QueryType};
 
+    fn has_scan(t: &TableRef, tbl: &str) -> bool {
+        match t {
+            TableRef::Scan { table, .. } => table == tbl,
+            TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+            TableRef::Union { queries, .. } => queries.iter().any(|q| has_scan(&q.from, tbl)),
+            TableRef::Subquery { query, .. } => has_scan(&query.from, tbl),
+        }
+    }
+
     fn test_input() -> Input {
         Input {
             query_type: QueryType::Search,
@@ -894,10 +903,7 @@ mod tests {
         Input {
             query_type: QueryType::Traversal,
             nodes,
-            compiler: CompilerMetadata {
-                node_edge_col,
-                ..Default::default()
-            },
+            compiler: CompilerMetadata { node_edge_col },
             ..Input::default()
         }
     }
@@ -1052,14 +1058,6 @@ mod tests {
             matches!(&d_id.expr, Expr::Column { table, column } if table == "d" && column == "merge_request_id")
         );
 
-        // Verify node table was JOINed
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         assert!(
             has_scan(&q.from, "gl_mergerequestdiff"),
             "non-default redaction_id_column should JOIN the node table"
