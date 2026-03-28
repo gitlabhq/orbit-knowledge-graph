@@ -28,7 +28,7 @@ use crate::constants::{
     SKIP_SECURITY_FILTER_TABLES, START_ID_COLUMN, cascade_cte, node_filter_cte,
 };
 use crate::input::{Input, InputNode, QueryType};
-use crate::passes::security::SecurityContext;
+
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
@@ -37,14 +37,14 @@ use ontology::constants::{
 const ROOT_SIP_CTE: &str = "_root_ids";
 
 /// Apply all optimization passes to the AST.
-pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
+pub fn optimize(node: &mut Node, input: &mut Input) {
     match node {
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
             if input.query_type == QueryType::Aggregation {
                 inject_agg_group_by_kind_filters(q, input);
             }
-            apply_sip_prefilter(q, input, ctx);
+            apply_sip_prefilter(q, input);
             apply_nonroot_node_ids_to_edges(q, input);
             apply_edge_led_reorder(q, input);
             if input.query_type == QueryType::Traversal && input.relationships.len() > 1 {
@@ -202,7 +202,7 @@ fn choose_sip_root(input: &Input) -> Option<&InputNode> {
 /// When source_id IN (...) is present without startsWith, ClickHouse selects
 /// the `by_source` projection instead. When both are present, the base table
 /// PK handles both predicates via prefix matching.
-fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
+fn apply_sip_prefilter(q: &mut Query, input: &Input) {
     if !matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Aggregation
@@ -1246,8 +1246,7 @@ mod tests {
         let original = match &node {
             Node::Query(q) => q.where_clause.clone(),
         };
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        optimize(&mut node, &mut input, &ctx);
+        optimize(&mut node, &mut input);
 
         match &node {
             Node::Query(q) => assert_eq!(q.where_clause, original),

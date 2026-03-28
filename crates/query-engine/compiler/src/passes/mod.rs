@@ -78,16 +78,15 @@ pub struct OptimizePass;
 
 impl<E, S> CompilerPass<E, S> for OptimizePass
 where
-    E: PipelineEnv + HasSecurityCtx,
+    E: PipelineEnv,
     S: PipelineState + HasNode + HasInput,
 {
     const NAME: &'static str = "optimize";
 
-    fn run(&self, env: &E, state: &mut S) -> Result<()> {
-        let security_ctx = env.security_ctx().clone();
+    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
         let mut node = state.take_node()?;
         let mut input = state.take_input()?;
-        optimize::optimize(&mut node, &mut input, &security_ctx);
+        optimize::optimize(&mut node, &mut input);
         state.set_node(node);
         state.set_input(input);
         Ok(())
