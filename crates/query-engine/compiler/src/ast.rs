@@ -68,8 +68,6 @@ pub enum Op {
     In,
     #[strum(serialize = "LIKE")]
     Like,
-    #[strum(serialize = "ILIKE")]
-    ILike,
     // Logical
     #[strum(serialize = "AND")]
     And,
@@ -175,14 +173,6 @@ impl Cte {
             name: name.into(),
             query: Box::new(query),
             recursive: false,
-        }
-    }
-
-    pub fn recursive(name: impl Into<String>, query: Query) -> Self {
-        Self {
-            name: name.into(),
-            query: Box::new(query),
-            recursive: true,
         }
     }
 }
@@ -452,15 +442,6 @@ impl TableRef {
             left: Box::new(left),
             right: Box::new(right),
             on,
-        }
-    }
-
-    pub fn cross_join(left: TableRef, right: TableRef) -> Self {
-        TableRef::Join {
-            join_type: JoinType::Cross,
-            left: Box::new(left),
-            right: Box::new(right),
-            on: Expr::lit(true), // ignored by codegen for Cross
         }
     }
 
