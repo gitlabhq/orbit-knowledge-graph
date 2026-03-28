@@ -549,7 +549,8 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     })))
 }
 
-/// Like `agg_expr` but uses edge columns for targets in `node_edge_col`.
+/// Build the aggregate expression. Uses edge columns for targets in
+/// `node_edge_col` (edge-only), node table columns otherwise.
 fn agg_expr_with_edge_col(
     agg: &InputAggregation,
     node_edge_col: &HashMap<String, (String, String)>,
