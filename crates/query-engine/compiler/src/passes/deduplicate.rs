@@ -39,7 +39,11 @@ pub fn deduplicate(node: &mut Node, input: &Input) {
     match node {
         Node::Query(q) => {
             for cte in &mut q.ctes {
-                dedup_query(&mut cte.query, input);
+                if is_id_only_node_cte(&cte.query) {
+                    apply_cte_argmax_dedup(&mut cte.query);
+                } else {
+                    dedup_query(&mut cte.query, input);
+                }
             }
             dedup_query(q, input);
         }
@@ -144,6 +148,65 @@ fn partition_filters(where_clause: Option<Expr>, alias: &str) -> (Vec<Expr>, Vec
     }
 
     (inner, outer)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Strategy: argMaxIfOrNull for id-only CTEs (_nf_*, _root_ids)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Detect CTEs that select only `id` from a single node table scan.
+/// These are the _nf_* and _root_ids CTEs created by the lowerer/optimizer.
+fn is_id_only_node_cte(q: &Query) -> bool {
+    let is_node_scan = matches!(&q.from, TableRef::Scan { table, .. } if is_node_table(table));
+    let selects_id_only = q.select.len() == 1
+        && matches!(&q.select[0].expr, Expr::Column { column, .. } if column == DEFAULT_PRIMARY_KEY);
+    is_node_scan && selects_id_only
+}
+
+/// Replace LIMIT 1 BY with argMax for id-only CTE queries.
+///
+/// Transforms:
+///   SELECT id FROM gl_table WHERE <filters>
+/// Into:
+///   SELECT id FROM gl_table WHERE <filters>
+///   GROUP BY id HAVING isNotNull(argMaxIfOrNull(id, _version, _deleted = false))
+///
+/// Filters referencing the node alias are also duplicated into HAVING
+/// wrapped in argMaxIfOrNull so ClickHouse can evaluate them on the
+/// latest-version row.
+fn apply_cte_argmax_dedup(q: &mut Query) {
+    let alias = match &q.from {
+        TableRef::Scan { alias, .. } => alias.clone(),
+        _ => return,
+    };
+
+    q.group_by.push(Expr::col(&alias, DEFAULT_PRIMARY_KEY));
+
+    let not_deleted = Expr::eq(Expr::col(&alias, DELETED_COLUMN), Expr::lit(false));
+    let mut having_parts = vec![Expr::func(
+        "isNotNull",
+        vec![Expr::func(
+            "argMaxIfOrNull",
+            vec![
+                Expr::col(&alias, DEFAULT_PRIMARY_KEY),
+                Expr::col(&alias, VERSION_COLUMN),
+                not_deleted,
+            ],
+        )],
+    )];
+
+    // Duplicate value filters into HAVING for correctness: the GROUP BY
+    // sees all versions, so the filter must apply to the latest version
+    // via argMaxIfOrNull.
+    if let Some(where_expr) = &q.where_clause {
+        for conjunct in where_expr.clone().flatten_and() {
+            if references_only(&conjunct, &alias) && !is_deleted_filter(&conjunct) {
+                having_parts.push(wrap_in_argmax_if(&conjunct, &alias));
+            }
+        }
+    }
+
+    q.having = Expr::conjoin(having_parts);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -455,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn wraps_cte_node_scans() {
+    fn id_only_cte_uses_argmax() {
         let mut node = Node::Query(Box::new(Query {
             ctes: vec![Cte::new(
                 "_nf_mr",
@@ -472,9 +535,45 @@ mod tests {
         deduplicate(&mut node, &input_for(QueryType::Traversal));
 
         let Node::Query(q) = &node;
-        let inner = find_subquery(&q.ctes[0].query.from, "mr").expect("CTE scan wrapped");
-        assert!(has_limit_by(inner));
+        let cte_q = &q.ctes[0].query;
+        // Should use GROUP BY + HAVING argMax, not LIMIT 1 BY subquery.
+        assert!(
+            !cte_q.group_by.is_empty(),
+            "id-only CTE should have GROUP BY"
+        );
+        assert!(cte_q.having.is_some(), "id-only CTE should have HAVING");
+        // FROM should still be a bare scan, not wrapped in a subquery.
+        assert!(
+            matches!(&cte_q.from, TableRef::Scan { table, .. } if table == "gl_merge_request"),
+            "CTE FROM should be a bare scan"
+        );
         assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "_nf_mr"));
+    }
+
+    #[test]
+    fn non_id_cte_uses_limit_by() {
+        // CTE that selects more than just id should still use LIMIT 1 BY.
+        let mut node = Node::Query(Box::new(Query {
+            ctes: vec![Cte::new(
+                "_some_cte",
+                Query {
+                    select: vec![
+                        SelectExpr::new(Expr::col("mr", "id"), "id"),
+                        SelectExpr::new(Expr::col("mr", "state"), "state"),
+                    ],
+                    from: TableRef::scan("gl_merge_request", "mr"),
+                    ..Default::default()
+                },
+            )],
+            select: vec![SelectExpr::new(Expr::col("b", "id"), "id")],
+            from: TableRef::scan("_some_cte", "b"),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Traversal));
+
+        let Node::Query(q) = &node;
+        let inner = find_subquery(&q.ctes[0].query.from, "mr").expect("non-id CTE scan wrapped");
+        assert!(has_limit_by(inner));
     }
 
     #[test]

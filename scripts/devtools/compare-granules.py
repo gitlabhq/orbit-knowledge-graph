@@ -4,8 +4,9 @@
 Usage:
     python3 scripts/devtools/compare-granules.py <before.json> <after.json> [--labels before,after]
 
-Prints a markdown table showing per-query, per-scan granule changes with
-decrease multiples (e.g. "15.4x fewer").
+Prints a markdown table showing total granules scanned per query with
+decrease multiples (e.g. "15.4x fewer"). Sums across all scans in the
+query plan so scan reordering doesn't create false positives.
 """
 
 import json
@@ -33,12 +34,16 @@ def parse_args():
     return files[0], files[1], labels
 
 
-def extract_base_granules(result):
+def total_granules(result):
+    """Sum all Granules: selected/total across the base execution plan."""
     for ex in result.get("executions", []):
         if ex.get("label") == "base":
             plan = ex.get("explain_plan", "")
-            return re.findall(r"Granules: (\d+)/(\d+)", plan)
-    return []
+            matches = re.findall(r"Granules: (\d+)/(\d+)", plan)
+            selected = sum(int(m[0]) for m in matches)
+            total = sum(int(m[1]) for m in matches)
+            return selected, total
+    return 0, 0
 
 
 def main():
@@ -54,38 +59,33 @@ def main():
         if "error" in after[name] or "error" in before.get(name, {}):
             continue
 
-        b_gran = extract_base_granules(before.get(name, {}))
-        a_gran = extract_base_granules(after[name])
+        bs, bt = total_granules(before.get(name, {}))
+        aa, at = total_granules(after[name])
 
-        for i in range(max(len(b_gran), len(a_gran))):
-            if i >= len(b_gran) or i >= len(a_gran):
-                continue
-            bs, bt = int(b_gran[i][0]), int(b_gran[i][1])
-            aa, at = int(a_gran[i][0]), int(a_gran[i][1])
-            if bs == aa:
-                continue
+        if bs == aa and bt == at:
+            continue
 
-            if aa == 0:
-                multiple = "∞"
-                pct = "-100%"
-            elif bs == 0:
-                multiple = "n/a"
-                pct = "new"
-            else:
-                ratio = bs / aa
-                multiple = f"{ratio:.1f}x"
-                pct = f"{(aa - bs) / bs * 100:+.0f}%"
+        if aa == 0:
+            multiple = "∞"
+            pct = "-100%"
+        elif bs == 0:
+            multiple = "n/a"
+            pct = "new"
+        else:
+            ratio = bs / aa
+            multiple = f"{ratio:.1f}x"
+            pct = f"{(aa - bs) / bs * 100:+.0f}%"
 
-            rows.append((name, i, bs, bt, aa, at, multiple, pct))
+        rows.append((name, bs, bt, aa, at, multiple, pct))
 
     if not rows:
         print("No granule changes detected.")
         return
 
-    print(f"| Query | Scan | {labels[0]} | {labels[1]} | Change | Multiple |")
-    print("|---|---|---|---|---|---|")
-    for name, scan, bs, bt, aa, at, multiple, pct in rows:
-        print(f"| {name} | {scan} | {bs}/{bt} | {aa}/{at} | {pct} | {multiple} fewer |")
+    print(f"| Query | {labels[0]} | {labels[1]} | Change | Multiple |")
+    print("|---|---|---|---|---|")
+    for name, bs, bt, aa, at, multiple, pct in rows:
+        print(f"| {name} | {bs}/{bt} | {aa}/{at} | {pct} | {multiple} fewer |")
 
 
 if __name__ == "__main__":
