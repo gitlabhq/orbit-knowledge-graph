@@ -234,8 +234,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
     // (filters/node_ids). A traversal_path-only SIP on a large table (e.g. 8M
     // jobs) scans more rows than it saves. For small tables the source_kind
     // filter on the edge already narrows sufficiently.
-    let node_is_edge_only = input.compiler.skipped_node_joins.contains(&root_node.id)
-        || input.compiler.node_edge_col.contains_key(&root_node.id);
+    let node_is_edge_only = input.compiler.node_edge_col.contains_key(&root_node.id);
     if node_is_edge_only && !has_explicit_selectivity {
         return;
     }

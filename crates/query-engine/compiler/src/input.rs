@@ -5,7 +5,7 @@
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Top-level input
@@ -81,15 +81,13 @@ pub struct Input {
 
 /// Metadata accumulated across compiler passes.
 ///
-/// Written by lowering and optimize, read by downstream passes (SIP, security, etc.).
+/// Written by lowering, read by downstream passes (enforce, SIP, fold, etc.).
 #[derive(Debug, Clone, Default)]
 pub struct CompilerMetadata {
-    /// Node IDs whose tables were eliminated from the FROM clause
-    /// (e.g. edge-only aggregation). SIP/cascade should skip these.
-    pub skipped_node_joins: HashSet<String>,
-    /// For traversal queries: maps node alias → (edge_alias, edge_column).
+    /// Maps node alias → (edge_alias, edge_column) for edge-only nodes.
     /// Written by lower, read by enforce to emit `_gkg_*` redaction columns
-    /// from edge columns instead of node table columns.
+    /// from edge columns instead of node table columns. Also used by SIP
+    /// and fold passes to skip edge-only targets.
     pub node_edge_col: HashMap<String, (String, String)>,
 }
 
