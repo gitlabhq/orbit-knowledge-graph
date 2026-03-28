@@ -7,12 +7,17 @@ if [ -z "$CI_MERGE_REQUEST_IID" ]; then
   exit 0
 fi
 
-# Strip GitLab draft prefixes: "Draft:", "[Draft]", "(Draft)"
-# Use multiple -e expressions for POSIX compatibility (busybox sed lacks \| alternation)
-TITLE=$(printf '%s\n' "$CI_MERGE_REQUEST_TITLE" \
-  | sed -e 's/^\[Draft\][[:space:]]*//' \
-        -e 's/^(Draft)[[:space:]]*//' \
-        -e 's/^Draft:[[:space:]]*//')
+TITLE="$CI_MERGE_REQUEST_TITLE"
+
+# Reject Draft MRs — they must be marked ready before the title check passes.
+# Checking for all GitLab draft prefix variants: "Draft:", "[Draft]", "(Draft)"
+case "$TITLE" in
+  "Draft: "*|"[Draft] "*|"(Draft) "*|"Draft:"*|"[Draft]"*|"(Draft)"*)
+    echo "This MR is still a Draft. Remove the Draft status before merging."
+    echo "MR title: $TITLE"
+    exit 1
+    ;;
+esac
 
 echo "Checking MR title against conventional commit format: $TITLE"
 
