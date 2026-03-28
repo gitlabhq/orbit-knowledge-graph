@@ -65,22 +65,24 @@ pub use pipeline::{
 
 // Re-export env, state, and capability traits.
 pub use passes::{
-    CheckPass, CodegenPass, DeduplicatePass, DuckDbCodegenPass, EnforcePass, HydrationCodegenPass,
+    CheckPass, CodegenPass, DeduplicatePass, DuckDbCodegenPass, EnforcePass, HydratePlanPass,
     LowerPass, NormalizePass, OptimizePass, SecurityPass, ValidatePass,
 };
 pub use pipelines::{
-    DuckDbState, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx, HasSecurityCtx,
-    LocalEnv, QueryState, SealInput, SealJson, SealNode, SecureEnv,
+    DuckDbState, HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput,
+    HasResultCtx, HasSecurityCtx, LocalEnv, QueryState, SealInput, SealJson, SealNode, SecureEnv,
 };
 
 // Re-export key types from pass modules.
 pub use passes::check::check_ast;
 pub use passes::codegen::{
-    CompiledQueryContext, HydrationPlan, HydrationTemplate, ParamValue, ParameterizedQuery,
-    SqlDialect, codegen,
+    CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect, codegen,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
-pub use passes::hydrate::generate_hydration_plan;
+pub use passes::hydrate::{
+    DynamicEntityColumns, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
+    generate_hydration_plan,
+};
 pub use passes::lower::lower;
 pub use passes::normalize::{build_entity_auth, normalize};
 pub use passes::optimize::optimize;
@@ -117,8 +119,8 @@ pub fn compile(
 /// Compile from a pre-built `Input`. Used for internal query types (Hydration)
 /// that bypass JSON schema validation.
 ///
-/// For hydration queries (`QueryType::Hydration`), skips security and check
-/// passes and uses `HydrationCodegenPass` (no hydration plan generation).
+/// For hydration queries (`QueryType::Hydration`), skips security, check, and
+/// hydrate plan passes — codegen defaults to `HydrationPlan::None`.
 /// For all other query types, runs the full secure pipeline.
 pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
     let env = SecureEnv::new(Arc::new(Ontology::new()), ctx.clone());

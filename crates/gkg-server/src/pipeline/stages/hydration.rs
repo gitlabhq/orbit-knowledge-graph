@@ -6,8 +6,8 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
 use query_engine::compiler::{
-    ColumnSelection, DynamicColumnMode, HydrationPlan, HydrationTemplate, Input, InputNode,
-    QueryType, compile_input,
+    ColumnSelection, DynamicEntityColumns, HydrationPlan, HydrationTemplate, Input, InputNode,
+    QueryType, VirtualColumnRequest, compile_input,
 };
 
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
@@ -37,46 +37,34 @@ impl HydrationStage {
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }
 
+    /// Resolve virtual columns from remote services (e.g. Gitaly) and merge
+    /// the results into the property map. Currently a no-op — all virtual
+    /// fields are `disabled: true` in the ontology and excluded from plans.
+    ///
+    /// When #379 lands, this will dispatch to the appropriate service client
+    /// based on `VirtualColumnRequest.service` and `lookup`.
+    async fn resolve_virtual_columns<'a>(
+        _requests: impl Iterator<Item = &'a VirtualColumnRequest>,
+        _property_map: &mut PropertyMap,
+    ) -> Result<(), PipelineError> {
+        Ok(())
+    }
+
     async fn hydrate_static(
         ctx: &QueryPipelineContext,
         templates: &[HydrationTemplate],
         query_result: &QueryResult,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let base_input = &ctx.compiled()?.input;
-
         let mut nodes = Vec::new();
         let mut total_ids: usize = 0;
 
         for template in templates {
-            let ids = Self::collect_static_ids(query_result, template);
-            if ids.is_empty() {
+            if template.columns.is_empty() {
                 continue;
             }
 
-            let node = ctx
-                .ontology
-                .get_node(&template.entity_type)
-                .ok_or_else(|| {
-                    PipelineError::Execution(format!(
-                        "entity type not found in ontology: {}",
-                        template.entity_type
-                    ))
-                })?;
-
-            // Use columns from the original input node (user-specified) rather
-            // than ontology defaults, so explicit column requests like
-            // ["username", "user_type"] are preserved.
-            let columns = base_input
-                .nodes
-                .iter()
-                .find(|n| n.id == template.node_alias)
-                .and_then(|n| match &n.columns {
-                    Some(ColumnSelection::List(cols)) => Some(cols.clone()),
-                    _ => None,
-                })
-                .unwrap_or_else(|| node.default_columns.clone());
-
-            if columns.is_empty() {
+            let ids = Self::collect_static_ids(query_result, template);
+            if ids.is_empty() {
                 continue;
             }
 
@@ -84,8 +72,8 @@ impl HydrationStage {
             nodes.push(InputNode {
                 id: HYDRATION_NODE_ALIAS.to_string(),
                 entity: Some(template.entity_type.clone()),
-                table: Some(node.destination_table.clone()),
-                columns: Some(ColumnSelection::List(columns)),
+                table: Some(template.destination_table.clone()),
+                columns: Some(ColumnSelection::List(template.columns.clone())),
                 node_ids: ids,
                 ..InputNode::default()
             });
@@ -94,15 +82,14 @@ impl HydrationStage {
         Self::execute_hydration(ctx, nodes, total_ids).await
     }
 
-    /// Consolidated dynamic hydration: builds an `Input` with one node per entity
-    /// type, compiles it as `QueryType::Hydration` (which generates a UNION ALL
-    /// with proper parameterization), and executes a single query.
-    async fn hydrate_dynamic_consolidated(
+    /// Dynamic hydration: builds an `Input` with one node per
+    /// discovered entity type using pre-resolved column specs from the
+    /// compilation plan. No ontology lookups at runtime.
+    async fn hydrate_dynamic(
         ctx: &QueryPipelineContext,
+        entity_specs: &[DynamicEntityColumns],
         refs: &HashMap<String, Vec<i64>>,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let base_input = &ctx.compiled()?.input;
-
         let mut nodes = Vec::new();
         let mut total_ids: usize = 0;
 
@@ -110,26 +97,15 @@ impl HydrationStage {
             if ids.is_empty() {
                 continue;
             }
-            let node = ctx.ontology.get_node(entity_type).ok_or_else(|| {
-                PipelineError::Execution(format!(
-                    "entity type not found in ontology: {entity_type}"
-                ))
-            })?;
 
-            let columns = match base_input.options.dynamic_columns {
-                DynamicColumnMode::All => node
-                    .fields
-                    .iter()
-                    .filter(|f| f.name != "_version" && f.name != "_deleted")
-                    .map(|f| f.name.clone())
-                    .collect::<Vec<_>>(),
-                DynamicColumnMode::Default => {
-                    if node.default_columns.is_empty() {
-                        continue;
-                    }
-                    node.default_columns.clone()
-                }
+            let spec = match entity_specs.iter().find(|s| s.entity_type == *entity_type) {
+                Some(s) => s,
+                None => continue,
             };
+
+            if spec.columns.is_empty() {
+                continue;
+            }
 
             let capped_ids: Vec<i64> = ids
                 .iter()
@@ -141,8 +117,8 @@ impl HydrationStage {
             nodes.push(InputNode {
                 id: HYDRATION_NODE_ALIAS.to_string(),
                 entity: Some(entity_type.clone()),
-                table: Some(node.destination_table.clone()),
-                columns: Some(ColumnSelection::List(columns)),
+                table: Some(spec.destination_table.clone()),
+                columns: Some(ColumnSelection::List(spec.columns.clone())),
                 node_ids: capped_ids,
                 ..InputNode::default()
             });
@@ -202,7 +178,7 @@ impl HydrationStage {
             let elapsed = t.elapsed();
 
             let mut execution = QueryExecution {
-                label: "hydration:consolidated".into(),
+                label: "hydration:dynamic".into(),
                 rendered_sql,
                 query_id: query_stats.query_id.clone(),
                 elapsed_ms: elapsed.as_secs_f64() * 1000.0,
@@ -239,7 +215,7 @@ impl HydrationStage {
             let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
 
             let execution = QueryExecution {
-                label: "hydration:consolidated".into(),
+                label: "hydration:dynamic".into(),
                 rendered_sql,
                 query_id: String::new(),
                 elapsed_ms: elapsed.as_secs_f64() * 1000.0,
@@ -257,11 +233,11 @@ impl HydrationStage {
             (batches, execution)
         };
 
-        let props = Self::parse_consolidated_batches(&batches)?;
+        let props = Self::parse_dynamic_batches(&batches)?;
         Ok((props, vec![debug], vec![execution]))
     }
 
-    fn parse_consolidated_batches(batches: &[RecordBatch]) -> Result<PropertyMap, PipelineError> {
+    fn parse_dynamic_batches(batches: &[RecordBatch]) -> Result<PropertyMap, PipelineError> {
         let alias = HYDRATION_NODE_ALIAS;
         let entity_type_col = format!("{alias}_entity_type");
         let props_col = format!("{alias}_props");
@@ -295,20 +271,13 @@ impl HydrationStage {
                     })
                     .map(|m| {
                         m.into_iter()
-                            .filter_map(|(k, v)| match v {
-                                serde_json::Value::String(s) => Some((k, ColumnValue::String(s))),
-                                serde_json::Value::Number(n) => {
-                                    if let Some(i) = n.as_i64() {
-                                        Some((k, ColumnValue::Int64(i)))
-                                    } else {
-                                        n.as_f64().map(|f| (k, ColumnValue::Float64(f)))
-                                    }
+                            .filter_map(|(k, v)| {
+                                let cv = ColumnValue::from(v);
+                                if cv == ColumnValue::Null {
+                                    None
+                                } else {
+                                    Some((k, cv))
                                 }
-                                serde_json::Value::Bool(b) => {
-                                    Some((k, ColumnValue::String(b.to_string())))
-                                }
-                                serde_json::Value::Null => None,
-                                _ => Some((k, ColumnValue::String(v.to_string()))),
                             })
                             .collect()
                     })
@@ -424,15 +393,22 @@ impl PipelineStage for HydrationStage {
                     .get_or_insert_default::<QueryExecutionLog>()
                     .0
                     .extend(executions);
+                let mut property_map = property_map;
+                Self::resolve_virtual_columns(
+                    templates.iter().flat_map(|t| &t.virtual_columns),
+                    &mut property_map,
+                )
+                .await?;
+
                 if !property_map.is_empty() {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
                 }
             }
-            HydrationPlan::Dynamic => {
+            HydrationPlan::Dynamic(entity_specs) => {
                 let refs = Self::extract_dynamic_refs(&query_result);
                 if !refs.is_empty() {
                     let (property_map, debug, executions) =
-                        Self::hydrate_dynamic_consolidated(ctx, &refs)
+                        Self::hydrate_dynamic(ctx, entity_specs, &refs)
                             .await
                             .inspect_err(|e| obs.record_error(e))?;
                     hydration_queries = debug;
@@ -448,6 +424,13 @@ impl PipelineStage for HydrationStage {
                         .get_or_insert_default::<QueryExecutionLog>()
                         .0
                         .extend(executions);
+                    let mut property_map = property_map;
+                    Self::resolve_virtual_columns(
+                        entity_specs.iter().flat_map(|s| &s.virtual_columns),
+                        &mut property_map,
+                    )
+                    .await?;
+
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
                 }
             }

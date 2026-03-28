@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
-use crate::entities::{DataType, EnumType, Field, NodeEntity, NodeStyle, RedactionConfig};
+use crate::entities::{
+    DataType, EnumType, Field, FieldSource, NodeEntity, NodeStyle, RedactionConfig, VirtualSource,
+};
 use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
 use super::EtlSettings;
@@ -90,13 +92,27 @@ struct EdgeMappingYaml {
 struct PropertyYaml {
     #[serde(rename = "type")]
     data_type: DataType,
-    source: String,
+    /// Source column name. Required for column-backed fields, absent for virtual fields.
+    #[serde(default)]
+    source: Option<String>,
+    /// Virtual source configuration. Present only for fields resolved from a
+    /// remote service. Mutually exclusive with `source`.
+    #[serde(default, rename = "virtual")]
+    virtual_config: Option<VirtualSourceYaml>,
     #[serde(default)]
     nullable: bool,
     #[serde(default)]
     values: Option<BTreeMap<i64, String>>,
     #[serde(default)]
     enum_type: EnumType,
+}
+
+#[derive(Debug, Deserialize)]
+struct VirtualSourceYaml {
+    service: String,
+    lookup: String,
+    #[serde(default)]
+    disabled: bool,
 }
 
 impl NodeYaml {
@@ -116,16 +132,37 @@ impl NodeYaml {
                     primary_keys.push(prop_name.clone());
                 }
 
-                Field {
+                let source = match (prop_def.source, prop_def.virtual_config) {
+                    (Some(col), None) => FieldSource::DatabaseColumn(col),
+                    (None, Some(v)) => FieldSource::Virtual(VirtualSource {
+                        service: v.service,
+                        lookup: v.lookup,
+                        disabled: v.disabled,
+                    }),
+                    (Some(_), Some(_)) => {
+                        return Err(OntologyError::Validation(format!(
+                            "property '{prop_name}' on node '{name}': \
+                             use 'source' or 'virtual', not both"
+                        )));
+                    }
+                    (None, None) => {
+                        return Err(OntologyError::Validation(format!(
+                            "property '{prop_name}' on node '{name}': \
+                             requires 'source' or 'virtual'"
+                        )));
+                    }
+                };
+
+                Ok(Field {
                     name: prop_name,
-                    source: prop_def.source,
+                    source,
                     data_type: prop_def.data_type,
                     nullable: prop_def.nullable,
                     enum_values: prop_def.values,
                     enum_type: prop_def.enum_type,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         if primary_keys.is_empty() {
             primary_keys.push(DEFAULT_PRIMARY_KEY.to_string());

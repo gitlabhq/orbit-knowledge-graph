@@ -19,6 +19,26 @@ pub enum ColumnValue {
     Null,
 }
 
+impl From<serde_json::Value> for ColumnValue {
+    fn from(v: serde_json::Value) -> Self {
+        match v {
+            serde_json::Value::String(s) => Self::String(s),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Self::Int64(i)
+                } else if let Some(f) = n.as_f64() {
+                    Self::Float64(f)
+                } else {
+                    Self::String(n.to_string())
+                }
+            }
+            serde_json::Value::Bool(b) => Self::String(b.to_string()),
+            serde_json::Value::Null => Self::Null,
+            other => Self::String(other.to_string()),
+        }
+    }
+}
+
 /// Stateless helper for extracting typed values from Arrow [`RecordBatch`]es.
 ///
 /// All methods are associated functions — no instance required.
