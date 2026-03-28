@@ -144,9 +144,12 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
     let mut node_columns: Vec<ExtractColumn> = node
         .fields
         .iter()
-        .map(|field| match &field.data_type {
-            DataType::Uuid => ExtractColumn::ToString(field.source.to_string()),
-            _ => ExtractColumn::Bare(field.source.to_string()),
+        .filter_map(|field| {
+            let col = field.column_name()?;
+            Some(match &field.data_type {
+                DataType::Uuid => ExtractColumn::ToString(col.to_string()),
+                _ => ExtractColumn::Bare(col.to_string()),
+            })
         })
         .collect();
 
@@ -186,25 +189,26 @@ fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> Vec<String> 
 fn resolve_node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
     fields
         .iter()
-        .map(|field| {
+        .filter_map(|field| {
+            let col = field.column_name()?;
             if field.data_type == DataType::Enum
                 && field.enum_type == EnumType::Int
                 && field.enum_values.is_some()
             {
-                return NodeColumn::IntEnum {
-                    source: field.source.clone(),
+                return Some(NodeColumn::IntEnum {
+                    source: col.to_string(),
                     target: field.name.clone(),
                     values: field.enum_values.clone().unwrap(),
-                };
+                });
             }
-            if field.source == field.name {
+            Some(if col == field.name {
                 NodeColumn::Identity(field.name.clone())
             } else {
                 NodeColumn::Rename {
-                    source: field.source.clone(),
+                    source: col.to_string(),
                     target: field.name.clone(),
                 }
-            }
+            })
         })
         .collect()
 }

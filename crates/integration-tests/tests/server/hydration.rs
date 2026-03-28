@@ -180,7 +180,7 @@ async fn path_finding_dynamic_hydration(ctx: &TestContext) {
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
 
     assert!(
-        matches!(plan, HydrationPlan::Dynamic),
+        matches!(plan, HydrationPlan::Dynamic(_)),
         "PathFinding should produce Dynamic plan"
     );
     assert!(!result.is_empty(), "should find at least one path");
@@ -349,7 +349,7 @@ async fn neighbors_dynamic_hydration(ctx: &TestContext) {
     let (result, _ctx_ref, plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
 
-    assert!(matches!(plan, HydrationPlan::Dynamic));
+    assert!(matches!(plan, HydrationPlan::Dynamic(_)));
     assert!(!result.is_empty(), "should find neighbors");
 
     for row in result.authorized_rows() {

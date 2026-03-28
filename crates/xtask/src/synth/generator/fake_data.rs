@@ -490,7 +490,7 @@ impl FakeValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::DataType;
+    use ontology::{DataType, FieldSource};
     use std::collections::BTreeMap;
 
     fn fake_data_path() -> String {
@@ -510,7 +510,7 @@ mod tests {
 
         let field = Field {
             name: "status".to_string(),
-            source: "status".to_string(),
+            source: FieldSource::DatabaseColumn("status".to_string()),
             data_type: DataType::String,
             nullable: true,
             enum_values: Some(enum_vals),
@@ -525,7 +525,7 @@ mod tests {
         let pools = test_pools();
         let make = |name: &str, dt: DataType| Field {
             name: name.to_string(),
-            source: name.to_string(),
+            source: FieldSource::DatabaseColumn(name.to_string()),
             data_type: dt,
             nullable: false,
             enum_values: None,
@@ -578,7 +578,7 @@ mod tests {
     fn test_generate_produces_non_null_for_non_nullable() {
         let field = Field {
             name: "name".to_string(),
-            source: "name".to_string(),
+            source: FieldSource::DatabaseColumn("name".to_string()),
             data_type: DataType::String,
             nullable: false,
             enum_values: None,
@@ -604,7 +604,7 @@ mod tests {
 
         let field = Field {
             name: "category".to_string(),
-            source: "category".to_string(),
+            source: FieldSource::DatabaseColumn("category".to_string()),
             data_type: DataType::Enum,
             nullable: false,
             enum_values: Some(enum_vals),
@@ -632,7 +632,7 @@ mod tests {
     fn test_generate_deterministic_with_seed() {
         let field = Field {
             name: "name".to_string(),
-            source: "name".to_string(),
+            source: FieldSource::DatabaseColumn("name".to_string()),
             data_type: DataType::String,
             nullable: false,
             enum_values: None,
