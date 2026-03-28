@@ -903,10 +903,7 @@ mod tests {
         Input {
             query_type: QueryType::Traversal,
             nodes,
-            compiler: CompilerMetadata {
-                node_edge_col,
-                ..Default::default()
-            },
+            compiler: CompilerMetadata { node_edge_col },
             ..Input::default()
         }
     }

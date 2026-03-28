@@ -1572,7 +1572,7 @@ mod tests {
     fn group_by_kind_filter_injected() {
         use crate::input::{Direction, InputNode, InputRelationship};
 
-        let mut input = Input {
+        let input = Input {
             query_type: QueryType::Aggregation,
             nodes: vec![
                 InputNode {
@@ -1635,9 +1635,9 @@ mod tests {
     fn group_by_kind_filter_with_target_filters() {
         use crate::input::{Direction, InputNode, InputRelationship};
 
-        // mr has a filter, so it's NOT skippable — but the group-by node
-        // (p = Project) should still get its kind filter.
-        let mut input = Input {
+        // mr has a filter, but the group-by node (p = Project) should
+        // still get its kind filter.
+        let input = Input {
             query_type: QueryType::Aggregation,
             nodes: vec![
                 InputNode {
@@ -1712,7 +1712,7 @@ mod tests {
         // edge_columns() for Incoming returns (target_id, source_id),
         // so mr (from) maps to target_id → target_kind,
         // and p (to) maps to source_id → source_kind.
-        let mut input = Input {
+        let input = Input {
             query_type: QueryType::Aggregation,
             nodes: vec![
                 InputNode {
