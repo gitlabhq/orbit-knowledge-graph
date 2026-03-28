@@ -8,7 +8,11 @@ if [ -z "$CI_MERGE_REQUEST_IID" ]; then
 fi
 
 # Strip GitLab draft prefixes: "Draft:", "[Draft]", "(Draft)"
-TITLE=$(printf '%s\n' "$CI_MERGE_REQUEST_TITLE" | sed 's/^\(\[Draft\]\|(Draft)\|Draft:\)[[:space:]]*//')
+# Use multiple -e expressions for POSIX compatibility (busybox sed lacks \| alternation)
+TITLE=$(printf '%s\n' "$CI_MERGE_REQUEST_TITLE" \
+  | sed -e 's/^\[Draft\][[:space:]]*//' \
+        -e 's/^(Draft)[[:space:]]*//' \
+        -e 's/^Draft:[[:space:]]*//')
 
 echo "Checking MR title against conventional commit format: $TITLE"
 

@@ -181,6 +181,16 @@ semgrep-sast:
       exists:
         - "**/*.rs"
 
+# Override the default secret_detection rules so the job runs on MR pipelines.
+# The Jobs/Secret-Detection.gitlab-ci.yml template defaults to branch pipelines
+# only, which conflicts with this project's workflow (MR + main branch only).
+secret_detection:
+  stage: security
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # Docs stage
 
 check_docs_markdown:
