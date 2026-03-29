@@ -38,11 +38,6 @@ impl Context {
     fn emit_query(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
-        // SET statements (must come before WITH for recursive CTEs)
-        for (key, value) in &q.set_statements {
-            parts.push(format!("SET {key} = {value};"));
-        }
-
         // WITH clause (CTEs)
         if !q.ctes.is_empty() {
             parts.push(self.emit_ctes(&q.ctes)?);

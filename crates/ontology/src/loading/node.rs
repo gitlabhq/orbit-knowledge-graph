@@ -164,6 +164,16 @@ impl NodeYaml {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Reject field names that collide with the _gkg_ redaction column prefix.
+        for field in &fields {
+            if field.name.starts_with("_gkg_") {
+                return Err(OntologyError::Validation(format!(
+                    "field '{}' on node '{}' uses reserved prefix '_gkg_'",
+                    field.name, name
+                )));
+            }
+        }
+
         if primary_keys.is_empty() {
             primary_keys.push(DEFAULT_PRIMARY_KEY.to_string());
         }

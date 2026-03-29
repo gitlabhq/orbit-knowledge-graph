@@ -360,23 +360,6 @@ mod tests {
     }
 
     #[test]
-    fn skips_set_statements() {
-        let q = Query {
-            select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
-            from: TableRef::scan("nodes", "n"),
-            set_statements: vec![("max_threads".into(), "4".into())],
-            ..Default::default()
-        };
-
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert!(
-            !result.sql.contains("SET"),
-            "DuckDB should skip SET: {}",
-            result.sql
-        );
-    }
-
-    #[test]
     fn array_in_expanded() {
         let type_filter = Expr::col_in(
             "e",
