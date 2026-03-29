@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfiguration;
+use gitlab_client::GitlabClient;
 use ontology::Ontology;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::ServerTlsConfig;
@@ -27,9 +28,15 @@ impl GrpcServer {
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
+        gitlab_client: Option<Arc<GitlabClient>>,
     ) -> Self {
-        let service =
-            KnowledgeGraphServiceImpl::new(validator, ontology, clickhouse_config, cluster_health);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            ontology,
+            clickhouse_config,
+            cluster_health,
+            gitlab_client,
+        );
         Self {
             addr,
             service: KnowledgeGraphServiceServer::new(service),
@@ -79,6 +86,7 @@ mod tests {
             ontology,
             &clickhouse_config,
             cluster_health,
+            None,
             None,
         );
         assert_eq!(server.addr(), addr);

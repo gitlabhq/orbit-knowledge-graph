@@ -2,6 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfiguration;
+use gitlab_client::GitlabClient;
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -40,14 +41,18 @@ impl KnowledgeGraphServiceImpl {
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
+        gitlab_client: Option<Arc<GitlabClient>>,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
-        let pipeline = QueryPipelineService::new(
+        let mut pipeline = QueryPipelineService::new(
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
         );
+        if let Some(gl) = gitlab_client {
+            pipeline = pipeline.with_gitlab_client(gl);
+        }
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {
             validator,
@@ -414,6 +419,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let plan = service
@@ -440,6 +446,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let response = service.build_structured_schema(&[]);
@@ -468,6 +475,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -502,6 +510,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("User");
@@ -524,6 +533,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
@@ -540,6 +550,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -567,6 +578,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let response = service.build_structured_schema(&[]);
@@ -589,6 +601,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let response = service.build_structured_schema(&[]);
@@ -615,6 +628,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let response =

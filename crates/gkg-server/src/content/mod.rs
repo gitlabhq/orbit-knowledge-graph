@@ -1,3 +1,5 @@
+pub mod gitaly_direct;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -43,6 +45,7 @@ pub trait ColumnResolver: Send + Sync {
 
 /// Maps service names (e.g. `"gitaly"`) to their [`ColumnResolver`]
 /// implementations, with a configurable batch size limit.
+#[derive(Clone)]
 pub struct ColumnResolverRegistry {
     services: HashMap<String, Arc<dyn ColumnResolver>>,
     max_batch_size: usize,

@@ -148,6 +148,21 @@ async fn run_webserver(
 
     let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
 
+    let gitlab_client = config
+        .gitlab_client_config()
+        .map(|cfg| {
+            gitlab_client::GitlabClient::new(cfg)
+                .map(Arc::new)
+                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))
+        })
+        .transpose()?;
+
+    if gitlab_client.is_some() {
+        info!("GitlabClient configured — content resolution enabled");
+    } else {
+        info!("No GitLab client config — content resolution disabled");
+    }
+
     let graph_client = config.graph.build_client();
     let http_server = HttpServer::bind(config.bind_address, graph_client).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
@@ -161,6 +176,7 @@ async fn run_webserver(
         &config.graph,
         cluster_health,
         tls_config,
+        gitlab_client,
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
