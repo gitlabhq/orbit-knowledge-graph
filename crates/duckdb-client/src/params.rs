@@ -6,10 +6,19 @@ pub fn to_sql_params(params: &[&ParamValue]) -> Vec<Box<dyn duckdb::ToSql>> {
 
 fn param_to_sql(param: &ParamValue) -> Box<dyn duckdb::ToSql> {
     match (&param.ch_type, &param.value) {
+        (ChType::Int64, serde_json::Value::Null) => Box::new(Option::<i64>::None),
+        (ChType::Float64, serde_json::Value::Null) => Box::new(Option::<f64>::None),
+        (ChType::Bool, serde_json::Value::Null) => Box::new(Option::<bool>::None),
         (_, serde_json::Value::Null) => Box::new(Option::<String>::None),
         (ChType::String, serde_json::Value::String(s)) => Box::new(s.clone()),
-        (ChType::Int64, serde_json::Value::Number(n)) => Box::new(n.as_i64().unwrap_or(0)),
-        (ChType::Float64, serde_json::Value::Number(n)) => Box::new(n.as_f64().unwrap_or(0.0)),
+        (ChType::Int64, serde_json::Value::Number(n)) => match n.as_i64() {
+            Some(v) => Box::new(v),
+            None => Box::new(param.value.to_string()),
+        },
+        (ChType::Float64, serde_json::Value::Number(n)) => match n.as_f64() {
+            Some(v) => Box::new(v),
+            None => Box::new(param.value.to_string()),
+        },
         (ChType::Bool, serde_json::Value::Bool(b)) => Box::new(*b),
         (_, v) => Box::new(v.to_string()),
     }

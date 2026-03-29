@@ -7,6 +7,8 @@ use duckdb::vtab::arrow::{ArrowVTab, arrow_recordbatch_to_query_params};
 use crate::error::{DuckDbError, Result};
 use crate::schema::{CODE_GRAPH_TABLES, SCHEMA_DDL};
 
+/// Matches DuckDB's default STANDARD_VECTOR_SIZE.
+/// Chunking Arrow batches to this size avoids internal re-chunking in the vtab scanner.
 const ARROW_CHUNK_SIZE: usize = 2048;
 
 pub struct DuckDbClient {
@@ -48,6 +50,9 @@ impl DuckDbClient {
     /// Zero-copy bulk insert via DuckDB's Arrow virtual table scanner.
     /// Large batches are chunked to stay within DuckDB's vector size limits.
     pub fn insert_arrow(&self, table: &str, batch: &RecordBatch) -> Result<()> {
+        if !CODE_GRAPH_TABLES.contains(&table) {
+            return Err(DuckDbError::Schema(format!("unknown table: {table}")));
+        }
         if batch.num_rows() == 0 {
             return Ok(());
         }
@@ -84,6 +89,11 @@ impl DuckDbClient {
         Ok(batches)
     }
 
+    /// Deletes all data for a project/branch across node tables and edges.
+    ///
+    /// Edge table uses `traversal_path` for scoping (matching the ClickHouse schema
+    /// where `gl_edge` has no `project_id`/`branch` columns). In local mode, each
+    /// DB file is one project, so deleting by the fixed traversal path is correct.
     pub fn delete_project_data(&self, project_id: i64, branch: &str) -> Result<()> {
         for table in CODE_GRAPH_TABLES {
             if *table == "gl_edge" {
@@ -94,7 +104,6 @@ impl DuckDbClient {
                 params![project_id, branch],
             )?;
         }
-        // Local mode uses a fixed traversal_path for all edges
         self.conn.execute(
             "DELETE FROM gl_edge WHERE traversal_path = ?",
             params!["0/"],
@@ -286,6 +295,16 @@ mod tests {
             .downcast_ref::<StringArray>()
             .unwrap();
         assert_eq!(names.value(0), "src");
+    }
+
+    #[test]
+    fn insert_arrow_rejects_unknown_table() {
+        let client = DuckDbClient::open_in_memory().unwrap();
+        client.initialize_schema().unwrap();
+
+        let batch = make_file_batch(&[1], &["a.rs"]);
+        let err = client.insert_arrow("evil_table", &batch).unwrap_err();
+        assert!(err.to_string().contains("unknown table"));
     }
 
     #[test]
