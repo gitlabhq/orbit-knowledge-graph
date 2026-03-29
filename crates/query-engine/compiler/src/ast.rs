@@ -198,8 +198,6 @@ pub struct Query {
     pub limit: Option<u32>,
     /// Additional queries to UNION ALL with this one (for recursive CTEs).
     pub union_all: Vec<Query>,
-    /// ClickHouse SET statements prepended to the query (for recursive CTEs).
-    pub set_statements: Vec<(String, String)>,
     /// ClickHouse inline SETTINGS clause appended after LIMIT.
     /// Uses a closed enum to prevent SQL injection — only known safe
     /// settings can be emitted.
@@ -230,7 +228,6 @@ impl Default for Query {
             limit_by: None,
             limit: None,
             union_all: vec![],
-            set_statements: vec![],
             query_settings: Vec::new(),
         }
     }

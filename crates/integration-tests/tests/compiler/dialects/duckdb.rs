@@ -49,19 +49,6 @@ fn no_clickhouse_functions_leak() {
 }
 
 #[test]
-fn no_set_statements() {
-    let sql = parse_duckdb(
-        r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "limit": 10
-    }"#,
-    );
-
-    assert!(!sql.raw_contains("SET "));
-}
-
-#[test]
 fn no_security_filter() {
     let sql = parse_duckdb(
         r#"{
