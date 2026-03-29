@@ -69,43 +69,9 @@ impl VirtualService for MockVirtualService {
     }
 }
 
-/// Extract `root_namespace_id` from a traversal path.
-///
-/// Traversal paths follow the format `"org_id/root_namespace_id/..."`.
-/// Returns the second segment parsed as i64.
-pub fn extract_root_namespace_id(traversal_path: &str) -> Option<i64> {
-    traversal_path
-        .trim_end_matches('/')
-        .split('/')
-        .nth(1)?
-        .parse::<i64>()
-        .ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn root_namespace_from_two_segment_path() {
-        assert_eq!(extract_root_namespace_id("9970/123/"), Some(123));
-    }
-
-    #[test]
-    fn root_namespace_from_three_segment_path() {
-        assert_eq!(extract_root_namespace_id("9970/456/789/"), Some(456));
-    }
-
-    #[test]
-    fn root_namespace_none_for_single_segment() {
-        assert_eq!(extract_root_namespace_id("9970/"), None);
-        assert_eq!(extract_root_namespace_id("9970"), None);
-    }
-
-    #[test]
-    fn root_namespace_none_for_empty() {
-        assert_eq!(extract_root_namespace_id(""), None);
-    }
 
     #[test]
     fn registry_lookup() {
