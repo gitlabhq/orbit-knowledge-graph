@@ -264,7 +264,7 @@ unit-test:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo nextest run --profile ci --lib --bins --test compiler
+    - cargo nextest run --profile ci --lib --bins --test compiler --test querying-pipeline
     - sccache --show-stats || true
 
 integration-test:
