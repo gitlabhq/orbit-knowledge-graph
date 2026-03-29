@@ -93,6 +93,14 @@ pub fn validate_ontology_constants(ontology: &crate::Ontology) {
         ontology.edge_columns().len(),
         EDGE_RESERVED_COLUMNS.len(),
     );
+
+    assert_eq!(
+        ontology.internal_column_prefix(),
+        INTERNAL_COLUMN_PREFIX,
+        "INTERNAL_COLUMN_PREFIX const (\"{INTERNAL_COLUMN_PREFIX}\") doesn't match \
+         embedded ontology (\"{}\") — update the const in constants.rs",
+        ontology.internal_column_prefix(),
+    );
 }
 
 #[cfg(test)]
