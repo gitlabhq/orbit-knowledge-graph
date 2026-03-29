@@ -20,13 +20,12 @@ pub(crate) async fn like_contains_returns_matching_rows(ctx: &TestContext) {
     .await;
 
     resp.assert_node_count(1);
-    resp.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.contains("lic"))
+    });
 }
 
 pub(crate) async fn like_contains_matches_multiple(ctx: &TestContext) {
-    // "a" appears in alice, charlie, diana — but min length is 3,
-    // so use "ali" (only alice) or a shared substring.
-    // "li" is 2 chars (too short). Use "arl" for charlie only.
     let resp = run_query(
         ctx,
         r#"{
@@ -40,7 +39,9 @@ pub(crate) async fn like_contains_matches_multiple(ctx: &TestContext) {
     .await;
 
     resp.assert_node_count(1);
-    resp.assert_node("User", 3, |n| n.prop_str("username") == Some("charlie"));
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.contains("arl"))
+    });
 }
 
 pub(crate) async fn like_contains_no_match_returns_empty(ctx: &TestContext) {
@@ -56,6 +57,9 @@ pub(crate) async fn like_contains_no_match_returns_empty(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.contains("zzz"))
+    });
     resp.assert_node_count(0);
 }
 
@@ -75,7 +79,9 @@ pub(crate) async fn like_starts_with_returns_matching_rows(ctx: &TestContext) {
     .await;
 
     resp.assert_node_count(1);
-    resp.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.starts_with("ali"))
+    });
 }
 
 pub(crate) async fn like_starts_with_no_match(ctx: &TestContext) {
@@ -91,13 +97,15 @@ pub(crate) async fn like_starts_with_no_match(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.starts_with("xyz"))
+    });
     resp.assert_node_count(0);
 }
 
 // ── ends_with ───────────────────────────────────────────────────────
 
 pub(crate) async fn like_ends_with_returns_matching_rows(ctx: &TestContext) {
-    // "ice" matches alice
     let resp = run_query(
         ctx,
         r#"{
@@ -111,13 +119,14 @@ pub(crate) async fn like_ends_with_returns_matching_rows(ctx: &TestContext) {
     .await;
 
     resp.assert_node_count(1);
-    resp.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.ends_with("ice"))
+    });
 }
 
 // ── metacharacter escaping ──────────────────────────────────────────
 
 pub(crate) async fn like_percent_matched_literally(ctx: &TestContext) {
-    // "100%" should not expand — no usernames contain literal "%"
     let resp = run_query(
         ctx,
         r#"{
@@ -130,12 +139,13 @@ pub(crate) async fn like_percent_matched_literally(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.contains("100%"))
+    });
     resp.assert_node_count(0);
 }
 
 pub(crate) async fn like_underscore_matched_literally(ctx: &TestContext) {
-    // "a_b" should not match "aXb" via single-char wildcard —
-    // no usernames contain literal "a_b"
     let resp = run_query(
         ctx,
         r#"{
@@ -148,6 +158,9 @@ pub(crate) async fn like_underscore_matched_literally(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username").is_some_and(|u| u.contains("a_b"))
+    });
     resp.assert_node_count(0);
 }
 
@@ -167,8 +180,8 @@ pub(crate) async fn like_equality_on_email_returns_correct_row(ctx: &TestContext
     .await;
 
     resp.assert_node_count(1);
-    resp.assert_node("User", 1, |n| {
-        n.prop_str("username") == Some("alice") && n.prop_str("email") == Some("alice@example.com")
+    resp.assert_filter("User", "email", |n| {
+        n.prop_str("email") == Some("alice@example.com")
     });
 }
 
@@ -186,5 +199,8 @@ pub(crate) async fn like_in_filter_on_email_works(ctx: &TestContext) {
     .await;
 
     resp.assert_node_count(2);
-    resp.assert_node_ids("User", &[1, 2]);
+    resp.assert_filter("User", "email", |n| {
+        n.prop_str("email")
+            .is_some_and(|e| e == "alice@example.com" || e == "bob@example.com")
+    });
 }

@@ -18,6 +18,7 @@ pub(crate) async fn filterable_traversal_path_readable_as_column(ctx: &TestConte
     .await;
 
     resp.assert_node_count(1);
+    resp.assert_node_ids("Group", &[100]);
     resp.assert_node("Group", 100, |n| {
         n.prop_str("name") == Some("Public Group") && n.prop_str("traversal_path") == Some("1/100/")
     });
@@ -38,13 +39,13 @@ pub(crate) async fn filterable_traversal_path_readable_on_project(ctx: &TestCont
     .await;
 
     resp.assert_node_count(1);
+    resp.assert_node_ids("Project", &[1000]);
     resp.assert_node("Project", 1000, |n| n.prop_str("traversal_path").is_some());
 }
 
 pub(crate) async fn filterable_other_filters_still_work_alongside_traversal_path_column(
     ctx: &TestContext,
 ) {
-    // Select traversal_path as a column while filtering on a different field.
     let resp = run_query(
         ctx,
         r#"{
@@ -59,7 +60,10 @@ pub(crate) async fn filterable_other_filters_still_work_alongside_traversal_path
     .await;
 
     resp.assert_node_count(1);
+    resp.assert_filter("Group", "name", |n| {
+        n.prop_str("name") == Some("Public Group")
+    });
     resp.assert_node("Group", 100, |n| {
-        n.prop_str("name") == Some("Public Group") && n.prop_str("traversal_path") == Some("1/100/")
+        n.prop_str("traversal_path") == Some("1/100/")
     });
 }
