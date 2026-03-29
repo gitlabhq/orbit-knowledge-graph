@@ -42,6 +42,15 @@ pub struct CompiledQueryContext {
 }
 
 impl ParameterizedQuery {
+    /// Returns parameter values in positional order (`$1`, `$2`, ...) for DuckDB execution.
+    ///
+    /// Keys follow the `pN` convention from DuckDB codegen, where N matches `$N` in the SQL.
+    pub fn params_in_order(&self) -> Vec<&ParamValue> {
+        let mut entries: Vec<_> = self.params.iter().collect();
+        entries.sort_by_key(|(k, _)| k[1..].parse::<usize>().unwrap_or(0));
+        entries.into_iter().map(|(_, v)| v).collect()
+    }
+
     /// Render SQL with parameters inlined for debugging/observability.
     ///
     /// Dispatches on [`SqlDialect`]:
@@ -88,5 +97,85 @@ impl ParameterizedQuery {
 impl std::fmt::Display for ParameterizedQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.render())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gkg_utils::clickhouse::ChType;
+    use serde_json::Value;
+
+    fn make_param(ch_type: ChType, value: Value) -> ParamValue {
+        ParamValue { ch_type, value }
+    }
+
+    fn make_query(params: HashMap<String, ParamValue>) -> ParameterizedQuery {
+        ParameterizedQuery {
+            sql: String::new(),
+            params,
+            result_context: ResultContext::new(),
+            dialect: SqlDialect::DuckDb,
+        }
+    }
+
+    #[test]
+    fn params_in_order_sorts_by_positional_index() {
+        let params = HashMap::from([
+            (
+                "p3".into(),
+                make_param(ChType::String, Value::String("c".into())),
+            ),
+            (
+                "p1".into(),
+                make_param(ChType::String, Value::String("a".into())),
+            ),
+            (
+                "p2".into(),
+                make_param(ChType::Int64, Value::Number(42.into())),
+            ),
+        ]);
+        let query = make_query(params);
+        let ordered = query.params_in_order();
+
+        assert_eq!(ordered.len(), 3);
+        assert_eq!(ordered[0].value, Value::String("a".into()));
+        assert_eq!(ordered[1].value, Value::Number(42.into()));
+        assert_eq!(ordered[2].value, Value::String("c".into()));
+    }
+
+    #[test]
+    fn params_in_order_empty() {
+        let query = make_query(HashMap::new());
+        assert!(query.params_in_order().is_empty());
+    }
+
+    #[test]
+    fn params_in_order_single() {
+        let params = HashMap::from([("p1".into(), make_param(ChType::Bool, Value::Bool(true)))]);
+        let query = make_query(params);
+        let ordered = query.params_in_order();
+
+        assert_eq!(ordered.len(), 1);
+        assert_eq!(ordered[0].value, Value::Bool(true));
+    }
+
+    #[test]
+    fn params_in_order_many_params() {
+        let params: HashMap<String, ParamValue> = (1..=10)
+            .map(|i| {
+                (
+                    format!("p{i}"),
+                    make_param(ChType::Int64, Value::Number(i.into())),
+                )
+            })
+            .collect();
+        let query = make_query(params);
+        let ordered = query.params_in_order();
+
+        assert_eq!(ordered.len(), 10);
+        for (i, param) in ordered.iter().enumerate() {
+            assert_eq!(param.value, Value::Number((i as i64 + 1).into()));
+        }
     }
 }
