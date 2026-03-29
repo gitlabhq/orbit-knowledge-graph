@@ -3,8 +3,11 @@ name = "integration-tests"
 version.workspace = true
 edition = "2024"
 publish = false
+autotests = false
 
 # No src/lib.rs — this crate only contains integration tests.
+# Test targets are defined explicitly below; autotests = false
+# prevents cargo from auto-discovering files like common.rs.
 
 [[test]]
 name = "docker"

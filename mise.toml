@@ -44,12 +44,12 @@ run = "cargo build --release"
 description = "Build the crates"
 
 [tasks.test]
-run = "cargo nextest run --lib --bins --test compiler --test querying-pipeline"
-description = "Run unit tests with full debug symbols"
+run = "./scripts/run-unit-tests.sh"
+description = "Run unit + non-Docker integration tests (auto-discovers test targets)"
 
 [tasks."test:fast"]
-run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins --test compiler --test querying-pipeline"
-description = "Run unit tests with reduced debug info for faster builds"
+run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked ./scripts/run-unit-tests.sh"
+description = "Run unit + non-Docker integration tests with reduced debug info"
 
 [tasks."test:compiler"]
 run = "cargo nextest run --test compiler"
