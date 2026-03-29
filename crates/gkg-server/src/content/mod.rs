@@ -32,7 +32,7 @@ pub trait VirtualService: Send + Sync {
 }
 
 /// Maps service names (e.g. `"gitaly"`) to their implementations.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct VirtualServiceRegistry {
     services: HashMap<String, Arc<dyn VirtualService>>,
 }

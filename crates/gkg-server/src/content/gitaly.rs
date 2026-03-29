@@ -1,8 +1,12 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use gitlab_client::GitlabClient;
 use gkg_utils::arrow::ColumnValue;
+use indexer::modules::code::repository::blob_stream::BlobStream;
 use query_engine::pipeline::PipelineError;
+use tracing::{debug, warn};
 
 use super::VirtualService;
 
@@ -23,11 +27,21 @@ pub struct GitalyBlobRequest {
 /// File identity key for deduplicating Gitaly fetches.
 type FileKey = (i64, String, String); // (project_id, branch, file_path)
 
-/// Stub Gitaly virtual service. Parses rows into typed
-/// [`GitalyBlobRequest`]s, deduplicates by file identity, and slices
-/// content by byte range per row. The actual Gitaly fetch is not yet
-/// implemented — returns `None` for every row.
-pub struct GitalyContentService;
+/// Resolves file content by calling the GitLab internal API's `list_blobs`
+/// endpoint, which streams blobs from Gitaly via Workhorse.
+///
+/// Requests are grouped by `project_id` and deduplicated by file identity.
+/// Multiple definitions in the same file share the fetched content and
+/// only receive their byte-range slice.
+pub struct GitalyContentService {
+    client: Arc<GitlabClient>,
+}
+
+impl GitalyContentService {
+    pub fn new(client: Arc<GitlabClient>) -> Self {
+        Self { client }
+    }
+}
 
 #[async_trait]
 impl VirtualService for GitalyContentService {
@@ -43,19 +57,88 @@ impl VirtualService for GitalyContentService {
             .collect();
 
         // Deduplicate: each unique (project_id, branch, file_path) is
-        // fetched once. Multiple definitions in the same file share the
-        // cached content and only receive their byte-range slice.
+        // fetched once via list_blobs.
         let mut file_cache: HashMap<FileKey, Option<String>> = HashMap::new();
+
+        // Group unique file keys by project_id for batched Gitaly calls.
+        let mut by_project: HashMap<i64, Vec<FileKey>> = HashMap::new();
         for req in requests.iter().flatten() {
             let key = (req.project_id, req.branch.clone(), req.file_path.clone());
-            file_cache.entry(key).or_insert_with(|| {
-                // TODO(#379): fetch blob from Gitaly
-                None
-            });
+            if !file_cache.contains_key(&key) {
+                file_cache.insert(key.clone(), None);
+                by_project
+                    .entry(req.project_id)
+                    .or_default()
+                    .push(key);
+            }
+        }
+
+        // Fetch blobs concurrently per project.
+        let futures = by_project.iter().map(|(&project_id, keys)| {
+            let client = Arc::clone(&self.client);
+            let revisions: Vec<String> = keys
+                .iter()
+                .map(|(_, branch, path)| format!("{branch}:{path}"))
+                .collect();
+            let keys = keys.clone();
+            async move {
+                let stream = client.list_blobs(project_id, &revisions).await;
+                (project_id, keys, stream)
+            }
+        });
+
+        let responses: Vec<_> = futures::future::join_all(futures).await;
+
+        for (project_id, keys, stream_result) in responses {
+            let stream = match stream_result {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(
+                        project_id,
+                        error = %e,
+                        "list_blobs failed, content will be missing for this project"
+                    );
+                    continue;
+                }
+            };
+
+            let mut blob_stream = BlobStream::new(stream);
+            let mut blob_index = 0;
+
+            loop {
+                match blob_stream.next_blob().await {
+                    Ok(Some(blob)) => {
+                        if blob_index < keys.len() {
+                            match String::from_utf8(blob.data) {
+                                Ok(text) => {
+                                    file_cache.insert(keys[blob_index].clone(), Some(text));
+                                }
+                                Err(_) => {
+                                    debug!(
+                                        project_id,
+                                        path = %keys[blob_index].2,
+                                        "skipping binary blob"
+                                    );
+                                }
+                            }
+                        }
+                        blob_index += 1;
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        warn!(
+                            project_id,
+                            error = %e,
+                            "blob stream decode error"
+                        );
+                        break;
+                    }
+                }
+            }
         }
 
         // For each row, look up cached content and return only the
-        // relevant byte-range slice — never the full file.
+        // relevant byte-range slice.
         Ok(requests
             .iter()
             .map(|req| {
@@ -72,6 +155,7 @@ impl VirtualService for GitalyContentService {
 
 impl GitalyContentService {
     /// Extract a [`GitalyBlobRequest`] from a hydrated property map.
+    ///
     ///
     /// Expects `project_id`, `branch`, and either `path` (File) or
     /// `file_path` (Definition). Returns `None` if any required field
@@ -201,16 +285,8 @@ mod tests {
     }
 
     // ── resolve_batch ───────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn stub_returns_none() {
-        let svc = GitalyContentService;
-        let props = HashMap::new();
-        let rows: Vec<&HashMap<String, ColumnValue>> = vec![&props, &props];
-
-        let results = svc.resolve_batch("blob_content", &rows, 1).await.unwrap();
-        assert_eq!(results, vec![None, None]);
-    }
+    // Integration tests for resolve_batch require a running GitlabClient
+    // and are covered in the integration-tests crate.
 
     // ── helpers ─────────────────────────────────────────────────────────
 

@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use crate::auth::Claims;
+use crate::content::VirtualServiceRegistry;
+use crate::content::gitaly::GitalyContentService;
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
+use gitlab_client::GitlabClient;
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
@@ -22,6 +25,7 @@ pub struct QueryPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
     profiling: ProfilingConfig,
+    virtual_registry: Option<Arc<VirtualServiceRegistry>>,
 }
 
 impl QueryPipelineService {
@@ -34,7 +38,15 @@ impl QueryPipelineService {
             ontology,
             client,
             profiling,
+            virtual_registry: None,
         }
+    }
+
+    pub fn with_gitlab_client(mut self, gitlab_client: Arc<GitlabClient>) -> Self {
+        let mut registry = VirtualServiceRegistry::new();
+        registry.register("gitaly", Arc::new(GitalyContentService::new(gitlab_client)));
+        self.virtual_registry = Some(Arc::new(registry));
+        self
     }
 
     pub async fn run_query(
@@ -52,6 +64,9 @@ impl QueryPipelineService {
         server_extensions.insert(claims);
         server_extensions.insert(tx);
         server_extensions.insert(stream);
+        if let Some(registry) = &self.virtual_registry {
+            server_extensions.insert(VirtualServiceRegistry::clone(registry));
+        }
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
