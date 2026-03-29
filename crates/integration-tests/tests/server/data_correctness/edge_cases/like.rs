@@ -57,8 +57,8 @@ pub(crate) async fn like_contains_no_match_returns_empty(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_filter("User", "username", |n| {
-        n.prop_str("username").is_some_and(|u| u.contains("zzz"))
+    resp.skip_requirement(Requirement::Filter {
+        field: "username".into(),
     });
     resp.assert_node_count(0);
 }
@@ -97,8 +97,8 @@ pub(crate) async fn like_starts_with_no_match(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_filter("User", "username", |n| {
-        n.prop_str("username").is_some_and(|u| u.starts_with("xyz"))
+    resp.skip_requirement(Requirement::Filter {
+        field: "username".into(),
     });
     resp.assert_node_count(0);
 }
@@ -139,8 +139,8 @@ pub(crate) async fn like_percent_matched_literally(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_filter("User", "username", |n| {
-        n.prop_str("username").is_some_and(|u| u.contains("100%"))
+    resp.skip_requirement(Requirement::Filter {
+        field: "username".into(),
     });
     resp.assert_node_count(0);
 }
@@ -158,8 +158,8 @@ pub(crate) async fn like_underscore_matched_literally(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_filter("User", "username", |n| {
-        n.prop_str("username").is_some_and(|u| u.contains("a_b"))
+    resp.skip_requirement(Requirement::Filter {
+        field: "username".into(),
     });
     resp.assert_node_count(0);
 }

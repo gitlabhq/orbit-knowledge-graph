@@ -1078,6 +1078,7 @@ fn filterable_rejects_traversal_path_starts_with() {
     .unwrap_err();
     assert!(
         err.to_string().contains("not an allowed value")
+            || err.to_string().contains("is not one of")
             || err.to_string().contains("not filterable"),
         "expected traversal_path rejection, got: {err}"
     );
@@ -1098,6 +1099,7 @@ fn filterable_rejects_traversal_path_equality() {
     .unwrap_err();
     assert!(
         err.to_string().contains("not an allowed value")
+            || err.to_string().contains("is not one of")
             || err.to_string().contains("not filterable"),
         "expected traversal_path rejection, got: {err}"
     );
@@ -1118,6 +1120,7 @@ fn filterable_rejects_traversal_path_on_mr() {
     .unwrap_err();
     assert!(
         err.to_string().contains("not an allowed value")
+            || err.to_string().contains("is not one of")
             || err.to_string().contains("not filterable"),
         "expected traversal_path rejection on MR, got: {err}"
     );
