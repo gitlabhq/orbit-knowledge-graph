@@ -13,7 +13,6 @@ use chrono::{DateTime, Utc};
 use code_graph::analysis::types::{
     DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode,
 };
-use code_graph::graph::{RelationshipKind, RelationshipType};
 use rustc_hash::FxHasher;
 
 pub struct ArrowConverter {
@@ -415,7 +414,7 @@ impl ArrowConverter {
         }
 
         for rel in rels {
-            let (src_kind_str, tgt_kind_str) = relationship_kind_to_strings(&rel.kind);
+            let (src_kind_str, tgt_kind_str) = rel.kind.source_target_kinds();
 
             let source_node_id = self.lookup_node_id(graph_data, src_kind_str, rel.source_id);
             let target_node_id = self.lookup_node_id(graph_data, tgt_kind_str, rel.target_id);
@@ -427,7 +426,7 @@ impl ArrowConverter {
             traversal_path.append_value(&self.traversal_path);
             source_id.append_value(src_id);
             source_kind.append_value(src_kind_str);
-            relationship_kind.append_value(edge_label(&rel.relationship_type));
+            relationship_kind.append_value(rel.relationship_type.edge_kind());
             target_id.append_value(tgt_id);
             target_kind.append_value(tgt_kind_str);
             version.append_value(self.version_micros);
@@ -574,80 +573,6 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
     let mut hasher = FxHasher::default();
     [&project_id.to_string(), branch, "branch"].hash(&mut hasher);
     hasher.finish() as i64
-}
-
-fn relationship_kind_to_strings(kind: &RelationshipKind) -> (&'static str, &'static str) {
-    match kind {
-        RelationshipKind::DirectoryToDirectory => ("Directory", "Directory"),
-        RelationshipKind::DirectoryToFile => ("Directory", "File"),
-        RelationshipKind::FileToDefinition => ("File", "Definition"),
-        RelationshipKind::FileToImportedSymbol => ("File", "ImportedSymbol"),
-        RelationshipKind::DefinitionToDefinition => ("Definition", "Definition"),
-        RelationshipKind::DefinitionToImportedSymbol => ("Definition", "ImportedSymbol"),
-        RelationshipKind::ImportedSymbolToImportedSymbol => ("ImportedSymbol", "ImportedSymbol"),
-        RelationshipKind::ImportedSymbolToDefinition => ("ImportedSymbol", "Definition"),
-        RelationshipKind::ImportedSymbolToFile => ("ImportedSymbol", "File"),
-        RelationshipKind::Empty => ("Unknown", "Unknown"),
-    }
-}
-
-/// Maps a fine-grained `RelationshipType` to the ontology edge label
-/// stored in the `relationship_kind` column of the edges table.
-fn edge_label(relationship_type: &RelationshipType) -> &'static str {
-    match relationship_type {
-        RelationshipType::DirContainsDir | RelationshipType::DirContainsFile => "CONTAINS",
-
-        RelationshipType::FileDefines
-        | RelationshipType::DefinesImportedSymbol
-        | RelationshipType::ModuleToMethod
-        | RelationshipType::ModuleToSingletonMethod
-        | RelationshipType::ModuleToClass
-        | RelationshipType::ModuleToModule
-        | RelationshipType::ClassToMethod
-        | RelationshipType::ClassToSingletonMethod
-        | RelationshipType::ClassToClass
-        | RelationshipType::ClassToLambda
-        | RelationshipType::ClassToProc
-        | RelationshipType::ClassToInterface
-        | RelationshipType::ClassToProperty
-        | RelationshipType::ClassToConstructor
-        | RelationshipType::ClassToEnumEntry
-        | RelationshipType::FunctionToFunction
-        | RelationshipType::FunctionToClass
-        | RelationshipType::FunctionToLambda
-        | RelationshipType::FunctionToProc
-        | RelationshipType::LambdaToLambda
-        | RelationshipType::LambdaToClass
-        | RelationshipType::LambdaToFunction
-        | RelationshipType::LambdaToProc
-        | RelationshipType::LambdaToMethod
-        | RelationshipType::LambdaToProperty
-        | RelationshipType::LambdaToInterface
-        | RelationshipType::MethodToMethod
-        | RelationshipType::MethodToClass
-        | RelationshipType::MethodToFunction
-        | RelationshipType::MethodToLambda
-        | RelationshipType::MethodToProc
-        | RelationshipType::MethodToProperty
-        | RelationshipType::MethodToInterface
-        | RelationshipType::InterfaceToInterface
-        | RelationshipType::InterfaceToClass
-        | RelationshipType::InterfaceToMethod
-        | RelationshipType::InterfaceToFunction
-        | RelationshipType::InterfaceToProperty
-        | RelationshipType::InterfaceToLambda => "DEFINES",
-
-        RelationshipType::FileImports
-        | RelationshipType::ImportedSymbolToImportedSymbol
-        | RelationshipType::ImportedSymbolToDefinition
-        | RelationshipType::ImportedSymbolToFile => "IMPORTS",
-
-        RelationshipType::Calls
-        | RelationshipType::AmbiguouslyCalls
-        | RelationshipType::PropertyReference => "CALLS",
-
-        RelationshipType::Empty => "EMPTY",
-    }
 }
 
 #[cfg(test)]
