@@ -110,6 +110,11 @@ name = "gkg-utils"
 expression = "LicenseRef-EE"
 license-files = []
 
+[[licenses.clarify]]
+name = "duckdb-client"
+expression = "LicenseRef-EE"
+license-files = []
+
 [[licenses.exceptions]]
 name = "ruby-prism"
 allow = ["MIT"]
