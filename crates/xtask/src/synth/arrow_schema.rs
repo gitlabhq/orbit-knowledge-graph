@@ -145,25 +145,20 @@ mod tests {
                     name: "id".to_string(),
                     source: FieldSource::DatabaseColumn("id".to_string()),
                     data_type: DataType::Int,
-                    nullable: false,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
+                    ..Default::default()
                 },
                 Field {
                     name: "username".to_string(),
                     source: FieldSource::DatabaseColumn("username".to_string()),
                     data_type: DataType::String,
-                    nullable: false,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
+                    ..Default::default()
                 },
                 Field {
                     name: "email".to_string(),
                     source: FieldSource::DatabaseColumn("email".to_string()),
                     data_type: DataType::String,
                     nullable: true,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
+                    ..Default::default()
                 },
             ],
             destination_table: "gl_user".to_string(),

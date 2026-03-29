@@ -1581,8 +1581,16 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
 }
 
 fn like_pattern(col: Expr, filter: &InputFilter, prefix: &str, suffix: &str) -> Expr {
-    let s = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+    let raw = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+    let s = escape_like(raw);
     Expr::binary(Op::Like, col, Expr::string(format!("{prefix}{s}{suffix}")))
+}
+
+/// Escape LIKE metacharacters so user input is matched literally.
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2936,5 +2944,32 @@ mod tests {
             "no cursor should not set CH query cache: {:?}",
             q.query_settings
         );
+    }
+
+    // ── escape_like ─────────────────────────────────────────────────
+
+    #[test]
+    fn escape_like_preserves_plain_text() {
+        assert_eq!(super::escape_like("hello"), "hello");
+    }
+
+    #[test]
+    fn escape_like_escapes_percent() {
+        assert_eq!(super::escape_like("100%"), "100\\%");
+    }
+
+    #[test]
+    fn escape_like_escapes_underscore() {
+        assert_eq!(super::escape_like("user_name"), "user\\_name");
+    }
+
+    #[test]
+    fn escape_like_escapes_backslash() {
+        assert_eq!(super::escape_like("path\\to"), "path\\\\to");
+    }
+
+    #[test]
+    fn escape_like_escapes_all_metacharacters() {
+        assert_eq!(super::escape_like("100%_\\"), "100\\%\\_\\\\");
     }
 }

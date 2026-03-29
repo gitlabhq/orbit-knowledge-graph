@@ -103,6 +103,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         order_by: schema.settings.etl.default_etl_order_by,
     };
     ontology.etl_settings = etl_settings.clone();
+    // Resolve entity names → physical table names after nodes are loaded (see below).
 
     if !ontology.edge_table.starts_with(&ontology.table_prefix) {
         return Err(OntologyError::Validation(format!(
@@ -201,6 +202,18 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .edge_etl_configs
                 .insert(edge_name.clone(), etl_config);
         }
+    }
+
+    // Resolve skip_security_filter_for_entities → physical table names.
+    for entity_name in &schema.settings.skip_security_filter_for_entities {
+        let node = ontology.nodes.get(entity_name).ok_or_else(|| {
+            OntologyError::Validation(format!(
+                "skip_security_filter_for_entities: unknown entity '{entity_name}'"
+            ))
+        })?;
+        ontology
+            .skip_security_filter_for_tables
+            .push(node.destination_table.clone());
     }
 
     Ok(ontology)
