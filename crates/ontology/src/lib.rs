@@ -592,17 +592,38 @@ impl Ontology {
     }
 
     /// Whether LIKE operators are allowed on a node field.
-    /// Returns `true` for reserved columns and unknown fields (fail-open for
-    /// backwards compatibility; schema validation catches unknown fields).
+    /// Returns `true` for reserved columns (e.g. `id`). Returns `false` for
+    /// unknown fields (fail-closed). Unknown nodes return `true` since edge
+    /// filters pass entity names like `"relationship[0]"`.
     #[must_use]
     pub fn is_like_allowed(&self, node_name: &str, field_name: &str) -> bool {
+        if NODE_RESERVED_COLUMNS.contains(&field_name) {
+            return true;
+        }
         let Some(node) = self.nodes.get(node_name) else {
             return true;
         };
         node.fields
             .iter()
             .find(|f| f.name == field_name)
-            .is_none_or(|f| f.like_allowed)
+            .is_some_and(|f| f.like_allowed)
+    }
+
+    /// Whether a field is filterable by users.
+    /// Returns `true` for reserved columns (e.g. `id`). Returns `false` for
+    /// unknown fields (fail-closed).
+    #[must_use]
+    pub fn is_filterable(&self, node_name: &str, field_name: &str) -> bool {
+        if NODE_RESERVED_COLUMNS.contains(&field_name) {
+            return true;
+        }
+        let Some(node) = self.nodes.get(node_name) else {
+            return true;
+        };
+        node.fields
+            .iter()
+            .find(|f| f.name == field_name)
+            .is_some_and(|f| f.filterable)
     }
 
     /// Validate that a type is a valid node label or edge type.

@@ -103,6 +103,11 @@
               "type": "boolean",
               "description": "Whether LIKE-based operators (contains, starts_with, ends_with) are permitted on this field. Defaults to true. Set to false for sensitive columns to prevent probing.",
               "default": true
+            },
+            "filterable": {
+              "type": "boolean",
+              "description": "Whether users can filter on this field. Defaults to true. Set to false for internal columns (e.g. traversal_path) that should only be system-controlled.",
+              "default": true
             }
           },
           "required": ["type", "source"],

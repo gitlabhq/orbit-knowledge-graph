@@ -107,10 +107,15 @@ struct PropertyYaml {
     enum_type: EnumType,
     #[serde(default = "PropertyYaml::default_like_allowed")]
     like_allowed: bool,
+    #[serde(default = "PropertyYaml::default_filterable")]
+    filterable: bool,
 }
 
 impl PropertyYaml {
     fn default_like_allowed() -> bool {
+        true
+    }
+    fn default_filterable() -> bool {
         true
     }
 }
@@ -169,6 +174,7 @@ impl NodeYaml {
                     enum_values: prop_def.values,
                     enum_type: prop_def.enum_type,
                     like_allowed: prop_def.like_allowed,
+                    filterable: prop_def.filterable,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

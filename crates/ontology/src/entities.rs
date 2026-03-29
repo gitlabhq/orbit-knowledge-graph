@@ -237,6 +237,9 @@ pub struct Field {
     /// are allowed on this field. Defaults to true. Set to false for sensitive
     /// columns (e.g. emails, vulnerability titles) to prevent probing.
     pub like_allowed: bool,
+    /// Whether users can filter on this field. Defaults to true. Set to false
+    /// for internal columns (e.g. traversal_path) that are system-controlled.
+    pub filterable: bool,
 }
 
 impl Default for Field {
@@ -249,6 +252,7 @@ impl Default for Field {
             enum_values: None,
             enum_type: EnumType::default(),
             like_allowed: true,
+            filterable: true,
         }
     }
 }

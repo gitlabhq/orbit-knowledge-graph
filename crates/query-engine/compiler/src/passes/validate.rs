@@ -288,6 +288,11 @@ impl<'a> Validator<'a> {
                 continue;
             };
             for (prop, filter) in &node.filters {
+                if !self.ontology.is_filterable(entity, prop) {
+                    return Err(QueryError::Validation(format!(
+                        "filter on \"{prop}\" for {entity}: field is not filterable"
+                    )));
+                }
                 let Some(data_type) = self.ontology.get_field_type(entity, prop) else {
                     continue;
                 };
@@ -345,7 +350,7 @@ impl<'a> Validator<'a> {
 
         // Enforce minimum pattern length for LIKE filters.
         if is_like_op {
-            let len = value.as_str().map_or(0, str::len);
+            let len = value.as_str().map_or(0, |s| s.chars().count());
             if len < Self::MIN_LIKE_PATTERN_LEN {
                 return Err(QueryError::Validation(format!(
                     "filter on \"{prop}\" for {entity}: \
