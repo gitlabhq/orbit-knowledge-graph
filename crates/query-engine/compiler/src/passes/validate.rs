@@ -31,7 +31,7 @@ fn collect_schema_errors(
 ) -> Result<()> {
     let errors: Vec<_> = validator
         .iter_errors(value)
-        .map(|e| format!("{} at {}", e, e.instance_path()))
+        .map(|e| sanitize_schema_error(&format!("{} at {}", e, e.instance_path())))
         .collect();
 
     if errors.is_empty() {
@@ -39,6 +39,16 @@ fn collect_schema_errors(
     } else {
         Err(QueryError::Validation(errors.join("; ")))
     }
+}
+
+/// Strip enumerated valid values from jsonschema enum-rejection messages.
+/// Matches `is not one of ["quoted","values",...]` — requires at least one
+/// quoted element to avoid false positives on non-enum bracket content.
+fn sanitize_schema_error(msg: &str) -> String {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#"is not one of \["[^"]*".*?\]"#).expect("valid regex")
+    });
+    RE.replace_all(msg, "is not an allowed value").to_string()
 }
 
 /// Check whether a JSON value is compatible with an ontology `DataType`.
@@ -1474,6 +1484,30 @@ mod tests {
             "integer filter on Int source_id should pass, got: {:?}",
             result
         );
+    }
+
+    /// Verify the Identifier regex in graph_query.schema.json only matches ASCII.
+    /// This is a defense against homoglyph attacks — the regex engine treats
+    /// [a-zA-Z] as ASCII-only, but this test makes the assumption explicit.
+    /// The pattern is loaded from the schema to prevent staleness.
+    #[test]
+    fn identifier_regex_rejects_non_ascii() {
+        let schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON).unwrap();
+        let pattern = schema["$defs"]["Identifier"]["pattern"]
+            .as_str()
+            .expect("Identifier pattern missing from schema");
+        let re = regex::Regex::new(pattern).unwrap();
+
+        // Valid ASCII identifiers
+        assert!(re.is_match("user"));
+        assert!(re.is_match("_foo"));
+        assert!(re.is_match("User123"));
+
+        // Homoglyph / non-ASCII must be rejected
+        assert!(!re.is_match("usеr")); // Cyrillic е (U+0435)
+        assert!(!re.is_match("ᴜser")); // Latin small capital U (U+1D1C)
+        assert!(!re.is_match("üser")); // Latin u with diaeresis
+        assert!(!re.is_match("用户")); // CJK
     }
 
     // ── LIKE security controls ──────────────────────────────────────

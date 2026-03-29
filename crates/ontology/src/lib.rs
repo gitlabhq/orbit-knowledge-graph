@@ -216,6 +216,12 @@ impl Ontology {
         })?;
         for (field_name, data_type, nullable) in fields {
             let field_name_string: String = field_name.into();
+            if field_name_string.starts_with(constants::INTERNAL_COLUMN_PREFIX) {
+                return Err(OntologyError::Validation(format!(
+                    "field \"{field_name_string}\" on node \"{node_name}\" uses reserved prefix '{}'",
+                    constants::INTERNAL_COLUMN_PREFIX
+                )));
+            }
             if field_name_string == constants::TRAVERSAL_PATH_COLUMN {
                 node.has_traversal_path = true;
             }
