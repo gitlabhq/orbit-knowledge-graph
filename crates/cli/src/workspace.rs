@@ -116,6 +116,11 @@ impl IndexStore {
         Ok(repo_paths)
     }
 
+    pub fn db_path(&self, repo_path: &str) -> PathBuf {
+        let dir_name = path_to_dir_name(Path::new(repo_path));
+        self.indexes_dir.join(&dir_name).join("graph.duckdb")
+    }
+
     pub async fn set_status(
         &self,
         repo_path: &str,
