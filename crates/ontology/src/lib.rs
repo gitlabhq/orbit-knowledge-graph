@@ -24,7 +24,7 @@ mod loading;
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
-    INTERNAL_COLUMN_PREFIX, NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+    NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 pub use entities::{
     DataType, DomainInfo, EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity,
@@ -140,7 +140,7 @@ impl Ontology {
                     DEFAULT_PRIMARY_KEY.to_string(),
                 ],
             },
-            internal_column_prefix: constants::INTERNAL_COLUMN_PREFIX.to_string(),
+            internal_column_prefix: "_gkg_".to_string(),
             skip_security_filter_for_tables: Vec::new(),
         }
     }
@@ -1291,7 +1291,7 @@ properties:
                 "TestNode".to_string(),
                 &default_sort_key,
                 &etl_settings,
-                INTERNAL_COLUMN_PREFIX,
+                "_gkg_",
             )
             .expect("should succeed");
         assert_eq!(entity.sort_key, vec!["project_id", "branch", "id"]);
@@ -1329,7 +1329,7 @@ properties:
                 "TestNode".to_string(),
                 &default_sort_key,
                 &etl_settings,
-                INTERNAL_COLUMN_PREFIX,
+                "_gkg_",
             )
             .expect("should succeed");
         assert_eq!(entity.sort_key, default_sort_key);
@@ -1357,6 +1357,7 @@ schema_version: "1.0"
 settings:
   table_prefix: "kg_"
   edge_table: "kg_edge"
+  internal_column_prefix: "_gkg_"
   default_entity_sort_key: [traversal_path, id]
   edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
   edge_columns:
@@ -1541,7 +1542,7 @@ properties:
                 "TestNode".to_string(),
                 &default_sort_key,
                 &etl_settings,
-                INTERNAL_COLUMN_PREFIX,
+                "_gkg_",
             )
             .unwrap_err();
         assert!(
@@ -1586,7 +1587,7 @@ properties:
                 "TestNode".to_string(),
                 &default_sort_key,
                 &etl_settings,
-                INTERNAL_COLUMN_PREFIX,
+                "_gkg_",
             )
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());

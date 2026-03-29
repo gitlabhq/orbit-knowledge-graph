@@ -9,12 +9,6 @@ use const_format::concatcp;
 /// Primary key field name used by default.
 pub const DEFAULT_PRIMARY_KEY: &str = "id";
 
-/// Compile-time default for `settings.internal_column_prefix`.
-/// Used by `concatcp!` for static column name derivation. The runtime value
-/// is loaded from YAML via [`Ontology::internal_column_prefix()`] and
-/// validated against this const at startup.
-pub const INTERNAL_COLUMN_PREFIX: &str = "_gkg_";
-
 /// Reserved columns that exist on all nodes.
 pub const NODE_RESERVED_COLUMNS: &[&str] = &["id"];
 
@@ -92,14 +86,6 @@ pub fn validate_ontology_constants(ontology: &crate::Ontology) {
         "edge_columns count {} doesn't match EDGE_RESERVED_COLUMNS length {}",
         ontology.edge_columns().len(),
         EDGE_RESERVED_COLUMNS.len(),
-    );
-
-    assert_eq!(
-        ontology.internal_column_prefix(),
-        INTERNAL_COLUMN_PREFIX,
-        "INTERNAL_COLUMN_PREFIX const (\"{INTERNAL_COLUMN_PREFIX}\") doesn't match \
-         embedded ontology (\"{}\") — update the const in constants.rs",
-        ontology.internal_column_prefix(),
     );
 }
 

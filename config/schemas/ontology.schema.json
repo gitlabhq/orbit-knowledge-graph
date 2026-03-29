@@ -357,7 +357,7 @@
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."
         }
       },
-      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "edge_columns", "etl"],
+      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "edge_columns", "internal_column_prefix", "etl"],
       "additionalProperties": false
     },
 
