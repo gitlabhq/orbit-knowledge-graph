@@ -1,4 +1,4 @@
-module gitlab.com/gitlab-org/orbit/knowledge-graph/proto/go
+module gitlab.com/gitlab-org/orbit/knowledge-graph
 
 go 1.24.0
 

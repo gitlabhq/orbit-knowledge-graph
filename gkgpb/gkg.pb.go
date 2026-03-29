@@ -2358,7 +2358,7 @@ const file_gkg_proto_rawDesc = "" +
 	"\fExecuteQuery\x12\x1b.gkg.v1.ExecuteQueryMessage\x1a\x1b.gkg.v1.ExecuteQueryMessage(\x010\x01\x12O\n" +
 	"\x0eGetGraphSchema\x12\x1d.gkg.v1.GetGraphSchemaRequest\x1a\x1e.gkg.v1.GetGraphSchemaResponse\x12U\n" +
 	"\x10GetClusterHealth\x12\x1f.gkg.v1.GetClusterHealthRequest\x1a .gkg.v1.GetClusterHealthResponse\x12L\n" +
-	"\rGetGraphStats\x12\x1c.gkg.v1.GetGraphStatsRequest\x1a\x1d.gkg.v1.GetGraphStatsResponseB<Z:gitlab.com/gitlab-org/orbit/knowledge-graph/proto/go/gkgpbb\x06proto3"
+	"\rGetGraphStats\x12\x1c.gkg.v1.GetGraphStatsRequest\x1a\x1d.gkg.v1.GetGraphStatsResponseb\x06proto3"
 
 var (
 	file_gkg_proto_rawDescOnce sync.Once
