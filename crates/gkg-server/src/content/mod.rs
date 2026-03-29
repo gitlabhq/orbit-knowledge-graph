@@ -8,6 +8,9 @@ use query_engine::pipeline::PipelineError;
 /// Maximum rows per virtual service batch call.
 pub const MAX_VIRTUAL_BATCH_SIZE: usize = 100;
 
+/// A single entity row's hydrated properties, keyed by column name.
+pub type PropertyRow = HashMap<String, ColumnValue>;
+
 /// A service that resolves virtual column values from an external source.
 ///
 /// Implementations receive the hydrated property map for each entity row
@@ -24,7 +27,7 @@ pub trait VirtualService: Send + Sync {
     async fn resolve_batch(
         &self,
         lookup: &str,
-        rows: &[&HashMap<String, ColumnValue>],
+        rows: &[&PropertyRow],
         org_id: i64,
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError>;
 }
@@ -57,7 +60,7 @@ impl VirtualService for MockVirtualService {
     async fn resolve_batch(
         &self,
         lookup: &str,
-        rows: &[&HashMap<String, ColumnValue>],
+        rows: &[&PropertyRow],
         _org_id: i64,
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
         Ok(rows
@@ -85,7 +88,7 @@ mod tests {
     async fn mock_service_echoes_lookup() {
         let svc = MockVirtualService;
         let props = HashMap::new();
-        let rows: Vec<&HashMap<String, ColumnValue>> = vec![&props, &props];
+        let rows: Vec<&PropertyRow> = vec![&props, &props];
 
         let results = svc.resolve_batch("blob_content", &rows, 1).await.unwrap();
         assert_eq!(results.len(), 2);
