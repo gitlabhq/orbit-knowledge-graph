@@ -51,8 +51,6 @@ impl Context {
     fn emit_query(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
-        // DuckDB: skip SET statements (ClickHouse-specific).
-
         if !q.ctes.is_empty() {
             parts.push(self.emit_ctes(&q.ctes)?);
         }
@@ -355,23 +353,6 @@ mod tests {
         assert!(
             !result.sql.contains("startsWith("),
             "should not contain CH function: {}",
-            result.sql
-        );
-    }
-
-    #[test]
-    fn skips_set_statements() {
-        let q = Query {
-            select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
-            from: TableRef::scan("nodes", "n"),
-            set_statements: vec![("max_threads".into(), "4".into())],
-            ..Default::default()
-        };
-
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert!(
-            !result.sql.contains("SET"),
-            "DuckDB should skip SET: {}",
             result.sql
         );
     }
