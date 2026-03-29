@@ -51,8 +51,6 @@ impl Context {
     fn emit_query(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
-        // DuckDB: skip SET statements (ClickHouse-specific).
-
         if !q.ctes.is_empty() {
             parts.push(self.emit_ctes(&q.ctes)?);
         }
