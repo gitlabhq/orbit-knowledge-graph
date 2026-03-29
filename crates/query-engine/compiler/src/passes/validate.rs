@@ -41,13 +41,12 @@ fn collect_schema_errors(
     }
 }
 
-/// Strip enumerated valid values from jsonschema error messages.
-/// Patterns like `"foo" is not one of ["bar","baz",...]` expose the full
-/// allowlist. Replace with a generic message — the schema itself is public
-/// via GetGraphSchema so this is low severity, but reduces noise.
+/// Strip enumerated valid values from jsonschema enum-rejection messages.
+/// Matches `is not one of ["quoted","values",...]` — requires at least one
+/// quoted element to avoid false positives on non-enum bracket content.
 fn sanitize_schema_error(msg: &str) -> String {
     static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r#"is not one of \[.*?\]"#).expect("valid regex")
+        regex::Regex::new(r#"is not one of \["[^"]*".*?\]"#).expect("valid regex")
     });
     RE.replace_all(msg, "is not an allowed value").to_string()
 }
@@ -1450,9 +1449,13 @@ mod tests {
     /// Verify the Identifier regex in graph_query.schema.json only matches ASCII.
     /// This is a defense against homoglyph attacks — the regex engine treats
     /// [a-zA-Z] as ASCII-only, but this test makes the assumption explicit.
+    /// The pattern is loaded from the schema to prevent staleness.
     #[test]
     fn identifier_regex_rejects_non_ascii() {
-        let pattern = r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$";
+        let schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON).unwrap();
+        let pattern = schema["$defs"]["Identifier"]["pattern"]
+            .as_str()
+            .expect("Identifier pattern missing from schema");
         let re = regex::Regex::new(pattern).unwrap();
 
         // Valid ASCII identifiers
