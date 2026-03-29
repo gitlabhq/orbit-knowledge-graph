@@ -7,12 +7,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gkg_server::content::{ColumnResolverRegistry, MockColumnResolver, PropertyRow};
+use gkg_server::content::{ColumnResolverRegistry, PropertyRow};
 use gkg_server::pipeline::HydrationStage;
 use gkg_utils::arrow::ColumnValue;
 use ontology::Ontology;
 use query_engine::compiler::{SecurityContext, VirtualColumnRequest};
 use query_engine::pipeline::{PipelineError, QueryPipelineContext, TypeMap};
+
+use super::common::MockColumnResolver;
 
 fn test_ctx() -> QueryPipelineContext {
     test_ctx_with_batch_size(100)

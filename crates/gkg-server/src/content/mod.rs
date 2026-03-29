@@ -80,36 +80,14 @@ impl ColumnResolverRegistry {
     }
 }
 
-/// Mock resolver that echoes the lookup name back as the resolved value.
-pub struct MockColumnResolver;
-
-#[async_trait]
-impl ColumnResolver for MockColumnResolver {
-    async fn resolve_batch(
-        &self,
-        lookup: &str,
-        rows: &[&PropertyRow],
-        _ctx: &ResolverContext,
-    ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
-        Ok(rows
-            .iter()
-            .map(|_| Some(ColumnValue::String(format!("mock:{lookup}"))))
-            .collect())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn registry_lookup() {
-        let mut reg = ColumnResolverRegistry::new();
+        let reg = ColumnResolverRegistry::new();
         assert!(reg.get("gitaly").is_none());
-
-        reg.register("gitaly", Arc::new(MockColumnResolver));
-        assert!(reg.get("gitaly").is_some());
-        assert!(reg.get("other").is_none());
     }
 
     #[test]
@@ -122,25 +100,5 @@ mod tests {
     fn registry_custom_batch_size() {
         let reg = ColumnResolverRegistry::new().with_max_batch_size(50);
         assert_eq!(reg.max_batch_size(), 50);
-    }
-
-    #[tokio::test]
-    async fn mock_resolver_echoes_lookup() {
-        let svc = MockColumnResolver;
-        let props = HashMap::new();
-        let rows: Vec<&PropertyRow> = vec![&props, &props];
-
-        let rctx = ResolverContext {
-            security_context: SecurityContext::new(1, vec!["1/2/".into()]).unwrap(),
-        };
-        let results = svc
-            .resolve_batch("blob_content", &rows, &rctx)
-            .await
-            .unwrap();
-        assert_eq!(results.len(), 2);
-        assert_eq!(
-            results[0],
-            Some(ColumnValue::String("mock:blob_content".into()))
-        );
     }
 }
