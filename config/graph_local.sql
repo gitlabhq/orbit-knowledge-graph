@@ -3,12 +3,12 @@
 -- Mirrors the code-indexing subset of graph.sql (ClickHouse).
 -- Differences:
 --   - No ENGINE, CODEC, PROJECTION, INDEX, or SETTINGS clauses
+--   - No traversal_path — local mode has no multi-tenant namespace scoping
 --   - _version is BIGINT (not DateTime64) — local mode uses a simple counter
 --   - No _deleted column — local mode does full delete-and-reinsert
 
 CREATE TABLE IF NOT EXISTS gl_directory (
     id BIGINT NOT NULL,
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     path VARCHAR NOT NULL,
@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS gl_directory (
 
 CREATE TABLE IF NOT EXISTS gl_file (
     id BIGINT NOT NULL,
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     path VARCHAR NOT NULL,
@@ -30,7 +29,6 @@ CREATE TABLE IF NOT EXISTS gl_file (
 
 CREATE TABLE IF NOT EXISTS gl_definition (
     id BIGINT NOT NULL,
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     file_path VARCHAR NOT NULL,
@@ -46,7 +44,6 @@ CREATE TABLE IF NOT EXISTS gl_definition (
 
 CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     id BIGINT NOT NULL,
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     file_path VARCHAR NOT NULL,
@@ -62,7 +59,6 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
 );
 
 CREATE TABLE IF NOT EXISTS gl_edge (
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     source_id BIGINT NOT NULL,
     source_kind VARCHAR NOT NULL,
     relationship_kind VARCHAR NOT NULL,
