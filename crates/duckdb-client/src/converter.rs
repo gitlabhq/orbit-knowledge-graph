@@ -9,6 +9,9 @@ use code_graph::analysis::types::{
 
 use crate::error::Result;
 
+/// Fixed value — the query engine's lower pass references traversal_path
+/// in generated SQL. A future MR will make the DuckDB pipeline dialect-aware
+/// and remove this column from the local schema entirely.
 const LOCAL_TRAVERSAL_PATH: &str = "0/";
 
 pub struct LocalGraphData {
@@ -37,102 +40,118 @@ pub fn convert_graph_data(
     })
 }
 
+/// Common columns shared by all node tables: id, traversal_path, project_id, branch, _version.
+struct BaseColumns {
+    id: Int64Builder,
+    traversal_path: StringBuilder,
+    project_id: Int64Builder,
+    branch: StringBuilder,
+    version: Int64Builder,
+    project_id_val: i64,
+    branch_val: String,
+}
+
+impl BaseColumns {
+    fn new(capacity: usize, branch: &str) -> Self {
+        Self {
+            id: Int64Builder::with_capacity(capacity),
+            traversal_path: StringBuilder::with_capacity(capacity, capacity * 3),
+            project_id: Int64Builder::with_capacity(capacity),
+            branch: StringBuilder::with_capacity(capacity, capacity * branch.len()),
+            version: Int64Builder::with_capacity(capacity),
+            project_id_val: 0,
+            branch_val: branch.to_string(),
+        }
+    }
+
+    fn with_project_id(mut self, project_id: i64) -> Self {
+        self.project_id_val = project_id;
+        self
+    }
+
+    fn append(&mut self, node_id: i64) {
+        self.id.append_value(node_id);
+        self.traversal_path.append_value(LOCAL_TRAVERSAL_PATH);
+        self.project_id.append_value(self.project_id_val);
+        self.branch.append_value(&self.branch_val);
+        self.version.append_value(0);
+    }
+
+    fn into_batch(mut self, extra: Vec<(&str, DataType, bool, ArrayRef)>) -> Result<RecordBatch> {
+        let mut fields = vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("traversal_path", DataType::Utf8, false),
+            Field::new("project_id", DataType::Int64, false),
+            Field::new("branch", DataType::Utf8, false),
+        ];
+        let mut columns: Vec<ArrayRef> = vec![
+            Arc::new(self.id.finish()),
+            Arc::new(self.traversal_path.finish()),
+            Arc::new(self.project_id.finish()),
+            Arc::new(self.branch.finish()),
+        ];
+
+        for (name, dtype, nullable, array) in extra {
+            fields.push(Field::new(name, dtype, nullable));
+            columns.push(array);
+        }
+
+        fields.push(Field::new("_version", DataType::Int64, false));
+        columns.push(Arc::new(self.version.finish()));
+
+        Ok(RecordBatch::try_new(
+            Arc::new(Schema::new(fields)),
+            columns,
+        )?)
+    }
+}
+
 fn convert_directories(
     nodes: &[DirectoryNode],
     project_id: i64,
     branch: &str,
 ) -> Result<RecordBatch> {
     let cap = nodes.len();
-    let mut id = Int64Builder::with_capacity(cap);
-    let mut tp = StringBuilder::with_capacity(cap, cap * 3);
-    let mut pid = Int64Builder::with_capacity(cap);
-    let mut br = StringBuilder::with_capacity(cap, cap * branch.len());
+    let mut base = BaseColumns::new(cap, branch).with_project_id(project_id);
     let mut path = StringBuilder::with_capacity(cap, cap * 64);
     let mut name = StringBuilder::with_capacity(cap, cap * 32);
-    let mut ver = Int64Builder::with_capacity(cap);
 
     for node in nodes {
         let Some(node_id) = node.id else { continue };
-        id.append_value(node_id);
-        tp.append_value(LOCAL_TRAVERSAL_PATH);
-        pid.append_value(project_id);
-        br.append_value(branch);
+        base.append(node_id);
         path.append_value(&node.path);
         name.append_value(&node.name);
-        ver.append_value(0);
     }
 
-    Ok(RecordBatch::try_new(
-        Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("traversal_path", DataType::Utf8, false),
-            Field::new("project_id", DataType::Int64, false),
-            Field::new("branch", DataType::Utf8, false),
-            Field::new("path", DataType::Utf8, false),
-            Field::new("name", DataType::Utf8, false),
-            Field::new("_version", DataType::Int64, false),
-        ])),
-        vec![
-            Arc::new(id.finish()) as ArrayRef,
-            Arc::new(tp.finish()),
-            Arc::new(pid.finish()),
-            Arc::new(br.finish()),
-            Arc::new(path.finish()),
-            Arc::new(name.finish()),
-            Arc::new(ver.finish()),
-        ],
-    )?)
+    base.into_batch(vec![
+        ("path", DataType::Utf8, false, Arc::new(path.finish())),
+        ("name", DataType::Utf8, false, Arc::new(name.finish())),
+    ])
 }
 
 fn convert_files(nodes: &[FileNode], project_id: i64, branch: &str) -> Result<RecordBatch> {
     let cap = nodes.len();
-    let mut id = Int64Builder::with_capacity(cap);
-    let mut tp = StringBuilder::with_capacity(cap, cap * 3);
-    let mut pid = Int64Builder::with_capacity(cap);
-    let mut br = StringBuilder::with_capacity(cap, cap * branch.len());
+    let mut base = BaseColumns::new(cap, branch).with_project_id(project_id);
     let mut path = StringBuilder::with_capacity(cap, cap * 64);
     let mut name = StringBuilder::with_capacity(cap, cap * 32);
     let mut ext = StringBuilder::with_capacity(cap, cap * 8);
     let mut lang = StringBuilder::with_capacity(cap, cap * 16);
-    let mut ver = Int64Builder::with_capacity(cap);
 
     for node in nodes {
         let Some(node_id) = node.id else { continue };
-        id.append_value(node_id);
-        tp.append_value(LOCAL_TRAVERSAL_PATH);
-        pid.append_value(project_id);
-        br.append_value(branch);
+        base.append(node_id);
         path.append_value(&node.path);
         name.append_value(&node.name);
         ext.append_value(&node.extension);
         lang.append_value(&node.language);
-        ver.append_value(0);
     }
 
-    Ok(RecordBatch::try_new(
-        Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("traversal_path", DataType::Utf8, false),
-            Field::new("project_id", DataType::Int64, false),
-            Field::new("branch", DataType::Utf8, false),
-            Field::new("path", DataType::Utf8, false),
-            Field::new("name", DataType::Utf8, false),
-            Field::new("extension", DataType::Utf8, false),
-            Field::new("language", DataType::Utf8, false),
-            Field::new("_version", DataType::Int64, false),
-        ])),
-        vec![
-            Arc::new(id.finish()) as ArrayRef,
-            Arc::new(tp.finish()),
-            Arc::new(pid.finish()),
-            Arc::new(br.finish()),
-            Arc::new(path.finish()),
-            Arc::new(name.finish()),
-            Arc::new(ext.finish()),
-            Arc::new(lang.finish()),
-            Arc::new(ver.finish()),
-        ],
-    )?)
+    base.into_batch(vec![
+        ("path", DataType::Utf8, false, Arc::new(path.finish())),
+        ("name", DataType::Utf8, false, Arc::new(name.finish())),
+        ("extension", DataType::Utf8, false, Arc::new(ext.finish())),
+        ("language", DataType::Utf8, false, Arc::new(lang.finish())),
+    ])
 }
 
 fn convert_definitions(
@@ -141,10 +160,7 @@ fn convert_definitions(
     branch: &str,
 ) -> Result<RecordBatch> {
     let cap = nodes.len();
-    let mut id = Int64Builder::with_capacity(cap);
-    let mut tp = StringBuilder::with_capacity(cap, cap * 3);
-    let mut pid = Int64Builder::with_capacity(cap);
-    let mut br = StringBuilder::with_capacity(cap, cap * branch.len());
+    let mut base = BaseColumns::new(cap, branch).with_project_id(project_id);
     let mut file_path = StringBuilder::with_capacity(cap, cap * 64);
     let mut fqn = StringBuilder::with_capacity(cap, cap * 128);
     let mut name = StringBuilder::with_capacity(cap, cap * 32);
@@ -153,14 +169,10 @@ fn convert_definitions(
     let mut end_line = Int64Builder::with_capacity(cap);
     let mut start_byte = Int64Builder::with_capacity(cap);
     let mut end_byte = Int64Builder::with_capacity(cap);
-    let mut ver = Int64Builder::with_capacity(cap);
 
     for node in nodes {
         let Some(node_id) = node.id else { continue };
-        id.append_value(node_id);
-        tp.append_value(LOCAL_TRAVERSAL_PATH);
-        pid.append_value(project_id);
-        br.append_value(branch);
+        base.append(node_id);
         file_path.append_value(node.file_path.as_ref());
         fqn.append_value(node.fqn.to_string());
         name.append_value(node.fqn.name());
@@ -169,41 +181,48 @@ fn convert_definitions(
         end_line.append_value(node.range.end.line as i64);
         start_byte.append_value(node.range.byte_offset.0 as i64);
         end_byte.append_value(node.range.byte_offset.1 as i64);
-        ver.append_value(0);
     }
 
-    Ok(RecordBatch::try_new(
-        Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("traversal_path", DataType::Utf8, false),
-            Field::new("project_id", DataType::Int64, false),
-            Field::new("branch", DataType::Utf8, false),
-            Field::new("file_path", DataType::Utf8, false),
-            Field::new("fqn", DataType::Utf8, false),
-            Field::new("name", DataType::Utf8, false),
-            Field::new("definition_type", DataType::Utf8, false),
-            Field::new("start_line", DataType::Int64, false),
-            Field::new("end_line", DataType::Int64, false),
-            Field::new("start_byte", DataType::Int64, false),
-            Field::new("end_byte", DataType::Int64, false),
-            Field::new("_version", DataType::Int64, false),
-        ])),
-        vec![
-            Arc::new(id.finish()) as ArrayRef,
-            Arc::new(tp.finish()),
-            Arc::new(pid.finish()),
-            Arc::new(br.finish()),
+    base.into_batch(vec![
+        (
+            "file_path",
+            DataType::Utf8,
+            false,
             Arc::new(file_path.finish()),
-            Arc::new(fqn.finish()),
-            Arc::new(name.finish()),
+        ),
+        ("fqn", DataType::Utf8, false, Arc::new(fqn.finish())),
+        ("name", DataType::Utf8, false, Arc::new(name.finish())),
+        (
+            "definition_type",
+            DataType::Utf8,
+            false,
             Arc::new(def_type.finish()),
+        ),
+        (
+            "start_line",
+            DataType::Int64,
+            false,
             Arc::new(start_line.finish()),
+        ),
+        (
+            "end_line",
+            DataType::Int64,
+            false,
             Arc::new(end_line.finish()),
+        ),
+        (
+            "start_byte",
+            DataType::Int64,
+            false,
             Arc::new(start_byte.finish()),
+        ),
+        (
+            "end_byte",
+            DataType::Int64,
+            false,
             Arc::new(end_byte.finish()),
-            Arc::new(ver.finish()),
-        ],
-    )?)
+        ),
+    ])
 }
 
 fn convert_imported_symbols(
@@ -212,10 +231,7 @@ fn convert_imported_symbols(
     branch: &str,
 ) -> Result<RecordBatch> {
     let cap = nodes.len();
-    let mut id = Int64Builder::with_capacity(cap);
-    let mut tp = StringBuilder::with_capacity(cap, cap * 3);
-    let mut pid = Int64Builder::with_capacity(cap);
-    let mut br = StringBuilder::with_capacity(cap, cap * branch.len());
+    let mut base = BaseColumns::new(cap, branch).with_project_id(project_id);
     let mut file_path = StringBuilder::with_capacity(cap, cap * 64);
     let mut import_type = StringBuilder::with_capacity(cap, cap * 16);
     let mut import_path = StringBuilder::with_capacity(cap, cap * 64);
@@ -225,14 +241,10 @@ fn convert_imported_symbols(
     let mut end_line = Int64Builder::with_capacity(cap);
     let mut start_byte = Int64Builder::with_capacity(cap);
     let mut end_byte = Int64Builder::with_capacity(cap);
-    let mut ver = Int64Builder::with_capacity(cap);
 
     for node in nodes {
         let Some(node_id) = node.id else { continue };
-        id.append_value(node_id);
-        tp.append_value(LOCAL_TRAVERSAL_PATH);
-        pid.append_value(project_id);
-        br.append_value(branch);
+        base.append(node_id);
         file_path.append_value(&node.location.file_path);
         import_type.append_value(node.import_type.as_str());
         import_path.append_value(&node.import_path);
@@ -253,43 +265,64 @@ fn convert_imported_symbols(
         end_line.append_value(node.location.end_line as i64);
         start_byte.append_value(node.location.start_byte);
         end_byte.append_value(node.location.end_byte);
-        ver.append_value(0);
     }
 
-    Ok(RecordBatch::try_new(
-        Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("traversal_path", DataType::Utf8, false),
-            Field::new("project_id", DataType::Int64, false),
-            Field::new("branch", DataType::Utf8, false),
-            Field::new("file_path", DataType::Utf8, false),
-            Field::new("import_type", DataType::Utf8, false),
-            Field::new("import_path", DataType::Utf8, false),
-            Field::new("identifier_name", DataType::Utf8, true),
-            Field::new("identifier_alias", DataType::Utf8, true),
-            Field::new("start_line", DataType::Int64, false),
-            Field::new("end_line", DataType::Int64, false),
-            Field::new("start_byte", DataType::Int64, false),
-            Field::new("end_byte", DataType::Int64, false),
-            Field::new("_version", DataType::Int64, false),
-        ])),
-        vec![
-            Arc::new(id.finish()) as ArrayRef,
-            Arc::new(tp.finish()),
-            Arc::new(pid.finish()),
-            Arc::new(br.finish()),
+    base.into_batch(vec![
+        (
+            "file_path",
+            DataType::Utf8,
+            false,
             Arc::new(file_path.finish()),
+        ),
+        (
+            "import_type",
+            DataType::Utf8,
+            false,
             Arc::new(import_type.finish()),
+        ),
+        (
+            "import_path",
+            DataType::Utf8,
+            false,
             Arc::new(import_path.finish()),
+        ),
+        (
+            "identifier_name",
+            DataType::Utf8,
+            true,
             Arc::new(ident_name.finish()),
+        ),
+        (
+            "identifier_alias",
+            DataType::Utf8,
+            true,
             Arc::new(ident_alias.finish()),
+        ),
+        (
+            "start_line",
+            DataType::Int64,
+            false,
             Arc::new(start_line.finish()),
+        ),
+        (
+            "end_line",
+            DataType::Int64,
+            false,
             Arc::new(end_line.finish()),
+        ),
+        (
+            "start_byte",
+            DataType::Int64,
+            false,
             Arc::new(start_byte.finish()),
+        ),
+        (
+            "end_byte",
+            DataType::Int64,
+            false,
             Arc::new(end_byte.finish()),
-            Arc::new(ver.finish()),
-        ],
-    )?)
+        ),
+    ])
 }
 
 fn convert_edges(graph_data: &GraphData) -> Result<RecordBatch> {
