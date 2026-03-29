@@ -29,6 +29,9 @@ use crate::content::{MAX_VIRTUAL_BATCH_SIZE, VirtualServiceRegistry};
 
 type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
 
+/// Entity type paired with the virtual columns that need remote resolution.
+type EntityVirtualColumns<'a> = (&'a str, &'a [VirtualColumnRequest]);
+
 #[derive(Clone)]
 pub struct HydrationStage;
 
@@ -49,7 +52,7 @@ impl HydrationStage {
     /// flag and registering the service in [`VirtualServiceRegistry`].
     async fn resolve_virtual_columns(
         ctx: &QueryPipelineContext,
-        entity_virtual_columns: &[(&str, &[VirtualColumnRequest])],
+        entity_virtual_columns: &[EntityVirtualColumns<'_>],
         property_map: &mut PropertyMap,
     ) -> Result<(), PipelineError> {
         let has_work = entity_virtual_columns.iter().any(|(_, vc)| !vc.is_empty());
@@ -481,7 +484,7 @@ impl PipelineStage for HydrationStage {
                     .0
                     .extend(executions);
                 let mut property_map = property_map;
-                let entity_virtuals: Vec<(&str, &[VirtualColumnRequest])> = templates
+                let entity_virtuals: Vec<EntityVirtualColumns<'_>> = templates
                     .iter()
                     .map(|t| (t.entity_type.as_str(), t.virtual_columns.as_slice()))
                     .collect();
@@ -512,7 +515,7 @@ impl PipelineStage for HydrationStage {
                         .0
                         .extend(executions);
                     let mut property_map = property_map;
-                    let entity_virtuals: Vec<(&str, &[VirtualColumnRequest])> = entity_specs
+                    let entity_virtuals: Vec<EntityVirtualColumns<'_>> = entity_specs
                         .iter()
                         .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
                         .collect();
@@ -573,7 +576,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_virtual_columns_skips_when_no_virtual_columns() {
         let ctx = test_ctx();
-        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &[])];
+        let specs: Vec<EntityVirtualColumns<'_>> = vec![("File", &[])];
         let mut map = file_property_map();
         let original_len = map.values().next().unwrap().len();
 
@@ -592,7 +595,7 @@ mod tests {
             service: "gitaly".into(),
             lookup: "blob_content".into(),
         }];
-        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+        let specs: Vec<EntityVirtualColumns<'_>> = vec![("File", &vcrs)];
         let mut map = file_property_map();
 
         HydrationStage::resolve_virtual_columns(&ctx, &specs, &mut map)
@@ -622,7 +625,7 @@ mod tests {
             service: "gitaly".into(),
             lookup: "blob_content".into(),
         }];
-        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+        let specs: Vec<EntityVirtualColumns<'_>> = vec![("File", &vcrs)];
         let mut map = file_property_map();
 
         let err = HydrationStage::resolve_virtual_columns(&ctx, &specs, &mut map)
@@ -640,7 +643,7 @@ mod tests {
             service: "unknown_service".into(),
             lookup: "blob_content".into(),
         }];
-        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+        let specs: Vec<EntityVirtualColumns<'_>> = vec![("File", &vcrs)];
         let mut map = file_property_map();
 
         let err = HydrationStage::resolve_virtual_columns(&ctx, &specs, &mut map)
@@ -660,7 +663,7 @@ mod tests {
             service: "gitaly".into(),
             lookup: "blob_content".into(),
         }];
-        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("Definition", &vcrs)];
+        let specs: Vec<EntityVirtualColumns<'_>> = vec![("Definition", &vcrs)];
         let mut map = file_property_map();
         let original_len = map.values().next().unwrap().len();
 
