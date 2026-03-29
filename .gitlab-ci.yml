@@ -367,6 +367,25 @@ docker-build-mr:
   script:
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
+check-go-proto:
+  needs: []
+  image: golang:1.24
+  tags:
+    - saas-linux-medium-amd64
+  stage: lint
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq protobuf-compiler
+    - go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+    - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+  script:
+    - cd proto/go
+    - make check
+    - go build ./gkgpb/...
+  rules:
+    - changes:
+        - crates/gkg-server/proto/**/*
+        - proto/go/**/*
+
 build-proto-gem:
   needs: []
   image: ruby:3.3
