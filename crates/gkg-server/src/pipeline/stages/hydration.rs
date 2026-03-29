@@ -72,61 +72,66 @@ impl HydrationStage {
         let org_id = ctx.security_context()?.org_id;
 
         for &(entity_type, virtual_columns) in entity_virtual_columns {
-            // Collect matching keys once per entity type — avoids rescanning
-            // property_map for each virtual column.
-            let entity_keys: Vec<(String, i64)> = property_map
+            let valid_keys: Vec<(String, i64)> = property_map
                 .keys()
                 .filter(|(etype, _)| etype == entity_type)
                 .cloned()
                 .collect();
 
-            if entity_keys.is_empty() {
+            if valid_keys.is_empty() {
                 continue;
             }
 
-            if entity_keys.len() > MAX_VIRTUAL_BATCH_SIZE {
+            if valid_keys.len() > MAX_VIRTUAL_BATCH_SIZE {
                 return Err(PipelineError::ContentResolution(format!(
                     "virtual column batch size {} exceeds limit {MAX_VIRTUAL_BATCH_SIZE}",
-                    entity_keys.len(),
+                    valid_keys.len(),
                 )));
             }
 
-            for vcr in virtual_columns {
-                let service = registry.get(&vcr.service).ok_or_else(|| {
-                    PipelineError::ContentResolution(format!(
-                        "no virtual service registered for '{}'",
-                        vcr.service,
-                    ))
-                })?;
+            // Look up services eagerly so we fail fast on missing registrations.
+            let service_lookups: Vec<_> = virtual_columns
+                .iter()
+                .map(|vcr| {
+                    let service = registry.get(&vcr.service).ok_or_else(|| {
+                        PipelineError::ContentResolution(format!(
+                            "no virtual service registered for '{}'",
+                            vcr.service,
+                        ))
+                    })?;
+                    Ok((vcr, Arc::clone(service)))
+                })
+                .collect::<Result<Vec<_>, PipelineError>>()?;
 
-                // Filter to keys present in the map so prop_refs and
-                // valid_keys are guaranteed to be aligned.
-                let valid_keys: Vec<(String, i64)> = entity_keys
-                    .iter()
-                    .filter(|k| property_map.contains_key(k))
-                    .cloned()
-                    .collect();
+            // Build prop_refs once — shared by all concurrent futures,
+            // dropped after try_join_all returns.
+            let prop_refs: Vec<&PropertyRow> = valid_keys
+                .iter()
+                .map(|k| property_map.get(k).expect("key validated above"))
+                .collect();
 
-                // Scoped immutable borrows — dropped after resolve_batch
-                // returns, before the mutable merge below.
-                let prop_refs: Vec<&PropertyRow> = valid_keys
-                    .iter()
-                    .map(|k| property_map.get(k).expect("key validated above"))
-                    .collect();
-
-                let results = service
-                    .resolve_batch(&vcr.lookup, &prop_refs, org_id)
-                    .await?;
-
-                if results.len() != valid_keys.len() {
-                    return Err(PipelineError::ContentResolution(format!(
-                        "service '{}' returned {} results for {} rows",
-                        vcr.service,
-                        results.len(),
-                        valid_keys.len(),
-                    )));
+            // Resolve all virtual columns for this entity type concurrently.
+            let futures = service_lookups.iter().map(|(vcr, service)| {
+                let prop_refs = &prop_refs;
+                async move {
+                    let results = service
+                        .resolve_batch(&vcr.lookup, prop_refs, org_id)
+                        .await?;
+                    if results.len() != prop_refs.len() {
+                        return Err(PipelineError::ContentResolution(format!(
+                            "service '{}' returned {} results for {} rows",
+                            vcr.service,
+                            results.len(),
+                            prop_refs.len(),
+                        )));
+                    }
+                    Ok(results)
                 }
+            });
+            let all_results = futures::future::try_join_all(futures).await?;
 
+            // Merge all resolved values into the property map.
+            for ((vcr, _), results) in service_lookups.iter().zip(all_results) {
                 for (i, value) in results.into_iter().enumerate() {
                     if let Some(value) = value
                         && let Some(props) = property_map.get_mut(&valid_keys[i])
