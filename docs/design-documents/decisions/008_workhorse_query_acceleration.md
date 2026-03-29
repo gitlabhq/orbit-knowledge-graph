@@ -239,6 +239,18 @@ note bottom of Cache: Both calls share the same\n5-minute traversal ID cache
 
 Workhorse passes only `user_id` and resource IDs.
 
+### TLS and transport security
+
+There are three network legs in this architecture, each with different security properties:
+
+**Client → Workhorse (external):** TLS terminated by nginx/Workhorse as it is today. No change.
+
+**Workhorse → GKG gRPC (internal):** The GKG gRPC endpoint address is configured in `gitlab.yml` (`knowledge_graph.grpc_endpoint`). When the address uses a `tls://` or `dns+tls:` scheme, Workhorse dials with TLS using the system certificate pool. When the address is plaintext (e.g., `localhost:50054` in development), it uses insecure credentials. This matches the existing Ruby `GrpcClient.channel_credentials` behavior. In production, GKG runs in the same cluster as Workhorse with mTLS handled by the service mesh (Istio), so the plaintext path is only used in GDK.
+
+**Workhorse → Rails internal API (internal):** The redaction callback uses the same `secret.NewRoundTripper` signing that all Workhorse-to-Rails internal requests use. The request is signed with a JWT derived from the shared `.gitlab_workhorse_secret` file. This is the same mechanism that protects `/api/v4/internal/*` endpoints for Gitaly, GOB, and other services.
+
+**JWT in the SendData header:** The GKG JWT (containing user identity and traversal IDs) is serialized into the `Gitlab-Workhorse-Send-Data` response header from Rails to Workhorse. This header never leaves the machine — it travels over the Unix socket or loopback connection between Puma and Workhorse. The JWT is then forwarded as `Authorization: Bearer <token>` gRPC metadata to GKG over the internal network.
+
 ### What does not change
 
 - **GKG Rust code**: the gRPC protocol is identical regardless of whether the client is Rails or Workhorse. JWT format, metadata keys, stream message types, and the redaction handshake remain unchanged.
