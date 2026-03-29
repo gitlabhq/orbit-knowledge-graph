@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 
 use crate::OntologyError;
-use crate::constants::DEFAULT_PRIMARY_KEY;
+use crate::constants::{DEFAULT_PRIMARY_KEY, INTERNAL_COLUMN_PREFIX};
 use crate::entities::{
     DataType, EnumType, Field, FieldSource, NodeEntity, NodeStyle, RedactionConfig, VirtualSource,
 };
@@ -105,6 +105,19 @@ struct PropertyYaml {
     values: Option<BTreeMap<i64, String>>,
     #[serde(default)]
     enum_type: EnumType,
+    #[serde(default = "PropertyYaml::default_like_allowed")]
+    like_allowed: bool,
+    #[serde(default = "PropertyYaml::default_filterable")]
+    filterable: bool,
+}
+
+impl PropertyYaml {
+    fn default_like_allowed() -> bool {
+        true
+    }
+    fn default_filterable() -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,9 +173,21 @@ impl NodeYaml {
                     nullable: prop_def.nullable,
                     enum_values: prop_def.values,
                     enum_type: prop_def.enum_type,
+                    like_allowed: prop_def.like_allowed,
+                    filterable: prop_def.filterable,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+
+        // Reject field names that collide with the internal redaction column prefix.
+        for field in &fields {
+            if field.name.starts_with(INTERNAL_COLUMN_PREFIX) {
+                return Err(OntologyError::Validation(format!(
+                    "field '{}' on node '{}' uses reserved prefix '{INTERNAL_COLUMN_PREFIX}'",
+                    field.name, name
+                )));
+            }
+        }
 
         if primary_keys.is_empty() {
             primary_keys.push(DEFAULT_PRIMARY_KEY.to_string());

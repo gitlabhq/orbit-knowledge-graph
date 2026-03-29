@@ -103,8 +103,8 @@ pub(super) async fn search_filter_starts_with_returns_matching_rows(ctx: &TestCo
         r#"{
             "query_type": "search",
             "node": {"id": "u", "entity": "User", "columns": ["username"],
-                     "filters": {"username": {"op": "starts_with", "value": "a"}}},
-            "limit": 10
+                     "filters": {"username": {"op": "starts_with", "value": "ali"}}},
+             "limit": 10
         }"#,
         &allow_all(),
     )
@@ -112,7 +112,7 @@ pub(super) async fn search_filter_starts_with_returns_matching_rows(ctx: &TestCo
 
     resp.assert_node_count(1);
     resp.assert_filter("User", "username", |n| {
-        n.prop_str("username").is_some_and(|u| u.starts_with("a"))
+        n.prop_str("username").is_some_and(|u| u.starts_with("ali"))
     });
     resp.find_node("User", 1)
         .unwrap()
@@ -148,17 +148,17 @@ pub(super) async fn search_filter_contains_returns_substring_matches(ctx: &TestC
         r#"{
             "query_type": "search",
             "node": {"id": "u", "entity": "User", "columns": ["username"],
-                     "filters": {"username": {"op": "contains", "value": "li"}}},
-            "limit": 10
+                     "filters": {"username": {"op": "contains", "value": "lic"}}},
+             "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
-    resp.assert_node_count(2);
-    resp.assert_node_ids("User", &[1, 3]);
+    resp.assert_node_count(1);
+    resp.assert_node_ids("User", &[1]);
     resp.assert_filter("User", "username", |n| {
-        n.prop_str("username").is_some_and(|u| u.contains("li"))
+        n.prop_str("username").is_some_and(|u| u.contains("lic"))
     });
 }
 

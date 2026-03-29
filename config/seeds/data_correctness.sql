@@ -89,13 +89,13 @@
 --     ASSIGNED:      User 1 -> WI 4000, User 2 -> WI 4000, User 3 -> WI 4001
 --     HAS_LABEL:     WI 4000 -> Label 7000, WI 4000 -> Label 7001, WI 4001 -> Label 7002
 
-INSERT INTO gl_user (id, username, name, state, user_type) VALUES
-    (1, 'alice', 'Alice Admin', 'active', 'human'),
-    (2, 'bob', 'Bob Builder', 'active', 'human'),
-    (3, 'charlie', 'Charlie Private', 'active', 'human'),
-    (4, 'diana', 'Diana Developer', 'active', 'project_bot'),
-    (5, 'eve', 'Eve External', 'blocked', 'service_account'),
-    (6, '用户_émoji_🎉', 'Ünïcödé Üser', 'active', 'human');
+INSERT INTO gl_user (id, username, name, state, user_type, email) VALUES
+    (1, 'alice', 'Alice Admin', 'active', 'human', 'alice@example.com'),
+    (2, 'bob', 'Bob Builder', 'active', 'human', 'bob@example.com'),
+    (3, 'charlie', 'Charlie Private', 'active', 'human', 'charlie@example.com'),
+    (4, 'diana', 'Diana Developer', 'active', 'project_bot', 'diana@example.com'),
+    (5, 'eve', 'Eve External', 'blocked', 'service_account', 'eve@example.com'),
+    (6, '用户_émoji_🎉', 'Ünïcödé Üser', 'active', 'human', 'unicode@example.com');
 
 INSERT INTO gl_group (id, name, visibility_level, traversal_path) VALUES
     (100, 'Public Group', 'public', '1/100/'),

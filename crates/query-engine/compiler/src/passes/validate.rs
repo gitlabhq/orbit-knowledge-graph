@@ -31,7 +31,7 @@ fn collect_schema_errors(
 ) -> Result<()> {
     let errors: Vec<_> = validator
         .iter_errors(value)
-        .map(|e| format!("{} at {}", e, e.instance_path()))
+        .map(|e| sanitize_schema_error(&format!("{} at {}", e, e.instance_path())))
         .collect();
 
     if errors.is_empty() {
@@ -39,6 +39,16 @@ fn collect_schema_errors(
     } else {
         Err(QueryError::Validation(errors.join("; ")))
     }
+}
+
+/// Strip enumerated valid values from jsonschema enum-rejection messages.
+/// Matches `is not one of ["quoted","values",...]` — requires at least one
+/// quoted element to avoid false positives on non-enum bracket content.
+fn sanitize_schema_error(msg: &str) -> String {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#"is not one of \["[^"]*".*?\]"#).expect("valid regex")
+    });
+    RE.replace_all(msg, "is not an allowed value").to_string()
 }
 
 /// Check whether a JSON value is compatible with an ontology `DataType`.
@@ -288,6 +298,14 @@ impl<'a> Validator<'a> {
                 continue;
             };
             for (prop, filter) in &node.filters {
+                if !self
+                    .ontology
+                    .check_field_flag(entity, prop, |f| f.filterable)
+                {
+                    return Err(QueryError::Validation(format!(
+                        "filter on \"{prop}\" for {entity}: field is not filterable"
+                    )));
+                }
                 let Some(data_type) = self.ontology.get_field_type(entity, prop) else {
                     continue;
                 };
@@ -309,6 +327,9 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Minimum number of characters required in a LIKE filter value.
+    const MIN_LIKE_PATTERN_LEN: usize = 3;
+
     fn check_one_filter(
         &self,
         entity: &str,
@@ -323,9 +344,38 @@ impl<'a> Validator<'a> {
             return Ok(());
         }
 
+        let is_like_op = matches!(
+            op,
+            FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith
+        );
+
+        // Reject LIKE operators on fields marked like_allowed: false.
+        if is_like_op
+            && !self
+                .ontology
+                .check_field_flag(entity, prop, |f| f.like_allowed)
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 LIKE operators (contains/starts_with/ends_with) are not allowed on this field"
+            )));
+        }
+
         let Some(value) = filter.value.as_ref() else {
             return Ok(());
         };
+
+        // Enforce minimum pattern length for LIKE filters.
+        if is_like_op {
+            let len = value.as_str().map_or(0, |s| s.chars().count());
+            if len < Self::MIN_LIKE_PATTERN_LEN {
+                return Err(QueryError::Validation(format!(
+                    "filter on \"{prop}\" for {entity}: \
+                     LIKE pattern must be at least {} characters, got {len}",
+                    Self::MIN_LIKE_PATTERN_LEN
+                )));
+            }
+        }
 
         match op {
             FilterOp::In => {
@@ -1433,6 +1483,163 @@ mod tests {
             result.is_ok(),
             "integer filter on Int source_id should pass, got: {:?}",
             result
+        );
+    }
+
+    /// Verify the Identifier regex in graph_query.schema.json only matches ASCII.
+    /// This is a defense against homoglyph attacks — the regex engine treats
+    /// [a-zA-Z] as ASCII-only, but this test makes the assumption explicit.
+    /// The pattern is loaded from the schema to prevent staleness.
+    #[test]
+    fn identifier_regex_rejects_non_ascii() {
+        let schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON).unwrap();
+        let pattern = schema["$defs"]["Identifier"]["pattern"]
+            .as_str()
+            .expect("Identifier pattern missing from schema");
+        let re = regex::Regex::new(pattern).unwrap();
+
+        // Valid ASCII identifiers
+        assert!(re.is_match("user"));
+        assert!(re.is_match("_foo"));
+        assert!(re.is_match("User123"));
+
+        // Homoglyph / non-ASCII must be rejected
+        assert!(!re.is_match("usеr")); // Cyrillic е (U+0435)
+        assert!(!re.is_match("ᴜser")); // Latin small capital U (U+1D1C)
+        assert!(!re.is_match("üser")); // Latin u with diaeresis
+        assert!(!re.is_match("用户")); // CJK
+    }
+
+    // ── LIKE security controls ──────────────────────────────────────
+
+    fn ontology_with_sensitive_field() -> Ontology {
+        Ontology::new()
+            .with_nodes(["User"])
+            .with_edges(["AUTHORED"])
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("email", DataType::String)],
+            )
+            .modify_field("User", "email", |f| f.like_allowed = false)
+            .unwrap()
+    }
+
+    fn ontology_with_unfilterable_field() -> Ontology {
+        Ontology::new()
+            .with_nodes(["Group"])
+            .with_edges(["CONTAINS"])
+            .with_fields(
+                "Group",
+                [
+                    ("name", DataType::String),
+                    ("traversal_path", DataType::String),
+                ],
+            )
+            .modify_field("Group", "traversal_path", |f| f.filterable = false)
+            .unwrap()
+    }
+
+    #[test]
+    fn rejects_short_like_pattern() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"username": {"op": "contains", "value": "ab"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("LIKE pattern must be at least 3 characters"),
+            "expected min length error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_like_on_disallowed_field() {
+        let ont = ontology_with_sensitive_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"email": {"op": "contains", "value": "example"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("LIKE operators"),
+            "expected like_allowed rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_equality_on_like_disallowed_field() {
+        let ont = ontology_with_sensitive_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"email": "test@example.com"}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        assert!(
+            validator.check_references(&input).is_ok(),
+            "equality filter on like_allowed:false field should pass"
+        );
+    }
+
+    #[test]
+    fn rejects_filter_on_unfilterable_field() {
+        let ont = ontology_with_unfilterable_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("not filterable"),
+            "expected filterable rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_filter_on_filterable_field() {
+        let ont = ontology_with_unfilterable_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"name": "Public Group"}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        assert!(
+            validator.check_references(&input).is_ok(),
+            "filter on filterable:true field should pass"
         );
     }
 }

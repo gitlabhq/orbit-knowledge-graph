@@ -515,6 +515,7 @@ mod tests {
             nullable: true,
             enum_values: Some(enum_vals),
             enum_type: ontology::EnumType::default(),
+            ..Default::default()
         };
 
         assert_eq!(FieldKind::classify(&field, pools), FieldKind::Enum);
@@ -530,6 +531,7 @@ mod tests {
             nullable: false,
             enum_values: None,
             enum_type: ontology::EnumType::default(),
+            ..Default::default()
         };
 
         assert_eq!(
@@ -583,6 +585,7 @@ mod tests {
             nullable: false,
             enum_values: None,
             enum_type: ontology::EnumType::default(),
+            ..Default::default()
         };
 
         let mut fvg = FakeValueGenerator::with_seed(42, test_pools());
@@ -609,6 +612,7 @@ mod tests {
             nullable: false,
             enum_values: Some(enum_vals),
             enum_type: ontology::EnumType::default(),
+            ..Default::default()
         };
 
         let mut fvg = FakeValueGenerator::with_seed(42, test_pools());
@@ -637,6 +641,7 @@ mod tests {
             nullable: false,
             enum_values: None,
             enum_type: ontology::EnumType::default(),
+            ..Default::default()
         };
 
         let pools = test_pools();

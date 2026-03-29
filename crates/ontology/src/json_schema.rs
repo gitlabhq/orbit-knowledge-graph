@@ -93,13 +93,24 @@ impl Ontology {
     fn build_node_selector_validation(&self) -> Vec<Value> {
         self.nodes()
             .map(|node| {
-                let valid_fields: Vec<Value> = NODE_RESERVED_COLUMNS
+                // All fields are valid for column selection.
+                let valid_columns: Vec<Value> = NODE_RESERVED_COLUMNS
                     .iter()
                     .map(|s| Value::String((*s).to_string()))
                     .chain(node.fields.iter().map(|f| Value::String(f.name.clone())))
                     .collect();
 
-                let columns_enum = valid_fields.clone();
+                // Only filterable fields are valid filter targets.
+                let filterable_fields: Vec<Value> = NODE_RESERVED_COLUMNS
+                    .iter()
+                    .map(|s| Value::String((*s).to_string()))
+                    .chain(
+                        node.fields
+                            .iter()
+                            .filter(|f| f.filterable)
+                            .map(|f| Value::String(f.name.clone())),
+                    )
+                    .collect();
 
                 serde_json::json!({
                     "if": { "properties": { "entity": { "const": node.name } } },
@@ -108,11 +119,11 @@ impl Ontology {
                             "columns": {
                                 "oneOf": [
                                     { "const": "*" },
-                                    { "type": "array", "items": { "enum": columns_enum }, "minItems": 1 }
+                                    { "type": "array", "items": { "enum": valid_columns }, "minItems": 1 }
                                 ]
                             },
                             "filters": {
-                                "propertyNames": { "enum": valid_fields }
+                                "propertyNames": { "enum": filterable_fields }
                             }
                         }
                     }

@@ -1934,7 +1934,7 @@ async fn filter_contains_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "contains", "value": "li"}}},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "contains", "value": "lic"}}},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1942,17 +1942,15 @@ async fn filter_contains_operator(ctx: &TestContext) {
     .await;
 
     let nodes = value["nodes"].as_array().unwrap();
-    assert_eq!(nodes.len(), 2);
+    assert_eq!(nodes.len(), 1);
     let names: Vec<&str> = nodes
         .iter()
         .filter_map(|n| n["username"].as_str())
         .collect();
-    assert!(names.contains(&"alice"), "alice contains 'li'");
-    assert!(names.contains(&"charlie"), "charlie contains 'li'");
-    assert!(!names.contains(&"bob"), "bob does not contain 'li'");
+    assert!(names.contains(&"alice"), "alice contains 'lic'");
 
     let ids = node_ids(nodes, "User");
-    assert_eq!(ids, HashSet::from([1, 3]));
+    assert_eq!(ids, HashSet::from([1]));
 }
 
 async fn filter_starts_with_operator(ctx: &TestContext) {
@@ -1960,7 +1958,7 @@ async fn filter_starts_with_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "starts_with", "value": "al"}}},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "starts_with", "value": "ali"}}},
             "limit": 10
         }"#,
         &allow_all(),
