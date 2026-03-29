@@ -1,5 +1,3 @@
-pub mod gitaly;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
