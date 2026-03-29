@@ -26,11 +26,14 @@ use ontology::constants::{
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-/// Generate SELECT expressions for all edge columns with the given table alias.
+/// Generate SELECT expressions for edge columns with the given table alias.
+/// Skips `traversal_path` — it is only used by the security pass (injected
+/// into WHERE, not SELECT) and is absent from the local DuckDB schema.
 fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
     EDGE_RESERVED_COLUMNS
         .iter()
         .zip(EDGE_ALIAS_SUFFIXES.iter())
+        .filter(|(col, _)| **col != TRAVERSAL_PATH_COLUMN)
         .map(|(col, suffix)| SelectExpr::new(Expr::col(alias, *col), format!("{alias}_{suffix}")))
         .collect()
 }
@@ -1208,10 +1211,6 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
             SelectExpr::new(Expr::col("e1", start_col), START_ID_COLUMN),
             SelectExpr::new(Expr::col(&last, end_col), END_ID_COLUMN),
             SelectExpr::new(
-                Expr::col(&last, TRAVERSAL_PATH_COLUMN),
-                TRAVERSAL_PATH_COLUMN,
-            ),
-            SelectExpr::new(
                 Expr::func(
                     "array",
                     (1..=depth)
@@ -1703,10 +1702,10 @@ mod tests {
             panic!("expected Query");
         };
         assert_eq!(q.limit, Some(25));
-        // Edge-centric: 6 edge columns + redaction ID/type pairs (no node properties)
-        assert!(q.select.len() >= 6);
+        // Edge-centric: 5 edge columns (no traversal_path) + redaction ID/type pairs
+        assert!(q.select.len() >= 5);
         assert!(
-            q.select
+            !q.select
                 .iter()
                 .any(|s| s.alias.as_deref() == Some("e0_path"))
         );
@@ -1951,7 +1950,7 @@ mod tests {
         );
 
         let select_aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(select_aliases.contains(&&"hop_e0_path".to_string()));
+        assert!(!select_aliases.contains(&&"hop_e0_path".to_string()));
         assert!(select_aliases.contains(&&"hop_e0_type".to_string()));
         assert!(select_aliases.contains(&&"hop_e0_src".to_string()));
         assert!(select_aliases.contains(&&"hop_e0_src_type".to_string()));
@@ -1980,7 +1979,6 @@ mod tests {
                 vec![
                     "start_id",
                     "end_id",
-                    "traversal_path",
                     "path_nodes",
                     "relationship_kind",
                     "source_id",
@@ -2285,10 +2283,10 @@ mod tests {
     fn test_edge_select_exprs_generates_all_columns() {
         let exprs = edge_select_exprs("e0");
 
-        assert_eq!(exprs.len(), 6);
+        assert_eq!(exprs.len(), 5);
 
         let aliases: Vec<_> = exprs.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"e0_path".to_string()));
+        assert!(!aliases.contains(&&"e0_path".to_string()));
         assert!(aliases.contains(&&"e0_type".to_string()));
         assert!(aliases.contains(&&"e0_src".to_string()));
         assert!(aliases.contains(&&"e0_src_type".to_string()));
