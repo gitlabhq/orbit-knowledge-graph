@@ -942,3 +942,201 @@ fn hydration_id_column_excluded_from_map() {
         "map should not contain 'id' key"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LIKE hardening: rejection at compile time
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn like_rejects_short_contains_pattern() {
+    let err = compile(
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"username": {"op": "contains", "value": "ab"}}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("LIKE pattern must be at least 3"),
+        "expected min length error, got: {err}"
+    );
+}
+
+#[test]
+fn like_rejects_single_char_starts_with() {
+    let err = compile(
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"username": {"op": "starts_with", "value": "a"}}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("LIKE pattern must be at least 3"),
+        "expected min length error, got: {err}"
+    );
+}
+
+#[test]
+fn like_rejects_empty_ends_with() {
+    let err = compile(
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"username": {"op": "ends_with", "value": ""}}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("LIKE pattern must be at least 3"),
+        "expected min length error, got: {err}"
+    );
+}
+
+#[test]
+fn like_rejects_contains_on_email() {
+    let err = compile(
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"email": {"op": "contains", "value": "example"}}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("LIKE operators"),
+        "expected like_allowed rejection, got: {err}"
+    );
+}
+
+#[test]
+fn like_rejects_starts_with_on_email() {
+    let err = compile(
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"email": {"op": "starts_with", "value": "alice"}}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("LIKE operators"),
+        "expected like_allowed rejection, got: {err}"
+    );
+}
+
+#[test]
+fn like_equality_on_email_compiles() {
+    assert!(
+        compile(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"email": "alice@example.com"}},
+            "limit": 10
+        }"#,
+            &embedded_ontology(),
+            &test_ctx(),
+        )
+        .is_ok()
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// filterable: false — traversal_path blocked at compile time
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn filterable_rejects_traversal_path_starts_with() {
+    let err = compile(
+        r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("not an allowed value")
+            || err.to_string().contains("not filterable"),
+        "expected traversal_path rejection, got: {err}"
+    );
+}
+
+#[test]
+fn filterable_rejects_traversal_path_equality() {
+    let err = compile(
+        r#"{
+            "query_type": "search",
+            "node": {"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": "1/100/1000/"}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("not an allowed value")
+            || err.to_string().contains("not filterable"),
+        "expected traversal_path rejection, got: {err}"
+    );
+}
+
+#[test]
+fn filterable_rejects_traversal_path_on_mr() {
+    let err = compile(
+        r#"{
+            "query_type": "search",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "filters": {"traversal_path": "1/100/"}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("not an allowed value")
+            || err.to_string().contains("not filterable"),
+        "expected traversal_path rejection on MR, got: {err}"
+    );
+}
+
+#[test]
+fn filterable_allows_traversal_path_in_columns() {
+    assert!(
+        compile(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group",
+                     "columns": ["name", "traversal_path"],
+                     "node_ids": [100]},
+            "limit": 10
+        }"#,
+            &embedded_ontology(),
+            &test_ctx(),
+        )
+        .is_ok()
+    );
+}
