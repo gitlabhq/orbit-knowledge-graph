@@ -96,29 +96,37 @@ impl HydrationStage {
                     ))
                 })?;
 
-                // Build prop_refs scoped to this iteration so the immutable
-                // borrows are dropped before the mutable merge below.
-                let prop_refs: Vec<&HashMap<String, ColumnValue>> = entity_keys
+                // Filter to keys present in the map so prop_refs and
+                // valid_keys are guaranteed to be aligned.
+                let valid_keys: Vec<(String, i64)> = entity_keys
                     .iter()
-                    .filter_map(|k| property_map.get(k))
+                    .filter(|k| property_map.contains_key(k))
+                    .cloned()
+                    .collect();
+
+                // Scoped immutable borrows — dropped after resolve_batch
+                // returns, before the mutable merge below.
+                let prop_refs: Vec<&HashMap<String, ColumnValue>> = valid_keys
+                    .iter()
+                    .map(|k| property_map.get(k).expect("key validated above"))
                     .collect();
 
                 let results = service
                     .resolve_batch(&vcr.lookup, &prop_refs, org_id)
                     .await?;
 
-                if results.len() != entity_keys.len() {
+                if results.len() != valid_keys.len() {
                     return Err(PipelineError::ContentResolution(format!(
                         "service '{}' returned {} results for {} rows",
                         vcr.service,
                         results.len(),
-                        entity_keys.len(),
+                        valid_keys.len(),
                     )));
                 }
 
                 for (i, value) in results.into_iter().enumerate() {
                     if let Some(value) = value
-                        && let Some(props) = property_map.get_mut(&entity_keys[i])
+                        && let Some(props) = property_map.get_mut(&valid_keys[i])
                     {
                         props.insert(vcr.column_name.clone(), value);
                     }
@@ -522,5 +530,144 @@ impl PipelineStage for HydrationStage {
             redacted_count,
             hydration_queries,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    use ontology::Ontology;
+    use query_engine::compiler::{SecurityContext, VirtualColumnRequest};
+    use query_engine::pipeline::{QueryPipelineContext, TypeMap};
+
+    use crate::content::{MockVirtualService, VirtualServiceRegistry};
+
+    fn test_ctx() -> QueryPipelineContext {
+        let mut registry = VirtualServiceRegistry::new();
+        registry.register("gitaly", Arc::new(MockVirtualService));
+
+        let mut server_extensions = TypeMap::default();
+        server_extensions.insert(registry);
+
+        QueryPipelineContext {
+            query_json: String::new(),
+            compiled: None,
+            ontology: Arc::new(Ontology::new()),
+            security_context: Some(SecurityContext::new(1, vec!["1/2/".into()]).unwrap()),
+            server_extensions,
+            phases: TypeMap::default(),
+        }
+    }
+
+    fn file_property_map() -> PropertyMap {
+        let mut props = HashMap::new();
+        props.insert("path".into(), ColumnValue::String("src/lib.rs".into()));
+        let mut map = PropertyMap::new();
+        map.insert(("File".into(), 1), props.clone());
+        map.insert(("File".into(), 2), props);
+        map
+    }
+
+    #[tokio::test]
+    async fn resolve_virtual_columns_skips_when_no_virtual_columns() {
+        let ctx = test_ctx();
+        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &[])];
+        let mut map = file_property_map();
+        let original_len = map.values().next().unwrap().len();
+
+        HydrationStage::resolve_virtual_columns(&ctx, &specs, &mut map)
+            .await
+            .unwrap();
+
+        assert_eq!(map.values().next().unwrap().len(), original_len);
+    }
+
+    #[tokio::test]
+    async fn resolve_virtual_columns_merges_results() {
+        let ctx = test_ctx();
+        let vcrs = [VirtualColumnRequest {
+            column_name: "content".into(),
+            service: "gitaly".into(),
+            lookup: "blob_content".into(),
+        }];
+        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+        let mut map = file_property_map();
+
+        HydrationStage::resolve_virtual_columns(&ctx, &specs, &mut map)
+            .await
+            .unwrap();
+
+        for (_, props) in &map {
+            assert_eq!(
+                props.get("content"),
+                Some(&ColumnValue::String("mock:blob_content".into()))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_virtual_columns_errors_without_registry() {
+        let ctx = QueryPipelineContext {
+            query_json: String::new(),
+            compiled: None,
+            ontology: Arc::new(Ontology::new()),
+            security_context: Some(SecurityContext::new(1, vec!["1/2/".into()]).unwrap()),
+            server_extensions: TypeMap::default(),
+            phases: TypeMap::default(),
+        };
+        let vcrs = [VirtualColumnRequest {
+            column_name: "content".into(),
+            service: "gitaly".into(),
+            lookup: "blob_content".into(),
+        }];
+        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+        let mut map = file_property_map();
+
+        let err = HydrationStage::resolve_virtual_columns(&ctx, &specs, &mut map)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, PipelineError::ContentResolution(_)));
+    }
+
+    #[tokio::test]
+    async fn resolve_virtual_columns_errors_for_unknown_service() {
+        let ctx = test_ctx();
+        let vcrs = [VirtualColumnRequest {
+            column_name: "content".into(),
+            service: "unknown_service".into(),
+            lookup: "blob_content".into(),
+        }];
+        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+        let mut map = file_property_map();
+
+        let err = HydrationStage::resolve_virtual_columns(&ctx, &specs, &mut map)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(&err, PipelineError::ContentResolution(msg) if msg.contains("unknown_service"))
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_virtual_columns_skips_unmatched_entity_type() {
+        let ctx = test_ctx();
+        let vcrs = [VirtualColumnRequest {
+            column_name: "content".into(),
+            service: "gitaly".into(),
+            lookup: "blob_content".into(),
+        }];
+        let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("Definition", &vcrs)];
+        let mut map = file_property_map();
+        let original_len = map.values().next().unwrap().len();
+
+        HydrationStage::resolve_virtual_columns(&ctx, &specs, &mut map)
+            .await
+            .unwrap();
+
+        assert_eq!(map.values().next().unwrap().len(), original_len);
     }
 }
