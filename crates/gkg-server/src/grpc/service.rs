@@ -735,6 +735,7 @@ mod tests {
             Arc::clone(&ontology),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
         );
 
         let response = service.build_structured_schema(&["*".to_string()]);
