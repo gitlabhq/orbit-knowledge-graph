@@ -25,9 +25,12 @@ use query_engine::compiler::constants::{
     HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
 };
 
-use crate::content::{MAX_VIRTUAL_BATCH_SIZE, VirtualServiceRegistry};
+use crate::content::{ColumnResolverRegistry, PropertyRow, ResolverContext};
 
-type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
+type PropertyMap = HashMap<(String, i64), PropertyRow>;
+
+/// Entity type paired with the virtual columns that need remote resolution.
+type EntityVirtualColumns<'a> = (&'a str, &'a [VirtualColumnRequest]);
 
 #[derive(Clone)]
 pub struct HydrationStage;
@@ -40,16 +43,16 @@ impl HydrationStage {
     }
 
     /// Resolve virtual columns from remote services and merge results into
-    /// the property map. Dispatches to the appropriate [`VirtualService`]
+    /// the property map. Dispatches to the appropriate [`ColumnResolver`]
     /// by the `service` name declared in the ontology.
     ///
     /// Currently a no-op in practice because all virtual fields are
     /// `disabled: true` in the ontology. The full pipeline is wired up so
     /// that enabling a virtual field only requires removing the `disabled`
-    /// flag and registering the service in [`VirtualServiceRegistry`].
-    async fn resolve_virtual_columns(
+    /// flag and registering the service in [`ColumnResolverRegistry`].
+    pub async fn resolve_virtual_columns(
         ctx: &QueryPipelineContext,
-        entity_virtual_columns: &[(&str, &[VirtualColumnRequest])],
+        entity_virtual_columns: &[EntityVirtualColumns<'_>],
         property_map: &mut PropertyMap,
     ) -> Result<(), PipelineError> {
         let has_work = entity_virtual_columns.iter().any(|(_, vc)| !vc.is_empty());
@@ -59,66 +62,83 @@ impl HydrationStage {
 
         let registry = ctx
             .server_extensions
-            .get::<VirtualServiceRegistry>()
+            .get::<ColumnResolverRegistry>()
             .ok_or_else(|| {
                 PipelineError::ContentResolution(
-                    "virtual columns requested but no VirtualServiceRegistry available".into(),
+                    "virtual columns requested but no ColumnResolverRegistry available".into(),
                 )
             })?;
 
-        let org_id = ctx.security_context()?.org_id;
+        let resolver_ctx = ResolverContext {
+            security_context: ctx.security_context()?.clone(),
+        };
+        let max_batch = registry.max_batch_size();
 
         for &(entity_type, virtual_columns) in entity_virtual_columns {
-            // Collect matching keys once per entity type — avoids rescanning
-            // property_map for each virtual column.
-            let entity_keys: Vec<(String, i64)> = property_map
+            let valid_keys: Vec<(String, i64)> = property_map
                 .keys()
                 .filter(|(etype, _)| etype == entity_type)
                 .cloned()
                 .collect();
 
-            if entity_keys.is_empty() {
+            if valid_keys.is_empty() {
                 continue;
             }
 
-            if entity_keys.len() > MAX_VIRTUAL_BATCH_SIZE {
+            if valid_keys.len() > max_batch {
                 return Err(PipelineError::ContentResolution(format!(
-                    "virtual column batch size {} exceeds limit {MAX_VIRTUAL_BATCH_SIZE}",
-                    entity_keys.len(),
+                    "column resolver batch size {} exceeds limit {max_batch}",
+                    valid_keys.len(),
                 )));
             }
 
-            for vcr in virtual_columns {
-                let service = registry.get(&vcr.service).ok_or_else(|| {
-                    PipelineError::ContentResolution(format!(
-                        "no virtual service registered for '{}'",
-                        vcr.service,
-                    ))
-                })?;
+            // Look up services eagerly so we fail fast on missing registrations.
+            let service_lookups: Vec<_> = virtual_columns
+                .iter()
+                .map(|vcr| {
+                    let service = registry.get(&vcr.service).ok_or_else(|| {
+                        PipelineError::ContentResolution(format!(
+                            "no virtual service registered for '{}'",
+                            vcr.service,
+                        ))
+                    })?;
+                    Ok((vcr, Arc::clone(service)))
+                })
+                .collect::<Result<Vec<_>, PipelineError>>()?;
 
-                // Build prop_refs scoped to this iteration so the immutable
-                // borrows are dropped before the mutable merge below.
-                let prop_refs: Vec<&HashMap<String, ColumnValue>> = entity_keys
-                    .iter()
-                    .filter_map(|k| property_map.get(k))
-                    .collect();
+            // Build prop_refs once — shared by all concurrent futures,
+            // dropped after try_join_all returns.
+            let prop_refs: Vec<&PropertyRow> = valid_keys
+                .iter()
+                .map(|k| property_map.get(k).expect("key validated above"))
+                .collect();
 
-                let results = service
-                    .resolve_batch(&vcr.lookup, &prop_refs, org_id)
-                    .await?;
-
-                if results.len() != entity_keys.len() {
-                    return Err(PipelineError::ContentResolution(format!(
-                        "service '{}' returned {} results for {} rows",
-                        vcr.service,
-                        results.len(),
-                        entity_keys.len(),
-                    )));
+            // Resolve all virtual columns for this entity type concurrently.
+            let futures = service_lookups.iter().map(|(vcr, service)| {
+                let prop_refs = &prop_refs;
+                let resolver_ctx = &resolver_ctx;
+                async move {
+                    let results = service
+                        .resolve_batch(&vcr.lookup, prop_refs, resolver_ctx)
+                        .await?;
+                    if results.len() != prop_refs.len() {
+                        return Err(PipelineError::ContentResolution(format!(
+                            "service '{}' returned {} results for {} rows",
+                            vcr.service,
+                            results.len(),
+                            prop_refs.len(),
+                        )));
+                    }
+                    Ok(results)
                 }
+            });
+            let all_results = futures::future::try_join_all(futures).await?;
 
+            // Merge all resolved values into the property map.
+            for ((vcr, _), results) in service_lookups.iter().zip(all_results) {
                 for (i, value) in results.into_iter().enumerate() {
                     if let Some(value) = value
-                        && let Some(props) = property_map.get_mut(&entity_keys[i])
+                        && let Some(props) = property_map.get_mut(&valid_keys[i])
                     {
                         props.insert(vcr.column_name.clone(), value);
                     }
@@ -473,7 +493,7 @@ impl PipelineStage for HydrationStage {
                     .0
                     .extend(executions);
                 let mut property_map = property_map;
-                let entity_virtuals: Vec<(&str, &[VirtualColumnRequest])> = templates
+                let entity_virtuals: Vec<EntityVirtualColumns<'_>> = templates
                     .iter()
                     .map(|t| (t.entity_type.as_str(), t.virtual_columns.as_slice()))
                     .collect();
@@ -504,7 +524,7 @@ impl PipelineStage for HydrationStage {
                         .0
                         .extend(executions);
                     let mut property_map = property_map;
-                    let entity_virtuals: Vec<(&str, &[VirtualColumnRequest])> = entity_specs
+                    let entity_virtuals: Vec<EntityVirtualColumns<'_>> = entity_specs
                         .iter()
                         .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
                         .collect();

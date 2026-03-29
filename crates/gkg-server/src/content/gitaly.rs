@@ -8,7 +8,7 @@ use indexer::modules::code::repository::blob_stream::BlobStream;
 use query_engine::pipeline::PipelineError;
 use tracing::{debug, warn};
 
-use super::VirtualService;
+use super::{ColumnResolver, PropertyRow, ResolverContext};
 
 /// Gitaly-specific parameters extracted from a hydrated entity row.
 ///
@@ -44,12 +44,12 @@ impl GitalyContentService {
 }
 
 #[async_trait]
-impl VirtualService for GitalyContentService {
+impl ColumnResolver for GitalyContentService {
     async fn resolve_batch(
         &self,
         _lookup: &str,
-        rows: &[&HashMap<String, ColumnValue>],
-        _org_id: i64,
+        rows: &[&PropertyRow],
+        _ctx: &ResolverContext,
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
         let requests: Vec<Option<GitalyBlobRequest>> = rows
             .iter()

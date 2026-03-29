@@ -189,7 +189,7 @@ fn enforce_return_columns(
     let select_len_before = q.select.len();
     // Neighbors emit _gkg_* columns directly in the lowerer (per UNION arm)
     // because the center edge column differs per direction.
-    let is_edge_centric = matches!(
+    let globally_edge_centric = matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Neighbors
     );
@@ -219,7 +219,12 @@ fn enforce_return_columns(
 
         let needs_separate_pk = node.redaction_id_column != DEFAULT_PRIMARY_KEY;
 
-        if is_edge_centric {
+        // Use edge-centric path if the query type is globally edge-centric,
+        // or if this specific node has an edge column mapping (e.g. edge-only
+        // aggregation targets).
+        let node_is_edge_centric = globally_edge_centric || node_edge_col.contains_key(&node.id);
+
+        if node_is_edge_centric {
             let (edge_alias, edge_col) = node_edge_col.get(&node.id).ok_or_else(|| {
                 QueryError::Enforcement(format!(
                     "node '{}' has no edge mapping in node_edge_col",
@@ -358,6 +363,15 @@ mod tests {
     use super::*;
     use crate::ast::{JoinType, TableRef};
     use crate::input::{InputNode, QueryType};
+
+    fn has_scan(t: &TableRef, tbl: &str) -> bool {
+        match t {
+            TableRef::Scan { table, .. } => table == tbl,
+            TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+            TableRef::Union { queries, .. } => queries.iter().any(|q| has_scan(&q.from, tbl)),
+            TableRef::Subquery { query, .. } => has_scan(&query.from, tbl),
+        }
+    }
 
     fn test_input() -> Input {
         Input {
@@ -889,10 +903,7 @@ mod tests {
         Input {
             query_type: QueryType::Traversal,
             nodes,
-            compiler: CompilerMetadata {
-                node_edge_col,
-                ..Default::default()
-            },
+            compiler: CompilerMetadata { node_edge_col },
             ..Input::default()
         }
     }
@@ -1047,14 +1058,6 @@ mod tests {
             matches!(&d_id.expr, Expr::Column { table, column } if table == "d" && column == "merge_request_id")
         );
 
-        // Verify node table was JOINed
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         assert!(
             has_scan(&q.from, "gl_mergerequestdiff"),
             "non-default redaction_id_column should JOIN the node table"

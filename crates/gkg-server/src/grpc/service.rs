@@ -7,7 +7,7 @@ use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{info, instrument};
+use tracing::{Instrument, info, instrument};
 
 use crate::auth::{Claims, JwtValidator};
 use crate::cluster_health::ClusterHealthChecker;
@@ -108,62 +108,66 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
+        let span = tracing::Span::current();
 
-        tokio::spawn(async move {
-            let req = match receive_query_request(&mut stream, &tx).await {
-                Some(r) => r,
-                None => return,
-            };
+        tokio::spawn(
+            async move {
+                let req = match receive_query_request(&mut stream, &tx).await {
+                    Some(r) => r,
+                    None => return,
+                };
 
-            info!(query_len = req.query.len(), "Executing query");
+                info!(query_len = req.query.len(), "Executing query");
 
-            let use_llm_format = req.format == ResponseFormat::Llm as i32;
+                let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
-            let result = pipeline
-                .run_query(claims, &req.query, tx.clone(), stream)
-                .await;
+                let result = pipeline
+                    .run_query(claims, &req.query, tx.clone(), stream)
+                    .await;
 
-            match result {
-                Ok(output) => {
-                    info!("Sending final query result");
+                match result {
+                    Ok(output) => {
+                        info!("Sending final query result");
 
-                    use crate::proto::execute_query_result::Content;
+                        use crate::proto::execute_query_result::Content;
 
-                    let formatted = if use_llm_format {
-                        GoonFormatter.format(&output)
-                    } else {
-                        GraphFormatter.format(&output)
-                    };
+                        let formatted = if use_llm_format {
+                            GoonFormatter.format(&output)
+                        } else {
+                            GraphFormatter.format(&output)
+                        };
 
-                    let content = if use_llm_format {
-                        Some(Content::FormattedText(formatted.to_string()))
-                    } else {
-                        Some(Content::ResultJson(formatted.to_string()))
-                    };
+                        let content = if use_llm_format {
+                            Some(Content::FormattedText(formatted.to_string()))
+                        } else {
+                            Some(Content::ResultJson(formatted.to_string()))
+                        };
 
-                    let metadata = Some(QueryMetadata {
-                        query_type: output.query_type,
-                        raw_query_strings: output.raw_query_strings,
-                        row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
-                        pagination: output.pagination.map(|p| PaginationInfo {
-                            has_more: p.has_more,
-                            total_rows: p.total_rows as i64,
-                        }),
-                    });
+                        let metadata = Some(QueryMetadata {
+                            query_type: output.query_type,
+                            raw_query_strings: output.raw_query_strings,
+                            row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                            pagination: output.pagination.map(|p| PaginationInfo {
+                                has_more: p.has_more,
+                                total_rows: p.total_rows as i64,
+                            }),
+                        });
 
-                    let _ = tx
-                        .send(Ok(ExecuteQueryMessage {
-                            content: Some(execute_query_message::Content::Result(
-                                ExecuteQueryResult { content, metadata },
-                            )),
-                        }))
-                        .await;
-                }
-                Err(e) => {
-                    send_query_error(&tx, e).await;
+                        let _ = tx
+                            .send(Ok(ExecuteQueryMessage {
+                                content: Some(execute_query_message::Content::Result(
+                                    ExecuteQueryResult { content, metadata },
+                                )),
+                            }))
+                            .await;
+                    }
+                    Err(e) => {
+                        send_query_error(&tx, e).await;
+                    }
                 }
             }
-        });
+            .instrument(span),
+        );
 
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }

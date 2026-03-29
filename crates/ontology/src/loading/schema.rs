@@ -27,6 +27,8 @@ pub(super) struct SettingsYaml {
     pub default_entity_sort_key: Vec<String>,
     pub edge_sort_key: Vec<String>,
     pub edge_columns: Vec<EdgeColumnYaml>,
+    #[serde(default)]
+    pub skip_security_filter_for_entities: Vec<String>,
     pub etl: EtlSettingsYaml,
 }
 

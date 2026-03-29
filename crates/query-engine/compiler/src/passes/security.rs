@@ -8,7 +8,7 @@
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
-use crate::constants::{GL_TABLE_PREFIX, SKIP_SECURITY_FILTER_TABLES, TRAVERSAL_PATH_COLUMN};
+use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, skip_security_filter_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 
@@ -139,7 +139,7 @@ fn should_apply_security_filter(table: &str) -> bool {
         return false;
     }
     // Skip tables for entities whose visibility is relationship-based
-    if SKIP_SECURITY_FILTER_TABLES.contains(&table) {
+    if skip_security_filter_tables().iter().any(|t| t == table) {
         return false;
     }
     true

@@ -24,11 +24,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
-    BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS,
-    SKIP_SECURITY_FILTER_TABLES, START_ID_COLUMN, cascade_cte, node_filter_cte,
+    BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
+    cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
 use crate::input::{Input, InputNode, QueryType};
-use crate::passes::security::SecurityContext;
+
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
@@ -37,14 +37,14 @@ use ontology::constants::{
 const ROOT_SIP_CTE: &str = "_root_ids";
 
 /// Apply all optimization passes to the AST.
-pub fn optimize(node: &mut Node, input: &mut Input, ctx: &SecurityContext) {
+pub fn optimize(node: &mut Node, input: &mut Input) {
     match node {
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
             if input.query_type == QueryType::Aggregation {
-                eliminate_agg_node_joins(q, input);
+                inject_agg_group_by_kind_filters(q, input);
             }
-            apply_sip_prefilter(q, input, ctx);
+            apply_sip_prefilter(q, input);
             apply_nonroot_node_ids_to_edges(q, input);
             apply_edge_led_reorder(q, input);
             if input.query_type == QueryType::Traversal && input.relationships.len() > 1 {
@@ -110,7 +110,12 @@ fn edge_kind_column(edge_col: &str) -> Option<&'static str> {
 /// the correct entity type are counted.
 ///
 /// Constraints: single relationship, single-hop only.
-fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
+/// Inject entity kind filters for aggregation group-by nodes.
+///
+/// Their table JOINs are kept (for property access), but adding the kind
+/// predicate to the edge lets ClickHouse prune edges that don't connect
+/// to the expected entity before the JOIN.
+fn inject_agg_group_by_kind_filters(q: &mut Query, input: &Input) {
     if input.relationships.len() != 1 {
         return;
     }
@@ -125,77 +130,10 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
         .filter_map(|a| a.group_by.as_deref())
         .collect();
 
-    let mut skippable: HashSet<String> = HashSet::new();
-    for node in &input.nodes {
-        if group_by_ids.contains(node.id.as_str()) {
-            continue;
-        }
-        if !node.node_ids.is_empty() || !node.filters.is_empty() {
-            continue;
-        }
-        let all_simple = input
-            .aggregations
-            .iter()
-            .filter(|a| a.target.as_deref() == Some(&node.id))
-            .all(|a| a.property.is_none());
-        if all_simple {
-            skippable.insert(node.id.clone());
-        }
-    }
-
-    let edge_alias = if rel.max_hops > 1 {
-        "hop_e0".to_string()
-    } else {
-        "e0".to_string()
-    };
-
-    // Inject kind filters for group-by nodes. Their table JOINs are kept
-    // (for property access), but the kind predicate on the edge lets
-    // ClickHouse prune edges that don't connect to the expected entity
-    // before the JOIN.
-    {
-        let mut gb_kind_filters: Vec<Expr> = Vec::new();
-        for gb_id in &group_by_ids {
-            let node = match input.nodes.iter().find(|n| n.id == *gb_id) {
-                Some(n) => n,
-                None => continue,
-            };
-            let entity = match node.entity.as_deref() {
-                Some(e) => e,
-                None => continue,
-            };
-            let (start_col, end_col) = rel.direction.edge_columns();
-            let id_col = if *gb_id == rel.from {
-                start_col
-            } else {
-                end_col
-            };
-            let kind_col = match edge_kind_column(id_col) {
-                Some(k) => k,
-                None => continue,
-            };
-            gb_kind_filters.push(Expr::eq(
-                Expr::col(&edge_alias, kind_col),
-                Expr::param(ChType::String, entity.to_string()),
-            ));
-        }
-        if !gb_kind_filters.is_empty() {
-            let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
-            parts.extend(gb_kind_filters);
-            q.where_clause = Expr::conjoin(parts);
-        }
-    }
-
-    if skippable.is_empty() {
-        return;
-    }
-
-    // Build rewrite map: skipped node alias → (edge alias, edge id column, kind column, entity name).
-    let mut rewrites: HashMap<String, (String, &str)> = HashMap::new();
-    let mut kind_filters: Vec<Expr> = Vec::new();
-
-    for node_id in &skippable {
-        let node = match input.nodes.iter().find(|n| &n.id == node_id) {
+    let edge_alias = "e0";
+    let mut gb_kind_filters: Vec<Expr> = Vec::new();
+    for gb_id in &group_by_ids {
+        let node = match input.nodes.iter().find(|n| n.id == *gb_id) {
             Some(n) => n,
             None => continue,
         };
@@ -203,113 +141,25 @@ fn eliminate_agg_node_joins(q: &mut Query, input: &mut Input) {
             Some(e) => e,
             None => continue,
         };
-        let (start, end) = rel.direction.edge_columns();
-        let id_col = if *node_id == rel.from { start } else { end };
+        let (start_col, end_col) = rel.direction.edge_columns();
+        let id_col = if *gb_id == rel.from {
+            start_col
+        } else {
+            end_col
+        };
         let kind_col = match edge_kind_column(id_col) {
             Some(k) => k,
             None => continue,
         };
-        rewrites.insert(node_id.clone(), (edge_alias.clone(), id_col));
-        kind_filters.push(Expr::eq(
-            Expr::col(&edge_alias, kind_col),
+        gb_kind_filters.push(Expr::eq(
+            Expr::col(edge_alias, kind_col),
             Expr::param(ChType::String, entity.to_string()),
         ));
     }
-
-    // Remove the node table scan from the FROM tree, collecting any
-    // surviving join conditions (e.g. relationship_kind = 'IN_PROJECT')
-    // that need to move to WHERE.
-    let mut rescued_conditions: Vec<Expr> = Vec::new();
-    for node_id in &skippable {
-        prune_join_for_alias(&mut q.from, node_id, &mut rescued_conditions);
-    }
-
-    // Rewrite aggregate expressions in SELECT: COUNT(node.id) → COUNT(e0.source_id).
-    for sel in &mut q.select {
-        rewrite_agg_column(&mut sel.expr, &rewrites);
-    }
-    for ord in &mut q.order_by {
-        rewrite_agg_column(&mut ord.expr, &rewrites);
-    }
-
-    // Strip WHERE conjuncts that reference the eliminated node aliases,
-    // and add kind filters + rescued join conditions.
-    if let Some(w) = q.where_clause.take() {
-        let conjuncts = w.flatten_and();
-        let mut remaining: Vec<Expr> = conjuncts
-            .into_iter()
-            .filter(|c| {
-                let aliases = collect_column_aliases(c);
-                !aliases.iter().any(|a| skippable.contains(a))
-            })
-            .collect();
-        remaining.extend(kind_filters);
-        remaining.extend(rescued_conditions);
-        q.where_clause = Expr::conjoin(remaining);
-    } else {
-        kind_filters.extend(rescued_conditions);
-        q.where_clause = Expr::conjoin(kind_filters);
-    }
-
-    input.compiler.skipped_node_joins = skippable;
-}
-
-/// Remove a Scan node (by alias) from the FROM join tree.
-///
-/// Walks the tree looking for a Join whose left or right child is a Scan
-/// with the target alias. When found, replaces the Join with the other child.
-/// Any ON conjuncts that don't reference the pruned alias are collected into
-/// `rescued` so the caller can add them to WHERE.
-fn prune_join_for_alias(from: &mut TableRef, alias: &str, rescued: &mut Vec<Expr>) {
-    let replacement = match from {
-        TableRef::Join {
-            left, right, on, ..
-        } => {
-            if matches!(right.as_ref(), TableRef::Scan { alias: a, .. } if a == alias) {
-                let conjuncts = on.clone().flatten_and();
-                rescued.extend(conjuncts.into_iter().filter(|c| {
-                    let aliases = collect_column_aliases(c);
-                    !aliases.contains(alias)
-                }));
-                Some(*left.clone())
-            } else if matches!(left.as_ref(), TableRef::Scan { alias: a, .. } if a == alias) {
-                let conjuncts = on.clone().flatten_and();
-                rescued.extend(conjuncts.into_iter().filter(|c| {
-                    let aliases = collect_column_aliases(c);
-                    !aliases.contains(alias)
-                }));
-                Some(*right.clone())
-            } else {
-                None
-            }
-        }
-        _ => None,
-    };
-
-    if let Some(r) = replacement {
-        *from = r;
-        return;
-    }
-
-    if let TableRef::Join { left, right, .. } = from {
-        prune_join_for_alias(left, alias, rescued);
-        prune_join_for_alias(right, alias, rescued);
-    }
-}
-
-/// Rewrite `FuncCall(name, [Column(node_alias, "id")])` to use the edge column
-/// when node_alias is in the rewrite map.
-fn rewrite_agg_column(expr: &mut Expr, rewrites: &HashMap<String, (String, &str)>) {
-    if let Expr::FuncCall { args, .. } = expr {
-        for arg in args.iter_mut() {
-            if let Expr::Column { table, column } = arg
-                && column == DEFAULT_PRIMARY_KEY
-                && let Some((edge_alias, edge_col)) = rewrites.get(table.as_str())
-            {
-                *table = edge_alias.clone();
-                *column = edge_col.to_string();
-            }
-        }
+    if !gb_kind_filters.is_empty() {
+        let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
+        parts.extend(gb_kind_filters);
+        q.where_clause = Expr::conjoin(parts);
     }
 }
 
@@ -352,7 +202,7 @@ fn choose_sip_root(input: &Input) -> Option<&InputNode> {
 /// When source_id IN (...) is present without startsWith, ClickHouse selects
 /// the `by_source` projection instead. When both are present, the base table
 /// PK handles both predicates via prefix matching.
-fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
+fn apply_sip_prefilter(q: &mut Query, input: &Input) {
     if !matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Aggregation
@@ -384,18 +234,20 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
     // (filters/node_ids). A traversal_path-only SIP on a large table (e.g. 8M
     // jobs) scans more rows than it saves. For small tables the source_kind
     // filter on the edge already narrows sufficiently.
-    if input.compiler.skipped_node_joins.contains(&root_node.id) && !has_explicit_selectivity {
+    let node_is_edge_only = input.compiler.node_edge_col.contains_key(&root_node.id);
+    if node_is_edge_only && !has_explicit_selectivity {
         return;
     }
 
     // Apply SIP when root node has explicit filters OR when its table will
     // get a security filter (startsWith on traversal_path). Tables in
-    // SKIP_SECURITY_FILTER_TABLES (e.g. gl_user) won't get security filters,
+    // skip_security_filter_for_tables won't get security filters,
     // so an unfiltered SIP CTE would push all IDs — skip those.
+    let skip = skip_security_filter_tables();
     let root_table_has_security_filter = root_node
         .table
         .as_deref()
-        .is_some_and(|t| !SKIP_SECURITY_FILTER_TABLES.contains(&t));
+        .is_some_and(|t| !skip.iter().any(|s| s == t));
 
     if !has_explicit_selectivity && !root_table_has_security_filter {
         return;
@@ -418,7 +270,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
             conjuncts
                 .into_iter()
                 .filter(|c| {
-                    let aliases = collect_column_aliases(c);
+                    let aliases = c.column_aliases();
                     !aliases.is_empty() && aliases.iter().all(|a| a == root_alias)
                 })
                 .collect::<Vec<_>>()
@@ -426,20 +278,29 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
         .unwrap_or_default();
     let cte_where = Expr::and_all(root_only_conds.into_iter().map(Some));
 
-    let cte_query = Query {
-        select: vec![SelectExpr::new(
-            Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
-            DEFAULT_PRIMARY_KEY,
-        )],
-        from: TableRef::scan(&root_table, root_alias),
-        where_clause: cte_where,
-        ..Default::default()
+    // Reuse an existing _nf_* CTE for the root node if one was already
+    // created by the lowerer. ClickHouse inlines CTEs, so duplicating
+    // the same query under two names doubles the scan.
+    let existing_nf = node_filter_cte(root_alias);
+    let sip_cte_name = if q.ctes.iter().any(|c| c.name == existing_nf) {
+        existing_nf
+    } else {
+        let cte_query = Query {
+            select: vec![SelectExpr::new(
+                Expr::col(root_alias, DEFAULT_PRIMARY_KEY),
+                DEFAULT_PRIMARY_KEY,
+            )],
+            from: TableRef::scan(&root_table, root_alias),
+            where_clause: cte_where,
+            ..Default::default()
+        };
+        q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
+        ROOT_SIP_CTE.to_string()
     };
-    q.ctes.push(Cte::new(ROOT_SIP_CTE, cte_query));
 
     // Inject root SIP into edges adjacent to the root node.
     let mut node_ctes: HashMap<String, String> = HashMap::new();
-    node_ctes.insert(root_alias.clone(), ROOT_SIP_CTE.to_string());
+    node_ctes.insert(root_alias.clone(), sip_cte_name.clone());
 
     for (i, rel) in input.relationships.iter().enumerate() {
         let from_cte = node_ctes.get(&rel.from).cloned();
@@ -503,7 +364,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input, _ctx: &SecurityContext) {
     // with a cascade CTE gets `node.id IN (SELECT id FROM cascade_cte)`,
     // allowing ClickHouse to prewhere-filter large node tables (e.g. gl_job).
     for (alias, cte_name) in &node_ctes {
-        if cte_name == ROOT_SIP_CTE {
+        if *cte_name == sip_cte_name {
             continue;
         }
         let node_filter = Expr::InSubquery {
@@ -639,7 +500,7 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
                 conjuncts
                     .into_iter()
                     .filter(|c| {
-                        let aliases = collect_column_aliases(c);
+                        let aliases = c.column_aliases();
                         !aliases.is_empty() && aliases.iter().all(|a| a == target_alias)
                     })
                     .collect()
@@ -772,10 +633,12 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
     let conjuncts = where_clause.flatten_and();
 
     // Build target alias set from Input aggregations (node ID = table alias after lowering).
+    // Exclude edge-only targets — their filters are already in _nf_* CTEs.
     let target_aliases: HashSet<&str> = input
         .aggregations
         .iter()
         .filter_map(|agg| agg.target.as_deref())
+        .filter(|t| !input.compiler.node_edge_col.contains_key(*t))
         .collect();
 
     // Build group-by alias set to avoid folding their filters.
@@ -800,7 +663,7 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
     let mut remaining: Vec<Expr> = Vec::new();
 
     for conjunct in conjuncts {
-        let aliases = collect_column_aliases(&conjunct);
+        let aliases = conjunct.column_aliases();
 
         // Keep in WHERE if:
         //   - references no columns (constant expression)
@@ -889,37 +752,6 @@ fn extract_agg_target_alias(expr: &Expr) -> Option<String> {
     }
 }
 
-/// Collect all unique table aliases referenced by column expressions.
-fn collect_column_aliases(expr: &Expr) -> HashSet<String> {
-    let mut aliases = HashSet::new();
-    collect_aliases_inner(expr, &mut aliases);
-    aliases
-}
-
-fn collect_aliases_inner(expr: &Expr, aliases: &mut HashSet<String>) {
-    match expr {
-        Expr::Column { table, .. } => {
-            aliases.insert(table.clone());
-        }
-        Expr::BinaryOp { left, right, .. } => {
-            collect_aliases_inner(left, aliases);
-            collect_aliases_inner(right, aliases);
-        }
-        Expr::UnaryOp { expr: inner, .. } => {
-            collect_aliases_inner(inner, aliases);
-        }
-        Expr::FuncCall { args, .. } => {
-            for arg in args {
-                collect_aliases_inner(arg, aliases);
-            }
-        }
-        Expr::InSubquery { expr, .. } => {
-            collect_aliases_inner(expr, aliases);
-        }
-        Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
-    }
-}
-
 /// Cascade node filter CTEs through relationships for edge-centric traversals.
 ///
 /// The lowerer creates `_nf_{node}` CTEs that filter each node independently.
@@ -977,55 +809,18 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 continue; // already cascaded
             }
 
-            let target = input.nodes.iter().find(|n| n.id == *target_id);
-            let alias = CASCADE_EDGE_ALIAS;
-
-            let edge_filter = Expr::InSubquery {
-                expr: Box::new(Expr::col(alias, edge_filter_col)),
-                cte_name: source_cte.clone(),
-                column: DEFAULT_PRIMARY_KEY.to_string(),
+            let cte_query = match build_cascade_for_node(
+                input,
+                target_id,
+                edge_select_col,
+                edge_filter_col,
+                &source_cte,
+                &rel.types,
+            ) {
+                Some(q) => q,
+                None => continue,
             };
-            let rel_filter = if rel.types.len() == 1 {
-                Expr::eq(
-                    Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
-                    Expr::param(ChType::String, rel.types[0].clone()),
-                )
-            } else {
-                Expr::col_in(
-                    alias,
-                    RELATIONSHIP_KIND_COLUMN,
-                    ChType::String,
-                    rel.types
-                        .iter()
-                        .map(|t| serde_json::Value::String(t.clone()))
-                        .collect(),
-                )
-                .unwrap_or_else(|| Expr::param(ChType::Bool, true))
-            };
-            let kind_filter = target.and_then(|n| n.entity.as_ref()).map(|entity| {
-                let kind_col = if edge_select_col == SOURCE_ID_COLUMN {
-                    SOURCE_KIND_COLUMN
-                } else {
-                    TARGET_KIND_COLUMN
-                };
-                Expr::eq(
-                    Expr::col(alias, kind_col),
-                    Expr::param(ChType::String, entity.clone()),
-                )
-            });
-
-            q.ctes.push(Cte::new(
-                &cascade_name,
-                Query {
-                    select: vec![SelectExpr::new(
-                        Expr::col(alias, edge_select_col),
-                        DEFAULT_PRIMARY_KEY,
-                    )],
-                    from: TableRef::scan(EDGE_TABLE, alias),
-                    where_clause: Expr::and_all([Some(edge_filter), Some(rel_filter), kind_filter]),
-                    ..Default::default()
-                },
-            ));
+            q.ctes.push(Cte::new(&cascade_name, cte_query));
 
             let target_nf = node_filter_cte(target_id);
             if let Some(cte) = q.ctes.iter_mut().find(|c| c.name == target_nf) {
@@ -1381,7 +1176,7 @@ mod tests {
         }
 
         // Group-by node filter stays in WHERE.
-        let where_aliases = collect_column_aliases(q.where_clause.as_ref().unwrap());
+        let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
         assert!(where_aliases.contains("p"));
         assert!(!where_aliases.contains("mr"));
     }
@@ -1410,7 +1205,7 @@ mod tests {
             other => panic!("expected countIf, got {other:?}"),
         }
 
-        let where_aliases = collect_column_aliases(q.where_clause.as_ref().unwrap());
+        let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
         assert!(where_aliases.contains("p"));
     }
 
@@ -1452,8 +1247,7 @@ mod tests {
         let original = match &node {
             Node::Query(q) => q.where_clause.clone(),
         };
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        optimize(&mut node, &mut input, &ctx);
+        optimize(&mut node, &mut input);
 
         match &node {
             Node::Query(q) => assert_eq!(q.where_clause, original),
@@ -1779,7 +1573,7 @@ mod tests {
     fn group_by_kind_filter_injected() {
         use crate::input::{Direction, InputNode, InputRelationship};
 
-        let mut input = Input {
+        let input = Input {
             query_type: QueryType::Aggregation,
             nodes: vec![
                 InputNode {
@@ -1829,31 +1623,22 @@ mod tests {
             ..Default::default()
         };
 
-        eliminate_agg_node_joins(&mut q, &mut input);
+        inject_agg_group_by_kind_filters(&mut q, &input);
 
         let w = q.where_clause.as_ref().expect("WHERE should exist");
-
-        // Group-by node (p = Project, source side) should get source_kind filter
         assert!(
             has_kind_filter(w, "e0", "source_kind", "Project"),
             "WHERE should contain e0.source_kind = 'Project'"
         );
-
-        // Target node (mr = MergeRequest, target side) should also get
-        // target_kind filter (from the existing skippable logic)
-        assert!(
-            has_kind_filter(w, "e0", "target_kind", "MergeRequest"),
-            "WHERE should contain e0.target_kind = 'MergeRequest'"
-        );
     }
 
     #[test]
-    fn group_by_kind_filter_without_skippable_nodes() {
+    fn group_by_kind_filter_with_target_filters() {
         use crate::input::{Direction, InputNode, InputRelationship};
 
-        // mr has a filter, so it's NOT skippable — but the group-by node
-        // (p = Project) should still get its kind filter.
-        let mut input = Input {
+        // mr has a filter, but the group-by node (p = Project) should
+        // still get its kind filter.
+        let input = Input {
             query_type: QueryType::Aggregation,
             nodes: vec![
                 InputNode {
@@ -1911,18 +1696,12 @@ mod tests {
             ..Default::default()
         };
 
-        eliminate_agg_node_joins(&mut q, &mut input);
+        inject_agg_group_by_kind_filters(&mut q, &input);
 
         let w = q.where_clause.as_ref().expect("WHERE should exist");
         assert!(
             has_kind_filter(w, "e0", "source_kind", "Project"),
-            "group-by kind filter should be injected even when no nodes are skippable"
-        );
-
-        // mr is NOT skippable (has filters), so its join should remain
-        assert!(
-            input.compiler.skipped_node_joins.is_empty(),
-            "no nodes should be skipped when target has filters"
+            "group-by kind filter should be injected even when target has filters"
         );
     }
 
@@ -1934,7 +1713,7 @@ mod tests {
         // edge_columns() for Incoming returns (target_id, source_id),
         // so mr (from) maps to target_id → target_kind,
         // and p (to) maps to source_id → source_kind.
-        let mut input = Input {
+        let input = Input {
             query_type: QueryType::Aggregation,
             nodes: vec![
                 InputNode {
@@ -1984,22 +1763,12 @@ mod tests {
             ..Default::default()
         };
 
-        eliminate_agg_node_joins(&mut q, &mut input);
+        inject_agg_group_by_kind_filters(&mut q, &input);
 
         let w = q.where_clause.as_ref().expect("WHERE should exist");
-
-        // p is the group-by node. With Incoming direction, p (to) maps to
-        // source_id → source_kind.
         assert!(
             has_kind_filter(w, "e0", "source_kind", "Project"),
             "group-by node p should get source_kind for Incoming direction"
-        );
-
-        // mr is the target node (skippable). With Incoming direction, mr (from)
-        // maps to target_id → target_kind.
-        assert!(
-            has_kind_filter(w, "e0", "target_kind", "MergeRequest"),
-            "skippable node mr should get target_kind for Incoming direction"
         );
     }
 }

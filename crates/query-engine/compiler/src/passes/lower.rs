@@ -26,11 +26,14 @@ use ontology::constants::{
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-/// Generate SELECT expressions for all edge columns with the given table alias.
+/// Generate SELECT expressions for edge columns with the given table alias.
+/// Skips `traversal_path` — it is only used by the security pass (injected
+/// into WHERE, not SELECT) and is absent from the local DuckDB schema.
 fn edge_select_exprs(alias: &str) -> Vec<SelectExpr> {
     EDGE_RESERVED_COLUMNS
         .iter()
         .zip(EDGE_ALIAS_SUFFIXES.iter())
+        .filter(|(col, _)| **col != TRAVERSAL_PATH_COLUMN)
         .map(|(col, suffix)| SelectExpr::new(Expr::col(alias, *col), format!("{alias}_{suffix}")))
         .collect()
 }
@@ -60,7 +63,7 @@ const CH_QUERY_CACHE_TTL: u32 = 30;
 pub fn lower(input: &mut Input) -> Result<Node> {
     let mut node = match input.query_type {
         QueryType::Search => lower_search(input),
-        QueryType::Traversal => lower_traversal(input),
+        QueryType::Traversal => lower_traversal_edge_only(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
         QueryType::Neighbors => lower_neighbors(input),
@@ -142,10 +145,6 @@ fn lower_search(input: &Input) -> Result<Node> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Traversal
 // ─────────────────────────────────────────────────────────────────────────────
-
-fn lower_traversal(input: &mut Input) -> Result<Node> {
-    lower_traversal_edge_only(input)
-}
 
 /// Edge-only traversal: edges are the FROM tables, node tables are
 /// referenced only via IN subqueries for filtering. Node properties are
@@ -395,34 +394,132 @@ fn build_node_where(node: &InputNode) -> Option<Expr> {
 }
 
 fn lower_aggregation(input: &mut Input) -> Result<Node> {
-    let (from, edge_aliases) = build_joins(&input.nodes, &input.relationships)?;
-    let where_clause = build_full_where(&input.nodes, &input.relationships, &edge_aliases);
-
-    let group_by_node_ids: HashSet<_> = input
+    let group_by_ids: HashSet<String> = input
         .aggregations
         .iter()
         .filter_map(|agg| agg.group_by.clone())
         .collect();
 
+    // Edge-only targets are only possible for single-hop, single-rel
+    // aggregations with relationships. No-rel (single-node) and multi-hop
+    // fall back to the standard join approach.
+    let has_multi_hop = input.relationships.iter().any(|r| r.max_hops > 1);
+    let can_edge_only = !input.relationships.is_empty() && !has_multi_hop;
+
+    let mut edge_only_targets: HashSet<String> = HashSet::new();
+    if can_edge_only {
+        for node in &input.nodes {
+            if group_by_ids.contains(&node.id) {
+                continue;
+            }
+            let all_property_less = input
+                .aggregations
+                .iter()
+                .filter(|a| a.target.as_deref() == Some(&node.id))
+                .all(|a| a.property.is_none());
+            if all_property_less {
+                edge_only_targets.insert(node.id.clone());
+            }
+        }
+    }
+
+    // Build the FROM tree.
+    let (from, edge_aliases) = if input.relationships.is_empty() {
+        // Single-node aggregation — no edges, just a node scan.
+        let node = input
+            .nodes
+            .first()
+            .ok_or_else(|| QueryError::Lowering("aggregation requires at least one node".into()))?;
+        let table = resolve_table(node)?;
+        (TableRef::scan(&table, &node.id), HashMap::new())
+    } else {
+        build_joins(&input.nodes, &input.relationships, &edge_only_targets)?
+    };
+
+    // Build WHERE from non-edge-only nodes + edge filters.
+    let where_clause = build_where(
+        &input.nodes,
+        &input.relationships,
+        &edge_aliases,
+        &edge_only_targets,
+    );
+
+    // Build node_edge_col for edge-only targets and _nf_* CTEs.
+    let mut node_edge_col: HashMap<String, (String, String)> = HashMap::new();
+    let mut ctes = Vec::new();
+    let mut where_parts: Vec<Expr> = where_clause.into_iter().collect();
+
+    // Build _nf_* CTEs for non-group-by nodes with conditions. Edge-only
+    // targets also get their node_edge_col mapping populated here.
+    if input.relationships.len() == 1 {
+        let rel = &input.relationships[0];
+        let (start_col, end_col) = rel.direction.edge_columns();
+        let edge_alias = edge_aliases
+            .get(&0)
+            .cloned()
+            .unwrap_or_else(|| "e0".to_string());
+
+        for node in &input.nodes {
+            if group_by_ids.contains(&node.id) {
+                continue;
+            }
+            let edge_col = if node.id == rel.from {
+                start_col
+            } else {
+                end_col
+            };
+
+            if edge_only_targets.contains(&node.id) {
+                node_edge_col.insert(node.id.clone(), (edge_alias.clone(), edge_col.to_string()));
+            }
+
+            let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
+            if !has_conditions {
+                continue;
+            }
+            let table = resolve_table(node)?;
+            let node_where = build_node_where(node);
+            let cte_name = node_filter_cte(&node.id);
+            let cte_query = Query {
+                select: vec![SelectExpr::new(
+                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                    DEFAULT_PRIMARY_KEY,
+                )],
+                from: TableRef::scan(&table, &node.id),
+                where_clause: node_where,
+                ..Default::default()
+            };
+            ctes.push(Cte::new(&cte_name, cte_query));
+            where_parts.push(Expr::InSubquery {
+                expr: Box::new(Expr::col(&edge_alias, edge_col)),
+                cte_name,
+                column: DEFAULT_PRIMARY_KEY.into(),
+            });
+        }
+    }
+
+    input.compiler.node_edge_col = node_edge_col;
+
     let mut select = Vec::new();
-    let mut group_by = Vec::new();
+    let mut group_by_exprs = Vec::new();
 
     for node in &input.nodes {
-        if !group_by_node_ids.contains(&node.id) {
+        if !group_by_ids.contains(&node.id) {
             continue;
         }
         if let Some(ColumnSelection::List(cols)) = &node.columns {
             for col in cols {
                 let expr = Expr::col(&node.id, col);
                 select.push(SelectExpr::new(expr.clone(), format!("{}_{col}", node.id)));
-                group_by.push(expr);
+                group_by_exprs.push(expr);
             }
         }
     }
 
     for agg in &input.aggregations {
+        let expr = agg_expr_with_edge_col(agg, &input.compiler.node_edge_col);
         select.push(SelectExpr::new(
-            agg_expr(agg),
+            expr,
             agg.alias
                 .clone()
                 .unwrap_or_else(|| agg.function.as_sql().to_lowercase()),
@@ -436,7 +533,7 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         .map_or(vec![], |s| {
             let agg = &input.aggregations[s.agg_index];
             vec![OrderExpr {
-                expr: agg_expr(agg),
+                expr: agg_expr_with_edge_col(agg, &input.compiler.node_edge_col),
                 desc: s.direction == OrderDirection::Desc,
             }]
         });
@@ -446,18 +543,34 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     Ok(Node::Query(Box::new(Query {
         select,
         from,
-        where_clause,
-        group_by,
+        where_clause: Expr::conjoin(where_parts),
+        group_by: group_by_exprs,
         order_by,
         limit,
+        ctes,
         ..Default::default()
     })))
 }
 
-fn agg_expr(agg: &InputAggregation) -> Expr {
+/// Build the aggregate expression. Uses edge columns for targets in
+/// `node_edge_col` (edge-only), node table columns otherwise.
+fn agg_expr_with_edge_col(
+    agg: &InputAggregation,
+    node_edge_col: &HashMap<String, (String, String)>,
+) -> Expr {
     let arg = match (&agg.property, &agg.target) {
-        (Some(prop), Some(target)) => Expr::col(target, prop),
-        (None, Some(target)) => Expr::col(target, DEFAULT_PRIMARY_KEY),
+        (Some(prop), Some(target)) => {
+            // Property aggregate — always references the node table.
+            Expr::col(target, prop)
+        }
+        (None, Some(target)) => {
+            // Property-less: use edge column if target is edge-only.
+            if let Some((alias, col)) = node_edge_col.get(target.as_str()) {
+                Expr::col(alias, col.as_str())
+            } else {
+                Expr::col(target, DEFAULT_PRIMARY_KEY)
+            }
+        }
         _ => Expr::int(1),
     };
     Expr::func(agg.function.as_sql(), vec![arg])
@@ -1098,10 +1211,6 @@ fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direc
             SelectExpr::new(Expr::col("e1", start_col), START_ID_COLUMN),
             SelectExpr::new(Expr::col(&last, end_col), END_ID_COLUMN),
             SelectExpr::new(
-                Expr::col(&last, TRAVERSAL_PATH_COLUMN),
-                TRAVERSAL_PATH_COLUMN,
-            ),
-            SelectExpr::new(
                 Expr::func(
                     "array",
                     (1..=depth)
@@ -1156,16 +1265,33 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
 // Join Building
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Build a FROM tree that JOINs node tables and edge tables.
+/// Nodes in `skip_nodes` are omitted from the tree — they are handled
+/// edge-only via `node_edge_col` + `_nf_*` CTEs instead.
 fn build_joins(
     nodes: &[InputNode],
     rels: &[InputRelationship],
+    skip_nodes: &HashSet<String>,
 ) -> Result<(TableRef, HashMap<usize, String>)> {
-    let start = match rels.first() {
-        Some(r) => find_node(nodes, &r.from)?,
-        None => nodes
-            .first()
-            .ok_or_else(|| QueryError::Lowering("no nodes in input".into()))?,
+    // Find the first non-skipped node to start the FROM tree.
+    let first_rel = rels
+        .first()
+        .ok_or_else(|| QueryError::Lowering("no relationships".into()))?;
+
+    let start_node_id = if !skip_nodes.contains(&first_rel.from) {
+        &first_rel.from
+    } else if !skip_nodes.contains(&first_rel.to) {
+        &first_rel.to
+    } else {
+        // Both nodes skipped — start from edge.
+        let alias = "e0".to_string();
+        let (edge, _) = edge_scan(&alias, &type_filter(&first_rel.types));
+        let mut edge_aliases = HashMap::new();
+        edge_aliases.insert(0, alias);
+        return Ok((edge, edge_aliases));
     };
+
+    let start = find_node(nodes, start_node_id)?;
     let start_table = resolve_table(start)?;
     let mut result = TableRef::scan(&start_table, &start.id);
     let mut edge_aliases = HashMap::new();
@@ -1173,11 +1299,7 @@ fn build_joins(
     joined.insert(start.id.clone());
 
     for (i, rel) in rels.iter().enumerate() {
-        let target = find_node(nodes, &rel.to)?;
-        let target_table = resolve_table(target)?;
-        let source_joined = joined.contains(&rel.from);
-        let target_joined = joined.contains(&rel.to);
-
+        // Multi-hop: use UNION ALL pattern with hop_e{i} alias.
         if rel.max_hops > 1 {
             let alias = format!("hop_e{i}");
             edge_aliases.insert(i, alias.clone());
@@ -1189,14 +1311,26 @@ fn build_joins(
                 Expr::col(&rel.from, DEFAULT_PRIMARY_KEY),
                 Expr::col(&alias, from_col),
             );
-
             let target_cond = Expr::eq(
                 Expr::col(&alias, to_col),
                 Expr::col(&rel.to, DEFAULT_PRIMARY_KEY),
             );
 
+            let source_joined = joined.contains(&rel.from) || skip_nodes.contains(&rel.from);
+            let target_joined = joined.contains(&rel.to) || skip_nodes.contains(&rel.to);
+
             let union_join_cond = match (source_joined, target_joined) {
-                (true, true) => Expr::and(source_cond.clone(), target_cond.clone()),
+                (true, true) => {
+                    let mut conds = Vec::new();
+                    if joined.contains(&rel.from) {
+                        conds.push(source_cond.clone());
+                    }
+                    if joined.contains(&rel.to) {
+                        conds.push(target_cond.clone());
+                    }
+                    Expr::and_all(conds.into_iter().map(Some))
+                        .unwrap_or_else(|| source_cond.clone())
+                }
                 (true, false) => source_cond.clone(),
                 (false, true) => target_cond.clone(),
                 (false, false) => {
@@ -1209,7 +1343,7 @@ fn build_joins(
 
             result = TableRef::join(JoinType::Inner, result, union, union_join_cond);
 
-            if !source_joined {
+            if !joined.contains(&rel.from) && !skip_nodes.contains(&rel.from) {
                 let from_node = find_node(nodes, &rel.from)?;
                 let source_table = resolve_table(from_node)?;
                 result = TableRef::join(
@@ -1220,7 +1354,9 @@ fn build_joins(
                 );
                 joined.insert(rel.from.clone());
             }
-            if !target_joined {
+            if !joined.contains(&rel.to) && !skip_nodes.contains(&rel.to) {
+                let target = find_node(nodes, &rel.to)?;
+                let target_table = resolve_table(target)?;
                 result = TableRef::join(
                     JoinType::Inner,
                     result,
@@ -1229,55 +1365,136 @@ fn build_joins(
                 );
                 joined.insert(rel.to.clone());
             }
-        } else {
-            let alias = format!("e{i}");
-            edge_aliases.insert(i, alias.clone());
+            continue;
+        }
 
-            let (edge, edge_type_cond) = edge_scan(&alias, &type_filter(&rel.types));
-            let source_cond = source_join_cond(&rel.from, &alias, rel.direction);
-            let target_cond = target_join_cond(&alias, &rel.to, rel.direction);
+        let alias = format!("e{i}");
+        edge_aliases.insert(i, alias.clone());
 
-            let mut edge_join_cond = match (source_joined, target_joined) {
-                (true, true) => Expr::and(source_cond.clone(), target_cond.clone()),
-                (true, false) => source_cond.clone(),
-                (false, true) => target_cond.clone(),
-                (false, false) => {
-                    return Err(QueryError::Lowering(format!(
-                        "disconnected relationship: neither '{}' nor '{}' are reachable",
-                        rel.from, rel.to
-                    )));
+        let (edge, edge_type_cond) = edge_scan(&alias, &type_filter(&rel.types));
+        let source_cond = source_join_cond(&rel.from, &alias, rel.direction);
+        let target_cond = target_join_cond(&alias, &rel.to, rel.direction);
+
+        let source_joined = joined.contains(&rel.from) || skip_nodes.contains(&rel.from);
+        let target_joined = joined.contains(&rel.to) || skip_nodes.contains(&rel.to);
+
+        let mut edge_join_cond = match (source_joined, target_joined) {
+            (true, true) => {
+                // Only include join conds for non-skipped nodes.
+                let mut conds = Vec::new();
+                if joined.contains(&rel.from) {
+                    conds.push(source_cond.clone());
                 }
-            };
-            if let Some(tc) = edge_type_cond {
-                edge_join_cond = Expr::and(edge_join_cond, tc);
+                if joined.contains(&rel.to) {
+                    conds.push(target_cond.clone());
+                }
+                Expr::and_all(conds.into_iter().map(Some)).unwrap_or_else(|| source_cond.clone())
             }
+            (true, false) => {
+                if joined.contains(&rel.from) {
+                    source_cond.clone()
+                } else {
+                    // source is skipped, we need the edge but no join to it
+                    target_cond.clone()
+                }
+            }
+            (false, true) => {
+                if joined.contains(&rel.to) {
+                    target_cond.clone()
+                } else {
+                    source_cond.clone()
+                }
+            }
+            (false, false) => {
+                return Err(QueryError::Lowering(format!(
+                    "disconnected relationship: neither '{}' nor '{}' are reachable",
+                    rel.from, rel.to
+                )));
+            }
+        };
+        if let Some(tc) = edge_type_cond {
+            edge_join_cond = Expr::and(edge_join_cond, tc);
+        }
 
-            result = TableRef::join(JoinType::Inner, result, edge, edge_join_cond);
+        result = TableRef::join(JoinType::Inner, result, edge, edge_join_cond);
 
-            if !source_joined {
-                let from_node = find_node(nodes, &rel.from)?;
-                let source_table = resolve_table(from_node)?;
-                result = TableRef::join(
-                    JoinType::Inner,
-                    result,
-                    TableRef::scan(&source_table, &rel.from),
-                    source_cond,
-                );
-                joined.insert(rel.from.clone());
-            }
-            if !target_joined {
-                result = TableRef::join(
-                    JoinType::Inner,
-                    result,
-                    TableRef::scan(&target_table, &rel.to),
-                    target_cond,
-                );
-                joined.insert(rel.to.clone());
-            }
+        // Join non-skipped, non-yet-joined nodes.
+        if !joined.contains(&rel.from) && !skip_nodes.contains(&rel.from) {
+            let from_node = find_node(nodes, &rel.from)?;
+            let source_table = resolve_table(from_node)?;
+            result = TableRef::join(
+                JoinType::Inner,
+                result,
+                TableRef::scan(&source_table, &rel.from),
+                source_cond,
+            );
+            joined.insert(rel.from.clone());
+        }
+        if !joined.contains(&rel.to) && !skip_nodes.contains(&rel.to) {
+            let target = find_node(nodes, &rel.to)?;
+            let target_table = resolve_table(target)?;
+            result = TableRef::join(
+                JoinType::Inner,
+                result,
+                TableRef::scan(&target_table, &rel.to),
+                target_cond,
+            );
+            joined.insert(rel.to.clone());
         }
     }
 
     Ok((result, edge_aliases))
+}
+
+/// Build a WHERE clause from node conditions and edge filters.
+/// Conditions for nodes in `skip_nodes` are excluded — those filters
+/// are handled via `_nf_*` CTEs instead.
+fn build_where(
+    nodes: &[InputNode],
+    rels: &[InputRelationship],
+    edge_aliases: &HashMap<usize, String>,
+    skip_nodes: &HashSet<String>,
+) -> Option<Expr> {
+    let mut conds: Vec<Expr> = Vec::new();
+
+    for node in nodes {
+        if skip_nodes.contains(&node.id) {
+            continue;
+        }
+        conds.extend(id_filter(&node.id, DEFAULT_PRIMARY_KEY, &node.node_ids));
+        if let Some(r) = &node.id_range {
+            conds.push(Expr::binary(
+                Op::Ge,
+                Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                Expr::int(r.start),
+            ));
+            conds.push(Expr::binary(
+                Op::Le,
+                Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                Expr::int(r.end),
+            ));
+        }
+        for (prop, filter) in &node.filters {
+            conds.push(filter_expr(&node.id, prop, filter));
+        }
+    }
+
+    for (i, rel) in rels.iter().enumerate() {
+        if let Some(alias) = edge_aliases.get(&i) {
+            for (prop, filter) in &rel.filters {
+                conds.push(filter_expr(alias, prop, filter));
+            }
+            if rel.max_hops > 1 && rel.min_hops > 1 {
+                conds.push(Expr::binary(
+                    Op::Ge,
+                    Expr::col(alias, DEPTH_COLUMN),
+                    Expr::int(rel.min_hops as i64),
+                ));
+            }
+        }
+    }
+
+    Expr::and_all(conds.into_iter().map(Some))
 }
 
 /// Join from source node to edge table.
@@ -1331,53 +1548,6 @@ fn target_join_cond(edge: &str, node: &str, dir: Direction) -> Expr {
 // ─────────────────────────────────────────────────────────────────────────────
 // WHERE Clause
 // ─────────────────────────────────────────────────────────────────────────────
-
-fn build_full_where(
-    nodes: &[InputNode],
-    rels: &[InputRelationship],
-    edge_aliases: &HashMap<usize, String>,
-) -> Option<Expr> {
-    let mut conds: Vec<Expr> = Vec::new();
-
-    // Node conditions: IDs, ranges, filters
-    for node in nodes {
-        conds.extend(id_filter(&node.id, DEFAULT_PRIMARY_KEY, &node.node_ids));
-        if let Some(r) = &node.id_range {
-            conds.push(Expr::binary(
-                Op::Ge,
-                Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                Expr::int(r.start),
-            ));
-            conds.push(Expr::binary(
-                Op::Le,
-                Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                Expr::int(r.end),
-            ));
-        }
-        for (prop, filter) in &node.filters {
-            conds.push(filter_expr(&node.id, prop, filter));
-        }
-    }
-
-    // Edge filters
-    for (i, rel) in rels.iter().enumerate() {
-        if let Some(alias) = edge_aliases.get(&i) {
-            for (prop, filter) in &rel.filters {
-                conds.push(filter_expr(alias, prop, filter));
-            }
-            // min_hops filter for multi-hop
-            if rel.max_hops > 1 && rel.min_hops > 1 {
-                conds.push(Expr::binary(
-                    Op::Ge,
-                    Expr::col(alias, DEPTH_COLUMN),
-                    Expr::int(rel.min_hops as i64),
-                ));
-            }
-        }
-    }
-
-    Expr::and_all(conds.into_iter().map(Some))
-}
 
 fn id_filter(table: &str, col: &str, ids: &[i64]) -> Option<Expr> {
     Expr::col_in(
@@ -1444,6 +1614,15 @@ mod tests {
     use crate::passes::normalize;
     use crate::passes::validate;
     use ontology::Ontology;
+
+    fn has_scan(t: &TableRef, tbl: &str) -> bool {
+        match t {
+            TableRef::Scan { table, .. } => table == tbl,
+            TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
+            TableRef::Union { queries, .. } => queries.iter().any(|q| has_scan(&q.from, tbl)),
+            TableRef::Subquery { query, .. } => has_scan(&query.from, tbl),
+        }
+    }
 
     fn test_ontology() -> Ontology {
         use ontology::DataType;
@@ -1523,10 +1702,10 @@ mod tests {
             panic!("expected Query");
         };
         assert_eq!(q.limit, Some(25));
-        // Edge-centric: 6 edge columns + redaction ID/type pairs (no node properties)
-        assert!(q.select.len() >= 6);
+        // Edge-centric: 5 edge columns (no traversal_path) + redaction ID/type pairs
+        assert!(q.select.len() >= 5);
         assert!(
-            q.select
+            !q.select
                 .iter()
                 .any(|s| s.alias.as_deref() == Some("e0_path"))
         );
@@ -1771,7 +1950,7 @@ mod tests {
         );
 
         let select_aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(select_aliases.contains(&&"hop_e0_path".to_string()));
+        assert!(!select_aliases.contains(&&"hop_e0_path".to_string()));
         assert!(select_aliases.contains(&&"hop_e0_type".to_string()));
         assert!(select_aliases.contains(&&"hop_e0_src".to_string()));
         assert!(select_aliases.contains(&&"hop_e0_src_type".to_string()));
@@ -1800,7 +1979,6 @@ mod tests {
                 vec![
                     "start_id",
                     "end_id",
-                    "traversal_path",
                     "path_nodes",
                     "relationship_kind",
                     "source_id",
@@ -2105,10 +2283,10 @@ mod tests {
     fn test_edge_select_exprs_generates_all_columns() {
         let exprs = edge_select_exprs("e0");
 
-        assert_eq!(exprs.len(), 6);
+        assert_eq!(exprs.len(), 5);
 
         let aliases: Vec<_> = exprs.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"e0_path".to_string()));
+        assert!(!aliases.contains(&&"e0_path".to_string()));
         assert!(aliases.contains(&&"e0_type".to_string()));
         assert!(aliases.contains(&&"e0_src".to_string()));
         assert!(aliases.contains(&&"e0_src_type".to_string()));
@@ -2447,13 +2625,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         assert!(
             has_scan(&q.from, "gl_note"),
             "order_by on node property should JOIN the node table"
@@ -2488,13 +2659,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         assert!(
             !has_scan(&q.from, "gl_user"),
             "order_by id should not add a node table JOIN"
@@ -2529,13 +2693,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         // source-side node should get its table joined for username
         assert!(has_scan(&q.from, "gl_user"));
         assert!(!q.order_by[0].desc);
@@ -2596,13 +2753,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         // gl_note joined for order_by
         assert!(has_scan(&q.from, "gl_note"));
         // node_ids filter CTE present
@@ -2634,13 +2784,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         // Multi-hop gets user table joined for ordering
         assert!(has_scan(&q.from, "gl_user"));
         assert_eq!(q.order_by.len(), 1);
@@ -2665,13 +2808,6 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_scan(t: &TableRef, tbl: &str) -> bool {
-            match t {
-                TableRef::Scan { table, .. } => table == tbl,
-                TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-                _ => false,
-            }
-        }
         assert!(
             has_scan(&q.from, "gl_mergerequest"),
             "order_by mr.title should JOIN gl_mergerequest"

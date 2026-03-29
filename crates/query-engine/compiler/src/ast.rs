@@ -3,6 +3,8 @@
 //! Intermediate representation between JSON input and SQL output.
 //! Each node maps directly to ClickHouse SQL constructs.
 
+use std::collections::HashSet;
+
 use serde_json::Value;
 
 pub use gkg_utils::clickhouse::{ChScalar, ChType};
@@ -66,8 +68,6 @@ pub enum Op {
     In,
     #[strum(serialize = "LIKE")]
     Like,
-    #[strum(serialize = "ILIKE")]
-    ILike,
     // Logical
     #[strum(serialize = "AND")]
     And,
@@ -173,14 +173,6 @@ impl Cte {
             name: name.into(),
             query: Box::new(query),
             recursive: false,
-        }
-    }
-
-    pub fn recursive(name: impl Into<String>, query: Query) -> Self {
-        Self {
-            name: name.into(),
-            query: Box::new(query),
-            recursive: true,
         }
     }
 }
@@ -392,6 +384,48 @@ impl Expr {
     pub fn or(left: Expr, right: Expr) -> Expr {
         Expr::binary(Op::Or, left, right)
     }
+
+    /// Collect all unique table aliases referenced by column expressions.
+    pub fn column_aliases(&self) -> HashSet<String> {
+        let mut aliases = HashSet::new();
+        self.collect_aliases(&mut aliases);
+        aliases
+    }
+
+    fn collect_aliases(&self, out: &mut HashSet<String>) {
+        match self {
+            Expr::Column { table, .. } => {
+                out.insert(table.clone());
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                left.collect_aliases(out);
+                right.collect_aliases(out);
+            }
+            Expr::FuncCall { args, .. } => {
+                for a in args {
+                    a.collect_aliases(out);
+                }
+            }
+            Expr::UnaryOp { expr, .. } => expr.collect_aliases(out),
+            Expr::InSubquery { expr, .. } => expr.collect_aliases(out),
+            Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
+        }
+    }
+
+    /// Check if this expression only references columns from `alias`
+    /// (or is a constant/literal).
+    pub fn references_only(&self, alias: &str) -> bool {
+        match self {
+            Expr::Column { table, .. } => table == alias,
+            Expr::Literal(_) | Expr::Param { .. } | Expr::Star => true,
+            Expr::FuncCall { args, .. } => args.iter().all(|a| a.references_only(alias)),
+            Expr::BinaryOp { left, right, .. } => {
+                left.references_only(alias) && right.references_only(alias)
+            }
+            Expr::UnaryOp { expr, .. } => expr.references_only(alias),
+            Expr::InSubquery { expr, .. } => expr.references_only(alias),
+        }
+    }
 }
 
 impl TableRef {
@@ -408,15 +442,6 @@ impl TableRef {
             left: Box::new(left),
             right: Box::new(right),
             on,
-        }
-    }
-
-    pub fn cross_join(left: TableRef, right: TableRef) -> Self {
-        TableRef::Join {
-            join_type: JoinType::Cross,
-            left: Box::new(left),
-            right: Box::new(right),
-            on: Expr::lit(true), // ignored by codegen for Cross
         }
     }
 

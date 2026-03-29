@@ -5,14 +5,8 @@ edition = "2024"
 publish = false
 
 # No src/lib.rs — this crate only contains integration tests.
-
-[[test]]
-name = "docker"
-path = "tests/entrypoints/docker.rs"
-
-[[test]]
-name = "compiler"
-path = "tests/entrypoints/compiler.rs"
+# Test targets are auto-discovered from tests/*.rs files.
+# Shared helpers live in tests/common/ (subdirectory, ignored by auto-discovery).
 
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
