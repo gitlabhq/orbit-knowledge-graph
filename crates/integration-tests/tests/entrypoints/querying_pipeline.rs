@@ -1,2 +1,2 @@
-#[path = "../server/virtual_columns.rs"]
-mod virtual_columns;
+#[path = "../server/querying_pipeline/mod.rs"]
+mod querying_pipeline;
