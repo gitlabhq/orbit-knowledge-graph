@@ -114,6 +114,21 @@ async fn data_correctness() {
         edge_cases::non_default_redaction_id_with_multiple_mrs,
         // referential integrity
         edge_cases::traversal_referential_integrity_on_complex_query,
+        // LIKE data correctness
+        edge_cases::like_contains_returns_matching_rows,
+        edge_cases::like_contains_matches_multiple,
+        edge_cases::like_contains_no_match_returns_empty,
+        edge_cases::like_starts_with_returns_matching_rows,
+        edge_cases::like_starts_with_no_match,
+        edge_cases::like_ends_with_returns_matching_rows,
+        edge_cases::like_percent_matched_literally,
+        edge_cases::like_underscore_matched_literally,
+        edge_cases::like_equality_on_email_returns_correct_row,
+        edge_cases::like_in_filter_on_email_works,
+        // filterable: false data correctness
+        edge_cases::filterable_traversal_path_readable_as_column,
+        edge_cases::filterable_traversal_path_readable_on_project,
+        edge_cases::filterable_other_filters_still_work_alongside_traversal_path_column,
         // security: traversal path scoping for search
         security::search_scoped_path_excludes_other_namespaces,
         security::search_scoped_to_single_project_namespace,

@@ -1598,15 +1598,13 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Search for groups under the root namespace using traversal_path prefix
+    // Search for all groups by ID range (traversal_path is not user-filterable)
     let json = r#"{
         "query_type": "search",
         "node": {
             "id": "g",
             "entity": "Group",
-            "filters": {
-                "traversal_path": {"op": "starts_with", "value": "1/"}
-            }
+            "node_ids": [100, 101, 102]
         },
         "limit": 100
     }"#;
