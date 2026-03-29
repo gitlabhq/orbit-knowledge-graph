@@ -277,7 +277,7 @@ impl Ontology {
     /// # Errors
     ///
     /// Returns an error if the node or field doesn't exist.
-    pub fn try_with_like_disallowed(
+    pub fn with_like_disallowed(
         mut self,
         node_name: &str,
         field_name: &str,
@@ -287,23 +287,12 @@ impl Ontology {
         Ok(self)
     }
 
-    /// Mark a field as not LIKE-filterable.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the node or field doesn't exist.
-    #[must_use]
-    pub fn with_like_disallowed(self, node_name: &str, field_name: &str) -> Self {
-        self.try_with_like_disallowed(node_name, field_name)
-            .unwrap_or_else(|e| panic!("{e}"))
-    }
-
     /// Mark a field as not user-filterable.
     ///
     /// # Errors
     ///
     /// Returns an error if the node or field doesn't exist.
-    pub fn try_with_unfilterable(
+    pub fn with_unfilterable(
         mut self,
         node_name: &str,
         field_name: &str,
@@ -311,17 +300,6 @@ impl Ontology {
         let field = self.get_field_mut(node_name, field_name)?;
         field.filterable = false;
         Ok(self)
-    }
-
-    /// Mark a field as not user-filterable.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the node or field doesn't exist.
-    #[must_use]
-    pub fn with_unfilterable(self, node_name: &str, field_name: &str) -> Self {
-        self.try_with_unfilterable(node_name, field_name)
-            .unwrap_or_else(|e| panic!("{e}"))
     }
 
     fn get_field_mut(

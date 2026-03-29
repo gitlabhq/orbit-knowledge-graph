@@ -1480,6 +1480,7 @@ mod tests {
                 [("username", DataType::String), ("email", DataType::String)],
             )
             .with_like_disallowed("User", "email")
+            .unwrap()
     }
 
     fn ontology_with_unfilterable_field() -> Ontology {
@@ -1494,6 +1495,7 @@ mod tests {
                 ],
             )
             .with_unfilterable("Group", "traversal_path")
+            .unwrap()
     }
 
     #[test]
