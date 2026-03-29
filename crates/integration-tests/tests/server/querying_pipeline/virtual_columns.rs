@@ -77,7 +77,7 @@ async fn merges_results_into_property_map() {
         .await
         .unwrap();
 
-    for (_, props) in &map {
+    for props in map.values() {
         assert_eq!(
             props.get("content"),
             Some(&ColumnValue::String("mock:blob_content".into()))
