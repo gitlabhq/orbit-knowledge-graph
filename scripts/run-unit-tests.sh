@@ -9,6 +9,8 @@ set -euo pipefail
 #
 # Extra arguments are forwarded to cargo nextest (e.g. --profile ci).
 
+command -v jq >/dev/null 2>&1 || { echo "error: jq is required but not found" >&2; exit 1; }
+
 NON_DOCKER_TESTS=$(
   cargo metadata --no-deps --format-version 1 | \
   jq -r '.packages[]
@@ -18,12 +20,11 @@ NON_DOCKER_TESTS=$(
     | .name'
 )
 
-TEST_FLAGS=""
-for t in $NON_DOCKER_TESTS; do
-  TEST_FLAGS="$TEST_FLAGS --test $t"
-done
+args=(cargo nextest run --lib --bins)
+while IFS= read -r t; do
+  [[ -n "$t" ]] && args+=(--test "$t")
+done <<<"$NON_DOCKER_TESTS"
+args+=("$@")
 
-CMD="cargo nextest run $* --lib --bins $TEST_FLAGS"
-echo "+ $CMD"
-# shellcheck disable=SC2086
-exec $CMD
+echo "+ ${args[*]}"
+exec "${args[@]}"
