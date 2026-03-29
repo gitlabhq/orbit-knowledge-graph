@@ -9,11 +9,6 @@ use code_graph::analysis::types::{
 
 use crate::error::Result;
 
-/// Fixed value — the query engine's lower pass references traversal_path
-/// in generated SQL. A future MR will make the DuckDB pipeline dialect-aware
-/// and remove this column from the local schema entirely.
-const LOCAL_TRAVERSAL_PATH: &str = "0/";
-
 pub struct LocalGraphData {
     pub directories: RecordBatch,
     pub files: RecordBatch,
@@ -40,10 +35,9 @@ pub fn convert_graph_data(
     })
 }
 
-/// Common columns shared by all node tables: id, traversal_path, project_id, branch, _version.
+/// Common columns shared by all node tables: id, project_id, branch, _version.
 struct BaseColumns {
     id: Int64Builder,
-    traversal_path: StringBuilder,
     project_id: Int64Builder,
     branch: StringBuilder,
     version: Int64Builder,
@@ -55,7 +49,6 @@ impl BaseColumns {
     fn new(capacity: usize, branch: &str) -> Self {
         Self {
             id: Int64Builder::with_capacity(capacity),
-            traversal_path: StringBuilder::with_capacity(capacity, capacity * 3),
             project_id: Int64Builder::with_capacity(capacity),
             branch: StringBuilder::with_capacity(capacity, capacity * branch.len()),
             version: Int64Builder::with_capacity(capacity),
@@ -71,7 +64,6 @@ impl BaseColumns {
 
     fn append(&mut self, node_id: i64) {
         self.id.append_value(node_id);
-        self.traversal_path.append_value(LOCAL_TRAVERSAL_PATH);
         self.project_id.append_value(self.project_id_val);
         self.branch.append_value(&self.branch_val);
         self.version.append_value(0);
@@ -80,13 +72,11 @@ impl BaseColumns {
     fn into_batch(mut self, extra: Vec<(&str, DataType, bool, ArrayRef)>) -> Result<RecordBatch> {
         let mut fields = vec![
             Field::new("id", DataType::Int64, false),
-            Field::new("traversal_path", DataType::Utf8, false),
             Field::new("project_id", DataType::Int64, false),
             Field::new("branch", DataType::Utf8, false),
         ];
         let mut columns: Vec<ArrayRef> = vec![
             Arc::new(self.id.finish()),
-            Arc::new(self.traversal_path.finish()),
             Arc::new(self.project_id.finish()),
             Arc::new(self.branch.finish()),
         ];
@@ -328,7 +318,6 @@ fn convert_imported_symbols(
 fn convert_edges(graph_data: &GraphData) -> Result<RecordBatch> {
     let rels = &graph_data.relationships;
     let cap = rels.len();
-    let mut tp = StringBuilder::with_capacity(cap, cap * 3);
     let mut source_id = Int64Builder::with_capacity(cap);
     let mut source_kind = StringBuilder::with_capacity(cap, cap * 16);
     let mut rel_kind = StringBuilder::with_capacity(cap, cap * 16);
@@ -345,7 +334,6 @@ fn convert_edges(graph_data: &GraphData) -> Result<RecordBatch> {
             continue;
         };
 
-        tp.append_value(LOCAL_TRAVERSAL_PATH);
         source_id.append_value(s);
         source_kind.append_value(src_kind_str);
         rel_kind.append_value(rel.relationship_type.edge_kind());
@@ -356,7 +344,6 @@ fn convert_edges(graph_data: &GraphData) -> Result<RecordBatch> {
 
     Ok(RecordBatch::try_new(
         Arc::new(Schema::new(vec![
-            Field::new("traversal_path", DataType::Utf8, false),
             Field::new("source_id", DataType::Int64, false),
             Field::new("source_kind", DataType::Utf8, false),
             Field::new("relationship_kind", DataType::Utf8, false),
@@ -365,8 +352,7 @@ fn convert_edges(graph_data: &GraphData) -> Result<RecordBatch> {
             Field::new("_version", DataType::Int64, false),
         ])),
         vec![
-            Arc::new(tp.finish()) as ArrayRef,
-            Arc::new(source_id.finish()),
+            Arc::new(source_id.finish()) as ArrayRef,
             Arc::new(source_kind.finish()),
             Arc::new(rel_kind.finish()),
             Arc::new(target_id.finish()),
@@ -450,7 +436,7 @@ mod tests {
 
         let result = convert_graph_data(&graph, 100, "main").unwrap();
         assert_eq!(result.directories.num_rows(), 1);
-        assert_eq!(result.directories.num_columns(), 7);
+        assert_eq!(result.directories.num_columns(), 6);
     }
 
     #[test]
@@ -473,6 +459,6 @@ mod tests {
 
         let result = convert_graph_data(&graph, 100, "main").unwrap();
         assert_eq!(result.files.num_rows(), 1);
-        assert_eq!(result.files.num_columns(), 9);
+        assert_eq!(result.files.num_columns(), 8);
     }
 }

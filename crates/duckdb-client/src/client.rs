@@ -65,25 +65,13 @@ impl DuckDbClient {
         Ok(batches)
     }
 
-    /// Deletes all data for a project/branch across node tables and edges.
-    ///
-    /// Edge table uses `traversal_path` for scoping (matching the ClickHouse schema
-    /// where `gl_edge` has no `project_id`/`branch` columns). In local mode, each
-    /// DB file is one project, so deleting by the fixed traversal path is correct.
-    pub fn delete_project_data(&self, project_id: i64, branch: &str) -> Result<()> {
+    /// Deletes all data across all tables. In local mode each DB file is
+    /// one project, so a full truncate is the correct reset before re-indexing.
+    pub fn delete_all_data(&self) -> Result<()> {
         for table in CODE_GRAPH_TABLES {
-            if *table == "gl_edge" {
-                continue;
-            }
-            self.conn.execute(
-                &format!("DELETE FROM {table} WHERE project_id = ? AND branch = ?"),
-                params![project_id, branch],
-            )?;
+            self.conn
+                .execute(&format!("DELETE FROM {table}"), params![])?;
         }
-        self.conn.execute(
-            "DELETE FROM gl_edge WHERE traversal_path = ?",
-            params!["0/"],
-        )?;
         Ok(())
     }
 }
@@ -98,7 +86,6 @@ mod tests {
     fn file_schema() -> Arc<Schema> {
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int64, false),
-            Field::new("traversal_path", DataType::Utf8, false),
             Field::new("project_id", DataType::Int64, false),
             Field::new("branch", DataType::Utf8, false),
             Field::new("path", DataType::Utf8, false),
@@ -115,7 +102,6 @@ mod tests {
             file_schema(),
             vec![
                 Arc::new(Int64Array::from(ids.to_vec())),
-                Arc::new(StringArray::from(vec!["0/"; n])),
                 Arc::new(Int64Array::from(vec![42; n])),
                 Arc::new(StringArray::from(vec!["main"; n])),
                 Arc::new(StringArray::from(names.to_vec())),
@@ -136,8 +122,8 @@ mod tests {
         client
             .conn
             .execute(
-                "INSERT INTO gl_file (id, traversal_path, project_id, branch, path, name, extension, language, _version) \
-                 VALUES (1, '0/', 42, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust', 0)",
+                "INSERT INTO gl_file (id, project_id, branch, path, name, extension, language, _version) \
+                 VALUES (1, 42, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust', 0)",
                 [],
             )
             .unwrap();
@@ -211,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_project_data_isolates_projects() {
+    fn delete_all_data_truncates() {
         let client = DuckDbClient::open_in_memory().unwrap();
         client.initialize_schema().unwrap();
 
@@ -230,17 +216,17 @@ mod tests {
             )
             .unwrap();
 
-        client.delete_project_data(42, "main").unwrap();
+        client.delete_all_data().unwrap();
 
-        let batches = client.query_arrow("SELECT id FROM gl_file").unwrap();
-        assert_eq!(batches[0].num_rows(), 1);
-
-        let ids = batches[0]
+        let batches = client
+            .query_arrow("SELECT count(*) as cnt FROM gl_file")
+            .unwrap();
+        let count = batches[0]
             .column(0)
             .as_any()
             .downcast_ref::<Int64Array>()
             .unwrap();
-        assert_eq!(ids.value(0), 2);
+        assert_eq!(count.value(0), 0);
     }
 
     #[test]

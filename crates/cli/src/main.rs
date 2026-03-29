@@ -229,7 +229,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                 .initialize_schema()
                 .context("failed to create schema")?;
             client
-                .delete_project_data(project_id, "HEAD")
+                .delete_all_data()
                 .context("failed to clear existing data")?;
 
             client.insert_arrow("gl_directory", local_data.directories)?;
