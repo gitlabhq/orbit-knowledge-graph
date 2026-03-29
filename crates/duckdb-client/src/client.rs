@@ -2,14 +2,9 @@ use std::path::Path;
 
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
-use duckdb::vtab::arrow::{ArrowVTab, arrow_recordbatch_to_query_params};
 
 use crate::error::{DuckDbError, Result};
 use crate::schema::{CODE_GRAPH_TABLES, SCHEMA_DDL};
-
-/// Matches DuckDB's default STANDARD_VECTOR_SIZE.
-/// Chunking Arrow batches to this size avoids internal re-chunking in the vtab scanner.
-const ARROW_CHUNK_SIZE: usize = 2048;
 
 pub struct DuckDbClient {
     conn: duckdb::Connection,
@@ -21,24 +16,13 @@ impl DuckDbClient {
             std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
         }
         let conn = duckdb::Connection::open(path)?;
-        let client = Self { conn };
-        client.configure()?;
-        Ok(client)
+        Ok(Self { conn })
     }
 
     #[cfg(test)]
     pub(crate) fn open_in_memory() -> Result<Self> {
         let conn = duckdb::Connection::open_in_memory()?;
-        let client = Self { conn };
-        client.configure()?;
-        Ok(client)
-    }
-
-    fn configure(&self) -> Result<()> {
-        self.conn
-            .register_table_function::<ArrowVTab>("arrow")
-            .map_err(|e| DuckDbError::Schema(format!("failed to register arrow vtab: {e}")))?;
-        Ok(())
+        Ok(Self { conn })
     }
 
     pub fn initialize_schema(&self) -> Result<()> {
@@ -48,27 +32,18 @@ impl DuckDbClient {
         Ok(())
     }
 
-    /// Zero-copy bulk insert via DuckDB's Arrow virtual table scanner.
-    /// Large batches are chunked to stay within DuckDB's vector size limits.
-    pub fn insert_arrow(&self, table: &str, batch: &RecordBatch) -> Result<()> {
+    /// Bulk insert via DuckDB's Appender, which converts Arrow RecordBatch
+    /// directly to DuckDB DataChunks — no SQL parsing, no vtab overhead.
+    pub fn insert_arrow(&self, table: &str, batch: RecordBatch) -> Result<()> {
         if !CODE_GRAPH_TABLES.contains(&table) {
             return Err(DuckDbError::Schema(format!("unknown table: {table}")));
         }
         if batch.num_rows() == 0 {
             return Ok(());
         }
-        let sql = format!("INSERT INTO {table} SELECT * FROM arrow(?, ?)");
-        let mut stmt = self.conn.prepare(&sql)?;
-
-        let total = batch.num_rows();
-        let mut offset = 0;
-        while offset < total {
-            let len = (total - offset).min(ARROW_CHUNK_SIZE);
-            let chunk = batch.slice(offset, len);
-            let params = arrow_recordbatch_to_query_params(chunk);
-            stmt.execute(params)?;
-            offset += len;
-        }
+        let mut appender = self.conn.appender(table)?;
+        appender.append_record_batch(batch)?;
+        appender.flush()?;
         Ok(())
     }
 
@@ -189,12 +164,12 @@ mod tests {
     }
 
     #[test]
-    fn arrow_vtab_insert_and_query() {
+    fn appender_insert_and_query() {
         let client = DuckDbClient::open_in_memory().unwrap();
         client.initialize_schema().unwrap();
 
         let batch = make_file_batch(&[10, 11], &["a.rs", "b.rs"]);
-        client.insert_arrow("gl_file", &batch).unwrap();
+        client.insert_arrow("gl_file", batch).unwrap();
 
         let result = client
             .query_arrow("SELECT id, name FROM gl_file ORDER BY id")
@@ -212,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn large_batch_chunking() {
+    fn large_batch_appender() {
         let client = DuckDbClient::open_in_memory().unwrap();
         client.initialize_schema().unwrap();
 
@@ -222,7 +197,7 @@ mod tests {
         let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
 
         let batch = make_file_batch(&ids, &name_refs);
-        client.insert_arrow("gl_file", &batch).unwrap();
+        client.insert_arrow("gl_file", batch).unwrap();
 
         let result = client
             .query_arrow("SELECT count(*) as cnt FROM gl_file")
@@ -304,7 +279,7 @@ mod tests {
         client.initialize_schema().unwrap();
 
         let batch = make_file_batch(&[1], &["a.rs"]);
-        let err = client.insert_arrow("evil_table", &batch).unwrap_err();
+        let err = client.insert_arrow("evil_table", batch).unwrap_err();
         assert!(err.to_string().contains("unknown table"));
     }
 
@@ -314,7 +289,7 @@ mod tests {
         client.initialize_schema().unwrap();
 
         let batch = make_file_batch(&[], &[]);
-        client.insert_arrow("gl_file", &batch).unwrap();
+        client.insert_arrow("gl_file", batch).unwrap();
 
         let result = client
             .query_arrow("SELECT count(*) as cnt FROM gl_file")
