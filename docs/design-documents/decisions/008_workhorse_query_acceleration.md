@@ -135,7 +135,7 @@ Puma workers handle two short calls instead of one long one. The first (~10 ms) 
 
 ### The GKG injecter
 
-A new `workhorse/internal/gkg/` package implements the `senddata.Injecter` interface. Most existing injecters just read from an external source (Gitaly, a URL). This one also needs to call back to Rails mid-stream for redaction. It holds a reference to `*api.API` (same pattern as the GOB and dependency proxy modules) to make signed internal requests.
+A new `workhorse/internal/orbit/` package implements the `senddata.Injecter` interface. Most existing injecters just read from an external source (Gitaly, a URL). This one also needs to call back to Rails mid-stream for redaction. It holds a reference to `*api.API` (same pattern as the GOB and dependency proxy modules) to make signed internal requests.
 
 The injecter's `Inject()` method:
 
