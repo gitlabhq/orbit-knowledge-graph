@@ -1,6 +1,5 @@
-//! filterable: false data correctness: verify that traversal_path can be
-//! selected as a column (readable) but queries with non-filterable fields
-//! work correctly through the full pipeline.
+//! Verify that `traversal_path` (marked `filterable: false`) can still be
+//! selected as a return column and returns correct values from ClickHouse.
 
 use super::super::helpers::*;
 
