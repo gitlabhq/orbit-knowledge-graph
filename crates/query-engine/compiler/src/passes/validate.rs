@@ -1468,4 +1468,135 @@ mod tests {
             result
         );
     }
+
+    // ── LIKE security controls ──────────────────────────────────────
+
+    fn ontology_with_sensitive_field() -> Ontology {
+        Ontology::new()
+            .with_nodes(["User"])
+            .with_edges(["AUTHORED"])
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("email", DataType::String)],
+            )
+            .with_like_disallowed("User", "email")
+    }
+
+    fn ontology_with_unfilterable_field() -> Ontology {
+        Ontology::new()
+            .with_nodes(["Group"])
+            .with_edges(["CONTAINS"])
+            .with_fields(
+                "Group",
+                [
+                    ("name", DataType::String),
+                    ("traversal_path", DataType::String),
+                ],
+            )
+            .with_unfilterable("Group", "traversal_path")
+    }
+
+    #[test]
+    fn rejects_short_like_pattern() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"username": {"op": "contains", "value": "ab"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("LIKE pattern must be at least 3 characters"),
+            "expected min length error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_like_on_disallowed_field() {
+        let ont = ontology_with_sensitive_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"email": {"op": "contains", "value": "example"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("LIKE operators"),
+            "expected like_allowed rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_equality_on_like_disallowed_field() {
+        let ont = ontology_with_sensitive_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"email": "test@example.com"}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        assert!(
+            validator.check_references(&input).is_ok(),
+            "equality filter on like_allowed:false field should pass"
+        );
+    }
+
+    #[test]
+    fn rejects_filter_on_unfilterable_field() {
+        let ont = ontology_with_unfilterable_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("not filterable"),
+            "expected filterable rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_filter_on_filterable_field() {
+        let ont = ontology_with_unfilterable_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"name": "Public Group"}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        assert!(
+            validator.check_references(&input).is_ok(),
+            "filter on filterable:true field should pass"
+        );
+    }
 }

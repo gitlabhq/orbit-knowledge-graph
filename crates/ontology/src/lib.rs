@@ -272,6 +272,38 @@ impl Ontology {
         self
     }
 
+    /// Builder: mark a field as not LIKE-filterable (for testing).
+    #[must_use]
+    pub fn with_like_disallowed(mut self, node_name: &str, field_name: &str) -> Self {
+        let node = self
+            .nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"));
+        let field = node
+            .fields
+            .iter_mut()
+            .find(|f| f.name == field_name)
+            .unwrap_or_else(|| panic!("field \"{field_name}\" not found on \"{node_name}\""));
+        field.like_allowed = false;
+        self
+    }
+
+    /// Builder: mark a field as not user-filterable (for testing).
+    #[must_use]
+    pub fn with_unfilterable(mut self, node_name: &str, field_name: &str) -> Self {
+        let node = self
+            .nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"));
+        let field = node
+            .fields
+            .iter_mut()
+            .find(|f| f.name == field_name)
+            .unwrap_or_else(|| panic!("field \"{field_name}\" not found on \"{node_name}\""));
+        field.filterable = false;
+        self
+    }
+
     /// Builder: set redaction config for a node (for testing).
     #[must_use]
     pub fn with_redaction(
@@ -611,7 +643,8 @@ impl Ontology {
 
     /// Whether a field is filterable by users.
     /// Returns `true` for reserved columns (e.g. `id`). Returns `false` for
-    /// unknown fields (fail-closed).
+    /// unknown fields (fail-closed). Unknown nodes return `true` since edge
+    /// filters pass entity names like `"relationship[0]"`.
     #[must_use]
     pub fn is_filterable(&self, node_name: &str, field_name: &str) -> bool {
         if NODE_RESERVED_COLUMNS.contains(&field_name) {
