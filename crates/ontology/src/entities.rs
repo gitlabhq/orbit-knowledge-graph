@@ -233,6 +233,24 @@ pub struct Field {
     pub enum_values: Option<BTreeMap<i64, String>>,
     /// How the enum is stored in the source (int or string). Defaults to Int.
     pub enum_type: EnumType,
+    /// Whether LIKE-based filter operators (contains, starts_with, ends_with)
+    /// are allowed on this field. Defaults to true. Set to false for sensitive
+    /// columns (e.g. emails, vulnerability titles) to prevent probing.
+    pub like_allowed: bool,
+}
+
+impl Default for Field {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            source: FieldSource::DatabaseColumn(String::new()),
+            data_type: DataType::String,
+            nullable: false,
+            enum_values: None,
+            enum_type: EnumType::default(),
+            like_allowed: true,
+        }
+    }
 }
 
 impl Field {

@@ -222,8 +222,7 @@ impl Ontology {
                 source: FieldSource::DatabaseColumn(field_name_string),
                 data_type,
                 nullable,
-                enum_values: None,
-                enum_type: EnumType::default(),
+                ..Default::default()
             });
         }
         Ok(self)
@@ -592,6 +591,20 @@ impl Ontology {
             .map(|f| f.data_type)
     }
 
+    /// Whether LIKE operators are allowed on a node field.
+    /// Returns `true` for reserved columns and unknown fields (fail-open for
+    /// backwards compatibility; schema validation catches unknown fields).
+    #[must_use]
+    pub fn is_like_allowed(&self, node_name: &str, field_name: &str) -> bool {
+        let Some(node) = self.nodes.get(node_name) else {
+            return true;
+        };
+        node.fields
+            .iter()
+            .find(|f| f.name == field_name)
+            .is_none_or(|f| f.like_allowed)
+    }
+
     /// Validate that a type is a valid node label or edge type.
     ///
     /// # Errors
@@ -714,17 +727,14 @@ mod tests {
             source: FieldSource::DatabaseColumn("email".into()),
             data_type: DataType::String,
             nullable: true,
-            enum_values: None,
-            enum_type: EnumType::default(),
+            ..Default::default()
         };
         assert_eq!(format!("{field}"), "email: String?");
         let field = Field {
             name: "id".into(),
             source: FieldSource::DatabaseColumn("id".into()),
             data_type: DataType::Int,
-            nullable: false,
-            enum_values: None,
-            enum_type: EnumType::default(),
+            ..Default::default()
         };
         assert_eq!(format!("{field}"), "id: Int");
     }
@@ -915,6 +925,7 @@ mod tests {
                 nullable: false,
                 enum_values: Some(enum_values),
                 enum_type: EnumType::Int,
+                ..Default::default()
             }],
             destination_table: "gl_user".to_string(),
             ..Default::default()

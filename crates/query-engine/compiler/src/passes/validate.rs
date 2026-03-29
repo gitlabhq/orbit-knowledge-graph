@@ -309,6 +309,9 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Minimum number of characters required in a LIKE filter value.
+    const MIN_LIKE_PATTERN_LEN: usize = 3;
+
     fn check_one_filter(
         &self,
         entity: &str,
@@ -323,9 +326,34 @@ impl<'a> Validator<'a> {
             return Ok(());
         }
 
+        let is_like_op = matches!(
+            op,
+            FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith
+        );
+
+        // Reject LIKE operators on fields marked like_allowed: false.
+        if is_like_op && !self.ontology.is_like_allowed(entity, prop) {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 LIKE operators (contains/starts_with/ends_with) are not allowed on this field"
+            )));
+        }
+
         let Some(value) = filter.value.as_ref() else {
             return Ok(());
         };
+
+        // Enforce minimum pattern length for LIKE filters.
+        if is_like_op {
+            let len = value.as_str().map_or(0, str::len);
+            if len < Self::MIN_LIKE_PATTERN_LEN {
+                return Err(QueryError::Validation(format!(
+                    "filter on \"{prop}\" for {entity}: \
+                     LIKE pattern must be at least {} characters, got {len}",
+                    Self::MIN_LIKE_PATTERN_LEN
+                )));
+            }
+        }
 
         match op {
             FilterOp::In => {

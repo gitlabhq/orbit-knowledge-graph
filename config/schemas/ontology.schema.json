@@ -98,6 +98,11 @@
             "enum_type": {
               "$ref": "#/definitions/enumType",
               "description": "For enum types, specifies how the enum is stored in the source database."
+            },
+            "like_allowed": {
+              "type": "boolean",
+              "description": "Whether LIKE-based operators (contains, starts_with, ends_with) are permitted on this field. Defaults to true. Set to false for sensitive columns to prevent probing.",
+              "default": true
             }
           },
           "required": ["type", "source"],

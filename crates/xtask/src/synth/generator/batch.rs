@@ -230,25 +230,20 @@ mod tests {
                     name: "id".to_string(),
                     source: FieldSource::DatabaseColumn("id".to_string()),
                     data_type: DataType::Int,
-                    nullable: false,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
+                    ..Default::default()
                 },
                 Field {
                     name: "name".to_string(),
                     source: FieldSource::DatabaseColumn("name".to_string()),
                     data_type: DataType::String,
                     nullable: true,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
+                    ..Default::default()
                 },
                 Field {
                     name: "active".to_string(),
                     source: FieldSource::DatabaseColumn("active".to_string()),
                     data_type: DataType::Bool,
-                    nullable: false,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
+                    ..Default::default()
                 },
             ],
             destination_table: "gl_test_nodes".to_string(),

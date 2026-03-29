@@ -1581,8 +1581,16 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
 }
 
 fn like_pattern(col: Expr, filter: &InputFilter, prefix: &str, suffix: &str) -> Expr {
-    let s = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+    let raw = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+    let s = escape_like(raw);
     Expr::binary(Op::Like, col, Expr::string(format!("{prefix}{s}{suffix}")))
+}
+
+/// Escape LIKE metacharacters so user input is matched literally.
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

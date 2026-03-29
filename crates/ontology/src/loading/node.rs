@@ -105,6 +105,14 @@ struct PropertyYaml {
     values: Option<BTreeMap<i64, String>>,
     #[serde(default)]
     enum_type: EnumType,
+    #[serde(default = "PropertyYaml::default_like_allowed")]
+    like_allowed: bool,
+}
+
+impl PropertyYaml {
+    fn default_like_allowed() -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,6 +168,7 @@ impl NodeYaml {
                     nullable: prop_def.nullable,
                     enum_values: prop_def.values,
                     enum_type: prop_def.enum_type,
+                    like_allowed: prop_def.like_allowed,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
