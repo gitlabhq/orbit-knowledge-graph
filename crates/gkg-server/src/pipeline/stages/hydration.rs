@@ -25,7 +25,7 @@ use query_engine::compiler::constants::{
     HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
 };
 
-use crate::content::{MAX_VIRTUAL_BATCH_SIZE, PropertyRow, VirtualServiceRegistry};
+use crate::content::{ColumnResolverRegistry, PropertyRow};
 
 type PropertyMap = HashMap<(String, i64), PropertyRow>;
 
@@ -43,13 +43,13 @@ impl HydrationStage {
     }
 
     /// Resolve virtual columns from remote services and merge results into
-    /// the property map. Dispatches to the appropriate [`VirtualService`]
+    /// the property map. Dispatches to the appropriate [`ColumnResolver`]
     /// by the `service` name declared in the ontology.
     ///
     /// Currently a no-op in practice because all virtual fields are
     /// `disabled: true` in the ontology. The full pipeline is wired up so
     /// that enabling a virtual field only requires removing the `disabled`
-    /// flag and registering the service in [`VirtualServiceRegistry`].
+    /// flag and registering the service in [`ColumnResolverRegistry`].
     pub async fn resolve_virtual_columns(
         ctx: &QueryPipelineContext,
         entity_virtual_columns: &[EntityVirtualColumns<'_>],
@@ -62,14 +62,15 @@ impl HydrationStage {
 
         let registry = ctx
             .server_extensions
-            .get::<VirtualServiceRegistry>()
+            .get::<ColumnResolverRegistry>()
             .ok_or_else(|| {
                 PipelineError::ContentResolution(
-                    "virtual columns requested but no VirtualServiceRegistry available".into(),
+                    "virtual columns requested but no ColumnResolverRegistry available".into(),
                 )
             })?;
 
         let org_id = ctx.security_context()?.org_id;
+        let max_batch = registry.max_batch_size();
 
         for &(entity_type, virtual_columns) in entity_virtual_columns {
             let valid_keys: Vec<(String, i64)> = property_map
@@ -82,9 +83,9 @@ impl HydrationStage {
                 continue;
             }
 
-            if valid_keys.len() > MAX_VIRTUAL_BATCH_SIZE {
+            if valid_keys.len() > max_batch {
                 return Err(PipelineError::ContentResolution(format!(
-                    "virtual column batch size {} exceeds limit {MAX_VIRTUAL_BATCH_SIZE}",
+                    "column resolver batch size {} exceeds limit {max_batch}",
                     valid_keys.len(),
                 )));
             }

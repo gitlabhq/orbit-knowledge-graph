@@ -1,13 +1,13 @@
 //! Tests for virtual column resolution dispatch logic.
 //!
-//! Exercises `resolve_virtual_columns` with `MockVirtualService` — no
+//! Exercises `resolve_virtual_columns` with `MockColumnResolver` — no
 //! ClickHouse or Gitaly needed. These will extend to cover the real
 //! Gitaly service once it's wired up.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gkg_server::content::{MockVirtualService, PropertyRow, VirtualServiceRegistry};
+use gkg_server::content::{ColumnResolverRegistry, MockColumnResolver, PropertyRow};
 use gkg_server::pipeline::HydrationStage;
 use gkg_utils::arrow::ColumnValue;
 use ontology::Ontology;
@@ -15,8 +15,8 @@ use query_engine::compiler::{SecurityContext, VirtualColumnRequest};
 use query_engine::pipeline::{PipelineError, QueryPipelineContext, TypeMap};
 
 fn test_ctx() -> QueryPipelineContext {
-    let mut registry = VirtualServiceRegistry::new();
-    registry.register("gitaly", Arc::new(MockVirtualService));
+    let mut registry = ColumnResolverRegistry::new();
+    registry.register("gitaly", Arc::new(MockColumnResolver));
 
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(registry);

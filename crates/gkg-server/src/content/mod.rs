@@ -5,11 +5,10 @@ use async_trait::async_trait;
 use gkg_utils::arrow::ColumnValue;
 use query_engine::pipeline::PipelineError;
 
-/// Maximum rows per virtual service batch call.
-pub const MAX_VIRTUAL_BATCH_SIZE: usize = 100;
-
 /// A single entity row's hydrated properties, keyed by column name.
 pub type PropertyRow = HashMap<String, ColumnValue>;
+
+const DEFAULT_MAX_BATCH_SIZE: usize = 100;
 
 /// A service that resolves virtual column values from an external source.
 ///
@@ -18,7 +17,7 @@ pub type PropertyRow = HashMap<String, ColumnValue>;
 /// trait generic — a Gitaly implementation reads `project_id`/`branch`/`path`,
 /// while a hypothetical CI service would read `pipeline_id`/`job_id`.
 #[async_trait]
-pub trait VirtualService: Send + Sync {
+pub trait ColumnResolver: Send + Sync {
     /// Resolve a batch of rows for the given `lookup` operation.
     ///
     /// `rows` contains one property map per entity. Returns a
@@ -32,31 +31,50 @@ pub trait VirtualService: Send + Sync {
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError>;
 }
 
-/// Maps service names (e.g. `"gitaly"`) to their implementations.
-#[derive(Default)]
-pub struct VirtualServiceRegistry {
-    services: HashMap<String, Arc<dyn VirtualService>>,
+/// Maps service names (e.g. `"gitaly"`) to their [`ColumnResolver`]
+/// implementations, with a configurable batch size limit.
+pub struct ColumnResolverRegistry {
+    services: HashMap<String, Arc<dyn ColumnResolver>>,
+    max_batch_size: usize,
 }
 
-impl VirtualServiceRegistry {
+impl Default for ColumnResolverRegistry {
+    fn default() -> Self {
+        Self {
+            services: HashMap::new(),
+            max_batch_size: DEFAULT_MAX_BATCH_SIZE,
+        }
+    }
+}
+
+impl ColumnResolverRegistry {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn register(&mut self, name: impl Into<String>, service: Arc<dyn VirtualService>) {
+    pub fn with_max_batch_size(mut self, max_batch_size: usize) -> Self {
+        self.max_batch_size = max_batch_size;
+        self
+    }
+
+    pub fn max_batch_size(&self) -> usize {
+        self.max_batch_size
+    }
+
+    pub fn register(&mut self, name: impl Into<String>, service: Arc<dyn ColumnResolver>) {
         self.services.insert(name.into(), service);
     }
 
-    pub fn get(&self, name: &str) -> Option<&Arc<dyn VirtualService>> {
+    pub fn get(&self, name: &str) -> Option<&Arc<dyn ColumnResolver>> {
         self.services.get(name)
     }
 }
 
-/// Mock service that echoes the lookup name back as the resolved value.
-pub struct MockVirtualService;
+/// Mock resolver that echoes the lookup name back as the resolved value.
+pub struct MockColumnResolver;
 
 #[async_trait]
-impl VirtualService for MockVirtualService {
+impl ColumnResolver for MockColumnResolver {
     async fn resolve_batch(
         &self,
         lookup: &str,
@@ -76,17 +94,29 @@ mod tests {
 
     #[test]
     fn registry_lookup() {
-        let mut reg = VirtualServiceRegistry::new();
+        let mut reg = ColumnResolverRegistry::new();
         assert!(reg.get("gitaly").is_none());
 
-        reg.register("gitaly", Arc::new(MockVirtualService));
+        reg.register("gitaly", Arc::new(MockColumnResolver));
         assert!(reg.get("gitaly").is_some());
         assert!(reg.get("other").is_none());
     }
 
+    #[test]
+    fn registry_default_batch_size() {
+        let reg = ColumnResolverRegistry::new();
+        assert_eq!(reg.max_batch_size(), DEFAULT_MAX_BATCH_SIZE);
+    }
+
+    #[test]
+    fn registry_custom_batch_size() {
+        let reg = ColumnResolverRegistry::new().with_max_batch_size(50);
+        assert_eq!(reg.max_batch_size(), 50);
+    }
+
     #[tokio::test]
-    async fn mock_service_echoes_lookup() {
-        let svc = MockVirtualService;
+    async fn mock_resolver_echoes_lookup() {
+        let svc = MockColumnResolver;
         let props = HashMap::new();
         let rows: Vec<&PropertyRow> = vec![&props, &props];
 
