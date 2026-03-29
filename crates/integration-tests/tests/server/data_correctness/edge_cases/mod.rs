@@ -1,4 +1,10 @@
+mod filterable;
+mod like;
+
 use super::helpers::*;
+
+pub(crate) use filterable::*;
+pub(crate) use like::*;
 
 pub(super) async fn traversal_referential_integrity_on_complex_query(ctx: &TestContext) {
     let resp = run_query(

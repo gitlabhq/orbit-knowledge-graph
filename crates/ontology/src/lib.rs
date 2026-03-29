@@ -224,8 +224,7 @@ impl Ontology {
                 source: FieldSource::DatabaseColumn(field_name_string),
                 data_type,
                 nullable,
-                enum_values: None,
-                enum_type: EnumType::default(),
+                ..Default::default()
             });
         }
         Ok(self)
@@ -273,6 +272,40 @@ impl Ontology {
             );
         }
         self
+    }
+
+    /// Mutate a field on a node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node or field doesn't exist.
+    pub fn modify_field(
+        mut self,
+        node_name: &str,
+        field_name: &str,
+        f: impl FnOnce(&mut Field),
+    ) -> Result<Self, OntologyError> {
+        let field = self.get_field_mut(node_name, field_name)?;
+        f(field);
+        Ok(self)
+    }
+
+    fn get_field_mut(
+        &mut self,
+        node_name: &str,
+        field_name: &str,
+    ) -> Result<&mut Field, OntologyError> {
+        let node = self.nodes.get_mut(node_name).ok_or_else(|| {
+            OntologyError::Validation(format!("node \"{node_name}\" does not exist"))
+        })?;
+        node.fields
+            .iter_mut()
+            .find(|f| f.name == field_name)
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "field \"{field_name}\" not found on \"{node_name}\""
+                ))
+            })
     }
 
     /// Builder: set redaction config for a node (for testing).
@@ -600,6 +633,30 @@ impl Ontology {
             .map(|f| f.data_type)
     }
 
+    /// Check a boolean property on a node field.
+    ///
+    /// Returns `true` for reserved columns (e.g. `id`). Returns `false` for
+    /// unknown fields (fail-closed). Unknown nodes return `true` since edge
+    /// filters pass entity names like `"relationship[0]"`.
+    #[must_use]
+    pub fn check_field_flag(
+        &self,
+        node_name: &str,
+        field_name: &str,
+        flag: impl Fn(&Field) -> bool,
+    ) -> bool {
+        if NODE_RESERVED_COLUMNS.contains(&field_name) {
+            return true;
+        }
+        let Some(node) = self.nodes.get(node_name) else {
+            return true;
+        };
+        node.fields
+            .iter()
+            .find(|f| f.name == field_name)
+            .is_some_and(&flag)
+    }
+
     /// Validate that a type is a valid node label or edge type.
     ///
     /// # Errors
@@ -722,17 +779,14 @@ mod tests {
             source: FieldSource::DatabaseColumn("email".into()),
             data_type: DataType::String,
             nullable: true,
-            enum_values: None,
-            enum_type: EnumType::default(),
+            ..Default::default()
         };
         assert_eq!(format!("{field}"), "email: String?");
         let field = Field {
             name: "id".into(),
             source: FieldSource::DatabaseColumn("id".into()),
             data_type: DataType::Int,
-            nullable: false,
-            enum_values: None,
-            enum_type: EnumType::default(),
+            ..Default::default()
         };
         assert_eq!(format!("{field}"), "id: Int");
     }
@@ -923,6 +977,7 @@ mod tests {
                 nullable: false,
                 enum_values: Some(enum_values),
                 enum_type: EnumType::Int,
+                ..Default::default()
             }],
             destination_table: "gl_user".to_string(),
             ..Default::default()
@@ -1502,5 +1557,72 @@ properties:
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
         assert_eq!(entity.sort_key, default_sort_key);
+    }
+
+    // ── check_field_flag / modify_field ────────────────────────────
+
+    fn field_flags_ontology() -> Ontology {
+        Ontology::new()
+            .with_nodes(["User"])
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("email", DataType::String)],
+            )
+            .modify_field("User", "email", |f| {
+                f.like_allowed = false;
+                f.filterable = false;
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn check_field_flag_returns_true_for_reserved_columns() {
+        let ont = field_flags_ontology();
+        assert!(ont.check_field_flag("User", "id", |f| f.like_allowed));
+        assert!(ont.check_field_flag("User", "id", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_returns_true_for_allowed_field() {
+        let ont = field_flags_ontology();
+        assert!(ont.check_field_flag("User", "username", |f| f.like_allowed));
+        assert!(ont.check_field_flag("User", "username", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_returns_false_for_disallowed_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.check_field_flag("User", "email", |f| f.like_allowed));
+        assert!(!ont.check_field_flag("User", "email", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_fails_closed_for_unknown_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.like_allowed));
+        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_returns_true_for_unknown_node() {
+        let ont = field_flags_ontology();
+        assert!(ont.check_field_flag("Unknown", "whatever", |f| f.like_allowed));
+    }
+
+    #[test]
+    fn modify_field_errors_for_unknown_node() {
+        let result = Ontology::new()
+            .with_nodes(["User"])
+            .modify_field("Bogus", "field", |_| {});
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn modify_field_errors_for_unknown_field() {
+        let result = Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("name", DataType::String)])
+            .modify_field("User", "bogus", |_| {});
+        assert!(result.is_err());
     }
 }

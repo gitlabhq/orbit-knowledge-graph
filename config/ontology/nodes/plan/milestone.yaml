@@ -74,6 +74,7 @@ properties:
   traversal_path:
     type: string
     source: traversal_path
+    filterable: false
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
