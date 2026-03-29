@@ -272,36 +272,74 @@ impl Ontology {
         self
     }
 
-    /// Builder: mark a field as not LIKE-filterable (for testing).
-    #[must_use]
-    pub fn with_like_disallowed(mut self, node_name: &str, field_name: &str) -> Self {
-        let node = self
-            .nodes
-            .get_mut(node_name)
-            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"));
-        let field = node
-            .fields
-            .iter_mut()
-            .find(|f| f.name == field_name)
-            .unwrap_or_else(|| panic!("field \"{field_name}\" not found on \"{node_name}\""));
+    /// Mark a field as not LIKE-filterable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node or field doesn't exist.
+    pub fn try_with_like_disallowed(
+        mut self,
+        node_name: &str,
+        field_name: &str,
+    ) -> Result<Self, OntologyError> {
+        let field = self.get_field_mut(node_name, field_name)?;
         field.like_allowed = false;
-        self
+        Ok(self)
     }
 
-    /// Builder: mark a field as not user-filterable (for testing).
+    /// Mark a field as not LIKE-filterable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node or field doesn't exist.
     #[must_use]
-    pub fn with_unfilterable(mut self, node_name: &str, field_name: &str) -> Self {
-        let node = self
-            .nodes
-            .get_mut(node_name)
-            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"));
-        let field = node
-            .fields
+    pub fn with_like_disallowed(self, node_name: &str, field_name: &str) -> Self {
+        self.try_with_like_disallowed(node_name, field_name)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// Mark a field as not user-filterable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node or field doesn't exist.
+    pub fn try_with_unfilterable(
+        mut self,
+        node_name: &str,
+        field_name: &str,
+    ) -> Result<Self, OntologyError> {
+        let field = self.get_field_mut(node_name, field_name)?;
+        field.filterable = false;
+        Ok(self)
+    }
+
+    /// Mark a field as not user-filterable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node or field doesn't exist.
+    #[must_use]
+    pub fn with_unfilterable(self, node_name: &str, field_name: &str) -> Self {
+        self.try_with_unfilterable(node_name, field_name)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    fn get_field_mut(
+        &mut self,
+        node_name: &str,
+        field_name: &str,
+    ) -> Result<&mut Field, OntologyError> {
+        let node = self.nodes.get_mut(node_name).ok_or_else(|| {
+            OntologyError::Validation(format!("node \"{node_name}\" does not exist"))
+        })?;
+        node.fields
             .iter_mut()
             .find(|f| f.name == field_name)
-            .unwrap_or_else(|| panic!("field \"{field_name}\" not found on \"{node_name}\""));
-        field.filterable = false;
-        self
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "field \"{field_name}\" not found on \"{node_name}\""
+                ))
+            })
     }
 
     /// Builder: set redaction config for a node (for testing).
