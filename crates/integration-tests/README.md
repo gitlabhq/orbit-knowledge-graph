@@ -89,3 +89,26 @@ between them.
    `containers.rs` and create `server/foo.rs`.
 5. For compiler tests, add to `compiler/mod.rs` and create `compiler/foo.rs`.
 6. For a new test binary, add a `tests/foo.rs` file -- Cargo auto-discovers it.
+
+## Auto-discovery rules
+
+Cargo treats every `.rs` file at the `tests/` root as a separate test binary.
+Subdirectories (`common/`, `compiler/`, `server/`, etc.) are ignored. This is
+why shared helpers live in `tests/common/mod.rs` instead of `tests/common.rs`.
+
+When an entrypoint needs to include modules whose directory name doesn't match
+the module name (e.g. `querying_pipeline` lives under `server/`), use a
+`#[path]` attribute:
+
+```rust
+// local.rs — compiler/ is at the tests/ root, so standard resolution works:
+mod compiler;
+
+// querying_pipeline/ lives under server/, so we need an explicit path:
+#[path = "server/querying_pipeline/mod.rs"]
+mod querying_pipeline;
+```
+
+Avoid naming a `.rs` entrypoint the same as an existing subdirectory
+(e.g. don't create `tests/compiler.rs` when `tests/compiler/` exists) --
+Rust forbids both `foo.rs` and `foo/mod.rs` for the same module.
