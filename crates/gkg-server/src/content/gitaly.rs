@@ -66,10 +66,7 @@ impl ColumnResolver for GitalyContentService {
             let key = (req.project_id, req.branch.clone(), req.file_path.clone());
             if !file_cache.contains_key(&key) {
                 file_cache.insert(key.clone(), None);
-                by_project
-                    .entry(req.project_id)
-                    .or_default()
-                    .push(key);
+                by_project.entry(req.project_id).or_default().push(key);
             }
         }
 
