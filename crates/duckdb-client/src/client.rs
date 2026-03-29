@@ -26,7 +26,8 @@ impl DuckDbClient {
         Ok(client)
     }
 
-    pub fn open_in_memory() -> Result<Self> {
+    #[cfg(test)]
+    pub(crate) fn open_in_memory() -> Result<Self> {
         let conn = duckdb::Connection::open_in_memory()?;
         let client = Self { conn };
         client.configure()?;
