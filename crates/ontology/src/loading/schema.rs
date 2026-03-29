@@ -27,9 +27,17 @@ pub(super) struct SettingsYaml {
     pub default_entity_sort_key: Vec<String>,
     pub edge_sort_key: Vec<String>,
     pub edge_columns: Vec<EdgeColumnYaml>,
+    #[serde(default = "SettingsYaml::default_internal_column_prefix")]
+    pub internal_column_prefix: String,
     #[serde(default)]
     pub skip_security_filter_for_entities: Vec<String>,
     pub etl: EtlSettingsYaml,
+}
+
+impl SettingsYaml {
+    fn default_internal_column_prefix() -> String {
+        "_gkg_".to_string()
+    }
 }
 
 #[derive(Debug, Deserialize)]

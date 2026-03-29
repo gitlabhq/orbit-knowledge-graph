@@ -21,6 +21,7 @@ settings:
     - {name: source_kind, type: string}
     - {name: target_id, type: int64}
     - {name: target_kind, type: string}
+  internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User]
   etl:
     default_watermark: _siphon_replicated_at

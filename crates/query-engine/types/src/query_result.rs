@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use compiler::GKG_COLUMN_PREFIX;
+use compiler::INTERNAL_COLUMN_PREFIX;
 use compiler::constants::{
     EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
 };
@@ -139,7 +139,7 @@ impl QueryResultRow {
         let prefix = format!("{alias}_");
         let mut props = HashMap::new();
         for (name, value) in &self.columns {
-            if name.starts_with(GKG_COLUMN_PREFIX) {
+            if name.starts_with(INTERNAL_COLUMN_PREFIX) {
                 continue;
             }
             if skip_prefixes.iter().any(|sp| name.starts_with(sp)) {
