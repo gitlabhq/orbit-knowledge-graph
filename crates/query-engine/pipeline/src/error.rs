@@ -14,6 +14,9 @@ pub enum PipelineError {
     #[error("Authorization failed: {0}")]
     Authorization(String),
 
+    #[error("Content resolution failed: {0}")]
+    ContentResolution(String),
+
     #[error("Streaming channel not available: {0}")]
     Streaming(String),
 
@@ -28,6 +31,7 @@ impl PipelineError {
             Self::Compile(_) => "compile_error",
             Self::Execution(_) => "execution_error",
             Self::Authorization(_) => "authorization_error",
+            Self::ContentResolution(_) => "content_resolution_error",
             Self::Streaming(_) => "streaming_error",
             Self::Custom(_) => "custom_error",
         }

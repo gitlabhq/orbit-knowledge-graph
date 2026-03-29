@@ -14,6 +14,10 @@ path = "tests/entrypoints/docker.rs"
 name = "compiler"
 path = "tests/entrypoints/compiler.rs"
 
+[[test]]
+name = "querying-pipeline"
+path = "tests/entrypoints/querying_pipeline.rs"
+
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
