@@ -3,12 +3,22 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use gkg_utils::arrow::ColumnValue;
+use query_engine::compiler::SecurityContext;
 use query_engine::pipeline::PipelineError;
 
 /// A single entity row's hydrated properties, keyed by column name.
 pub type PropertyRow = HashMap<String, ColumnValue>;
 
 const DEFAULT_MAX_BATCH_SIZE: usize = 100;
+
+/// Context passed to every [`ColumnResolver::resolve_batch`] call.
+/// Wraps [`SecurityContext`] and can be extended with additional
+/// cross-cutting concerns (e.g. request ID for tracing) without
+/// changing the trait signature.
+#[derive(Debug, Clone)]
+pub struct ResolverContext {
+    pub security_context: SecurityContext,
+}
 
 /// A service that resolves virtual column values from an external source.
 ///
@@ -27,7 +37,7 @@ pub trait ColumnResolver: Send + Sync {
         &self,
         lookup: &str,
         rows: &[&PropertyRow],
-        org_id: i64,
+        ctx: &ResolverContext,
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError>;
 }
 
@@ -79,7 +89,7 @@ impl ColumnResolver for MockColumnResolver {
         &self,
         lookup: &str,
         rows: &[&PropertyRow],
-        _org_id: i64,
+        _ctx: &ResolverContext,
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
         Ok(rows
             .iter()
@@ -120,7 +130,13 @@ mod tests {
         let props = HashMap::new();
         let rows: Vec<&PropertyRow> = vec![&props, &props];
 
-        let results = svc.resolve_batch("blob_content", &rows, 1).await.unwrap();
+        let rctx = ResolverContext {
+            security_context: SecurityContext::new(1, vec!["1/2/".into()]).unwrap(),
+        };
+        let results = svc
+            .resolve_batch("blob_content", &rows, &rctx)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(
             results[0],

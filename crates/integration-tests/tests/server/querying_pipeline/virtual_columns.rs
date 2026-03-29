@@ -15,7 +15,11 @@ use query_engine::compiler::{SecurityContext, VirtualColumnRequest};
 use query_engine::pipeline::{PipelineError, QueryPipelineContext, TypeMap};
 
 fn test_ctx() -> QueryPipelineContext {
-    let mut registry = ColumnResolverRegistry::new();
+    test_ctx_with_batch_size(100)
+}
+
+fn test_ctx_with_batch_size(max_batch_size: usize) -> QueryPipelineContext {
+    let mut registry = ColumnResolverRegistry::new().with_max_batch_size(max_batch_size);
     registry.register("gitaly", Arc::new(MockColumnResolver));
 
     let mut server_extensions = TypeMap::default();
@@ -141,4 +145,22 @@ async fn skips_unmatched_entity_type() {
         .unwrap();
 
     assert_eq!(map.values().next().unwrap().len(), original_len);
+}
+
+#[tokio::test]
+async fn errors_when_batch_size_exceeded() {
+    let ctx = test_ctx_with_batch_size(1);
+    let vcrs = [VirtualColumnRequest {
+        column_name: "content".into(),
+        service: "gitaly".into(),
+        lookup: "blob_content".into(),
+    }];
+    let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
+    let mut map = file_property_map(); // 2 File entries, limit is 1
+
+    let err = HydrationStage::resolve_virtual_columns(&ctx, &specs, &mut map)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(&err, PipelineError::ContentResolution(msg) if msg.contains("batch size")));
 }

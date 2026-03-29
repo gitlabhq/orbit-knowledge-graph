@@ -25,7 +25,7 @@ use query_engine::compiler::constants::{
     HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
 };
 
-use crate::content::{ColumnResolverRegistry, PropertyRow};
+use crate::content::{ColumnResolverRegistry, PropertyRow, ResolverContext};
 
 type PropertyMap = HashMap<(String, i64), PropertyRow>;
 
@@ -69,7 +69,9 @@ impl HydrationStage {
                 )
             })?;
 
-        let org_id = ctx.security_context()?.org_id;
+        let resolver_ctx = ResolverContext {
+            security_context: ctx.security_context()?.clone(),
+        };
         let max_batch = registry.max_batch_size();
 
         for &(entity_type, virtual_columns) in entity_virtual_columns {
@@ -114,9 +116,10 @@ impl HydrationStage {
             // Resolve all virtual columns for this entity type concurrently.
             let futures = service_lookups.iter().map(|(vcr, service)| {
                 let prop_refs = &prop_refs;
+                let resolver_ctx = &resolver_ctx;
                 async move {
                     let results = service
-                        .resolve_batch(&vcr.lookup, prop_refs, org_id)
+                        .resolve_batch(&vcr.lookup, prop_refs, resolver_ctx)
                         .await?;
                     if results.len() != prop_refs.len() {
                         return Err(PipelineError::ContentResolution(format!(
