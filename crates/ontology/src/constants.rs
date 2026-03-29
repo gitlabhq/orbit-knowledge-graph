@@ -9,10 +9,10 @@ use const_format::concatcp;
 /// Primary key field name used by default.
 pub const DEFAULT_PRIMARY_KEY: &str = "id";
 
-/// Default value for `settings.internal_column_prefix` in the ontology YAML.
-/// Used as fallback when constructing an `Ontology` via `Ontology::new()`.
-/// The runtime value is loaded from YAML; the compiler re-exports this const
-/// and uses it for `concatcp!` column name derivation.
+/// Compile-time default for `settings.internal_column_prefix`.
+/// Used by `concatcp!` for static column name derivation. The runtime value
+/// is loaded from YAML via [`Ontology::internal_column_prefix()`] and
+/// validated against this const at startup.
 pub const INTERNAL_COLUMN_PREFIX: &str = "_gkg_";
 
 /// Reserved columns that exist on all nodes.

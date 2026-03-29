@@ -1,22 +1,36 @@
 // ENFORCEMENT CONSTANTS
 
-use const_format::concatcp;
-
 // Re-export so existing `crate::constants::` paths keep working.
-pub use ontology::constants::{GL_TABLE_PREFIX, INTERNAL_COLUMN_PREFIX, TRAVERSAL_PATH_COLUMN};
+pub use ontology::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 
-pub const PATH_COLUMN: &str = concatcp!(INTERNAL_COLUMN_PREFIX, "path");
+/// Internal column prefix, loaded once from ontology YAML at startup.
+pub fn internal_column_prefix() -> &'static str {
+    use std::sync::OnceLock;
+    static PREFIX: OnceLock<String> = OnceLock::new();
+    PREFIX.get_or_init(|| {
+        ontology::Ontology::load_embedded()
+            .expect("embedded ontology must load")
+            .internal_column_prefix()
+            .to_string()
+    })
+}
 
-/// Column name for the relationship kinds array in path finding queries.
-/// Contains Array(String) with the relationship_kind for each hop.
-/// Combined with PATH_COLUMN, this allows full edge reconstruction:
-/// path[i] --edge_kinds[i]--> path[i+1].
-pub const EDGE_KINDS_COLUMN: &str = concatcp!(INTERNAL_COLUMN_PREFIX, "edge_kinds");
-pub const NEIGHBOR_ID_COLUMN: &str = concatcp!(INTERNAL_COLUMN_PREFIX, "neighbor_id");
-pub const NEIGHBOR_TYPE_COLUMN: &str = concatcp!(INTERNAL_COLUMN_PREFIX, "neighbor_type");
-pub const RELATIONSHIP_TYPE_COLUMN: &str = concatcp!(INTERNAL_COLUMN_PREFIX, "relationship_type");
-pub const NEIGHBOR_IS_OUTGOING_COLUMN: &str =
-    concatcp!(INTERNAL_COLUMN_PREFIX, "neighbor_is_outgoing");
+/// Define a prefixed internal column name, loaded once at startup.
+macro_rules! internal_col {
+    ($fn_name:ident, $suffix:literal) => {
+        pub fn $fn_name() -> &'static str {
+            static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            V.get_or_init(|| format!("{}{}", internal_column_prefix(), $suffix))
+        }
+    };
+}
+
+internal_col!(path_column, "path");
+internal_col!(edge_kinds_column, "edge_kinds");
+internal_col!(neighbor_id_column, "neighbor_id");
+internal_col!(neighbor_type_column, "neighbor_type");
+internal_col!(relationship_type_column, "relationship_type");
+internal_col!(neighbor_is_outgoing_column, "neighbor_is_outgoing");
 
 /// Tables that should NOT have traversal path security filters applied.
 /// Loaded once from ontology (`settings.skip_security_filter_for_tables`).
@@ -33,17 +47,15 @@ pub fn skip_security_filter_tables() -> &'static [String] {
 
 // _gkg_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {
-    format!("{INTERNAL_COLUMN_PREFIX}{alias}_pk")
+    format!("{}{alias}_pk", internal_column_prefix())
 }
 
-// _gkg_{alias}_id  — the authorization ID (may differ from pk for indirect-auth entities)
 pub fn redaction_id_column(alias: &str) -> String {
-    format!("{INTERNAL_COLUMN_PREFIX}{alias}_id")
+    format!("{}{alias}_id", internal_column_prefix())
 }
 
-// _gkg_{alias}_type
 pub fn redaction_type_column(alias: &str) -> String {
-    format!("{INTERNAL_COLUMN_PREFIX}{alias}_type")
+    format!("{}{alias}_type", internal_column_prefix())
 }
 
 /// Node alias used in synthetic hydration search queries.
