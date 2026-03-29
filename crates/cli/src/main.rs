@@ -166,6 +166,8 @@ async fn main() -> Result<()> {
     }
 }
 
+/// Deterministic project ID from canonical path. Mask clears the sign bit
+/// so the result is always a positive i64 (required by the query DSL validator).
 fn project_id_from_path(path: &str) -> i64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
