@@ -100,6 +100,7 @@ pub struct Ontology {
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
     pub(crate) edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
     pub(crate) etl_settings: EtlSettings,
+    pub(crate) skip_security_filter_for_tables: Vec<String>,
 }
 
 impl Default for Ontology {
@@ -138,6 +139,7 @@ impl Ontology {
                     DEFAULT_PRIMARY_KEY.to_string(),
                 ],
             },
+            skip_security_filter_for_tables: Vec::new(),
         }
     }
 
@@ -466,6 +468,12 @@ impl Ontology {
     #[must_use]
     pub fn edge_table(&self) -> &str {
         &self.edge_table
+    }
+
+    /// Tables excluded from traversal-path security filters.
+    #[must_use]
+    pub fn skip_security_filter_tables(&self) -> &[String] {
+        &self.skip_security_filter_for_tables
     }
 
     /// Default ORDER BY / dedup key columns for node tables.

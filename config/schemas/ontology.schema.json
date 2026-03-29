@@ -332,6 +332,11 @@
           },
           "minItems": 1
         },
+        "skip_security_filter_for_entities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Entity names (e.g. 'User') excluded from traversal-path security filters. Resolved to physical table names at load time. These are entities whose visibility is determined through relationships rather than direct path hierarchy."
+        },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."

@@ -24,8 +24,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
-    BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS,
-    SKIP_SECURITY_FILTER_TABLES, START_ID_COLUMN, cascade_cte, node_filter_cte,
+    BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
+    cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
 use crate::input::{Input, InputNode, QueryType};
 
@@ -241,12 +241,13 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
 
     // Apply SIP when root node has explicit filters OR when its table will
     // get a security filter (startsWith on traversal_path). Tables in
-    // SKIP_SECURITY_FILTER_TABLES (e.g. gl_user) won't get security filters,
+    // skip_security_filter_for_tables won't get security filters,
     // so an unfiltered SIP CTE would push all IDs — skip those.
+    let skip = skip_security_filter_tables();
     let root_table_has_security_filter = root_node
         .table
         .as_deref()
-        .is_some_and(|t| !SKIP_SECURITY_FILTER_TABLES.contains(&t));
+        .is_some_and(|t| !skip.iter().any(|s| s == t));
 
     if !has_explicit_selectivity && !root_table_has_security_filter {
         return;
