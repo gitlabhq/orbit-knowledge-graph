@@ -12,6 +12,7 @@ bundled = ["duckdb/bundled"]
 [dependencies]
 duckdb = { workspace = true }
 arrow = { workspace = true }
+code-graph = { path = "../code-graph" }
 gkg-utils = { path = "../utils" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

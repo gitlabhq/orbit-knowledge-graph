@@ -28,6 +28,8 @@ struct IndexOutput {
     graph: GraphStats,
     processing: ProcessingStats,
     #[serde(skip_serializing_if = "Option::is_none")]
+    database_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     detailed: Option<DetailedStats>,
 }
 
@@ -164,6 +166,13 @@ async fn main() -> Result<()> {
     }
 }
 
+fn project_id_from_path(path: &str) -> i64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
+}
+
 async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
     let store = workspace::IndexStore::open_default()?;
     let repos = store.resolve_repos(&path).await?;
@@ -195,13 +204,8 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         let file_source = DirectoryFileSource::new(key.clone());
         let indexer = RepositoryIndexer::new(repo_name.clone(), key.clone());
 
-        let result = match indexer.index_files(file_source, &config).await {
-            Ok(r) => {
-                store
-                    .set_status(&key, workspace::Status::Indexed, None)
-                    .await?;
-                r
-            }
+        let mut result = match indexer.index_files(file_source, &config).await {
+            Ok(r) => r,
             Err(e) => {
                 store
                     .set_status(&key, workspace::Status::Error, Some(e.to_string()))
@@ -210,7 +214,39 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             }
         };
 
-        let output = build_index_output(&repo_name, &key, &result, show_stats);
+        let db_path = if let Some(ref mut graph_data) = result.graph_data {
+            let project_id = project_id_from_path(&key);
+            graph_data.assign_node_ids(project_id, "HEAD");
+
+            let local_data = duckdb_client::convert_graph_data(graph_data, project_id, "HEAD")
+                .context("failed to convert graph data to Arrow")?;
+
+            let db = store.db_path(&key);
+            let client = duckdb_client::DuckDbClient::open(&db).context("failed to open DuckDB")?;
+            client
+                .initialize_schema()
+                .context("failed to create schema")?;
+            client
+                .delete_project_data(project_id, "HEAD")
+                .context("failed to clear existing data")?;
+
+            client.insert_arrow("gl_directory", local_data.directories)?;
+            client.insert_arrow("gl_file", local_data.files)?;
+            client.insert_arrow("gl_definition", local_data.definitions)?;
+            client.insert_arrow("gl_imported_symbol", local_data.imported_symbols)?;
+            client.insert_arrow("gl_edge", local_data.edges)?;
+
+            Some(db.display().to_string())
+        } else {
+            None
+        };
+
+        store
+            .set_status(&key, workspace::Status::Indexed, None)
+            .await?;
+
+        let mut output = build_index_output(&repo_name, &key, &result, show_stats);
+        output.database_path = db_path;
         info!("{}", serde_json::to_string_pretty(&output)?);
     }
 
@@ -292,6 +328,7 @@ fn build_index_output(
             skipped_files: result.skipped_files.len(),
             errored_files: result.errored_files.len(),
         },
+        database_path: None,
         detailed,
     }
 }
