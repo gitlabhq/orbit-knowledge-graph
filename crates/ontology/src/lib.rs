@@ -1576,4 +1576,90 @@ properties:
         assert!(entity.default_columns.is_empty());
         assert_eq!(entity.sort_key, default_sort_key);
     }
+
+    // ── is_like_allowed / is_filterable ─────────────────────────────
+
+    fn field_flags_ontology() -> Ontology {
+        Ontology::new()
+            .with_nodes(["User"])
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("email", DataType::String)],
+            )
+            .with_like_disallowed("User", "email")
+            .unwrap()
+            .with_unfilterable("User", "email")
+            .unwrap()
+    }
+
+    #[test]
+    fn is_like_allowed_returns_true_for_reserved_columns() {
+        let ont = field_flags_ontology();
+        assert!(ont.is_like_allowed("User", "id"));
+    }
+
+    #[test]
+    fn is_like_allowed_returns_true_for_allowed_field() {
+        let ont = field_flags_ontology();
+        assert!(ont.is_like_allowed("User", "username"));
+    }
+
+    #[test]
+    fn is_like_allowed_returns_false_for_disallowed_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.is_like_allowed("User", "email"));
+    }
+
+    #[test]
+    fn is_like_allowed_fails_closed_for_unknown_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.is_like_allowed("User", "nonexistent"));
+    }
+
+    #[test]
+    fn is_like_allowed_returns_true_for_unknown_node() {
+        let ont = field_flags_ontology();
+        assert!(ont.is_like_allowed("Unknown", "whatever"));
+    }
+
+    #[test]
+    fn is_filterable_returns_true_for_reserved_columns() {
+        let ont = field_flags_ontology();
+        assert!(ont.is_filterable("User", "id"));
+    }
+
+    #[test]
+    fn is_filterable_returns_true_for_filterable_field() {
+        let ont = field_flags_ontology();
+        assert!(ont.is_filterable("User", "username"));
+    }
+
+    #[test]
+    fn is_filterable_returns_false_for_unfilterable_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.is_filterable("User", "email"));
+    }
+
+    #[test]
+    fn is_filterable_fails_closed_for_unknown_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.is_filterable("User", "nonexistent"));
+    }
+
+    #[test]
+    fn with_like_disallowed_errors_for_unknown_node() {
+        let result = Ontology::new()
+            .with_nodes(["User"])
+            .with_like_disallowed("Bogus", "field");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn with_unfilterable_errors_for_unknown_field() {
+        let result = Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("name", DataType::String)])
+            .with_unfilterable("User", "bogus");
+        assert!(result.is_err());
+    }
 }

@@ -2945,4 +2945,31 @@ mod tests {
             q.query_settings
         );
     }
+
+    // ── escape_like ─────────────────────────────────────────────────
+
+    #[test]
+    fn escape_like_preserves_plain_text() {
+        assert_eq!(super::escape_like("hello"), "hello");
+    }
+
+    #[test]
+    fn escape_like_escapes_percent() {
+        assert_eq!(super::escape_like("100%"), "100\\%");
+    }
+
+    #[test]
+    fn escape_like_escapes_underscore() {
+        assert_eq!(super::escape_like("user_name"), "user\\_name");
+    }
+
+    #[test]
+    fn escape_like_escapes_backslash() {
+        assert_eq!(super::escape_like("path\\to"), "path\\\\to");
+    }
+
+    #[test]
+    fn escape_like_escapes_all_metacharacters() {
+        assert_eq!(super::escape_like("100%_\\"), "100\\%\\_\\\\");
+    }
 }
