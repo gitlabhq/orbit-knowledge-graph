@@ -288,7 +288,10 @@ impl<'a> Validator<'a> {
                 continue;
             };
             for (prop, filter) in &node.filters {
-                if !self.ontology.is_filterable(entity, prop) {
+                if !self
+                    .ontology
+                    .check_field_flag(entity, prop, |f| f.filterable)
+                {
                     return Err(QueryError::Validation(format!(
                         "filter on \"{prop}\" for {entity}: field is not filterable"
                     )));
@@ -337,7 +340,11 @@ impl<'a> Validator<'a> {
         );
 
         // Reject LIKE operators on fields marked like_allowed: false.
-        if is_like_op && !self.ontology.is_like_allowed(entity, prop) {
+        if is_like_op
+            && !self
+                .ontology
+                .check_field_flag(entity, prop, |f| f.like_allowed)
+        {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
                  LIKE operators (contains/starts_with/ends_with) are not allowed on this field"
@@ -1479,7 +1486,7 @@ mod tests {
                 "User",
                 [("username", DataType::String), ("email", DataType::String)],
             )
-            .with_like_disallowed("User", "email")
+            .modify_field("User", "email", |f| f.like_allowed = false)
             .unwrap()
     }
 
@@ -1494,7 +1501,7 @@ mod tests {
                     ("traversal_path", DataType::String),
                 ],
             )
-            .with_unfilterable("Group", "traversal_path")
+            .modify_field("Group", "traversal_path", |f| f.filterable = false)
             .unwrap()
     }
 

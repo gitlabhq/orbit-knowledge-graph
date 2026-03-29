@@ -272,33 +272,19 @@ impl Ontology {
         self
     }
 
-    /// Mark a field as not LIKE-filterable.
+    /// Mutate a field on a node.
     ///
     /// # Errors
     ///
     /// Returns an error if the node or field doesn't exist.
-    pub fn with_like_disallowed(
+    pub fn modify_field(
         mut self,
         node_name: &str,
         field_name: &str,
+        f: impl FnOnce(&mut Field),
     ) -> Result<Self, OntologyError> {
         let field = self.get_field_mut(node_name, field_name)?;
-        field.like_allowed = false;
-        Ok(self)
-    }
-
-    /// Mark a field as not user-filterable.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the node or field doesn't exist.
-    pub fn with_unfilterable(
-        mut self,
-        node_name: &str,
-        field_name: &str,
-    ) -> Result<Self, OntologyError> {
-        let field = self.get_field_mut(node_name, field_name)?;
-        field.filterable = false;
+        f(field);
         Ok(self)
     }
 
@@ -639,12 +625,18 @@ impl Ontology {
             .map(|f| f.data_type)
     }
 
-    /// Whether LIKE operators are allowed on a node field.
+    /// Check a boolean property on a node field.
+    ///
     /// Returns `true` for reserved columns (e.g. `id`). Returns `false` for
     /// unknown fields (fail-closed). Unknown nodes return `true` since edge
     /// filters pass entity names like `"relationship[0]"`.
     #[must_use]
-    pub fn is_like_allowed(&self, node_name: &str, field_name: &str) -> bool {
+    pub fn check_field_flag(
+        &self,
+        node_name: &str,
+        field_name: &str,
+        flag: impl Fn(&Field) -> bool,
+    ) -> bool {
         if NODE_RESERVED_COLUMNS.contains(&field_name) {
             return true;
         }
@@ -654,25 +646,7 @@ impl Ontology {
         node.fields
             .iter()
             .find(|f| f.name == field_name)
-            .is_some_and(|f| f.like_allowed)
-    }
-
-    /// Whether a field is filterable by users.
-    /// Returns `true` for reserved columns (e.g. `id`). Returns `false` for
-    /// unknown fields (fail-closed). Unknown nodes return `true` since edge
-    /// filters pass entity names like `"relationship[0]"`.
-    #[must_use]
-    pub fn is_filterable(&self, node_name: &str, field_name: &str) -> bool {
-        if NODE_RESERVED_COLUMNS.contains(&field_name) {
-            return true;
-        }
-        let Some(node) = self.nodes.get(node_name) else {
-            return true;
-        };
-        node.fields
-            .iter()
-            .find(|f| f.name == field_name)
-            .is_some_and(|f| f.filterable)
+            .is_some_and(&flag)
     }
 
     /// Validate that a type is a valid node label or edge type.
@@ -1577,7 +1551,7 @@ properties:
         assert_eq!(entity.sort_key, default_sort_key);
     }
 
-    // ── is_like_allowed / is_filterable ─────────────────────────────
+    // ── check_field_flag / modify_field ────────────────────────────
 
     fn field_flags_ontology() -> Ontology {
         Ontology::new()
@@ -1586,80 +1560,61 @@ properties:
                 "User",
                 [("username", DataType::String), ("email", DataType::String)],
             )
-            .with_like_disallowed("User", "email")
+            .modify_field("User", "email", |f| {
+                f.like_allowed = false;
+                f.filterable = false;
+            })
             .unwrap()
-            .with_unfilterable("User", "email")
-            .unwrap()
     }
 
     #[test]
-    fn is_like_allowed_returns_true_for_reserved_columns() {
+    fn check_field_flag_returns_true_for_reserved_columns() {
         let ont = field_flags_ontology();
-        assert!(ont.is_like_allowed("User", "id"));
+        assert!(ont.check_field_flag("User", "id", |f| f.like_allowed));
+        assert!(ont.check_field_flag("User", "id", |f| f.filterable));
     }
 
     #[test]
-    fn is_like_allowed_returns_true_for_allowed_field() {
+    fn check_field_flag_returns_true_for_allowed_field() {
         let ont = field_flags_ontology();
-        assert!(ont.is_like_allowed("User", "username"));
+        assert!(ont.check_field_flag("User", "username", |f| f.like_allowed));
+        assert!(ont.check_field_flag("User", "username", |f| f.filterable));
     }
 
     #[test]
-    fn is_like_allowed_returns_false_for_disallowed_field() {
+    fn check_field_flag_returns_false_for_disallowed_field() {
         let ont = field_flags_ontology();
-        assert!(!ont.is_like_allowed("User", "email"));
+        assert!(!ont.check_field_flag("User", "email", |f| f.like_allowed));
+        assert!(!ont.check_field_flag("User", "email", |f| f.filterable));
     }
 
     #[test]
-    fn is_like_allowed_fails_closed_for_unknown_field() {
+    fn check_field_flag_fails_closed_for_unknown_field() {
         let ont = field_flags_ontology();
-        assert!(!ont.is_like_allowed("User", "nonexistent"));
+        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.like_allowed));
+        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.filterable));
     }
 
     #[test]
-    fn is_like_allowed_returns_true_for_unknown_node() {
+    fn check_field_flag_returns_true_for_unknown_node() {
         let ont = field_flags_ontology();
-        assert!(ont.is_like_allowed("Unknown", "whatever"));
+        assert!(ont.check_field_flag("Unknown", "whatever", |f| f.like_allowed));
     }
 
     #[test]
-    fn is_filterable_returns_true_for_reserved_columns() {
-        let ont = field_flags_ontology();
-        assert!(ont.is_filterable("User", "id"));
-    }
-
-    #[test]
-    fn is_filterable_returns_true_for_filterable_field() {
-        let ont = field_flags_ontology();
-        assert!(ont.is_filterable("User", "username"));
-    }
-
-    #[test]
-    fn is_filterable_returns_false_for_unfilterable_field() {
-        let ont = field_flags_ontology();
-        assert!(!ont.is_filterable("User", "email"));
-    }
-
-    #[test]
-    fn is_filterable_fails_closed_for_unknown_field() {
-        let ont = field_flags_ontology();
-        assert!(!ont.is_filterable("User", "nonexistent"));
-    }
-
-    #[test]
-    fn with_like_disallowed_errors_for_unknown_node() {
+    fn modify_field_errors_for_unknown_node() {
         let result = Ontology::new()
             .with_nodes(["User"])
-            .with_like_disallowed("Bogus", "field");
+            .modify_field("Bogus", "field", |_| {});
         assert!(result.is_err());
     }
 
     #[test]
-    fn with_unfilterable_errors_for_unknown_field() {
+    fn modify_field_errors_for_unknown_field() {
         let result = Ontology::new()
             .with_nodes(["User"])
             .with_fields("User", [("name", DataType::String)])
-            .with_unfilterable("User", "bogus");
+            .modify_field("User", "bogus", |_| {});
         assert!(result.is_err());
     }
 }
