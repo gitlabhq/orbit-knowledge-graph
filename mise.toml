@@ -51,21 +51,17 @@ description = "Run unit + non-Docker integration tests (auto-discovers test targ
 run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked ./scripts/run-unit-tests.sh"
 description = "Run unit + non-Docker integration tests with reduced debug info"
 
-[tasks."test:compiler"]
-run = "cargo nextest run --test compiler"
-description = "Run compiler integration tests (no Docker)"
-
-[tasks."test:querying-pipeline"]
-run = "cargo nextest run --test querying-pipeline"
-description = "Run querying pipeline tests (no Docker)"
+[tasks."test:local"]
+run = "cargo nextest run --test local"
+description = "Run local integration tests — compiler + querying pipeline (no Docker)"
 
 [tasks."test:integration"]
-run = "cargo nextest run --all-features --test docker --no-fail-fast --retries 0"
+run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run integration tests (requires Docker and `mise colima:start`)"
 
 [tasks."test:integration:server"]
-run = "cargo nextest run --all-features --test docker -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
+run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, hydration, redaction, graph formatter)"
 

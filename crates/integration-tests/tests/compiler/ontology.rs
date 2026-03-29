@@ -3,7 +3,7 @@
 use super::setup::{embedded_ontology, test_ctx};
 use super::utils::ParsedSql;
 use compiler::{
-    ColumnSelection, HydrationPlan, Input, InputNode, QueryType, compile, compile_input,
+    compile, compile_input, ColumnSelection, HydrationPlan, Input, InputNode, QueryType,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

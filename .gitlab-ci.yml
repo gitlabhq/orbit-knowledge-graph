@@ -293,7 +293,7 @@ integration-test:
       docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
       docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/nats:2.11-alpine nats:2.11-alpine
   script:
-    - cargo nextest run --profile ci --all-features --test docker
+    - cargo nextest run --profile ci --all-features --test containers
     - sccache --show-stats || true
 
 # Build Stage

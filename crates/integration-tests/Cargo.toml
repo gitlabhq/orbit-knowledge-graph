@@ -3,23 +3,10 @@ name = "integration-tests"
 version.workspace = true
 edition = "2024"
 publish = false
-autotests = false
 
 # No src/lib.rs — this crate only contains integration tests.
-# Test targets are defined explicitly below; autotests = false
-# prevents cargo from auto-discovering files like common.rs.
-
-[[test]]
-name = "docker"
-path = "tests/entrypoints/docker.rs"
-
-[[test]]
-name = "compiler"
-path = "tests/entrypoints/compiler.rs"
-
-[[test]]
-name = "querying-pipeline"
-path = "tests/entrypoints/querying_pipeline.rs"
+# Test targets are auto-discovered from tests/*.rs files.
+# Shared helpers live in tests/common/ (subdirectory, ignored by auto-discovery).
 
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }

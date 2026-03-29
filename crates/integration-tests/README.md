@@ -8,10 +8,10 @@ exists to break the dependency cycle: it depends on `gkg-server`, `compiler`, an
 
 ```plaintext
 tests/
-  common.rs                  # Shared helpers: MockRedactionService, test fixtures, DummyClaims
-  entrypoints/
-    compiler.rs              # Stateless compiler test binary (no Docker)
-    docker.rs                # Docker-based server test binary
+  local.rs                   # Non-Docker test binary: compiler + querying pipeline (auto-discovered)
+  containers.rs              # Docker-based server test binary (auto-discovered)
+  common/
+    mod.rs                   # Shared helpers: MockRedactionService, test fixtures, DummyClaims
   compiler/
     mod.rs                   # Module declarations
     setup.rs                 # Shared test helpers (test_ctx, test_ontology, compile_to_ast)
@@ -22,16 +22,20 @@ tests/
   indexer/                   # Indexer integration tests (NATS, ClickHouse, SDLC, code, dispatcher)
   server/
     data_correctness/        # Seeds data, runs full pipeline, asserts values via ResponseView
+    querying_pipeline/       # Virtual column dispatch tests
     graph_formatter.rs       # Graph formatter end-to-end tests
     health.rs                # Health/readiness endpoint tests
     hydration.rs             # Hydration pipeline tests (compile -> execute -> hydrate -> format)
     redaction.rs             # Redaction pipeline tests (fail-closed, path finding, search, etc.)
 ```
 
+Test targets are auto-discovered by Cargo from `tests/*.rs` files. Shared helpers
+live in `tests/common/` (subdirectory, ignored by auto-discovery).
+
 Tests are split across two binaries:
 
-- **`compiler`** — Stateless compiler tests (no Docker). Runs as part of `unit-test` in CI.
-- **`docker`** — Server tests requiring ClickHouse via testcontainers. Each orchestrator
+- **`local`** — Compiler and querying pipeline tests (no Docker). Runs as part of `unit-test` in CI.
+- **`containers`** — Server tests requiring ClickHouse via testcontainers. Each orchestrator
   test starts one container, seeds data once, and runs subtests in parallel.
 
 ## Running
@@ -39,7 +43,7 @@ Tests are split across two binaries:
 All tasks are defined in `mise.toml` at the repo root:
 
 ```shell
-mise test:compiler                                  # compiler tests (no Docker)
+mise test:local                                     # compiler + querying pipeline (no Docker)
 mise colima:start                                   # start Docker runtime (12 GB RAM)
 mise test:integration                               # run all server integration tests
 mise test:integration:server                        # correctness, hydration, redaction, graph formatter
@@ -49,14 +53,16 @@ mise colima:stop                                    # stop when done
 To run specific suites or tests directly:
 
 ```shell
-# Compiler tests (no Docker needed)
-cargo nextest run --test compiler
+# Local tests (no Docker needed)
+cargo nextest run --test local                                           # all local tests
+cargo nextest run --test local -E 'test(compiler::)'                     # compiler only
+cargo nextest run --test local -E 'test(querying_pipeline::)'            # querying pipeline only
 
 # Docker-based server tests
 export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
-cargo nextest run --test docker                                          # all server tests
-cargo nextest run --test docker -E 'test(data_correctness)'              # one suite
-cargo nextest run --test docker -E 'test(infra_canary)'                  # canary
+cargo nextest run --test containers                                      # all server tests
+cargo nextest run --test containers -E 'test(data_correctness)'          # one suite
+cargo nextest run --test containers -E 'test(infra_canary)'              # canary
 ```
 
 ## Test architecture
@@ -80,5 +86,6 @@ between them.
 3. If it writes extra data, add it to the `run_subtests!` block and call the seed
    function at the top of the test body.
 4. If you need a new server test module, add `pub mod foo;` to
-   `entrypoints/docker.rs` and create `server/foo.rs`.
+   `containers.rs` and create `server/foo.rs`.
 5. For compiler tests, add to `compiler/mod.rs` and create `compiler/foo.rs`.
+6. For a new test binary, add a `tests/foo.rs` file -- Cargo auto-discovers it.

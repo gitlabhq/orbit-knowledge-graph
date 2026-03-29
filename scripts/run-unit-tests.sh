@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Discover all integration-tests [[test]] targets except "docker" (which
+# Discover all integration-tests test targets except "containers" (which
 # needs Docker/testcontainers) and run them alongside lib + bin tests.
 #
-# New entrypoints in crates/integration-tests/tests/entrypoints/ are
-# picked up automatically — no need to update mise.toml or .gitlab-ci.yml.
+# Test targets are auto-discovered from tests/*.rs files in the
+# integration-tests crate — no Cargo.toml or CI changes needed.
 #
 # Extra arguments are forwarded to cargo nextest (e.g. --profile ci).
 
@@ -14,7 +14,7 @@ NON_DOCKER_TESTS=$(
   jq -r '.packages[]
     | select(.name == "integration-tests")
     | .targets[]
-    | select((.kind | index("test")) and .name != "docker")
+    | select((.kind | index("test")) and .name != "containers")
     | .name'
 )
 

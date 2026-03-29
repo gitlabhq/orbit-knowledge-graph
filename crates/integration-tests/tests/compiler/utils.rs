@@ -8,8 +8,8 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
-use compiler::SqlDialect;
 use compiler::passes::codegen::{ParamValue, ParameterizedQuery};
+use compiler::SqlDialect;
 use sqlparser::ast::{
     Expr, Function, GroupByExpr, LimitClause, ObjectName, OrderByKind, Query, Select, SelectItem,
     SetExpr, Statement, TableFactor, Visit, Visitor,
