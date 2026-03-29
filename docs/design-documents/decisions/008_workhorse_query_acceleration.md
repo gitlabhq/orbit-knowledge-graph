@@ -114,7 +114,7 @@ GKG -> ClickHouse: SQL query
 ClickHouse --> GKG: Arrow result batches
 GKG --> Workhorse: RedactionRequired (resource IDs)
 
-Workhorse -> Puma2: POST /internal/orbit/redaction
+Workhorse -> Puma2: POST /api/v4/internal/orbit/redaction
 activate Puma2 #B3FFB3
 Puma2 -> Puma2: Authz::RedactionService
 Puma2 --> Workhorse: authorization map
@@ -195,7 +195,7 @@ A new endpoint at `POST /api/v4/internal/orbit/redaction` handles the mid-stream
 }
 ```
 
-This endpoint is authenticated via the Workhorse shared secret (`Gitlab-Workhorse-Api-Request` header). It loads the user, calls `Authz::RedactionService`, and returns the authorization map.
+This endpoint is authenticated via the Workhorse shared secret (`Gitlab-Workhorse-Api-Request` header). It loads the user, calls `Authz::RedactionService`, and returns the authorization map. The endpoint enforces the same limits the current in-process redaction uses: resource types are restricted to the set `Authz::RedactionService` supports, and the total number of resource IDs per request is bounded to prevent abuse.
 
 ### Handling `precomputed_member_access` at scale
 
@@ -258,13 +258,13 @@ Workhorse passes only `user_id` and resource IDs.
 
 ### Rollout
 
-A feature flag (`knowledge_graph_workhorse_acceleration`, type: ops, default: disabled) gates the new path. When disabled, the existing synchronous Rails flow runs unchanged. This allows gradual rollout and instant rollback.
+The existing `knowledge_graph` feature flag already gates all Orbit endpoints. The Workhorse path is enabled under the same flag — no additional feature flag is needed. When disabled, the existing synchronous Rails flow runs unchanged.
 
 ## Why not the alternatives
 
 ### Keep the synchronous Rails flow and optimize redaction further
 
-The redaction preloading work reduced SQL queries from 348 to 5 for 100 projects. That is a real improvement, but the bottleneck is not redaction speed — it is Puma's thread-per-request model. Even with zero-cost redaction, the Puma worker is still blocked for ClickHouse query execution (100-500 ms) plus gRPC overhead. Redaction optimization and Workhorse offloading solve different problems.
+The redaction preloading work reduced SQL queries from 348 to 5 for 100 projects. That is a real improvement, but redaction is still the primary bottleneck — it accounts for the majority of the end-to-end latency in large queries. Moving the stream to Workhorse does not make redaction faster. What it does is free the Puma thread while the slow parts run (ClickHouse execution, redaction exchange, hydration), so other Rails requests are not starved. Both optimizations are needed: faster redaction reduces total latency, Workhorse offloading reduces thread utilization.
 
 ### GOB-style proxy (Workhorse intercepts the route directly)
 
@@ -277,6 +277,10 @@ Replicating the full Rails permission model (group hierarchies, custom roles, SA
 ### Async job queue (Sidekiq) with polling
 
 Instead of holding the HTTP connection, Rails could enqueue a Sidekiq job for the GKG query, return a job ID, and have the client poll for results. This eliminates Puma blocking but introduces polling latency, job queue contention, and a more complex client contract. The Workhorse approach keeps the request-response model that clients already use.
+
+### Expose GKG directly (future consideration)
+
+Longer term, it may make sense to expose the GKG query endpoint directly to clients without going through Workhorse or Rails at all. This would require GKG to handle its own authentication and authorization, which is out of scope for this ADR. The Workhorse approach is the right intermediate step — it removes the Puma bottleneck while keeping authorization in Rails.
 
 ## Consequences
 
@@ -293,7 +297,7 @@ Instead of holding the HTTP connection, Rails could enqueue a Sidekiq job for th
 - Debugging now spans three processes (Workhorse to GKG, Workhorse to Rails) instead of two (Rails to GKG). Correlation IDs must propagate through all three legs.
 - The GKG proto needs to be compiled for Go and kept in sync with the Rust source. Proto changes require updating both the Rust server and the Go client.
 - The bidirectional stream handling is more complex than existing injecters (which use server-streaming or unary Gitaly RPCs). The mid-stream callback to Rails is new territory for Workhorse.
-- Two feature-flagged code paths will coexist until rollout is complete and the legacy path is removed.
+- The synchronous Rails code path should be removed once Workhorse acceleration is stable, to avoid maintaining two implementations long-term.
 
 ## References
 
