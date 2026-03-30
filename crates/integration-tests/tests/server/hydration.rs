@@ -49,13 +49,31 @@ async fn setup_test_data(ctx: &TestContext) {
     )
     .await;
 
+    // Source code entities — File and Definition have redaction id_column = project_id,
+    // so their PK (_gkg_f_pk) differs from the auth ID (_gkg_f_id).
+    ctx.execute(
+        "INSERT INTO gl_file (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
+         (5001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust'),
+         (5002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'main.rs', 'rs', 'Rust')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO gl_definition (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
+         (6001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib::greet', 'greet', 'function', 1, 5, 0, 80),
+         (6002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'main', 'main', 'function', 1, 10, 0, 120)",
+    )
+    .await;
+
     ctx.execute(
         "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
          ('1/101/', 2, 'User', 'MEMBER_OF', 101, 'Group'),
          ('1/101/', 3, 'User', 'MEMBER_OF', 101, 'Group'),
          ('1/100/', 100, 'Group', 'CONTAINS', 1000, 'Project'),
-         ('1/101/', 101, 'Group', 'CONTAINS', 1001, 'Project')",
+         ('1/101/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
+         ('1/100/1000/', 5001, 'File', 'DEFINES', 6001, 'Definition'),
+         ('1/100/1000/', 5002, 'File', 'DEFINES', 6002, 'Definition')",
     )
     .await;
 
@@ -817,6 +835,120 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─── Traversal static hydration with indirect-auth entities ─────────────────
+
+/// Regression test: entities with `redaction.id_column != "id"` (e.g. File,
+/// Definition where auth uses `project_id`) must hydrate using the entity's
+/// own primary key (`_gkg_f_pk`), not the authorization ID (`_gkg_f_id`).
+///
+/// Without the fix, `collect_static_ids` reads `_gkg_f_id` (= project_id 1000)
+/// instead of `_gkg_f_pk` (= file id 5001/5002), causing the hydration query
+/// to look up `gl_file WHERE id = 1000` which returns nothing (or the wrong row).
+async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = test_security_context();
+    let client = Arc::new(ctx.create_client());
+
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "f", "entity": "File", "columns": ["name", "path", "branch"]},
+            {"id": "d", "entity": "Definition", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
+        "limit": 10
+    }"#;
+
+    let (result, _ctx_ref, plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
+
+    assert!(
+        matches!(plan, HydrationPlan::Static(ref t) if t.len() == 2),
+        "should produce Static hydration with 2 templates (File + Definition)"
+    );
+
+    let authorized: Vec<_> = result.authorized_rows().collect();
+    assert_eq!(
+        authorized.len(),
+        2,
+        "should have 2 authorized rows (File->DEFINES->Definition edges for both files)"
+    );
+
+    // Verify EVERY row has hydrated properties — not just any. Catches partial
+    // failures where some rows hydrate and others don't.
+    let mut seen_file_names: Vec<String> = Vec::new();
+    let mut seen_def_names: Vec<String> = Vec::new();
+    for row in &authorized {
+        let f_name = row.get_column_string("f_name").unwrap_or_else(|| {
+            panic!(
+                "File name missing on row. Hydration is likely using \
+                 redaction ID (project_id) instead of PK (file id)."
+            )
+        });
+        seen_file_names.push(f_name);
+
+        let d_name = row.get_column_string("d_name").unwrap_or_else(|| {
+            panic!(
+                "Definition name missing on row. Hydration is likely using \
+                 redaction ID (project_id) instead of PK (definition id)."
+            )
+        });
+        seen_def_names.push(d_name);
+    }
+
+    seen_file_names.sort();
+    seen_def_names.sort();
+    assert_eq!(
+        seen_file_names,
+        vec!["lib.rs", "main.rs"],
+        "both seeded files (5001, 5002) should be hydrated"
+    );
+    assert_eq!(
+        seen_def_names,
+        vec!["greet", "main"],
+        "both seeded definitions (6001, 6002) should be hydrated"
+    );
+}
+
+/// Verify that entities where PK == auth ID (User, Group) still hydrate correctly
+/// after the fix (no regression from the PK-fallback logic).
+async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = test_security_context();
+    let client = Arc::new(ctx.create_client());
+
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "limit": 10
+    }"#;
+
+    let (result, _ctx_ref, _plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
+
+    let authorized: Vec<_> = result.authorized_rows().collect();
+    assert!(!authorized.is_empty(), "should have authorized rows");
+
+    let user_props_found = authorized.iter().any(|row| {
+        row.get_column_string("u_username")
+            .is_some_and(|v| v == "alice")
+    });
+    assert!(
+        user_props_found,
+        "User username should be hydrated (fallback to _gkg_u_id when _gkg_u_pk absent)"
+    );
+
+    let group_props_found = authorized.iter().any(|row| {
+        row.get_column_string("g_name")
+            .is_some_and(|v| v == "Public Group")
+    });
+    assert!(group_props_found, "Group name should be hydrated");
+}
+
 // Orchestrator
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -848,5 +980,8 @@ async fn hydration_integration() {
         consolidated_hydration_filters_null_properties,
         consolidated_hydration_multiple_ids_same_type,
         consolidated_hydration_single_query_execution,
+        // traversal static hydration correctness
+        traversal_static_hydration_indirect_auth_entities,
+        traversal_static_hydration_default_auth_entities,
     );
 }
