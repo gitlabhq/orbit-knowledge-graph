@@ -970,6 +970,75 @@ async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
     }
 }
 
+/// Verify that dynamic hydration (PathFinding) correctly resolves properties for
+/// indirect-auth entities. The path File->Definition traverses entities where
+/// PK != auth ID. NodeRef.id should carry the entity PK (from edge source_id/
+/// target_id), so hydration queries `gl_file WHERE id = <file_id>`.
+async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = test_security_context();
+    let client = Arc::new(ctx.create_client());
+
+    // Path from File 5001 to Definition 6001 (single hop via DEFINES)
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "File", "node_ids": [5001]},
+            {"id": "end", "entity": "Definition", "node_ids": [6001]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+    }"#;
+
+    let (result, _ctx_ref, plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
+
+    assert!(
+        matches!(plan, HydrationPlan::Dynamic(_)),
+        "path_finding should produce Dynamic hydration plan"
+    );
+
+    let row = result
+        .authorized_rows()
+        .next()
+        .expect("should find a path from File 5001 to Definition 6001");
+    let path_nodes = row.path_nodes();
+    assert_eq!(path_nodes.len(), 2, "path should be File -> Definition");
+
+    // File 5001 = lib.rs
+    let file_node = &path_nodes[0];
+    assert_eq!(file_node.entity_type, "File");
+    assert_eq!(file_node.id, 5001);
+    assert!(
+        !file_node.properties.is_empty(),
+        "File node should have hydrated properties (PK 5001, not project_id 1000)"
+    );
+    assert_eq!(
+        file_node
+            .properties
+            .get("name")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
+        Some("lib.rs"),
+        "File 5001 name should be 'lib.rs'"
+    );
+
+    // Definition 6001 = greet
+    let def_node = &path_nodes[1];
+    assert_eq!(def_node.entity_type, "Definition");
+    assert_eq!(def_node.id, 6001);
+    assert!(
+        !def_node.properties.is_empty(),
+        "Definition node should have hydrated properties (PK 6001, not project_id 1000)"
+    );
+    assert_eq!(
+        def_node
+            .properties
+            .get("name")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
+        Some("greet"),
+        "Definition 6001 name should be 'greet'"
+    );
+}
+
 /// Verify that entities where PK == auth ID (User, Group) still hydrate correctly
 /// after the fix (no regression from the PK-fallback logic).
 async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
@@ -1044,5 +1113,6 @@ async fn hydration_integration() {
         traversal_static_hydration_indirect_auth_entities,
         traversal_static_hydration_default_auth_entities,
         neighbors_dynamic_hydration_indirect_auth_entities,
+        path_finding_dynamic_hydration_indirect_auth_entities,
     );
 }
