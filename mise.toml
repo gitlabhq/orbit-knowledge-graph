@@ -78,13 +78,17 @@ run = "cargo fmt --all -- --check"
 description = "Check Rust formatting"
 
 [tasks."lint:code"]
-run = "cargo clippy --all-targets --all-features -- -D warnings"
+run = [
+  "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings",
+  "cargo clippy -p duckdb-client --all-targets -- -D warnings",
+]
 description = "Run clippy lint checks"
 
 [tasks."lint:code:fix"]
 run = [
   "cargo fmt",
-  "cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings",
+  "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features --fix --allow-dirty -- -D warnings",
+  "cargo clippy -p duckdb-client --all-targets --fix --allow-dirty -- -D warnings",
   "cargo fmt",
 ]
 description = "Run clippy lint checks and fix applicable issues"
