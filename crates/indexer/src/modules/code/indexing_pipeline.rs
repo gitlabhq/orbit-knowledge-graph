@@ -132,6 +132,7 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_indexing(
         &self,
         context: &HandlerContext,
@@ -213,6 +214,7 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn write_graph_data(
         &self,
         ctx: &HandlerContext,
