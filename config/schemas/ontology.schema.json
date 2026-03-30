@@ -345,6 +345,7 @@
         "internal_column_prefix": {
           "type": "string",
           "pattern": "^_[a-z_]+$",
+          "minLength": 5,
           "description": "Prefix for internal columns injected by the compiler (e.g. '_gkg_'). Ontology field names starting with this prefix are rejected at load time."
         },
         "skip_security_filter_for_entities": {

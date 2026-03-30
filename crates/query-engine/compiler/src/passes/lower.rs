@@ -11,7 +11,7 @@ use crate::constants::{
     END_ID_COLUMN, END_KIND_COLUMN, FORWARD_ALIAS, FORWARD_CTE, FRONTIER_EDGE_KINDS_COLUMN,
     PATH_NODES_COLUMN, PATHS_ALIAS, START_ID_COLUMN, edge_kinds_column, neighbor_id_column,
     neighbor_is_outgoing_column, neighbor_type_column, node_filter_cte, path_column,
-    relationship_type_column,
+    primary_key_column, redaction_id_column, redaction_type_column, relationship_type_column,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{
@@ -1022,7 +1022,7 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
         if center_uses_default_pk {
             select.push(SelectExpr::new(
                 Expr::col(edge_alias, center_edge_col),
-                format!("_gkg_{center_id}_id"),
+                redaction_id_column(&center_id),
             ));
         } else {
             // Indirect auth: JOIN center node table to read the auth column.
@@ -1037,16 +1037,16 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
             );
             select.push(SelectExpr::new(
                 Expr::col(&center_id, &center_redaction_col),
-                format!("_gkg_{center_id}_id"),
+                redaction_id_column(&center_id),
             ));
             select.push(SelectExpr::new(
                 Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
-                format!("_gkg_{center_id}_pk"),
+                primary_key_column(&center_id),
             ));
         }
         select.push(SelectExpr::new(
             Expr::string(center_entity.as_str()),
-            format!("_gkg_{center_id}_type"),
+            redaction_type_column(&center_id),
         ));
 
         Query {
