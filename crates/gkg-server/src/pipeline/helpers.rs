@@ -58,8 +58,30 @@ pub async fn send_query_error(
         .send(Ok(ExecuteQueryMessage {
             content: Some(execute_query_message::Content::Error(ExecuteQueryError {
                 code: error.code().to_string(),
-                message: error.to_string(),
+                message: sanitize_error_message(&error),
             })),
         }))
         .await;
+}
+
+/// Sanitize error messages before sending to clients.
+///
+/// Compilation and validation errors are safe to return (they describe
+/// user input problems). Execution and internal errors may contain
+/// ClickHouse table names, SQL fragments, or infrastructure details —
+/// replace with a generic message and let server-side logs capture the
+/// full error.
+fn sanitize_error_message(error: &PipelineError) -> String {
+    match error {
+        PipelineError::Compile(msg) | PipelineError::Security(msg) => msg.clone(),
+        PipelineError::Execution(_) => {
+            "Query execution failed. Please retry or contact support.".to_string()
+        }
+        PipelineError::Authorization(_) => "Authorization failed.".to_string(),
+        PipelineError::ContentResolution(_) => {
+            "An internal error occurred during content resolution.".to_string()
+        }
+        PipelineError::Streaming(_) => "An internal error occurred during streaming.".to_string(),
+        PipelineError::Custom(_) => "An internal error occurred.".to_string(),
+    }
 }
