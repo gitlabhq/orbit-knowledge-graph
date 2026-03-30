@@ -216,6 +216,10 @@ pub struct VirtualSource {
     /// When true, the field is declared in the ontology but not yet resolvable.
     /// The compiler will exclude it from hydration plans.
     pub disabled: bool,
+    /// Column-backed properties this virtual field needs in the property map
+    /// for resolution. The compiler ensures these are fetched during hydration
+    /// even if the user didn't request them.
+    pub depends_on: Vec<String>,
 }
 
 /// A field definition within an entity.
