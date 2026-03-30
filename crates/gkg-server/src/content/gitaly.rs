@@ -169,7 +169,15 @@ impl GitalyContentService {
         // integer fields may arrive as ColumnValue::String("2") rather than
         // ColumnValue::Int64(2). Parse both representations.
         let project_id = props.get("project_id").and_then(col_as_i64)?;
-        let branch = props.get("branch").and_then(|v| v.as_string().cloned())?;
+        // Prefer commit_sha (immutable) over branch (can advance between
+        // indexing and query time). Fall back to branch if commit_sha is
+        // missing or empty.
+        let branch = props
+            .get("commit_sha")
+            .and_then(|v| v.as_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| props.get("branch").and_then(|v| v.as_string()))
+            .cloned()?;
 
         let file_path = props
             .get("file_path")
