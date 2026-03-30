@@ -8,10 +8,10 @@ use crate::ast::{
 
 use crate::constants::{
     ANCHOR_ID_COLUMN, BACKWARD_ALIAS, BACKWARD_CTE, DEPTH_COLUMN, EDGE_ALIAS_SUFFIXES,
-    EDGE_KINDS_COLUMN, END_ID_COLUMN, END_KIND_COLUMN, FORWARD_ALIAS, FORWARD_CTE,
-    FRONTIER_EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN,
-    NEIGHBOR_TYPE_COLUMN, PATH_COLUMN, PATH_NODES_COLUMN, PATHS_ALIAS, RELATIONSHIP_TYPE_COLUMN,
-    START_ID_COLUMN, node_filter_cte,
+    END_ID_COLUMN, END_KIND_COLUMN, FORWARD_ALIAS, FORWARD_CTE, FRONTIER_EDGE_KINDS_COLUMN,
+    PATH_NODES_COLUMN, PATHS_ALIAS, START_ID_COLUMN, edge_kinds_column, neighbor_id_column,
+    neighbor_is_outgoing_column, neighbor_type_column, node_filter_cte, path_column,
+    primary_key_column, redaction_id_column, redaction_type_column, relationship_type_column,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{
@@ -656,11 +656,11 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                         Expr::col(FORWARD_ALIAS, PATH_NODES_COLUMN),
                     ],
                 ),
-                PATH_COLUMN,
+                path_column(),
             ),
             SelectExpr::new(
                 Expr::col(FORWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN),
-                EDGE_KINDS_COLUMN,
+                edge_kinds_column(),
             ),
         ],
         from: TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
@@ -704,7 +704,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                         Expr::func("array", vec![end_tuple(BACKWARD_ALIAS)]),
                     ],
                 ),
-                PATH_COLUMN,
+                path_column(),
             ),
             SelectExpr::new(
                 Expr::func(
@@ -717,7 +717,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                         ),
                     ],
                 ),
-                EDGE_KINDS_COLUMN,
+                edge_kinds_column(),
             ),
         ],
         from: TableRef::join(
@@ -764,8 +764,11 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             ctes
         },
         select: vec![
-            SelectExpr::new(Expr::col(PATHS_ALIAS, PATH_COLUMN), PATH_COLUMN),
-            SelectExpr::new(Expr::col(PATHS_ALIAS, EDGE_KINDS_COLUMN), EDGE_KINDS_COLUMN),
+            SelectExpr::new(Expr::col(PATHS_ALIAS, path_column()), path_column()),
+            SelectExpr::new(
+                Expr::col(PATHS_ALIAS, edge_kinds_column()),
+                edge_kinds_column(),
+            ),
             SelectExpr::new(Expr::col(PATHS_ALIAS, DEPTH_COLUMN), DEPTH_COLUMN),
         ],
         from: paths_union,
@@ -1005,13 +1008,13 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
         }
 
         let mut select = vec![
-            SelectExpr::new(Expr::col(edge_alias, neighbor_id), NEIGHBOR_ID_COLUMN),
-            SelectExpr::new(Expr::col(edge_alias, neighbor_type), NEIGHBOR_TYPE_COLUMN),
+            SelectExpr::new(Expr::col(edge_alias, neighbor_id), neighbor_id_column()),
+            SelectExpr::new(Expr::col(edge_alias, neighbor_type), neighbor_type_column()),
             SelectExpr::new(
                 Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
-                RELATIONSHIP_TYPE_COLUMN,
+                relationship_type_column(),
             ),
-            SelectExpr::new(Expr::int(is_outgoing), NEIGHBOR_IS_OUTGOING_COLUMN),
+            SelectExpr::new(Expr::int(is_outgoing), neighbor_is_outgoing_column()),
         ];
 
         let mut from = edge_table;
@@ -1019,7 +1022,7 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
         if center_uses_default_pk {
             select.push(SelectExpr::new(
                 Expr::col(edge_alias, center_edge_col),
-                format!("_gkg_{center_id}_id"),
+                redaction_id_column(&center_id),
             ));
         } else {
             // Indirect auth: JOIN center node table to read the auth column.
@@ -1034,16 +1037,16 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
             );
             select.push(SelectExpr::new(
                 Expr::col(&center_id, &center_redaction_col),
-                format!("_gkg_{center_id}_id"),
+                redaction_id_column(&center_id),
             ));
             select.push(SelectExpr::new(
                 Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
-                format!("_gkg_{center_id}_pk"),
+                primary_key_column(&center_id),
             ));
         }
         select.push(SelectExpr::new(
             Expr::string(center_entity.as_str()),
-            format!("_gkg_{center_id}_type"),
+            redaction_type_column(&center_id),
         ));
 
         Query {
