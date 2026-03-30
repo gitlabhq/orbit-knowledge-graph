@@ -100,6 +100,7 @@ pub struct Ontology {
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
     pub(crate) edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
     pub(crate) etl_settings: EtlSettings,
+    pub(crate) internal_column_prefix: String,
     pub(crate) skip_security_filter_for_tables: Vec<String>,
 }
 
@@ -139,6 +140,7 @@ impl Ontology {
                     DEFAULT_PRIMARY_KEY.to_string(),
                 ],
             },
+            internal_column_prefix: "_gkg_".to_string(),
             skip_security_filter_for_tables: Vec::new(),
         }
     }
@@ -216,10 +218,10 @@ impl Ontology {
         })?;
         for (field_name, data_type, nullable) in fields {
             let field_name_string: String = field_name.into();
-            if field_name_string.starts_with(constants::INTERNAL_COLUMN_PREFIX) {
+            if field_name_string.starts_with(&self.internal_column_prefix) {
                 return Err(OntologyError::Validation(format!(
                     "field \"{field_name_string}\" on node \"{node_name}\" uses reserved prefix '{}'",
-                    constants::INTERNAL_COLUMN_PREFIX
+                    self.internal_column_prefix
                 )));
             }
             if field_name_string == constants::TRAVERSAL_PATH_COLUMN {
@@ -507,6 +509,12 @@ impl Ontology {
     #[must_use]
     pub fn edge_table(&self) -> &str {
         &self.edge_table
+    }
+
+    /// Prefix for internal columns injected by the compiler.
+    #[must_use]
+    pub fn internal_column_prefix(&self) -> &str {
+        &self.internal_column_prefix
     }
 
     /// Tables excluded from traversal-path security filters.
@@ -1279,7 +1287,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .expect("should succeed");
         assert_eq!(entity.sort_key, vec!["project_id", "branch", "id"]);
     }
@@ -1312,7 +1325,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .expect("should succeed");
         assert_eq!(entity.sort_key, default_sort_key);
     }
@@ -1339,6 +1357,7 @@ schema_version: "1.0"
 settings:
   table_prefix: "kg_"
   edge_table: "kg_edge"
+  internal_column_prefix: "_gkg_"
   default_entity_sort_key: [traversal_path, id]
   edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
   edge_columns:
@@ -1519,7 +1538,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let err = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .unwrap_err();
         assert!(
             err.to_string().contains("nonexistent_field"),
@@ -1559,7 +1583,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
         assert_eq!(entity.sort_key, default_sort_key);

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use compiler::{
-    EdgeMeta, NEIGHBOR_IS_OUTGOING_COLUMN, QueryType, RELATIONSHIP_TYPE_COLUMN, ResultContext,
+    EdgeMeta, QueryType, ResultContext, neighbor_is_outgoing_column, relationship_type_column,
 };
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -432,13 +432,13 @@ impl GraphFormatter {
             });
 
             let rel_type = row
-                .get_column_string(RELATIONSHIP_TYPE_COLUMN)
+                .get_column_string(relationship_type_column())
                 .unwrap_or_default();
 
             let (center_type, center_id) = center.unwrap_or_default();
 
             let is_outgoing = row
-                .get(NEIGHBOR_IS_OUTGOING_COLUMN)
+                .get(neighbor_is_outgoing_column())
                 .and_then(|value| value.as_int64().copied())
                 .map(|value| value != 0)
                 .unwrap_or(!matches!(
