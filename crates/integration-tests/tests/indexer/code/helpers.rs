@@ -230,7 +230,13 @@ async fn handle_download_archive(
             let files: Vec<(&str, &str)> = p
                 .archive_files
                 .iter()
-                .map(|(path, content)| (path.as_str(), std::str::from_utf8(content).unwrap_or("")))
+                .map(|(path, content)| {
+                    (
+                        path.as_str(),
+                        std::str::from_utf8(content)
+                            .expect("test fixture content must be valid UTF-8"),
+                    )
+                })
                 .collect();
             let archive = build_tar_gz(&files, &query.ref_name);
             (StatusCode::OK, archive).into_response()
