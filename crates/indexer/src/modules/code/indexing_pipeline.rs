@@ -71,13 +71,15 @@ impl CodeIndexingPipeline {
         context.progress.notify_in_progress().await;
 
         let indexed_at = Utc::now();
-        // Use the commit SHA if available; fall back to branch name.
-        let ref_name = request.commit_sha.as_deref().unwrap_or(&request.branch);
+        // ref_name for repository resolution: commit SHA preferred, branch as fallback.
+        // commit_sha for storage: only the actual SHA, empty string if unavailable.
+        let _ref_name = request.commit_sha.as_deref().unwrap_or(&request.branch);
+        let commit_sha = request.commit_sha.as_deref().unwrap_or("");
         self.run_indexing(
             context,
             request.project_id,
             &request.branch,
-            ref_name,
+            commit_sha,
             &request.traversal_path,
             indexed_at,
             &repo_path,
