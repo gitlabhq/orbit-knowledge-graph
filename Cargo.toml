@@ -86,7 +86,7 @@ tracing-test = "0.2.5"
 # Parser-core
 parser-core = { path = "crates/code-parser" }
 clickhouse-client = { path = "crates/clickhouse-client" }
-duckdb = { version = "1.10501.0", features = ["bundled", "vtab-arrow", "appender-arrow"] }
+duckdb = { version = "1.10501.0", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.7.0" }
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
