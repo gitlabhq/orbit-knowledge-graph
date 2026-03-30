@@ -126,6 +126,10 @@ struct VirtualSourceYaml {
     lookup: String,
     #[serde(default)]
     disabled: bool,
+    /// Column-backed properties this virtual field needs in the property map
+    /// for resolution. The compiler ensures these are fetched during hydration.
+    #[serde(default)]
+    depends_on: Vec<String>,
 }
 
 impl NodeYaml {
@@ -152,6 +156,7 @@ impl NodeYaml {
                         service: v.service,
                         lookup: v.lookup,
                         disabled: v.disabled,
+                        depends_on: v.depends_on,
                     }),
                     (Some(_), Some(_)) => {
                         return Err(OntologyError::Validation(format!(
@@ -210,6 +215,32 @@ impl NodeYaml {
                     "default_columns entry '{}' is not a declared property of node '{}'",
                     col, name
                 )));
+            }
+        }
+
+        // Validate that every depends_on entry on a virtual field references
+        // an existing database-backed column on this same node.
+        for field in &fields {
+            if let FieldSource::Virtual(vs) = &field.source {
+                for dep in &vs.depends_on {
+                    match fields.iter().find(|f| f.name == *dep) {
+                        None => {
+                            return Err(OntologyError::Validation(format!(
+                                "virtual field '{}' on node '{}': depends_on references \
+                                 unknown field '{dep}'",
+                                field.name, name
+                            )));
+                        }
+                        Some(dep_field) if dep_field.is_virtual() => {
+                            return Err(OntologyError::Validation(format!(
+                                "virtual field '{}' on node '{}': depends_on references \
+                                 virtual field '{dep}' (must be database-backed)",
+                                field.name, name
+                            )));
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
 
@@ -328,5 +359,139 @@ impl EtlYaml {
                 edges: convert_edge_mappings(edges)?,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Ontology;
+
+    fn test_etl_settings() -> EtlSettings {
+        EtlSettings {
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["id".to_string()],
+        }
+    }
+
+    #[test]
+    fn embedded_ontology_depends_on_references_are_valid() {
+        // The real ontology should pass all validation including depends_on.
+        let ontology = Ontology::load_embedded().expect("embedded ontology should load");
+        // File.content has depends_on -- verify the field exists and has deps.
+        let file = ontology.get_node("File").expect("File node should exist");
+        let content = file.fields.iter().find(|f| f.name == "content");
+        assert!(content.is_some(), "File should have a content field");
+        if let Some(f) = content
+            && let FieldSource::Virtual(vs) = &f.source
+        {
+            assert!(
+                !vs.depends_on.is_empty(),
+                "File.content should have depends_on"
+            );
+        }
+    }
+
+    fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
+        let node: NodeYaml = serde_yaml::from_str(yaml).unwrap();
+        node.into_entity(
+            "TestNode".to_string(),
+            &["id".to_string()],
+            &test_etl_settings(),
+            "_gkg_",
+        )
+    }
+
+    #[test]
+    fn depends_on_rejects_unknown_field() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              content:
+                type: string
+                virtual:
+                  service: gitaly
+                  lookup: blob_content
+                  depends_on: [nonexistent_field]
+                nullable: true
+            "#,
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nonexistent_field"),
+            "error should mention the bad field name, got: {err}"
+        );
+    }
+
+    #[test]
+    fn depends_on_rejects_virtual_dependency() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              other_virtual:
+                type: string
+                virtual:
+                  service: foo
+                  lookup: bar
+                nullable: true
+              content:
+                type: string
+                virtual:
+                  service: gitaly
+                  lookup: blob_content
+                  depends_on: [other_virtual]
+                nullable: true
+            "#,
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("must be database-backed"),
+            "error should say virtual deps not allowed, got: {err}"
+        );
+    }
+
+    #[test]
+    fn depends_on_accepts_valid_db_column() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              project_id:
+                type: int64
+                source: project_id
+              content:
+                type: string
+                virtual:
+                  service: gitaly
+                  lookup: blob_content
+                  depends_on: [project_id]
+                nullable: true
+            "#,
+        );
+        assert!(
+            result.is_ok(),
+            "should accept valid depends_on: {:?}",
+            result.err()
+        );
     }
 }
