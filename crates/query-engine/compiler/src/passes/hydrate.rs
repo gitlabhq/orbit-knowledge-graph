@@ -102,10 +102,33 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 return None;
             };
 
-            let (columns, virtual_columns) = split_columns(requested, ont_node);
+            let (mut columns, virtual_columns) = split_columns(requested, ont_node);
 
             if columns.is_empty() && virtual_columns.is_empty() {
                 return None;
+            }
+
+            // Virtual columns may depend on properties that the user didn't
+            // explicitly request.  Ensure those dependency columns are fetched
+            // during hydration so the resolver can read them from the property map.
+            if !virtual_columns.is_empty() {
+                for dep in &[
+                    "project_id",
+                    "branch",
+                    "path",
+                    "file_path",
+                    "start_byte",
+                    "end_byte",
+                ] {
+                    let dep_s = (*dep).to_string();
+                    if !columns.contains(&dep_s)
+                        && ont_node.fields.iter().any(|f| {
+                            f.name == *dep && matches!(f.source, FieldSource::DatabaseColumn(_))
+                        })
+                    {
+                        columns.push(dep_s);
+                    }
+                }
             }
 
             Some(HydrationTemplate {
