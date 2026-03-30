@@ -150,6 +150,13 @@ impl ColumnResolver for GitalyContentService {
     }
 }
 
+/// Extract an i64 from a ColumnValue, handling both Int64 and String representations.
+fn col_as_i64(v: &ColumnValue) -> Option<i64> {
+    v.as_int64().copied().or_else(|| {
+        v.as_string().and_then(|s| s.parse::<i64>().ok())
+    })
+}
+
 impl GitalyContentService {
     /// Extract a [`GitalyBlobRequest`] from a hydrated property map.
     ///
@@ -158,9 +165,10 @@ impl GitalyContentService {
     /// `file_path` (Definition). Returns `None` if any required field
     /// is missing or byte ranges are invalid.
     pub fn build_request(props: &HashMap<String, ColumnValue>) -> Option<GitalyBlobRequest> {
-        let project_id = props
-            .get("project_id")
-            .and_then(|v| v.as_int64().copied())?;
+        // Hydration stores all values as strings (via toJSONString/map), so
+        // integer fields may arrive as ColumnValue::String("2") rather than
+        // ColumnValue::Int64(2). Parse both representations.
+        let project_id = props.get("project_id").and_then(col_as_i64)?;
         let branch = props.get("branch").and_then(|v| v.as_string().cloned())?;
 
         let file_path = props
@@ -168,8 +176,8 @@ impl GitalyContentService {
             .or_else(|| props.get("path"))
             .and_then(|v| v.as_string().cloned())?;
 
-        let start_byte = props.get("start_byte").and_then(|v| v.as_int64().copied());
-        let end_byte = props.get("end_byte").and_then(|v| v.as_int64().copied());
+        let start_byte = props.get("start_byte").and_then(col_as_i64);
+        let end_byte = props.get("end_byte").and_then(col_as_i64);
 
         match (start_byte, end_byte) {
             (Some(s), Some(e)) if s < 0 || e < 0 || s > e => return None,
