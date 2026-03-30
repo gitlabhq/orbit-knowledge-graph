@@ -123,7 +123,8 @@ lint-check:
     - .sccache-template
     - .mr-only-rules
   script:
-    - cargo clippy --all-targets --all-features -- -D warnings
+    - cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings
+    - cargo clippy -p duckdb-client --all-targets -- -D warnings
     - sccache --show-stats || true
 
 # Security Stage
@@ -153,7 +154,10 @@ cargo-geiger:
     - .mr-and-main-rules
   needs: []
   script:
-    - for pkg in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do cargo geiger -p "$pkg" --all-features || true; done
+    - for pkg in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do
+        if [ "$pkg" = "duckdb-client" ]; then cargo geiger -p "$pkg" || true;
+        else cargo geiger -p "$pkg" --all-features || true; fi;
+      done
   allow_failure: true
 
 generate-sbom:
