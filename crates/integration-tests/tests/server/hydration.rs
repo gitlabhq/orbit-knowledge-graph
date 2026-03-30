@@ -868,31 +868,45 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
     );
 
     let authorized: Vec<_> = result.authorized_rows().collect();
-    assert!(
-        !authorized.is_empty(),
-        "should have authorized rows (File->DEFINES->Definition edges exist)"
+    assert_eq!(
+        authorized.len(),
+        2,
+        "should have 2 authorized rows (File->DEFINES->Definition edges for both files)"
     );
 
-    // Verify hydrated properties are present and correct. Without the fix,
-    // these would all be missing because hydration looked up the wrong ID.
-    let file_props_found = authorized.iter().any(|row| {
-        row.get_column_string("f_name")
-            .is_some_and(|v| v == "lib.rs" || v == "main.rs")
-    });
-    assert!(
-        file_props_found,
-        "File name should be hydrated (lib.rs or main.rs). \
-         If missing, hydration is using redaction ID (project_id) instead of PK (file id)."
-    );
+    // Verify EVERY row has hydrated properties — not just any. Catches partial
+    // failures where some rows hydrate and others don't.
+    let mut seen_file_names: Vec<String> = Vec::new();
+    let mut seen_def_names: Vec<String> = Vec::new();
+    for row in &authorized {
+        let f_name = row.get_column_string("f_name").unwrap_or_else(|| {
+            panic!(
+                "File name missing on row. Hydration is likely using \
+                 redaction ID (project_id) instead of PK (file id)."
+            )
+        });
+        seen_file_names.push(f_name);
 
-    let def_props_found = authorized.iter().any(|row| {
-        row.get_column_string("d_name")
-            .is_some_and(|v| v == "greet" || v == "main")
-    });
-    assert!(
-        def_props_found,
-        "Definition name should be hydrated (greet or main). \
-         If missing, hydration is using redaction ID (project_id) instead of PK (definition id)."
+        let d_name = row.get_column_string("d_name").unwrap_or_else(|| {
+            panic!(
+                "Definition name missing on row. Hydration is likely using \
+                 redaction ID (project_id) instead of PK (definition id)."
+            )
+        });
+        seen_def_names.push(d_name);
+    }
+
+    seen_file_names.sort();
+    seen_def_names.sort();
+    assert_eq!(
+        seen_file_names,
+        vec!["lib.rs", "main.rs"],
+        "both seeded files (5001, 5002) should be hydrated"
+    );
+    assert_eq!(
+        seen_def_names,
+        vec!["greet", "main"],
+        "both seeded definitions (6001, 6002) should be hydrated"
     );
 }
 
