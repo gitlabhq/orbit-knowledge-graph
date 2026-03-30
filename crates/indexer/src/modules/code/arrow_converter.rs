@@ -19,6 +19,7 @@ pub struct ArrowConverter {
     traversal_path: String,
     project_id: i64,
     branch: String,
+    commit_sha: String,
     version_micros: i64,
 }
 
@@ -27,12 +28,14 @@ impl ArrowConverter {
         traversal_path: String,
         project_id: i64,
         branch: String,
+        commit_sha: String,
         version_timestamp: DateTime<Utc>,
     ) -> Self {
         Self {
             traversal_path,
             project_id,
             branch,
+            commit_sha,
             version_micros: version_timestamp.timestamp_micros(),
         }
     }
@@ -89,6 +92,7 @@ impl ArrowConverter {
             &self.traversal_path,
             self.project_id,
             &self.branch,
+            &self.commit_sha,
             self.version_micros,
             count,
         )
@@ -487,11 +491,13 @@ struct BaseColumnBuilders {
     traversal_path: StringBuilder,
     project_id: Int64Builder,
     branch: StringBuilder,
+    commit_sha: StringBuilder,
     version: TimestampMicrosecondBuilder,
     deleted: BooleanBuilder,
     traversal_path_value: String,
     project_id_value: i64,
     branch_value: String,
+    commit_sha_value: String,
     version_micros: i64,
 }
 
@@ -500,6 +506,7 @@ impl BaseColumnBuilders {
         traversal_path: &str,
         project_id: i64,
         branch: &str,
+        commit_sha: &str,
         version_micros: i64,
         capacity: usize,
     ) -> Self {
@@ -507,11 +514,13 @@ impl BaseColumnBuilders {
             traversal_path: StringBuilder::with_capacity(capacity, capacity * traversal_path.len()),
             project_id: Int64Builder::with_capacity(capacity),
             branch: StringBuilder::with_capacity(capacity, capacity * branch.len()),
+            commit_sha: StringBuilder::with_capacity(capacity, capacity * commit_sha.len()),
             version: TimestampMicrosecondBuilder::with_capacity(capacity),
             deleted: BooleanBuilder::with_capacity(capacity),
             traversal_path_value: traversal_path.to_string(),
             project_id_value: project_id,
             branch_value: branch.to_string(),
+            commit_sha_value: commit_sha.to_string(),
             version_micros,
         }
     }
@@ -520,6 +529,7 @@ impl BaseColumnBuilders {
         self.traversal_path.append_value(&self.traversal_path_value);
         self.project_id.append_value(self.project_id_value);
         self.branch.append_value(&self.branch_value);
+        self.commit_sha.append_value(&self.commit_sha_value);
         self.version.append_value(self.version_micros);
         self.deleted.append_value(false);
     }
@@ -534,6 +544,7 @@ impl BaseColumnBuilders {
             Field::new("traversal_path", DataType::Utf8, false),
             Field::new("project_id", DataType::Int64, false),
             Field::new("branch", DataType::Utf8, false),
+            Field::new("commit_sha", DataType::Utf8, false),
             Field::new(
                 "_version",
                 DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
@@ -547,6 +558,7 @@ impl BaseColumnBuilders {
             Arc::new(self.traversal_path.finish()),
             Arc::new(self.project_id.finish()),
             Arc::new(self.branch.finish()),
+            Arc::new(self.commit_sha.finish()),
             Arc::new(self.version.finish().with_timezone("UTC")),
             Arc::new(self.deleted.finish()),
         ];

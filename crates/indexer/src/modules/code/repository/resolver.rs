@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tracing::{info, warn};
@@ -85,20 +85,28 @@ impl RepositoryResolver {
         &self,
         project_id: i64,
         branch: &str,
-        commit_sha: &str,
+        ref_name: &str,
     ) -> Result<PathBuf, HandlerError> {
-        info!(project_id, branch, commit = %commit_sha, "starting full repository download");
+        info!(
+            project_id,
+            branch, ref_name, "starting full repository download"
+        );
 
         let archive_stream = self
             .repository_service
-            .download_archive(project_id, commit_sha)
+            .download_archive(project_id, ref_name)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))?;
 
-        self.cache
-            .extract_archive(project_id, branch, commit_sha, archive_stream)
+        let repo_dir = self
+            .cache
+            .extract_archive(project_id, branch, ref_name, archive_stream)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
+            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))?;
+
+        flatten_gitaly_archive(&repo_dir, ref_name).await?;
+
+        Ok(repo_dir)
     }
 
     async fn incremental_update(
@@ -311,6 +319,98 @@ async fn compute_changeset(
     Ok(builder.build())
 }
 
+/// Flatten the Gitaly archive root directory after extraction.
+///
+/// Gitaly's `git archive --prefix` wraps all entries under a single
+/// top-level directory named `<slug>-<ref>/` (e.g. `my-project-abc123/`).
+/// This function validates the expected structure and removes the wrapper
+/// so the extracted tree matches the actual repository layout.
+///
+/// Errors hard if the archive structure is unexpected -- bad data in the
+/// graph is worse than a failed indexing run.
+async fn flatten_gitaly_archive(dir: &Path, ref_name: &str) -> Result<(), HandlerError> {
+    let mut entries = tokio::fs::read_dir(dir)
+        .await
+        .map_err(|e| HandlerError::Processing(format!("failed to read extracted archive: {e}")))?;
+
+    let first = entries
+        .next_entry()
+        .await
+        .map_err(|e| HandlerError::Processing(format!("failed to read archive entry: {e}")))?
+        .ok_or_else(|| HandlerError::Processing("extracted archive is empty".to_string()))?;
+
+    if entries
+        .next_entry()
+        .await
+        .map_err(|e| HandlerError::Processing(format!("failed to read archive entry: {e}")))?
+        .is_some()
+    {
+        return Err(HandlerError::Processing(
+            "extracted archive has multiple top-level entries, expected single root directory"
+                .to_string(),
+        ));
+    }
+
+    let file_type = first
+        .file_type()
+        .await
+        .map_err(|e| HandlerError::Processing(format!("failed to stat archive entry: {e}")))?;
+
+    if !file_type.is_dir() {
+        return Err(HandlerError::Processing(format!(
+            "extracted archive contains a single file '{}', expected a directory",
+            first.file_name().to_string_lossy()
+        )));
+    }
+
+    let name = first.file_name();
+    let name_str = name.to_string_lossy();
+    let expected_suffix = format!("-{ref_name}");
+    if !name_str.ends_with(&expected_suffix) || name_str.len() <= expected_suffix.len() {
+        return Err(HandlerError::Processing(format!(
+            "archive root directory '{}' does not match expected pattern '<slug>-{ref_name}'",
+            name_str
+        )));
+    }
+
+    let archive_root = first.path();
+
+    // Rename the archive root to a staging name to avoid collisions
+    // between the directory itself and any child with the same name.
+    // Stays on the same filesystem so rename is atomic.
+    // Note: extract_archive clears the repo_dir before extraction, so
+    // a leftover staging dir from a previous failed run is not possible.
+    let staging = dir.join(".gkg-flatten-staging");
+    tokio::fs::rename(&archive_root, &staging)
+        .await
+        .map_err(|e| HandlerError::Processing(format!("failed to stage archive root: {e}")))?;
+
+    let mut child_entries = tokio::fs::read_dir(&staging)
+        .await
+        .map_err(|e| HandlerError::Processing(format!("failed to read staging dir: {e}")))?;
+
+    while let Some(entry) = child_entries
+        .next_entry()
+        .await
+        .map_err(|e| HandlerError::Processing(format!("failed to read staging entry: {e}")))?
+    {
+        tokio::fs::rename(entry.path(), dir.join(entry.file_name()))
+            .await
+            .map_err(|e| {
+                HandlerError::Processing(format!(
+                    "failed to move '{}' out of archive root: {e}",
+                    entry.file_name().to_string_lossy()
+                ))
+            })?;
+    }
+
+    tokio::fs::remove_dir(&staging)
+        .await
+        .map_err(|e| HandlerError::Processing(format!("failed to remove staging dir: {e}")))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write as _;
@@ -335,7 +435,7 @@ mod tests {
     }
 
     impl ScriptedRepositoryService {
-        fn with_archive(files: &[(&str, &str)]) -> Arc<Self> {
+        fn with_archive(files: &[(&str, &str)], ref_name: &str) -> Arc<Self> {
             let snapshots: Vec<FileSnapshot> = files
                 .iter()
                 .map(|(path, content)| FileSnapshot {
@@ -345,7 +445,7 @@ mod tests {
                 })
                 .collect();
             Arc::new(Self {
-                archive: Mutex::new(build_test_tar_gz(files)),
+                archive: Mutex::new(build_test_tar_gz(files, ref_name)),
                 changed_paths_response: Mutex::new(None),
                 blobs: Mutex::new(snapshots),
             })
@@ -355,8 +455,8 @@ mod tests {
             *self.changed_paths_response.lock() = Some(response);
         }
 
-        fn set_archive(&self, files: &[(&str, &str)]) {
-            *self.archive.lock() = build_test_tar_gz(files);
+        fn set_archive(&self, files: &[(&str, &str)], ref_name: &str) {
+            *self.archive.lock() = build_test_tar_gz(files, ref_name);
             *self.blobs.lock() = files
                 .iter()
                 .map(|(path, content)| FileSnapshot {
@@ -435,12 +535,14 @@ mod tests {
         }
     }
 
-    fn build_test_tar_gz(files: &[(&str, &str)]) -> Vec<u8> {
+    fn build_test_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
         let mut tar_builder = tar::Builder::new(Vec::new());
         for (path, content) in files {
             let content_bytes = content.as_bytes();
             let mut header = tar::Header::new_gnu();
-            header.set_path(path).unwrap();
+            // Simulate Gitaly archive format: <slug>-<ref>/<path>
+            let archive_path = format!("project-{ref_name}/{path}");
+            header.set_path(&archive_path).unwrap();
             header.set_size(content_bytes.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
@@ -543,7 +645,8 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_cache_miss_does_full_download() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(service);
 
         let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
@@ -555,7 +658,8 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_cache_hit_returns_cached_path() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(service);
 
         let first_path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
@@ -566,15 +670,19 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_stale_cache_triggers_incremental_update() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "commit1");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
         resolver.resolve(1, "main", Some("commit1")).await.unwrap();
 
-        service.set_archive(&[
-            ("src/main.rs", "fn main() {}"),
-            ("src/lib.rs", "pub mod lib;"),
-        ]);
+        service.set_archive(
+            &[
+                ("src/main.rs", "fn main() {}"),
+                ("src/lib.rs", "pub mod lib;"),
+            ],
+            "commit2",
+        );
         service.set_changed_paths_response(Ok(
             r#"{"path":"src/lib.rs","status":"ADDED","old_path":"","new_mode":33188,"old_mode":0,"old_blob_id":"","new_blob_id":"blob_src/lib.rs"}"#.to_string()
         ));
@@ -587,13 +695,14 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_force_push_falls_back_to_full_download() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "commit1");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
         resolver.resolve(1, "main", Some("commit1")).await.unwrap();
 
         service.set_changed_paths_response(Err(RepositoryServiceError::ForcePush(1)));
-        service.set_archive(&[("src/new.rs", "fn new() {}")]);
+        service.set_archive(&[("src/new.rs", "fn new() {}")], "commit2");
 
         let path = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
@@ -603,7 +712,8 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_uses_branch_when_no_commit_sha() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "main");
         let (_dir, resolver) = create_resolver(service);
 
         let path = resolver.resolve(1, "main", None).await.unwrap();
@@ -790,5 +900,77 @@ mod tests {
 
         let err = compute_changeset(stream).await.unwrap_err();
         assert!(err.contains("too many changed paths"));
+    }
+
+    // -- flatten_gitaly_archive tests -----------------------------------------
+
+    #[tokio::test]
+    async fn flatten_strips_matching_archive_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("my-project-abc123/src")).unwrap();
+        std::fs::write(dir.path().join("my-project-abc123/src/lib.rs"), "content").unwrap();
+
+        flatten_gitaly_archive(dir.path(), "abc123").await.unwrap();
+
+        assert!(dir.path().join("src/lib.rs").exists());
+        assert!(!dir.path().join("my-project-abc123").exists());
+    }
+
+    #[tokio::test]
+    async fn flatten_errors_on_empty_archive() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let err = flatten_gitaly_archive(dir.path(), "main")
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{err:?}").contains("empty"),
+            "expected empty error, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn flatten_errors_on_multiple_entries() {
+        // Names don't need to match <slug>-<ref> -- the multiple-entries
+        // check fires before the suffix validation.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("a")).unwrap();
+        std::fs::create_dir(dir.path().join("b")).unwrap();
+
+        let err = flatten_gitaly_archive(dir.path(), "main")
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{err:?}").contains("multiple top-level"),
+            "expected multiple entries error, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn flatten_errors_on_single_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("only_file.rs"), "x").unwrap();
+
+        let err = flatten_gitaly_archive(dir.path(), "main")
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{err:?}").contains("single file"),
+            "expected single file error, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn flatten_errors_on_non_matching_ref() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("project-main/src")).unwrap();
+
+        let err = flatten_gitaly_archive(dir.path(), "develop")
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{err:?}").contains("does not match"),
+            "expected pattern mismatch error, got: {err:?}"
+        );
     }
 }

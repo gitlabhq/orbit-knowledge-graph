@@ -43,6 +43,12 @@ properties:
     nullable: false
     description: "Git branch where this file exists."
 
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    description: "Commit SHA at which this file was indexed."
+
   path:
     type: string
     source: path
@@ -72,6 +78,6 @@ properties:
     virtual:
       service: gitaly
       lookup: blob_content
-      depends_on: [project_id, branch, path]
+      depends_on: [project_id, commit_sha, branch, path]
     nullable: true
     description: "Raw source text of the file. Resolved from Gitaly at query time."
