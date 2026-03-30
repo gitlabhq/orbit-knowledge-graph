@@ -96,6 +96,7 @@ properties:
     virtual:
       service: gitaly
       lookup: blob_content
+      disabled: true
       depends_on: [project_id, branch, file_path, start_byte, end_byte]
     nullable: true
     description: "Source text of the definition. Resolved from Gitaly at query time using start_byte/end_byte."
