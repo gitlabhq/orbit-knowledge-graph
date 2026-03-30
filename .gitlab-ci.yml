@@ -367,7 +367,7 @@ docker-build-mr:
     IMAGE_NAME: gkg
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      # TODO: revert to `when: manual` after verifying Docker build works
+      when: manual
       allow_failure: true
   script:
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
