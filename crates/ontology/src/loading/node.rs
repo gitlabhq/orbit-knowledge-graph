@@ -218,6 +218,32 @@ impl NodeYaml {
             }
         }
 
+        // Validate that every depends_on entry on a virtual field references
+        // an existing database-backed column on this same node.
+        for field in &fields {
+            if let FieldSource::Virtual(vs) = &field.source {
+                for dep in &vs.depends_on {
+                    match fields.iter().find(|f| f.name == *dep) {
+                        None => {
+                            return Err(OntologyError::Validation(format!(
+                                "virtual field '{}' on node '{}': depends_on references \
+                                 unknown field '{dep}'",
+                                field.name, name
+                            )));
+                        }
+                        Some(dep_field) if dep_field.is_virtual() => {
+                            return Err(OntologyError::Validation(format!(
+                                "virtual field '{}' on node '{}': depends_on references \
+                                 virtual field '{dep}' (must be database-backed)",
+                                field.name, name
+                            )));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
         let sort_key = self
             .sort_key
             .unwrap_or_else(|| default_entity_sort_key.to_vec());
