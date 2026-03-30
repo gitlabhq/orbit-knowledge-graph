@@ -41,6 +41,7 @@ stages:
     SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
     SCCACHE_GCS_KEY_PATH: "${SCCACHE_GCS_KEY}"
     SCCACHE_GCS_RW_MODE: "READ_WRITE"
+    DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
     - mise install
     - |
