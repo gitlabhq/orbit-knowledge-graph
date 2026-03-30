@@ -126,6 +126,10 @@ struct VirtualSourceYaml {
     lookup: String,
     #[serde(default)]
     disabled: bool,
+    /// Column-backed properties this virtual field needs in the property map
+    /// for resolution. The compiler ensures these are fetched during hydration.
+    #[serde(default)]
+    depends_on: Vec<String>,
 }
 
 impl NodeYaml {
@@ -152,6 +156,7 @@ impl NodeYaml {
                         service: v.service,
                         lookup: v.lookup,
                         disabled: v.disabled,
+                        depends_on: v.depends_on,
                     }),
                     (Some(_), Some(_)) => {
                         return Err(OntologyError::Validation(format!(

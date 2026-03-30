@@ -102,10 +102,30 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 return None;
             };
 
-            let (columns, virtual_columns) = split_columns(requested, ont_node);
+            let (mut columns, virtual_columns) = split_columns(requested, ont_node);
 
             if columns.is_empty() && virtual_columns.is_empty() {
                 return None;
+            }
+
+            // Virtual columns may depend on properties that the user didn't
+            // explicitly request. Pull dependency names from the ontology's
+            // `depends_on` and ensure they're fetched during hydration.
+            for vc in &virtual_columns {
+                let Some(field) = ont_node.fields.iter().find(|f| f.name == vc.column_name) else {
+                    continue;
+                };
+                if let FieldSource::Virtual(vs) = &field.source {
+                    for dep in &vs.depends_on {
+                        if !columns.contains(dep)
+                            && ont_node.fields.iter().any(|f| {
+                                f.name == *dep && matches!(f.source, FieldSource::DatabaseColumn(_))
+                            })
+                        {
+                            columns.push(dep.clone());
+                        }
+                    }
+                }
             }
 
             Some(HydrationTemplate {
@@ -175,6 +195,7 @@ fn split_columns(
                     service,
                     lookup,
                     disabled,
+                    ..
                 }) => {
                     if !disabled {
                         virtual_columns.push(VirtualColumnRequest {
