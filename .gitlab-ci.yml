@@ -268,18 +268,6 @@ unit-test:
     - ./scripts/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
-# Temporary: duckdb-client is excluded from default-members because its
-# bundled C++ build adds ~80s. Run its unit tests in a dedicated job.
-duckdb-client-test:
-  stage: test
-  extends:
-    - .test-template
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - cargo nextest run --profile ci -p duckdb-client
-    - sccache --show-stats || true
-
 integration-test:
   stage: test
   extends:
