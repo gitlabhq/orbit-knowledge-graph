@@ -117,6 +117,44 @@ impl LocalRepositoryCache {
     }
 }
 
+/// Gitaly archives wrap all files under a top-level directory named
+/// `<project>-<ref>/`. After extraction, detect this pattern and flatten
+/// the tree by moving the contents up one level.
+///
+/// Only flattens when the sole top-level entry is a directory whose name
+/// contains a hyphen (matching the `<slug>-<ref>` convention).
+async fn flatten_single_root_dir(dir: &Path) -> Result<(), RepositoryCacheError> {
+    let mut entries = tokio::fs::read_dir(dir).await?;
+    let mut sole_child: Option<std::path::PathBuf> = None;
+    let mut count = 0;
+
+    while let Some(entry) = entries.next_entry().await? {
+        count += 1;
+        if count > 1 {
+            return Ok(());
+        }
+        if entry.file_type().await?.is_dir() {
+            let name = entry.file_name();
+            if name.to_string_lossy().contains('-') {
+                sole_child = Some(entry.path());
+            }
+        }
+    }
+
+    let Some(child) = sole_child else {
+        return Ok(());
+    };
+
+    let mut child_entries = tokio::fs::read_dir(&child).await?;
+    while let Some(entry) = child_entries.next_entry().await? {
+        let dest = dir.join(entry.file_name());
+        tokio::fs::rename(entry.path(), &dest).await?;
+    }
+    tokio::fs::remove_dir(&child).await?;
+
+    Ok(())
+}
+
 fn hashed_branch_name(branch: &str) -> String {
     let hash = Sha256::digest(branch.as_bytes());
     format!("{:x}", hash)
@@ -290,6 +328,11 @@ impl RepositoryCache for LocalRepositoryCache {
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
         .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
 
+        // Gitaly archives wrap all files under a top-level directory named
+        // `<project>-<ref>/`. Detect this and flatten the tree so paths are
+        // repo-relative.
+        flatten_single_root_dir(&repo_dir).await?;
+
         let meta_dir = self.branch_dir(project_id, branch).join(META_DIR);
         tokio::fs::create_dir_all(&meta_dir).await?;
         tokio::fs::write(meta_dir.join(COMMIT_FILE), commit_sha).await?;
@@ -369,7 +412,7 @@ mod tests {
     #[tokio::test]
     async fn invalidate_removes_cached_repository() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
+        let archive = build_tar_gz(&[("file.rs", b"content")]);
         cache
             .extract_archive(42, "main", "abc123", archive_stream(archive))
             .await
@@ -391,7 +434,7 @@ mod tests {
     #[tokio::test]
     async fn separate_branches_are_independent() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
+        let archive = build_tar_gz(&[("file.rs", b"content")]);
 
         cache
             .extract_archive(42, "main", "aaa", archive_stream(archive.clone()))
@@ -409,7 +452,7 @@ mod tests {
     #[tokio::test]
     async fn separate_projects_are_independent() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
+        let archive = build_tar_gz(&[("file.rs", b"content")]);
 
         cache
             .extract_archive(1, "main", "aaa", archive_stream(archive.clone()))
@@ -427,7 +470,7 @@ mod tests {
     #[tokio::test]
     async fn invalidate_one_branch_preserves_others() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
+        let archive = build_tar_gz(&[("file.rs", b"content")]);
 
         cache
             .extract_archive(42, "main", "aaa", archive_stream(archive.clone()))
@@ -495,13 +538,13 @@ mod tests {
     #[tokio::test]
     async fn extract_archive_replaces_existing_files() {
         let (_dir, cache) = create_cache();
-        let first_archive = build_tar_gz(&[("root/old_file.rs", b"old content")]);
+        let first_archive = build_tar_gz(&[("old_file.rs", b"old content")]);
         cache
             .extract_archive(42, "main", "commit1", archive_stream(first_archive))
             .await
             .unwrap();
 
-        let second_archive = build_tar_gz(&[("root/new_file.rs", b"new content")]);
+        let second_archive = build_tar_gz(&[("new_file.rs", b"new content")]);
         let path = cache
             .extract_archive(42, "main", "commit2", archive_stream(second_archive))
             .await

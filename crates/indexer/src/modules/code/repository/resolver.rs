@@ -440,9 +440,7 @@ mod tests {
         for (path, content) in files {
             let content_bytes = content.as_bytes();
             let mut header = tar::Header::new_gnu();
-            // Simulate Gitaly archive format: all files under a root directory
-            let archive_path = format!("project-main/{path}");
-            header.set_path(&archive_path).unwrap();
+            header.set_path(path).unwrap();
             header.set_size(content_bytes.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();

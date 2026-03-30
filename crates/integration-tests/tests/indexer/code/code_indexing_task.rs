@@ -258,6 +258,26 @@ async fn assert_file_is_active(
     project_id: i64,
     path: &str,
 ) {
+    // Debug: list all paths for this project
+    let all = clickhouse
+        .query(&format!(
+            "SELECT path, _deleted FROM gl_file FINAL WHERE project_id = {project_id}"
+        ))
+        .await;
+    if let Some(batch) = all.first() {
+        let paths = batch
+            .column_by_name("path")
+            .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+        let deleted = batch
+            .column_by_name("_deleted")
+            .and_then(|c| c.as_any().downcast_ref::<BooleanArray>());
+        if let (Some(p), Some(d)) = (paths, deleted) {
+            for i in 0..batch.num_rows() {
+                eprintln!("  [debug] file: {:?} deleted={}", p.value(i), d.value(i));
+            }
+        }
+    }
+
     let result = clickhouse
         .query(&format!(
             "SELECT id FROM gl_file FINAL \
