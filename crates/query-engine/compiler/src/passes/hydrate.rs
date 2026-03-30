@@ -222,3 +222,190 @@ fn split_columns(
 
     (columns, virtual_columns)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ontology::{Field, FieldSource, VirtualSource};
+
+    fn db_field(name: &str) -> Field {
+        Field {
+            name: name.to_string(),
+            source: FieldSource::DatabaseColumn(name.to_string()),
+            data_type: ontology::DataType::String,
+            nullable: false,
+            enum_values: None,
+            enum_type: Default::default(),
+            like_allowed: false,
+            filterable: true,
+        }
+    }
+
+    fn virtual_field(name: &str, service: &str, lookup: &str, deps: &[&str]) -> Field {
+        Field {
+            name: name.to_string(),
+            source: FieldSource::Virtual(VirtualSource {
+                service: service.to_string(),
+                lookup: lookup.to_string(),
+                disabled: false,
+                depends_on: deps.iter().map(|s| s.to_string()).collect(),
+            }),
+            data_type: ontology::DataType::String,
+            nullable: true,
+            enum_values: None,
+            enum_type: Default::default(),
+            like_allowed: false,
+            filterable: false,
+        }
+    }
+
+    fn test_node(fields: Vec<Field>) -> ontology::NodeEntity {
+        ontology::NodeEntity {
+            name: "TestNode".to_string(),
+            domain: "test".to_string(),
+            description: String::new(),
+            label: String::new(),
+            destination_table: "gl_test".to_string(),
+            fields,
+            primary_keys: vec!["id".to_string()],
+            default_columns: vec![],
+            sort_key: vec!["id".to_string()],
+            etl: None,
+            redaction: None,
+            style: Default::default(),
+            has_traversal_path: false,
+        }
+    }
+
+    fn vc_req(col: &str, service: &str, lookup: &str) -> VirtualColumnRequest {
+        VirtualColumnRequest {
+            column_name: col.to_string(),
+            service: service.to_string(),
+            lookup: lookup.to_string(),
+        }
+    }
+
+    #[test]
+    fn inject_adds_missing_dependencies() {
+        let node = test_node(vec![
+            db_field("id"),
+            db_field("project_id"),
+            db_field("branch"),
+            db_field("path"),
+            virtual_field(
+                "content",
+                "gitaly",
+                "blob_content",
+                &["project_id", "branch", "path"],
+            ),
+        ]);
+        let vcs = vec![vc_req("content", "gitaly", "blob_content")];
+        let mut columns = vec!["name".to_string()];
+
+        inject_virtual_dependencies(&mut columns, &vcs, &node);
+
+        assert!(columns.contains(&"project_id".to_string()));
+        assert!(columns.contains(&"branch".to_string()));
+        assert!(columns.contains(&"path".to_string()));
+    }
+
+    #[test]
+    fn inject_does_not_duplicate_existing_columns() {
+        let node = test_node(vec![
+            db_field("id"),
+            db_field("project_id"),
+            db_field("branch"),
+            virtual_field(
+                "content",
+                "gitaly",
+                "blob_content",
+                &["project_id", "branch"],
+            ),
+        ]);
+        let vcs = vec![vc_req("content", "gitaly", "blob_content")];
+        let mut columns = vec!["project_id".to_string()];
+
+        inject_virtual_dependencies(&mut columns, &vcs, &node);
+
+        let count = columns.iter().filter(|c| *c == "project_id").count();
+        assert_eq!(count, 1, "project_id should not be duplicated");
+        assert!(columns.contains(&"branch".to_string()));
+    }
+
+    #[test]
+    fn inject_noop_when_no_virtual_columns() {
+        let node = test_node(vec![db_field("id"), db_field("name")]);
+        let vcs: Vec<VirtualColumnRequest> = vec![];
+        let mut columns = vec!["name".to_string()];
+
+        inject_virtual_dependencies(&mut columns, &vcs, &node);
+
+        assert_eq!(columns, vec!["name".to_string()]);
+    }
+
+    #[test]
+    fn inject_skips_deps_not_in_ontology() {
+        let node = test_node(vec![
+            db_field("id"),
+            db_field("branch"),
+            virtual_field(
+                "content",
+                "gitaly",
+                "blob_content",
+                &["branch", "nonexistent"],
+            ),
+        ]);
+        let vcs = vec![vc_req("content", "gitaly", "blob_content")];
+        let mut columns = vec![];
+
+        inject_virtual_dependencies(&mut columns, &vcs, &node);
+
+        assert!(columns.contains(&"branch".to_string()));
+        assert!(!columns.contains(&"nonexistent".to_string()));
+    }
+
+    #[test]
+    fn split_columns_separates_db_and_virtual() {
+        let node = test_node(vec![
+            db_field("id"),
+            db_field("name"),
+            virtual_field("content", "gitaly", "blob_content", &[]),
+        ]);
+        let requested = vec!["name".to_string(), "content".to_string()];
+
+        let (cols, vcs) = split_columns(&requested, &node);
+
+        assert_eq!(cols, vec!["name"]);
+        assert_eq!(vcs.len(), 1);
+        assert_eq!(vcs[0].column_name, "content");
+        assert_eq!(vcs[0].service, "gitaly");
+    }
+
+    #[test]
+    fn split_columns_excludes_disabled_virtual() {
+        let node = test_node(vec![
+            db_field("id"),
+            Field {
+                name: "content".to_string(),
+                source: FieldSource::Virtual(VirtualSource {
+                    service: "gitaly".to_string(),
+                    lookup: "blob_content".to_string(),
+                    disabled: true,
+                    depends_on: vec![],
+                }),
+                data_type: ontology::DataType::String,
+                nullable: true,
+                enum_values: None,
+                enum_type: Default::default(),
+                like_allowed: false,
+                filterable: false,
+            },
+        ]);
+        let requested = vec!["content".to_string()];
+
+        let (cols, vcs) = split_columns(&requested, &node);
+
+        assert!(cols.is_empty());
+        assert!(vcs.is_empty());
+    }
+}
