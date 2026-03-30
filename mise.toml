@@ -14,6 +14,10 @@ GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}"
 # Clone from: https://gitlab.com/gitlab-org/analytics-section/siphon
 SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/siphon"
 
+# Auto-download prebuilt DuckDB shared library on first build (cached in target/).
+# CI uses DUCKDB_LIB_DIR from the build image instead.
+DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
+
 [tools]
 "rust" = { version = "1.93.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu" }
 "cargo:cargo-nextest" = "0.9.123"
