@@ -369,7 +369,7 @@ mod tests {
     #[tokio::test]
     async fn invalidate_removes_cached_repository() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
         cache
             .extract_archive(42, "main", "abc123", archive_stream(archive))
             .await
@@ -391,7 +391,7 @@ mod tests {
     #[tokio::test]
     async fn separate_branches_are_independent() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
 
         cache
             .extract_archive(42, "main", "aaa", archive_stream(archive.clone()))
@@ -409,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn separate_projects_are_independent() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
 
         cache
             .extract_archive(1, "main", "aaa", archive_stream(archive.clone()))
@@ -427,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn invalidate_one_branch_preserves_others() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
 
         cache
             .extract_archive(42, "main", "aaa", archive_stream(archive.clone()))
@@ -467,9 +467,10 @@ mod tests {
     #[tokio::test]
     async fn extract_archive_populates_cache() {
         let (_dir, cache) = create_cache();
+        // Gitaly archives wrap files under a top-level directory
         let archive = build_tar_gz(&[
-            ("src/main.rs", b"fn main() {}"),
-            ("src/lib.rs", b"pub mod lib;"),
+            ("project-main/src/main.rs", b"fn main() {}"),
+            ("project-main/src/lib.rs", b"pub mod lib;"),
         ]);
 
         let path = cache
@@ -477,6 +478,7 @@ mod tests {
             .await
             .unwrap();
 
+        // Archive root ("project-main/") is stripped during extraction
         let content = tokio::fs::read_to_string(path.join("src/main.rs"))
             .await
             .unwrap();
@@ -493,13 +495,13 @@ mod tests {
     #[tokio::test]
     async fn extract_archive_replaces_existing_files() {
         let (_dir, cache) = create_cache();
-        let first_archive = build_tar_gz(&[("old_file.rs", b"old content")]);
+        let first_archive = build_tar_gz(&[("root/old_file.rs", b"old content")]);
         cache
             .extract_archive(42, "main", "commit1", archive_stream(first_archive))
             .await
             .unwrap();
 
-        let second_archive = build_tar_gz(&[("new_file.rs", b"new content")]);
+        let second_archive = build_tar_gz(&[("root/new_file.rs", b"new content")]);
         let path = cache
             .extract_archive(42, "main", "commit2", archive_stream(second_archive))
             .await
