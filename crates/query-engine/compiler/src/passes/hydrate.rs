@@ -108,25 +108,7 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 return None;
             }
 
-            // Virtual columns may depend on properties that the user didn't
-            // explicitly request. Pull dependency names from the ontology's
-            // `depends_on` and ensure they're fetched during hydration.
-            for vc in &virtual_columns {
-                let Some(field) = ont_node.fields.iter().find(|f| f.name == vc.column_name) else {
-                    continue;
-                };
-                if let FieldSource::Virtual(vs) = &field.source {
-                    for dep in &vs.depends_on {
-                        if !columns.contains(dep)
-                            && ont_node.fields.iter().any(|f| {
-                                f.name == *dep && matches!(f.source, FieldSource::DatabaseColumn(_))
-                            })
-                        {
-                            columns.push(dep.clone());
-                        }
-                    }
-                }
-            }
+            inject_virtual_dependencies(&mut columns, &virtual_columns, ont_node);
 
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
@@ -162,11 +144,13 @@ fn build_dynamic_specs(input: &Input, ontology: &Ontology) -> Vec<DynamicEntityC
                 return None;
             }
 
-            let (columns, virtual_columns) = split_columns(&requested, node);
+            let (mut columns, virtual_columns) = split_columns(&requested, node);
 
             if columns.is_empty() && virtual_columns.is_empty() {
                 return None;
             }
+
+            inject_virtual_dependencies(&mut columns, &virtual_columns, node);
 
             Some(DynamicEntityColumns {
                 entity_type: name.to_string(),
@@ -176,6 +160,32 @@ fn build_dynamic_specs(input: &Input, ontology: &Ontology) -> Vec<DynamicEntityC
             })
         })
         .collect()
+}
+
+/// Ensure that database-backed columns required by virtual column resolvers
+/// are included in the hydration column list, even if the user didn't
+/// request them. Reads `depends_on` from the ontology's `VirtualSource`.
+fn inject_virtual_dependencies(
+    columns: &mut Vec<String>,
+    virtual_columns: &[VirtualColumnRequest],
+    node: &ontology::NodeEntity,
+) {
+    for vc in virtual_columns {
+        let Some(field) = node.fields.iter().find(|f| f.name == vc.column_name) else {
+            continue;
+        };
+        if let FieldSource::Virtual(vs) = &field.source {
+            for dep in &vs.depends_on {
+                if !columns.contains(dep)
+                    && node.fields.iter().any(|f| {
+                        f.name == *dep && matches!(f.source, FieldSource::DatabaseColumn(_))
+                    })
+                {
+                    columns.push(dep.clone());
+                }
+            }
+        }
+    }
 }
 
 /// Partition requested column names into CH-backed and virtual based on
