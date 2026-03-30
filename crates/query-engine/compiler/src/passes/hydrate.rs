@@ -26,7 +26,8 @@ pub enum HydrationPlan {
 pub struct HydrationTemplate {
     pub entity_type: String,
     /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
-    /// results back to the base query's `_gkg_{alias}_id` / `_gkg_{alias}_type` columns.
+    /// results back to the base query's `_gkg_{alias}_pk` (or `_gkg_{alias}_id`
+    /// when PK == auth ID) column.
     pub node_alias: String,
     /// ClickHouse table to query (resolved from ontology at compile time).
     pub destination_table: String,
