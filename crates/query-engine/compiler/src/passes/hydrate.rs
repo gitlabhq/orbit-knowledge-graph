@@ -131,6 +131,9 @@ fn build_dynamic_specs(input: &Input, ontology: &Ontology) -> Vec<DynamicEntityC
             let node = ontology.get_node(name)?;
 
             let requested: Vec<String> = match input.options.dynamic_columns {
+                // Virtual columns are excluded from dynamic modes: they
+                // require an explicit user request because they incur
+                // external service calls (e.g. Gitaly round-trips).
                 DynamicColumnMode::All => node
                     .fields
                     .iter()
