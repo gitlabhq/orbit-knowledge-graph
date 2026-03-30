@@ -22,7 +22,7 @@ use query_engine::shared::{
 };
 
 use query_engine::compiler::constants::{
-    HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, redaction_id_column,
+    HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, primary_key_column, redaction_id_column,
 };
 
 use crate::content::{ColumnResolverRegistry, PropertyRow, ResolverContext};
@@ -389,11 +389,21 @@ impl HydrationStage {
         Ok(result)
     }
 
+    /// Collect the entity primary keys from authorized rows for hydration lookups.
+    ///
+    /// Entities with indirect authorization (e.g. File → `project_id`) emit a
+    /// separate `_gkg_{alias}_pk` column holding the row's own ID. Entities
+    /// where PK == auth ID (e.g. User, Project) only emit `_gkg_{alias}_id`.
+    /// We try the PK column first, falling back to the redaction ID column.
     fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
-        let id_column = redaction_id_column(&template.node_alias);
+        let pk_col = primary_key_column(&template.node_alias);
+        let id_col = redaction_id_column(&template.node_alias);
         let mut ids: Vec<i64> = result
             .authorized_rows()
-            .filter_map(|row| row.get_column_i64(&id_column))
+            .filter_map(|row| {
+                row.get_column_i64(&pk_col)
+                    .or_else(|| row.get_column_i64(&id_col))
+            })
             .collect();
         ids.sort_unstable();
         ids.dedup();
@@ -407,7 +417,11 @@ impl HydrationStage {
     ) {
         for row in result.authorized_rows_mut() {
             for template in templates {
-                let id = row.get_column_i64(&redaction_id_column(&template.node_alias));
+                let pk_col = primary_key_column(&template.node_alias);
+                let id_col = redaction_id_column(&template.node_alias);
+                let id = row
+                    .get_column_i64(&pk_col)
+                    .or_else(|| row.get_column_i64(&id_col));
                 if let Some(id) = id
                     && let Some(props) = property_map.get(&(template.entity_type.clone(), id))
                 {
