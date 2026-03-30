@@ -15,7 +15,6 @@ GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}"
 SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/siphon"
 
 # Auto-download prebuilt DuckDB shared library on first build (cached in target/).
-# CI uses DUCKDB_LIB_DIR from the build image instead.
 DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 
 [tools]
