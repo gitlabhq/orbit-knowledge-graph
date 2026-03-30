@@ -187,7 +187,7 @@ Example NATS KV:
 - Value: `{ "worker_id": String, "started_at": Instant }`
 - TTL: 60 seconds
 
-After acquiring the lock, the service resolves the repository using a three-tier strategy: if the branch is already cached at the same commit, the cached files are reused directly. If the cache exists at an older commit, an incremental update fetches only the changed paths and their blob content from the Rails internal API, applying renames, deletions, and writes to the cache. If no cache exists or the incremental update fails (e.g. due to a force push), the service falls back to downloading the full repository archive.
+After acquiring the lock, the service resolves the repository using a three-tier strategy: if the branch is already cached at the same commit, the cached files are reused directly. If the cache exists at an older commit, an incremental update fetches only the changed paths and their blob content from the Rails internal API, applying renames, deletions, and writes to the cache. If no cache exists or the incremental update fails (e.g. due to a force push), the service falls back to downloading the full repository archive. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions.
 
 #### Transform (call graph construction)
 
