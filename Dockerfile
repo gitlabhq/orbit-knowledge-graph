@@ -7,7 +7,7 @@ COPY . .
 
 ENV GKG_VERSION=$GKG_VERSION
 
-RUN cargo build --release --package gkg-server && \
+RUN cargo build --release --package gkg-server --features duckdb-client/bundled && \
     cp target/release/gkg-server /gkg-server
 
 FROM registry.access.redhat.com/ubi10/ubi-minimal:10.1
