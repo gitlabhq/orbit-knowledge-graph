@@ -2,10 +2,8 @@ use std::sync::Arc;
 
 use crate::auth::Claims;
 use crate::content::ColumnResolverRegistry;
-use crate::content::gitaly::GitalyContentService;
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
-use gitlab_client::GitlabClient;
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
@@ -42,10 +40,8 @@ impl QueryPipelineService {
         }
     }
 
-    pub fn with_gitlab_client(mut self, gitlab_client: Arc<GitlabClient>) -> Self {
-        let mut registry = ColumnResolverRegistry::new();
-        registry.register("gitaly", Arc::new(GitalyContentService::new(gitlab_client)));
-        self.resolver_registry = Some(Arc::new(registry));
+    pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
+        self.resolver_registry = Some(registry);
         self
     }
 

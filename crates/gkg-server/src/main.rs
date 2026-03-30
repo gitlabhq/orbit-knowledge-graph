@@ -5,6 +5,7 @@ use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::config::AppConfig;
+use gkg_server::content;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
@@ -148,19 +149,25 @@ async fn run_webserver(
 
     let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
 
-    let gitlab_client = config
+    let resolver_registry = config
         .gitlab_client_config()
         .map(|cfg| {
-            gitlab_client::GitlabClient::new(cfg)
+            let client = gitlab_client::GitlabClient::new(cfg)
                 .map(Arc::new)
-                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))
+                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?;
+            let mut registry = content::ColumnResolverRegistry::new();
+            registry.register(
+                "gitaly",
+                Arc::new(content::gitaly::GitalyContentService::new(client)),
+            );
+            Ok::<_, anyhow::Error>(Arc::new(registry))
         })
         .transpose()?;
 
-    if gitlab_client.is_some() {
-        info!("GitlabClient configured — content resolution enabled");
+    if resolver_registry.is_some() {
+        info!("Content resolution enabled (GitlabClient configured)");
     } else {
-        info!("No GitLab client config — content resolution disabled");
+        info!("Content resolution disabled (no GitLab client config)");
     }
 
     let graph_client = config.graph.build_client();
@@ -176,7 +183,7 @@ async fn run_webserver(
         &config.graph,
         cluster_health,
         tls_config,
-        gitlab_client,
+        resolver_registry,
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 

@@ -1,8 +1,8 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::content::ColumnResolverRegistry;
 use clickhouse_client::ClickHouseConfiguration;
-use gitlab_client::GitlabClient;
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -40,7 +40,7 @@ impl KnowledgeGraphServiceImpl {
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
-        gitlab_client: Option<Arc<GitlabClient>>,
+        resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
@@ -49,8 +49,8 @@ impl KnowledgeGraphServiceImpl {
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
         );
-        if let Some(gl) = gitlab_client {
-            pipeline = pipeline.with_gitlab_client(gl);
+        if let Some(registry) = resolver_registry {
+            pipeline = pipeline.with_resolver_registry(registry);
         }
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {
