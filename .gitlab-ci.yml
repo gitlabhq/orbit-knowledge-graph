@@ -154,7 +154,7 @@ cargo-geiger:
     - .mr-and-main-rules
   needs: []
   script:
-    - for pkg in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do
+    - cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | while IFS= read -r pkg; do
         if [ "$pkg" = "duckdb-client" ]; then cargo geiger -p "$pkg" || true;
         else cargo geiger -p "$pkg" --all-features || true; fi;
       done
