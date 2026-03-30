@@ -47,7 +47,11 @@ impl ParameterizedQuery {
     /// Keys follow the `pN` convention from DuckDB codegen, where N matches `$N` in the SQL.
     pub fn params_in_order(&self) -> Vec<&ParamValue> {
         let mut entries: Vec<_> = self.params.iter().collect();
-        entries.sort_by_key(|(k, _)| k[1..].parse::<usize>().unwrap_or(0));
+        entries.sort_by_key(|(k, _)| {
+            k.strip_prefix('p')
+                .and_then(|n| n.parse::<usize>().ok())
+                .unwrap_or(usize::MAX)
+        });
         entries.into_iter().map(|(_, v)| v).collect()
     }
 
