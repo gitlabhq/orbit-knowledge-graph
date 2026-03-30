@@ -931,6 +931,8 @@ mod tests {
 
     #[tokio::test]
     async fn flatten_errors_on_multiple_entries() {
+        // Names don't need to match <slug>-<ref> -- the multiple-entries
+        // check fires before the suffix validation.
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("a")).unwrap();
         std::fs::create_dir(dir.path().join("b")).unwrap();
