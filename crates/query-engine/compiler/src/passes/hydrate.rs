@@ -147,13 +147,11 @@ fn build_dynamic_specs(input: &Input, ontology: &Ontology) -> Vec<DynamicEntityC
                 return None;
             }
 
-            let (mut columns, virtual_columns) = split_columns(&requested, node);
+            let (columns, virtual_columns) = split_columns(&requested, node);
 
             if columns.is_empty() && virtual_columns.is_empty() {
                 return None;
             }
-
-            inject_virtual_dependencies(&mut columns, &virtual_columns, node);
 
             Some(DynamicEntityColumns {
                 entity_type: name.to_string(),
