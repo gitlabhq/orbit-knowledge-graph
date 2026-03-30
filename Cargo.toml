@@ -32,6 +32,37 @@ members = [
   "crates/integration-tests",
   "crates/duckdb-client",
 ]
+# Exclude duckdb-client from default builds — its bundled C++ compilation
+# is expensive and nothing depends on it yet. Build explicitly with:
+#   cargo build -p duckdb-client
+default-members = [
+  "crates/treesitter-visit",
+  "crates/code-parser",
+  "crates/code-graph",
+  "crates/clickhouse-client",
+  "crates/indexer",
+  "crates/query-engine",
+  "crates/query-engine/compiler",
+  "crates/query-engine/types",
+  "crates/query-engine/pipeline",
+  "crates/query-engine/shared",
+  "crates/query-engine/formatters",
+  "crates/query-engine/profiler",
+  "crates/query-engine/compiler-pipeline-macros",
+  "crates/cli",
+
+  "crates/gkg-server",
+  "crates/ontology",
+
+  "crates/health-check",
+  "crates/siphon-proto",
+  "crates/gitaly-protos",
+  "crates/gitlab-client",
+  "crates/xtask",
+  "crates/integration-testkit",
+  "crates/utils",
+  "crates/integration-tests",
+]
 
 [workspace.dependencies]
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "594f02c" }
