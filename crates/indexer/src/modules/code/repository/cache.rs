@@ -468,8 +468,8 @@ mod tests {
     async fn extract_archive_populates_cache() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[
-            ("src/main.rs", b"fn main() {}"),
-            ("src/lib.rs", b"pub mod lib;"),
+            ("project-abc123/src/main.rs", b"fn main() {}"),
+            ("project-abc123/src/lib.rs", b"pub mod lib;"),
         ]);
 
         let path = cache
@@ -477,6 +477,7 @@ mod tests {
             .await
             .unwrap();
 
+        // Archive root stripped during extraction
         let content = tokio::fs::read_to_string(path.join("src/main.rs"))
             .await
             .unwrap();
@@ -493,13 +494,13 @@ mod tests {
     #[tokio::test]
     async fn extract_archive_replaces_existing_files() {
         let (_dir, cache) = create_cache();
-        let first_archive = build_tar_gz(&[("old_file.rs", b"old content")]);
+        let first_archive = build_tar_gz(&[("project-commit1/old_file.rs", b"old content")]);
         cache
             .extract_archive(42, "main", "commit1", archive_stream(first_archive))
             .await
             .unwrap();
 
-        let second_archive = build_tar_gz(&[("new_file.rs", b"new content")]);
+        let second_archive = build_tar_gz(&[("project-commit2/new_file.rs", b"new content")]);
         let path = cache
             .extract_archive(42, "main", "commit2", archive_stream(second_archive))
             .await

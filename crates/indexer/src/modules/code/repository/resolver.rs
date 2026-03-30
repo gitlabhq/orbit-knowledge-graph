@@ -85,18 +85,21 @@ impl RepositoryResolver {
         &self,
         project_id: i64,
         branch: &str,
-        commit_sha: &str,
+        ref_name: &str,
     ) -> Result<PathBuf, HandlerError> {
-        info!(project_id, branch, commit = %commit_sha, "starting full repository download");
+        info!(
+            project_id,
+            branch, ref_name, "starting full repository download"
+        );
 
         let archive_stream = self
             .repository_service
-            .download_archive(project_id, commit_sha)
+            .download_archive(project_id, ref_name)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))?;
 
         self.cache
-            .extract_archive(project_id, branch, commit_sha, archive_stream)
+            .extract_archive(project_id, branch, ref_name, archive_stream)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
     }
@@ -335,7 +338,7 @@ mod tests {
     }
 
     impl ScriptedRepositoryService {
-        fn with_archive(files: &[(&str, &str)]) -> Arc<Self> {
+        fn with_archive(files: &[(&str, &str)], ref_name: &str) -> Arc<Self> {
             let snapshots: Vec<FileSnapshot> = files
                 .iter()
                 .map(|(path, content)| FileSnapshot {
@@ -345,7 +348,7 @@ mod tests {
                 })
                 .collect();
             Arc::new(Self {
-                archive: Mutex::new(build_test_tar_gz(files)),
+                archive: Mutex::new(build_test_tar_gz(files, ref_name)),
                 changed_paths_response: Mutex::new(None),
                 blobs: Mutex::new(snapshots),
             })
@@ -355,8 +358,8 @@ mod tests {
             *self.changed_paths_response.lock() = Some(response);
         }
 
-        fn set_archive(&self, files: &[(&str, &str)]) {
-            *self.archive.lock() = build_test_tar_gz(files);
+        fn set_archive(&self, files: &[(&str, &str)], ref_name: &str) {
+            *self.archive.lock() = build_test_tar_gz(files, ref_name);
             *self.blobs.lock() = files
                 .iter()
                 .map(|(path, content)| FileSnapshot {
@@ -435,12 +438,14 @@ mod tests {
         }
     }
 
-    fn build_test_tar_gz(files: &[(&str, &str)]) -> Vec<u8> {
+    fn build_test_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
         let mut tar_builder = tar::Builder::new(Vec::new());
         for (path, content) in files {
             let content_bytes = content.as_bytes();
             let mut header = tar::Header::new_gnu();
-            header.set_path(path).unwrap();
+            // Simulate Gitaly archive format: <slug>-<ref>/<path>
+            let archive_path = format!("project-{ref_name}/{path}");
+            header.set_path(&archive_path).unwrap();
             header.set_size(content_bytes.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
@@ -543,7 +548,8 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_cache_miss_does_full_download() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(service);
 
         let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
@@ -555,7 +561,8 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_cache_hit_returns_cached_path() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(service);
 
         let first_path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
@@ -566,15 +573,19 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_stale_cache_triggers_incremental_update() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "commit1");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
         resolver.resolve(1, "main", Some("commit1")).await.unwrap();
 
-        service.set_archive(&[
-            ("src/main.rs", "fn main() {}"),
-            ("src/lib.rs", "pub mod lib;"),
-        ]);
+        service.set_archive(
+            &[
+                ("src/main.rs", "fn main() {}"),
+                ("src/lib.rs", "pub mod lib;"),
+            ],
+            "commit2",
+        );
         service.set_changed_paths_response(Ok(
             r#"{"path":"src/lib.rs","status":"ADDED","old_path":"","new_mode":33188,"old_mode":0,"old_blob_id":"","new_blob_id":"blob_src/lib.rs"}"#.to_string()
         ));
@@ -587,13 +598,14 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_force_push_falls_back_to_full_download() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "commit1");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
         resolver.resolve(1, "main", Some("commit1")).await.unwrap();
 
         service.set_changed_paths_response(Err(RepositoryServiceError::ForcePush(1)));
-        service.set_archive(&[("src/new.rs", "fn new() {}")]);
+        service.set_archive(&[("src/new.rs", "fn new() {}")], "commit2");
 
         let path = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
@@ -603,7 +615,8 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_uses_branch_when_no_commit_sha() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")]);
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "main");
         let (_dir, resolver) = create_resolver(service);
 
         let path = resolver.resolve(1, "main", None).await.unwrap();
