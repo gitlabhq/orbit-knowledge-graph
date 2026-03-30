@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::auth::Claims;
 use crate::proto::ExecuteQueryMessage;
@@ -17,11 +18,15 @@ use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
 };
 
+/// Default query timeout if not configured.
+const DEFAULT_QUERY_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Clone)]
 pub struct QueryPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
     profiling: ProfilingConfig,
+    query_timeout: Duration,
 }
 
 impl QueryPipelineService {
@@ -34,10 +39,37 @@ impl QueryPipelineService {
             ontology,
             client,
             profiling,
+            query_timeout: DEFAULT_QUERY_TIMEOUT,
         }
     }
 
+    #[must_use]
+    pub fn with_query_timeout(mut self, timeout: Duration) -> Self {
+        self.query_timeout = timeout;
+        self
+    }
+
     pub async fn run_query(
+        &self,
+        claims: Claims,
+        query_json: &str,
+        tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+        stream: Streaming<ExecuteQueryMessage>,
+    ) -> Result<PipelineOutput, PipelineError> {
+        tokio::time::timeout(
+            self.query_timeout,
+            self.run_pipeline(claims, query_json, tx, stream),
+        )
+        .await
+        .map_err(|_| {
+            PipelineError::Execution(format!(
+                "query timed out after {}s",
+                self.query_timeout.as_secs()
+            ))
+        })?
+    }
+
+    async fn run_pipeline(
         &self,
         claims: Claims,
         query_json: &str,

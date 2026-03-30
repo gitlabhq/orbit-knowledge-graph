@@ -27,9 +27,15 @@ impl GrpcServer {
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
+        query_timeout_secs: Option<u64>,
     ) -> Self {
-        let service =
-            KnowledgeGraphServiceImpl::new(validator, ontology, clickhouse_config, cluster_health);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            ontology,
+            clickhouse_config,
+            cluster_health,
+            query_timeout_secs,
+        );
         Self {
             addr,
             service: KnowledgeGraphServiceServer::new(service),
@@ -79,6 +85,7 @@ mod tests {
             ontology,
             &clickhouse_config,
             cluster_health,
+            None,
             None,
         );
         assert_eq!(server.addr(), addr);

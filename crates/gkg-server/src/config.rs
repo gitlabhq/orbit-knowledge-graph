@@ -115,6 +115,11 @@ pub struct AppConfig {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub tls: TlsConfig,
+    /// Maximum seconds a query pipeline is allowed to run before being
+    /// cancelled. Covers compilation, execution, redaction, and hydration.
+    /// Defaults to 30s if not set.
+    #[serde(default)]
+    pub query_timeout_secs: Option<u64>,
 }
 
 impl AppConfig {
