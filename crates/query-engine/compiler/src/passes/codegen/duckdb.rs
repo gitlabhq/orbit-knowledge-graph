@@ -19,9 +19,6 @@ use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
 
-// TODO: DuckDB executors will need params in positional order. The current
-// HashMap with synthetic `p1`, `p2` keys works for codegen + render, but a
-// real executor should use `Vec<ParamValue>` or a `params_in_order()` API.
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
     let sql = match ast {
