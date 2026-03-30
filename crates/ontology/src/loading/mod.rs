@@ -103,6 +103,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         order_by: schema.settings.etl.default_etl_order_by,
     };
     ontology.etl_settings = etl_settings.clone();
+    ontology.internal_column_prefix = schema.settings.internal_column_prefix;
     // Resolve entity names → physical table names after nodes are loaded (see below).
 
     if !ontology.edge_table.starts_with(&ontology.table_prefix) {
@@ -143,6 +144,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 node_name.clone(),
                 &ontology.default_entity_sort_key,
                 &etl_settings,
+                &ontology.internal_column_prefix,
             )?;
 
             if !entity.destination_table.starts_with(&ontology.table_prefix) {

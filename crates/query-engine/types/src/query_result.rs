@@ -4,10 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use compiler::GKG_COLUMN_PREFIX;
 use compiler::constants::{
-    EDGE_KINDS_COLUMN, NEIGHBOR_ID_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
+    edge_kinds_column, neighbor_id_column, neighbor_type_column, path_column,
 };
+use compiler::internal_column_prefix;
 use compiler::{QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
@@ -139,7 +139,7 @@ impl QueryResultRow {
         let prefix = format!("{alias}_");
         let mut props = HashMap::new();
         for (name, value) in &self.columns {
-            if name.starts_with(GKG_COLUMN_PREFIX) {
+            if name.starts_with(internal_column_prefix()) {
                 continue;
             }
             if skip_prefixes.iter().any(|sp| name.starts_with(sp)) {
@@ -189,16 +189,20 @@ impl QueryResult {
                 let columns = ArrowUtils::extract_row(batch, row_idx);
 
                 let dynamic_nodes = if is_path_finding {
-                    ArrowUtils::get_i64_string_pairs(batch, PATH_COLUMN, row_idx)
+                    ArrowUtils::get_i64_string_pairs(batch, path_column(), row_idx)
                         .into_iter()
                         .map(|(id, t)| NodeRef::new(id, t))
                         .collect()
                 } else if is_neighbors {
                     let neighbor =
-                        ArrowUtils::get_column::<Int64Type>(batch, NEIGHBOR_ID_COLUMN, row_idx)
+                        ArrowUtils::get_column::<Int64Type>(batch, neighbor_id_column(), row_idx)
                             .and_then(|id| {
-                                ArrowUtils::get_column_string(batch, NEIGHBOR_TYPE_COLUMN, row_idx)
-                                    .map(|t| NodeRef::new(id, t))
+                                ArrowUtils::get_column_string(
+                                    batch,
+                                    neighbor_type_column(),
+                                    row_idx,
+                                )
+                                .map(|t| NodeRef::new(id, t))
                             });
                     neighbor.into_iter().collect()
                 } else if !traversal_path_columns.is_empty() {
@@ -212,7 +216,7 @@ impl QueryResult {
                 };
 
                 let edge_kinds = if is_path_finding {
-                    ArrowUtils::get_string_list(batch, EDGE_KINDS_COLUMN, row_idx)
+                    ArrowUtils::get_string_list(batch, edge_kinds_column(), row_idx)
                 } else {
                     Vec::new()
                 };

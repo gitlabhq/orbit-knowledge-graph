@@ -348,6 +348,12 @@
           },
           "minItems": 1
         },
+        "internal_column_prefix": {
+          "type": "string",
+          "pattern": "^_[a-z_]+$",
+          "minLength": 5,
+          "description": "Prefix for internal columns injected by the compiler (e.g. '_gkg_'). Ontology field names starting with this prefix are rejected at load time."
+        },
         "skip_security_filter_for_entities": {
           "type": "array",
           "items": { "type": "string" },
@@ -358,7 +364,7 @@
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."
         }
       },
-      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "edge_columns", "etl"],
+      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "edge_columns", "internal_column_prefix", "etl"],
       "additionalProperties": false
     },
 

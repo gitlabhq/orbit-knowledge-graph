@@ -910,6 +910,135 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
     );
 }
 
+// ─── Dynamic hydration with indirect-auth entities ──────────────────────────
+
+/// Verify that dynamic hydration (Neighbors) correctly resolves properties for
+/// indirect-auth entities (File, Definition) where the entity PK differs from
+/// the authorization ID. Dynamic hydration uses NodeRef.id which comes from
+/// edge source_id/target_id (the actual entity PK), so this should work
+/// without the static-hydration PK fix — but we test it to be sure.
+async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = test_security_context();
+    let client = Arc::new(ctx.create_client());
+
+    // File 5001 has outgoing DEFINES edges to Definition 6001
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "f", "entity": "File", "node_ids": [5001]},
+        "neighbors": {"node": "f", "direction": "outgoing"}
+    }"#;
+
+    let (result, _ctx_ref, plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
+
+    assert!(
+        matches!(plan, HydrationPlan::Dynamic(_)),
+        "neighbors should produce Dynamic hydration plan"
+    );
+
+    let authorized: Vec<_> = result.authorized_rows().collect();
+    assert!(
+        !authorized.is_empty(),
+        "File 5001 should have at least one outgoing neighbor"
+    );
+
+    // The neighbor should be Definition 6001 with hydrated properties
+    let has_definition_neighbor = authorized.iter().any(|row| {
+        row.dynamic_nodes()
+            .iter()
+            .any(|n| n.entity_type == "Definition" && n.id == 6001 && !n.properties.is_empty())
+    });
+    assert!(
+        has_definition_neighbor,
+        "Definition 6001 should appear as a neighbor with hydrated properties"
+    );
+
+    // Verify the actual property value
+    for row in &authorized {
+        for node in row.dynamic_nodes() {
+            if node.entity_type == "Definition" && node.id == 6001 {
+                assert_eq!(
+                    node.properties
+                        .get("name")
+                        .and_then(|v| v.as_string().map(|s| s.as_str())),
+                    Some("greet"),
+                    "Definition 6001 name should be 'greet'"
+                );
+            }
+        }
+    }
+}
+
+/// Verify that dynamic hydration (PathFinding) correctly resolves properties for
+/// indirect-auth entities. The path File->Definition traverses entities where
+/// PK != auth ID. NodeRef.id should carry the entity PK (from edge source_id/
+/// target_id), so hydration queries `gl_file WHERE id = <file_id>`.
+async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = test_security_context();
+    let client = Arc::new(ctx.create_client());
+
+    // Path from File 5001 to Definition 6001 (single hop via DEFINES)
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "File", "node_ids": [5001]},
+            {"id": "end", "entity": "Definition", "node_ids": [6001]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+    }"#;
+
+    let (result, _ctx_ref, plan) =
+        compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
+
+    assert!(
+        matches!(plan, HydrationPlan::Dynamic(_)),
+        "path_finding should produce Dynamic hydration plan"
+    );
+
+    let row = result
+        .authorized_rows()
+        .next()
+        .expect("should find a path from File 5001 to Definition 6001");
+    let path_nodes = row.path_nodes();
+    assert_eq!(path_nodes.len(), 2, "path should be File -> Definition");
+
+    // File 5001 = lib.rs
+    let file_node = &path_nodes[0];
+    assert_eq!(file_node.entity_type, "File");
+    assert_eq!(file_node.id, 5001);
+    assert!(
+        !file_node.properties.is_empty(),
+        "File node should have hydrated properties (PK 5001, not project_id 1000)"
+    );
+    assert_eq!(
+        file_node
+            .properties
+            .get("name")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
+        Some("lib.rs"),
+        "File 5001 name should be 'lib.rs'"
+    );
+
+    // Definition 6001 = greet
+    let def_node = &path_nodes[1];
+    assert_eq!(def_node.entity_type, "Definition");
+    assert_eq!(def_node.id, 6001);
+    assert!(
+        !def_node.properties.is_empty(),
+        "Definition node should have hydrated properties (PK 6001, not project_id 1000)"
+    );
+    assert_eq!(
+        def_node
+            .properties
+            .get("name")
+            .and_then(|v| v.as_string().map(|s| s.as_str())),
+        Some("greet"),
+        "Definition 6001 name should be 'greet'"
+    );
+}
+
 /// Verify that entities where PK == auth ID (User, Group) still hydrate correctly
 /// after the fix (no regression from the PK-fallback logic).
 async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
@@ -980,8 +1109,10 @@ async fn hydration_integration() {
         consolidated_hydration_filters_null_properties,
         consolidated_hydration_multiple_ids_same_type,
         consolidated_hydration_single_query_execution,
-        // traversal static hydration correctness
+        // static + dynamic hydration with indirect-auth entities
         traversal_static_hydration_indirect_auth_entities,
         traversal_static_hydration_default_auth_entities,
+        neighbors_dynamic_hydration_indirect_auth_entities,
+        path_finding_dynamic_hydration_indirect_auth_entities,
     );
 }

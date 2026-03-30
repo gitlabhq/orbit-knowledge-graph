@@ -47,10 +47,10 @@ pub mod pipelines;
 
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
-    EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_KINDS_COLUMN, EDGE_SRC_SUFFIX,
-    EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, GKG_COLUMN_PREFIX, HYDRATION_NODE_ALIAS,
-    NEIGHBOR_ID_COLUMN, NEIGHBOR_IS_OUTGOING_COLUMN, NEIGHBOR_TYPE_COLUMN, PATH_COLUMN,
-    RELATIONSHIP_TYPE_COLUMN,
+    EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX,
+    EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, HYDRATION_NODE_ALIAS, edge_kinds_column,
+    internal_column_prefix, neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column,
+    path_column, relationship_type_column,
 };
 pub use error::{QueryError, Result};
 pub use input::{

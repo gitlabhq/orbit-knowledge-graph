@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 
 use crate::OntologyError;
-use crate::constants::{DEFAULT_PRIMARY_KEY, INTERNAL_COLUMN_PREFIX};
+use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::entities::{
     DataType, EnumType, Field, FieldSource, NodeEntity, NodeStyle, RedactionConfig, VirtualSource,
 };
@@ -138,6 +138,7 @@ impl NodeYaml {
         name: String,
         default_entity_sort_key: &[String],
         etl_settings: &EtlSettings,
+        internal_column_prefix: &str,
     ) -> Result<NodeEntity, OntologyError> {
         let mut primary_keys = Vec::new();
 
@@ -186,9 +187,9 @@ impl NodeYaml {
 
         // Reject field names that collide with the internal redaction column prefix.
         for field in &fields {
-            if field.name.starts_with(INTERNAL_COLUMN_PREFIX) {
+            if field.name.starts_with(internal_column_prefix) {
                 return Err(OntologyError::Validation(format!(
-                    "field '{}' on node '{}' uses reserved prefix '{INTERNAL_COLUMN_PREFIX}'",
+                    "field '{}' on node '{}' uses reserved prefix '{internal_column_prefix}'",
                     field.name, name
                 )));
             }
