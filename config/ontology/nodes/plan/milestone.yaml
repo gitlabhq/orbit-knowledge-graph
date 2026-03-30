@@ -5,7 +5,7 @@ domain: plan
 description: A milestone for tracking progress toward a goal within a project or group
 label: title
 destination_table: gl_milestone
-default_columns: [id, iid, title, state]
+default_columns: [id, iid, title, state, due_date, start_date]
 
 style:
   size: 30
