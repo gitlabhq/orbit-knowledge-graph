@@ -4,6 +4,11 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[features]
+# Compile DuckDB from C++ source for a fully static, self-contained binary.
+# Use for Docker/release builds: cargo build --release --features duckdb-client/bundled
+bundled = ["duckdb/bundled"]
+
 [dependencies]
 duckdb = { workspace = true }
 arrow = { workspace = true }
