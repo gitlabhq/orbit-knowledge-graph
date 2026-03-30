@@ -85,23 +85,26 @@ impl RepositoryResolver {
         &self,
         project_id: i64,
         branch: &str,
-        commit_sha: &str,
+        ref_name: &str,
     ) -> Result<PathBuf, HandlerError> {
-        info!(project_id, branch, commit = %commit_sha, "starting full repository download");
+        info!(
+            project_id,
+            branch, ref_name, "starting full repository download"
+        );
 
         let archive_stream = self
             .repository_service
-            .download_archive(project_id, commit_sha)
+            .download_archive(project_id, ref_name)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))?;
 
         let repo_dir = self
             .cache
-            .extract_archive(project_id, branch, commit_sha, archive_stream)
+            .extract_archive(project_id, branch, ref_name, archive_stream)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))?;
 
-        flatten_gitaly_archive(&repo_dir, commit_sha).await?;
+        flatten_gitaly_archive(&repo_dir, ref_name).await?;
 
         Ok(repo_dir)
     }
@@ -375,12 +378,9 @@ async fn flatten_gitaly_archive(dir: &Path, ref_name: &str) -> Result<(), Handle
     // Rename the archive root to a staging name to avoid collisions
     // between the directory itself and any child with the same name.
     // Stays on the same filesystem so rename is atomic.
+    // Note: extract_archive clears the repo_dir before extraction, so
+    // a leftover staging dir from a previous failed run is not possible.
     let staging = dir.join(".gkg-flatten-staging");
-    if staging.exists() {
-        tokio::fs::remove_dir_all(&staging)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to clean staging dir: {e}")))?;
-    }
     tokio::fs::rename(&archive_root, &staging)
         .await
         .map_err(|e| HandlerError::Processing(format!("failed to stage archive root: {e}")))?;
