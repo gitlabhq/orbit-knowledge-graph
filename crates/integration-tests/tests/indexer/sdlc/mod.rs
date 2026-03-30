@@ -36,8 +36,11 @@ async fn namespace_indexing() {
     run_subtests!(
         &ctx,
         projects::processes_projects,
+        projects::computes_full_path_for_projects,
         projects::creates_member_of_edges_for_projects,
         groups::processes_and_transforms_groups,
+        groups::computes_full_path_for_top_level_group,
+        groups::computes_full_path_for_nested_subgroups,
         groups::creates_group_edges,
         groups::creates_member_of_edges_for_groups,
         labels::processes_labels_with_edges,

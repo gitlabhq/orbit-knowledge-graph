@@ -3,8 +3,8 @@ use gkg_utils::arrow::ArrowUtils;
 
 use crate::indexer::common::{
     TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
-    assert_node_count, create_member, create_namespace, create_user, handler_context,
-    namespace_envelope, namespace_handler,
+    assert_node_count, create_member, create_namespace, create_namespace_with_path, create_user,
+    handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_and_transforms_groups(ctx: &TestContext) {
@@ -43,6 +43,53 @@ pub async fn creates_group_edges(ctx: &TestContext) {
     assert_edge_count_for_traversal_path(ctx, "OWNER", "User", "Group", "1/100/", 1).await;
     assert_edge_count_for_traversal_path(ctx, "OWNER", "User", "Group", "1/100/101/", 1).await;
     assert_edges_have_traversal_path(ctx, "CONTAINS", "Group", "Group", "1/100/101/", 1).await;
+}
+
+pub async fn computes_full_path_for_top_level_group(ctx: &TestContext) {
+    create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("acme")).await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    let result = ctx
+        .query("SELECT full_path FROM gl_group FINAL WHERE id = 100")
+        .await;
+    let full_path = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
+        .expect("full_path column");
+    assert_eq!(full_path.value(0), "acme");
+}
+
+pub async fn computes_full_path_for_nested_subgroups(ctx: &TestContext) {
+    create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("gitlab-org")).await;
+    create_namespace_with_path(ctx, 200, Some(100), 0, "1/100/200/", Some("orbit")).await;
+    create_namespace_with_path(ctx, 300, Some(200), 0, "1/100/200/300/", Some("knowledge-graph"))
+        .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    assert_node_count(ctx, "gl_group", 3).await;
+
+    let result = ctx
+        .query("SELECT id, full_path FROM gl_group FINAL ORDER BY id")
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(&result[0], "id")
+        .expect("id column");
+    let paths = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
+        .expect("full_path column");
+
+    assert_eq!(ids.value(0), 100);
+    assert_eq!(paths.value(0), "gitlab-org");
+    assert_eq!(ids.value(1), 200);
+    assert_eq!(paths.value(1), "gitlab-org/orbit");
+    assert_eq!(ids.value(2), 300);
+    assert_eq!(paths.value(2), "gitlab-org/orbit/knowledge-graph");
 }
 
 pub async fn creates_member_of_edges_for_groups(ctx: &TestContext) {
