@@ -195,11 +195,20 @@ impl GitalyContentService {
 }
 
 /// Return the byte-range slice of `content`, or the full string when no
-/// range is specified. Falls back to the full content if the range is
-/// out of bounds.
+/// range is specified. Returns an empty string if the range is out of
+/// bounds or lands on a UTF-8 boundary.
 fn slice_content(content: &str, start_byte: Option<i64>, end_byte: Option<i64>) -> &str {
     match (start_byte, end_byte) {
-        (Some(s), Some(e)) => content.get(s as usize..e as usize).unwrap_or(content),
+        (Some(s), Some(e)) if s >= 0 && e >= s => {
+            let s = s as usize;
+            let e = (e as usize).min(content.len());
+            if s >= content.len() {
+                return "";
+            }
+            // str::get checks UTF-8 char boundaries and returns None
+            // if either index falls inside a multi-byte character.
+            content.get(s..e).unwrap_or("")
+        }
         _ => content,
     }
 }
@@ -285,8 +294,19 @@ mod tests {
     }
 
     #[test]
-    fn slice_falls_back_on_out_of_bounds() {
+    fn slice_clamps_end_to_content_len() {
         assert_eq!(slice_content("hi", Some(0), Some(999)), "hi");
+    }
+
+    #[test]
+    fn slice_empty_when_start_past_end_of_content() {
+        assert_eq!(slice_content("hi", Some(100), Some(200)), "");
+    }
+
+    #[test]
+    fn slice_empty_on_utf8_boundary() {
+        // 'é' is 2 bytes (0xC3 0xA9). Slicing at byte 1 lands mid-character.
+        assert_eq!(slice_content("é", Some(0), Some(1)), "");
     }
 
     // ── resolve_batch ───────────────────────────────────────────────────
