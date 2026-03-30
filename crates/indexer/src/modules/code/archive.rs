@@ -55,7 +55,17 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
         }
 
         let relative_path = entry_path.strip_prefix("/").unwrap_or(&entry_path);
-        let dest = target_canonical.join(relative_path);
+
+        // Gitaly archives wrap all files under a top-level directory named
+        // `<project>-<ref>/` (like `git archive --prefix`). Strip it so the
+        // extracted tree matches the repo root.
+        let relative_path = strip_archive_root(relative_path);
+        if relative_path.as_os_str().is_empty() {
+            // This entry is the archive root directory itself — skip it.
+            continue;
+        }
+
+        let dest = target_canonical.join(&relative_path);
 
         let dest_canonical = if dest.exists() {
             dest.canonicalize()
@@ -105,6 +115,17 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
     }
 
     Ok(())
+}
+
+/// Strip the first path component (the archive's top-level directory).
+///
+/// Gitaly archives prefix every entry with `<project>-<ref>/`, e.g.
+/// `gitlab-test-master/files/ruby/regex.rb`. This function returns
+/// `files/ruby/regex.rb`.
+fn strip_archive_root(path: &Path) -> PathBuf {
+    let mut components = path.components();
+    components.next(); // skip the archive root directory
+    components.as_path().to_path_buf()
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
@@ -173,10 +194,12 @@ mod tests {
     #[test]
     fn extracts_valid_archive() {
         let dir = tempfile::tempdir().unwrap();
-        let data = build_tar_gz(vec![("src/main.rs", b"fn main() {}")]);
+        // Gitaly archives wrap files under a top-level directory
+        let data = build_tar_gz(vec![("project-main/src/main.rs", b"fn main() {}")]);
 
         extract_tar_gz(&data, dir.path()).unwrap();
 
+        // The archive root ("project-main/") should be stripped
         let content = std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap();
         assert_eq!(content, "fn main() {}");
     }
@@ -205,7 +228,7 @@ mod tests {
     #[test]
     fn rejects_path_traversal() {
         let dir = tempfile::tempdir().unwrap();
-        let data = build_tar_gz_with_raw_path("../escape.txt", b"malicious");
+        let data = build_tar_gz_with_raw_path("root/../../escape.txt", b"malicious");
 
         let result = extract_tar_gz(&data, dir.path());
 
@@ -217,7 +240,8 @@ mod tests {
     #[test]
     fn rejects_symlink_escaping_target_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let data = build_tar_gz_with_symlink("legit.txt", "escape", "../../etc/passwd");
+        let data =
+            build_tar_gz_with_symlink("root/legit.txt", "root/escape", "../../../etc/passwd");
 
         let result = extract_tar_gz(&data, dir.path());
 

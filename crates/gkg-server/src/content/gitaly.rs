@@ -152,9 +152,9 @@ impl ColumnResolver for GitalyContentService {
 
 /// Extract an i64 from a ColumnValue, handling both Int64 and String representations.
 fn col_as_i64(v: &ColumnValue) -> Option<i64> {
-    v.as_int64().copied().or_else(|| {
-        v.as_string().and_then(|s| s.parse::<i64>().ok())
-    })
+    v.as_int64()
+        .copied()
+        .or_else(|| v.as_string().and_then(|s| s.parse::<i64>().ok()))
 }
 
 impl GitalyContentService {
