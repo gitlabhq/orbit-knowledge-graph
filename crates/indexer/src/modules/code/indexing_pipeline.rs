@@ -71,10 +71,13 @@ impl CodeIndexingPipeline {
         context.progress.notify_in_progress().await;
 
         let indexed_at = Utc::now();
+        // Use the commit SHA if available; fall back to branch name.
+        let ref_name = request.commit_sha.as_deref().unwrap_or(&request.branch);
         self.run_indexing(
             context,
             request.project_id,
             &request.branch,
+            ref_name,
             &request.traversal_path,
             indexed_at,
             &repo_path,
@@ -132,6 +135,7 @@ impl CodeIndexingPipeline {
         context: &HandlerContext,
         project_id: i64,
         branch: &str,
+        commit_sha: &str,
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
         repo_dir: &Path,
@@ -184,6 +188,7 @@ impl CodeIndexingPipeline {
             context,
             project_id,
             branch,
+            commit_sha,
             traversal_path,
             indexed_at,
             &graph_data,
@@ -211,6 +216,7 @@ impl CodeIndexingPipeline {
         ctx: &HandlerContext,
         project_id: i64,
         branch: &str,
+        commit_sha: &str,
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
         graph_data: &GraphData,
@@ -219,6 +225,7 @@ impl CodeIndexingPipeline {
             traversal_path.to_string(),
             project_id,
             branch.to_string(),
+            commit_sha.to_string(),
             indexed_at,
         );
 
