@@ -109,24 +109,21 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
             }
 
             // Virtual columns may depend on properties that the user didn't
-            // explicitly request.  Ensure those dependency columns are fetched
-            // during hydration so the resolver can read them from the property map.
-            if !virtual_columns.is_empty() {
-                for dep in &[
-                    "project_id",
-                    "branch",
-                    "path",
-                    "file_path",
-                    "start_byte",
-                    "end_byte",
-                ] {
-                    let dep_s = (*dep).to_string();
-                    if !columns.contains(&dep_s)
-                        && ont_node.fields.iter().any(|f| {
-                            f.name == *dep && matches!(f.source, FieldSource::DatabaseColumn(_))
-                        })
-                    {
-                        columns.push(dep_s);
+            // explicitly request. Pull dependency names from the ontology's
+            // `depends_on` and ensure they're fetched during hydration.
+            for vc in &virtual_columns {
+                let Some(field) = ont_node.fields.iter().find(|f| f.name == vc.column_name) else {
+                    continue;
+                };
+                if let FieldSource::Virtual(vs) = &field.source {
+                    for dep in &vs.depends_on {
+                        if !columns.contains(dep)
+                            && ont_node.fields.iter().any(|f| {
+                                f.name == *dep && matches!(f.source, FieldSource::DatabaseColumn(_))
+                            })
+                        {
+                            columns.push(dep.clone());
+                        }
                     }
                 }
             }
@@ -198,6 +195,7 @@ fn split_columns(
                     service,
                     lookup,
                     disabled,
+                    ..
                 }) => {
                     if !disabled {
                         virtual_columns.push(VirtualColumnRequest {

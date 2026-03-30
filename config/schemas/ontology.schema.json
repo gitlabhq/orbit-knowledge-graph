@@ -64,6 +64,12 @@
           "type": "boolean",
           "description": "When true, the virtual field is declared but not resolvable. Queries requesting it will receive null.",
           "default": false
+        },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Column-backed properties this virtual field needs in the property map for resolution. The compiler ensures these are fetched during hydration even if the user didn't request them.",
+          "default": []
         }
       },
       "required": ["service", "lookup"],
