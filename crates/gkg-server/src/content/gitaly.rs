@@ -12,20 +12,19 @@ use super::{ColumnResolver, PropertyRow, ResolverContext};
 
 /// Gitaly-specific parameters extracted from a hydrated entity row.
 ///
-/// `branch` is used as the Gitaly revision ref. A commit SHA would be
-/// more precise but isn't available in the current schema — the indexer
-/// stores the branch name at index time.
+/// `revision` is the git ref used in `<revision>:<path>` for `list_blobs`.
+/// Prefers `commit_sha` (immutable) over `branch` (can advance).
 #[derive(Debug, Clone)]
 pub struct GitalyBlobRequest {
     pub project_id: i64,
-    pub branch: String,
+    pub revision: String,
     pub file_path: String,
     pub start_byte: Option<i64>,
     pub end_byte: Option<i64>,
 }
 
 /// File identity key for deduplicating Gitaly fetches.
-type FileKey = (i64, String, String); // (project_id, branch, file_path)
+type FileKey = (i64, String, String); // (project_id, revision, file_path)
 
 /// Resolves file content by calling the GitLab internal API's `list_blobs`
 /// endpoint, which streams blobs from Gitaly via Workhorse.
@@ -56,14 +55,14 @@ impl ColumnResolver for GitalyContentService {
             .map(|props| Self::build_request(props))
             .collect();
 
-        // Deduplicate: each unique (project_id, branch, file_path) is
+        // Deduplicate: each unique (project_id, revision, file_path) is
         // fetched once via list_blobs.
         let mut file_cache: HashMap<FileKey, Option<String>> = HashMap::new();
 
         // Group unique file keys by project_id for batched Gitaly calls.
         let mut by_project: HashMap<i64, Vec<FileKey>> = HashMap::new();
         for req in requests.iter().flatten() {
-            let key = (req.project_id, req.branch.clone(), req.file_path.clone());
+            let key = (req.project_id, req.revision.clone(), req.file_path.clone());
             if !file_cache.contains_key(&key) {
                 file_cache.insert(key.clone(), None);
                 by_project.entry(req.project_id).or_default().push(key);
@@ -75,7 +74,7 @@ impl ColumnResolver for GitalyContentService {
             let client = Arc::clone(&self.client);
             let revisions: Vec<String> = keys
                 .iter()
-                .map(|(_, branch, path)| format!("{branch}:{path}"))
+                .map(|(_, revision, path)| format!("{revision}:{path}"))
                 .collect();
             let keys = keys.clone();
             async move {
@@ -140,7 +139,7 @@ impl ColumnResolver for GitalyContentService {
             .iter()
             .map(|req| {
                 let req = req.as_ref()?;
-                let key = (req.project_id, req.branch.clone(), req.file_path.clone());
+                let key = (req.project_id, req.revision.clone(), req.file_path.clone());
                 let content = file_cache.get(&key)?.as_deref()?;
                 Some(ColumnValue::String(
                     slice_content(content, req.start_byte, req.end_byte).to_string(),
@@ -160,8 +159,8 @@ fn col_as_i64(v: &ColumnValue) -> Option<i64> {
 impl GitalyContentService {
     /// Extract a [`GitalyBlobRequest`] from a hydrated property map.
     ///
-    ///
-    /// Expects `project_id`, `branch`, and either `path` (File) or
+    /// Builds the `revision` from `commit_sha` (preferred) or `branch`
+    /// (fallback). Expects `project_id` and either `path` (File) or
     /// `file_path` (Definition). Returns `None` if any required field
     /// is missing or byte ranges are invalid.
     pub fn build_request(props: &HashMap<String, ColumnValue>) -> Option<GitalyBlobRequest> {
@@ -172,7 +171,7 @@ impl GitalyContentService {
         // Prefer commit_sha (immutable) over branch (can advance between
         // indexing and query time). Fall back to branch if commit_sha is
         // missing or empty.
-        let branch = props
+        let revision = props
             .get("commit_sha")
             .and_then(|v| v.as_string())
             .filter(|s| !s.is_empty())
@@ -194,7 +193,7 @@ impl GitalyContentService {
 
         Some(GitalyBlobRequest {
             project_id,
-            branch,
+            revision,
             file_path,
             start_byte,
             end_byte,
@@ -234,7 +233,7 @@ mod tests {
 
         let req = GitalyContentService::build_request(&props).unwrap();
         assert_eq!(req.project_id, 42);
-        assert_eq!(req.branch, "main");
+        assert_eq!(req.revision, "main");
         assert_eq!(req.file_path, "src/lib.rs");
         assert_eq!(req.start_byte, None);
         assert_eq!(req.end_byte, None);
