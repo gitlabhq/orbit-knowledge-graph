@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 
 use arrow::array::{
-    Array, BooleanArray, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array,
+    Array, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
     LargeStringArray, ListArray, PrimitiveArray, StringArray, StructArray,
     TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-    TimestampSecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+    TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow::datatypes::ArrowPrimitiveType;
 use arrow::record_batch::RecordBatch;
