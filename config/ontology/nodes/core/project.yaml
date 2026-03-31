@@ -101,7 +101,11 @@ etl:
     traversal_paths.traversal_path AS traversal_path
   from: >-
     siphon_projects project
-    INNER JOIN project_namespace_traversal_paths traversal_paths
+    INNER JOIN (
+      SELECT id, traversal_path
+      FROM project_namespace_traversal_paths
+      WHERE startsWith(traversal_path, {traversal_path:String})
+    ) traversal_paths
     ON project.id = traversal_paths.id
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: project._siphon_replicated_at
