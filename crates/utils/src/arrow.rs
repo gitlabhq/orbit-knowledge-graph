@@ -19,12 +19,48 @@ pub enum ColumnValue {
     Null,
 }
 
+/// Types that can be extracted from a [`ColumnValue`], with fallback
+/// parsing from the string representation. Useful because ClickHouse
+/// hydration (`toJSONString(map(...))`) stringifies all values.
+pub trait FromColumnValue: Sized {
+    fn from_column_value(v: &ColumnValue) -> Option<Self>;
+}
+
+/// Implement [`FromColumnValue`] for a type. Tries the native accessor
+/// first, then falls back to parsing from the string variant.
+macro_rules! impl_coerce {
+    // Numeric: try native variant, then parse from string
+    ($ty:ty, native: $accessor:ident) => {
+        impl FromColumnValue for $ty {
+            fn from_column_value(v: &ColumnValue) -> Option<Self> {
+                v.$accessor()
+                    .copied()
+                    .map(|n| n as $ty)
+                    .or_else(|| v.as_string().and_then(|s| s.parse().ok()))
+            }
+        }
+    };
+    // String-only: extract or parse from string variant
+    ($ty:ty, from_str: $parse:expr) => {
+        impl FromColumnValue for $ty {
+            fn from_column_value(v: &ColumnValue) -> Option<Self> {
+                v.as_string().and_then($parse)
+            }
+        }
+    };
+}
+
+impl_coerce!(i64, native: as_int64);
+impl_coerce!(f64, native: as_float64);
+impl_coerce!(String, from_str: |s| Some(s.clone()));
+impl_coerce!(bool, from_str: |s| match s.as_str() {
+    "true" | "1" => Some(true),
+    "false" | "0" => Some(false),
+    _ => None,
+});
+
 impl ColumnValue {
-    /// Coerce to the requested type, parsing from string if needed.
-    ///
-    /// Hydration stores all values as strings via ClickHouse's
-    /// `toJSONString(map(...))`. This method handles both the native
-    /// representation and the stringified one:
+    /// Extract as the requested type, parsing from string if needed.
     ///
     /// ```
     /// # use gkg_utils::arrow::ColumnValue;
@@ -33,41 +69,8 @@ impl ColumnValue {
     /// assert_eq!(ColumnValue::String("hello".into()).coerce::<i64>(), None);
     /// assert_eq!(ColumnValue::String("hello".into()).coerce::<String>(), Some("hello".into()));
     /// ```
-    pub fn coerce<T: CoerceFromColumnValue>(&self) -> Option<T> {
-        T::coerce_from(self)
-    }
-}
-
-/// Trait for types that can be extracted from a [`ColumnValue`],
-/// with fallback parsing from string representation.
-pub trait CoerceFromColumnValue: Sized {
-    fn coerce_from(v: &ColumnValue) -> Option<Self>;
-}
-
-impl CoerceFromColumnValue for i64 {
-    fn coerce_from(v: &ColumnValue) -> Option<Self> {
-        v.as_int64()
-            .copied()
-            .or_else(|| v.as_string().and_then(|s| s.parse().ok()))
-    }
-}
-
-impl CoerceFromColumnValue for f64 {
-    fn coerce_from(v: &ColumnValue) -> Option<Self> {
-        v.as_float64()
-            .copied()
-            .or_else(|| v.as_string().and_then(|s| s.parse().ok()))
-    }
-}
-
-impl CoerceFromColumnValue for String {
-    fn coerce_from(v: &ColumnValue) -> Option<Self> {
-        match v {
-            ColumnValue::String(s) => Some(s.clone()),
-            ColumnValue::Int64(n) => Some(n.to_string()),
-            ColumnValue::Float64(n) => Some(n.to_string()),
-            ColumnValue::Null => None,
-        }
+    pub fn coerce<T: FromColumnValue>(&self) -> Option<T> {
+        T::from_column_value(self)
     }
 }
 
