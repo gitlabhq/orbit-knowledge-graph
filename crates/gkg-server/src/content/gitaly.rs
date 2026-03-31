@@ -149,13 +149,6 @@ impl ColumnResolver for GitalyContentService {
     }
 }
 
-/// Extract an i64 from a ColumnValue, handling both Int64 and String representations.
-fn col_as_i64(v: &ColumnValue) -> Option<i64> {
-    v.as_int64()
-        .copied()
-        .or_else(|| v.as_string().and_then(|s| s.parse::<i64>().ok()))
-}
-
 impl GitalyContentService {
     /// Extract a [`GitalyBlobRequest`] from a hydrated property map.
     ///
@@ -164,27 +157,22 @@ impl GitalyContentService {
     /// `file_path` (Definition). Returns `None` if any required field
     /// is missing or byte ranges are invalid.
     pub fn build_request(props: &HashMap<String, ColumnValue>) -> Option<GitalyBlobRequest> {
-        // Hydration stores all values as strings (via toJSONString/map), so
-        // integer fields may arrive as ColumnValue::String("2") rather than
-        // ColumnValue::Int64(2). Parse both representations.
-        let project_id = props.get("project_id").and_then(col_as_i64)?;
-        // Prefer commit_sha (immutable) over branch (can advance between
-        // indexing and query time). Fall back to branch if commit_sha is
-        // missing or empty.
-        let revision = props
-            .get("commit_sha")
-            .and_then(|v| v.as_string())
-            .filter(|s| !s.is_empty())
-            .or_else(|| props.get("branch").and_then(|v| v.as_string()))
-            .cloned()?;
+        let project_id: i64 = props.get("project_id").and_then(|v| v.coerce())?;
 
-        let file_path = props
+        // Prefer commit_sha (immutable) over branch (can advance).
+        let revision: String = props
+            .get("commit_sha")
+            .and_then(|v| v.coerce::<String>())
+            .filter(|s| !s.is_empty())
+            .or_else(|| props.get("branch").and_then(|v| v.coerce()))?;
+
+        let file_path: String = props
             .get("file_path")
             .or_else(|| props.get("path"))
-            .and_then(|v| v.as_string().cloned())?;
+            .and_then(|v| v.coerce())?;
 
-        let start_byte = props.get("start_byte").and_then(col_as_i64);
-        let end_byte = props.get("end_byte").and_then(col_as_i64);
+        let start_byte: Option<i64> = props.get("start_byte").and_then(|v| v.coerce());
+        let end_byte: Option<i64> = props.get("end_byte").and_then(|v| v.coerce());
 
         match (start_byte, end_byte) {
             (Some(s), Some(e)) if s < 0 || e < 0 || s > e => return None,

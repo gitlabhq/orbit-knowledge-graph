@@ -19,6 +19,58 @@ pub enum ColumnValue {
     Null,
 }
 
+impl ColumnValue {
+    /// Coerce to the requested type, parsing from string if needed.
+    ///
+    /// Hydration stores all values as strings via ClickHouse's
+    /// `toJSONString(map(...))`. This method handles both the native
+    /// representation and the stringified one:
+    ///
+    /// ```
+    /// # use gkg_utils::arrow::ColumnValue;
+    /// assert_eq!(ColumnValue::Int64(42).coerce::<i64>(), Some(42));
+    /// assert_eq!(ColumnValue::String("42".into()).coerce::<i64>(), Some(42));
+    /// assert_eq!(ColumnValue::String("hello".into()).coerce::<i64>(), None);
+    /// assert_eq!(ColumnValue::String("hello".into()).coerce::<String>(), Some("hello".into()));
+    /// ```
+    pub fn coerce<T: CoerceFromColumnValue>(&self) -> Option<T> {
+        T::coerce_from(self)
+    }
+}
+
+/// Trait for types that can be extracted from a [`ColumnValue`],
+/// with fallback parsing from string representation.
+pub trait CoerceFromColumnValue: Sized {
+    fn coerce_from(v: &ColumnValue) -> Option<Self>;
+}
+
+impl CoerceFromColumnValue for i64 {
+    fn coerce_from(v: &ColumnValue) -> Option<Self> {
+        v.as_int64()
+            .copied()
+            .or_else(|| v.as_string().and_then(|s| s.parse().ok()))
+    }
+}
+
+impl CoerceFromColumnValue for f64 {
+    fn coerce_from(v: &ColumnValue) -> Option<Self> {
+        v.as_float64()
+            .copied()
+            .or_else(|| v.as_string().and_then(|s| s.parse().ok()))
+    }
+}
+
+impl CoerceFromColumnValue for String {
+    fn coerce_from(v: &ColumnValue) -> Option<Self> {
+        match v {
+            ColumnValue::String(s) => Some(s.clone()),
+            ColumnValue::Int64(n) => Some(n.to_string()),
+            ColumnValue::Float64(n) => Some(n.to_string()),
+            ColumnValue::Null => None,
+        }
+    }
+}
+
 impl From<serde_json::Value> for ColumnValue {
     fn from(v: serde_json::Value) -> Self {
         match v {
