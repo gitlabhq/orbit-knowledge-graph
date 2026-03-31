@@ -71,7 +71,7 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "code-graph"
+name = "code-graph-linker"
 expression = "LicenseRef-EE"
 license-files = []
 

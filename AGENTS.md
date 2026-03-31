@@ -81,15 +81,16 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/formatters` | Result formatters (graph, raw row, goon) |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/` |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
-| `code-parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
-| `code-graph` | Builds in-memory property graphs from parsed code |
+| `code-graph` | Parent crate for code parsing and graph construction; re-exports `treesitter-visit`, `parser-core`, `code-graph-linker` |
+| `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper |
+| `code-graph/parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
+| `code-graph/linker` | Builds in-memory property graphs from parsed code |
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`) and Arrow extraction utilities |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QueryProfiler` for per-query stats |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `siphon-proto` | Protobuf types for CDC replication events |
 | `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | K8s readiness/liveness probes |
-| `treesitter-visit` | Tree-sitter language bindings wrapper |
 | `cli` | Local `orbit index` and `orbit query` commands |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, and `ResponseView` assertion framework for integration tests |

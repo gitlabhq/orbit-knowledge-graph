@@ -1,4 +1,4 @@
-use code_graph::analysis::types::GraphData;
+use code_graph_linker::analysis::types::GraphData;
 use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter};

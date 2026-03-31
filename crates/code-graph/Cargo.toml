@@ -3,41 +3,10 @@ name = "code-graph"
 version.workspace = true
 edition = "2024"
 
+[dependencies]
+treesitter-visit = { path = "treesitter-visit" }
+parser-core = { path = "parser" }
+code-graph-linker = { path = "linker" }
+
 [lints]
 workspace = true
-
-[lib]
-path = "src/lib.rs"
-
-[features]
-test-utils = []
-
-[dependencies]
-parser-core = { workspace = true }
-anyhow = { workspace = true }
-log = { workspace = true }
-num_cpus = { workspace = true }
-serde = { workspace = true }
-tracing = { workspace = true }
-tokio = { workspace = true }
-tokio-rayon = { workspace = true }
-tokio-stream = { workspace = true }
-futures = { workspace = true }
-chrono = { workspace = true }
-tempfile = { workspace = true }
-ignore = { workspace = true }
-serde_json = { workspace = true }
-rayon = { workspace = true }
-rustc-hash = { workspace = true }
-smallvec = { workspace = true }
-internment = { workspace = true, features = ["arc"] }
-stacker = { workspace = true }
-strum = { workspace = true }
-
-[dev-dependencies]
-gitalisk-core = { workspace = true }
-tempfile = { workspace = true }
-walkdir = { workspace = true }
-criterion = { workspace = true }
-tracing-test = { workspace = true }
-
