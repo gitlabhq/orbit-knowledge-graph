@@ -115,11 +115,8 @@ pub struct AppConfig {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub tls: TlsConfig,
-    /// Maximum seconds a query pipeline is allowed to run before being
-    /// cancelled. Covers compilation, execution, redaction, and hydration.
-    /// Defaults to 30s if not set.
     #[serde(default)]
-    pub query_timeout_secs: Option<u64>,
+    pub query: QueryConfig,
 }
 
 impl AppConfig {
@@ -163,6 +160,16 @@ impl AppConfig {
 }
 
 pub type SharedAppConfig = Arc<AppConfig>;
+
+/// Query execution settings.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct QueryConfig {
+    /// Maximum seconds a query pipeline is allowed to run before being
+    /// cancelled. Covers compilation, execution, redaction, and hydration.
+    /// Defaults to 30s if not set.
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MetricsConfig {

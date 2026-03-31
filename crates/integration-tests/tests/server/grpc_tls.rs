@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use gkg_server::auth::JwtValidator;
 use gkg_server::cluster_health::ClusterHealthChecker;
+use gkg_server::config::QueryConfig;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::proto::GetClusterHealthRequest;
 use gkg_server::proto::knowledge_graph_service_client::KnowledgeGraphServiceClient;
@@ -42,7 +43,7 @@ fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> G
         &clickhouse_config,
         cluster_health,
         tls_config,
-        None,
+        &QueryConfig::default(),
     )
 }
 

@@ -10,6 +10,7 @@ use tracing::{Instrument, info, instrument};
 
 use crate::auth::{Claims, JwtValidator};
 use crate::cluster_health::ClusterHealthChecker;
+use crate::config::QueryConfig;
 use crate::graph_stats::GraphStatsService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
@@ -39,7 +40,7 @@ impl KnowledgeGraphServiceImpl {
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
-        query_timeout_secs: Option<u64>,
+        query_config: &QueryConfig,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
@@ -48,7 +49,7 @@ impl KnowledgeGraphServiceImpl {
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
         );
-        if let Some(secs) = query_timeout_secs {
+        if let Some(secs) = query_config.timeout_secs {
             pipeline = pipeline.with_query_timeout(std::time::Duration::from_secs(secs));
         }
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
@@ -417,7 +418,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let plan = service
@@ -444,7 +445,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -473,7 +474,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -508,7 +509,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("User");
@@ -531,7 +532,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
@@ -548,7 +549,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -576,7 +577,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -599,7 +600,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -626,7 +627,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let response =
@@ -729,7 +730,7 @@ mod tests {
             Arc::clone(&ontology),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
+            &QueryConfig::default(),
         );
 
         let response = service.build_structured_schema(&["*".to_string()]);

@@ -161,7 +161,7 @@ async fn run_webserver(
         &config.graph,
         cluster_health,
         tls_config,
-        config.query_timeout_secs,
+        &config.query,
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
