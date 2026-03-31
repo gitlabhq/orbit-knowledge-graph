@@ -17,7 +17,7 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
-code-graph-linker = { path = "../code-graph/linker" }
+code-graph = { path = "../code-graph" }
 gkg-utils = { path = "../utils" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }

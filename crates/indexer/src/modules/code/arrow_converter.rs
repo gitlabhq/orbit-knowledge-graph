@@ -10,7 +10,7 @@ use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use code_graph_linker::analysis::types::{
+use code_graph::linker::analysis::types::{
     DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode,
 };
 use rustc_hash::FxHasher;
@@ -72,9 +72,9 @@ impl ArrowConverter {
             Arc::new(schema),
             vec![
                 Arc::new(arrow::array::Int64Array::from(vec![branch_id])) as ArrayRef,
-                Arc::new(arrow::array::StringArray::from(vec![
-                    self.traversal_path.as_str(),
-                ])) as ArrayRef,
+                Arc::new(arrow::array::StringArray::from(vec![self
+                    .traversal_path
+                    .as_str()])) as ArrayRef,
                 Arc::new(arrow::array::Int64Array::from(vec![self.project_id])) as ArrayRef,
                 Arc::new(arrow::array::StringArray::from(vec![self.branch.as_str()])) as ArrayRef,
                 Arc::new(arrow::array::BooleanArray::from(vec![true])) as ArrayRef,
@@ -590,7 +590,7 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_linker::analysis::types::{DefinitionType, FqnType};
+    use code_graph::linker::analysis::types::{DefinitionType, FqnType};
     use internment::ArcIntern;
     use parser_core::ruby::types::{RubyDefinitionType, RubyFqn, RubyFqnPart, RubyFqnPartType};
     use parser_core::utils::{Position, Range};

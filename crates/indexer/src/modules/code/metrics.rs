@@ -1,7 +1,7 @@
-use code_graph_linker::analysis::types::GraphData;
-use opentelemetry::KeyValue;
+use code_graph::linker::analysis::types::GraphData;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
+use opentelemetry::KeyValue;
 
 use crate::handler::HandlerError;
 use crate::metrics::DURATION_BUCKETS;
