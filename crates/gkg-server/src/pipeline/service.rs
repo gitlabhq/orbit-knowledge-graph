@@ -15,7 +15,8 @@ use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, Pipel
 
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, QuerySettings, RedactionStage,
+    SecurityStage,
 };
 
 /// Default query timeout if not configured.
@@ -81,6 +82,9 @@ impl QueryPipelineService {
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(self.profiling.clone());
+        server_extensions.insert(QuerySettings {
+            max_execution_time_secs: Some(self.query_timeout.as_secs()),
+        });
         server_extensions.insert(claims);
         server_extensions.insert(tx);
         server_extensions.insert(stream);
