@@ -1,5 +1,6 @@
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clickhouse_client::ClickHouseConfiguration;
 use ontology::Ontology;
@@ -44,14 +45,12 @@ impl KnowledgeGraphServiceImpl {
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
-        let mut pipeline = QueryPipelineService::new(
+        let pipeline = QueryPipelineService::new(
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
-        );
-        if let Some(secs) = query_config.timeout_secs {
-            pipeline = pipeline.with_query_timeout(std::time::Duration::from_secs(secs));
-        }
+        )
+        .with_query_timeout(Duration::from_secs(query_config.timeout_secs));
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {
             validator,

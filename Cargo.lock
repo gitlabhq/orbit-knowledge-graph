@@ -2977,6 +2977,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gkg-config"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "gkg-server"
 version = "0.1.0"
 dependencies = [
@@ -2995,6 +3002,7 @@ dependencies = [
  "enum-as-inner",
  "futures",
  "gitlab-client",
+ "gkg-config",
  "gkg-utils",
  "health-check",
  "indexer",

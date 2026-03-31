@@ -210,6 +210,7 @@ pub struct Query {
 pub enum QuerySetting {
     UseQueryCache(bool),
     QueryCacheTtl(u32),
+    MaxExecutionTime(u64),
 }
 
 impl Default for Query {

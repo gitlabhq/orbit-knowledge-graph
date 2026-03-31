@@ -1,0 +1,11 @@
+[package]
+name = "gkg-config"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+serde = { workspace = true }
+
+[lints]
+workspace = true

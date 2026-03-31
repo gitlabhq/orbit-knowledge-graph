@@ -90,9 +90,7 @@ async fn execute_standard(
     for (key, param) in params.iter() {
         query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
     }
-    if let Some(secs) = query_config.timeout_secs {
-        query = query.with_option("max_execution_time", secs.to_string());
-    }
+    query = query.with_option("max_execution_time", query_config.timeout_secs.to_string());
     let batches = query
         .fetch_arrow()
         .await

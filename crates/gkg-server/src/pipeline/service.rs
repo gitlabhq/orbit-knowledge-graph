@@ -84,7 +84,7 @@ impl QueryPipelineService {
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(self.profiling.clone());
         server_extensions.insert(QueryConfig {
-            timeout_secs: Some(self.query_timeout.as_secs()),
+            timeout_secs: self.query_timeout.as_secs(),
         });
         server_extensions.insert(claims);
         server_extensions.insert(tx);

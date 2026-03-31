@@ -141,6 +141,7 @@ impl Context {
                         format!("use_query_cache = {}", u8::from(*v))
                     }
                     QuerySetting::QueryCacheTtl(v) => format!("query_cache_ttl = {v}"),
+                    QuerySetting::MaxExecutionTime(v) => format!("max_execution_time = {v}"),
                 })
                 .collect();
             parts.push(format!("SETTINGS {}", settings.join(", ")));
