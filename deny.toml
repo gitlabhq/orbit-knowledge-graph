@@ -76,6 +76,11 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "code-graph-linker"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "orbit"
 expression = "LicenseRef-EE"
 license-files = []
