@@ -35,7 +35,6 @@ macro_rules! impl_coerce {
             fn from_column_value(v: &ColumnValue) -> Option<Self> {
                 v.$accessor()
                     .copied()
-                    .map(|n| n as $ty)
                     .or_else(|| v.as_string().and_then(|s| s.parse().ok()))
             }
         }
@@ -53,7 +52,7 @@ macro_rules! impl_coerce {
 impl_coerce!(i64, native: as_int64);
 impl_coerce!(f64, native: as_float64);
 impl_coerce!(String, from_str: |s| Some(s.clone()));
-impl_coerce!(bool, from_str: |s| match s.as_str() {
+impl_coerce!(bool, from_str: |s| match s.trim().to_ascii_lowercase().as_str() {
     "true" | "1" => Some(true),
     "false" | "0" => Some(false),
     _ => None,
