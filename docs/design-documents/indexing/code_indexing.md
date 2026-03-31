@@ -103,8 +103,8 @@ graph LR
 
 | Component | Description |
 |---|---|
-| `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
-| `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
+| `code-graph/parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
+| `code-graph/linker` crate | Streaming indexing pipeline, graph data model, analysis |
 | `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
 
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
@@ -329,8 +329,8 @@ tool. Here are the main architectural differences in the current service:
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
 | Authorization | None (local tool) | Rails gRPC delegation |
-| Parser crate | External `parser-core` dependency | In-tree `code-parser` (forked and evolved) |
-| Graph builder | External `indexer` crate | In-tree `code-graph` |
+| Parser crate | External `parser-core` dependency | In-tree `code-graph/parser` (forked and evolved) |
+| Graph builder | External `indexer` crate | In-tree `code-graph/linker` |
 | Concurrency | Streaming model (Rayon + semaphore) | Same streaming model (preserved) |
 
 ### Indexing the active branches
