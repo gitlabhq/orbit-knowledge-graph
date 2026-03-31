@@ -72,9 +72,9 @@ impl ArrowConverter {
             Arc::new(schema),
             vec![
                 Arc::new(arrow::array::Int64Array::from(vec![branch_id])) as ArrayRef,
-                Arc::new(arrow::array::StringArray::from(vec![self
-                    .traversal_path
-                    .as_str()])) as ArrayRef,
+                Arc::new(arrow::array::StringArray::from(vec![
+                    self.traversal_path.as_str(),
+                ])) as ArrayRef,
                 Arc::new(arrow::array::Int64Array::from(vec![self.project_id])) as ArrayRef,
                 Arc::new(arrow::array::StringArray::from(vec![self.branch.as_str()])) as ArrayRef,
                 Arc::new(arrow::array::BooleanArray::from(vec![true])) as ArrayRef,
