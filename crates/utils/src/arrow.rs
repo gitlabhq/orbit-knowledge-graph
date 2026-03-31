@@ -19,6 +19,60 @@ pub enum ColumnValue {
     Null,
 }
 
+/// Types that can be extracted from a [`ColumnValue`], with fallback
+/// parsing from the string representation. Useful because ClickHouse
+/// hydration (`toJSONString(map(...))`) stringifies all values.
+pub trait FromColumnValue: Sized {
+    fn from_column_value(v: &ColumnValue) -> Option<Self>;
+}
+
+/// Implement [`FromColumnValue`] for a type. Tries the native accessor
+/// first, then falls back to parsing from the string variant.
+macro_rules! impl_coerce {
+    // Numeric: try native variant, then parse from string
+    ($ty:ty, native: $accessor:ident) => {
+        impl FromColumnValue for $ty {
+            fn from_column_value(v: &ColumnValue) -> Option<Self> {
+                v.$accessor()
+                    .copied()
+                    .or_else(|| v.as_string().and_then(|s| s.parse().ok()))
+            }
+        }
+    };
+    // String-only: extract or parse from string variant
+    ($ty:ty, from_str: $parse:expr) => {
+        impl FromColumnValue for $ty {
+            fn from_column_value(v: &ColumnValue) -> Option<Self> {
+                v.as_string().and_then($parse)
+            }
+        }
+    };
+}
+
+impl_coerce!(i64, native: as_int64);
+impl_coerce!(f64, native: as_float64);
+impl_coerce!(String, from_str: |s| Some(s.clone()));
+impl_coerce!(bool, from_str: |s| match s.trim().to_ascii_lowercase().as_str() {
+    "true" | "1" => Some(true),
+    "false" | "0" => Some(false),
+    _ => None,
+});
+
+impl ColumnValue {
+    /// Extract as the requested type, parsing from string if needed.
+    ///
+    /// ```
+    /// # use gkg_utils::arrow::ColumnValue;
+    /// assert_eq!(ColumnValue::Int64(42).coerce::<i64>(), Some(42));
+    /// assert_eq!(ColumnValue::String("42".into()).coerce::<i64>(), Some(42));
+    /// assert_eq!(ColumnValue::String("hello".into()).coerce::<i64>(), None);
+    /// assert_eq!(ColumnValue::String("hello".into()).coerce::<String>(), Some("hello".into()));
+    /// ```
+    pub fn coerce<T: FromColumnValue>(&self) -> Option<T> {
+        T::from_column_value(self)
+    }
+}
+
 impl From<serde_json::Value> for ColumnValue {
     fn from(v: serde_json::Value) -> Self {
         match v {
@@ -236,6 +290,87 @@ mod tests {
     };
     use arrow::datatypes::{DataType, Field, Int64Type, Schema, UInt64Type};
     use std::sync::Arc;
+
+    // ── coerce tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn coerce_i64_from_int64() {
+        assert_eq!(ColumnValue::Int64(42).coerce::<i64>(), Some(42));
+    }
+
+    #[test]
+    fn coerce_i64_from_string() {
+        assert_eq!(ColumnValue::String("42".into()).coerce::<i64>(), Some(42));
+    }
+
+    #[test]
+    fn coerce_i64_from_bad_string() {
+        assert_eq!(ColumnValue::String("abc".into()).coerce::<i64>(), None);
+    }
+
+    #[test]
+    fn coerce_i64_from_null() {
+        assert_eq!(ColumnValue::Null.coerce::<i64>(), None);
+    }
+
+    #[test]
+    fn coerce_f64_from_float64() {
+        assert_eq!(ColumnValue::Float64(2.72).coerce::<f64>(), Some(2.72));
+    }
+
+    #[test]
+    fn coerce_f64_from_string() {
+        assert_eq!(
+            ColumnValue::String("2.72".into()).coerce::<f64>(),
+            Some(2.72)
+        );
+    }
+
+    #[test]
+    fn coerce_string_from_string() {
+        assert_eq!(
+            ColumnValue::String("hello".into()).coerce::<String>(),
+            Some("hello".into())
+        );
+    }
+
+    #[test]
+    fn coerce_string_from_int64() {
+        assert_eq!(ColumnValue::Int64(42).coerce::<String>(), None);
+    }
+
+    #[test]
+    fn coerce_string_from_null() {
+        assert_eq!(ColumnValue::Null.coerce::<String>(), None);
+    }
+
+    #[test]
+    fn coerce_bool_from_string_true() {
+        assert_eq!(
+            ColumnValue::String("true".into()).coerce::<bool>(),
+            Some(true)
+        );
+        assert_eq!(ColumnValue::String("1".into()).coerce::<bool>(), Some(true));
+    }
+
+    #[test]
+    fn coerce_bool_from_string_false() {
+        assert_eq!(
+            ColumnValue::String("false".into()).coerce::<bool>(),
+            Some(false)
+        );
+        assert_eq!(
+            ColumnValue::String("0".into()).coerce::<bool>(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn coerce_bool_from_bad_string() {
+        assert_eq!(ColumnValue::String("yes".into()).coerce::<bool>(), None);
+    }
+
+    // ── arrow extraction tests ──────────────────────────────────────
 
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
         let fields: Vec<Field> = columns
