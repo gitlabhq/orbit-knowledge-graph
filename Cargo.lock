@@ -1210,6 +1210,15 @@ dependencies = [
 name = "code-graph"
 version = "0.1.0"
 dependencies = [
+ "code-graph-linker",
+ "parser-core",
+ "treesitter-visit",
+]
+
+[[package]]
+name = "code-graph-linker"
+version = "0.1.0"
+dependencies = [
  "anyhow",
  "chrono",
  "criterion",

@@ -84,7 +84,11 @@ etl:
     siphon_namespaces namespace
     INNER JOIN siphon_namespace_details namespace_details
     ON namespace.id = namespace_details.namespace_id
-    INNER JOIN namespace_traversal_paths traversal_paths
+    INNER JOIN (
+      SELECT id, traversal_path
+      FROM namespace_traversal_paths
+      WHERE startsWith(traversal_path, {traversal_path:String})
+    ) traversal_paths
     ON namespace.id = traversal_paths.id
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: namespace._siphon_replicated_at
