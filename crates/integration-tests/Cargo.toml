@@ -36,7 +36,7 @@ serde = { workspace = true }
 health-check = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-siphon-proto = { path = "../siphon-proto" }
+siphon-proto = { path = "../protos/siphon" }
 tar = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }

@@ -22,7 +22,7 @@ gkg-utils = { path = "../utils" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
-gitaly-protos = { path = "../gitaly-protos" }
+gitaly-protos = { path = "../protos/gitaly" }
 gitlab-client = { workspace = true }
 moka = { workspace = true }
 ontology = { path = "../ontology" }
@@ -33,7 +33,7 @@ rustc-hash = { workspace = true }
 prost-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-siphon-proto = { path = "../siphon-proto" }
+siphon-proto = { path = "../protos/siphon" }
 tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }

@@ -39,7 +39,9 @@ The service is implemented as a Cargo workspace with 16 crates:
 | `code-graph` | In-memory property graph construction from parsed code |
 | `clickhouse-client` | Async ClickHouse client with Arrow-IPC streaming |
 
-| `siphon-proto` | Protobuf types for Siphon CDC replication events |
+| `protos` | Parent crate for protobuf types |
+| `protos/siphon` | Protobuf types for Siphon CDC replication events |
+| `protos/gitaly` | Protobuf types for Gitaly gRPC repository operations |
 | `labkit-rs` | Structured logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | Kubernetes readiness/liveness probes |
 | `treesitter-visit` | Tree-sitter language bindings wrapper |

@@ -86,7 +86,9 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`) and Arrow extraction utilities |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QueryProfiler` for per-query stats |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
-| `siphon-proto` | Protobuf types for CDC replication events |
+| `protos` | Parent crate for protobuf types; re-exports `siphon-proto`, `gitaly-protos` |
+| `protos/siphon` | Protobuf types for CDC replication events |
+| `protos/gitaly` | Protobuf types for Gitaly gRPC repository operations |
 | `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | K8s readiness/liveness probes |
 | `treesitter-visit` | Tree-sitter language bindings wrapper |

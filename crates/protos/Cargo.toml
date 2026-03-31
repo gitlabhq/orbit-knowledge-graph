@@ -1,0 +1,12 @@
+[package]
+name = "protos"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+siphon-proto = { path = "siphon" }
+gitaly-protos = { path = "gitaly" }
+
+[lints]
+workspace = true
