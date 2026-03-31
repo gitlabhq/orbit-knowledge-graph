@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use code_graph::analysis::types::GraphData;
-use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
-use code_graph::loading::DirectoryFileSource;
+use code_graph::linker::analysis::types::GraphData;
+use code_graph::linker::indexer::{IndexingConfig, RepositoryIndexer};
+use code_graph::linker::loading::DirectoryFileSource;
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::ArrowConverter;
