@@ -204,14 +204,7 @@ pub struct Query {
     pub query_settings: Vec<QuerySetting>,
 }
 
-/// Allowed ClickHouse query-level settings. Closed enum prevents
-/// arbitrary user input from reaching the SETTINGS clause (CWE-89).
-#[derive(Debug, Clone, PartialEq)]
-pub enum QuerySetting {
-    UseQueryCache(bool),
-    QueryCacheTtl(u32),
-    MaxExecutionTime(u64),
-}
+pub use gkg_config::QuerySetting;
 
 impl Default for Query {
     fn default() -> Self {

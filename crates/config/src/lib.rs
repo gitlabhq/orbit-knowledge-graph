@@ -6,4 +6,4 @@
 
 pub mod query;
 
-pub use query::QueryConfig;
+pub use query::{QueryConfig, QuerySetting};

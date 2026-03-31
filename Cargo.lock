@@ -1268,6 +1268,7 @@ version = "0.1.0"
 dependencies = [
  "compiler-pipeline-macros",
  "const_format",
+ "gkg-config",
  "gkg-utils",
  "jsonschema",
  "once_cell",

@@ -28,3 +28,12 @@ impl Default for QueryConfig {
 fn default_timeout() -> u64 {
     DEFAULT_TIMEOUT_SECS
 }
+
+/// Allowed ClickHouse query-level settings. Closed enum prevents
+/// arbitrary user input from reaching the SETTINGS clause (CWE-89).
+#[derive(Debug, Clone, PartialEq)]
+pub enum QuerySetting {
+    UseQueryCache(bool),
+    QueryCacheTtl(u32),
+    MaxExecutionTime(u64),
+}
