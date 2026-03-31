@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 
 use arrow::array::{
-    Array, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+    Array, BooleanArray, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array,
     LargeStringArray, ListArray, PrimitiveArray, StringArray, StructArray,
     TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-    TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+    TimestampSecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
 };
 use arrow::datatypes::ArrowPrimitiveType;
 use arrow::record_batch::RecordBatch;
@@ -316,14 +316,14 @@ mod tests {
 
     #[test]
     fn coerce_f64_from_float64() {
-        assert_eq!(ColumnValue::Float64(3.14).coerce::<f64>(), Some(3.14));
+        assert_eq!(ColumnValue::Float64(2.72).coerce::<f64>(), Some(2.72));
     }
 
     #[test]
     fn coerce_f64_from_string() {
         assert_eq!(
-            ColumnValue::String("3.14".into()).coerce::<f64>(),
-            Some(3.14)
+            ColumnValue::String("2.72".into()).coerce::<f64>(),
+            Some(2.72)
         );
     }
 
