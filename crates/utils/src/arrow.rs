@@ -292,6 +292,87 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Int64Type, Schema, UInt64Type};
     use std::sync::Arc;
 
+    // ── coerce tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn coerce_i64_from_int64() {
+        assert_eq!(ColumnValue::Int64(42).coerce::<i64>(), Some(42));
+    }
+
+    #[test]
+    fn coerce_i64_from_string() {
+        assert_eq!(ColumnValue::String("42".into()).coerce::<i64>(), Some(42));
+    }
+
+    #[test]
+    fn coerce_i64_from_bad_string() {
+        assert_eq!(ColumnValue::String("abc".into()).coerce::<i64>(), None);
+    }
+
+    #[test]
+    fn coerce_i64_from_null() {
+        assert_eq!(ColumnValue::Null.coerce::<i64>(), None);
+    }
+
+    #[test]
+    fn coerce_f64_from_float64() {
+        assert_eq!(ColumnValue::Float64(3.14).coerce::<f64>(), Some(3.14));
+    }
+
+    #[test]
+    fn coerce_f64_from_string() {
+        assert_eq!(
+            ColumnValue::String("3.14".into()).coerce::<f64>(),
+            Some(3.14)
+        );
+    }
+
+    #[test]
+    fn coerce_string_from_string() {
+        assert_eq!(
+            ColumnValue::String("hello".into()).coerce::<String>(),
+            Some("hello".into())
+        );
+    }
+
+    #[test]
+    fn coerce_string_from_int64() {
+        assert_eq!(ColumnValue::Int64(42).coerce::<String>(), None);
+    }
+
+    #[test]
+    fn coerce_string_from_null() {
+        assert_eq!(ColumnValue::Null.coerce::<String>(), None);
+    }
+
+    #[test]
+    fn coerce_bool_from_string_true() {
+        assert_eq!(
+            ColumnValue::String("true".into()).coerce::<bool>(),
+            Some(true)
+        );
+        assert_eq!(ColumnValue::String("1".into()).coerce::<bool>(), Some(true));
+    }
+
+    #[test]
+    fn coerce_bool_from_string_false() {
+        assert_eq!(
+            ColumnValue::String("false".into()).coerce::<bool>(),
+            Some(false)
+        );
+        assert_eq!(
+            ColumnValue::String("0".into()).coerce::<bool>(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn coerce_bool_from_bad_string() {
+        assert_eq!(ColumnValue::String("yes".into()).coerce::<bool>(), None);
+    }
+
+    // ── arrow extraction tests ──────────────────────────────────────
+
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
         let fields: Vec<Field> = columns
             .iter()
