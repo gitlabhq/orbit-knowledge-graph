@@ -792,8 +792,8 @@ mod tests {
             from: TableRef::scan("nodes", "n"),
             limit: Some(100),
             query_config: gkg_config::QueryConfig {
-                use_query_cache: true,
-                query_cache_ttl: 60,
+                use_query_cache: Some(true),
+                query_cache_ttl: Some(60),
                 ..Default::default()
             },
             ..Default::default()
