@@ -3,7 +3,7 @@
 //! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax and
 //! ClickHouse-specific functions (`startsWith`, `has`, `array`, etc.).
 
-use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, QuerySetting, TableRef};
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -132,19 +132,13 @@ impl Context {
             parts.push(format!("LIMIT {limit}"));
         }
 
-        if !q.query_settings.is_empty() {
-            let settings: Vec<String> = q
-                .query_settings
-                .iter()
-                .map(|s| match s {
-                    QuerySetting::UseQueryCache(v) => {
-                        format!("use_query_cache = {}", u8::from(*v))
-                    }
-                    QuerySetting::QueryCacheTtl(v) => format!("query_cache_ttl = {v}"),
-                    QuerySetting::MaxExecutionTime(v) => format!("max_execution_time = {v}"),
-                })
+        let settings = q.query_config.to_clickhouse_settings();
+        if !settings.is_empty() {
+            let kv: Vec<String> = settings
+                .into_iter()
+                .map(|(k, v)| format!("{k} = {v}"))
                 .collect();
-            parts.push(format!("SETTINGS {}", settings.join(", ")));
+            parts.push(format!("SETTINGS {}", kv.join(", ")));
         }
 
         Ok(parts.join(" "))
@@ -790,7 +784,6 @@ mod tests {
 
     #[test]
     fn query_settings_emitted_after_limit() {
-        use crate::ast::QuerySetting;
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
@@ -798,22 +791,27 @@ mod tests {
             }],
             from: TableRef::scan("nodes", "n"),
             limit: Some(100),
-            query_settings: vec![
-                QuerySetting::UseQueryCache(true),
-                QuerySetting::QueryCacheTtl(60),
-            ],
+            query_config: gkg_config::QueryConfig {
+                use_query_cache: true,
+                query_cache_ttl: 60,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert_eq!(
-            result.sql,
-            "SELECT n.id FROM nodes AS n LIMIT 100 SETTINGS use_query_cache = 1, query_cache_ttl = 60"
+        assert!(
+            result.sql.contains("SETTINGS"),
+            "should have SETTINGS clause: {}",
+            result.sql
         );
+        assert!(result.sql.contains("use_query_cache = 1"));
+        assert!(result.sql.contains("query_cache_ttl = 60"));
+        assert!(result.sql.contains("max_execution_time = "));
     }
 
     #[test]
-    fn no_query_settings_when_empty() {
+    fn query_settings_always_include_max_execution_time() {
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
@@ -825,8 +823,13 @@ mod tests {
 
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
         assert!(
-            !result.sql.contains("SETTINGS"),
-            "no SETTINGS without query_settings: {}",
+            result.sql.contains("max_execution_time = "),
+            "should always emit max_execution_time: {}",
+            result.sql
+        );
+        assert!(
+            !result.sql.contains("use_query_cache"),
+            "should not emit cache settings by default: {}",
             result.sql
         );
     }

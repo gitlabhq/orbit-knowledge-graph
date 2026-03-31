@@ -10,8 +10,6 @@ use query_engine::shared::{
     ExecutionOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
 };
 
-use crate::config::QueryConfig;
-
 #[derive(Clone)]
 pub struct ClickHouseExecutor;
 
@@ -45,16 +43,10 @@ impl PipelineStage for ClickHouseExecutor {
             )
         };
 
-        let query_config = ctx
-            .server_extensions
-            .get::<QueryConfig>()
-            .cloned()
-            .unwrap_or_default();
-
         let (batches, execution) = if profiling.enabled {
             execute_profiled(client, &sql, &params, &rendered_sql, &profiling, t).await?
         } else {
-            execute_standard(client, &sql, &params, &rendered_sql, &query_config, t).await?
+            execute_standard(client, &sql, &params, &rendered_sql, t).await?
         };
 
         let elapsed = t.elapsed();
@@ -83,14 +75,13 @@ async fn execute_standard(
     sql: &str,
     params: &std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
     rendered_sql: &str,
-    query_config: &QueryConfig,
     t: Instant,
 ) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), PipelineError> {
     let mut query = client.query(sql);
     for (key, param) in params.iter() {
         query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
     }
-    query = query.with_option("max_execution_time", query_config.timeout_secs.to_string());
+    // query = query.with_option("max_execution_time", query_config.timeout_secs.to_string());
     let batches = query
         .fetch_arrow()
         .await

@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::auth::Claims;
 use crate::proto::ExecuteQueryMessage;
@@ -14,21 +13,18 @@ use query_engine::pipeline::{
 use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
 use super::metrics::OTelPipelineObserver;
-use crate::config::QueryConfig;
 
 use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
 };
 
-/// Default query timeout if not configured.
-const DEFAULT_QUERY_TIMEOUT: Duration = Duration::from_secs(30);
+use gkg_config::global::DEFAULT_QUERY_TIMEOUT;
 
 #[derive(Clone)]
 pub struct QueryPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
     profiling: ProfilingConfig,
-    query_timeout: Duration,
 }
 
 impl QueryPipelineService {
@@ -41,14 +37,7 @@ impl QueryPipelineService {
             ontology,
             client,
             profiling,
-            query_timeout: DEFAULT_QUERY_TIMEOUT,
         }
-    }
-
-    #[must_use]
-    pub fn with_query_timeout(mut self, timeout: Duration) -> Self {
-        self.query_timeout = timeout;
-        self
     }
 
     pub async fn run_query(
@@ -59,14 +48,14 @@ impl QueryPipelineService {
         stream: Streaming<ExecuteQueryMessage>,
     ) -> Result<PipelineOutput, PipelineError> {
         tokio::time::timeout(
-            self.query_timeout,
+            DEFAULT_QUERY_TIMEOUT,
             self.run_pipeline(claims, query_json, tx, stream),
         )
         .await
         .map_err(|_| {
             PipelineError::Execution(format!(
                 "query timed out after {}s",
-                self.query_timeout.as_secs()
+                DEFAULT_QUERY_TIMEOUT.as_secs()
             ))
         })?
     }
@@ -83,9 +72,6 @@ impl QueryPipelineService {
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(self.profiling.clone());
-        server_extensions.insert(QueryConfig {
-            timeout_secs: self.query_timeout.as_secs(),
-        });
         server_extensions.insert(claims);
         server_extensions.insert(tx);
         server_extensions.insert(stream);

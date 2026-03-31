@@ -9,7 +9,6 @@ use tracing::info;
 
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
-use crate::config::QueryConfig;
 use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
 
 use super::service::KnowledgeGraphServiceImpl;
@@ -28,15 +27,9 @@ impl GrpcServer {
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
-        query_config: &QueryConfig,
     ) -> Self {
-        let service = KnowledgeGraphServiceImpl::new(
-            validator,
-            ontology,
-            clickhouse_config,
-            cluster_health,
-            query_config,
-        );
+        let service =
+            KnowledgeGraphServiceImpl::new(validator, ontology, clickhouse_config, cluster_health);
         Self {
             addr,
             service: KnowledgeGraphServiceServer::new(service),
@@ -87,7 +80,6 @@ mod tests {
             &clickhouse_config,
             cluster_health,
             None,
-            &QueryConfig::default(),
         );
         assert_eq!(server.addr(), addr);
     }
