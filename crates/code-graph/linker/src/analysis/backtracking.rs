@@ -146,12 +146,10 @@ mod tests {
         )
     }
 
-    fn make_def_node(_name: &str, fqn_parts: Vec<&str>, range: Range) -> (DefinitionNode, FqnType) {
+    fn make_def_node(fqn_parts: Vec<&str>, range: Range) -> (DefinitionNode, FqnType) {
         let fqn = DslFqn::new(fqn_parts.into_iter().map(String::from).collect());
         let fqn_type = FqnType::Dsl(fqn);
-        let def_type = DslDefinitionType {
-            label: "Function".to_string(),
-        };
+        let def_type = DslDefinitionType { label: "Function" };
         let node = DefinitionNode::new(
             fqn_type.clone(),
             DefinitionType::Dsl(def_type),
@@ -169,11 +167,11 @@ mod tests {
 
         def_map.insert(
             ("foo".to_string(), "file_a.c".to_string()),
-            make_def_node("foo", vec!["foo"], range_foo),
+            make_def_node(vec!["foo"], range_foo),
         );
         def_map.insert(
             ("bar".to_string(), "file_b.c".to_string()),
-            make_def_node("bar", vec!["bar"], range_bar),
+            make_def_node(vec!["bar"], range_bar),
         );
 
         let backtracker = GlobalBacktracker::from_definition_map(&def_map);
@@ -181,7 +179,6 @@ mod tests {
         let refs = vec![DslRawReference {
             name: "bar".to_string(),
             range: make_range(10, 15),
-            scope_fqn: Some(DslFqn::new(vec!["foo".to_string()])),
         }];
 
         let mut relationships = Vec::new();
@@ -203,16 +200,16 @@ mod tests {
 
         def_map.insert(
             ("main".to_string(), "main.c".to_string()),
-            make_def_node("main", vec!["main"], range_main),
+            make_def_node(vec!["main"], range_main),
         );
         // Two definitions of "helper" in different files
         def_map.insert(
             ("helper".to_string(), "util_a.c".to_string()),
-            make_def_node("helper", vec!["helper"], make_range(0, 50)),
+            make_def_node(vec!["helper"], make_range(0, 50)),
         );
         def_map.insert(
             ("helper".to_string(), "util_b.c".to_string()),
-            make_def_node("helper", vec!["helper"], make_range(0, 50)),
+            make_def_node(vec!["helper"], make_range(0, 50)),
         );
 
         let backtracker = GlobalBacktracker::from_definition_map(&def_map);
@@ -220,7 +217,6 @@ mod tests {
         let refs = vec![DslRawReference {
             name: "helper".to_string(),
             range: make_range(10, 20),
-            scope_fqn: Some(DslFqn::new(vec!["main".to_string()])),
         }];
 
         let mut relationships = Vec::new();
@@ -246,15 +242,15 @@ mod tests {
 
         def_map.insert(
             ("main".to_string(), "main.c".to_string()),
-            make_def_node("main", vec!["main"], range_main),
+            make_def_node(vec!["main"], range_main),
         );
         def_map.insert(
             ("helper".to_string(), "main.c".to_string()),
-            make_def_node("helper", vec!["helper"], range_local_helper),
+            make_def_node(vec!["helper"], range_local_helper),
         );
         def_map.insert(
             ("helper".to_string(), "other.c".to_string()),
-            make_def_node("helper", vec!["helper"], range_external_helper),
+            make_def_node(vec!["helper"], range_external_helper),
         );
 
         let backtracker = GlobalBacktracker::from_definition_map(&def_map);
@@ -262,7 +258,6 @@ mod tests {
         let refs = vec![DslRawReference {
             name: "helper".to_string(),
             range: make_range(10, 20),
-            scope_fqn: Some(DslFqn::new(vec!["main".to_string()])),
         }];
 
         let mut relationships = Vec::new();
@@ -285,13 +280,13 @@ mod tests {
 
         def_map.insert(
             ("main".to_string(), "main.c".to_string()),
-            make_def_node("main", vec!["main"], range_main),
+            make_def_node(vec!["main"], range_main),
         );
         // 5 definitions of "get" across different files — exceeds backtrack_limit=2
         for i in 0..5 {
             def_map.insert(
                 ("get".to_string(), format!("mod_{i}.c")),
-                make_def_node("get", vec!["get"], make_range(0, 50)),
+                make_def_node(vec!["get"], make_range(0, 50)),
             );
         }
 
@@ -300,7 +295,6 @@ mod tests {
         let refs = vec![DslRawReference {
             name: "get".to_string(),
             range: make_range(10, 20),
-            scope_fqn: Some(DslFqn::new(vec!["main".to_string()])),
         }];
 
         let mut relationships = Vec::new();
