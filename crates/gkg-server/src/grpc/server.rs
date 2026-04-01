@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::content::ColumnResolverRegistry;
 use clickhouse_client::ClickHouseConfiguration;
 use ontology::Ontology;
 use tonic::transport::Server as TonicServer;
@@ -23,6 +24,7 @@ pub struct GrpcServer {
 }
 
 impl GrpcServer {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
@@ -30,6 +32,7 @@ impl GrpcServer {
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
+        resolver_registry: Option<Arc<ColumnResolverRegistry>>,
         grpc_config: GrpcConfig,
     ) -> Self {
         let service = KnowledgeGraphServiceImpl::new(
@@ -37,6 +40,7 @@ impl GrpcServer {
             ontology,
             clickhouse_config,
             cluster_health,
+            resolver_registry,
             grpc_config.stream_timeout_secs,
         );
         Self {
@@ -97,6 +101,7 @@ mod tests {
             ontology,
             &clickhouse_config,
             cluster_health,
+            None,
             None,
             GrpcConfig::default(),
         );

@@ -1,6 +1,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::content::ColumnResolverRegistry;
 use clickhouse_client::ClickHouseConfiguration;
 use ontology::Ontology;
 use tokio::sync::mpsc;
@@ -40,15 +41,19 @@ impl KnowledgeGraphServiceImpl {
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
+        resolver_registry: Option<Arc<ColumnResolverRegistry>>,
         stream_timeout_secs: u64,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
-        let pipeline = QueryPipelineService::new(
+        let mut pipeline = QueryPipelineService::new(
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
         );
+        if let Some(registry) = resolver_registry {
+            pipeline = pipeline.with_resolver_registry(registry);
+        }
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {
             validator,
@@ -429,6 +434,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 
@@ -456,6 +462,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 
@@ -485,6 +492,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 
@@ -520,6 +528,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 
@@ -543,6 +552,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 
@@ -560,6 +570,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 
@@ -588,6 +599,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 
@@ -611,6 +623,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 
@@ -638,6 +651,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 
@@ -741,6 +755,7 @@ mod tests {
             Arc::clone(&ontology),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             60,
         );
 

@@ -5,6 +5,7 @@ use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::config::AppConfig;
+use gkg_server::content;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
@@ -158,6 +159,27 @@ async fn run_webserver(
 
     let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
 
+    let resolver_registry = config
+        .gitlab_client_config()
+        .map(|cfg| {
+            let client = gitlab_client::GitlabClient::new(cfg)
+                .map(Arc::new)
+                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?;
+            let mut registry = content::ColumnResolverRegistry::new();
+            registry.register(
+                "gitaly",
+                Arc::new(content::gitaly::GitalyContentService::new(client)),
+            );
+            Ok::<_, anyhow::Error>(Arc::new(registry))
+        })
+        .transpose()?;
+
+    if resolver_registry.is_some() {
+        info!("Content resolution enabled (GitlabClient configured)");
+    } else {
+        info!("Content resolution disabled (no GitLab client config)");
+    }
+
     let graph_client = config.graph.build_client();
     let http_server = HttpServer::bind(config.bind_address, graph_client).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
@@ -171,6 +193,7 @@ async fn run_webserver(
         &config.graph,
         cluster_health,
         tls_config,
+        resolver_registry,
         config.grpc.clone(),
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");

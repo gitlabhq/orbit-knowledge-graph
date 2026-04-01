@@ -69,6 +69,17 @@ impl BlobStream {
         }
     }
 
+    pub async fn drain(&mut self) -> (Vec<ResolvedBlob>, Option<BlobDecodeError>) {
+        let mut blobs = Vec::new();
+        loop {
+            match self.next_blob().await {
+                Ok(Some(blob)) => blobs.push(blob),
+                Ok(None) => return (blobs, None),
+                Err(e) => return (blobs, Some(e)),
+            }
+        }
+    }
+
     pub async fn next_blob(&mut self) -> Result<Option<ResolvedBlob>, BlobDecodeError> {
         loop {
             match self.chunks.next().await {
