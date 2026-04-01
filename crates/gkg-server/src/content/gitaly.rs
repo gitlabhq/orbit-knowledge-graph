@@ -98,36 +98,19 @@ impl ColumnResolver for GitalyContentService {
                 }
             };
 
-            let mut blob_stream = BlobStream::new(stream);
-            let mut blob_index = 0;
+            let (blobs, err) = BlobStream::new(stream).drain().await;
 
-            loop {
-                match blob_stream.next_blob().await {
-                    Ok(Some(blob)) => {
-                        if blob_index < keys.len() {
-                            match String::from_utf8(blob.data) {
-                                Ok(text) => {
-                                    file_cache.insert(keys[blob_index].clone(), Some(text));
-                                }
-                                Err(_) => {
-                                    debug!(
-                                        project_id,
-                                        path = %keys[blob_index].2,
-                                        "skipping binary blob"
-                                    );
-                                }
-                            }
-                        }
-                        blob_index += 1;
+            if let Some(e) = err {
+                warn!(project_id, error = %e, "blob stream decode error");
+            }
+
+            for (blob, key) in blobs.into_iter().zip(keys.iter()) {
+                match String::from_utf8(blob.data) {
+                    Ok(text) => {
+                        file_cache.insert(key.clone(), Some(text));
                     }
-                    Ok(None) => break,
-                    Err(e) => {
-                        warn!(
-                            project_id,
-                            error = %e,
-                            "blob stream decode error"
-                        );
-                        break;
+                    Err(_) => {
+                        debug!(project_id, path = %key.2, "skipping binary blob");
                     }
                 }
             }

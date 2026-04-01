@@ -24,6 +24,7 @@ pub struct GrpcServer {
 }
 
 impl GrpcServer {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
