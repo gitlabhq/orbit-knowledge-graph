@@ -154,6 +154,12 @@ macro_rules! define_languages {
 }
 
 define_languages! {
+    C {
+        name: "c",
+        extensions: ["c", "h"],
+        names: ["c"],
+        exclude_extensions: []
+    },
     Ruby {
         // string representation of the language
         name: "ruby",
@@ -613,8 +619,10 @@ mod tests {
         let extensions = get_supported_extensions();
 
         // NOTE: Make sure to also update the count in the macro when updating this test.
-        assert_eq!(extensions.len(), 12);
+        assert_eq!(extensions.len(), 14);
 
+        assert!(extensions.contains(&"c"));
+        assert!(extensions.contains(&"h"));
         assert!(extensions.contains(&"rb"));
         assert!(extensions.contains(&"rbw"));
         assert!(extensions.contains(&"rake"));
