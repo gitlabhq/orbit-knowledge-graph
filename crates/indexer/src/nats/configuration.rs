@@ -154,22 +154,42 @@ impl NatsConfiguration {
         if self.tls_enabled() { "tls" } else { "nats" }
     }
 
-    /// Checks that all configured TLS paths point to existing files.
-    /// Returns a list of `(field_name, path)` for paths that could not be found.
-    pub fn validate_tls_paths(&self) -> Vec<(&'static str, &str)> {
+    /// Validates TLS configuration completeness and file existence.
+    ///
+    /// Returns `Ok(())` when:
+    /// - No TLS paths are configured (plaintext), or
+    /// - All configured paths point to existing files and cert/key form a complete pair.
+    ///
+    /// Returns `Err` when:
+    /// - `tls_cert_path` is set without `tls_key_path` (or vice versa)
+    /// - Any configured path points to a nonexistent file
+    pub fn validate_tls_config(&self) -> Result<(), String> {
+        if !self.tls_enabled() {
+            return Ok(());
+        }
+
+        match (&self.tls_cert_path, &self.tls_key_path) {
+            (Some(_), None) => {
+                return Err("tls_cert_path is set but tls_key_path is missing".into());
+            }
+            (None, Some(_)) => {
+                return Err("tls_key_path is set but tls_cert_path is missing".into());
+            }
+            _ => {}
+        }
+
         let checks: [(&str, Option<&String>); 3] = [
             ("tls_ca_cert_path", self.tls_ca_cert_path.as_ref()),
             ("tls_cert_path", self.tls_cert_path.as_ref()),
             ("tls_key_path", self.tls_key_path.as_ref()),
         ];
+        for (field, path) in checks {
+            if let Some(p) = path.filter(|p| !Path::new(p.as_str()).exists()) {
+                return Err(format!("{field}: file not found at '{p}'"));
+            }
+        }
 
-        checks
-            .into_iter()
-            .filter_map(|(name, path)| {
-                path.filter(|p| !Path::new(p.as_str()).exists())
-                    .map(|p| (name, p.as_str()))
-            })
-            .collect()
+        Ok(())
     }
 
     pub fn connection_timeout(&self) -> Duration {
@@ -293,37 +313,80 @@ mod tests {
     }
 
     #[test]
-    fn validate_tls_paths_empty_when_no_tls() {
+    fn validate_no_tls_is_valid() {
         let config = NatsConfiguration::default();
-        assert!(config.validate_tls_paths().is_empty());
+        assert!(config.validate_tls_config().is_ok());
     }
 
     #[test]
-    fn validate_tls_paths_reports_missing_files() {
-        let config = NatsConfiguration {
-            tls_ca_cert_path: Some("/nonexistent/ca.pem".into()),
-            tls_cert_path: Some("/nonexistent/cert.pem".into()),
-            tls_key_path: Some("/nonexistent/key.pem".into()),
-            ..Default::default()
-        };
-        let missing = config.validate_tls_paths();
-        assert_eq!(missing.len(), 3);
-        assert_eq!(missing[0].0, "tls_ca_cert_path");
-        assert_eq!(missing[1].0, "tls_cert_path");
-        assert_eq!(missing[2].0, "tls_key_path");
-    }
-
-    #[test]
-    fn validate_tls_paths_skips_existing_files() {
+    fn validate_ca_only_is_valid() {
         let ca_file = NamedTempFile::new().unwrap();
         let config = NatsConfiguration {
             tls_ca_cert_path: Some(ca_file.path().to_str().unwrap().into()),
-            tls_cert_path: Some("/nonexistent/cert.pem".into()),
             ..Default::default()
         };
-        let missing = config.validate_tls_paths();
-        assert_eq!(missing.len(), 1);
-        assert_eq!(missing[0].0, "tls_cert_path");
+        assert!(config.validate_tls_config().is_ok());
+    }
+
+    #[test]
+    fn validate_full_mtls_is_valid() {
+        let ca = NamedTempFile::new().unwrap();
+        let cert = NamedTempFile::new().unwrap();
+        let key = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some(ca.path().to_str().unwrap().into()),
+            tls_cert_path: Some(cert.path().to_str().unwrap().into()),
+            tls_key_path: Some(key.path().to_str().unwrap().into()),
+            ..Default::default()
+        };
+        assert!(config.validate_tls_config().is_ok());
+    }
+
+    #[test]
+    fn validate_cert_without_key_is_invalid() {
+        let cert = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_cert_path: Some(cert.path().to_str().unwrap().into()),
+            ..Default::default()
+        };
+        let err = config.validate_tls_config().unwrap_err();
+        assert!(err.contains("tls_key_path is missing"), "{err}");
+    }
+
+    #[test]
+    fn validate_key_without_cert_is_invalid() {
+        let key = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_key_path: Some(key.path().to_str().unwrap().into()),
+            ..Default::default()
+        };
+        let err = config.validate_tls_config().unwrap_err();
+        assert!(err.contains("tls_cert_path is missing"), "{err}");
+    }
+
+    #[test]
+    fn validate_missing_file_is_invalid() {
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some("/nonexistent/ca.pem".into()),
+            ..Default::default()
+        };
+        let err = config.validate_tls_config().unwrap_err();
+        assert!(err.contains("tls_ca_cert_path"), "{err}");
+        assert!(err.contains("file not found"), "{err}");
+    }
+
+    #[test]
+    fn validate_existing_ca_but_missing_cert_file_is_invalid() {
+        let ca = NamedTempFile::new().unwrap();
+        let key = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some(ca.path().to_str().unwrap().into()),
+            tls_cert_path: Some("/nonexistent/cert.pem".into()),
+            tls_key_path: Some(key.path().to_str().unwrap().into()),
+            ..Default::default()
+        };
+        let err = config.validate_tls_config().unwrap_err();
+        assert!(err.contains("tls_cert_path"), "{err}");
     }
 
     #[test]

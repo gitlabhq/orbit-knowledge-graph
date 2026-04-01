@@ -53,6 +53,10 @@ pub struct NatsBroker {
 
 impl NatsBroker {
     pub async fn connect(config: &NatsConfiguration) -> Result<Self, NatsError> {
+        config
+            .validate_tls_config()
+            .map_err(NatsError::Connection)?;
+
         let connect_options = Self::build_connect_options(config);
 
         let url = format!("{}://{}", config.scheme(), config.url);
@@ -86,6 +90,7 @@ impl NatsBroker {
         &self.client
     }
 
+    /// Builds connect options. Must be called after `validate_tls_config()`.
     fn build_connect_options(config: &NatsConfiguration) -> async_nats::ConnectOptions {
         let mut options = async_nats::ConnectOptions::new()
             .connection_timeout(config.connection_timeout())
@@ -95,23 +100,16 @@ impl NatsBroker {
             options = options.user_and_password(user.clone(), pass.clone());
         }
 
-        for (field, path) in config.validate_tls_paths() {
-            warn!(%field, %path, "TLS file not found, skipping");
+        if config.tls_enabled() {
+            options = options.require_tls(true);
         }
 
         if let Some(ca_path) = &config.tls_ca_cert_path {
-            let path = PathBuf::from(ca_path);
-            if path.exists() {
-                options = options.add_root_certificates(path).require_tls(true);
-            }
+            options = options.add_root_certificates(PathBuf::from(ca_path));
         }
 
         if let (Some(cert), Some(key)) = (&config.tls_cert_path, &config.tls_key_path) {
-            let cert_path = PathBuf::from(cert);
-            let key_path = PathBuf::from(key);
-            if cert_path.exists() && key_path.exists() {
-                options = options.add_client_certificate(cert_path, key_path);
-            }
+            options = options.add_client_certificate(PathBuf::from(cert), PathBuf::from(key));
         }
 
         options
