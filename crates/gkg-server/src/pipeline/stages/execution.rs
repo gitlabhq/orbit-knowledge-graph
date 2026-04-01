@@ -41,7 +41,7 @@ impl PipelineStage for ClickHouseExecutor {
                 compiled.base.params.clone(),
                 compiled.base.result_context.clone(),
                 compiled.base.render(),
-                compiled.base.query_config.clone(),
+                compiled.base.query_config,
             )
         };
 
