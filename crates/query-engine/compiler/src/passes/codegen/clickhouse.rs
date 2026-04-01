@@ -893,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn query_settings_always_include_max_execution_time() {
+    fn no_settings_emitted_for_default_query_config() {
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),

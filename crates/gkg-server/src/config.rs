@@ -115,8 +115,6 @@ pub struct AppConfig {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub tls: TlsConfig,
-    #[serde(default)]
-    pub query: QueryConfig,
 }
 
 impl AppConfig {
@@ -160,8 +158,6 @@ impl AppConfig {
 }
 
 pub type SharedAppConfig = Arc<AppConfig>;
-
-pub use gkg_config::QueryConfig;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MetricsConfig {

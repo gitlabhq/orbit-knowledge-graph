@@ -67,7 +67,6 @@ pub fn lower(input: &mut Input) -> Result<Node> {
         QueryType::Hydration => lower_hydration(input),
     }?;
 
-    // Enable ClickHouse query cache for cursor pagination queries so that
     Ok(node)
 }
 

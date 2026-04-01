@@ -46,7 +46,16 @@ impl PipelineStage for ClickHouseExecutor {
         };
 
         let (batches, execution) = if profiling.enabled {
-            execute_profiled(client, &sql, &params, &rendered_sql, &profiling, t).await?
+            execute_profiled(
+                client,
+                &sql,
+                &params,
+                &rendered_sql,
+                &query_config,
+                &profiling,
+                t,
+            )
+            .await?
         } else {
             execute_standard(client, &sql, &params, &rendered_sql, &query_config, t).await?
         };
@@ -123,6 +132,7 @@ async fn execute_profiled(
     sql: &str,
     params: &std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
     rendered_sql: &str,
+    query_config: &QueryConfig,
     profiling: &ProfilingConfig,
     t: Instant,
 ) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), PipelineError> {
@@ -131,9 +141,15 @@ async fn execute_profiled(
         .map(|(k, v)| (k.clone(), v.render_http_param()))
         .collect();
 
+    let settings: Vec<(String, String)> = query_config.to_clickhouse_settings();
+    let settings_refs: Vec<(&str, &str)> = settings
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
     let (batches, query_stats) = client
         .profiler()
-        .execute_with_stats(sql, &http_params, &[])
+        .execute_with_stats(sql, &http_params, &settings_refs)
         .await
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
