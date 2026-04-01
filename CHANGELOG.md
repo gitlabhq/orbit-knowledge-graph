@@ -1,3 +1,9 @@
+## [0.20.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.19.0...v0.20.0) (2026-04-01)
+
+### Features
+
+* **indexer:** add mTLS support for NATS client ([fcca027](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fcca027c9ca69a5edd90f655ba06a013a0ff1015)) by Bohdan Parkhomchuk
+
 ## [0.19.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.18.0...v0.19.0) (2026-04-01)
 
 ### Features
