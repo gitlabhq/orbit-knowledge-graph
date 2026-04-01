@@ -375,15 +375,16 @@ check-go-proto:
   stage: lint
   before_script:
     - apt-get update -qq && apt-get install -y -qq protobuf-compiler
-    - go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-    - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
   script:
     - make -C gkgpb check
     - go build ./gkgpb/...
   rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
     - changes:
         - crates/gkg-server/proto/**/*
         - gkgpb/**/*
+        - go.mod
+        - go.sum
 
 build-proto-gem:
   needs: []
