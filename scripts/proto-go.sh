@@ -6,12 +6,36 @@ PROTO_DIR="crates/gkg-server/proto"
 OUT_DIR="gkgpb"
 MODULE="gitlab.com/gitlab-org/orbit/knowledge-graph/gkgpb"
 
+PROTOC_VERSION="34.1"
 PROTOC_GEN_GO_VERSION="v1.36.11"
 PROTOC_GEN_GO_GRPC_VERSION="v1.6.1"
 
 install_tools() {
   go install "google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}"
   go install "google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}"
+
+  if protoc --version 2>/dev/null | grep -q "34.1"; then
+    return
+  fi
+
+  echo "Installing protoc ${PROTOC_VERSION}..."
+  local tmpdir
+  tmpdir="$(mktemp -d)"
+  local arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64)  arch="x86_64" ;;
+    aarch64|arm64) arch="aarch_64" ;;
+  esac
+  local os
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+
+  curl -sSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${os}-${arch}.zip" \
+    -o "${tmpdir}/protoc.zip"
+  unzip -qo "${tmpdir}/protoc.zip" -d "${tmpdir}/protoc"
+  export PATH="${tmpdir}/protoc/bin:${PATH}"
+  rm -rf "${tmpdir}/protoc.zip"
+  echo "protoc $(protoc --version) installed"
 }
 
 run_protoc() {

@@ -374,7 +374,7 @@ check-go-proto:
     - saas-linux-medium-amd64
   stage: lint
   before_script:
-    - apt-get update -qq && apt-get install -y -qq protobuf-compiler
+    - apt-get update -qq && apt-get install -y -qq unzip
   script:
     - scripts/proto-go.sh check
     - go build ./gkgpb/...
