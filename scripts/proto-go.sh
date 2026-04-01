@@ -28,7 +28,10 @@ install_tools() {
     aarch64|arm64) arch="aarch_64" ;;
   esac
   local os
-  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  case "$(uname -s)" in
+    Darwin) os="osx" ;;
+    *)      os="linux" ;;
+  esac
 
   curl -sSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${os}-${arch}.zip" \
     -o "${tmpdir}/protoc.zip"
