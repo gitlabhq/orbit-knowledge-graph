@@ -31,7 +31,8 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = AppConfig::load()?;
 
-    let invalid_keys = config.query.validate_keys(QueryType::VARIANTS);
+    let mut invalid_keys = config.query.validate_keys(QueryType::VARIANTS);
+    invalid_keys.sort();
     anyhow::ensure!(
         invalid_keys.is_empty(),
         "unknown query type(s) in config: {invalid_keys:?} (valid: {:?})",

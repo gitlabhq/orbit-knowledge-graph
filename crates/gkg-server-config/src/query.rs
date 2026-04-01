@@ -45,7 +45,9 @@ impl QueryConfig {
     /// Returns ClickHouse SETTINGS as key-value pairs, skipping unset fields.
     ///
     /// Uses serde round-trip so that the field names stay in sync with the
-    /// struct definition -- no manual string mapping needed.
+    /// struct definition -- no manual string mapping needed. Only numeric
+    /// and bool values are emitted; strings and other types are skipped to
+    /// prevent unescaped values from reaching the SETTINGS clause.
     pub fn to_clickhouse_settings(&self) -> Vec<(String, String)> {
         let map = match serde_json::to_value(self) {
             Ok(Value::Object(m)) => m,
@@ -53,12 +55,15 @@ impl QueryConfig {
         };
         map.into_iter()
             .filter(|(_, v)| !v.is_null())
-            .map(|(k, v)| {
-                let s = match v {
-                    Value::Bool(b) => if b { "1" } else { "0" }.to_string(),
-                    other => other.to_string(),
+            .filter_map(|(k, v)| {
+                let s = match &v {
+                    Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
+                    Value::Number(n) => n.to_string(),
+                    // Skip strings/arrays/objects -- they can't be safely
+                    // interpolated into a SETTINGS clause without escaping.
+                    _ => return None,
                 };
-                (k, s)
+                Some((k, s))
             })
             .collect()
     }

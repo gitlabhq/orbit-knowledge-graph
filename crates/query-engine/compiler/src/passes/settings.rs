@@ -12,9 +12,10 @@ pub fn resolve(query_type: &str, has_cursor: bool) -> QueryConfig {
     let mut cfg = gkg_server_config::query::for_query_type(query_type);
 
     if has_cursor {
+        // Intentionally unconditional: cursor pagination requires the query
+        // cache so that subsequent pages hit the same cached result. This
+        // overrides even an explicit `use_query_cache: false` in YAML.
         cfg.use_query_cache = Some(true);
-        // query_cache_ttl comes from the global default — only override
-        // use_query_cache here so the TTL stays configurable via YAML.
     }
 
     cfg
