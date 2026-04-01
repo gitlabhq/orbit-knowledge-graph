@@ -11,18 +11,16 @@ use serde_json::Value;
 /// Query execution settings. All fields map to ClickHouse query-level
 /// settings. The closed set of fields prevents arbitrary user input from
 /// reaching the SETTINGS clause (CWE-89).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct QueryConfig {
-    /// Maximum seconds a query is allowed to run. Applied as both a
-    /// `tokio::time::timeout` on the Rust pipeline and as ClickHouse
-    /// `max_execution_time` per query.
+    /// ClickHouse `max_execution_time` in seconds.
+    #[serde(rename = "max_execution_time")]
     pub timeout_secs: Option<u64>,
 
-    /// Enable ClickHouse query cache. Set to true for cursor pagination
-    /// queries so subsequent pages reuse the cached result.
+    /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
     pub use_query_cache: Option<bool>,
 
-    /// ClickHouse query cache TTL in seconds.
+    /// ClickHouse `query_cache_ttl` in seconds.
     pub query_cache_ttl: Option<u32>,
 }
 

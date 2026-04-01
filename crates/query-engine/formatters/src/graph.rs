@@ -521,6 +521,7 @@ mod tests {
                     params: HashMap::new(),
                     result_context: result_ctx.clone(),
                     dialect: Default::default(),
+                    query_config: gkg_config::global::DEFAULT_QUERY_CONFIG,
                 },
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({

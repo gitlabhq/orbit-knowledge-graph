@@ -2751,6 +2751,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "compiler",
+ "gkg-config",
  "gkg-utils",
  "indexmap 2.13.0",
  "serde",

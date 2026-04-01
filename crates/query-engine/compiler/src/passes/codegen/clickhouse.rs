@@ -11,16 +11,31 @@ use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
 
-pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
+pub fn codegen(
+    ast: &Node,
+    result_context: ResultContext,
+    query_config: gkg_config::QueryConfig,
+) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
-    let sql = match ast {
+    let mut sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
     };
+
+    let settings = query_config.to_clickhouse_settings();
+    if !settings.is_empty() {
+        let kv: Vec<String> = settings
+            .into_iter()
+            .map(|(k, v)| format!("{k} = {v}"))
+            .collect();
+        sql.push_str(&format!(" SETTINGS {}", kv.join(", ")));
+    }
+
     Ok(ParameterizedQuery {
         sql,
         params: ctx.params,
         result_context,
         dialect: SqlDialect::ClickHouse,
+        query_config,
     })
 }
 
@@ -130,15 +145,6 @@ impl Context {
 
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
-        }
-
-        let settings = q.query_config.to_clickhouse_settings();
-        if !settings.is_empty() {
-            let kv: Vec<String> = settings
-                .into_iter()
-                .map(|(k, v)| format!("{k} = {v}"))
-                .collect();
-            parts.push(format!("SETTINGS {}", kv.join(", ")));
         }
 
         Ok(parts.join(" "))
@@ -309,7 +315,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
@@ -342,7 +353,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, e.label AS rel_type FROM nodes AS n INNER JOIN edges AS e ON (n.id = e.source_id)"
@@ -371,7 +387,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label ORDER BY COUNT(n.id) DESC"
@@ -398,7 +419,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE n.label IN ({p0:String}, {p1:String}, {p2:String})"
@@ -427,7 +453,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE ((n.label = {p0:String}) AND ((n.created_at > {p1:String}) OR (n.deleted_at IS NULL)))"
@@ -480,7 +511,12 @@ mod tests {
             ),
             ..Default::default()
         };
-        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let r = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert!(
             r.sql.contains("e.relationship_kind = {p0:String}"),
             "{}",
@@ -514,7 +550,12 @@ mod tests {
             ),
             ..Default::default()
         };
-        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let r = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert!(
             r.sql.contains("e.relationship_kind IN {p0:Array(String)}"),
             "{}",
@@ -534,7 +575,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), ctx).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            ctx,
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(result.result_context.len(), 1);
         assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
     }
@@ -556,7 +602,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label HAVING (COUNT(n.id) > {p0:Int64})"
@@ -579,7 +630,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("HAVING"));
         assert!(!result.sql.contains("GROUP BY"));
     }
@@ -602,7 +658,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(outer)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("(SELECT"));
         assert!(result.sql.contains(") AS sub"));
         assert!(result.sql.contains("gl_project AS p"));
@@ -635,7 +696,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(outer)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("INNER JOIN (SELECT"));
         assert!(result.sql.contains("HAVING"));
         assert!(result.sql.contains(") AS deduped_e ON"));
@@ -666,7 +732,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("WITH RECURSIVE"));
         assert!(result.sql.contains("UNION ALL"));
     }
@@ -685,7 +756,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("UNION ALL"));
         assert!(result.sql.contains("LIMIT 10"));
         let union_pos = result.sql.find("UNION ALL").unwrap();
@@ -715,7 +791,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("UNION ALL"));
         assert!(result.sql.contains(") AS all_edges"));
     }
@@ -743,6 +824,7 @@ mod tests {
             params,
             result_context: empty_ctx(),
             dialect: SqlDialect::ClickHouse,
+            query_config: gkg_config::QueryConfig::default(),
         };
 
         assert_eq!(
@@ -774,6 +856,7 @@ mod tests {
             params,
             result_context: empty_ctx(),
             dialect: SqlDialect::ClickHouse,
+            query_config: gkg_config::QueryConfig::default(),
         };
 
         assert_eq!(
@@ -791,15 +874,14 @@ mod tests {
             }],
             from: TableRef::scan("nodes", "n"),
             limit: Some(100),
-            query_config: gkg_config::QueryConfig {
-                use_query_cache: Some(true),
-                query_cache_ttl: Some(60),
-                ..Default::default()
-            },
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let mut config = gkg_config::global::DEFAULT_QUERY_CONFIG;
+        config.use_query_cache = Some(true);
+        config.query_cache_ttl = Some(60);
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), config).unwrap();
         assert!(
             result.sql.contains("SETTINGS"),
             "should have SETTINGS clause: {}",
@@ -807,7 +889,6 @@ mod tests {
         );
         assert!(result.sql.contains("use_query_cache = 1"));
         assert!(result.sql.contains("query_cache_ttl = 60"));
-        assert!(result.sql.contains("max_execution_time = "));
     }
 
     #[test]
@@ -821,15 +902,15 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            gkg_config::QueryConfig::default(),
+        )
+        .unwrap();
         assert!(
-            result.sql.contains("max_execution_time = "),
-            "should always emit max_execution_time: {}",
-            result.sql
-        );
-        assert!(
-            !result.sql.contains("use_query_cache"),
-            "should not emit cache settings by default: {}",
+            !result.sql.contains("SETTINGS"),
+            "default QueryConfig should not emit SETTINGS: {}",
             result.sql
         );
     }
@@ -841,6 +922,7 @@ mod tests {
             params: HashMap::new(),
             result_context: empty_ctx(),
             dialect: SqlDialect::ClickHouse,
+            query_config: gkg_config::QueryConfig::default(),
         };
 
         assert_eq!(pq.render(), "SELECT {p0:String} AND {p1:Int64}");

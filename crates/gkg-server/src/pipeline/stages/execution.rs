@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
+use gkg_config::QueryConfig;
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -33,20 +34,21 @@ impl PipelineStage for ClickHouseExecutor {
             .cloned()
             .unwrap_or_default();
 
-        let (sql, params, result_context, rendered_sql) = {
+        let (sql, params, result_context, rendered_sql, query_config) = {
             let compiled = ctx.compiled()?;
             (
                 compiled.base.sql.clone(),
                 compiled.base.params.clone(),
                 compiled.base.result_context.clone(),
                 compiled.base.render(),
+                compiled.base.query_config.clone(),
             )
         };
 
         let (batches, execution) = if profiling.enabled {
             execute_profiled(client, &sql, &params, &rendered_sql, &profiling, t).await?
         } else {
-            execute_standard(client, &sql, &params, &rendered_sql, t).await?
+            execute_standard(client, &sql, &params, &rendered_sql, &query_config, t).await?
         };
 
         let elapsed = t.elapsed();
@@ -75,13 +77,17 @@ async fn execute_standard(
     sql: &str,
     params: &std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
     rendered_sql: &str,
+    query_config: &QueryConfig,
     t: Instant,
 ) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), PipelineError> {
     let mut query = client.query(sql);
     for (key, param) in params.iter() {
         query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
     }
-    // query = query.with_option("max_execution_time", query_config.timeout_secs.to_string());
+    // Defense-in-depth: set HTTP-level options alongside the SQL SETTINGS clause.
+    for (key, value) in query_config.to_clickhouse_settings() {
+        query = query.with_option(key, value);
+    }
     let batches = query
         .fetch_arrow()
         .await

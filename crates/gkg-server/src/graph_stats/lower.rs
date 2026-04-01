@@ -71,7 +71,12 @@ mod tests {
     fn lower_produces_union_all() {
         let input = test_input();
         let ast = lower(&input);
-        let result = codegen(&ast, ResultContext::new()).unwrap();
+        let result = codegen(
+            &ast,
+            ResultContext::new(),
+            gkg_config::global::DEFAULT_QUERY_CONFIG,
+        )
+        .unwrap();
 
         assert!(result.sql.contains("UNION ALL"), "SQL: {}", result.sql);
         assert!(result.sql.contains("gl_project"), "SQL: {}", result.sql);
@@ -87,7 +92,12 @@ mod tests {
     fn every_subquery_has_starts_with_filter() {
         let input = test_input();
         let ast = lower(&input);
-        let result = codegen(&ast, ResultContext::new()).unwrap();
+        let result = codegen(
+            &ast,
+            ResultContext::new(),
+            gkg_config::global::DEFAULT_QUERY_CONFIG,
+        )
+        .unwrap();
 
         let starts_with_count = result.sql.matches("startsWith").count();
         assert_eq!(
@@ -102,7 +112,12 @@ mod tests {
     fn every_subquery_has_deleted_filter() {
         let input = test_input();
         let ast = lower(&input);
-        let result = codegen(&ast, ResultContext::new()).unwrap();
+        let result = codegen(
+            &ast,
+            ResultContext::new(),
+            gkg_config::global::DEFAULT_QUERY_CONFIG,
+        )
+        .unwrap();
 
         let deleted_count = result.sql.matches("_deleted").count();
         assert_eq!(
