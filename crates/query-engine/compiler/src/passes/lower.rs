@@ -2888,51 +2888,6 @@ mod tests {
         assert_eq!(input.compiler.node_edge_col.len(), 2);
     }
 
-    // #[test]
-    // fn cursor_enables_ch_query_cache() {
-    //     let mut input = validated_input(
-    //         r#"{
-    //         "query_type": "search",
-    //         "node": {"id": "u", "entity": "User"},
-    //         "limit": 100,
-    //         "cursor": {"offset": 0, "page_size": 20}
-    //     }"#,
-    //     );
-
-    //     let Node::Query(q) = lower(&mut input).unwrap() else {
-    //         panic!("expected Query");
-    //     };
-
-    //     assert!(
-    //         q.query_config.use_query_cache,
-    //         "cursor should enable CH query cache"
-    //     );
-    //     assert_eq!(
-    //         q.query_config.query_cache_ttl, DEFAULT_QUERY_CACHE_TTL,
-    //         "CH query cache TTL should be {DEFAULT_QUERY_CACHE_TTL}s"
-    //     );
-    // }
-
-    // #[test]
-    // fn no_cursor_no_ch_query_cache() {
-    //     let mut input = validated_input(
-    //         r#"{
-    //         "query_type": "search",
-    //         "node": {"id": "u", "entity": "User"},
-    //         "limit": 100
-    //     }"#,
-    //     );
-
-    //     let Node::Query(q) = lower(&mut input).unwrap() else {
-    //         panic!("expected Query");
-    //     };
-
-    //     assert!(
-    //         !q.query_config.use_query_cache,
-    //         "no cursor should not set CH query cache"
-    //     );
-    // }
-
     // ── escape_like ─────────────────────────────────────────────────
 
     #[test]
