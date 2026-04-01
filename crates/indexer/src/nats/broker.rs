@@ -59,7 +59,7 @@ impl NatsBroker {
 
         let connect_options = Self::build_connect_options(config);
 
-        let url = format!("{}://{}", config.scheme(), config.url);
+        let url = config.connection_url();
         let client = async_nats::connect_with_options(&url, connect_options)
             .await
             .map_err(map_connect_error)?;

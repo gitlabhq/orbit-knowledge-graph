@@ -142,16 +142,27 @@ impl NatsConfiguration {
         1
     }
 
-    /// Returns true when any TLS path is configured.
+    /// Returns true when TLS is configured — either via cert paths or a `tls://` url scheme.
     pub fn tls_enabled(&self) -> bool {
-        self.tls_ca_cert_path.is_some()
+        self.url.starts_with("tls://")
+            || self.tls_ca_cert_path.is_some()
             || self.tls_cert_path.is_some()
             || self.tls_key_path.is_some()
     }
 
-    /// Returns `"tls"` when TLS is configured, `"nats"` otherwise.
-    pub fn scheme(&self) -> &str {
-        if self.tls_enabled() { "tls" } else { "nats" }
+    /// Returns the full connection URL with the appropriate scheme.
+    ///
+    /// Accepts `url` in any of these formats:
+    /// - `"host:port"` — scheme derived from TLS config
+    /// - `"nats://host:port"` — plaintext
+    /// - `"tls://host:port"` — TLS required
+    pub fn connection_url(&self) -> String {
+        if self.url.starts_with("nats://") || self.url.starts_with("tls://") {
+            return self.url.clone();
+        }
+
+        let scheme = if self.tls_enabled() { "tls" } else { "nats" };
+        format!("{scheme}://{}", self.url)
     }
 
     /// Validates TLS configuration completeness and file existence.
@@ -286,30 +297,60 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn scheme_is_nats_by_default() {
+    fn bare_host_defaults_to_nats_scheme() {
         let config = NatsConfiguration::default();
-        assert_eq!(config.scheme(), "nats");
+        assert_eq!(config.connection_url(), "nats://localhost:4222");
         assert!(!config.tls_enabled());
     }
 
     #[test]
-    fn scheme_is_tls_when_ca_cert_set() {
+    fn bare_host_uses_tls_scheme_when_ca_set() {
         let config = NatsConfiguration {
             tls_ca_cert_path: Some("/tmp/ca.pem".into()),
             ..Default::default()
         };
-        assert_eq!(config.scheme(), "tls");
+        assert_eq!(config.connection_url(), "tls://localhost:4222");
         assert!(config.tls_enabled());
     }
 
     #[test]
-    fn scheme_is_tls_when_client_cert_set() {
+    fn bare_host_uses_tls_scheme_when_client_cert_set() {
         let config = NatsConfiguration {
             tls_cert_path: Some("/tmp/cert.pem".into()),
             tls_key_path: Some("/tmp/key.pem".into()),
             ..Default::default()
         };
-        assert_eq!(config.scheme(), "tls");
+        assert_eq!(config.connection_url(), "tls://localhost:4222");
+    }
+
+    #[test]
+    fn nats_scheme_in_url_is_preserved() {
+        let config = NatsConfiguration {
+            url: "nats://my-nats:4222".into(),
+            ..Default::default()
+        };
+        assert_eq!(config.connection_url(), "nats://my-nats:4222");
+        assert!(!config.tls_enabled());
+    }
+
+    #[test]
+    fn tls_scheme_in_url_enables_tls() {
+        let config = NatsConfiguration {
+            url: "tls://secure-nats:4222".into(),
+            ..Default::default()
+        };
+        assert_eq!(config.connection_url(), "tls://secure-nats:4222");
+        assert!(config.tls_enabled());
+    }
+
+    #[test]
+    fn tls_scheme_in_url_not_duplicated_with_cert_paths() {
+        let config = NatsConfiguration {
+            url: "tls://secure-nats:4222".into(),
+            tls_ca_cert_path: Some("/tmp/ca.pem".into()),
+            ..Default::default()
+        };
+        assert_eq!(config.connection_url(), "tls://secure-nats:4222");
     }
 
     #[test]
@@ -407,7 +448,7 @@ mod tests {
             config.tls_key_path.as_deref(),
             Some("/etc/nats/client-key.pem")
         );
-        assert_eq!(config.scheme(), "tls");
+        assert!(config.tls_enabled());
     }
 
     #[test]
@@ -417,6 +458,6 @@ mod tests {
         assert!(config.tls_ca_cert_path.is_none());
         assert!(config.tls_cert_path.is_none());
         assert!(config.tls_key_path.is_none());
-        assert_eq!(config.scheme(), "nats");
+        assert!(!config.tls_enabled());
     }
 }
