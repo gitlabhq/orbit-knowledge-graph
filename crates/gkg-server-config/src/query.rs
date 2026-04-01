@@ -103,13 +103,17 @@ impl QuerySettings {
         }
     }
 
-    /// Returns unrecognized override keys (empty if all valid).
+    /// Returns unrecognized override keys sorted alphabetically
+    /// (empty if all valid).
     pub fn validate_keys(&self, valid_types: &[&str]) -> Vec<String> {
-        self.overrides
+        let mut invalid: Vec<String> = self
+            .overrides
             .keys()
             .filter(|k| !valid_types.contains(&k.as_str()))
             .cloned()
-            .collect()
+            .collect();
+        invalid.sort();
+        invalid
     }
 }
 

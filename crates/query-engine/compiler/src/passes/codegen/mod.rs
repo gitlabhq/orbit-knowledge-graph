@@ -32,7 +32,9 @@ pub struct ParameterizedQuery {
     pub sql: String,
     pub params: HashMap<String, ParamValue>,
     pub result_context: ResultContext,
-    /// Resolved query settings for execution-stage defense-in-depth.
+    /// Resolved query settings. Currently baked into the SQL SETTINGS clause
+    /// by codegen; carried here so the execution stage can also apply them
+    /// as HTTP-level ClickHouse settings (defense-in-depth, not yet wired).
     pub query_config: QueryConfig,
     pub dialect: SqlDialect,
 }
