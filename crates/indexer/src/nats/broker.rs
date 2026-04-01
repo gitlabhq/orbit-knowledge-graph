@@ -1,6 +1,7 @@
 //! NATS JetStream message broker.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -54,7 +55,7 @@ impl NatsBroker {
     pub async fn connect(config: &NatsConfiguration) -> Result<Self, NatsError> {
         let connect_options = Self::build_connect_options(config);
 
-        let url = format!("nats://{}", config.url);
+        let url = format!("{}://{}", config.scheme(), config.url);
         let client = async_nats::connect_with_options(&url, connect_options)
             .await
             .map_err(map_connect_error)?;
@@ -92,6 +93,25 @@ impl NatsBroker {
 
         if let (Some(user), Some(pass)) = (&config.username, &config.password) {
             options = options.user_and_password(user.clone(), pass.clone());
+        }
+
+        for (field, path) in config.validate_tls_paths() {
+            warn!(%field, %path, "TLS file not found, skipping");
+        }
+
+        if let Some(ca_path) = &config.tls_ca_cert_path {
+            let path = PathBuf::from(ca_path);
+            if path.exists() {
+                options = options.add_root_certificates(path).require_tls(true);
+            }
+        }
+
+        if let (Some(cert), Some(key)) = (&config.tls_cert_path, &config.tls_key_path) {
+            let cert_path = PathBuf::from(cert);
+            let key_path = PathBuf::from(key);
+            if cert_path.exists() && key_path.exists() {
+                options = options.add_client_certificate(cert_path, key_path);
+            }
         }
 
         options

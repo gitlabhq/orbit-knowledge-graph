@@ -1,5 +1,6 @@
 //! NATS broker configuration.
 
+use std::path::Path;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,21 @@ pub struct NatsConfiguration {
     /// For production, prefer environment variables over storing in config files.
     #[serde(default)]
     pub password: Option<String>,
+
+    /// Path to CA certificate (PEM) for verifying the NATS server.
+    /// Setting this enables TLS (connection uses `tls://` scheme).
+    #[serde(default)]
+    pub tls_ca_cert_path: Option<String>,
+
+    /// Path to client certificate (PEM) for mTLS authentication.
+    /// Must be paired with `tls_key_path`.
+    #[serde(default)]
+    pub tls_cert_path: Option<String>,
+
+    /// Path to client private key (PEM) for mTLS authentication.
+    /// Must be paired with `tls_cert_path`.
+    #[serde(default)]
+    pub tls_key_path: Option<String>,
 
     /// Connection timeout in seconds. Defaults to 10.
     #[serde(default = "NatsConfiguration::default_connection_timeout_secs")]
@@ -126,6 +142,36 @@ impl NatsConfiguration {
         1
     }
 
+    /// Returns true when any TLS path is configured.
+    pub fn tls_enabled(&self) -> bool {
+        self.tls_ca_cert_path.is_some()
+            || self.tls_cert_path.is_some()
+            || self.tls_key_path.is_some()
+    }
+
+    /// Returns `"tls"` when TLS is configured, `"nats"` otherwise.
+    pub fn scheme(&self) -> &str {
+        if self.tls_enabled() { "tls" } else { "nats" }
+    }
+
+    /// Checks that all configured TLS paths point to existing files.
+    /// Returns a list of `(field_name, path)` for paths that could not be found.
+    pub fn validate_tls_paths(&self) -> Vec<(&'static str, &str)> {
+        let checks: [(&str, Option<&String>); 3] = [
+            ("tls_ca_cert_path", self.tls_ca_cert_path.as_ref()),
+            ("tls_cert_path", self.tls_cert_path.as_ref()),
+            ("tls_key_path", self.tls_key_path.as_ref()),
+        ];
+
+        checks
+            .into_iter()
+            .filter_map(|(name, path)| {
+                path.filter(|p| !Path::new(p.as_str()).exists())
+                    .map(|p| (name, p.as_str()))
+            })
+            .collect()
+    }
+
     pub fn connection_timeout(&self) -> Duration {
         Duration::from_secs(self.connection_timeout_secs)
     }
@@ -163,12 +209,18 @@ impl NatsConfiguration {
     /// - `NATS_STREAM_REPLICAS`: Number of stream replicas (default: 1)
     /// - `NATS_STREAM_MAX_AGE_SECS`: Maximum age of messages in seconds
     /// - `NATS_STREAM_MAX_BYTES`: Maximum bytes per stream
+    /// - `NATS_TLS_CA_CERT_PATH`: Path to CA certificate (PEM)
+    /// - `NATS_TLS_CERT_PATH`: Path to client certificate (PEM)
+    /// - `NATS_TLS_KEY_PATH`: Path to client private key (PEM)
     /// - `NATS_STREAM_MAX_MESSAGES`: Maximum messages per stream
     pub fn from_env() -> Self {
         Self {
             url: std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".into()),
             username: std::env::var("NATS_USERNAME").ok(),
             password: std::env::var("NATS_PASSWORD").ok(),
+            tls_ca_cert_path: std::env::var("NATS_TLS_CA_CERT_PATH").ok(),
+            tls_cert_path: std::env::var("NATS_TLS_CERT_PATH").ok(),
+            tls_key_path: std::env::var("NATS_TLS_KEY_PATH").ok(),
             consumer_name: std::env::var("NATS_CONSUMER_NAME").ok(),
             auto_create_streams: env_var_or(
                 "NATS_AUTO_CREATE_STREAMS",
@@ -189,6 +241,9 @@ impl Default for NatsConfiguration {
             url: "localhost:4222".to_string(),
             username: None,
             password: None,
+            tls_ca_cert_path: None,
+            tls_cert_path: None,
+            tls_key_path: None,
             connection_timeout_secs: Self::default_connection_timeout_secs(),
             request_timeout_secs: Self::default_request_timeout_secs(),
             ack_wait_secs: Self::default_ack_wait_secs(),
@@ -202,5 +257,103 @@ impl Default for NatsConfiguration {
             stream_max_bytes: None,
             stream_max_messages: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn scheme_is_nats_by_default() {
+        let config = NatsConfiguration::default();
+        assert_eq!(config.scheme(), "nats");
+        assert!(!config.tls_enabled());
+    }
+
+    #[test]
+    fn scheme_is_tls_when_ca_cert_set() {
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some("/tmp/ca.pem".into()),
+            ..Default::default()
+        };
+        assert_eq!(config.scheme(), "tls");
+        assert!(config.tls_enabled());
+    }
+
+    #[test]
+    fn scheme_is_tls_when_client_cert_set() {
+        let config = NatsConfiguration {
+            tls_cert_path: Some("/tmp/cert.pem".into()),
+            tls_key_path: Some("/tmp/key.pem".into()),
+            ..Default::default()
+        };
+        assert_eq!(config.scheme(), "tls");
+    }
+
+    #[test]
+    fn validate_tls_paths_empty_when_no_tls() {
+        let config = NatsConfiguration::default();
+        assert!(config.validate_tls_paths().is_empty());
+    }
+
+    #[test]
+    fn validate_tls_paths_reports_missing_files() {
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some("/nonexistent/ca.pem".into()),
+            tls_cert_path: Some("/nonexistent/cert.pem".into()),
+            tls_key_path: Some("/nonexistent/key.pem".into()),
+            ..Default::default()
+        };
+        let missing = config.validate_tls_paths();
+        assert_eq!(missing.len(), 3);
+        assert_eq!(missing[0].0, "tls_ca_cert_path");
+        assert_eq!(missing[1].0, "tls_cert_path");
+        assert_eq!(missing[2].0, "tls_key_path");
+    }
+
+    #[test]
+    fn validate_tls_paths_skips_existing_files() {
+        let ca_file = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some(ca_file.path().to_str().unwrap().into()),
+            tls_cert_path: Some("/nonexistent/cert.pem".into()),
+            ..Default::default()
+        };
+        let missing = config.validate_tls_paths();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].0, "tls_cert_path");
+    }
+
+    #[test]
+    fn deserialize_with_tls_fields() {
+        let yaml = r#"
+            url: "localhost:4222"
+            tls_ca_cert_path: "/etc/nats/ca.pem"
+            tls_cert_path: "/etc/nats/client.pem"
+            tls_key_path: "/etc/nats/client-key.pem"
+        "#;
+        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.tls_ca_cert_path.as_deref(), Some("/etc/nats/ca.pem"));
+        assert_eq!(
+            config.tls_cert_path.as_deref(),
+            Some("/etc/nats/client.pem")
+        );
+        assert_eq!(
+            config.tls_key_path.as_deref(),
+            Some("/etc/nats/client-key.pem")
+        );
+        assert_eq!(config.scheme(), "tls");
+    }
+
+    #[test]
+    fn deserialize_without_tls_fields_uses_defaults() {
+        let yaml = r#"url: "localhost:4222""#;
+        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.tls_ca_cert_path.is_none());
+        assert!(config.tls_cert_path.is_none());
+        assert!(config.tls_key_path.is_none());
+        assert_eq!(config.scheme(), "nats");
     }
 }

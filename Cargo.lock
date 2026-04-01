@@ -3611,6 +3611,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "siphon-proto",
  "smallvec",
