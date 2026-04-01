@@ -17,18 +17,9 @@ pub fn codegen(
     query_config: gkg_config::QueryConfig,
 ) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
-    let mut sql = match ast {
-        Node::Query(q) => ctx.emit_query(q)?,
+    let sql = match ast {
+        Node::Query(q) => ctx.emit_query(q, &query_config)?,
     };
-
-    let settings = query_config.to_clickhouse_settings();
-    if !settings.is_empty() {
-        let kv: Vec<String> = settings
-            .into_iter()
-            .map(|(k, v)| format!("{k} = {v}"))
-            .collect();
-        sql.push_str(&format!(" SETTINGS {}", kv.join(", ")));
-    }
 
     Ok(ParameterizedQuery {
         sql,
@@ -50,7 +41,7 @@ impl Context {
         }
     }
 
-    fn emit_query(&mut self, q: &Query) -> Result<String> {
+    fn emit_query(&mut self, q: &Query, query_config: &gkg_config::QueryConfig) -> Result<String> {
         let mut parts = Vec::new();
 
         // WITH clause (CTEs)
@@ -60,6 +51,16 @@ impl Context {
 
         // SELECT, FROM, WHERE, GROUP BY, HAVING, UNION ALL, ORDER BY, LIMIT, OFFSET
         parts.push(self.emit_query_body(q)?);
+
+        // SETTINGS clause (closed set of allowed settings)
+        let settings = query_config.to_clickhouse_settings();
+        if !settings.is_empty() {
+            let kv: Vec<String> = settings
+                .into_iter()
+                .map(|(k, v)| format!("{k} = {v}"))
+                .collect();
+            parts.push(format!("SETTINGS {}", kv.join(", ")));
+        }
 
         Ok(parts.join(" "))
     }
@@ -275,12 +276,12 @@ impl Context {
             TableRef::Union { queries, alias } => {
                 let union_parts: Vec<String> = queries
                     .iter()
-                    .map(|q| self.emit_query(q))
+                    .map(|q| self.emit_query_body(q))
                     .collect::<Result<_>>()?;
                 Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
             }
             TableRef::Subquery { query, alias } => {
-                let inner_sql = self.emit_query(query)?;
+                let inner_sql = self.emit_query_body(query)?;
                 Ok(format!("({inner_sql}) AS {alias}"))
             }
         }
