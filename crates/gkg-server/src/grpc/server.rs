@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clickhouse_client::ClickHouseConfiguration;
 use ontology::Ontology;
@@ -9,6 +10,7 @@ use tracing::info;
 
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
+use crate::config::GrpcConfig;
 use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
 
 use super::service::KnowledgeGraphServiceImpl;
@@ -17,6 +19,7 @@ pub struct GrpcServer {
     addr: SocketAddr,
     service: KnowledgeGraphServiceServer<KnowledgeGraphServiceImpl>,
     tls_config: Option<ServerTlsConfig>,
+    grpc_config: GrpcConfig,
 }
 
 impl GrpcServer {
@@ -27,13 +30,20 @@ impl GrpcServer {
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
+        grpc_config: GrpcConfig,
     ) -> Self {
-        let service =
-            KnowledgeGraphServiceImpl::new(validator, ontology, clickhouse_config, cluster_health);
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            ontology,
+            clickhouse_config,
+            cluster_health,
+            grpc_config.stream_timeout_secs,
+        );
         Self {
             addr,
             service: KnowledgeGraphServiceServer::new(service),
             tls_config,
+            grpc_config,
         }
     }
 
@@ -45,7 +55,15 @@ impl GrpcServer {
         let tls_enabled = self.tls_config.is_some();
         info!(addr = %self.addr, tls = tls_enabled, "Starting gRPC server");
 
-        let mut builder = TonicServer::builder();
+        let gc = &self.grpc_config;
+        let mut builder = TonicServer::builder()
+            .http2_keepalive_interval(Some(Duration::from_secs(gc.keepalive_interval_secs)))
+            .http2_keepalive_timeout(Some(Duration::from_secs(gc.keepalive_timeout_secs)))
+            .tcp_keepalive(Some(Duration::from_secs(gc.tcp_keepalive_secs)))
+            .initial_connection_window_size(gc.connection_window_size)
+            .initial_stream_window_size(gc.stream_window_size)
+            .concurrency_limit_per_connection(gc.concurrency_limit)
+            .max_connection_age(Duration::from_secs(gc.max_connection_age_secs));
         if let Some(tls) = self.tls_config {
             builder = builder.tls_config(tls)?;
         }
@@ -80,6 +98,7 @@ mod tests {
             &clickhouse_config,
             cluster_health,
             None,
+            GrpcConfig::default(),
         );
         assert_eq!(server.addr(), addr);
     }
