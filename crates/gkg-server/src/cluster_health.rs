@@ -23,7 +23,9 @@ impl ClusterHealthChecker {
 
         Self {
             version: std::env::var("GKG_VERSION")
-                .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
             health_client,
         }
     }

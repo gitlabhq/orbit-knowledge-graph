@@ -33,7 +33,10 @@ fn version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
     VERSION
         .get_or_init(|| {
-            std::env::var("GKG_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string())
+            std::env::var("GKG_VERSION")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
         })
         .as_str()
 }
