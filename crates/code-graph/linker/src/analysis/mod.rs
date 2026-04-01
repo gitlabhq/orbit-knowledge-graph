@@ -1,7 +1,9 @@
+pub mod backtracking;
 pub mod files;
 pub mod languages;
 pub mod types;
 
+use crate::analysis::backtracking::GlobalBacktracker;
 use crate::analysis::types::rels_by_kind;
 use crate::analysis::types::{
     ConsolidatedRelationship, DefinitionNode, DirectoryNode, FileNode, FqnType, GraphData,
@@ -342,7 +344,15 @@ impl AnalysisService {
                     imported_symbol_map,
                     relationships,
                 );
-            } // Note: use _ => {} as a catch-all if you want to disable some analyzers
+            }
+            SupportedLanguage::C => {
+                languages::dsl::process_definitions(
+                    file_result,
+                    &relative_path,
+                    definition_map,
+                    relationships,
+                );
+            }
         }
     }
 
@@ -482,6 +492,15 @@ impl AnalysisService {
                         relationships,
                     );
                 }
+                SupportedLanguage::C => {
+                    let backtracker = GlobalBacktracker::from_definition_map(definition_map);
+                    backtracker.process_dsl_references(
+                        &references,
+                        &relative_path,
+                        definition_map,
+                        relationships,
+                    );
+                }
                 _ => {}
             }
         }
@@ -555,7 +574,10 @@ impl AnalysisService {
                     imported_symbol_map,
                     relationships,
                 );
-            } // Note: use _ => {} as a catch-all if you want to disable some analyzers
+            }
+            SupportedLanguage::C => {
+                languages::dsl::add_definition_relationships(definition_map, relationships);
+            }
         }
     }
 }

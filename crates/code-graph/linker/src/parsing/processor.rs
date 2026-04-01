@@ -2,11 +2,16 @@ use crate::loading::FileInfo;
 use log::debug;
 use parser_core::definitions::DefinitionInfo;
 use parser_core::{
+    c::c_language_spec,
     csharp::{
         analyzer::CSharpAnalyzer,
         types::{CSharpDefinitionInfo, CSharpImportedSymbolInfo},
     },
     definitions::DefinitionTypeInfo,
+    dsl::{
+        engine::DslAnalyzer,
+        types::{DslDefinitionInfo, DslRawReference},
+    },
     java::{
         analyzer::JavaAnalyzer,
         types::{JavaDefinitionInfo, JavaImportedSymbolInfo, JavaReferenceInfo},
@@ -192,7 +197,8 @@ impl<'a> FileProcessor<'a> {
         // Check if language is supported
         let is_supported = matches!(
             language,
-            SupportedLanguage::Ruby
+            SupportedLanguage::C
+                | SupportedLanguage::Ruby
                 | SupportedLanguage::Python
                 | SupportedLanguage::Kotlin
                 | SupportedLanguage::Java
@@ -453,7 +459,33 @@ impl<'a> FileProcessor<'a> {
                         self.path
                     ))
                 }
-            } // Note: Use _ => { Ok(Definitions::Unknown(vec![])) } if you want to comment out certain match arms
+            }
+            SupportedLanguage::C => {
+                if let UnifiedParseResult::TreeSitter(ast_result) = parse_result {
+                    let spec = c_language_spec();
+                    let analyzer = DslAnalyzer::new(&spec);
+                    match analyzer.analyze(ast_result) {
+                        Ok(output) => {
+                            let references = if output.references.is_empty() {
+                                None
+                            } else {
+                                Some(References::Dsl(output.references))
+                            };
+                            Ok((Definitions::Dsl(output.definitions), None, references))
+                        }
+                        Err(e) => Err(anyhow::anyhow!(
+                            "Failed to analyze C file '{}': {}",
+                            self.path,
+                            e
+                        )),
+                    }
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Expected TreeSitter parse result for C file '{}'",
+                        self.path
+                    ))
+                }
+            }
         };
         debug!("Finished analyzing file {}.", self.path);
         result
@@ -470,6 +502,7 @@ pub enum Definitions {
     CSharp(Vec<CSharpDefinitionInfo>),
     TypeScript(Vec<TypeScriptDefinitionInfo>),
     Rust(Vec<RustDefinitionInfo>),
+    Dsl(Vec<DslDefinitionInfo>),
     Unknown(Vec<DefinitionInfo<(), ()>>),
 }
 
@@ -484,6 +517,7 @@ impl Definitions {
             Definitions::CSharp(defs) => defs.len(),
             Definitions::TypeScript(defs) => defs.len(),
             Definitions::Rust(defs) => defs.len(),
+            Definitions::Dsl(defs) => defs.len(),
             Definitions::Unknown(defs) => defs.len(),
         }
     }
@@ -524,7 +558,18 @@ impl Definitions {
                 defs.iter()
                     .map(|def| def.definition_type.as_str().to_string()),
             ),
+            Definitions::Dsl(defs) => Box::new(
+                defs.iter()
+                    .map(|def| def.definition_type.as_str().to_string()),
+            ),
             Definitions::Unknown(_) => Box::new(std::iter::empty()),
+        }
+    }
+
+    pub fn iter_dsl(&self) -> Option<impl Iterator<Item = &DslDefinitionInfo>> {
+        match self {
+            Definitions::Dsl(defs) => Some(defs.iter()),
+            _ => None,
         }
     }
 
@@ -690,6 +735,7 @@ pub enum References {
     TypeScript(Vec<TypeScriptReferenceInfo>),
     Java(Vec<JavaReferenceInfo>),
     Python(Vec<PythonReferenceInfo>),
+    Dsl(Vec<DslRawReference>),
 }
 
 impl References {
@@ -701,12 +747,20 @@ impl References {
             References::TypeScript(references) => references.len(),
             References::Java(references) => references.len(),
             References::Python(references) => references.len(),
+            References::Dsl(references) => references.len(),
         }
     }
 
     /// Check if there are any references
     pub fn is_empty(&self) -> bool {
         self.count() == 0
+    }
+
+    pub fn iter_dsl(&self) -> Option<impl Iterator<Item = &DslRawReference>> {
+        match self {
+            References::Dsl(references) => Some(references.iter()),
+            _ => None,
+        }
     }
 
     pub fn iter_ruby(&self) -> Option<impl Iterator<Item = &RubyReference>> {
