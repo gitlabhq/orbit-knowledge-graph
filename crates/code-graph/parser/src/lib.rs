@@ -9,6 +9,7 @@ pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024; // 128 KiB
 
 pub mod analyzer;
 pub mod c;
+pub mod cpp;
 pub mod csharp;
 pub mod definitions;
 pub mod dsl;

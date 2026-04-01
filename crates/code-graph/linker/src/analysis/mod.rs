@@ -345,7 +345,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::C => {
+            SupportedLanguage::C | SupportedLanguage::Cpp => {
                 languages::dsl::process_definitions(
                     file_result,
                     &relative_path,
@@ -492,7 +492,7 @@ impl AnalysisService {
                         relationships,
                     );
                 }
-                SupportedLanguage::C => {
+                SupportedLanguage::C | SupportedLanguage::Cpp => {
                     let backtracker = GlobalBacktracker::from_definition_map(definition_map);
                     backtracker.process_dsl_references(
                         &references,
@@ -575,7 +575,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::C => {
+            SupportedLanguage::C | SupportedLanguage::Cpp => {
                 languages::dsl::add_definition_relationships(definition_map, relationships);
             }
         }
