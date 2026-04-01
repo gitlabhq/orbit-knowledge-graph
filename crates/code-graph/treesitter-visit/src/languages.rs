@@ -10,6 +10,7 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SupportLang {
     C,
+    Cpp,
     Python,
     Ruby,
     TypeScript,
@@ -47,6 +48,11 @@ impl LanguageExt for SupportLang {
             Self::C => tree_sitter_c::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-c"))]
             Self::C => panic!("tree-sitter-c feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-cpp")]
+            Self::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-cpp"))]
+            Self::Cpp => panic!("tree-sitter-cpp feature not enabled"),
 
             #[cfg(feature = "tree-sitter-python")]
             Self::Python => tree_sitter_python::LANGUAGE.into(),

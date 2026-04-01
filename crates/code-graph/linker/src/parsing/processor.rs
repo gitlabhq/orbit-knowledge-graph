@@ -3,6 +3,7 @@ use log::debug;
 use parser_core::definitions::DefinitionInfo;
 use parser_core::{
     c::c_language_spec,
+    cpp::cpp_language_spec,
     csharp::{
         analyzer::CSharpAnalyzer,
         types::{CSharpDefinitionInfo, CSharpImportedSymbolInfo},
@@ -195,6 +196,7 @@ impl<'a> FileProcessor<'a> {
         let is_supported = matches!(
             language,
             SupportedLanguage::C
+                | SupportedLanguage::Cpp
                 | SupportedLanguage::Ruby
                 | SupportedLanguage::Python
                 | SupportedLanguage::Kotlin
@@ -457,9 +459,12 @@ impl<'a> FileProcessor<'a> {
                     ))
                 }
             }
-            SupportedLanguage::C => {
+            SupportedLanguage::C | SupportedLanguage::Cpp => {
                 if let UnifiedParseResult::TreeSitter(ast_result) = parse_result {
-                    let spec = c_language_spec();
+                    let spec = match language {
+                        SupportedLanguage::Cpp => cpp_language_spec(),
+                        _ => c_language_spec(),
+                    };
                     match spec.analyze(ast_result) {
                         Ok(output) => {
                             let references = if output.references.is_empty() {
@@ -470,14 +475,14 @@ impl<'a> FileProcessor<'a> {
                             Ok((Definitions::Dsl(output.definitions), None, references))
                         }
                         Err(e) => Err(anyhow::anyhow!(
-                            "Failed to analyze C file '{}': {}",
+                            "Failed to analyze file '{}': {}",
                             self.path,
                             e
                         )),
                     }
                 } else {
                     Err(anyhow::anyhow!(
-                        "Expected TreeSitter parse result for C file '{}'",
+                        "Expected TreeSitter parse result for file '{}'",
                         self.path
                     ))
                 }
