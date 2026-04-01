@@ -93,7 +93,7 @@ etl:
   select: >-
     project.id AS id, project.name AS name, project.description AS description,
     project.visibility_level AS visibility_level,
-    coalesce(concat(ns_paths.full_path, '/', project.path), project.path) AS full_path,
+    if(route.id > 0, route.path, project.path) AS full_path,
     project.namespace_id AS namespace_id, project.creator_id AS creator_id,
     project.created_at AS created_at, project.updated_at AS updated_at,
     project.archived AS archived, project.star_count AS star_count,
@@ -103,17 +103,8 @@ etl:
     siphon_projects project
     INNER JOIN project_namespace_traversal_paths traversal_paths
     ON project.id = traversal_paths.id
-    LEFT JOIN (
-      SELECT n_id AS id,
-        arrayStringConcat(arrayFilter(x -> x != '',
-          groupArrayInsertAt('', 256)(a_path, toUInt64(idx - 1))), '/') AS full_path
-      FROM (
-        SELECT n.id AS n_id, idx, a.path AS a_path
-        FROM siphon_namespaces n FINAL
-        ARRAY JOIN arrayEnumerate(n.traversal_ids) AS idx, n.traversal_ids AS aid
-        INNER JOIN siphon_namespaces a FINAL ON a.id = aid
-      ) GROUP BY n_id
-    ) ns_paths ON project.namespace_id = ns_paths.id
+    LEFT JOIN (SELECT * FROM siphon_routes FINAL) route
+    ON project.id = route.source_id AND route.source_type = 'Project'
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: project._siphon_replicated_at
   deleted: project._siphon_deleted

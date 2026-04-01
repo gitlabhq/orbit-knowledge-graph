@@ -162,6 +162,23 @@ PRIMARY KEY id
 ORDER BY id
 SETTINGS index_granularity = 512, deduplicate_merge_projection_mode = 'rebuild';
 
+-- Siphon source tables for routes (full_path lookup)
+CREATE TABLE IF NOT EXISTS siphon_routes
+(
+    `id` Int64,
+    `source_id` Int64,
+    `source_type` String,
+    `path` String,
+    `created_at` Nullable(DateTime64(6, 'UTC')),
+    `updated_at` Nullable(DateTime64(6, 'UTC')),
+    `name` Nullable(String),
+    `namespace_id` Nullable(Int64),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (id)
+SETTINGS index_granularity = 2048;
+
 -- Siphon source tables for notes
 CREATE TABLE IF NOT EXISTS siphon_notes
 (

@@ -3,8 +3,8 @@ use gkg_utils::arrow::ArrowUtils;
 
 use crate::indexer::common::{
     TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
-    assert_node_count, create_member, create_namespace, create_namespace_with_path, create_user,
-    handler_context, namespace_envelope, namespace_handler,
+    assert_node_count, create_member, create_namespace, create_namespace_with_path, create_route,
+    create_user, handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_and_transforms_groups(ctx: &TestContext) {
@@ -47,6 +47,7 @@ pub async fn creates_group_edges(ctx: &TestContext) {
 
 pub async fn computes_full_path_for_top_level_group(ctx: &TestContext) {
     create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("acme")).await;
+    create_route(ctx, 100, 100, "Namespace", "acme", 100).await;
 
     namespace_handler(ctx)
         .await
@@ -65,8 +66,26 @@ pub async fn computes_full_path_for_top_level_group(ctx: &TestContext) {
 pub async fn computes_full_path_for_nested_subgroups(ctx: &TestContext) {
     create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("gitlab-org")).await;
     create_namespace_with_path(ctx, 200, Some(100), 0, "1/100/200/", Some("orbit")).await;
-    create_namespace_with_path(ctx, 300, Some(200), 0, "1/100/200/300/", Some("knowledge-graph"))
-        .await;
+    create_namespace_with_path(
+        ctx,
+        300,
+        Some(200),
+        0,
+        "1/100/200/300/",
+        Some("knowledge-graph"),
+    )
+    .await;
+    create_route(ctx, 100, 100, "Namespace", "gitlab-org", 100).await;
+    create_route(ctx, 200, 200, "Namespace", "gitlab-org/orbit", 200).await;
+    create_route(
+        ctx,
+        300,
+        300,
+        "Namespace",
+        "gitlab-org/orbit/knowledge-graph",
+        300,
+    )
+    .await;
 
     namespace_handler(ctx)
         .await
@@ -90,6 +109,155 @@ pub async fn computes_full_path_for_nested_subgroups(ctx: &TestContext) {
     assert_eq!(paths.value(1), "gitlab-org/orbit");
     assert_eq!(ids.value(2), 300);
     assert_eq!(paths.value(2), "gitlab-org/orbit/knowledge-graph");
+}
+
+pub async fn route_rename_updates_full_path(ctx: &TestContext) {
+    // Phase 1: initial state with old-name route
+    create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("old-name")).await;
+    create_route(ctx, 100, 100, "Namespace", "old-name", 100).await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    let result = ctx
+        .query("SELECT full_path FROM gl_group FINAL WHERE id = 100")
+        .await;
+    let paths = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
+        .expect("full_path column");
+    assert_eq!(paths.value(0), "old-name");
+
+    // Phase 2: simulate rename by inserting updated route and namespace rows
+    // Set checkpoint to the first run's watermark so the handler picks up newer data
+    ctx.execute(
+        "INSERT INTO checkpoint (key, watermark, cursor_values) \
+         VALUES ('ns.100.Group', '2024-01-20 12:00:00.000000', 'null')",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO siphon_routes (id, source_id, source_type, path, namespace_id, _siphon_replicated_at) \
+         VALUES (100, 100, 'Namespace', 'renamed-group', 100, '2024-01-20 18:00:00')",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO siphon_namespaces (id, name, path, type, visibility_level, traversal_ids, _siphon_replicated_at) \
+         VALUES (100, 'renamed-group', 'renamed-group', 'Group', 0, [1,100], '2024-01-20 18:00:00')",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO siphon_namespace_details (namespace_id, description, _siphon_replicated_at) \
+         VALUES (100, NULL, '2024-01-20 18:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    let result = ctx
+        .query("SELECT full_path FROM gl_group FINAL WHERE id = 100")
+        .await;
+    let paths = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
+        .expect("full_path column");
+    assert_eq!(paths.value(0), "renamed-group");
+}
+
+pub async fn child_route_reflects_parent_rename(ctx: &TestContext) {
+    // Parent group + child group + project, all with routes
+    create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("parent")).await;
+    create_namespace_with_path(ctx, 200, Some(100), 0, "1/100/200/", Some("child")).await;
+    create_route(ctx, 100, 100, "Namespace", "parent", 100).await;
+    create_route(ctx, 200, 200, "Namespace", "parent/child", 200).await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    let result = ctx
+        .query("SELECT id, full_path FROM gl_group FINAL ORDER BY id")
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(&result[0], "id")
+        .expect("id column");
+    let paths = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
+        .expect("full_path column");
+    assert_eq!(ids.value(0), 100);
+    assert_eq!(paths.value(0), "parent");
+    assert_eq!(ids.value(1), 200);
+    assert_eq!(paths.value(1), "parent/child");
+
+    // Simulate parent rename: routes cascade to update child
+    ctx.execute(
+        "INSERT INTO checkpoint (key, watermark, cursor_values) \
+         VALUES ('ns.100.Group', '2024-01-20 12:00:00.000000', 'null')",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO siphon_routes (id, source_id, source_type, path, namespace_id, _siphon_replicated_at) \
+         VALUES (100, 100, 'Namespace', 'new-parent', 100, '2024-01-20 18:00:00')",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO siphon_routes (id, source_id, source_type, path, namespace_id, _siphon_replicated_at) \
+         VALUES (200, 200, 'Namespace', 'new-parent/child', 200, '2024-01-20 18:00:00')",
+    )
+    .await;
+    // refresh_on_change cascades namespace re-replication
+    ctx.execute(
+        "INSERT INTO siphon_namespaces (id, name, path, type, visibility_level, parent_id, traversal_ids, _siphon_replicated_at) \
+         VALUES (100, 'new-parent', 'new-parent', 'Group', 0, NULL, [1,100], '2024-01-20 18:00:00')",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO siphon_namespaces (id, name, path, type, visibility_level, parent_id, traversal_ids, _siphon_replicated_at) \
+         VALUES (200, 'child', 'child', 'Group', 0, 100, [1,100,200], '2024-01-20 18:00:00')",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO siphon_namespace_details (namespace_id, description, _siphon_replicated_at) \
+         VALUES (100, NULL, '2024-01-20 18:00:00'), (200, NULL, '2024-01-20 18:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    let result = ctx
+        .query("SELECT id, full_path FROM gl_group FINAL ORDER BY id")
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(&result[0], "id")
+        .expect("id column");
+    let paths = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
+        .expect("full_path column");
+    assert_eq!(ids.value(0), 100);
+    assert_eq!(paths.value(0), "new-parent");
+    assert_eq!(ids.value(1), 200);
+    assert_eq!(paths.value(1), "new-parent/child");
+}
+
+pub async fn no_route_falls_back_to_slug(ctx: &TestContext) {
+    create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("my-group")).await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    let result = ctx
+        .query("SELECT full_path FROM gl_group FINAL WHERE id = 100")
+        .await;
+    let paths = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
+        .expect("full_path column");
+    assert_eq!(paths.value(0), "my-group");
 }
 
 pub async fn creates_member_of_edges_for_groups(ctx: &TestContext) {

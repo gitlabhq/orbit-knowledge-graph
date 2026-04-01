@@ -76,7 +76,7 @@ etl:
     namespace.id AS id, namespace.name AS name,
     namespace_details.description AS description,
     namespace.visibility_level AS visibility_level,
-    coalesce(ns_paths.full_path, namespace.path) AS full_path,
+    if(route.id > 0, route.path, namespace.path) AS full_path,
     namespace.parent_id AS parent_id, namespace.owner_id AS owner_id,
     namespace.created_at AS created_at, namespace.updated_at AS updated_at,
     traversal_paths.traversal_path AS traversal_path
@@ -86,17 +86,8 @@ etl:
     ON namespace.id = namespace_details.namespace_id
     INNER JOIN namespace_traversal_paths traversal_paths
     ON namespace.id = traversal_paths.id
-    LEFT JOIN (
-      SELECT n_id AS id,
-        arrayStringConcat(arrayFilter(x -> x != '',
-          groupArrayInsertAt('', 256)(a_path, toUInt64(idx - 1))), '/') AS full_path
-      FROM (
-        SELECT n.id AS n_id, idx, a.path AS a_path
-        FROM siphon_namespaces n FINAL
-        ARRAY JOIN arrayEnumerate(n.traversal_ids) AS idx, n.traversal_ids AS aid
-        INNER JOIN siphon_namespaces a FINAL ON a.id = aid
-      ) GROUP BY n_id
-    ) ns_paths ON namespace.id = ns_paths.id
+    LEFT JOIN (SELECT * FROM siphon_routes FINAL) route
+    ON namespace.id = route.source_id AND route.source_type = 'Namespace'
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: namespace._siphon_replicated_at
   deleted: namespace._siphon_deleted
