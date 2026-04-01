@@ -6,6 +6,9 @@ nats:
   url: "localhost:4222"
   # username: ""
   # password: ""
+  # tls_ca_cert_path: "/etc/nats/ca.pem"
+  # tls_cert_path: "/etc/nats/client.pem"
+  # tls_key_path: "/etc/nats/client-key.pem"
 
 datalake:
   url: "http://127.0.0.1:8123"
