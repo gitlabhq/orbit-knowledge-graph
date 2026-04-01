@@ -18,12 +18,15 @@ use serde_json::Value;
 /// [`QuerySettings::resolve`] fills in from the default.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct QueryConfig {
+    /// ClickHouse `max_execution_time` in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_execution_time: Option<u64>,
 
+    /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_query_cache: Option<bool>,
 
+    /// ClickHouse `query_cache_ttl` in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_cache_ttl: Option<u32>,
 }
@@ -86,6 +89,8 @@ pub struct QuerySettings {
 }
 
 impl QuerySettings {
+    /// Resolve the effective config for a query type by merging the
+    /// default with any type-specific override.
     pub fn resolve(&self, query_type: &str) -> QueryConfig {
         match self.overrides.get(query_type) {
             Some(override_cfg) => self.default.merge(override_cfg),
