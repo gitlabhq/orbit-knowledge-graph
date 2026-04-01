@@ -169,7 +169,7 @@ To register the client:
 
 To connect to the Orbit MCP server:
 
-1. Follow the instructions to [connect a client to the GitLab MCP server](https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server/#connect-a-client-to-the-gitlab-mcp-server).
+- Follow the instructions to [connect a client to the GitLab MCP server](https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server/#connect-a-client-to-the-gitlab-mcp-server).
   Use the URL `https://gitlab.com/api/v4/orbit/mcp`.
 
 You can now start a chat with your AI agent.
