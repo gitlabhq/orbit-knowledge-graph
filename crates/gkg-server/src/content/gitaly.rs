@@ -50,9 +50,15 @@ impl ColumnResolver for GitalyContentService {
         rows: &[&PropertyRow],
         _ctx: &ResolverContext,
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
-        let requests: Vec<Option<GitalyBlobRequest>> = rows
+        // Pre-compute keys alongside requests so they can be reused for
+        // deduplication and final lookup without cloning strings twice.
+        let requests: Vec<Option<(GitalyBlobRequest, FileKey)>> = rows
             .iter()
-            .map(|props| Self::build_request(props))
+            .map(|props| {
+                let req = Self::build_request(props)?;
+                let key = (req.project_id, req.revision.clone(), req.file_path.clone());
+                Some((req, key))
+            })
             .collect();
 
         // Deduplicate: each unique (project_id, revision, file_path) is
@@ -61,11 +67,13 @@ impl ColumnResolver for GitalyContentService {
 
         // Group unique file keys by project_id for batched Gitaly calls.
         let mut by_project: HashMap<i64, Vec<FileKey>> = HashMap::new();
-        for req in requests.iter().flatten() {
-            let key = (req.project_id, req.revision.clone(), req.file_path.clone());
-            if !file_cache.contains_key(&key) {
+        for (req, key) in requests.iter().flatten() {
+            if !file_cache.contains_key(key) {
                 file_cache.insert(key.clone(), None);
-                by_project.entry(req.project_id).or_default().push(key);
+                by_project
+                    .entry(req.project_id)
+                    .or_default()
+                    .push(key.clone());
             }
         }
 
@@ -118,14 +126,16 @@ impl ColumnResolver for GitalyContentService {
             file_cache.insert(key, Some(text));
         }
 
-        // For each row, look up cached content and return only the
-        // relevant byte-range slice.
+        // For each row, look up cached content and extract the byte-range slice.
+        // Non-UTF-8 blobs were already filtered during fetch, so their cache
+        // entries remain None and resolve to None here.
+        // `slice_content` returns a &str into the cached String, so only the
+        // extracted range is copied into the ColumnValue.
         Ok(requests
             .iter()
-            .map(|req| {
-                let req = req.as_ref()?;
-                let key = (req.project_id, req.revision.clone(), req.file_path.clone());
-                let content = file_cache.get(&key)?.as_deref()?;
+            .map(|entry| {
+                let (req, key) = entry.as_ref()?;
+                let content = file_cache.get(key)?.as_deref()?;
                 Some(ColumnValue::String(
                     slice_content(content, req.start_byte, req.end_byte).to_string(),
                 ))
