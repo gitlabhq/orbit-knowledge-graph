@@ -5,7 +5,9 @@ use crate::definitions::DefinitionInfo;
 use crate::parser::ParseResult;
 use crate::utils::node_to_range;
 
-use super::types::{DslDefinitionInfo, DslDefinitionType, DslFqn, DslRawReference, LanguageSpec};
+use super::types::{
+    DslDefinitionInfo, DslDefinitionType, DslFqn, DslRawReference, LanguageSpec, Rule,
+};
 
 pub struct DslParseOutput {
     pub definitions: Vec<DslDefinitionInfo>,
@@ -19,15 +21,7 @@ struct ScopeMatch {
     creates_scope: bool,
 }
 
-pub struct DslAnalyzer<'spec> {
-    spec: &'spec LanguageSpec,
-}
-
-impl<'spec> DslAnalyzer<'spec> {
-    pub fn new(spec: &'spec LanguageSpec) -> Self {
-        Self { spec }
-    }
-
+impl LanguageSpec {
     pub fn analyze(
         &self,
         parse_result: &ParseResult<'_, Root<StrDoc<SupportLang>>>,
@@ -105,25 +99,21 @@ impl<'spec> DslAnalyzer<'spec> {
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
     ) -> Option<ScopeMatch> {
-        if !self.spec.is_scope_candidate(node_kind) {
+        if !self.is_scope_candidate(node_kind) {
             return None;
         }
 
-        // Last matching rule wins.
         let rule = self
-            .spec
             .scopes
             .iter()
             .rev()
             .find(|r| r.matches(node, node_kind))?;
 
-        let name = rule.name.extract_name(node)?;
-        let range = node_to_range(node);
-        let label = rule.resolve_label(node);
+        let name = rule.extract_name(node)?;
         Some(ScopeMatch {
             name,
-            label,
-            range,
+            label: rule.resolve_label(node),
+            range: node_to_range(node),
             creates_scope: rule.creates_scope,
         })
     }
@@ -133,8 +123,8 @@ impl<'spec> DslAnalyzer<'spec> {
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
     ) -> Option<(String, crate::utils::Range)> {
-        let rule = self.spec.refs.iter().find(|r| r.matches(node, node_kind))?;
-        let name = rule.name.extract_name(node)?;
+        let rule = self.refs.iter().find(|r| r.matches(node, node_kind))?;
+        let name = rule.extract_name(node)?;
         Some((name, node_to_range(node)))
     }
 }
@@ -149,20 +139,19 @@ mod tests {
 
     #[test]
     fn test_scope_matching_and_fqn() {
-        let spec = LanguageSpec {
-            name: "test",
-            scopes: vec![
+        let spec = LanguageSpec::new(
+            "test",
+            vec![
                 scope("class_definition", "Class"),
                 scope("function_definition", "Function"),
                 scope("function_definition", "Method").when(grandparent_is("class_definition")),
             ],
-            refs: vec![],
-        };
-        let analyzer = DslAnalyzer::new(&spec);
+            vec![],
+        );
         let parser = GenericParser::new(SupportedLanguage::Python);
         let code = "class A:\n    def b(self): pass\ndef c(): pass";
         let result = parser.parse(code, Some("test.py")).unwrap();
-        let output = analyzer.analyze(&result).unwrap();
+        let output = spec.analyze(&result).unwrap();
 
         assert_eq!(output.definitions.len(), 3);
 
@@ -177,17 +166,15 @@ mod tests {
 
     #[test]
     fn test_reference_extraction() {
-        let spec = LanguageSpec {
-            name: "test",
-            scopes: vec![scope("function_definition", "Function")],
-            // Python uses "call" not "call_expression"
-            refs: vec![reference("call").name_from(field("function"))],
-        };
-        let analyzer = DslAnalyzer::new(&spec);
+        let spec = LanguageSpec::new(
+            "test",
+            vec![scope("function_definition", "Function")],
+            vec![reference("call").name_from(field("function"))],
+        );
         let parser = GenericParser::new(SupportedLanguage::Python);
         let code = "def foo(): pass\nfoo()";
         let result = parser.parse(code, Some("test.py")).unwrap();
-        let output = analyzer.analyze(&result).unwrap();
+        let output = spec.analyze(&result).unwrap();
 
         assert_eq!(output.references.len(), 1);
         assert_eq!(output.references[0].name, "foo");
@@ -195,31 +182,27 @@ mod tests {
 
     #[test]
     fn test_no_scope_definition() {
-        // Only inner is .no_scope() — outer still pushes scope normally.
-        let spec = LanguageSpec {
-            name: "test",
-            scopes: vec![
+        let spec = LanguageSpec::new(
+            "test",
+            vec![
                 scope("class_definition", "Class"),
                 scope("function_definition", "Function"),
-                // Methods inside classes don't push scope
                 scope("function_definition", "FlatMethod")
                     .when(grandparent_is("class_definition"))
                     .no_scope(),
             ],
-            refs: vec![],
-        };
-        let analyzer = DslAnalyzer::new(&spec);
+            vec![],
+        );
         let parser = GenericParser::new(SupportedLanguage::Python);
         let code = "class A:\n    def method(self): pass";
         let result = parser.parse(code, Some("test.py")).unwrap();
-        let output = analyzer.analyze(&result).unwrap();
+        let output = spec.analyze(&result).unwrap();
 
         let method = output
             .definitions
             .iter()
             .find(|d| d.name == "method")
             .unwrap();
-        // Method gets A.method FQN but doesn't push scope
         assert_eq!(dsl_fqn_to_string(&method.fqn), "A.method");
         assert_eq!(method.definition_type.label, "FlatMethod");
     }

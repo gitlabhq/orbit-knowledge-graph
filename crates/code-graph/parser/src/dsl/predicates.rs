@@ -3,7 +3,7 @@ use treesitter_visit::{Node, SupportLang};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-/// A condition on a tree-sitter node. Domain-specific checks.
+/// A condition on a tree-sitter node.
 pub enum Cond {
     HasName,
     ParentIs(&'static str),
@@ -30,14 +30,11 @@ impl Cond {
     fn test(&self, node: &N<'_>) -> bool {
         match self {
             Cond::HasName => node.field("name").is_some(),
-
             Cond::ParentIs(kind) => node.parent().is_some_and(|p| p.kind() == *kind),
-
             Cond::GrandparentIs(kind) => node
                 .parent()
                 .and_then(|p| p.parent())
                 .is_some_and(|gp| gp.kind() == *kind),
-
             Cond::AncestorIs(kinds) => {
                 let mut cur = node.parent();
                 while let Some(a) = cur {
@@ -49,7 +46,6 @@ impl Cond {
                 }
                 false
             }
-
             Cond::NearestAncestor { candidates, target } => {
                 let mut cur = node.parent();
                 while let Some(a) = cur {
@@ -61,17 +57,14 @@ impl Cond {
                 }
                 false
             }
-
             Cond::HasChild(kinds) => node.children().any(|child| {
                 let k = child.kind();
                 kinds.iter().any(|t| *t == k)
             }),
-
             Cond::FieldKind { field, kinds } => node.field(field).is_some_and(|f| {
                 let k = f.kind();
                 kinds.iter().any(|t| *t == k)
             }),
-
             Cond::FieldDescends {
                 field,
                 wrappers,
@@ -110,7 +103,6 @@ pub enum Pred {
 
 impl std::ops::Not for Pred {
     type Output = Pred;
-
     fn not(self) -> Pred {
         Pred::Not(Box::new(self))
     }
@@ -135,40 +127,33 @@ impl Pred {
     }
 }
 
-/// Lift a `Cond` into a `Pred`.
 impl From<Cond> for Pred {
     fn from(c: Cond) -> Self {
         Pred::Cond(c)
     }
 }
 
-// --- Constructors (all return Pred for ergonomic chaining) ---
-
-pub fn has_name() -> Pred {
-    Cond::HasName.into()
+/// Generate constructor functions that lift `Cond` variants into `Pred`.
+macro_rules! cond_constructors {
+    ($( fn $name:ident( $($arg:ident : $ty:ty),* ) => $variant:expr; )*) => {
+        $( pub fn $name( $($arg: $ty),* ) -> Pred { $variant.into() } )*
+    };
 }
 
-pub fn parent_is(kind: &'static str) -> Pred {
-    Cond::ParentIs(kind).into()
+cond_constructors! {
+    fn has_name() => Cond::HasName;
+    fn parent_is(kind: &'static str) => Cond::ParentIs(kind);
+    fn grandparent_is(kind: &'static str) => Cond::GrandparentIs(kind);
+    fn ancestor_is(kinds: &'static [&'static str]) => Cond::AncestorIs(kinds);
+    fn has_child(kinds: &'static [&'static str]) => Cond::HasChild(kinds);
 }
 
-pub fn grandparent_is(kind: &'static str) -> Pred {
-    Cond::GrandparentIs(kind).into()
-}
-
-pub fn ancestor_is(kinds: &'static [&'static str]) -> Pred {
-    Cond::AncestorIs(kinds).into()
-}
-
+// Multi-arg constructors don't fit the macro pattern cleanly.
 pub fn nearest_ancestor(
     candidates: &'static [&'static str],
     target: &'static [&'static str],
 ) -> Pred {
     Cond::NearestAncestor { candidates, target }.into()
-}
-
-pub fn has_child(kinds: &'static [&'static str]) -> Pred {
-    Cond::HasChild(kinds).into()
 }
 
 pub fn field_kind(field: &'static str, kinds: &'static [&'static str]) -> Pred {

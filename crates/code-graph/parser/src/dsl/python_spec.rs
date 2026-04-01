@@ -6,9 +6,9 @@ use super::predicates::*;
 use super::types::{LanguageSpec, reference, scope, scope_fn};
 
 pub fn python_language_spec() -> LanguageSpec {
-    LanguageSpec {
-        name: "python",
-        scopes: vec![
+    LanguageSpec::new(
+        "python",
+        vec![
             scope("class_definition", "Class"),
             scope("class_definition", "DecoratedClass").when(parent_is("decorated_definition")),
             scope_fn("function_definition", classify_function),
@@ -22,8 +22,8 @@ pub fn python_language_spec() -> LanguageSpec {
                 .name_from(field("left"))
                 .no_scope(),
         ],
-        refs: vec![reference("call_expression").name_from(field("function"))],
-    }
+        vec![reference("call_expression").name_from(field("function"))],
+    )
 }
 
 fn classify_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
@@ -50,19 +50,18 @@ fn classify_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsl::engine::DslAnalyzer;
+    use crate::dsl::engine::DslParseOutput;
     use crate::dsl::types::dsl_fqn_to_string;
     use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
 
-    fn analyze(code: &str) -> crate::dsl::engine::DslParseOutput {
+    fn analyze(code: &str) -> DslParseOutput {
         let spec = python_language_spec();
-        let analyzer = DslAnalyzer::new(&spec);
         let parser = GenericParser::new(SupportedLanguage::Python);
         let result = parser.parse(code, Some("test.py")).unwrap();
-        analyzer.analyze(&result).unwrap()
+        spec.analyze(&result).unwrap()
     }
 
-    fn assert_def(output: &crate::dsl::engine::DslParseOutput, name: &str, label: &str, fqn: &str) {
+    fn assert_def(output: &DslParseOutput, name: &str, label: &str, fqn: &str) {
         let def = output
             .definitions
             .iter()

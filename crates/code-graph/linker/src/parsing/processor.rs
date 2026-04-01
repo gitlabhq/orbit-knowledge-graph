@@ -8,10 +8,7 @@ use parser_core::{
         types::{CSharpDefinitionInfo, CSharpImportedSymbolInfo},
     },
     definitions::DefinitionTypeInfo,
-    dsl::{
-        engine::DslAnalyzer,
-        types::{DslDefinitionInfo, DslRawReference},
-    },
+    dsl::types::{DslDefinitionInfo, DslRawReference},
     java::{
         analyzer::JavaAnalyzer,
         types::{JavaDefinitionInfo, JavaImportedSymbolInfo, JavaReferenceInfo},
@@ -463,8 +460,7 @@ impl<'a> FileProcessor<'a> {
             SupportedLanguage::C => {
                 if let UnifiedParseResult::TreeSitter(ast_result) = parse_result {
                     let spec = c_language_spec();
-                    let analyzer = DslAnalyzer::new(&spec);
-                    match analyzer.analyze(ast_result) {
+                    match spec.analyze(ast_result) {
                         Ok(output) => {
                             let references = if output.references.is_empty() {
                                 None
