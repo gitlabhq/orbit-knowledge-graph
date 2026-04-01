@@ -520,6 +520,7 @@ mod tests {
                     sql: String::new(),
                     params: HashMap::new(),
                     result_context: result_ctx.clone(),
+                    query_config: Default::default(),
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,

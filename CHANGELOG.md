@@ -1,3 +1,25 @@
+## [0.20.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.19.0...v0.20.0) (2026-04-01)
+
+### Features
+
+* **indexer:** add mTLS support for NATS client ([fcca027](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fcca027c9ca69a5edd90f655ba06a013a0ff1015)) by Bohdan Parkhomchuk
+
+## [0.19.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.18.0...v0.19.0) (2026-04-01)
+
+### Features
+
+* **proto:** publish Go protobuf stubs for workhorse integration ([b328e96](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b328e96b5e9b54fd3ccda4b2a700ffdd2f310173)) by Michael Angelo Rivera
+* **utils:** add ColumnValue::coerce<T> for typed extraction ([2cfd81f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2cfd81f8b4b17eca954704bb5faf6b7862801e4d)) by Michael Usachenko
+
+### Fixes
+
+* **ontology:** use derived tables to prevent JOIN OOM in Group/Project ETL ([47af2ac](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/47af2acf51b2434ac8a31fe3e5bf0ec3ab4c6ecb)) by Michael Angelo Rivera
+* **proto:** regenerate Go stubs from current proto ([277f095](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/277f09527a5fe73d21a565a9c347526ce45a18b8)) by Michael Angelo Rivera
+
+### Other
+
+* **code-graph:** reorganize into parent crate with sub-crates ([14a3a63](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/14a3a63ec7fa066d2cdea2199fc4b705e431cbf5)) by Michael Usachenko
+
 ## [0.18.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.17.0...v0.18.0) (2026-03-30)
 
 ### Features

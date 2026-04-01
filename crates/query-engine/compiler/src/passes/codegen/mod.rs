@@ -7,6 +7,8 @@
 pub mod clickhouse;
 pub mod duckdb;
 
+use gkg_server_config::QueryConfig;
+
 use crate::input::{Input, QueryType};
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
@@ -30,6 +32,10 @@ pub struct ParameterizedQuery {
     pub sql: String,
     pub params: HashMap<String, ParamValue>,
     pub result_context: ResultContext,
+    /// Resolved query settings. Currently baked into the SQL SETTINGS clause
+    /// by codegen; carried here so the execution stage can also apply them
+    /// as HTTP-level ClickHouse settings (defense-in-depth, not yet wired).
+    pub query_config: QueryConfig,
     pub dialect: SqlDialect,
 }
 
@@ -119,6 +125,7 @@ mod tests {
             sql: String::new(),
             params,
             result_context: ResultContext::new(),
+            query_config: QueryConfig::default(),
             dialect: SqlDialect::DuckDb,
         }
     }

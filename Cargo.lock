@@ -1277,6 +1277,7 @@ version = "0.1.0"
 dependencies = [
  "compiler-pipeline-macros",
  "const_format",
+ "gkg-server-config",
  "gkg-utils",
  "jsonschema",
  "once_cell",
@@ -3004,6 +3005,7 @@ dependencies = [
  "enum-as-inner",
  "futures",
  "gitlab-client",
+ "gkg-server-config",
  "gkg-utils",
  "health-check",
  "indexer",
@@ -3023,6 +3025,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "strum 0.28.0",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -3035,6 +3038,15 @@ dependencies = [
  "tower",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "gkg-server-config"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -3611,6 +3623,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "siphon-proto",
  "smallvec",

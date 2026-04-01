@@ -18,6 +18,8 @@ use indexer::modules::namespace_deletion::{
 };
 use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
+use query_engine::compiler::input::QueryType;
+use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -29,6 +31,14 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
     let config = AppConfig::load()?;
+
+    let invalid_keys = config.query.validate_keys(QueryType::VARIANTS);
+    anyhow::ensure!(
+        invalid_keys.is_empty(),
+        "unknown query type(s) in config: {invalid_keys:?} (valid: {:?})",
+        QueryType::VARIANTS,
+    );
+    gkg_server_config::query::init(config.query.clone());
 
     let mut builder = labkit::Builder::new(args.mode.service_name())
         .propagate_correlation(true)
@@ -184,6 +194,7 @@ async fn run_webserver(
         cluster_health,
         tls_config,
         resolver_registry,
+        config.grpc.clone(),
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
