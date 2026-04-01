@@ -38,8 +38,12 @@ impl GraphStatsService {
         }
 
         let ast = lower::lower(&input);
-        let parameterized = codegen(&ast, ResultContext::new())
-            .map_err(|e| Status::internal(format!("codegen error: {e}")))?;
+        let parameterized = codegen(
+            &ast,
+            ResultContext::new(),
+            gkg_config::QueryConfig::default(),
+        )
+        .map_err(|e| Status::internal(format!("codegen error: {e}")))?;
 
         debug!(sql = %parameterized.sql, "Graph stats query compiled");
 

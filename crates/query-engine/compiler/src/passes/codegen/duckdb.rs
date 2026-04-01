@@ -29,6 +29,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
         params: ctx.params,
         result_context,
         dialect: SqlDialect::DuckDb,
+        query_config: gkg_config::QueryConfig::default(),
     })
 }
 
