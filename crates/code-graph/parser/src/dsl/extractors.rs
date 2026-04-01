@@ -3,27 +3,48 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::utils::{Range, node_to_range};
 
-/// Extracts the name string from a tree-sitter node.
-pub trait NameExtractor: Send + Sync {
-    fn extract_name(&self, node: &Node<StrDoc<SupportLang>>) -> Option<String>;
+type N<'a> = Node<'a, StrDoc<SupportLang>>;
+
+/// How to extract a name from a tree-sitter node.
+pub enum Extract {
+    /// Look for a `name` field, then fall back to first identifier child.
+    Default,
+    /// Extract text from a specific field.
+    Field(&'static str),
+    /// Follow a chain of fields and extract the final node's text.
+    /// e.g. `&["function", "field"]` follows `node.field("function").field("field")`.
+    FieldChain(&'static [&'static str]),
+    /// C-style: follow `declarator` -> `declarator` chain to find the name.
+    Declarator,
 }
 
-/// Default: look for a `name` field child, then fall back to the first named child.
-pub struct DefaultNameExtractor;
-
-impl NameExtractor for DefaultNameExtractor {
-    fn extract_name(&self, node: &Node<StrDoc<SupportLang>>) -> Option<String> {
-        if let Some(name_node) = node.field("name") {
-            return Some(name_node.text().to_string());
-        }
-        // Fallback: first named child that looks like an identifier
-        for child in node.children() {
-            if child.is_named() && is_identifier_kind(&child.kind()) {
-                return Some(child.text().to_string());
+impl Extract {
+    pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        match self {
+            Extract::Default => default_name(node),
+            Extract::Field(name) => node.field(name).map(|n| n.text().to_string()),
+            Extract::FieldChain(fields) => {
+                let mut current = node.clone();
+                for f in *fields {
+                    current = current.field(f)?;
+                }
+                Some(current.text().to_string())
             }
+            Extract::Declarator => declarator_name(node),
         }
-        None
     }
+}
+
+fn default_name(node: &N<'_>) -> Option<String> {
+    if let Some(name_node) = node.field("name") {
+        return Some(name_node.text().to_string());
+    }
+    for child in node.children() {
+        if child.is_named() && is_identifier_kind(&child.kind()) {
+            return Some(child.text().to_string());
+        }
+    }
+    None
 }
 
 fn is_identifier_kind(kind: &str) -> bool {
@@ -38,113 +59,55 @@ fn is_identifier_kind(kind: &str) -> bool {
     )
 }
 
-/// Extract the name from a specific field.
-pub struct FieldNameExtractor {
-    pub field_name: &'static str,
-}
-
-impl NameExtractor for FieldNameExtractor {
-    fn extract_name(&self, node: &Node<StrDoc<SupportLang>>) -> Option<String> {
-        node.field(self.field_name).map(|n| n.text().to_string())
+fn declarator_name(node: &N<'_>) -> Option<String> {
+    let declarator = node.field("declarator")?;
+    if let Some(inner) = declarator.field("declarator") {
+        return Some(inner.text().to_string());
     }
+    if is_identifier_kind(&declarator.kind()) {
+        return Some(declarator.text().to_string());
+    }
+    if let Some(name) = declarator.field("name") {
+        return Some(name.text().to_string());
+    }
+    None
 }
 
-pub fn extract_from_field(field_name: &'static str) -> FieldNameExtractor {
-    FieldNameExtractor { field_name }
+/// How to extract the range from a tree-sitter node.
+pub enum RangeExtract {
+    /// Use the node's own range.
+    Default,
+    /// Use the `name` field child's range.
+    NameField,
 }
 
-/// Extract the name from a field on the **parent** node.
-///
-/// Each entry is `(parent_kind, field_name)`. The first matching parent is used.
-pub struct ParentFieldNameExtractor {
-    pub entries: Vec<(&'static str, &'static str)>,
-}
-
-impl NameExtractor for ParentFieldNameExtractor {
-    fn extract_name(&self, node: &Node<StrDoc<SupportLang>>) -> Option<String> {
-        let parent = node.parent()?;
-        let parent_kind = parent.kind();
-        for &(expected_kind, field_name) in &self.entries {
-            if parent_kind == expected_kind
-                && let Some(field_node) = parent.field(field_name)
-            {
-                return Some(field_node.text().to_string());
+impl RangeExtract {
+    pub fn extract_range(&self, node: &N<'_>) -> Range {
+        match self {
+            RangeExtract::Default => node_to_range(node),
+            RangeExtract::NameField => {
+                if let Some(name_node) = node.field("name") {
+                    node_to_range(&name_node)
+                } else {
+                    node_to_range(node)
+                }
             }
         }
-        None
     }
 }
 
-pub fn extract_from_parent_fields(
-    entries: Vec<(&'static str, &'static str)>,
-) -> ParentFieldNameExtractor {
-    ParentFieldNameExtractor { entries }
+// --- Constructors ---
+
+pub fn field(name: &'static str) -> Extract {
+    Extract::Field(name)
 }
 
-/// Extract the name by looking at the `declarator` field, then the `name`
-/// field inside it. Common in C for patterns like
-/// `int my_func(int x) { ... }` where the tree is:
-/// ```text
-/// function_definition
-///   type: primitive_type "int"
-///   declarator: function_declarator
-///     declarator: identifier "my_func"
-///     parameters: ...
-/// ```
-pub struct DeclaratorNameExtractor;
-
-impl NameExtractor for DeclaratorNameExtractor {
-    fn extract_name(&self, node: &Node<StrDoc<SupportLang>>) -> Option<String> {
-        let declarator = node.field("declarator")?;
-        // function_declarator -> declarator (identifier)
-        if let Some(inner) = declarator.field("declarator") {
-            return Some(inner.text().to_string());
-        }
-        // Fallback: the declarator itself might be the identifier
-        if is_identifier_kind(&declarator.kind()) {
-            return Some(declarator.text().to_string());
-        }
-        // struct/enum: check for `name` field
-        if let Some(name) = declarator.field("name") {
-            return Some(name.text().to_string());
-        }
-        None
-    }
+pub fn field_chain(fields: &'static [&'static str]) -> Extract {
+    Extract::FieldChain(fields)
 }
 
-pub fn extract_from_declarator() -> DeclaratorNameExtractor {
-    DeclaratorNameExtractor
-}
-
-/// Extracts the range from a tree-sitter node.
-pub trait RangeExtractor: Send + Sync {
-    fn extract_range(&self, node: &Node<StrDoc<SupportLang>>) -> Range;
-}
-
-/// Default: use the node's own range.
-pub struct DefaultRangeExtractor;
-
-impl RangeExtractor for DefaultRangeExtractor {
-    fn extract_range(&self, node: &Node<StrDoc<SupportLang>>) -> Range {
-        node_to_range(node)
-    }
-}
-
-/// Use the `name` field child's range instead of the whole node.
-pub struct NameFieldRangeExtractor;
-
-impl RangeExtractor for NameFieldRangeExtractor {
-    fn extract_range(&self, node: &Node<StrDoc<SupportLang>>) -> Range {
-        if let Some(name_node) = node.field("name") {
-            node_to_range(&name_node)
-        } else {
-            node_to_range(node)
-        }
-    }
-}
-
-pub fn range_from_name_field() -> NameFieldRangeExtractor {
-    NameFieldRangeExtractor
+pub fn declarator() -> Extract {
+    Extract::Declarator
 }
 
 #[cfg(test)]
@@ -153,20 +116,19 @@ mod tests {
     use treesitter_visit::LanguageExt;
 
     #[test]
-    fn test_default_name_extractor() {
+    fn test_default_extract() {
         let root = SupportLang::Python.ast_grep("def foo(): pass");
         let func = root.root().children().next().unwrap();
-
-        let extractor = DefaultNameExtractor;
-        assert_eq!(extractor.extract_name(&func), Some("foo".to_string()));
+        assert_eq!(
+            Extract::Default.extract_name(&func),
+            Some("foo".to_string())
+        );
     }
 
     #[test]
-    fn test_field_name_extractor() {
+    fn test_field_extract() {
         let root = SupportLang::Python.ast_grep("def bar(): pass");
         let func = root.root().children().next().unwrap();
-
-        let extractor = extract_from_field("name");
-        assert_eq!(extractor.extract_name(&func), Some("bar".to_string()));
+        assert_eq!(field("name").extract_name(&func), Some("bar".to_string()));
     }
 }

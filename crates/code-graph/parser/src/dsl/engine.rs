@@ -5,7 +5,7 @@ use crate::definitions::DefinitionInfo;
 use crate::parser::ParseResult;
 use crate::utils::node_to_range;
 
-use super::extractors::{DefaultNameExtractor, NameExtractor};
+use super::extractors::Extract;
 use super::types::{DslDefinitionInfo, DslDefinitionType, DslFqn, DslRawReference, LanguageSpec};
 
 pub struct DslParseOutput {
@@ -81,7 +81,7 @@ impl<'spec> DslAnalyzer<'spec> {
             ));
         }
 
-        if let Some((name, range)) = self.evaluate_reference(node) {
+        if let Some((name, range)) = self.evaluate_reference(node, &node_kind) {
             references.push(DslRawReference {
                 name,
                 range,
@@ -102,7 +102,6 @@ impl<'spec> DslAnalyzer<'spec> {
         }
     }
 
-    /// Returns `(name, label, range, creates_scope)` if the node creates a definition.
     fn evaluate_scope(
         &self,
         node: &Node<StrDoc<SupportLang>>,
@@ -113,26 +112,25 @@ impl<'spec> DslAnalyzer<'spec> {
         }
 
         // Last matching rule wins.
-        let matched_rule = self
+        let matched = self
             .spec
-            .scope_rules
+            .scopes
             .iter()
             .rev()
-            .find(|r| r.predicate.test(node));
+            .find(|r| r.matches(node, node_kind));
 
-        if let Some(rule) = matched_rule {
-            let name = rule.get_name_extractor().extract_name(node)?;
-            let range = rule.get_range_extractor().extract_range(node);
-            let label = rule.label.unwrap_or(node_kind).to_string();
+        if let Some(rule) = matched {
+            let name = rule.name.extract_name(node)?;
+            let range = rule.range.extract_range(node);
+            let label = rule.resolve_label(node).to_string();
             return Some((name, label, range, rule.creates_scope));
         }
 
-        // Node kind is in the corpus but no explicit rule matched.
-        // Only auto-scope when NO rules are defined at all (pure corpus mode).
-        if !self.spec.scope_rules.is_empty() {
+        // Auto-scope only when no rules are defined at all.
+        if !self.spec.scopes.is_empty() {
             return None;
         }
-        let name = DefaultNameExtractor.extract_name(node)?;
+        let name = Extract::Default.extract_name(node)?;
         let range = node_to_range(node);
         Some((name, node_kind.to_string(), range, true))
     }
@@ -140,14 +138,11 @@ impl<'spec> DslAnalyzer<'spec> {
     fn evaluate_reference(
         &self,
         node: &Node<StrDoc<SupportLang>>,
+        node_kind: &str,
     ) -> Option<(String, crate::utils::Range)> {
-        for rule in &self.spec.reference_rules {
-            if rule.predicate.test(node) {
-                let name = rule.get_name_extractor().extract_name(node)?;
-                return Some((name, node_to_range(node)));
-            }
-        }
-        None
+        let rule = self.spec.refs.iter().find(|r| r.matches(node, node_kind))?;
+        let name = rule.name.extract_name(node)?;
+        Some((name, node_to_range(node)))
     }
 }
 
@@ -163,17 +158,12 @@ mod tests {
         LanguageSpec {
             name: "python",
             scope_corpus: &["class_definition", "function_definition"],
-            scope_rules: vec![
-                ScopeRule::new(Box::new(kind_eq("class_definition"))).with_label("Class"),
-                // "Function" is the general rule; "Method" is more specific
-                // and comes later so it overrides for class-contained functions.
-                ScopeRule::new(Box::new(kind_eq("function_definition"))).with_label("Function"),
-                ScopeRule::new(Box::new(
-                    kind_eq("function_definition").and(grandparent_kind("class_definition")),
-                ))
-                .with_label("Method"),
+            scopes: vec![
+                scope("class_definition", "Class"),
+                scope("function_definition", "Function"),
+                scope("function_definition", "Method").when(grandparent_is("class_definition")),
             ],
-            reference_rules: vec![],
+            refs: vec![],
         }
     }
 
@@ -209,7 +199,6 @@ def standalone():
         assert!(names.contains(&"subtract"));
         assert!(names.contains(&"standalone"));
 
-        // Check FQNs
         let fqns: Vec<String> = analysis
             .definitions
             .iter()
@@ -220,7 +209,6 @@ def standalone():
         assert!(fqns.contains(&"Calculator.subtract".to_string()));
         assert!(fqns.contains(&"standalone".to_string()));
 
-        // Check labels
         let calc = analysis
             .definitions
             .iter()
@@ -245,8 +233,6 @@ def standalone():
 
     #[test]
     fn test_last_rule_wins() {
-        // Both rules match function_definition, the second (Method) should win
-        // when inside a class, but the first (Function) should win otherwise.
         let spec = python_spec();
         let analyzer = DslAnalyzer::new(&spec);
 

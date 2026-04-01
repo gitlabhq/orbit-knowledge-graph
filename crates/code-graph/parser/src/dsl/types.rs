@@ -1,11 +1,14 @@
+use treesitter_visit::tree_sitter::StrDoc;
+use treesitter_visit::{Node, SupportLang};
+
 use crate::definitions::{DefinitionInfo, DefinitionTypeInfo};
 use crate::fqn::Fqn;
 use crate::utils::Range;
 
-use super::extractors::{
-    DefaultNameExtractor, DefaultRangeExtractor, NameExtractor, RangeExtractor,
-};
-use super::predicates::Predicate;
+use super::extractors::{Extract, RangeExtract};
+use super::predicates::Pred;
+
+pub type LabelFn = fn(&Node<StrDoc<SupportLang>>) -> &'static str;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DslDefinitionType {
@@ -33,47 +36,40 @@ pub struct DslRawReference {
     pub scope_fqn: Option<DslFqn>,
 }
 
-/// A scope rule decides whether a tree-sitter node creates a new scope and,
-/// if so, how to extract the name and range for the corresponding FQN part.
+// ---------------------------------------------------------------------------
+// Scope rules
+// ---------------------------------------------------------------------------
+
+enum Label {
+    Static(&'static str),
+    Fn(LabelFn),
+}
+
 pub struct ScopeRule {
-    /// When this predicate returns `true`, the node creates a new scope.
-    pub predicate: Box<dyn Predicate>,
-    /// Human-readable label for definitions created by this rule.
-    /// If `None`, the tree-sitter node kind is used as the label.
-    pub label: Option<&'static str>,
-    /// Custom name extractor. Falls back to `DefaultNameExtractor` when `None`.
-    pub name_extractor: Option<Box<dyn NameExtractor>>,
-    /// Custom range extractor. Falls back to `DefaultRangeExtractor` when `None`.
-    pub range_extractor: Option<Box<dyn RangeExtractor>>,
-    /// Whether matching this rule pushes a scope onto the FQN stack.
-    /// Defaults to `true`. Set to `false` for definitions that don't
-    /// create their own scope (e.g. lambda assignments in Python).
-    pub creates_scope: bool,
+    pub(crate) kind: &'static str,
+    label: Label,
+    pub(crate) condition: Option<Pred>,
+    pub(crate) name: Extract,
+    pub(crate) range: RangeExtract,
+    pub(crate) creates_scope: bool,
 }
 
 impl ScopeRule {
-    pub fn new(predicate: Box<dyn Predicate>) -> Self {
-        Self {
-            predicate,
-            label: None,
-            name_extractor: None,
-            range_extractor: None,
-            creates_scope: true,
-        }
-    }
-
-    pub fn with_label(mut self, label: &'static str) -> Self {
-        self.label = Some(label);
+    pub fn when(mut self, pred: Pred) -> Self {
+        self.condition = match self.condition {
+            Some(existing) => Some(existing.and(pred)),
+            None => Some(pred),
+        };
         self
     }
 
-    pub fn with_name_extractor(mut self, extractor: Box<dyn NameExtractor>) -> Self {
-        self.name_extractor = Some(extractor);
+    pub fn name_from(mut self, extract: Extract) -> Self {
+        self.name = extract;
         self
     }
 
-    pub fn with_range_extractor(mut self, extractor: Box<dyn RangeExtractor>) -> Self {
-        self.range_extractor = Some(extractor);
+    pub fn range_from(mut self, extract: RangeExtract) -> Self {
+        self.range = extract;
         self
     }
 
@@ -82,72 +78,101 @@ impl ScopeRule {
         self
     }
 
-    /// Get the name extractor, using the default if none was specified.
-    pub(crate) fn get_name_extractor(&self) -> &dyn NameExtractor {
-        self.name_extractor
-            .as_deref()
-            .unwrap_or(&DefaultNameExtractor)
+    pub(crate) fn matches(&self, node: &Node<StrDoc<SupportLang>>, node_kind: &str) -> bool {
+        if self.kind != node_kind {
+            return false;
+        }
+        self.condition.as_ref().is_none_or(|c| c.test(node))
     }
 
-    /// Get the range extractor, using the default if none was specified.
-    pub(crate) fn get_range_extractor(&self) -> &dyn RangeExtractor {
-        self.range_extractor
-            .as_deref()
-            .unwrap_or(&DefaultRangeExtractor)
+    pub(crate) fn resolve_label(&self, node: &Node<StrDoc<SupportLang>>) -> &str {
+        match &self.label {
+            Label::Static(s) => s,
+            Label::Fn(f) => f(node),
+        }
     }
 }
 
-/// A reference rule identifies call-site nodes and extracts the callee name.
+/// Create a scope rule matching nodes of the given kind with a static label.
+pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
+    ScopeRule {
+        kind,
+        label: Label::Static(label),
+        condition: None,
+        name: Extract::Default,
+        range: RangeExtract::Default,
+        creates_scope: true,
+    }
+}
+
+/// Create a scope rule matching nodes of the given kind with a dynamic label.
+pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
+    ScopeRule {
+        kind,
+        label: Label::Fn(label_fn),
+        condition: None,
+        name: Extract::Default,
+        range: RangeExtract::Default,
+        creates_scope: true,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reference rules
+// ---------------------------------------------------------------------------
+
 pub struct ReferenceRule {
-    /// When this predicate returns `true`, the node is a reference (call site).
-    pub predicate: Box<dyn Predicate>,
-    /// Extracts the name of the callee from the call-site node.
-    pub name_extractor: Option<Box<dyn NameExtractor>>,
-    /// Human-readable label (e.g. "FunctionCall", "MethodCall").
-    pub label: &'static str,
+    pub(crate) kind: &'static str,
+    #[allow(dead_code)]
+    pub(crate) label: &'static str,
+    pub(crate) condition: Option<Pred>,
+    pub(crate) name: Extract,
 }
 
 impl ReferenceRule {
-    pub fn new(predicate: Box<dyn Predicate>, label: &'static str) -> Self {
-        Self {
-            predicate,
-            name_extractor: None,
-            label,
-        }
-    }
-
-    pub fn with_name_extractor(mut self, extractor: Box<dyn NameExtractor>) -> Self {
-        self.name_extractor = Some(extractor);
+    pub fn when(mut self, pred: Pred) -> Self {
+        self.condition = match self.condition {
+            Some(existing) => Some(existing.and(pred)),
+            None => Some(pred),
+        };
         self
     }
 
-    pub(crate) fn get_name_extractor(&self) -> &dyn NameExtractor {
-        self.name_extractor
-            .as_deref()
-            .unwrap_or(&DefaultNameExtractor)
+    pub fn name_from(mut self, extract: Extract) -> Self {
+        self.name = extract;
+        self
+    }
+
+    pub(crate) fn matches(&self, node: &Node<StrDoc<SupportLang>>, node_kind: &str) -> bool {
+        if self.kind != node_kind {
+            return false;
+        }
+        self.condition.as_ref().is_none_or(|c| c.test(node))
     }
 }
 
-/// The complete specification for a language.
-///
-/// Provide the scope-creating node kinds plus a list of rules.
-/// The engine uses this to extract definitions, imports, and references
-/// from any tree-sitter-parsed AST.
+/// Create a reference rule matching nodes of the given kind.
+pub fn reference(kind: &'static str, label: &'static str) -> ReferenceRule {
+    ReferenceRule {
+        kind,
+        label,
+        condition: None,
+        name: Extract::Default,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Language specification
+// ---------------------------------------------------------------------------
+
 pub struct LanguageSpec {
     pub name: &'static str,
-    /// Node kinds that *might* create scopes (e.g. `function_definition`).
-    /// A node whose kind is in this set but has no matching `ScopeRule` will
-    /// automatically create a scope (using default name/range extraction).
     pub scope_corpus: &'static [&'static str],
-    /// Ordered list of scope rules. Later rules override earlier rules on
-    /// conflict (i.e. when two rules match the same node).
-    pub scope_rules: Vec<ScopeRule>,
-    /// Rules for extracting references (call sites).
-    pub reference_rules: Vec<ReferenceRule>,
+    pub scopes: Vec<ScopeRule>,
+    pub refs: Vec<ReferenceRule>,
 }
 
 impl LanguageSpec {
-    /// Returns `true` if the given node kind is in the scope corpus.
     pub fn is_scope_candidate(&self, kind: &str) -> bool {
         self.scope_corpus.contains(&kind)
     }

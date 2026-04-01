@@ -1,52 +1,7 @@
-use crate::dsl::extractors::{NameExtractor, extract_from_declarator, extract_from_field};
+use crate::dsl::extractors::{declarator, field, field_chain};
 use crate::dsl::predicates::*;
-use crate::dsl::types::{LanguageSpec, ReferenceRule, ScopeRule};
+use crate::dsl::types::{LanguageSpec, reference, scope};
 
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
-
-/// C language specification for the DSL engine.
-///
-/// ## C tree-sitter grammar — scope-creating constructs
-///
-/// ```text
-/// function_definition
-///   type: ...
-///   declarator: function_declarator
-///     declarator: identifier "my_func"
-///     parameters: parameter_list
-///   body: compound_statement
-///
-/// struct_specifier
-///   name: type_identifier "MyStruct"
-///   body: field_declaration_list
-///
-/// enum_specifier
-///   name: type_identifier "MyEnum"
-///   body: enumerator_list
-///
-/// union_specifier
-///   name: type_identifier "MyUnion"
-///   body: field_declaration_list
-///
-/// type_definition
-///   type: ...
-///   declarator: type_identifier "MyType"
-/// ```
-///
-/// ## Reference-producing constructs
-///
-/// ```text
-/// call_expression
-///   function: identifier "printf"
-///   arguments: argument_list
-///
-/// call_expression
-///   function: field_expression
-///     argument: identifier "obj"
-///     field: field_identifier "method"
-///   arguments: argument_list
-/// ```
 pub fn c_language_spec() -> LanguageSpec {
     LanguageSpec {
         name: "c",
@@ -56,54 +11,26 @@ pub fn c_language_spec() -> LanguageSpec {
             "enum_specifier",
             "union_specifier",
         ],
-        scope_rules: vec![
-            // Functions: name is inside declarator->declarator chain
-            ScopeRule::new(Box::new(kind_eq("function_definition")))
-                .with_label("Function")
-                .with_name_extractor(Box::new(extract_from_declarator())),
-            // Structs
-            ScopeRule::new(Box::new(kind_eq("struct_specifier").and(has_name_field())))
-                .with_label("Struct")
-                .with_name_extractor(Box::new(extract_from_field("name"))),
-            // Enums
-            ScopeRule::new(Box::new(kind_eq("enum_specifier").and(has_name_field())))
-                .with_label("Enum")
-                .with_name_extractor(Box::new(extract_from_field("name"))),
-            // Unions
-            ScopeRule::new(Box::new(kind_eq("union_specifier").and(has_name_field())))
-                .with_label("Union")
-                .with_name_extractor(Box::new(extract_from_field("name"))),
+        scopes: vec![
+            scope("function_definition", "Function").name_from(declarator()),
+            scope("struct_specifier", "Struct")
+                .when(has_name())
+                .name_from(field("name")),
+            scope("enum_specifier", "Enum")
+                .when(has_name())
+                .name_from(field("name")),
+            scope("union_specifier", "Union")
+                .when(has_name())
+                .name_from(field("name")),
         ],
-        reference_rules: vec![
-            // Direct function calls: printf("hello")
-            ReferenceRule::new(
-                Box::new(
-                    kind_eq("call_expression")
-                        .and(has_field_with_kind("function", vec!["identifier"])),
-                ),
-                "FunctionCall",
-            )
-            .with_name_extractor(Box::new(extract_from_field("function"))),
-            // Method-like calls via field expression: obj->method() or obj.method()
-            ReferenceRule::new(
-                Box::new(
-                    kind_eq("call_expression")
-                        .and(has_field_with_kind("function", vec!["field_expression"])),
-                ),
-                "FieldCall",
-            )
-            .with_name_extractor(Box::new(CallExpressionFieldExtractor)),
+        refs: vec![
+            reference("call_expression", "FunctionCall")
+                .when(field_kind("function", &["identifier"]))
+                .name_from(field("function")),
+            reference("call_expression", "FieldCall")
+                .when(field_kind("function", &["field_expression"]))
+                .name_from(field_chain(&["function", "field"])),
         ],
-    }
-}
-
-struct CallExpressionFieldExtractor;
-
-impl NameExtractor for CallExpressionFieldExtractor {
-    fn extract_name(&self, node: &Node<StrDoc<SupportLang>>) -> Option<String> {
-        let func_node = node.field("function")?;
-        let field_node = func_node.field("field")?;
-        Some(field_node.text().to_string())
     }
 }
 
@@ -145,7 +72,6 @@ void greet(const char* name) {
             assert_eq!(def.definition_type.label, "Function");
         }
 
-        // Check FQNs
         let fqns: Vec<String> = analysis
             .definitions
             .iter()
@@ -233,10 +159,8 @@ int main() {
         let result = parser.parse(code, Some("main.c")).unwrap();
         let analysis = analyzer.analyze(&result).unwrap();
 
-        // Should have 2 definitions: helper, main
         assert_eq!(analysis.definitions.len(), 2);
 
-        // Should have references: helper(42) and printf(...)
         let ref_names: Vec<&str> = analysis
             .references
             .iter()
@@ -296,7 +220,6 @@ int compute(int a, int b) {
         let result = parser.parse(code, Some("compute.c")).unwrap();
         let analysis = analyzer.analyze(&result).unwrap();
 
-        // Check references have correct scope FQN
         for r in &analysis.references {
             assert_eq!(
                 dsl_fqn_to_string(r.scope_fqn.as_ref().unwrap()),

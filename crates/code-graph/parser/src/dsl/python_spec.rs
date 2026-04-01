@@ -1,202 +1,50 @@
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use super::extractors::{NameExtractor, extract_from_field};
+use super::extractors::field;
 use super::predicates::*;
-use super::types::{LanguageSpec, ReferenceRule, ScopeRule};
+use super::types::{LanguageSpec, reference, scope, scope_fn};
 
-/// Python language specification for the DSL engine.
-///
-/// Replicates the definition extraction from `python/fqn.rs::build_fqn_index`
-/// using declarative rules instead of hand-written DFS logic.
-///
-/// Handles: classes, decorated classes, functions, async functions,
-/// decorated functions, methods (instance, async, decorated, decorated async),
-/// and lambda assignments.
 pub fn python_language_spec() -> LanguageSpec {
     LanguageSpec {
         name: "python",
         scope_corpus: &["class_definition", "function_definition", "assignment"],
-        scope_rules: vec![
-            // --- Classes ---
-            // Plain class (general rule, overridden by decorated variant)
-            ScopeRule::new(Box::new(kind_eq("class_definition"))).with_label("Class"),
-            // Decorated class: parent is `decorated_definition`
-            ScopeRule::new(Box::new(
-                kind_eq("class_definition").and(parent_kind("decorated_definition")),
-            ))
-            .with_label("DecoratedClass"),
-            // --- Functions/Methods ---
-            // General function (least specific, overridden by more specific rules below)
-            ScopeRule::new(Box::new(kind_eq("function_definition"))).with_label("Function"),
-            // Async function (no decorator, not in class)
-            ScopeRule::new(Box::new(
-                kind_eq("function_definition")
-                    .and(HasAsyncChild)
-                    .and(grandparent_kind("class_definition").not()),
-            ))
-            .with_label("AsyncFunction"),
-            // Decorated function (not in class)
-            ScopeRule::new(Box::new(
-                kind_eq("function_definition")
-                    .and(parent_kind("decorated_definition"))
-                    .and(IsNotInClassScope),
-            ))
-            .with_label("DecoratedFunction"),
-            // Decorated async function (not in class)
-            ScopeRule::new(Box::new(
-                kind_eq("function_definition")
-                    .and(HasAsyncChild)
-                    .and(parent_kind("decorated_definition"))
-                    .and(IsNotInClassScope),
-            ))
-            .with_label("DecoratedAsyncFunction"),
-            // Method (in class, no decorator, not async)
-            ScopeRule::new(Box::new(
-                kind_eq("function_definition")
-                    .and(HasAsyncChild.not())
-                    .and(parent_kind("decorated_definition").not())
-                    .and(IsInClassScope),
-            ))
-            .with_label("Method"),
-            // Async method (in class, no decorator)
-            ScopeRule::new(Box::new(
-                kind_eq("function_definition")
-                    .and(HasAsyncChild)
-                    .and(parent_kind("decorated_definition").not())
-                    .and(IsInClassScope),
-            ))
-            .with_label("AsyncMethod"),
-            // Decorated method (in class, has decorator, not async)
-            ScopeRule::new(Box::new(
-                kind_eq("function_definition")
-                    .and(HasAsyncChild.not())
-                    .and(parent_kind("decorated_definition"))
-                    .and(IsInClassScope),
-            ))
-            .with_label("DecoratedMethod"),
-            // Decorated async method (in class, has decorator, is async)
-            ScopeRule::new(Box::new(
-                kind_eq("function_definition")
-                    .and(HasAsyncChild)
-                    .and(parent_kind("decorated_definition"))
-                    .and(IsInClassScope),
-            ))
-            .with_label("DecoratedAsyncMethod"),
-            // --- Lambdas ---
-            // `x = lambda ...` — creates a definition but NOT a scope
-            ScopeRule::new(Box::new(kind_eq("assignment").and(IsLambdaAssignment)))
-                .with_label("Lambda")
-                .with_name_extractor(Box::new(LambdaAssignmentNameExtractor))
+        scopes: vec![
+            scope("class_definition", "Class"),
+            scope("class_definition", "DecoratedClass").when(parent_is("decorated_definition")),
+            scope_fn("function_definition", classify_function),
+            scope("assignment", "Lambda")
+                .when(field_descends(
+                    "right",
+                    &["parenthesized_expression"],
+                    &["lambda"],
+                    &["call"],
+                ))
+                .name_from(field("left"))
                 .no_scope(),
         ],
-        reference_rules: vec![
-            // call_expression: foo(), obj.method(), etc.
-            ReferenceRule::new(Box::new(kind_eq("call_expression")), "Call")
-                .with_name_extractor(Box::new(extract_from_field("function"))),
-        ],
+        refs: vec![reference("call_expression", "Call").name_from(field("function"))],
     }
 }
 
-/// Checks if a `function_definition` has an `async` keyword child.
-struct HasAsyncChild;
+fn classify_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
+    let is_async = has_child(&["async"]).test(node);
+    let has_decorator = parent_is("decorated_definition").test(node);
+    let is_method = nearest_ancestor(
+        &["class_definition", "function_definition"],
+        &["class_definition"],
+    )
+    .test(node);
 
-impl Predicate for HasAsyncChild {
-    fn test(&self, node: &Node<StrDoc<SupportLang>>) -> bool {
-        node.children().any(|c| c.kind() == "async")
-    }
-}
-
-/// True when the function_definition's grandparent (skipping block) is a class.
-/// In Python's tree-sitter: class_definition > body: block > function_definition
-/// With decorators: class_definition > body: block > decorated_definition > function_definition
-struct IsInClassScope;
-
-impl Predicate for IsInClassScope {
-    fn test(&self, node: &Node<StrDoc<SupportLang>>) -> bool {
-        // Walk up to find the nearest class or function ancestor (skipping block, decorated_definition)
-        let mut current = node.parent();
-        while let Some(ancestor) = current {
-            let kind = ancestor.kind();
-            if kind == "class_definition" {
-                return true;
-            }
-            // If we hit another function first, we're nested inside a function not a class
-            if kind == "function_definition" {
-                return false;
-            }
-            current = ancestor.parent();
-        }
-        false
-    }
-}
-
-struct IsNotInClassScope;
-
-impl Predicate for IsNotInClassScope {
-    fn test(&self, node: &Node<StrDoc<SupportLang>>) -> bool {
-        !IsInClassScope.test(node)
-    }
-}
-
-/// Checks if an assignment's RHS is a lambda (possibly parenthesized).
-struct IsLambdaAssignment;
-
-impl Predicate for IsLambdaAssignment {
-    fn test(&self, node: &Node<StrDoc<SupportLang>>) -> bool {
-        if let Some(right) = node.field("right") {
-            is_lambda_rhs(&right)
-        } else {
-            false
-        }
-    }
-}
-
-fn is_lambda_rhs(node: &Node<StrDoc<SupportLang>>) -> bool {
-    let kind = node.kind();
-    if kind == "lambda" {
-        return true;
-    }
-    if kind == "call" {
-        return false;
-    }
-    if kind == "parenthesized_expression"
-        && let Some(inner) = node.child(0)
-    {
-        return is_lambda_rhs(&inner);
-    }
-    false
-}
-
-/// Extracts the name from a lambda assignment's LHS.
-/// Handles both simple identifiers (`x = lambda ...`) and
-/// attribute access (`self.attr = lambda ...`).
-struct LambdaAssignmentNameExtractor;
-
-impl NameExtractor for LambdaAssignmentNameExtractor {
-    fn extract_name(&self, node: &Node<StrDoc<SupportLang>>) -> Option<String> {
-        let left = node.field("left")?;
-        let kind = left.kind();
-        if kind == "attribute" {
-            Some(extract_attribute_path(&left))
-        } else {
-            Some(left.text().to_string())
-        }
-    }
-}
-
-fn extract_attribute_path(node: &Node<StrDoc<SupportLang>>) -> String {
-    if node.kind() == "attribute" {
-        let mut parts = Vec::new();
-        if let Some(object) = node.field("object") {
-            parts.push(extract_attribute_path(&object));
-        }
-        if let Some(attribute) = node.field("attribute") {
-            parts.push(attribute.text().to_string());
-        }
-        parts.join(".")
-    } else {
-        node.text().to_string()
+    match (is_method, is_async, has_decorator) {
+        (true, true, true) => "DecoratedAsyncMethod",
+        (true, true, false) => "AsyncMethod",
+        (true, false, true) => "DecoratedMethod",
+        (true, false, false) => "Method",
+        (false, true, true) => "DecoratedAsyncFunction",
+        (false, true, false) => "AsyncFunction",
+        (false, false, true) => "DecoratedFunction",
+        (false, false, false) => "Function",
     }
 }
 
@@ -312,11 +160,7 @@ class MyClass:
 
     #[test]
     fn test_nested_functions() {
-        let code = r#"
-def outer():
-    def inner():
-        pass
-"#;
+        let code = "def outer():\n    def inner():\n        pass";
         let output = analyze(code);
         assert_eq!(output.definitions.len(), 2);
         assert_def(&output, "outer", "Function", "outer");
@@ -325,11 +169,7 @@ def outer():
 
     #[test]
     fn test_nested_class() {
-        let code = r#"
-class Outer:
-    class Inner:
-        pass
-"#;
+        let code = "class Outer:\n    class Inner:\n        pass";
         let output = analyze(code);
         assert_eq!(output.definitions.len(), 2);
         assert_def(&output, "Outer", "Class", "Outer");
@@ -364,19 +204,13 @@ class MyClass:
 
     #[test]
     fn test_method_inside_nested_function_is_not_method() {
-        let code = r#"
-class MyClass:
-    def method(self):
-        def inner():
-            pass
-"#;
+        let code = "class MyClass:\n    def method(self):\n        def inner():\n            pass";
         let output = analyze(code);
         assert_def(&output, "inner", "Function", "MyClass.method.inner");
     }
 
     #[test]
     fn test_full_parity_with_existing_analyzer() {
-        // Replicates the exact test from python/definitions.rs::test_method_definitions
         let code = r#"
 class MyClass:
     def method(self):
