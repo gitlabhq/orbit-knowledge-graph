@@ -376,7 +376,7 @@ check-go-proto:
   before_script:
     - apt-get update -qq && apt-get install -y -qq protobuf-compiler
   script:
-    - make -C gkgpb check
+    - scripts/proto-go.sh check
     - go build ./gkgpb/...
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/

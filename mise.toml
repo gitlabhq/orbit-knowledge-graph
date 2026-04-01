@@ -123,6 +123,14 @@ arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
 
+[tasks."proto:go"]
+run = "scripts/proto-go.sh generate"
+description = "Generate Go protobuf/gRPC stubs for Workhorse integration"
+
+[tasks."proto:go:check"]
+run = "scripts/proto-go.sh check"
+description = "Verify Go proto stubs are up to date"
+
 [tasks."proto:ruby"]
 run = '''
 mkdir -p crates/gkg-server/proto/ruby
