@@ -69,7 +69,7 @@ impl ColumnResolver for GitalyContentService {
             }
         }
 
-        // Fetch blobs concurrently per project.
+        // Fetch and drain all project blob streams concurrently.
         let futures = by_project.iter().map(|(&project_id, keys)| {
             let client = Arc::clone(&self.client);
             let revisions: Vec<String> = keys
@@ -78,42 +78,44 @@ impl ColumnResolver for GitalyContentService {
                 .collect();
             let keys = keys.clone();
             async move {
-                let stream = client.list_blobs(project_id, &revisions).await;
-                (project_id, keys, stream)
+                let stream = match client.list_blobs(project_id, &revisions).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        warn!(
+                            project_id,
+                            error = %e,
+                            "list_blobs failed, content will be missing for this project"
+                        );
+                        return vec![];
+                    }
+                };
+
+                let (blobs, err) = BlobStream::new(stream).drain().await;
+
+                if let Some(e) = err {
+                    warn!(project_id, error = %e, "blob stream decode error");
+                }
+
+                blobs
+                    .into_iter()
+                    .zip(keys.iter())
+                    .filter_map(|(blob, key)| match String::from_utf8(blob.data) {
+                        Ok(text) => Some((key.clone(), text)),
+                        Err(_) => {
+                            debug!(project_id, path = %key.2, "skipping binary blob");
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
             }
         });
 
-        let responses: Vec<_> = futures::future::join_all(futures).await;
-
-        for (project_id, keys, stream_result) in responses {
-            let stream = match stream_result {
-                Ok(s) => s,
-                Err(e) => {
-                    warn!(
-                        project_id,
-                        error = %e,
-                        "list_blobs failed, content will be missing for this project"
-                    );
-                    continue;
-                }
-            };
-
-            let (blobs, err) = BlobStream::new(stream).drain().await;
-
-            if let Some(e) = err {
-                warn!(project_id, error = %e, "blob stream decode error");
-            }
-
-            for (blob, key) in blobs.into_iter().zip(keys.iter()) {
-                match String::from_utf8(blob.data) {
-                    Ok(text) => {
-                        file_cache.insert(key.clone(), Some(text));
-                    }
-                    Err(_) => {
-                        debug!(project_id, path = %key.2, "skipping binary blob");
-                    }
-                }
-            }
+        for (key, text) in futures::future::join_all(futures)
+            .await
+            .into_iter()
+            .flatten()
+        {
+            file_cache.insert(key, Some(text));
         }
 
         // For each row, look up cached content and return only the
