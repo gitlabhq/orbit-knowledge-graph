@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
+use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
 use ontology::Ontology;
 use query_engine::compiler::{ResultContext, codegen};
@@ -38,7 +39,7 @@ impl GraphStatsService {
         }
 
         let ast = lower::lower(&input);
-        let parameterized = codegen(&ast, ResultContext::new())
+        let parameterized = codegen(&ast, ResultContext::new(), QueryConfig::default())
             .map_err(|e| Status::internal(format!("codegen error: {e}")))?;
 
         debug!(sql = %parameterized.sql, "Graph stats query compiled");

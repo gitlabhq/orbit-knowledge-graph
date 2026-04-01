@@ -11,6 +11,8 @@
 //! - `if(cond, then, else)` is rewritten to `CASE WHEN ... THEN ... ELSE ... END`.
 //! - Recursive CTE bodies have LIMIT/OFFSET stripped (DuckDB restriction).
 
+use gkg_server_config::QueryConfig;
+
 use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
@@ -28,6 +30,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
         sql,
         params: ctx.params,
         result_context,
+        query_config: QueryConfig::default(),
         dialect: SqlDialect::DuckDb,
     })
 }

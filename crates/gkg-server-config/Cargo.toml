@@ -1,0 +1,14 @@
+[package]
+name = "gkg-server-config"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = { workspace = true }
+
+[lints]
+workspace = true

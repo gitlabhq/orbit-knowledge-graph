@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use gitlab_client::GitlabClientConfiguration;
+use gkg_server_config::QuerySettings;
 use health_check::HealthCheckConfig;
 use indexer::clickhouse::ClickHouseConfiguration;
 use indexer::configuration::EngineConfiguration;
@@ -115,6 +116,8 @@ pub struct AppConfig {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub tls: TlsConfig,
+    #[serde(default)]
+    pub query: QuerySettings,
 }
 
 impl AppConfig {
