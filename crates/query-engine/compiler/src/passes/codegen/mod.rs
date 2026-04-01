@@ -31,8 +31,6 @@ pub struct ParameterizedQuery {
     pub params: HashMap<String, ParamValue>,
     pub result_context: ResultContext,
     pub dialect: SqlDialect,
-    /// Query-level settings applied during execution (HTTP options + SQL SETTINGS).
-    pub query_config: gkg_config::QueryConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -122,7 +120,6 @@ mod tests {
             params,
             result_context: ResultContext::new(),
             dialect: SqlDialect::DuckDb,
-            query_config: gkg_config::QueryConfig::default(),
         }
     }
 

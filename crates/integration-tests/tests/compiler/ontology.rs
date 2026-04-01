@@ -485,7 +485,7 @@ fn cursor_pagination_validation() {
 
     // Cursor query emits SETTINGS for CH query cache
     assert!(
-        result.base.sql.contains("use_query_cache = 1"),
+        result.base.sql.contains("SETTINGS use_query_cache = 1"),
         "cursor query should enable CH query cache: {}",
         result.base.sql
     );
@@ -609,7 +609,7 @@ fn cursor_pagination_validation() {
     );
     assert!(err.is_err(), "page_size = 0 should fail");
 
-    // No cursor: default limit still works, no cache SETTINGS emitted
+    // No cursor: default limit still works, no SETTINGS emitted
     let result = compile(
         r#"{
         "query_type": "search",
@@ -623,13 +623,8 @@ fn cursor_pagination_validation() {
     let sql = ParsedSql::from_query(&result.base);
     assert_eq!(sql.limit_value(), Some(30), "default limit should be 30");
     assert!(
-        !result.base.sql.contains("use_query_cache"),
-        "non-cursor query should not emit cache settings: {}",
-        result.base.sql
-    );
-    assert!(
-        result.base.sql.contains("max_execution_time"),
-        "every query should have max_execution_time: {}",
+        !result.base.sql.contains("SETTINGS"),
+        "non-cursor query should not emit SETTINGS: {}",
         result.base.sql
     );
 }

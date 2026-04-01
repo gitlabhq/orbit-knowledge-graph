@@ -1,61 +1,48 @@
 //! Query execution configuration shared between server and compiler.
 //!
 //! `QueryConfig` is the single type for all ClickHouse query-level settings.
-//! It is built by the compiler's settings phase, stored on `ParameterizedQuery`,
-//! and read by both codegen (SQL SETTINGS clause) and the execution stage
-//! (HTTP-level options).
+//! It is deserialized from `AppConfig.query` on the server side, stored in
+//! the pipeline context, and read by both the execution stage (HTTP-level
+//! options) and codegen (SQL SETTINGS clause).
 
 use serde::{Deserialize, Serialize};
-
-use crate::global::{DEFAULT_QUERY_CACHE_TTL, DEFAULT_TIMEOUT_SECS};
-
-/// Compile-time default config.
-pub static DEFAULT: QueryConfig = QueryConfig {
-    timeout_secs: DEFAULT_TIMEOUT_SECS,
-    use_query_cache: false,
-    query_cache_ttl: DEFAULT_QUERY_CACHE_TTL,
-};
+use serde_json::Value;
 
 /// Query execution settings. All fields map to ClickHouse query-level
 /// settings. The closed set of fields prevents arbitrary user input from
 /// reaching the SETTINGS clause (CWE-89).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct QueryConfig {
-    /// ClickHouse `max_execution_time`.
-    #[serde(default = "default_timeout")]
-    pub timeout_secs: u64,
+    /// Maximum seconds a query is allowed to run. Applied as both a
+    /// `tokio::time::timeout` on the Rust pipeline and as ClickHouse
+    /// `max_execution_time` per query.
+    pub timeout_secs: Option<u64>,
 
-    /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
-    #[serde(default)]
-    pub use_query_cache: bool,
+    /// Enable ClickHouse query cache. Set to true for cursor pagination
+    /// queries so subsequent pages reuse the cached result.
+    pub use_query_cache: Option<bool>,
 
-    /// ClickHouse `query_cache_ttl` in seconds.
-    #[serde(default = "default_cache_ttl")]
-    pub query_cache_ttl: u32,
-}
-
-impl Default for QueryConfig {
-    fn default() -> Self {
-        DEFAULT.clone()
-    }
+    /// ClickHouse query cache TTL in seconds.
+    pub query_cache_ttl: Option<u32>,
 }
 
 impl QueryConfig {
-    /// Returns ClickHouse SETTINGS as key-value pairs.
-    pub fn to_settings(&self) -> Vec<(&'static str, String)> {
-        let mut settings = vec![("max_execution_time", self.timeout_secs.to_string())];
-        if self.use_query_cache {
-            settings.push(("use_query_cache", "1".to_string()));
-            settings.push(("query_cache_ttl", self.query_cache_ttl.to_string()));
-        }
-        settings
+    /// Returns ClickHouse SETTINGS as key-value pairs, skipping unset (`None`) fields.
+    pub fn to_clickhouse_settings(&self) -> Vec<(String, String)> {
+        let Value::Object(map) =
+            serde_json::to_value(self).expect("QueryConfig is always serializable")
+        else {
+            unreachable!()
+        };
+        map.into_iter()
+            .filter(|(_, v)| !v.is_null())
+            .map(|(k, v)| {
+                let s = match v {
+                    Value::Bool(b) => if b { "1" } else { "0" }.to_string(),
+                    other => other.to_string(),
+                };
+                (k, s)
+            })
+            .collect()
     }
-}
-
-fn default_timeout() -> u64 {
-    DEFAULT_TIMEOUT_SECS
-}
-
-fn default_cache_ttl() -> u32 {
-    DEFAULT_QUERY_CACHE_TTL
 }

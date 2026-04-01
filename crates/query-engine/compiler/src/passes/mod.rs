@@ -9,15 +9,14 @@ pub mod lower;
 pub mod normalize;
 pub mod optimize;
 pub mod security;
-pub mod settings;
 pub mod validate;
 
 use crate::error::Result;
 use crate::input::Input;
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
 use crate::pipelines::{
-    HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasQueryConfig,
-    HasResultCtx, HasSecurityCtx,
+    HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx,
+    HasSecurityCtx,
 };
 
 pub struct ValidatePass;
@@ -177,35 +176,12 @@ where
     }
 }
 
-pub struct SettingsPass;
-
-impl<E, S> CompilerPass<E, S> for SettingsPass
-where
-    E: PipelineEnv,
-    S: PipelineState + HasInput + HasQueryConfig,
-{
-    const NAME: &'static str = "settings";
-
-    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
-        let input = state.input()?;
-        let config = settings::build_query_config(input);
-        state.set_query_config(config);
-        Ok(())
-    }
-}
-
 pub struct CodegenPass;
 
 impl<E, S> CompilerPass<E, S> for CodegenPass
 where
     E: PipelineEnv,
-    S: PipelineState
-        + HasNode
-        + HasInput
-        + HasResultCtx
-        + HasHydrationPlan
-        + HasQueryConfig
-        + HasOutput,
+    S: PipelineState + HasNode + HasInput + HasResultCtx + HasHydrationPlan + HasOutput,
 {
     const NAME: &'static str = "codegen";
 
@@ -214,10 +190,9 @@ where
         let hydration = state
             .take_hydration_plan()
             .unwrap_or(hydrate::HydrationPlan::None);
-        let query_config = state.take_query_config().unwrap_or_default();
         let node = state.node()?;
         let input = state.input()?;
-        let base = codegen::codegen(node, result_context, query_config)?;
+        let base = codegen::codegen(node, result_context)?;
         let query_type = input.query_type;
         let input = input.clone();
         state.set_output(codegen::CompiledQueryContext {

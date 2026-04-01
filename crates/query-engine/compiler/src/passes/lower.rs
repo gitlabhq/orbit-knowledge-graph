@@ -53,11 +53,13 @@ fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
 /// ClickHouse query cache TTL in seconds. Applied via SET when the query
 /// includes a cursor, so that subsequent pages of the same query benefit
 /// from CH-level caching of the raw SQL result.
+use gkg_config::global::DEFAULT_QUERY_CACHE_TTL;
+
 /// Lower validated input into an AST node.
 ///
 /// Writes metadata to `input.compiler` for downstream passes.
 pub fn lower(input: &mut Input) -> Result<Node> {
-    let node = match input.query_type {
+    let mut node = match input.query_type {
         QueryType::Search => lower_search(input),
         QueryType::Traversal => lower_traversal_edge_only(input),
         QueryType::Aggregation => lower_aggregation(input),
@@ -68,6 +70,13 @@ pub fn lower(input: &mut Input) -> Result<Node> {
     }?;
 
     // Enable ClickHouse query cache for cursor pagination queries so that
+    // subsequent pages reuse the cached SQL result at the CH layer.
+    if input.cursor.is_some() {
+        let Node::Query(q) = &mut node;
+        q.query_config.use_query_cache = Some(true);
+        q.query_config.query_cache_ttl = Some(DEFAULT_QUERY_CACHE_TTL);
+    }
+
     Ok(node)
 }
 

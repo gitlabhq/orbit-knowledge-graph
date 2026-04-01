@@ -9,6 +9,8 @@ use serde_json::Value;
 
 pub use gkg_utils::clickhouse::{ChScalar, ChType};
 
+pub use gkg_config::QueryConfig;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Expressions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,6 +200,9 @@ pub struct Query {
     pub limit: Option<u32>,
     /// Additional queries to UNION ALL with this one (for recursive CTEs).
     pub union_all: Vec<Query>,
+    /// ClickHouse query-level settings emitted as the SETTINGS clause.
+    /// Uses `QueryConfig` (a closed struct) to prevent SQL injection.
+    pub query_config: QueryConfig,
 }
 
 impl Default for Query {
@@ -216,6 +221,7 @@ impl Default for Query {
             limit_by: None,
             limit: None,
             union_all: vec![],
+            query_config: QueryConfig::default(),
         }
     }
 }

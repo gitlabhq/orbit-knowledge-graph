@@ -5,8 +5,6 @@ use std::sync::Arc;
 use compiler_pipeline_macros::{PipelineEnv, PipelineState};
 use ontology::Ontology;
 
-use gkg_config::QueryConfig;
-
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
 use crate::input::Input;
@@ -36,7 +34,6 @@ crate::define_state_capabilities! {
     pub node: Node,
     pub result_ctx: ResultContext,
     pub hydration_plan: HydrationPlan,
-    pub query_config: QueryConfig,
     pub output: CompiledQueryContext,
 }
 
@@ -66,7 +63,6 @@ pub struct QueryState {
     pub node: Option<Node>,
     pub result_ctx: Option<ResultContext>,
     pub hydration_plan: Option<HydrationPlan>,
-    pub query_config: Option<gkg_config::QueryConfig>,
     pub output: Option<CompiledQueryContext>,
 }
 
@@ -118,7 +114,6 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
         .pass(SecurityPass)
         .pass(CheckPass)
         .pass(HydratePlanPass)
-        .pass(SettingsPass)
         .pass(CodegenPass)
         .build()
 }
@@ -139,7 +134,6 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
         .pass(SecurityPass)
         .pass(CheckPass)
         .pass(HydratePlanPass)
-        .pass(SettingsPass)
         .pass(CodegenPass)
         .build()
 }
@@ -157,7 +151,6 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
-        .pass(SettingsPass)
         .pass(CodegenPass)
         .build()
 }
