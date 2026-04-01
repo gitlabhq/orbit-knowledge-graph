@@ -1,3 +1,4 @@
+use rustc_hash::FxHashSet;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -8,7 +9,9 @@ use crate::utils::Range;
 use super::extractors::Extract;
 use super::predicates::Pred;
 
-pub type LabelFn = fn(&Node<StrDoc<SupportLang>>) -> &'static str;
+type N<'a> = Node<'a, StrDoc<SupportLang>>;
+
+pub type LabelFn = fn(&N<'_>) -> &'static str;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DslDefinitionType {
@@ -34,25 +37,52 @@ pub struct DslRawReference {
     pub range: Range,
 }
 
+/// Shared behavior for scope and reference rules.
+pub trait Rule {
+    fn kind(&self) -> &'static str;
+    fn condition(&self) -> Option<&Pred>;
+    fn extract(&self) -> &Extract;
+
+    fn matches(&self, node: &N<'_>, node_kind: &str) -> bool {
+        self.kind() == node_kind && self.condition().is_none_or(|c| c.test(node))
+    }
+
+    fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        self.extract().extract_name(node)
+    }
+}
+
 enum Label {
     Static(&'static str),
     Fn(LabelFn),
 }
 
 pub struct ScopeRule {
-    pub(crate) kind: &'static str,
+    kind: &'static str,
     label: Label,
-    pub(crate) condition: Option<Pred>,
-    pub(crate) name: Extract,
+    condition: Option<Pred>,
+    name: Extract,
     pub(crate) creates_scope: bool,
+}
+
+impl Rule for ScopeRule {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+    fn condition(&self) -> Option<&Pred> {
+        self.condition.as_ref()
+    }
+    fn extract(&self) -> &Extract {
+        &self.name
+    }
 }
 
 impl ScopeRule {
     pub fn when(mut self, pred: Pred) -> Self {
-        self.condition = match self.condition {
-            Some(existing) => Some(existing.and(pred)),
-            None => Some(pred),
-        };
+        self.condition = Some(match self.condition {
+            Some(existing) => existing.and(pred),
+            None => pred,
+        });
         self
     }
 
@@ -66,14 +96,7 @@ impl ScopeRule {
         self
     }
 
-    pub(crate) fn matches(&self, node: &Node<StrDoc<SupportLang>>, node_kind: &str) -> bool {
-        if self.kind != node_kind {
-            return false;
-        }
-        self.condition.as_ref().is_none_or(|c| c.test(node))
-    }
-
-    pub(crate) fn resolve_label(&self, node: &Node<StrDoc<SupportLang>>) -> &'static str {
+    pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
         match &self.label {
             Label::Static(s) => s,
             Label::Fn(f) => f(node),
@@ -102,30 +125,35 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
 }
 
 pub struct ReferenceRule {
-    pub(crate) kind: &'static str,
-    pub(crate) condition: Option<Pred>,
-    pub(crate) name: Extract,
+    kind: &'static str,
+    condition: Option<Pred>,
+    name: Extract,
+}
+
+impl Rule for ReferenceRule {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+    fn condition(&self) -> Option<&Pred> {
+        self.condition.as_ref()
+    }
+    fn extract(&self) -> &Extract {
+        &self.name
+    }
 }
 
 impl ReferenceRule {
     pub fn when(mut self, pred: Pred) -> Self {
-        self.condition = match self.condition {
-            Some(existing) => Some(existing.and(pred)),
-            None => Some(pred),
-        };
+        self.condition = Some(match self.condition {
+            Some(existing) => existing.and(pred),
+            None => pred,
+        });
         self
     }
 
     pub fn name_from(mut self, extract: Extract) -> Self {
         self.name = extract;
         self
-    }
-
-    pub(crate) fn matches(&self, node: &Node<StrDoc<SupportLang>>, node_kind: &str) -> bool {
-        if self.kind != node_kind {
-            return false;
-        }
-        self.condition.as_ref().is_none_or(|c| c.test(node))
     }
 }
 
@@ -141,11 +169,21 @@ pub struct LanguageSpec {
     pub name: &'static str,
     pub scopes: Vec<ScopeRule>,
     pub refs: Vec<ReferenceRule>,
+    scope_kinds: FxHashSet<&'static str>,
 }
 
 impl LanguageSpec {
-    /// Derived from the scope rules — no need to maintain a separate corpus list.
-    pub fn is_scope_candidate(&self, kind: &str) -> bool {
-        self.scopes.iter().any(|r| r.kind == kind)
+    pub fn new(name: &'static str, scopes: Vec<ScopeRule>, refs: Vec<ReferenceRule>) -> Self {
+        let scope_kinds = scopes.iter().map(|r| r.kind).collect();
+        Self {
+            name,
+            scopes,
+            refs,
+            scope_kinds,
+        }
+    }
+
+    pub(crate) fn is_scope_candidate(&self, kind: &str) -> bool {
+        self.scope_kinds.contains(kind)
     }
 }
