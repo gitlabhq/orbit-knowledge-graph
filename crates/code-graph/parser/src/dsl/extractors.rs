@@ -1,8 +1,6 @@
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::utils::{Range, node_to_range};
-
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 /// How to extract a name from a tree-sitter node.
@@ -12,7 +10,6 @@ pub enum Extract {
     /// Extract text from a specific field.
     Field(&'static str),
     /// Follow a chain of fields and extract the final node's text.
-    /// e.g. `&["function", "field"]` follows `node.field("function").field("field")`.
     FieldChain(&'static [&'static str]),
     /// C-style: follow `declarator` -> `declarator` chain to find the name.
     Declarator,
@@ -72,31 +69,6 @@ fn declarator_name(node: &N<'_>) -> Option<String> {
     }
     None
 }
-
-/// How to extract the range from a tree-sitter node.
-pub enum RangeExtract {
-    /// Use the node's own range.
-    Default,
-    /// Use the `name` field child's range.
-    NameField,
-}
-
-impl RangeExtract {
-    pub fn extract_range(&self, node: &N<'_>) -> Range {
-        match self {
-            RangeExtract::Default => node_to_range(node),
-            RangeExtract::NameField => {
-                if let Some(name_node) = node.field("name") {
-                    node_to_range(&name_node)
-                } else {
-                    node_to_range(node)
-                }
-            }
-        }
-    }
-}
-
-// --- Constructors ---
 
 pub fn field(name: &'static str) -> Extract {
     Extract::Field(name)

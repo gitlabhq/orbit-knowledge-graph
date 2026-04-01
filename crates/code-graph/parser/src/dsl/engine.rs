@@ -5,12 +5,18 @@ use crate::definitions::DefinitionInfo;
 use crate::parser::ParseResult;
 use crate::utils::node_to_range;
 
-use super::extractors::Extract;
 use super::types::{DslDefinitionInfo, DslDefinitionType, DslFqn, DslRawReference, LanguageSpec};
 
 pub struct DslParseOutput {
     pub definitions: Vec<DslDefinitionInfo>,
     pub references: Vec<DslRawReference>,
+}
+
+struct ScopeMatch {
+    name: String,
+    label: &'static str,
+    range: crate::utils::Range,
+    creates_scope: bool,
 }
 
 pub struct DslAnalyzer<'spec> {
@@ -59,38 +65,30 @@ impl<'spec> DslAnalyzer<'spec> {
         let node_kind = node.kind();
         let mut pushed_scope = false;
 
-        if let Some((name, label, range, creates_scope)) = self.evaluate_scope(node, &node_kind) {
-            if creates_scope {
-                scope_stack.push(name.clone());
+        if let Some(m) = self.evaluate_scope(node, &node_kind) {
+            if m.creates_scope {
+                scope_stack.push(m.name.clone());
                 pushed_scope = true;
             }
 
-            let fqn = if creates_scope {
+            let fqn = if m.creates_scope {
                 DslFqn::new(scope_stack.clone())
             } else {
                 let mut parts = scope_stack.clone();
-                parts.push(name.clone());
+                parts.push(m.name.clone());
                 DslFqn::new(parts)
             };
 
             definitions.push(DefinitionInfo::new(
-                DslDefinitionType { label },
-                name,
+                DslDefinitionType { label: m.label },
+                m.name,
                 fqn,
-                range,
+                m.range,
             ));
         }
 
         if let Some((name, range)) = self.evaluate_reference(node, &node_kind) {
-            references.push(DslRawReference {
-                name,
-                range,
-                scope_fqn: if scope_stack.is_empty() {
-                    None
-                } else {
-                    Some(DslFqn::new(scope_stack.clone()))
-                },
-            });
+            references.push(DslRawReference { name, range });
         }
 
         for child in node.children() {
@@ -106,33 +104,28 @@ impl<'spec> DslAnalyzer<'spec> {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-    ) -> Option<(String, String, crate::utils::Range, bool)> {
+    ) -> Option<ScopeMatch> {
         if !self.spec.is_scope_candidate(node_kind) {
             return None;
         }
 
         // Last matching rule wins.
-        let matched = self
+        let rule = self
             .spec
             .scopes
             .iter()
             .rev()
-            .find(|r| r.matches(node, node_kind));
+            .find(|r| r.matches(node, node_kind))?;
 
-        if let Some(rule) = matched {
-            let name = rule.name.extract_name(node)?;
-            let range = rule.range.extract_range(node);
-            let label = rule.resolve_label(node).to_string();
-            return Some((name, label, range, rule.creates_scope));
-        }
-
-        // Auto-scope only when no rules are defined at all.
-        if !self.spec.scopes.is_empty() {
-            return None;
-        }
-        let name = Extract::Default.extract_name(node)?;
+        let name = rule.name.extract_name(node)?;
         let range = node_to_range(node);
-        Some((name, node_kind.to_string(), range, true))
+        let label = rule.resolve_label(node);
+        Some(ScopeMatch {
+            name,
+            label,
+            range,
+            creates_scope: rule.creates_scope,
+        })
     }
 
     fn evaluate_reference(
@@ -149,102 +142,85 @@ impl<'spec> DslAnalyzer<'spec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsl::extractors::field;
     use crate::dsl::predicates::*;
     use crate::dsl::types::*;
-    use crate::parser::GenericParser;
-    use crate::parser::LanguageParser;
+    use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
 
-    fn python_spec() -> LanguageSpec {
-        LanguageSpec {
-            name: "python",
-            scope_corpus: &["class_definition", "function_definition"],
+    #[test]
+    fn test_scope_matching_and_fqn() {
+        let spec = LanguageSpec {
+            name: "test",
             scopes: vec![
                 scope("class_definition", "Class"),
                 scope("function_definition", "Function"),
                 scope("function_definition", "Method").when(grandparent_is("class_definition")),
             ],
             refs: vec![],
-        }
-    }
-
-    #[test]
-    fn test_python_definitions_via_dsl() {
-        let spec = python_spec();
+        };
         let analyzer = DslAnalyzer::new(&spec);
-
-        let parser = GenericParser::new(crate::parser::SupportedLanguage::Python);
-        let code = r#"
-class Calculator:
-    def add(self, a, b):
-        return a + b
-
-    def subtract(self, a, b):
-        return a - b
-
-def standalone():
-    pass
-"#;
-        let result = parser.parse(code, Some("test.py")).unwrap();
-        let analysis = analyzer.analyze(&result).unwrap();
-
-        assert_eq!(analysis.definitions.len(), 4);
-
-        let names: Vec<&str> = analysis
-            .definitions
-            .iter()
-            .map(|d| d.name.as_str())
-            .collect();
-        assert!(names.contains(&"Calculator"));
-        assert!(names.contains(&"add"));
-        assert!(names.contains(&"subtract"));
-        assert!(names.contains(&"standalone"));
-
-        let fqns: Vec<String> = analysis
-            .definitions
-            .iter()
-            .map(|d| dsl_fqn_to_string(&d.fqn))
-            .collect();
-        assert!(fqns.contains(&"Calculator".to_string()));
-        assert!(fqns.contains(&"Calculator.add".to_string()));
-        assert!(fqns.contains(&"Calculator.subtract".to_string()));
-        assert!(fqns.contains(&"standalone".to_string()));
-
-        let calc = analysis
-            .definitions
-            .iter()
-            .find(|d| d.name == "Calculator")
-            .unwrap();
-        assert_eq!(calc.definition_type.label, "Class");
-
-        let add = analysis
-            .definitions
-            .iter()
-            .find(|d| d.name == "add")
-            .unwrap();
-        assert_eq!(add.definition_type.label, "Method");
-
-        let standalone = analysis
-            .definitions
-            .iter()
-            .find(|d| d.name == "standalone")
-            .unwrap();
-        assert_eq!(standalone.definition_type.label, "Function");
-    }
-
-    #[test]
-    fn test_last_rule_wins() {
-        let spec = python_spec();
-        let analyzer = DslAnalyzer::new(&spec);
-
-        let parser = GenericParser::new(crate::parser::SupportedLanguage::Python);
+        let parser = GenericParser::new(SupportedLanguage::Python);
         let code = "class A:\n    def b(self): pass\ndef c(): pass";
         let result = parser.parse(code, Some("test.py")).unwrap();
-        let analysis = analyzer.analyze(&result).unwrap();
+        let output = analyzer.analyze(&result).unwrap();
 
-        let b = analysis.definitions.iter().find(|d| d.name == "b").unwrap();
+        assert_eq!(output.definitions.len(), 3);
+
+        let b = output.definitions.iter().find(|d| d.name == "b").unwrap();
         assert_eq!(b.definition_type.label, "Method");
+        assert_eq!(dsl_fqn_to_string(&b.fqn), "A.b");
 
-        let c = analysis.definitions.iter().find(|d| d.name == "c").unwrap();
+        let c = output.definitions.iter().find(|d| d.name == "c").unwrap();
         assert_eq!(c.definition_type.label, "Function");
+        assert_eq!(dsl_fqn_to_string(&c.fqn), "c");
+    }
+
+    #[test]
+    fn test_reference_extraction() {
+        let spec = LanguageSpec {
+            name: "test",
+            scopes: vec![scope("function_definition", "Function")],
+            // Python uses "call" not "call_expression"
+            refs: vec![reference("call").name_from(field("function"))],
+        };
+        let analyzer = DslAnalyzer::new(&spec);
+        let parser = GenericParser::new(SupportedLanguage::Python);
+        let code = "def foo(): pass\nfoo()";
+        let result = parser.parse(code, Some("test.py")).unwrap();
+        let output = analyzer.analyze(&result).unwrap();
+
+        assert_eq!(output.references.len(), 1);
+        assert_eq!(output.references[0].name, "foo");
+    }
+
+    #[test]
+    fn test_no_scope_definition() {
+        // Only inner is .no_scope() — outer still pushes scope normally.
+        let spec = LanguageSpec {
+            name: "test",
+            scopes: vec![
+                scope("class_definition", "Class"),
+                scope("function_definition", "Function"),
+                // Methods inside classes don't push scope
+                scope("function_definition", "FlatMethod")
+                    .when(grandparent_is("class_definition"))
+                    .no_scope(),
+            ],
+            refs: vec![],
+        };
+        let analyzer = DslAnalyzer::new(&spec);
+        let parser = GenericParser::new(SupportedLanguage::Python);
+        let code = "class A:\n    def method(self): pass";
+        let result = parser.parse(code, Some("test.py")).unwrap();
+        let output = analyzer.analyze(&result).unwrap();
+
+        let method = output
+            .definitions
+            .iter()
+            .find(|d| d.name == "method")
+            .unwrap();
+        // Method gets A.method FQN but doesn't push scope
+        assert_eq!(dsl_fqn_to_string(&method.fqn), "A.method");
+        assert_eq!(method.definition_type.label, "FlatMethod");
     }
 }

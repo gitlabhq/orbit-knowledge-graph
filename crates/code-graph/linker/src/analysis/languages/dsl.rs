@@ -60,18 +60,20 @@ pub fn add_definition_relationships(
         })
         .collect();
 
+    // Index by FQN string for O(1) parent lookup.
+    let by_fqn: HashMap<String, &DefinitionNode> = dsl_definitions
+        .iter()
+        .map(|(node, fqn)| (fqn.parts.join("."), *node))
+        .collect();
+
     for (node, fqn) in &dsl_definitions {
         if fqn.len() <= 1 {
             continue;
         }
 
-        let parent_parts = fqn.parts[..fqn.len() - 1].to_vec();
-        let parent_fqn_string = parent_parts.join(".");
+        let parent_fqn_string = fqn.parts[..fqn.len() - 1].join(".");
 
-        if let Some((parent_node, _)) = dsl_definitions
-            .iter()
-            .find(|(def_node, _)| def_node.fqn.to_string() == parent_fqn_string)
-        {
+        if let Some(parent_node) = by_fqn.get(&parent_fqn_string) {
             let mut relationship = ConsolidatedRelationship::definition_to_definition(
                 parent_node.file_path.clone(),
                 node.file_path.clone(),

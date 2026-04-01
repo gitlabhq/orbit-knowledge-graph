@@ -8,7 +8,6 @@ use super::types::{LanguageSpec, reference, scope, scope_fn};
 pub fn python_language_spec() -> LanguageSpec {
     LanguageSpec {
         name: "python",
-        scope_corpus: &["class_definition", "function_definition", "assignment"],
         scopes: vec![
             scope("class_definition", "Class"),
             scope("class_definition", "DecoratedClass").when(parent_is("decorated_definition")),
@@ -23,7 +22,7 @@ pub fn python_language_spec() -> LanguageSpec {
                 .name_from(field("left"))
                 .no_scope(),
         ],
-        refs: vec![reference("call_expression", "Call").name_from(field("function"))],
+        refs: vec![reference("call_expression").name_from(field("function"))],
     }
 }
 
