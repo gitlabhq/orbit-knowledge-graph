@@ -59,14 +59,24 @@ impl<'spec> DslAnalyzer<'spec> {
         let node_kind = node.kind();
         let mut pushed_scope = false;
 
-        if let Some((name, label, range)) = self.evaluate_scope(node, &node_kind) {
-            scope_stack.push(name.clone());
-            pushed_scope = true;
+        if let Some((name, label, range, creates_scope)) = self.evaluate_scope(node, &node_kind) {
+            if creates_scope {
+                scope_stack.push(name.clone());
+                pushed_scope = true;
+            }
+
+            let fqn = if creates_scope {
+                DslFqn::new(scope_stack.clone())
+            } else {
+                let mut parts = scope_stack.clone();
+                parts.push(name.clone());
+                DslFqn::new(parts)
+            };
 
             definitions.push(DefinitionInfo::new(
                 DslDefinitionType { label },
                 name,
-                DslFqn::new(scope_stack.clone()),
+                fqn,
                 range,
             ));
         }
@@ -92,12 +102,12 @@ impl<'spec> DslAnalyzer<'spec> {
         }
     }
 
-    /// Returns `(name, label, range)` if the node creates a scope.
+    /// Returns `(name, label, range, creates_scope)` if the node creates a definition.
     fn evaluate_scope(
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-    ) -> Option<(String, String, crate::utils::Range)> {
+    ) -> Option<(String, String, crate::utils::Range, bool)> {
         if !self.spec.is_scope_candidate(node_kind) {
             return None;
         }
@@ -114,13 +124,17 @@ impl<'spec> DslAnalyzer<'spec> {
             let name = rule.get_name_extractor().extract_name(node)?;
             let range = rule.get_range_extractor().extract_range(node);
             let label = rule.label.unwrap_or(node_kind).to_string();
-            return Some((name, label, range));
+            return Some((name, label, range, rule.creates_scope));
         }
 
-        // Node kind is in the corpus but no explicit rule matched — auto-scope.
+        // Node kind is in the corpus but no explicit rule matched.
+        // Only auto-scope when NO rules are defined at all (pure corpus mode).
+        if !self.spec.scope_rules.is_empty() {
+            return None;
+        }
         let name = DefaultNameExtractor.extract_name(node)?;
         let range = node_to_range(node);
-        Some((name, node_kind.to_string(), range))
+        Some((name, node_kind.to_string(), range, true))
     }
 
     fn evaluate_reference(

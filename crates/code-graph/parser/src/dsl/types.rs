@@ -45,6 +45,10 @@ pub struct ScopeRule {
     pub name_extractor: Option<Box<dyn NameExtractor>>,
     /// Custom range extractor. Falls back to `DefaultRangeExtractor` when `None`.
     pub range_extractor: Option<Box<dyn RangeExtractor>>,
+    /// Whether matching this rule pushes a scope onto the FQN stack.
+    /// Defaults to `true`. Set to `false` for definitions that don't
+    /// create their own scope (e.g. lambda assignments in Python).
+    pub creates_scope: bool,
 }
 
 impl ScopeRule {
@@ -54,6 +58,7 @@ impl ScopeRule {
             label: None,
             name_extractor: None,
             range_extractor: None,
+            creates_scope: true,
         }
     }
 
@@ -69,6 +74,11 @@ impl ScopeRule {
 
     pub fn with_range_extractor(mut self, extractor: Box<dyn RangeExtractor>) -> Self {
         self.range_extractor = Some(extractor);
+        self
+    }
+
+    pub fn no_scope(mut self) -> Self {
+        self.creates_scope = false;
         self
     }
 
