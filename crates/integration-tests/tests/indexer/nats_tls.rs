@@ -43,7 +43,9 @@ struct TestPki {
     client_key_pem: String,
 }
 
-fn generate_test_pki() -> TestPki {
+/// Generates a test PKI. `server_sans` must include all hostnames/IPs the client
+/// will use to connect (e.g. "localhost", "127.0.0.1", "docker" in CI).
+fn generate_test_pki(server_sans: &[String]) -> TestPki {
     // CA
     let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -58,9 +60,8 @@ fn generate_test_pki() -> TestPki {
     let ca_key = KeyPair::generate().unwrap();
     let ca = CertifiedIssuer::self_signed(ca_params, ca_key).unwrap();
 
-    // Server cert — SAN must include "localhost" and 127.0.0.1
-    let mut server_params =
-        CertificateParams::new(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
+    // Server cert — SANs must match the hostname the client connects to
+    let mut server_params = CertificateParams::new(server_sans.to_vec()).unwrap();
     server_params
         .distinguished_name
         .push(DnType::CommonName, "nats-server");
@@ -92,6 +93,23 @@ fn generate_test_pki() -> TestPki {
         client_cert_pem: client_cert.pem(),
         client_key_pem: client_key.serialize_pem(),
     }
+}
+
+/// Resolves the testcontainers host to use for server cert SANs.
+async fn resolve_container_host() -> String {
+    // Start a throwaway container to discover the host (localhost vs docker in CI)
+    let probe = GenericImage::new("nats", "2.11-alpine")
+        .with_mapped_port(0, ContainerPort::Tcp(4222))
+        .start()
+        .await
+        .expect("failed to start probe container");
+    let host = probe
+        .get_host()
+        .await
+        .expect("failed to get host")
+        .to_string();
+    drop(probe);
+    host
 }
 
 fn nats_tls_config() -> String {
@@ -170,7 +188,9 @@ async fn start_nats_tls_container(
 #[tokio::test]
 async fn mtls_publish_and_subscribe() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    let pki = generate_test_pki();
+    let host = resolve_container_host().await;
+    let sans = vec![host, "localhost".into(), "127.0.0.1".into()];
+    let pki = generate_test_pki(&sans);
     let (_container, url) = start_nats_tls_container(&pki).await;
     let temp_dir = TempDir::new().unwrap();
     let config = client_config(&pki, &url, &temp_dir);
@@ -214,7 +234,9 @@ async fn mtls_publish_and_subscribe() {
 #[tokio::test]
 async fn mtls_rejects_without_client_cert() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    let pki = generate_test_pki();
+    let host = resolve_container_host().await;
+    let sans = vec![host, "localhost".into(), "127.0.0.1".into()];
+    let pki = generate_test_pki(&sans);
     let (_container, url) = start_nats_tls_container(&pki).await;
     let temp_dir = TempDir::new().unwrap();
 
@@ -238,11 +260,13 @@ async fn mtls_rejects_without_client_cert() {
 #[tokio::test]
 async fn mtls_rejects_wrong_ca() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    let pki = generate_test_pki();
+    let host = resolve_container_host().await;
+    let sans = vec![host, "localhost".into(), "127.0.0.1".into()];
+    let pki = generate_test_pki(&sans);
     let (_container, url) = start_nats_tls_container(&pki).await;
 
     // Generate a completely separate CA — server won't trust certs signed by it
-    let wrong_pki = generate_test_pki();
+    let wrong_pki = generate_test_pki(&sans);
     let temp_dir = TempDir::new().unwrap();
     let config = client_config(&wrong_pki, &url, &temp_dir);
 
