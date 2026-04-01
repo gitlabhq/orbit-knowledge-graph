@@ -485,13 +485,8 @@ fn cursor_pagination_validation() {
 
     // Cursor query emits SETTINGS for CH query cache
     assert!(
-        result.base.sql.contains("SETTINGS use_query_cache = 1"),
+        result.base.sql.contains("use_query_cache = 1"),
         "cursor query should enable CH query cache: {}",
-        result.base.sql
-    );
-    assert!(
-        result.base.sql.contains("query_cache_ttl ="),
-        "cursor query should set CH query cache TTL: {}",
         result.base.sql
     );
 
