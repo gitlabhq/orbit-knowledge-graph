@@ -1,5 +1,4 @@
 target/**
-!target/*/debug/
 !target/*/debug/gkg-server
 .*
 !.cargo/
