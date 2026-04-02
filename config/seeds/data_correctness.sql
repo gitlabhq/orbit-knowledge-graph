@@ -97,19 +97,19 @@ INSERT INTO gl_user (id, username, name, state, user_type, email) VALUES
     (5, 'eve', 'Eve External', 'blocked', 'service_account', 'eve@example.com'),
     (6, '用户_émoji_🎉', 'Ünïcödé Üser', 'active', 'human', 'unicode@example.com');
 
-INSERT INTO gl_group (id, name, visibility_level, traversal_path) VALUES
-    (100, 'Public Group', 'public', '1/100/'),
-    (101, 'Private Group', 'private', '1/101/'),
-    (102, 'Internal Group', 'internal', '1/102/'),
-    (200, 'Deep Group A', 'public', '1/100/200/'),
-    (300, 'Deep Group B', 'public', '1/100/200/300/');
+INSERT INTO gl_group (id, name, full_path, visibility_level, traversal_path) VALUES
+    (100, 'Public Group', 'public-group', 'public', '1/100/'),
+    (101, 'Private Group', 'private-group', 'private', '1/101/'),
+    (102, 'Internal Group', 'internal-group', 'internal', '1/102/'),
+    (200, 'Deep Group A', 'public-group/deep-a', 'public', '1/100/200/'),
+    (300, 'Deep Group B', 'public-group/deep-a/deep-b', 'public', '1/100/200/300/');
 
-INSERT INTO gl_project (id, name, visibility_level, traversal_path) VALUES
-    (1000, 'Public Project', 'public', '1/100/1000/'),
-    (1001, 'Private Project', 'private', '1/101/1001/'),
-    (1002, 'Internal Project', 'internal', '1/100/1002/'),
-    (1003, 'Secret Project', 'private', '1/101/1003/'),
-    (1004, 'Shared Project', 'public', '1/102/1004/');
+INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) VALUES
+    (1000, 'Public Project', 'public-group/public-project', 'public', '1/100/1000/'),
+    (1001, 'Private Project', 'private-group/private-project', 'private', '1/101/1001/'),
+    (1002, 'Internal Project', 'public-group/internal-project', 'internal', '1/100/1002/'),
+    (1003, 'Secret Project', 'private-group/secret-project', 'private', '1/101/1003/'),
+    (1004, 'Shared Project', 'internal-group/shared-project', 'public', '1/102/1004/');
 
 INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
     (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
