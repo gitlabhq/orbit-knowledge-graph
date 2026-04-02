@@ -77,7 +77,7 @@ impl PipelineStage for ProfilerExecutor {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let t = std::time::Instant::now();
+        let start = std::time::Instant::now();
         let client = ctx
             .server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
@@ -85,41 +85,51 @@ impl PipelineStage for ProfilerExecutor {
         let compiled = ctx.compiled()?;
         let result_context = compiled.base.result_context.clone();
         let rendered_sql = compiled.base.render();
-        let http_params: Vec<(String, String)> = compiled
-            .base
-            .params
-            .iter()
-            .map(|(k, v)| (k.clone(), v.render_http_param()))
-            .collect();
 
-        let (batches, query_stats) = client
-            .profiler()
-            .execute_with_stats(&compiled.base.sql, &http_params, &[])
+        let profiling_id = uuid::Uuid::new_v4().to_string();
+        let log_comment = format!("gkg;profiler;profiling_id={profiling_id}");
+
+        let mut query = client
+            .query(&compiled.base.sql)
+            .with_option("log_comment", &log_comment);
+        for (key, param) in &compiled.base.params {
+            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
+        }
+        let batches = query
+            .fetch_arrow()
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;
 
-        let elapsed = t.elapsed();
+        let elapsed = start.elapsed();
         obs.executed(elapsed, batches.len());
+        let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
 
-        let execution = QueryExecution {
+        let mut execution = QueryExecution {
             label: "base".into(),
             rendered_sql,
-            query_id: query_stats.query_id.clone(),
+            query_id: String::new(),
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,
             stats: QueryExecutionStats {
-                read_rows: query_stats.read_rows,
-                read_bytes: query_stats.read_bytes,
-                result_rows: query_stats.result_rows,
-                result_bytes: query_stats.result_bytes,
-                elapsed_ns: query_stats.elapsed_ns,
-                memory_usage: query_stats.memory_usage,
+                result_rows,
+                elapsed_ns: elapsed.as_nanos() as u64,
+                ..Default::default()
             },
             explain_plan: None,
             explain_pipeline: None,
             query_log: None,
             processors: None,
         };
+
+        // Backfill stats from system.query_log using the profiling_id
+        if let Ok(Some(entry)) = client.fetch_query_log(&profiling_id).await {
+            execution.query_id = entry.query_id.clone();
+            execution.stats.read_rows = entry.read_rows;
+            execution.stats.read_bytes = entry.read_bytes;
+            execution.stats.result_rows = entry.result_rows;
+            execution.stats.result_bytes = entry.result_bytes;
+            execution.stats.memory_usage = entry.memory_usage as i64;
+        }
 
         ctx.phases
             .get_or_insert_default::<QueryExecutionLog>()
