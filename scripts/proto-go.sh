@@ -54,6 +54,7 @@ run_protoc() {
 cmd_generate() {
   install_tools
   run_protoc "$OUT_DIR"
+  ( cd "$OUT_DIR" && go mod tidy )
   echo "Go proto stubs generated in ${OUT_DIR}/"
 }
 
