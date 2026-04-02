@@ -202,9 +202,9 @@ generation:
       "User -> WorkItem": 10
 
     REVIEWER:
-      "MergeRequest -> User":
+      "User -> MergeRequest":
         ratio: 3
-        per: source
+        per: target
 
     TRIGGERED:
       "User -> Pipeline": 1
@@ -216,9 +216,9 @@ generation:
       "User -> Group": 1
 
     MERGED_BY:
-      "MergeRequest -> User":
+      "User -> MergeRequest":
         ratio: 1
-        per: source
+        per: target
 
     CLOSES:
       "MergeRequest -> WorkItem": 0.5

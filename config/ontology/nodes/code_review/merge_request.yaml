@@ -153,5 +153,5 @@ etl:
     approvals:
       to: User
       as: REVIEWER
-      direction: outgoing
+      direction: incoming
       array_field: user_id
