@@ -55,10 +55,7 @@ impl PipelineStage for ClickHouseExecutor {
                 .base
                 .query_config
                 .to_clickhouse_settings()
-                .map_err(PipelineError::Execution)?
-                .into_iter()
-                .map(|(k, v)| (k, v.to_string()))
-                .collect();
+                .map_err(PipelineError::Execution)?;
 
             let log_comment = match labkit::correlation::current() {
                 Some(id) => format!("gkg;correlation_id={id}"),
