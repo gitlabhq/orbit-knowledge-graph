@@ -1,9 +1,7 @@
 //! Post-execution profiling queries against ClickHouse system tables.
 //!
 //! Retrieves EXPLAIN plans, query_log entries, processor profiles, and
-//! instance health using the standard `ArrowClickHouseClient`. Replaces
-//! the former `QueryProfiler` which maintained a separate `reqwest`
-//! HTTP client.
+//! instance health.
 
 use std::collections::HashMap;
 
