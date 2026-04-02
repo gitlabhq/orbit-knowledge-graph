@@ -3,3 +3,4 @@ pub mod extractors;
 pub mod predicates;
 pub mod python_spec;
 pub mod types;
+pub mod yaml_loader;

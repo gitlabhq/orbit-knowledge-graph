@@ -33,7 +33,7 @@ pub fn python_language_spec() -> LanguageSpec {
     .auto_imports(&["import_statement"])
 }
 
-fn classify_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
+pub fn classify_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
     let is_async = has_child(&["async"]).test(node);
     let has_decorator = parent_is("decorated_definition").test(node);
     let is_method = nearest_ancestor(

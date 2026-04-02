@@ -1,0 +1,30 @@
+name: cpp
+
+auto:
+  - [struct_specifier, Struct]
+  - [enum_specifier, Enum]
+  - [union_specifier, Union]
+  - [namespace_definition, Namespace]
+  - [class_specifier, Class]
+
+scopes:
+  - kind: function_definition
+    label: "udf:classify_cpp_function"
+    name: declarator
+
+refs:
+  - kind: call_expression
+    when: { field_kind: [function, [identifier]] }
+    name: { field: function }
+
+  - kind: call_expression
+    when: { field_kind: [function, [field_expression]] }
+    name: { field_chain: [function, field] }
+
+  - kind: call_expression
+    when: { field_kind: [function, [qualified_identifier]] }
+    name: { field: function }
+
+imports:
+  - kind: preproc_include
+    path: { field: path }
