@@ -294,7 +294,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
-        self.asserted_edge_types.borrow_mut().insert(edge_type.to_string());
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         let edges = self
             .response
             .edges
@@ -401,7 +403,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
-        self.asserted_edge_types.borrow_mut().insert(edge_type.to_string());
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         assert!(
             self.find_edge(from, from_id, to, to_id, edge_type)
                 .is_some(),
@@ -509,7 +513,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
-        self.asserted_edge_types.borrow_mut().insert(edge_type.to_string());
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         let actual: HashSet<(i64, i64)> = self
             .response
             .edges
@@ -528,7 +534,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
-        self.asserted_edge_types.borrow_mut().insert(edge_type.to_string());
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         let actual = self
             .response
             .edges
@@ -608,10 +616,7 @@ impl ResponseView {
                     )
                 })
                 .collect();
-            panic!(
-                "Uncovered edge types in response:\n{}",
-                list.join("\n")
-            );
+            panic!("Uncovered edge types in response:\n{}", list.join("\n"));
         }
     }
 }
