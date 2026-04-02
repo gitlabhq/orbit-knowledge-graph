@@ -11,15 +11,14 @@ use query_engine::shared::{
     ExecutionOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
 };
 
-/// Everything needed to execute a compiled query against ClickHouse.
 struct PreparedQuery {
     sql: String,
     params: HashMap<String, gkg_utils::clickhouse::ParamValue>,
     rendered_sql: String,
-    /// HTTP-level ClickHouse settings applied to every query.
-    /// Includes `log_comment` for tracing and the `QueryConfig` settings
-    /// as defense-in-depth (they're also in the SQL SETTINGS clause).
     http_settings: Vec<(String, String)>,
+    /// Set when profiling is enabled. Used to find the query in
+    /// system.query_log after execution.
+    profiling_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -57,13 +56,18 @@ impl PipelineStage for ClickHouseExecutor {
             // Build log_comment with correlation ID for tracing.
             // When profiling is enabled, append a unique profiling_id so
             // the query can be found in system.query_log after execution.
+            let profiling_id = if profiling.enabled {
+                Some(uuid::Uuid::new_v4().to_string())
+            } else {
+                None
+            };
+
             let mut log_comment = match labkit::correlation::current() {
                 Some(id) => format!("gkg;correlation_id={id}"),
                 None => "gkg".to_string(),
             };
-            if profiling.enabled {
-                let profiling_id = uuid::Uuid::new_v4().to_string();
-                log_comment.push_str(&format!(";profiling_id={profiling_id}"));
+            if let Some(ref pid) = profiling_id {
+                log_comment.push_str(&format!(";profiling_id={pid}"));
             }
             http_settings.push(("log_comment".to_string(), log_comment));
 
@@ -72,23 +76,20 @@ impl PipelineStage for ClickHouseExecutor {
                 params: compiled.base.params.clone(),
                 rendered_sql: compiled.base.render(),
                 http_settings,
+                profiling_id,
             };
             (prepared, compiled.base.result_context.clone())
         };
 
         let (batches, mut execution) = execute_query(client, &prepared, start).await?;
 
-        // When profiling is enabled, enrich the execution record with data
-        // from system tables. The profiling_id in log_comment lets us find
-        // the exact query_log entry.
-        if profiling.enabled {
-            let profiling_id = extract_profiling_id(&prepared.http_settings);
+        if let Some(ref profiling_id) = prepared.profiling_id {
             enrich_execution(
                 client,
                 &mut execution,
                 &prepared.rendered_sql,
                 &profiling,
-                &profiling_id,
+                profiling_id,
             )
             .await;
         }
@@ -188,17 +189,4 @@ async fn enrich_execution(
             execution.processors = Some(serde_json::to_value(&profiles).unwrap_or_default());
         }
     }
-}
-
-/// Extract the profiling_id value from the log_comment in http_settings.
-fn extract_profiling_id(http_settings: &[(String, String)]) -> String {
-    http_settings
-        .iter()
-        .find(|(k, _)| k == "log_comment")
-        .and_then(|(_, v)| {
-            v.split(';')
-                .find(|part| part.starts_with("profiling_id="))
-                .map(|part| part.trim_start_matches("profiling_id=").to_string())
-        })
-        .unwrap_or_default()
 }

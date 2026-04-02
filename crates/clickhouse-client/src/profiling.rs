@@ -307,9 +307,10 @@ impl ArrowClickHouseClient {
 }
 
 fn validate_log_comment_match(s: &str) -> Result<(), ClickHouseError> {
-    if !s
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    if s.is_empty()
+        || !s
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
         return Err(ClickHouseError::BadResponse {
             status: 0,
