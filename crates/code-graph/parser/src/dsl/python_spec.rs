@@ -3,7 +3,7 @@ use treesitter_visit::{Node, SupportLang};
 
 use super::extractors::field;
 use super::predicates::*;
-use super::types::{LanguageSpec, reference, scope, scope_fn};
+use super::types::{LanguageSpec, import, reference, scope, scope_fn};
 
 pub fn python_language_spec() -> LanguageSpec {
     LanguageSpec::new(
@@ -23,6 +23,12 @@ pub fn python_language_spec() -> LanguageSpec {
                 .no_scope(),
         ],
         vec![reference("call_expression").name_from(field("function"))],
+        vec![
+            import("import_statement").path_from(field("name")),
+            import("import_from_statement")
+                .path_from(field("module_name"))
+                .symbol_from(field("name")),
+        ],
     )
 }
 
@@ -284,5 +290,18 @@ class MyClass:
             "MyClass.decorated_async_method",
         );
         assert_def(&output, "lambda_method", "Lambda", "MyClass.lambda_method");
+    }
+
+    #[test]
+    fn test_python_imports() {
+        let output = analyze("import os\nfrom os.path import join\n");
+
+        assert_eq!(output.imports.len(), 2);
+
+        assert_eq!(output.imports[0].path, "os");
+        assert!(output.imports[0].name.is_none());
+
+        assert_eq!(output.imports[1].path, "os.path");
+        assert_eq!(output.imports[1].name.as_deref(), Some("join"));
     }
 }

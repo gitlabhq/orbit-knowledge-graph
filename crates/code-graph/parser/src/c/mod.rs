@@ -1,6 +1,6 @@
 use crate::dsl::extractors::{declarator, field, field_chain};
 use crate::dsl::predicates::*;
-use crate::dsl::types::{LanguageSpec, reference, scope};
+use crate::dsl::types::{LanguageSpec, import, reference, scope};
 
 pub fn c_language_spec() -> LanguageSpec {
     LanguageSpec::new(
@@ -25,6 +25,7 @@ pub fn c_language_spec() -> LanguageSpec {
                 .when(field_kind("function", &["field_expression"]))
                 .name_from(field_chain(&["function", "field"])),
         ],
+        vec![import("preproc_include").path_from(field("path"))],
     )
 }
 

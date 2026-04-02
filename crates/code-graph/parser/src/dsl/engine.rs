@@ -6,12 +6,13 @@ use crate::parser::ParseResult;
 use crate::utils::node_to_range;
 
 use super::types::{
-    DslDefinitionInfo, DslDefinitionType, DslFqn, DslRawReference, LanguageSpec, Rule,
+    DslDefinitionInfo, DslDefinitionType, DslFqn, DslImport, DslRawReference, LanguageSpec, Rule,
 };
 
 pub struct DslParseOutput {
     pub definitions: Vec<DslDefinitionInfo>,
     pub references: Vec<DslRawReference>,
+    pub imports: Vec<DslImport>,
 }
 
 struct ScopeMatch {
@@ -30,6 +31,7 @@ impl LanguageSpec {
 
         let mut definitions: Vec<DslDefinitionInfo> = Vec::new();
         let mut references: Vec<DslRawReference> = Vec::new();
+        let mut imports: Vec<DslImport> = Vec::new();
         let mut scope_stack: Vec<String> = Vec::new();
 
         self.walk_node(
@@ -37,11 +39,13 @@ impl LanguageSpec {
             &mut scope_stack,
             &mut definitions,
             &mut references,
+            &mut imports,
         );
 
         Ok(DslParseOutput {
             definitions,
             references,
+            imports,
         })
     }
 
@@ -51,6 +55,7 @@ impl LanguageSpec {
         scope_stack: &mut Vec<String>,
         definitions: &mut Vec<DslDefinitionInfo>,
         references: &mut Vec<DslRawReference>,
+        imports: &mut Vec<DslImport>,
     ) {
         if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
             return;
@@ -85,8 +90,12 @@ impl LanguageSpec {
             references.push(DslRawReference { name, range });
         }
 
+        if let Some(imp) = self.evaluate_import(node, &node_kind) {
+            imports.push(imp);
+        }
+
         for child in node.children() {
-            self.walk_node(&child, scope_stack, definitions, references);
+            self.walk_node(&child, scope_stack, definitions, references, imports);
         }
 
         if pushed_scope {
@@ -127,6 +136,21 @@ impl LanguageSpec {
         let name = rule.extract_name(node)?;
         Some((name, node_to_range(node)))
     }
+
+    fn evaluate_import(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        node_kind: &str,
+    ) -> Option<DslImport> {
+        let rule = self.imports.iter().find(|r| r.matches(node, node_kind))?;
+        let path = rule.extract_name(node)?;
+        Some(DslImport {
+            path,
+            name: rule.extract_symbol(node),
+            alias: rule.extract_alias(node),
+            range: node_to_range(node),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +170,7 @@ mod tests {
                 scope("function_definition", "Function"),
                 scope("function_definition", "Method").when(grandparent_is("class_definition")),
             ],
+            vec![],
             vec![],
         );
         let parser = GenericParser::new(SupportedLanguage::Python);
@@ -170,6 +195,7 @@ mod tests {
             "test",
             vec![scope("function_definition", "Function")],
             vec![reference("call").name_from(field("function"))],
+            vec![],
         );
         let parser = GenericParser::new(SupportedLanguage::Python);
         let code = "def foo(): pass\nfoo()";
@@ -191,6 +217,7 @@ mod tests {
                     .when(grandparent_is("class_definition"))
                     .no_scope(),
             ],
+            vec![],
             vec![],
         );
         let parser = GenericParser::new(SupportedLanguage::Python);
