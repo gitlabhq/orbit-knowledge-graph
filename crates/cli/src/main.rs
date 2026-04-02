@@ -4,8 +4,8 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use code_graph::linker::indexer::{IndexingConfig, RepositoryIndexer, RepositoryIndexingResult};
-use code_graph::linker::loading::DirectoryFileSource;
+use code_graph::fs::DirectoryFileSource;
+use code_graph::index::{IndexConfig, IndexResult, RepositoryIndexer};
 use ontology::Ontology;
 use query_engine::compiler::SecurityContext;
 use query_engine::formatters::{self, ResultFormatter};
@@ -398,10 +398,13 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             .context("failed to create schema")?;
     }
 
-    let config = IndexingConfig {
+    let config = IndexConfig {
+        fs: code_graph::fs::FsConfig {
+            max_file_size: 5_000_000,
+            respect_gitignore: true,
+            ..Default::default()
+        },
         worker_threads: threads,
-        max_file_size: 5_000_000,
-        respect_gitignore: true,
     };
 
     let mut failed = 0usize;
@@ -549,7 +552,7 @@ async fn index_repo(
 fn build_index_output(
     repo_name: &str,
     path: &str,
-    result: &RepositoryIndexingResult,
+    result: &IndexResult,
     show_stats: bool,
 ) -> IndexOutput {
     let (graph, rel_counts, def_counts) = match result.graph_data {

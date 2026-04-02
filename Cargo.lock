@@ -1210,8 +1210,20 @@ dependencies = [
 name = "code-graph"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "chrono",
  "code-graph-linker",
+ "futures",
+ "ignore",
+ "log",
+ "num_cpus",
  "parser-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-rayon",
+ "tokio-stream",
  "treesitter-visit",
 ]
 

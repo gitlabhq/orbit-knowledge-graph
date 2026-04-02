@@ -8,5 +8,20 @@ treesitter-visit = { path = "treesitter-visit" }
 parser-core = { path = "parser" }
 code-graph-linker = { path = "linker" }
 
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-rayon = { workspace = true }
+futures = { workspace = true }
+ignore = { workspace = true }
+num_cpus = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true
