@@ -11,4 +11,7 @@ pub use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, assert_edge_count,
     assert_edge_count_for_traversal_path, assert_edges_have_traversal_path, assert_node_count,
 };
-pub use siphon::{create_member, create_namespace, create_project, create_user};
+pub use siphon::{
+    create_member, create_namespace, create_namespace_with_path, create_project,
+    create_project_with_path, create_route, create_user,
+};
