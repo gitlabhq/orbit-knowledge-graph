@@ -23,8 +23,12 @@ pub fn codegen(
         Node::Query(q) => ctx.emit_query(q)?,
     };
 
-    // SETTINGS — only on the top-level query, not subqueries/UNION arms
-    let settings = query_config.to_clickhouse_settings();
+    // SETTINGS — only on the top-level query, not subqueries/UNION arms.
+    // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
+    // (bare integers, 0/1 bools, escaped quoted strings).
+    let settings = query_config
+        .to_clickhouse_settings()
+        .map_err(crate::error::QueryError::Codegen)?;
     if !settings.is_empty() {
         let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();
         sql.push_str(&format!(" SETTINGS {}", clause.join(", ")));
