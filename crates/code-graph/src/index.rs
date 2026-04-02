@@ -10,9 +10,7 @@ use tokio::sync::Semaphore;
 use code_graph_linker::analysis::{AnalysisService, types::GraphData};
 
 use crate::fs::{FileInfo, FileSource, FsConfig, ProcessingError, read_text_file};
-use crate::parse::{ErroredFile, FileProcessingResult, ProcessingStage, SkippedFile};
-
-use code_graph_linker::parsing::processor::FileProcessor;
+use crate::parse::{self, ErroredFile, FileProcessingResult, ProcessingStage, SkippedFile};
 
 #[derive(Debug, Clone, Default)]
 pub struct IndexConfig {
@@ -218,11 +216,8 @@ impl RepositoryIndexer {
                             let _permit = cpu_sem.acquire_owned().await.expect("semaphore closed");
 
                             let parse_res = tokio_rayon::spawn(move || {
-                                let processor = FileProcessor::new(
-                                    file_info.path.to_string_lossy().to_string(),
-                                    &content,
-                                );
-                                processor.process()
+                                let path = file_info.path.to_string_lossy();
+                                parse::parse(&path, &content)
                             })
                             .await;
 

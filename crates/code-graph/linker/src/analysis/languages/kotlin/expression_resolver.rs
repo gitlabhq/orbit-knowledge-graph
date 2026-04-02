@@ -14,20 +14,18 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use tracing::{debug, error};
 
-use crate::{
-    analysis::{
-        languages::kotlin::{
-            kotlin_file::{KotlinBinding, KotlinFile},
-            types::{KotlinScopeTree, ScopeContext},
-            utils::{full_import_path, get_binary_operator_function, get_unary_operator_function},
-        },
-        types::{
-            ConsolidatedRelationship, DefinitionNode, DefinitionType, ImportType,
-            ImportedSymbolLocation, ImportedSymbolNode,
-        },
+use crate::analysis::{
+    languages::kotlin::{
+        kotlin_file::{KotlinBinding, KotlinFile},
+        types::{KotlinScopeTree, ScopeContext},
+        utils::{full_import_path, get_binary_operator_function, get_unary_operator_function},
     },
-    parsing::processor::References,
+    types::{
+        ConsolidatedRelationship, DefinitionNode, DefinitionType, ImportType,
+        ImportedSymbolLocation, ImportedSymbolNode,
+    },
 };
+use crate::parse_types::References;
 
 use internment::ArcIntern;
 
@@ -175,7 +173,7 @@ impl KotlinExpressionResolver {
         );
 
         let remaining_stack = stacker::remaining_stack().unwrap_or(0);
-        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        if remaining_stack < parser_core::MINIMUM_STACK_REMAINING {
             error!(
                 remaining_stack,
                 expression_kind = expression.expression.variant_name(),
@@ -854,7 +852,7 @@ impl KotlinExpressionResolver {
         resolutions: &mut Resolutions,
     ) -> Option<ResolvedType> {
         let remaining_stack = stacker::remaining_stack().unwrap_or(0);
-        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        if remaining_stack < parser_core::MINIMUM_STACK_REMAINING {
             error!(
                 remaining_stack,
                 "stack limit reached, aborting Kotlin function type resolution in class hierarchy"

@@ -68,9 +68,6 @@ pub mod expression_resolver;
 pub mod scope_resolver;
 pub mod type_map;
 
-#[cfg(test)]
-mod tests;
-
 pub use analyzer::{AnalyzerStats, RubyAnalyzer, RubyReference};
 pub use expression_resolver::ExpressionResolver;
 pub use scope_resolver::ScopeResolver;

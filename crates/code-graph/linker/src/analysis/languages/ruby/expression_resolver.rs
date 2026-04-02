@@ -35,7 +35,7 @@ use super::{
 };
 use crate::analysis::types::{ConsolidatedRelationship, DefinitionNode, DefinitionType};
 use crate::graph::RelationshipType;
-use crate::parsing::processor::{References, RubyReference};
+use crate::parse_types::{References, RubyReference};
 use internment::ArcIntern;
 use parser_core::ruby::types::RubyDefinitionType;
 use parser_core::ruby::{

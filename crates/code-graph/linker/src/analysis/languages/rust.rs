@@ -3,7 +3,7 @@ use crate::analysis::types::{
     ImportType, ImportedSymbolLocation, ImportedSymbolNode,
 };
 use crate::graph::RelationshipType;
-use crate::parsing::processor::FileProcessingResult;
+use crate::parse_types::FileProcessingResult;
 use internment::ArcIntern;
 use parser_core::rust::{
     fqn::rust_fqn_to_string,

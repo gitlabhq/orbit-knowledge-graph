@@ -1232,14 +1232,10 @@ name = "code-graph-linker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "criterion",
- "futures",
  "gitalisk-core",
- "ignore",
  "internment",
  "log",
- "num_cpus",
  "parser-core",
  "rayon",
  "rustc-hash",
@@ -1249,9 +1245,6 @@ dependencies = [
  "stacker",
  "strum 0.28.0",
  "tempfile",
- "tokio",
- "tokio-rayon",
- "tokio-stream",
  "tracing",
  "tracing-test",
  "walkdir",
@@ -4973,7 +4966,9 @@ dependencies = [
 name = "parser-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "internment",
+ "log",
  "mimalloc",
  "once_cell",
  "pastey",

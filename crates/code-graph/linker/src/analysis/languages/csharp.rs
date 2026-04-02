@@ -7,13 +7,11 @@ use parser_core::{
 };
 use std::collections::HashMap;
 
-use crate::{
-    analysis::types::{
-        ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
-        ImportType, ImportedSymbolLocation, ImportedSymbolNode,
-    },
-    parsing::processor::FileProcessingResult,
+use crate::analysis::types::{
+    ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
+    ImportType, ImportedSymbolLocation, ImportedSymbolNode,
 };
+use crate::parse_types::FileProcessingResult;
 
 #[derive(Default)]
 pub struct CSharpAnalyzer;
