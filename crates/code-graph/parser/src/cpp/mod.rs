@@ -33,7 +33,7 @@ pub fn cpp_language_spec() -> LanguageSpec {
     ])
 }
 
-fn classify_cpp_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
+pub fn classify_cpp_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
     let in_class = nearest_ancestor(
         &["class_specifier", "struct_specifier", "function_definition"],
         &["class_specifier", "struct_specifier"],

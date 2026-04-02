@@ -4958,6 +4958,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "serde_yaml",
  "smallvec",
  "stacker",
  "swc_atoms",

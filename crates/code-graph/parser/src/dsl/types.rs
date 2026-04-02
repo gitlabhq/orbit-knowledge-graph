@@ -244,7 +244,7 @@ pub struct LanguageSpec {
     pub scopes: Vec<ScopeRule>,
     pub refs: Vec<ReferenceRule>,
     pub imports: Vec<ImportRule>,
-    scope_kinds: FxHashSet<&'static str>,
+    pub(crate) scope_kinds: FxHashSet<&'static str>,
 }
 
 impl LanguageSpec {
