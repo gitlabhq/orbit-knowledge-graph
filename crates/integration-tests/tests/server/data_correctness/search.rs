@@ -69,6 +69,8 @@ pub(super) async fn search_returns_correct_group_full_path(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(5);
+    resp.assert_node_order("Group", &[100, 101, 102, 200, 300]);
     resp.assert_node("Group", 100, |n| {
         n.prop_str("full_path") == Some("public-group")
     });
@@ -93,6 +95,8 @@ pub(super) async fn search_returns_correct_project_full_path(ctx: &TestContext) 
     )
     .await;
 
+    resp.assert_node_count(5);
+    resp.assert_node_order("Project", &[1000, 1001, 1002, 1003, 1004]);
     resp.assert_node("Project", 1000, |n| {
         n.prop_str("full_path") == Some("public-group/public-project")
     });
@@ -107,12 +111,13 @@ pub(super) async fn search_default_columns_include_full_path(ctx: &TestContext) 
         r#"{
             "query_type": "search",
             "node": {"id": "g", "entity": "Group"},
-            "limit": 3
+            "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
+    resp.assert_node_count(5);
     let first = resp.find_node("Group", 100).unwrap();
     assert!(
         first.prop_str("full_path").is_some(),

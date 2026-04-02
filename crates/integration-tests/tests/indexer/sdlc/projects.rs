@@ -51,7 +51,16 @@ pub async fn computes_full_path_for_projects(ctx: &TestContext) {
         Some("knowledge-graph"),
     )
     .await;
-    create_route(ctx, 1000, 1000, "Project", "gitlab-org/gitlab", 100).await;
+    create_route(
+        ctx,
+        1000,
+        1000,
+        "Project",
+        "gitlab-org/gitlab",
+        100,
+        "1/100/1000/",
+    )
+    .await;
     create_route(
         ctx,
         1001,
@@ -59,6 +68,7 @@ pub async fn computes_full_path_for_projects(ctx: &TestContext) {
         "Project",
         "gitlab-org/orbit/knowledge-graph",
         200,
+        "1/100/200/1001/",
     )
     .await;
 
@@ -88,9 +98,9 @@ pub async fn project_route_update_changes_full_path(ctx: &TestContext) {
     create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("org")).await;
     create_namespace_with_path(ctx, 200, Some(100), 0, "1/100/200/", Some("team")).await;
     create_project_with_path(ctx, 1000, 100, 1, 0, "1/100/1000/", Some("app")).await;
-    create_route(ctx, 100, 100, "Namespace", "org", 100).await;
-    create_route(ctx, 200, 200, "Namespace", "org/team", 200).await;
-    create_route(ctx, 1000, 1000, "Project", "org/app", 100).await;
+    create_route(ctx, 100, 100, "Namespace", "org", 100, "1/100/").await;
+    create_route(ctx, 200, 200, "Namespace", "org/team", 200, "1/100/200/").await;
+    create_route(ctx, 1000, 1000, "Project", "org/app", 100, "1/100/1000/").await;
 
     namespace_handler(ctx)
         .await
@@ -111,8 +121,8 @@ pub async fn project_route_update_changes_full_path(ctx: &TestContext) {
     )
     .await;
     ctx.execute(
-        "INSERT INTO siphon_routes (id, source_id, source_type, path, namespace_id, _siphon_replicated_at) \
-         VALUES (1000, 1000, 'Project', 'org/team/app', 200, '2024-01-20 18:00:00')",
+        "INSERT INTO siphon_routes (id, source_id, source_type, path, namespace_id, traversal_path, _siphon_replicated_at) \
+         VALUES (1000, 1000, 'Project', 'org/team/app', 200, '1/100/200/1000/', '2024-01-20 18:00:00')",
     )
     .await;
     ctx.execute(

@@ -92,9 +92,10 @@ etl:
     ) traversal_paths
     ON namespace.id = traversal_paths.id
     LEFT JOIN (
-      SELECT source_id, argMax(path, _siphon_replicated_at) AS path
+      SELECT toNullable(source_id) AS source_id, argMax(path, _siphon_replicated_at) AS path
       FROM siphon_routes
-      WHERE source_type = 'Namespace' AND NOT _siphon_deleted
+      WHERE startsWith(traversal_path, {traversal_path:String})
+        AND source_type = 'Namespace' AND NOT _siphon_deleted
       GROUP BY source_id
     ) route ON namespace.id = route.source_id
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
