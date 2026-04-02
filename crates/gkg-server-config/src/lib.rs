@@ -8,3 +8,4 @@ pub mod query;
 
 pub use query::QueryConfig;
 pub use query::QuerySettings;
+pub use query::SettingValue;

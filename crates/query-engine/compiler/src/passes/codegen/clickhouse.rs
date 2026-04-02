@@ -23,7 +23,9 @@ pub fn codegen(
         Node::Query(q) => ctx.emit_query(q)?,
     };
 
-    // SETTINGS — only on the top-level query, not subqueries/UNION arms
+    // SETTINGS — only on the top-level query, not subqueries/UNION arms.
+    // Values are formatted via SettingValue::Display which guarantees
+    // SQL-safe output (bare integers and 0/1 bools only).
     let settings = query_config.to_clickhouse_settings();
     if !settings.is_empty() {
         let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();

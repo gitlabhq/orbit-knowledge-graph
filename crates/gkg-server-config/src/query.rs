@@ -10,6 +10,31 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// A typed ClickHouse setting value. Formatting via [`Display`] produces
+/// SQL-safe literals: bare integers, `0`/`1` for bools, and single-quoted
+/// escaped strings.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SettingValue {
+    UInt64(u64),
+    Bool(bool),
+    Str(String),
+}
+
+impl std::fmt::Display for SettingValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SettingValue::UInt64(n) => write!(f, "{n}"),
+            SettingValue::Bool(b) => write!(f, "{}", if *b { "1" } else { "0" }),
+            SettingValue::Str(s) => {
+                // ClickHouse string settings use single quotes; escape
+                // embedded quotes and backslashes.
+                let escaped = s.replace('\\', "\\\\").replace('\'', "\\'");
+                write!(f, "'{escaped}'")
+            }
+        }
+    }
+}
+
 /// Query execution settings. All fields map to ClickHouse query-level
 /// settings. The closed set of fields prevents arbitrary user input from
 /// reaching the SETTINGS clause (CWE-89).
@@ -42,13 +67,13 @@ impl QueryConfig {
         }
     }
 
-    /// Returns ClickHouse SETTINGS as key-value pairs, skipping unset fields.
+    /// Returns ClickHouse SETTINGS as typed key-value pairs, skipping unset fields.
     ///
     /// Uses serde round-trip so that the field names stay in sync with the
     /// struct definition -- no manual string mapping needed. Only numeric
-    /// and bool values are emitted; strings and other types are skipped to
-    /// prevent unescaped values from reaching the SETTINGS clause.
-    pub fn to_clickhouse_settings(&self) -> Vec<(String, String)> {
+    /// and bool values are emitted as [`SettingValue`]; any other JSON type
+    /// triggers a [`debug_assert!`] so tests catch unhandled field types.
+    pub fn to_clickhouse_settings(&self) -> Vec<(String, SettingValue)> {
         let map = match serde_json::to_value(self) {
             Ok(Value::Object(m)) => m,
             _ => return Vec::new(),
@@ -56,14 +81,20 @@ impl QueryConfig {
         map.into_iter()
             .filter(|(_, v)| !v.is_null())
             .filter_map(|(k, v)| {
-                let s = match &v {
-                    Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
-                    Value::Number(n) => n.to_string(),
-                    // Skip strings/arrays/objects -- they can't be safely
-                    // interpolated into a SETTINGS clause without escaping.
-                    _ => return None,
+                let setting = match &v {
+                    Value::Bool(b) => SettingValue::Bool(*b),
+                    Value::Number(n) => SettingValue::UInt64(n.as_u64().unwrap_or(0)),
+                    Value::String(s) => SettingValue::Str(s.clone()),
+                    _ => {
+                        debug_assert!(
+                            false,
+                            "unexpected compound setting `{k}` in QueryConfig — \
+                             arrays and objects are not valid ClickHouse settings"
+                        );
+                        return None;
+                    }
                 };
-                Some((k, s))
+                Some((k, setting))
             })
             .collect()
     }
@@ -169,8 +200,30 @@ mod tests {
         let mut settings = cfg.to_clickhouse_settings();
         settings.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(settings.len(), 2);
-        assert_eq!(settings[0], ("max_execution_time".into(), "30".into()));
-        assert_eq!(settings[1], ("use_query_cache".into(), "1".into()));
+        assert_eq!(
+            settings[0],
+            ("max_execution_time".into(), SettingValue::UInt64(30))
+        );
+        assert_eq!(
+            settings[1],
+            ("use_query_cache".into(), SettingValue::Bool(true))
+        );
+    }
+
+    #[test]
+    fn setting_value_display() {
+        assert_eq!(SettingValue::UInt64(42).to_string(), "42");
+        assert_eq!(SettingValue::Bool(true).to_string(), "1");
+        assert_eq!(SettingValue::Bool(false).to_string(), "0");
+        assert_eq!(SettingValue::Str("hello".into()).to_string(), "'hello'");
+        assert_eq!(
+            SettingValue::Str("it's a test".into()).to_string(),
+            "'it\\'s a test'"
+        );
+        assert_eq!(
+            SettingValue::Str("back\\slash".into()).to_string(),
+            "'back\\\\slash'"
+        );
     }
 
     #[test]
