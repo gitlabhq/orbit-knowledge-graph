@@ -1150,8 +1150,6 @@ dependencies = [
  "futures",
  "gkg-server-config",
  "gkg-utils",
- "once_cell",
- "reqwest 0.13.2",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5615,6 +5613,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "types",
+ "uuid",
 ]
 
 [[package]]

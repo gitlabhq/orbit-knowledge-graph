@@ -17,13 +17,11 @@ use tokio_util::io::SyncIoBridge;
 use tracing::warn;
 
 use crate::error::ClickHouseError;
-use crate::profiler::QueryProfiler;
 
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
     base_url: String,
-    profiler: QueryProfiler,
 }
 
 impl ArrowClickHouseClient {
@@ -53,12 +51,9 @@ impl ArrowClickHouseClient {
             client = client.with_option(k, v);
         }
 
-        let profiler = QueryProfiler::new(url, database, username, password, query_settings);
-
         Self {
             client,
             base_url: url.to_string(),
-            profiler,
         }
     }
 
@@ -123,10 +118,6 @@ impl ArrowClickHouseClient {
 
     pub fn inner(&self) -> &Client {
         &self.client
-    }
-
-    pub fn profiler(&self) -> &QueryProfiler {
-        &self.profiler
     }
 
     pub fn new_query_id() -> String {
@@ -225,7 +216,7 @@ impl std::fmt::Debug for ArrowClickHouseClient {
 }
 
 pub struct ArrowQuery {
-    inner: Query,
+    pub(crate) inner: Query,
 }
 
 impl ArrowQuery {

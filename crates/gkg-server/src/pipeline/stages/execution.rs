@@ -11,15 +11,14 @@ use query_engine::shared::{
     ExecutionOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
 };
 
-/// Everything needed to execute a compiled query against ClickHouse.
 struct PreparedQuery {
     sql: String,
     params: HashMap<String, gkg_utils::clickhouse::ParamValue>,
     rendered_sql: String,
-    /// HTTP-level ClickHouse settings applied to every query.
-    /// Includes `log_comment` for tracing and the `QueryConfig` settings
-    /// as defense-in-depth (they're also in the SQL SETTINGS clause).
     http_settings: Vec<(String, String)>,
+    /// Set when profiling is enabled. Used to find the query in
+    /// system.query_log after execution.
+    profiling_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -48,19 +47,28 @@ impl PipelineStage for ClickHouseExecutor {
         let (prepared, result_context) = {
             let compiled = ctx.compiled()?;
 
-            // Build HTTP-level settings from QueryConfig (defense-in-depth:
-            // these are also baked into the SQL SETTINGS clause by codegen)
-            // plus log_comment for tracing.
             let mut http_settings: Vec<(String, String)> = compiled
                 .base
                 .query_config
                 .to_clickhouse_settings()
                 .map_err(PipelineError::Execution)?;
 
-            let log_comment = match labkit::correlation::current() {
+            // Build log_comment with correlation ID for tracing.
+            // When profiling is enabled, append a unique profiling_id so
+            // the query can be found in system.query_log after execution.
+            let profiling_id = if profiling.enabled {
+                Some(uuid::Uuid::new_v4().to_string())
+            } else {
+                None
+            };
+
+            let mut log_comment = match labkit::correlation::current() {
                 Some(id) => format!("gkg;correlation_id={id}"),
                 None => "gkg".to_string(),
             };
+            if let Some(ref pid) = profiling_id {
+                log_comment.push_str(&format!(";profiling_id={pid}"));
+            }
             http_settings.push(("log_comment".to_string(), log_comment));
 
             let prepared = PreparedQuery {
@@ -68,15 +76,23 @@ impl PipelineStage for ClickHouseExecutor {
                 params: compiled.base.params.clone(),
                 rendered_sql: compiled.base.render(),
                 http_settings,
+                profiling_id,
             };
             (prepared, compiled.base.result_context.clone())
         };
 
-        let (batches, execution) = if profiling.enabled {
-            execute_profiled(client, &prepared, &profiling, start).await?
-        } else {
-            execute_standard(client, &prepared, start).await?
-        };
+        let (batches, mut execution) = execute_query(client, &prepared, start).await?;
+
+        if let Some(ref profiling_id) = prepared.profiling_id {
+            enrich_execution(
+                client,
+                &mut execution,
+                &prepared.rendered_sql,
+                &profiling,
+                profiling_id,
+            )
+            .await;
+        }
 
         let elapsed = start.elapsed();
         obs.executed(elapsed, batches.len());
@@ -99,7 +115,7 @@ impl PipelineStage for ClickHouseExecutor {
     }
 }
 
-async fn execute_standard(
+async fn execute_query(
     client: &ArrowClickHouseClient,
     prepared: &PreparedQuery,
     start: Instant,
@@ -117,9 +133,6 @@ async fn execute_standard(
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
     let elapsed = start.elapsed();
-    // TODO: capture read_rows/read_bytes/memory_usage stats here.
-    // The clickhouse-rs crate discards X-ClickHouse-Summary headers so we
-    // need a different approach. See https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/640
     let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
 
     let execution = QueryExecution {
@@ -141,82 +154,39 @@ async fn execute_standard(
     Ok((batches, execution))
 }
 
-async fn execute_profiled(
+/// Enrich a QueryExecution with data from ClickHouse system tables.
+async fn enrich_execution(
     client: &ArrowClickHouseClient,
-    prepared: &PreparedQuery,
+    execution: &mut QueryExecution,
+    rendered_sql: &str,
     profiling: &ProfilingConfig,
-    start: Instant,
-) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), PipelineError> {
-    let http_params: Vec<(String, String)> = prepared
-        .params
-        .iter()
-        .map(|(k, v)| (k.clone(), v.render_http_param()))
-        .collect();
-
-    let extra_settings: Vec<(&str, &str)> = prepared
-        .http_settings
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-
-    let (batches, query_stats) = client
-        .profiler()
-        .execute_with_stats(&prepared.sql, &http_params, &extra_settings)
-        .await
-        .map_err(|e| PipelineError::Execution(e.to_string()))?;
-
-    let elapsed = start.elapsed();
-
-    let mut execution = QueryExecution {
-        label: "base".into(),
-        rendered_sql: prepared.rendered_sql.clone(),
-        query_id: query_stats.query_id.clone(),
-        elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-        stats: QueryExecutionStats {
-            read_rows: query_stats.read_rows,
-            read_bytes: query_stats.read_bytes,
-            result_rows: query_stats.result_rows,
-            result_bytes: query_stats.result_bytes,
-            elapsed_ns: query_stats.elapsed_ns,
-            memory_usage: query_stats.memory_usage,
-        },
-        explain_plan: None,
-        explain_pipeline: None,
-        query_log: None,
-        processors: None,
-    };
-
+    profiling_id: &str,
+) {
     if profiling.explain {
-        execution.explain_plan = client
-            .profiler()
-            .explain_plan(&prepared.rendered_sql)
-            .await
-            .ok();
-        execution.explain_pipeline = client
-            .profiler()
-            .explain_pipeline(&prepared.rendered_sql)
-            .await
-            .ok();
+        execution.explain_plan = client.explain_plan(rendered_sql).await.ok();
+        execution.explain_pipeline = client.explain_pipeline(rendered_sql).await.ok();
     }
 
-    if profiling.query_log
-        && let Ok(Some(entry)) = client
-            .profiler()
-            .fetch_query_log(&query_stats.query_id)
-            .await
+    if (profiling.query_log || profiling.processors)
+        && let Ok(Some(entry)) = client.fetch_query_log(profiling_id).await
     {
-        execution.query_log = Some(serde_json::to_value(&entry).unwrap_or_default());
-    }
+        let query_id = entry.query_id.clone();
+        execution.query_id = query_id.clone();
+        execution.stats.read_rows = entry.read_rows;
+        execution.stats.read_bytes = entry.read_bytes;
+        execution.stats.result_rows = entry.result_rows;
+        execution.stats.result_bytes = entry.result_bytes;
+        execution.stats.memory_usage = entry.memory_usage as i64;
 
-    if profiling.processors
-        && let Ok(profiles) = client
-            .profiler()
-            .fetch_processors_profile(&query_stats.query_id)
-            .await
-        && !profiles.is_empty()
-    {
-        execution.processors = Some(serde_json::to_value(&profiles).unwrap_or_default());
-    }
+        if profiling.query_log {
+            execution.query_log = Some(serde_json::to_value(&entry).unwrap_or_default());
+        }
 
-    Ok((batches, execution))
+        if profiling.processors
+            && let Ok(profiles) = client.fetch_processors_profile(&query_id).await
+            && !profiles.is_empty()
+        {
+            execution.processors = Some(serde_json::to_value(&profiles).unwrap_or_default());
+        }
+    }
 }

@@ -260,77 +260,57 @@ impl HydrationStage {
             rendered: rendered_sql.clone(),
         };
 
-        let (batches, execution) = if profiling.enabled {
-            let http_params: Vec<(String, String)> = compiled
-                .base
-                .params
-                .iter()
-                .map(|(k, v)| (k.clone(), v.render_http_param()))
-                .collect();
-
-            let t = Instant::now();
-            let (batches, query_stats) = client
-                .profiler()
-                .execute_with_stats(&compiled.base.sql, &http_params, &[])
-                .await
-                .map_err(|e| PipelineError::Execution(e.to_string()))?;
-            let elapsed = t.elapsed();
-
-            let mut execution = QueryExecution {
-                label: "hydration:dynamic".into(),
-                rendered_sql,
-                query_id: query_stats.query_id.clone(),
-                elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-                stats: QueryExecutionStats {
-                    read_rows: query_stats.read_rows,
-                    read_bytes: query_stats.read_bytes,
-                    result_rows: query_stats.result_rows,
-                    result_bytes: query_stats.result_bytes,
-                    elapsed_ns: query_stats.elapsed_ns,
-                    memory_usage: query_stats.memory_usage,
-                },
-                explain_plan: None,
-                explain_pipeline: None,
-                query_log: None,
-                processors: None,
-            };
-
-            if profiling.explain {
-                execution.explain_plan = client.profiler().explain_plan(&debug.rendered).await.ok();
-            }
-
-            (batches, execution)
+        let profiling_id = if profiling.enabled {
+            Some(uuid::Uuid::new_v4().to_string())
         } else {
-            let t = Instant::now();
-            let mut query = client.query(&compiled.base.sql);
-            for (key, param) in &compiled.base.params {
-                query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
-            }
-            let batches = query
-                .fetch_arrow()
-                .await
-                .map_err(|e| PipelineError::Execution(e.to_string()))?;
-            let elapsed = t.elapsed();
-            let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
-
-            let execution = QueryExecution {
-                label: "hydration:dynamic".into(),
-                rendered_sql,
-                query_id: String::new(),
-                elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-                stats: QueryExecutionStats {
-                    result_rows,
-                    elapsed_ns: elapsed.as_nanos() as u64,
-                    ..Default::default()
-                },
-                explain_plan: None,
-                explain_pipeline: None,
-                query_log: None,
-                processors: None,
-            };
-
-            (batches, execution)
+            None
         };
+
+        let start = Instant::now();
+        let mut query = client.query(&compiled.base.sql);
+        if let Some(ref pid) = profiling_id {
+            let log_comment = format!("gkg;hydration;profiling_id={pid}");
+            query = query.with_option("log_comment", log_comment);
+        }
+        for (key, param) in &compiled.base.params {
+            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
+        }
+        let batches = query
+            .fetch_arrow()
+            .await
+            .map_err(|e| PipelineError::Execution(e.to_string()))?;
+        let elapsed = start.elapsed();
+        let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
+
+        let mut execution = QueryExecution {
+            label: "hydration:dynamic".into(),
+            rendered_sql,
+            query_id: String::new(),
+            elapsed_ms: elapsed.as_secs_f64() * 1000.0,
+            stats: QueryExecutionStats {
+                result_rows,
+                elapsed_ns: elapsed.as_nanos() as u64,
+                ..Default::default()
+            },
+            explain_plan: None,
+            explain_pipeline: None,
+            query_log: None,
+            processors: None,
+        };
+
+        if let Some(ref pid) = profiling_id {
+            if profiling.explain {
+                execution.explain_plan = client.explain_plan(&debug.rendered).await.ok();
+            }
+            if let Ok(Some(entry)) = client.fetch_query_log(pid).await {
+                execution.query_id = entry.query_id.clone();
+                execution.stats.read_rows = entry.read_rows;
+                execution.stats.read_bytes = entry.read_bytes;
+                execution.stats.result_rows = entry.result_rows;
+                execution.stats.result_bytes = entry.result_bytes;
+                execution.stats.memory_usage = entry.memory_usage as i64;
+            }
+        }
 
         let props = Self::parse_dynamic_batches(&batches)?;
         Ok((props, vec![debug], vec![execution]))
