@@ -294,6 +294,10 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
+        // Edge type is tracked eagerly here (before MustInspect is returned).
+        // If the caller discards the MustInspect, both panics fire — MustInspect
+        // first (discard), then edge_type is already tracked. In practice this is
+        // fine: MustInspect prevents the discard pattern entirely.
         self.asserted_edge_types
             .borrow_mut()
             .insert(edge_type.to_string());
@@ -612,7 +616,7 @@ impl ResponseView {
                 .iter()
                 .map(|t| {
                     format!(
-                        "  - {t} (call assert_edge_exists, edges_of_type,                          assert_edge_set, or assert_edge_count)"
+                        "  - {t} (call assert_edge_exists, edges_of_type, assert_edge_set, or assert_edge_count)"
                     )
                 })
                 .collect();
@@ -1255,37 +1259,17 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod edge_coverage_tests {
+    use super::tests::{make_edge, make_node};
     use super::*;
-    use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse};
-
-    fn make_node(entity_type: &str, id: i64) -> GraphNode {
-        GraphNode {
-            entity_type: entity_type.to_string(),
-            id,
-            properties: serde_json::Map::new(),
-        }
-    }
-
-    fn make_edge(from: &str, from_id: i64, to: &str, to_id: i64, edge_type: &str) -> GraphEdge {
-        GraphEdge {
-            from: from.to_string(),
-            from_id,
-            to: to.to_string(),
-            to_id,
-            edge_type: edge_type.to_string(),
-            path_id: None,
-            step: None,
-            depth: None,
-        }
-    }
+    use query_engine::formatters::GraphResponse;
 
     fn response_with_two_edge_types() -> GraphResponse {
         GraphResponse {
             query_type: "neighbors".to_string(),
             nodes: vec![
-                make_node("User", 1),
-                make_node("Group", 100),
-                make_node("MergeRequest", 2000),
+                make_node("User", 1, &[]),
+                make_node("Group", 100, &[]),
+                make_node("MergeRequest", 2000, &[]),
             ],
             edges: vec![
                 make_edge("User", 1, "Group", 100, "MEMBER_OF"),
@@ -1362,7 +1346,7 @@ mod edge_coverage_tests {
     fn assert_all_edge_types_covered_single_type_passes() {
         let resp = GraphResponse {
             query_type: "traversal".to_string(),
-            nodes: vec![make_node("User", 1), make_node("Group", 100)],
+            nodes: vec![make_node("User", 1, &[]), make_node("Group", 100, &[])],
             edges: vec![make_edge("User", 1, "Group", 100, "MEMBER_OF")],
             columns: None,
             pagination: None,
@@ -1377,10 +1361,10 @@ mod edge_coverage_tests {
         let resp = GraphResponse {
             query_type: "neighbors".to_string(),
             nodes: vec![
-                make_node("User", 1),
-                make_node("Group", 100),
-                make_node("Group", 102),
-                make_node("MergeRequest", 2000),
+                make_node("User", 1, &[]),
+                make_node("Group", 100, &[]),
+                make_node("Group", 102, &[]),
+                make_node("MergeRequest", 2000, &[]),
             ],
             edges: vec![
                 make_edge("User", 1, "Group", 100, "MEMBER_OF"),
