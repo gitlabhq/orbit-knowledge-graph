@@ -5,18 +5,7 @@ use crate::dsl::types::{LanguageSpec, import, reference, scope};
 pub fn c_language_spec() -> LanguageSpec {
     LanguageSpec::new(
         "c",
-        vec![
-            scope("function_definition", "Function").name_from(declarator()),
-            scope("struct_specifier", "Struct")
-                .when(has_name())
-                .name_from(field("name")),
-            scope("enum_specifier", "Enum")
-                .when(has_name())
-                .name_from(field("name")),
-            scope("union_specifier", "Union")
-                .when(has_name())
-                .name_from(field("name")),
-        ],
+        vec![scope("function_definition", "Function").name_from(declarator())],
         vec![
             reference("call_expression")
                 .when(field_kind("function", &["identifier"]))
@@ -27,6 +16,11 @@ pub fn c_language_spec() -> LanguageSpec {
         ],
         vec![import("preproc_include").path_from(field("path"))],
     )
+    .auto(&[
+        ("struct_specifier", "Struct"),
+        ("enum_specifier", "Enum"),
+        ("union_specifier", "Union"),
+    ])
 }
 
 #[cfg(test)]

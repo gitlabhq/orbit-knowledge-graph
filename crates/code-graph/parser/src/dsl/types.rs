@@ -264,20 +264,20 @@ impl LanguageSpec {
         }
     }
 
-    pub fn with_imports(
-        name: &'static str,
-        scopes: Vec<ScopeRule>,
-        refs: Vec<ReferenceRule>,
-        imports: Vec<ImportRule>,
-    ) -> Self {
-        let scope_kinds = scopes.iter().map(|r| r.kind).collect();
-        Self {
-            name,
-            scopes,
-            refs,
-            imports,
-            scope_kinds,
-        }
+    /// Register node kinds that automatically create scopes using
+    /// default name extraction (`name` field, then first identifier child).
+    /// Explicit `scope()` rules override these for the same node kind
+    /// via last-rule-wins semantics.
+    pub fn auto(mut self, entries: &[(&'static str, &'static str)]) -> Self {
+        // Prepend auto-generated rules so explicit rules come later and win.
+        let mut auto_rules: Vec<ScopeRule> = entries
+            .iter()
+            .map(|&(kind, label)| scope(kind, label))
+            .collect();
+        auto_rules.append(&mut self.scopes);
+        self.scopes = auto_rules;
+        self.scope_kinds = self.scopes.iter().map(|r| r.kind).collect();
+        self
     }
 
     pub(crate) fn is_scope_candidate(&self, kind: &str) -> bool {

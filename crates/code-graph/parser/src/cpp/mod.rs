@@ -1,6 +1,6 @@
 use crate::dsl::extractors::{declarator, field, field_chain};
 use crate::dsl::predicates::*;
-use crate::dsl::types::{LanguageSpec, import, reference, scope, scope_fn};
+use crate::dsl::types::{LanguageSpec, import, reference, scope_fn};
 
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -10,22 +10,7 @@ use treesitter_visit::{Node, SupportLang};
 pub fn cpp_language_spec() -> LanguageSpec {
     LanguageSpec::new(
         "cpp",
-        vec![
-            scope("struct_specifier", "Struct")
-                .when(has_name())
-                .name_from(field("name")),
-            scope("enum_specifier", "Enum")
-                .when(has_name())
-                .name_from(field("name")),
-            scope("union_specifier", "Union")
-                .when(has_name())
-                .name_from(field("name")),
-            scope("namespace_definition", "Namespace").name_from(field("name")),
-            scope("class_specifier", "Class")
-                .when(has_name())
-                .name_from(field("name")),
-            scope_fn("function_definition", classify_cpp_function).name_from(declarator()),
-        ],
+        vec![scope_fn("function_definition", classify_cpp_function).name_from(declarator())],
         vec![
             reference("call_expression")
                 .when(field_kind("function", &["identifier"]))
@@ -33,13 +18,19 @@ pub fn cpp_language_spec() -> LanguageSpec {
             reference("call_expression")
                 .when(field_kind("function", &["field_expression"]))
                 .name_from(field_chain(&["function", "field"])),
-            // C++ qualified calls: MyClass::static_method()
             reference("call_expression")
                 .when(field_kind("function", &["qualified_identifier"]))
                 .name_from(field("function")),
         ],
         vec![import("preproc_include").path_from(field("path"))],
     )
+    .auto(&[
+        ("struct_specifier", "Struct"),
+        ("enum_specifier", "Enum"),
+        ("union_specifier", "Union"),
+        ("namespace_definition", "Namespace"),
+        ("class_specifier", "Class"),
+    ])
 }
 
 fn classify_cpp_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
