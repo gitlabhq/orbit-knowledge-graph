@@ -24,13 +24,13 @@ pub fn python_language_spec() -> LanguageSpec {
         ],
         vec![reference("call_expression").name_from(field("function"))],
         vec![
-            import("import_statement").path_from(field("name")),
             import("import_from_statement")
                 .path_from(field("module_name"))
                 .symbol_from(field("name")),
         ],
     )
     .auto(&[("class_definition", "Class")])
+    .auto_imports(&["import_statement"])
 }
 
 fn classify_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {

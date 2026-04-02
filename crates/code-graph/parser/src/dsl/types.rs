@@ -269,14 +269,33 @@ impl LanguageSpec {
     /// Explicit `scope()` rules override these for the same node kind
     /// via last-rule-wins semantics.
     pub fn auto(mut self, entries: &[(&'static str, &'static str)]) -> Self {
-        // Prepend auto-generated rules so explicit rules come later and win.
         let mut auto_rules: Vec<ScopeRule> = entries
             .iter()
             .map(|&(kind, label)| scope(kind, label))
             .collect();
+        // Prepend so explicit rules come later and win.
         auto_rules.append(&mut self.scopes);
         self.scopes = auto_rules;
         self.scope_kinds = self.scopes.iter().map(|r| r.kind).collect();
+        self
+    }
+
+    /// Register node kinds that automatically produce references using
+    /// default name extraction. Explicit `reference()` rules override.
+    pub fn auto_refs(mut self, kinds: &[&'static str]) -> Self {
+        let mut auto_rules: Vec<ReferenceRule> =
+            kinds.iter().map(|&kind| reference(kind)).collect();
+        auto_rules.append(&mut self.refs);
+        self.refs = auto_rules;
+        self
+    }
+
+    /// Register node kinds that automatically produce imports using
+    /// default path extraction. Explicit `import()` rules override.
+    pub fn auto_imports(mut self, kinds: &[&'static str]) -> Self {
+        let mut auto_rules: Vec<ImportRule> = kinds.iter().map(|&kind| import(kind)).collect();
+        auto_rules.append(&mut self.imports);
+        self.imports = auto_rules;
         self
     }
 
