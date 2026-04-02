@@ -9,7 +9,7 @@
 pub mod app;
 pub mod clickhouse;
 pub mod engine;
-pub mod env;
+
 pub mod gitlab;
 pub mod grpc;
 pub mod health_check;

@@ -10,8 +10,6 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
-pub use crate::configuration::GlobalHandlerConfig;
-pub use crate::configuration::NamespaceHandlerConfig;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use datalake::{Datalake, DatalakeQuery};
 use handler::global::GlobalHandler;

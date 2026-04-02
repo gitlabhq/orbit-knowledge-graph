@@ -5,8 +5,6 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::env::{env_var_opt, env_var_or};
-
 /// NATS connection settings.
 ///
 /// Matches siphon's QueuingConfig fields.
@@ -228,42 +226,6 @@ impl NatsConfiguration {
     pub fn stream_max_age(&self) -> Option<Duration> {
         self.stream_max_age_secs.map(Duration::from_secs)
     }
-
-    /// Creates configuration from environment variables.
-    ///
-    /// Uses defaults for any unset variables:
-    /// - `NATS_URL`: Server address (default: "localhost:4222")
-    /// - `NATS_USERNAME`: Optional username
-    /// - `NATS_PASSWORD`: Optional password
-    /// - `NATS_CONSUMER_NAME`: Optional consumer name for durable subscriptions
-    /// - `NATS_AUTO_CREATE_STREAMS`: Whether to auto-create streams (default: true)
-    /// - `NATS_STREAM_REPLICAS`: Number of stream replicas (default: 1)
-    /// - `NATS_STREAM_MAX_AGE_SECS`: Maximum age of messages in seconds
-    /// - `NATS_STREAM_MAX_BYTES`: Maximum bytes per stream
-    /// - `NATS_TLS_CA_CERT_PATH`: Path to CA certificate (PEM)
-    /// - `NATS_TLS_CERT_PATH`: Path to client certificate (PEM)
-    /// - `NATS_TLS_KEY_PATH`: Path to client private key (PEM)
-    /// - `NATS_STREAM_MAX_MESSAGES`: Maximum messages per stream
-    pub fn from_env() -> Self {
-        Self {
-            url: std::env::var("NATS_URL").unwrap_or_else(|_| "localhost:4222".into()),
-            username: std::env::var("NATS_USERNAME").ok(),
-            password: std::env::var("NATS_PASSWORD").ok(),
-            tls_ca_cert_path: std::env::var("NATS_TLS_CA_CERT_PATH").ok(),
-            tls_cert_path: std::env::var("NATS_TLS_CERT_PATH").ok(),
-            tls_key_path: std::env::var("NATS_TLS_KEY_PATH").ok(),
-            consumer_name: std::env::var("NATS_CONSUMER_NAME").ok(),
-            auto_create_streams: env_var_or(
-                "NATS_AUTO_CREATE_STREAMS",
-                Self::default_auto_create_streams(),
-            ),
-            stream_replicas: env_var_or("NATS_STREAM_REPLICAS", Self::default_stream_replicas()),
-            stream_max_age_secs: env_var_opt("NATS_STREAM_MAX_AGE_SECS"),
-            stream_max_bytes: env_var_opt("NATS_STREAM_MAX_BYTES"),
-            stream_max_messages: env_var_opt("NATS_STREAM_MAX_MESSAGES"),
-            ..Default::default()
-        }
-    }
 }
 
 impl Default for NatsConfiguration {
@@ -288,5 +250,176 @@ impl Default for NatsConfiguration {
             stream_max_bytes: None,
             stream_max_messages: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn bare_host_defaults_to_nats_scheme() {
+        let config = NatsConfiguration::default();
+        assert_eq!(config.connection_url(), "nats://localhost:4222");
+        assert!(!config.tls_enabled());
+    }
+
+    #[test]
+    fn bare_host_uses_tls_scheme_when_ca_set() {
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some("/tmp/ca.pem".into()),
+            ..Default::default()
+        };
+        assert_eq!(config.connection_url(), "tls://localhost:4222");
+        assert!(config.tls_enabled());
+    }
+
+    #[test]
+    fn bare_host_uses_tls_scheme_when_client_cert_set() {
+        let config = NatsConfiguration {
+            tls_cert_path: Some("/tmp/cert.pem".into()),
+            tls_key_path: Some("/tmp/key.pem".into()),
+            ..Default::default()
+        };
+        assert_eq!(config.connection_url(), "tls://localhost:4222");
+    }
+
+    #[test]
+    fn nats_scheme_in_url_is_preserved() {
+        let config = NatsConfiguration {
+            url: "nats://my-nats:4222".into(),
+            ..Default::default()
+        };
+        assert_eq!(config.connection_url(), "nats://my-nats:4222");
+        assert!(!config.tls_enabled());
+    }
+
+    #[test]
+    fn tls_scheme_in_url_enables_tls() {
+        let config = NatsConfiguration {
+            url: "tls://secure-nats:4222".into(),
+            ..Default::default()
+        };
+        assert_eq!(config.connection_url(), "tls://secure-nats:4222");
+        assert!(config.tls_enabled());
+    }
+
+    #[test]
+    fn tls_scheme_in_url_not_duplicated_with_cert_paths() {
+        let config = NatsConfiguration {
+            url: "tls://secure-nats:4222".into(),
+            tls_ca_cert_path: Some("/tmp/ca.pem".into()),
+            ..Default::default()
+        };
+        assert_eq!(config.connection_url(), "tls://secure-nats:4222");
+    }
+
+    #[test]
+    fn validate_no_tls_is_valid() {
+        let config = NatsConfiguration::default();
+        assert!(config.validate_tls_config().is_ok());
+    }
+
+    #[test]
+    fn validate_ca_only_is_valid() {
+        let ca_file = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some(ca_file.path().to_str().unwrap().into()),
+            ..Default::default()
+        };
+        assert!(config.validate_tls_config().is_ok());
+    }
+
+    #[test]
+    fn validate_full_mtls_is_valid() {
+        let ca = NamedTempFile::new().unwrap();
+        let cert = NamedTempFile::new().unwrap();
+        let key = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some(ca.path().to_str().unwrap().into()),
+            tls_cert_path: Some(cert.path().to_str().unwrap().into()),
+            tls_key_path: Some(key.path().to_str().unwrap().into()),
+            ..Default::default()
+        };
+        assert!(config.validate_tls_config().is_ok());
+    }
+
+    #[test]
+    fn validate_cert_without_key_is_invalid() {
+        let cert = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_cert_path: Some(cert.path().to_str().unwrap().into()),
+            ..Default::default()
+        };
+        let err = config.validate_tls_config().unwrap_err();
+        assert!(err.contains("tls_key_path is missing"), "{err}");
+    }
+
+    #[test]
+    fn validate_key_without_cert_is_invalid() {
+        let key = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_key_path: Some(key.path().to_str().unwrap().into()),
+            ..Default::default()
+        };
+        let err = config.validate_tls_config().unwrap_err();
+        assert!(err.contains("tls_cert_path is missing"), "{err}");
+    }
+
+    #[test]
+    fn validate_missing_file_is_invalid() {
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some("/nonexistent/ca.pem".into()),
+            ..Default::default()
+        };
+        let err = config.validate_tls_config().unwrap_err();
+        assert!(err.contains("tls_ca_cert_path"), "{err}");
+        assert!(err.contains("file not found"), "{err}");
+    }
+
+    #[test]
+    fn validate_existing_ca_but_missing_cert_file_is_invalid() {
+        let ca = NamedTempFile::new().unwrap();
+        let key = NamedTempFile::new().unwrap();
+        let config = NatsConfiguration {
+            tls_ca_cert_path: Some(ca.path().to_str().unwrap().into()),
+            tls_cert_path: Some("/nonexistent/cert.pem".into()),
+            tls_key_path: Some(key.path().to_str().unwrap().into()),
+            ..Default::default()
+        };
+        let err = config.validate_tls_config().unwrap_err();
+        assert!(err.contains("tls_cert_path"), "{err}");
+    }
+
+    #[test]
+    fn deserialize_with_tls_fields() {
+        let yaml = r#"
+            url: "localhost:4222"
+            tls_ca_cert_path: "/etc/nats/ca.pem"
+            tls_cert_path: "/etc/nats/client.pem"
+            tls_key_path: "/etc/nats/client-key.pem"
+        "#;
+        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.tls_ca_cert_path.as_deref(), Some("/etc/nats/ca.pem"));
+        assert_eq!(
+            config.tls_cert_path.as_deref(),
+            Some("/etc/nats/client.pem")
+        );
+        assert_eq!(
+            config.tls_key_path.as_deref(),
+            Some("/etc/nats/client-key.pem")
+        );
+        assert!(config.tls_enabled());
+    }
+
+    #[test]
+    fn deserialize_without_tls_fields_uses_defaults() {
+        let yaml = r#"url: "localhost:4222""#;
+        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.tls_ca_cert_path.is_none());
+        assert!(config.tls_cert_path.is_none());
+        assert!(config.tls_key_path.is_none());
+        assert!(!config.tls_enabled());
     }
 }

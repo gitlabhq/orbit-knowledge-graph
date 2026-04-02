@@ -1,7 +1,6 @@
 mod metrics;
 pub mod table_cleanup;
 
-pub use crate::configuration::TableCleanupConfig;
 pub use metrics::ScheduledTaskMetrics;
 pub use table_cleanup::TableCleanup;
 
@@ -13,8 +12,6 @@ use tracing::{info, warn};
 use crate::configuration::ScheduleConfiguration;
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsConfiguration, NatsServices, NatsServicesImpl};
-
-pub use gkg_server_config::ScheduleConfig;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]

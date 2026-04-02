@@ -14,12 +14,13 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use gitlab_client::{GitlabClient, GitlabClientConfiguration};
+use indexer::configuration::CodeIndexingTaskHandlerConfig;
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
-    CodeIndexingTaskHandler, CodeIndexingTaskHandlerConfig, LocalRepositoryCache,
-    RailsRepositoryService, RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
-    repository::RepositoryCache, repository::RepositoryResolver,
+    CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
+    config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
+    repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};

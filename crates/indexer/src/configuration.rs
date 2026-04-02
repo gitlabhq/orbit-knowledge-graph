@@ -3,6 +3,6 @@ pub use gkg_server_config::{
     GlobalHandlerConfig, HandlerConfiguration, HandlersConfiguration,
     NamespaceCodeBackfillDispatcherConfig, NamespaceDeletionHandlerConfig,
     NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, NamespaceHandlerConfig,
-    ScheduleConfiguration, ScheduledTasksConfiguration, SiphonCodeIndexingTaskDispatcherConfig,
-    TableCleanupConfig,
+    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
+    SiphonCodeIndexingTaskDispatcherConfig, TableCleanupConfig,
 };

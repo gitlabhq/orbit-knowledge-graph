@@ -8,9 +8,8 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
-use indexer::modules::sdlc::dispatch::{
-    GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher, NamespaceDispatcherConfig,
-};
+use indexer::configuration::{GlobalDispatcherConfig, NamespaceDispatcherConfig};
+use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::nats::NatsConfiguration;
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN};

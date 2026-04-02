@@ -24,9 +24,6 @@ use std::sync::Arc;
 
 use crate::IndexerConfig;
 use crate::clickhouse::ClickHouseConfigurationExt;
-pub use crate::configuration::CodeIndexingTaskHandlerConfig;
-pub use crate::configuration::NamespaceCodeBackfillDispatcherConfig;
-pub use crate::configuration::SiphonCodeIndexingTaskDispatcherConfig;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 pub use code_indexing_task_handler::CodeIndexingTaskHandler;
 use config::CodeTableNames;

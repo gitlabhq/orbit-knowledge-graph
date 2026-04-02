@@ -4,8 +4,6 @@ mod metrics;
 pub mod scheduler;
 pub(crate) mod store;
 
-pub use crate::configuration::NamespaceDeletionHandlerConfig;
-pub use crate::configuration::NamespaceDeletionSchedulerConfig;
 pub use handler::NamespaceDeletionHandler;
 pub use scheduler::NamespaceDeletionScheduler;
 pub use store::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
