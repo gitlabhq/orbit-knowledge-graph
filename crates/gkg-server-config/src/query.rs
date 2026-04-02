@@ -70,31 +70,31 @@ impl QueryConfig {
     /// Returns ClickHouse SETTINGS as typed key-value pairs, skipping unset fields.
     ///
     /// Uses serde round-trip so that the field names stay in sync with the
-    /// struct definition -- no manual string mapping needed. Only numeric
-    /// and bool values are emitted as [`SettingValue`]; any other JSON type
-    /// triggers a [`debug_assert!`] so tests catch unhandled field types.
-    pub fn to_clickhouse_settings(&self) -> Vec<(String, SettingValue)> {
+    /// struct definition -- no manual string mapping needed.
+    ///
+    /// Returns an error if a field serializes to a type that cannot be
+    /// represented as a ClickHouse setting (e.g. arrays, objects, or
+    /// non-u64 numbers).
+    pub fn to_clickhouse_settings(&self) -> Result<Vec<(String, SettingValue)>, String> {
         let map = match serde_json::to_value(self) {
             Ok(Value::Object(m)) => m,
-            _ => return Vec::new(),
+            _ => return Ok(Vec::new()),
         };
         map.into_iter()
             .filter(|(_, v)| !v.is_null())
-            .filter_map(|(k, v)| {
+            .map(|(k, v)| {
                 let setting = match &v {
                     Value::Bool(b) => SettingValue::Bool(*b),
-                    Value::Number(n) => SettingValue::UInt64(n.as_u64().unwrap_or(0)),
-                    Value::String(s) => SettingValue::Str(s.clone()),
-                    _ => {
-                        debug_assert!(
-                            false,
-                            "unexpected compound setting `{k}` in QueryConfig — \
-                             arrays and objects are not valid ClickHouse settings"
-                        );
-                        return None;
+                    Value::Number(n) => {
+                        let n = n
+                            .as_u64()
+                            .ok_or_else(|| format!("setting `{k}` has non-u64 value: {v}"))?;
+                        SettingValue::UInt64(n)
                     }
+                    Value::String(s) => SettingValue::Str(s.clone()),
+                    _ => return Err(format!("setting `{k}` has unsupported type: {v}")),
                 };
-                Some((k, setting))
+                Ok((k, setting))
             })
             .collect()
     }
@@ -191,13 +191,13 @@ mod tests {
     }
 
     #[test]
-    fn to_clickhouse_settings_skips_none_and_formats_bools() {
+    fn to_clickhouse_settings_skips_none_and_formats_bools() -> Result<(), String> {
         let cfg = QueryConfig {
             max_execution_time: Some(30),
             use_query_cache: Some(true),
             query_cache_ttl: None,
         };
-        let mut settings = cfg.to_clickhouse_settings();
+        let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(settings.len(), 2);
         assert_eq!(
@@ -208,6 +208,7 @@ mod tests {
             settings[1],
             ("use_query_cache".into(), SettingValue::Bool(true))
         );
+        Ok(())
     }
 
     #[test]

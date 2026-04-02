@@ -24,9 +24,11 @@ pub fn codegen(
     };
 
     // SETTINGS — only on the top-level query, not subqueries/UNION arms.
-    // Values are formatted via SettingValue::Display which guarantees
-    // SQL-safe output (bare integers and 0/1 bools only).
-    let settings = query_config.to_clickhouse_settings();
+    // Values are formatted via SettingValue::Display which produces
+    // SQL-safe output (bare integers, 0/1 bools, escaped quoted strings).
+    let settings = query_config
+        .to_clickhouse_settings()
+        .map_err(crate::error::QueryError::Codegen)?;
     if !settings.is_empty() {
         let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();
         sql.push_str(&format!(" SETTINGS {}", clause.join(", ")));
