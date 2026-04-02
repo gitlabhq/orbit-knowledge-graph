@@ -23,6 +23,9 @@ async fn data_correctness() {
         // search: column value correctness
         search::search_returns_correct_user_properties,
         search::search_returns_correct_project_properties,
+        search::search_returns_correct_group_full_path,
+        search::search_returns_correct_project_full_path,
+        search::search_default_columns_include_full_path,
         search::search_filter_eq_returns_matching_rows,
         search::search_filter_in_returns_matching_rows,
         search::search_filter_starts_with_returns_matching_rows,
