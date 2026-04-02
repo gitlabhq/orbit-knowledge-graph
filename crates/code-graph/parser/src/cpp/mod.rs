@@ -1,6 +1,6 @@
 use crate::dsl::extractors::{declarator, field, field_chain};
 use crate::dsl::predicates::*;
-use crate::dsl::types::{LanguageSpec, reference, scope, scope_fn};
+use crate::dsl::types::{LanguageSpec, import, reference, scope, scope_fn};
 
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -38,6 +38,7 @@ pub fn cpp_language_spec() -> LanguageSpec {
                 .when(field_kind("function", &["qualified_identifier"]))
                 .name_from(field("function")),
         ],
+        vec![import("preproc_include").path_from(field("path"))],
     )
 }
 
@@ -197,5 +198,22 @@ void process(Calculator& calc) {
             ref_names.contains(&"subtract"),
             "Expected 'subtract' ref, got: {ref_names:?}"
         );
+    }
+
+    #[test]
+    fn test_cpp_includes() {
+        let output = analyze(
+            r#"
+#include <stdio.h>
+#include "myheader.h"
+
+int main() { return 0; }
+"#,
+        );
+        assert_eq!(output.imports.len(), 2);
+        assert_eq!(output.imports[0].path, "<stdio.h>");
+        assert_eq!(output.imports[1].path, "\"myheader.h\"");
+        assert!(output.imports[0].name.is_none());
+        assert!(output.imports[1].name.is_none());
     }
 }
