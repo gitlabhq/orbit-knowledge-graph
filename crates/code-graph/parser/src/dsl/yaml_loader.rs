@@ -455,7 +455,8 @@ mod tests {
         let yaml = include_str!("specs/c.yaml");
         let registry = UdfRegistry::new();
         let yaml_spec = load_yaml_spec(yaml, &registry).unwrap();
-        let rust_spec = crate::c::c_language_spec();
+        use crate::dsl::types::DslLanguage;
+        let rust_spec = crate::c::C::spec();
 
         let code = r#"
 struct Point { int x; int y; };

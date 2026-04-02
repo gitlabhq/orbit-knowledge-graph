@@ -2,13 +2,14 @@ use crate::loading::FileInfo;
 use log::debug;
 use parser_core::definitions::DefinitionInfo;
 use parser_core::{
-    c::c_language_spec,
-    cpp::cpp_language_spec,
+    c::C,
+    cpp::Cpp,
     csharp::{
         analyzer::CSharpAnalyzer,
         types::{CSharpDefinitionInfo, CSharpImportedSymbolInfo},
     },
     definitions::DefinitionTypeInfo,
+    dsl::types::DslLanguage,
     dsl::types::{DslDefinitionInfo, DslRawReference},
     java::{
         analyzer::JavaAnalyzer,
@@ -462,8 +463,8 @@ impl<'a> FileProcessor<'a> {
             SupportedLanguage::C | SupportedLanguage::Cpp => {
                 if let UnifiedParseResult::TreeSitter(ast_result) = parse_result {
                     let spec = match language {
-                        SupportedLanguage::Cpp => cpp_language_spec(),
-                        _ => c_language_spec(),
+                        SupportedLanguage::Cpp => Cpp::spec(),
+                        _ => C::spec(),
                     };
                     match spec.analyze(ast_result) {
                         Ok(output) => {

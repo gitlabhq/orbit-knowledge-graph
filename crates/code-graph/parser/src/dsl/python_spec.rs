@@ -3,13 +3,27 @@ use treesitter_visit::{Node, SupportLang};
 
 use super::extractors::field;
 use super::predicates::*;
-use super::types::{LanguageSpec, import, reference, scope, scope_fn};
+use super::types::{
+    DslLanguage, ImportRule, ReferenceRule, ScopeRule, import, reference, scope, scope_fn,
+};
 
-pub fn python_language_spec() -> LanguageSpec {
-    LanguageSpec::new(
-        "python",
+pub struct Python;
+
+impl DslLanguage for Python {
+    fn name() -> &'static str {
+        "python"
+    }
+
+    fn auto_scopes() -> &'static [(&'static str, &'static str)] {
+        &[("class_definition", "Class")]
+    }
+
+    fn auto_imports() -> &'static [&'static str] {
+        &["import_statement"]
+    }
+
+    fn scopes() -> Vec<ScopeRule> {
         vec![
-            // Override: decorated classes get a different label
             scope("class_definition", "DecoratedClass").when(parent_is("decorated_definition")),
             scope_fn("function_definition", classify_function),
             scope("assignment", "Lambda")
@@ -21,16 +35,20 @@ pub fn python_language_spec() -> LanguageSpec {
                 ))
                 .name_from(field("left"))
                 .no_scope(),
-        ],
-        vec![reference("call_expression").name_from(field("function"))],
+        ]
+    }
+
+    fn refs() -> Vec<ReferenceRule> {
+        vec![reference("call_expression").name_from(field("function"))]
+    }
+
+    fn imports() -> Vec<ImportRule> {
         vec![
             import("import_from_statement")
                 .path_from(field("module_name"))
                 .symbol_from(field("name")),
-        ],
-    )
-    .auto(&[("class_definition", "Class")])
-    .auto_imports(&["import_statement"])
+        ]
+    }
 }
 
 pub fn classify_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
@@ -62,7 +80,7 @@ mod tests {
     use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
 
     fn analyze(code: &str) -> DslParseOutput {
-        let spec = python_language_spec();
+        let spec = Python::spec();
         let parser = GenericParser::new(SupportedLanguage::Python);
         let result = parser.parse(code, Some("test.py")).unwrap();
         spec.analyze(&result).unwrap()

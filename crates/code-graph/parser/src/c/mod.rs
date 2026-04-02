@@ -1,11 +1,29 @@
 use crate::dsl::extractors::{declarator, field, field_chain};
 use crate::dsl::predicates::*;
-use crate::dsl::types::{LanguageSpec, import, reference, scope};
+use crate::dsl::types::{
+    DslLanguage, ImportRule, ReferenceRule, ScopeRule, import, reference, scope,
+};
 
-pub fn c_language_spec() -> LanguageSpec {
-    LanguageSpec::new(
-        "c",
-        vec![scope("function_definition", "Function").name_from(declarator())],
+pub struct C;
+
+impl DslLanguage for C {
+    fn name() -> &'static str {
+        "c"
+    }
+
+    fn auto_scopes() -> &'static [(&'static str, &'static str)] {
+        &[
+            ("struct_specifier", "Struct"),
+            ("enum_specifier", "Enum"),
+            ("union_specifier", "Union"),
+        ]
+    }
+
+    fn scopes() -> Vec<ScopeRule> {
+        vec![scope("function_definition", "Function").name_from(declarator())]
+    }
+
+    fn refs() -> Vec<ReferenceRule> {
         vec![
             reference("call_expression")
                 .when(field_kind("function", &["identifier"]))
@@ -13,14 +31,12 @@ pub fn c_language_spec() -> LanguageSpec {
             reference("call_expression")
                 .when(field_kind("function", &["field_expression"]))
                 .name_from(field_chain(&["function", "field"])),
-        ],
-        vec![import("preproc_include").path_from(field("path"))],
-    )
-    .auto(&[
-        ("struct_specifier", "Struct"),
-        ("enum_specifier", "Enum"),
-        ("union_specifier", "Union"),
-    ])
+        ]
+    }
+
+    fn imports() -> Vec<ImportRule> {
+        vec![import("preproc_include").path_from(field("path"))]
+    }
 }
 
 #[cfg(test)]
@@ -31,7 +47,7 @@ mod tests {
 
     #[test]
     fn test_c_functions() {
-        let spec = c_language_spec();
+        let spec = C::spec();
 
         let parser = GenericParser::new(SupportedLanguage::C);
         let code = "int add(int a, int b) { return a + b; }\nvoid greet(const char* name) { }";
@@ -49,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_c_structs_and_enums() {
-        let spec = c_language_spec();
+        let spec = C::spec();
 
         let parser = GenericParser::new(SupportedLanguage::C);
         let code = "struct Point { int x; int y; };\nenum Color { RED, GREEN };\nunion Data { int i; float f; };";
@@ -79,7 +95,7 @@ mod tests {
 
     #[test]
     fn test_c_references() {
-        let spec = c_language_spec();
+        let spec = C::spec();
 
         let parser = GenericParser::new(SupportedLanguage::C);
         let code = r#"
@@ -96,7 +112,7 @@ int main() { int r = helper(42); printf("ok"); return 0; }
 
     #[test]
     fn test_c_field_calls() {
-        let spec = c_language_spec();
+        let spec = C::spec();
 
         let parser = GenericParser::new(SupportedLanguage::C);
         let code = "void process(struct Device* dev) { dev->init(); dev->run(42); }";
@@ -110,7 +126,7 @@ int main() { int r = helper(42); printf("ok"); return 0; }
 
     #[test]
     fn test_c_nested_calls_scoped() {
-        let spec = c_language_spec();
+        let spec = C::spec();
 
         let parser = GenericParser::new(SupportedLanguage::C);
         let code = "int compute(int a, int b) { return add(multiply(a, 2), b); }";
