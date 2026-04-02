@@ -16,7 +16,10 @@ struct PreparedQuery {
     sql: String,
     params: HashMap<String, gkg_utils::clickhouse::ParamValue>,
     rendered_sql: String,
-    log_comment: String,
+    /// HTTP-level ClickHouse settings applied to every query.
+    /// Includes `log_comment` for tracing and the `QueryConfig` settings
+    /// as defense-in-depth (they're also in the SQL SETTINGS clause).
+    http_settings: Vec<(String, String)>,
 }
 
 #[derive(Clone)]
@@ -42,19 +45,31 @@ impl PipelineStage for ClickHouseExecutor {
             .cloned()
             .unwrap_or_default();
 
-        // Tag every ClickHouse query with `log_comment` for tracing.
-        // Includes the request correlation ID when available so operators
-        // can join `system.query_log` with application logs.
         let (prepared, result_context) = {
             let compiled = ctx.compiled()?;
+
+            // Build HTTP-level settings from QueryConfig (defense-in-depth:
+            // these are also baked into the SQL SETTINGS clause by codegen)
+            // plus log_comment for tracing.
+            let mut http_settings: Vec<(String, String)> = compiled
+                .base
+                .query_config
+                .to_clickhouse_settings()
+                .into_iter()
+                .map(|(k, v)| (k, v.to_string()))
+                .collect();
+
+            let log_comment = match labkit::correlation::current() {
+                Some(id) => format!("gkg;correlation_id={id}"),
+                None => "gkg".to_string(),
+            };
+            http_settings.push(("log_comment".to_string(), log_comment));
+
             let prepared = PreparedQuery {
                 sql: compiled.base.sql.clone(),
                 params: compiled.base.params.clone(),
                 rendered_sql: compiled.base.render(),
-                log_comment: match labkit::correlation::current() {
-                    Some(id) => format!("gkg;correlation_id={id}"),
-                    None => "gkg".to_string(),
-                },
+                http_settings,
             };
             (prepared, compiled.base.result_context.clone())
         };
@@ -91,9 +106,10 @@ async fn execute_standard(
     prepared: &PreparedQuery,
     start: Instant,
 ) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), PipelineError> {
-    let mut query = client
-        .query(&prepared.sql)
-        .with_option("log_comment", &prepared.log_comment);
+    let mut query = client.query(&prepared.sql);
+    for (k, v) in &prepared.http_settings {
+        query = query.with_option(k, v);
+    }
     for (key, param) in prepared.params.iter() {
         query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
     }
@@ -139,13 +155,15 @@ async fn execute_profiled(
         .map(|(k, v)| (k.clone(), v.render_http_param()))
         .collect();
 
+    let extra_settings: Vec<(&str, &str)> = prepared
+        .http_settings
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
     let (batches, query_stats) = client
         .profiler()
-        .execute_with_stats(
-            &prepared.sql,
-            &http_params,
-            &[("log_comment", &prepared.log_comment)],
-        )
+        .execute_with_stats(&prepared.sql, &http_params, &extra_settings)
         .await
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
