@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
+use code_graph::fs::DirectoryFileSource;
+use code_graph::index::{IndexConfig, RepositoryIndexer};
 use code_graph::linker::analysis::types::GraphData;
-use code_graph::linker::indexer::{IndexingConfig, RepositoryIndexer};
-use code_graph::linker::loading::DirectoryFileSource;
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::ArrowConverter;
@@ -154,7 +154,7 @@ impl CodeIndexingPipeline {
 
         let indexing_start = Instant::now();
         let result = indexer
-            .index_files(file_source, &IndexingConfig::default())
+            .index_files(file_source, &IndexConfig::default())
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to index code: {e}")))
             .record_error_stage(&self.metrics, "indexing")?;
