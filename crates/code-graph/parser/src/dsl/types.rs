@@ -239,6 +239,37 @@ pub fn import(kind: &'static str) -> ImportRule {
     }
 }
 
+pub trait DslLanguage {
+    fn name() -> &'static str;
+
+    fn auto_scopes() -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
+    fn auto_refs() -> &'static [&'static str] {
+        &[]
+    }
+    fn auto_imports() -> &'static [&'static str] {
+        &[]
+    }
+
+    fn scopes() -> Vec<ScopeRule> {
+        vec![]
+    }
+    fn refs() -> Vec<ReferenceRule> {
+        vec![]
+    }
+    fn imports() -> Vec<ImportRule> {
+        vec![]
+    }
+
+    fn spec() -> LanguageSpec {
+        LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
+            .auto(Self::auto_scopes())
+            .auto_refs(Self::auto_refs())
+            .auto_imports(Self::auto_imports())
+    }
+}
+
 pub struct LanguageSpec {
     pub name: &'static str,
     pub scopes: Vec<ScopeRule>,

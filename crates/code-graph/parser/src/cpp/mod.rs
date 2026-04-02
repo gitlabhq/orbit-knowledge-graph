@@ -1,16 +1,34 @@
 use crate::dsl::extractors::{declarator, field, field_chain};
 use crate::dsl::predicates::*;
-use crate::dsl::types::{LanguageSpec, import, reference, scope_fn};
+use crate::dsl::types::{
+    DslLanguage, ImportRule, ReferenceRule, ScopeRule, import, reference, scope_fn,
+};
 
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-/// C++ inherits all of C's constructs and adds namespaces, classes,
-/// methods, templates, and lambda expressions.
-pub fn cpp_language_spec() -> LanguageSpec {
-    LanguageSpec::new(
-        "cpp",
-        vec![scope_fn("function_definition", classify_cpp_function).name_from(declarator())],
+pub struct Cpp;
+
+impl DslLanguage for Cpp {
+    fn name() -> &'static str {
+        "cpp"
+    }
+
+    fn auto_scopes() -> &'static [(&'static str, &'static str)] {
+        &[
+            ("struct_specifier", "Struct"),
+            ("enum_specifier", "Enum"),
+            ("union_specifier", "Union"),
+            ("namespace_definition", "Namespace"),
+            ("class_specifier", "Class"),
+        ]
+    }
+
+    fn scopes() -> Vec<ScopeRule> {
+        vec![scope_fn("function_definition", classify_cpp_function).name_from(declarator())]
+    }
+
+    fn refs() -> Vec<ReferenceRule> {
         vec![
             reference("call_expression")
                 .when(field_kind("function", &["identifier"]))
@@ -21,16 +39,12 @@ pub fn cpp_language_spec() -> LanguageSpec {
             reference("call_expression")
                 .when(field_kind("function", &["qualified_identifier"]))
                 .name_from(field("function")),
-        ],
-        vec![import("preproc_include").path_from(field("path"))],
-    )
-    .auto(&[
-        ("struct_specifier", "Struct"),
-        ("enum_specifier", "Enum"),
-        ("union_specifier", "Union"),
-        ("namespace_definition", "Namespace"),
-        ("class_specifier", "Class"),
-    ])
+        ]
+    }
+
+    fn imports() -> Vec<ImportRule> {
+        vec![import("preproc_include").path_from(field("path"))]
+    }
 }
 
 pub fn classify_cpp_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
@@ -51,7 +65,7 @@ mod tests {
     use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
 
     fn analyze(code: &str) -> DslParseOutput {
-        let spec = cpp_language_spec();
+        let spec = Cpp::spec();
         let parser = GenericParser::new(SupportedLanguage::Cpp);
         let result = parser.parse(code, Some("test.cpp")).unwrap();
         spec.analyze(&result).unwrap()
