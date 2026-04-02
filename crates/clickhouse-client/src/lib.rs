@@ -1,13 +1,12 @@
 mod arrow_client;
 mod configuration;
+pub mod enrichment;
 mod error;
 mod extract;
-pub mod profiler;
 pub mod stats;
 
 pub use arrow_client::{ArrowClickHouseClient, ArrowQuery};
 pub use configuration::{ClickHouseConfiguration, ProfilingConfig};
 pub use error::{ClickHouseError, ConfigurationError};
 pub use extract::FromArrowColumn;
-pub use profiler::QueryProfiler;
-pub use stats::QueryStats;
+pub use stats::{InstanceHealth, ProcessorProfile, QueryLogEntry, QueryStats};

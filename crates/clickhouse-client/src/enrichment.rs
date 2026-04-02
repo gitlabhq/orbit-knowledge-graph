@@ -1,149 +1,68 @@
+//! Post-execution enrichment queries against ClickHouse system tables.
+//!
+//! These functions retrieve profiling data (EXPLAIN plans, query_log entries,
+//! processor profiles, instance health) using the standard `ArrowClickHouseClient`.
+//! They replace the former `QueryProfiler` which maintained a separate `reqwest`
+//! HTTP client.
+
 use std::collections::HashMap;
-use std::io::Cursor;
 
-use arrow::record_batch::RecordBatch;
-use arrow_ipc::reader::StreamReader;
-use uuid::Uuid;
-
+use crate::arrow_client::ArrowClickHouseClient;
 use crate::error::ClickHouseError;
-use crate::stats::{
-    DiskInfo, InstanceHealth, ProcessorProfile, QueryLogEntry, QueryStats, TablePartsInfo,
-};
+use crate::stats::{DiskInfo, InstanceHealth, ProcessorProfile, QueryLogEntry, TablePartsInfo};
 
-const DEFAULT_QUERY_SETTINGS: &[(&str, &str)] = &[
-    ("output_format_arrow_string_as_string", "1"),
-    ("output_format_arrow_fixed_string_as_fixed_byte_array", "1"),
-    ("join_algorithm", "hash"),
-    ("query_plan_join_swap_table", "true"),
-    ("use_query_condition_cache", "true"),
-    ("join_use_nulls", "0"),
-];
+impl ArrowClickHouseClient {
+    /// Execute a SQL statement and return the response as raw text.
+    ///
+    /// Uses `TabSeparatedRaw` format so ClickHouse returns the bytes as-is.
+    /// Suitable for EXPLAIN output, SYSTEM commands, and any query where
+    /// the FORMAT is not embedded in the SQL.
+    pub async fn fetch_text(&self, sql: &str) -> Result<String, ClickHouseError> {
+        let mut cursor = self
+            .query(sql)
+            .inner
+            .fetch_bytes("TabSeparatedRaw")
+            .map_err(ClickHouseError::Query)?;
 
-pub struct QueryProfiler {
-    http: once_cell::sync::OnceCell<reqwest::Client>,
-    base_url: String,
-    database: String,
-    username: String,
-    password: Option<String>,
-    settings: HashMap<String, String>,
-}
-
-impl QueryProfiler {
-    pub fn new(
-        url: &str,
-        database: &str,
-        username: &str,
-        password: Option<&str>,
-        custom_settings: &HashMap<String, String>,
-    ) -> Self {
-        let mut settings: HashMap<String, String> = DEFAULT_QUERY_SETTINGS
-            .iter()
-            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-            .collect();
-        for (k, v) in custom_settings {
-            settings.insert(k.clone(), v.clone());
+        let mut buffer = Vec::new();
+        loop {
+            match cursor.next().await {
+                Ok(Some(chunk)) => buffer.extend(chunk),
+                Ok(None) => break,
+                Err(e) => return Err(ClickHouseError::Query(e)),
+            }
         }
-        Self {
-            http: once_cell::sync::OnceCell::new(),
-            base_url: url.to_string(),
-            database: database.to_string(),
-            username: username.to_string(),
-            password: password.map(String::from),
-            settings,
-        }
-    }
 
-    fn client(&self) -> &reqwest::Client {
-        self.http.get_or_init(|| {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("failed to build reqwest client")
+        String::from_utf8(buffer).map_err(|e| ClickHouseError::BadResponse {
+            status: 0,
+            body: format!("non-UTF8 response: {e}"),
         })
     }
 
-    // Mirrors clickhouse-rs Query::do_execute request building:
-    // - URL params: database, default_format, query settings, param_* bindings
-    // - Auth: X-ClickHouse-User / X-ClickHouse-Key headers
-    // - Body: SQL query text
-    // Additionally sets wait_end_of_query=1 to capture X-ClickHouse-Summary
-    // response headers (read_rows, read_bytes, memory_usage) which the
-    // clickhouse-rs crate discards.
-    pub async fn execute_with_stats(
-        &self,
-        sql: &str,
-        query_params: &[(String, String)],
-        extra_settings: &[(&str, &str)],
-    ) -> Result<(Vec<RecordBatch>, QueryStats), ClickHouseError> {
-        let query_id = Uuid::new_v4().to_string();
+    /// Execute a SQL query that returns JSONEachRow and return the raw text.
+    ///
+    /// Appends `FORMAT JSONEachRow` via the clickhouse-rs client (not in the
+    /// SQL text itself).
+    async fn fetch_json_text(&self, sql: &str) -> Result<String, ClickHouseError> {
+        let mut cursor = self
+            .query(sql)
+            .inner
+            .fetch_bytes("JSONEachRow")
+            .map_err(ClickHouseError::Query)?;
 
-        let mut url_params: Vec<(String, String)> = vec![
-            ("database".into(), self.database.clone()),
-            ("default_format".into(), "ArrowStream".into()),
-            ("wait_end_of_query".into(), "1".into()),
-            ("query_id".into(), query_id.clone()),
-        ];
-        for (k, v) in &self.settings {
-            url_params.push((k.clone(), v.clone()));
-        }
-        for (k, v) in query_params {
-            url_params.push((format!("param_{k}"), v.clone()));
-        }
-        for (k, v) in extra_settings {
-            url_params.push(((*k).into(), (*v).into()));
-        }
-
-        let url = reqwest::Url::parse_with_params(&self.base_url, &url_params).map_err(|e| {
-            ClickHouseError::BadResponse {
-                status: 0,
-                body: format!("URL parse error: {e}"),
+        let mut buffer = Vec::new();
+        loop {
+            match cursor.next().await {
+                Ok(Some(chunk)) => buffer.extend(chunk),
+                Ok(None) => break,
+                Err(e) => return Err(ClickHouseError::Query(e)),
             }
-        })?;
-
-        let mut req = self.client().post(url).body(sql.to_string());
-        req = req.header("X-ClickHouse-User", &self.username);
-        if let Some(pw) = &self.password {
-            req = req.header("X-ClickHouse-Key", pw);
         }
 
-        let resp = req.send().await.map_err(ClickHouseError::Http)?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            let body = truncate_body(&body);
-            return Err(ClickHouseError::BadResponse { status, body });
-        }
-
-        let summary = resp
-            .headers()
-            .get("X-ClickHouse-Summary")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-
-        let returned_id = resp
-            .headers()
-            .get("X-ClickHouse-Query-Id")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or(&query_id)
-            .to_string();
-
-        let stats = QueryStats::from_summary(summary, returned_id);
-
-        let body = resp.bytes().await.map_err(ClickHouseError::Http)?;
-
-        if body.is_empty() {
-            return Ok((vec![], stats));
-        }
-
-        let reader = StreamReader::try_new(Cursor::new(body.as_ref()), None)
-            .map_err(ClickHouseError::ArrowDecode)?;
-
-        let batches: Result<Vec<_>, _> = reader
-            .map(|r| r.map_err(ClickHouseError::ArrowDecode))
-            .collect();
-
-        Ok((batches?, stats))
+        String::from_utf8(buffer).map_err(|e| ClickHouseError::BadResponse {
+            status: 0,
+            body: format!("non-UTF8 response: {e}"),
+        })
     }
 
     pub async fn explain_plan(&self, sql: &str) -> Result<String, ClickHouseError> {
@@ -161,16 +80,42 @@ impl QueryProfiler {
         self.fetch_text(&format!("EXPLAIN ESTIMATE {sql}")).await
     }
 
+    /// Fetch a query_log entry by matching against `log_comment`.
+    ///
+    /// Flushes the query log first to ensure the entry is available.
+    /// The `log_comment_match` should be a unique substring (e.g. a
+    /// profiling UUID) that identifies the target query.
     pub async fn fetch_query_log(
+        &self,
+        log_comment_match: &str,
+    ) -> Result<Option<QueryLogEntry>, ClickHouseError> {
+        validate_log_comment_match(log_comment_match)?;
+        self.execute("SYSTEM FLUSH LOGS").await?;
+
+        let where_clause =
+            format!("log_comment LIKE '%{log_comment_match}%' AND type = 'QueryFinish'");
+        self.fetch_query_log_where(&where_clause).await
+    }
+
+    /// Fetch a query_log entry by `query_id`.
+    pub async fn fetch_query_log_by_id(
         &self,
         query_id: &str,
     ) -> Result<Option<QueryLogEntry>, ClickHouseError> {
         validate_query_id(query_id)?;
-        self.fetch_text("SYSTEM FLUSH LOGS").await?;
+        self.execute("SYSTEM FLUSH LOGS").await?;
 
+        let where_clause = format!("query_id = '{query_id}' AND type = 'QueryFinish'");
+        self.fetch_query_log_where(&where_clause).await
+    }
+
+    async fn fetch_query_log_where(
+        &self,
+        where_clause: &str,
+    ) -> Result<Option<QueryLogEntry>, ClickHouseError> {
         let sql = format!(
             "SELECT \
-                query_duration_ms, memory_usage, \
+                query_id, query_duration_ms, memory_usage, \
                 ProfileEvents['RealTimeMicroseconds'] AS real_time_us, \
                 ProfileEvents['UserTimeMicroseconds'] AS user_time_us, \
                 ProfileEvents['SystemTimeMicroseconds'] AS system_time_us, \
@@ -187,12 +132,11 @@ impl QueryProfiler {
                 read_rows, read_bytes, result_rows, result_bytes, \
                 ProfileEvents.Names, ProfileEvents.Values \
             FROM system.query_log \
-            WHERE query_id = '{query_id}' AND type = 'QueryFinish' \
-            LIMIT 1 \
-            FORMAT JSONEachRow"
+            WHERE {where_clause} \
+            LIMIT 1"
         );
 
-        let text = self.fetch_text(&sql).await?;
+        let text = self.fetch_json_text(&sql).await?;
         if text.trim().is_empty() {
             return Ok(None);
         }
@@ -203,31 +147,7 @@ impl QueryProfiler {
                 body: format!("failed to parse query_log JSON: {e}"),
             })?;
 
-        let profile_events = build_profile_events(&v);
-
-        Ok(Some(QueryLogEntry {
-            query_duration_ms: v["query_duration_ms"].as_f64().unwrap_or(0.0),
-            memory_usage: v["memory_usage"].as_u64().unwrap_or(0),
-            peak_memory_usage: 0,
-            read_rows: v["read_rows"].as_u64().unwrap_or(0),
-            read_bytes: v["read_bytes"].as_u64().unwrap_or(0),
-            result_rows: v["result_rows"].as_u64().unwrap_or(0),
-            result_bytes: v["result_bytes"].as_u64().unwrap_or(0),
-            real_time_us: v["real_time_us"].as_u64().unwrap_or(0),
-            user_time_us: v["user_time_us"].as_u64().unwrap_or(0),
-            system_time_us: v["system_time_us"].as_u64().unwrap_or(0),
-            os_cpu_wait_us: v["os_cpu_wait_us"].as_u64().unwrap_or(0),
-            os_io_wait_us: v["os_io_wait_us"].as_u64().unwrap_or(0),
-            selected_parts: v["selected_parts"].as_u64().unwrap_or(0),
-            selected_marks: v["selected_marks"].as_u64().unwrap_or(0),
-            selected_rows: v["selected_rows"].as_u64().unwrap_or(0),
-            mark_cache_hits: v["mark_cache_hits"].as_u64().unwrap_or(0),
-            mark_cache_misses: v["mark_cache_misses"].as_u64().unwrap_or(0),
-            external_sort_bytes: v["external_sort_bytes"].as_u64().unwrap_or(0),
-            external_agg_bytes: v["external_agg_bytes"].as_u64().unwrap_or(0),
-            external_join_bytes: v["external_join_bytes"].as_u64().unwrap_or(0),
-            profile_events,
-        }))
+        Ok(Some(parse_query_log_entry(&v)))
     }
 
     pub async fn fetch_processors_profile(
@@ -235,18 +155,16 @@ impl QueryProfiler {
         query_id: &str,
     ) -> Result<Vec<ProcessorProfile>, ClickHouseError> {
         validate_query_id(query_id)?;
-        self.fetch_text("SYSTEM FLUSH LOGS").await?;
 
         let sql = format!(
             "SELECT name, elapsed_us, input_wait_elapsed_us, output_wait_elapsed_us, \
                     input_rows, output_rows \
              FROM system.processors_profile_log \
              WHERE query_id = '{query_id}' \
-             ORDER BY elapsed_us DESC \
-             FORMAT JSONEachRow"
+             ORDER BY elapsed_us DESC"
         );
 
-        let text = self.fetch_text(&sql).await?;
+        let text = self.fetch_json_text(&sql).await?;
         if text.trim().is_empty() {
             return Ok(vec![]);
         }
@@ -285,17 +203,17 @@ impl QueryProfiler {
                 'BackgroundMergesAndMutationsPoolTask', \
                 'TemporaryFilesForSort', 'TemporaryFilesForAggregation', \
                 'TemporaryFilesForJoin'\
-            ) FORMAT JSONEachRow";
+            )";
 
         let uptime_sql = "\
             SELECT value FROM system.asynchronous_metrics \
-            WHERE metric = 'Uptime' FORMAT JSONEachRow";
+            WHERE metric = 'Uptime'";
 
         let disks_sql = "\
             SELECT name, path, total_space AS total_bytes, \
                    free_space AS free_bytes, \
                    (total_space - free_space) AS used_bytes \
-            FROM system.disks FORMAT JSONEachRow";
+            FROM system.disks";
 
         let parts_sql = "\
             SELECT database, table, \
@@ -309,14 +227,13 @@ impl QueryProfiler {
             FROM system.parts \
             WHERE active AND database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema') \
             GROUP BY database, table \
-            ORDER BY bytes_on_disk DESC \
-            FORMAT JSONEachRow";
+            ORDER BY bytes_on_disk DESC";
 
         let (metrics_text, uptime_text, disks_text, parts_text) = tokio::try_join!(
-            self.fetch_text(metrics_sql),
-            self.fetch_text(uptime_sql),
-            self.fetch_text(disks_sql),
-            self.fetch_text(parts_sql),
+            self.fetch_json_text(metrics_sql),
+            self.fetch_json_text(uptime_sql),
+            self.fetch_json_text(disks_sql),
+            self.fetch_json_text(parts_sql),
         )?;
 
         let mut health = InstanceHealth::default();
@@ -389,36 +306,19 @@ impl QueryProfiler {
 
         Ok(health)
     }
+}
 
-    async fn fetch_text(&self, sql: &str) -> Result<String, ClickHouseError> {
-        let mut params: Vec<(String, String)> = vec![("database".into(), self.database.clone())];
-        for (k, v) in &self.settings {
-            params.push((k.clone(), v.clone()));
-        }
-        let url = reqwest::Url::parse_with_params(&self.base_url, &params).map_err(|e| {
-            ClickHouseError::BadResponse {
-                status: 0,
-                body: format!("URL parse error: {e}"),
-            }
-        })?;
-
-        let mut req = self.client().post(url).body(sql.to_string());
-        req = req.header("X-ClickHouse-User", &self.username);
-        if let Some(pw) = &self.password {
-            req = req.header("X-ClickHouse-Key", pw);
-        }
-
-        let resp = req.send().await.map_err(ClickHouseError::Http)?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            let body = truncate_body(&body);
-            return Err(ClickHouseError::BadResponse { status, body });
-        }
-
-        resp.text().await.map_err(ClickHouseError::Http)
+fn validate_log_comment_match(s: &str) -> Result<(), ClickHouseError> {
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(ClickHouseError::BadResponse {
+            status: 0,
+            body: format!("invalid log_comment match string: {s}"),
+        });
     }
+    Ok(())
 }
 
 fn validate_query_id(query_id: &str) -> Result<(), ClickHouseError> {
@@ -434,17 +334,35 @@ fn validate_query_id(query_id: &str) -> Result<(), ClickHouseError> {
     Ok(())
 }
 
-fn truncate_body(body: &str) -> String {
-    const MAX_LEN: usize = 1024;
-    if body.len() <= MAX_LEN {
-        body.to_string()
-    } else {
-        format!("{}... (truncated)", &body[..MAX_LEN])
+fn parse_query_log_entry(v: &serde_json::Value) -> QueryLogEntry {
+    QueryLogEntry {
+        query_id: v["query_id"].as_str().unwrap_or("").to_string(),
+        query_duration_ms: v["query_duration_ms"].as_f64().unwrap_or(0.0),
+        memory_usage: v["memory_usage"].as_u64().unwrap_or(0),
+        peak_memory_usage: 0,
+        read_rows: v["read_rows"].as_u64().unwrap_or(0),
+        read_bytes: v["read_bytes"].as_u64().unwrap_or(0),
+        result_rows: v["result_rows"].as_u64().unwrap_or(0),
+        result_bytes: v["result_bytes"].as_u64().unwrap_or(0),
+        real_time_us: v["real_time_us"].as_u64().unwrap_or(0),
+        user_time_us: v["user_time_us"].as_u64().unwrap_or(0),
+        system_time_us: v["system_time_us"].as_u64().unwrap_or(0),
+        os_cpu_wait_us: v["os_cpu_wait_us"].as_u64().unwrap_or(0),
+        os_io_wait_us: v["os_io_wait_us"].as_u64().unwrap_or(0),
+        selected_parts: v["selected_parts"].as_u64().unwrap_or(0),
+        selected_marks: v["selected_marks"].as_u64().unwrap_or(0),
+        selected_rows: v["selected_rows"].as_u64().unwrap_or(0),
+        mark_cache_hits: v["mark_cache_hits"].as_u64().unwrap_or(0),
+        mark_cache_misses: v["mark_cache_misses"].as_u64().unwrap_or(0),
+        external_sort_bytes: v["external_sort_bytes"].as_u64().unwrap_or(0),
+        external_agg_bytes: v["external_agg_bytes"].as_u64().unwrap_or(0),
+        external_join_bytes: v["external_join_bytes"].as_u64().unwrap_or(0),
+        profile_events: build_profile_events(v),
     }
 }
 
-fn build_profile_events(v: &serde_json::Value) -> std::collections::HashMap<String, u64> {
-    let mut map = std::collections::HashMap::new();
+fn build_profile_events(v: &serde_json::Value) -> HashMap<String, u64> {
+    let mut map = HashMap::new();
 
     let names = v["ProfileEvents.Names"].as_array();
     let values = v["ProfileEvents.Values"].as_array();
@@ -461,26 +379,4 @@ fn build_profile_events(v: &serde_json::Value) -> std::collections::HashMap<Stri
     }
 
     map
-}
-
-impl std::fmt::Debug for QueryProfiler {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QueryProfiler")
-            .field("base_url", &self.base_url)
-            .field("database", &self.database)
-            .finish()
-    }
-}
-
-impl Clone for QueryProfiler {
-    fn clone(&self) -> Self {
-        Self {
-            http: once_cell::sync::OnceCell::new(),
-            base_url: self.base_url.clone(),
-            database: self.database.clone(),
-            username: self.username.clone(),
-            password: self.password.clone(),
-            settings: self.settings.clone(),
-        }
-    }
 }
