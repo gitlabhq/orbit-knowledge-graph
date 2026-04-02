@@ -3,6 +3,6 @@
 description: Review assignment relationship between users and merge requests
 
 variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: MergeRequest, id: id }
-    description: "User is a reviewer of merge request."
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: User, id: id }
+    description: "Merge request has user as reviewer."

@@ -264,7 +264,7 @@ mod tests {
                 {"id": "merger", "entity": "User", "node_ids": [42]}
             ],
             "relationships": [
-                {"type": "MERGED_BY", "from": "merger", "to": "mr"}
+                {"type": "MERGED_BY", "from": "mr", "to": "merger"}
             ],
             "limit": 30
         }"#;

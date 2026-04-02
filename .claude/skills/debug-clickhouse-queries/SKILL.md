@@ -170,9 +170,9 @@ AUTHORED:
 
 # Per-source: For each MR, maybe link a User  
 MERGED_BY:
-  "User -> MergeRequest":
+  "MergeRequest -> User":
     ratio: 0.3
-    per: target
+    per: source
 ```
 
 **Why this matters**: With 1000 Users and 100k MRs:
@@ -186,11 +186,11 @@ If queries return empty for User-related edges, check:
 
 ### Edge direction in ontology vs queries
 
-Queries specify edge direction: `{"type": "MERGED_BY", "from": "merger", "to": "mr"}`
+Queries specify edge direction: `{"type": "MERGED_BY", "from": "mr", "to": "user"}`
 
-This translates to: `merger.id = edge.source_id AND edge.target_id = mr.id`
+This translates to: `mr.id = edge.source AND edge.target = user.id`
 
-All person-action edges use person-is-source convention (User is always source_id). Queries starting from the entity must use `"direction": "incoming"` or swap from/to.
+The ontology must match. If ontology says `User -> MergeRequest` but query expects `MergeRequest -> User`, they're incompatible.
 
 ### Path compatibility for edges
 
