@@ -10,6 +10,13 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Escape a string for use as a ClickHouse SETTINGS value.
+/// Single-quotes the value and escapes embedded quotes and backslashes.
+fn escape_setting_str(s: &str) -> String {
+    let escaped = s.replace('\\', "\\\\").replace('\'', "\\'");
+    format!("'{escaped}'")
+}
+
 /// Query execution settings. All fields map to ClickHouse query-level
 /// settings. The closed set of fields prevents arbitrary user input from
 /// reaching the SETTINGS clause (CWE-89).
@@ -42,28 +49,34 @@ impl QueryConfig {
         }
     }
 
-    /// Returns ClickHouse SETTINGS as key-value pairs, skipping unset fields.
+    /// Returns ClickHouse SETTINGS as key-value string pairs, skipping unset fields.
     ///
     /// Uses serde round-trip so that the field names stay in sync with the
-    /// struct definition -- no manual string mapping needed. Only numeric
-    /// and bool values are emitted; strings and other types are skipped to
-    /// prevent unescaped values from reaching the SETTINGS clause.
-    pub fn to_clickhouse_settings(&self) -> Vec<(String, String)> {
+    /// struct definition -- no manual string mapping needed.
+    ///
+    /// Values are formatted as SQL-safe literals: bare integers, `0`/`1`
+    /// for bools, and single-quoted escaped strings. Returns an error if
+    /// a field serializes to a type that cannot be represented as a
+    /// ClickHouse setting (e.g. arrays, objects, or non-u64 numbers).
+    pub fn to_clickhouse_settings(&self) -> Result<Vec<(String, String)>, String> {
         let map = match serde_json::to_value(self) {
             Ok(Value::Object(m)) => m,
-            _ => return Vec::new(),
+            _ => return Ok(Vec::new()),
         };
         map.into_iter()
             .filter(|(_, v)| !v.is_null())
-            .filter_map(|(k, v)| {
-                let s = match &v {
+            .map(|(k, v)| {
+                let formatted = match &v {
                     Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
-                    Value::Number(n) => n.to_string(),
-                    // Skip strings/arrays/objects -- they can't be safely
-                    // interpolated into a SETTINGS clause without escaping.
-                    _ => return None,
+                    Value::Number(n) => {
+                        n.as_u64()
+                            .ok_or_else(|| format!("setting `{k}` has non-u64 value: {v}"))?;
+                        n.to_string()
+                    }
+                    Value::String(s) => escape_setting_str(s),
+                    _ => return Err(format!("setting `{k}` has unsupported type: {v}")),
                 };
-                Some((k, s))
+                Ok((k, formatted))
             })
             .collect()
     }
@@ -160,17 +173,25 @@ mod tests {
     }
 
     #[test]
-    fn to_clickhouse_settings_skips_none_and_formats_bools() {
+    fn to_clickhouse_settings_skips_none_and_formats_bools() -> Result<(), String> {
         let cfg = QueryConfig {
             max_execution_time: Some(30),
             use_query_cache: Some(true),
             query_cache_ttl: None,
         };
-        let mut settings = cfg.to_clickhouse_settings();
+        let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(settings.len(), 2);
         assert_eq!(settings[0], ("max_execution_time".into(), "30".into()));
         assert_eq!(settings[1], ("use_query_cache".into(), "1".into()));
+        Ok(())
+    }
+
+    #[test]
+    fn escape_setting_str_quotes_and_backslashes() {
+        assert_eq!(escape_setting_str("hello"), "'hello'");
+        assert_eq!(escape_setting_str("it's a test"), "'it\\'s a test'");
+        assert_eq!(escape_setting_str("back\\slash"), "'back\\\\slash'");
     }
 
     #[test]
