@@ -21,7 +21,6 @@ bytes = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
-config = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
@@ -65,7 +64,6 @@ prost-build = { workspace = true }
 
 [dev-dependencies]
 jsonschema = { workspace = true }
-tempfile = { workspace = true }
 tokio = { workspace = true }
 
 [lints.rust]

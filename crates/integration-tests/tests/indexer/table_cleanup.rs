@@ -1,6 +1,6 @@
-use clickhouse_client::FromArrowColumn;
-use indexer::scheduler::table_cleanup::{TableCleanup, TableCleanupConfig};
-use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
+use indexer::scheduler::table_cleanup::TableCleanup;
+use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanupConfig};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext};
 
 // Verifies that OPTIMIZE TABLE ... FINAL CLEANUP is valid for every ontology table.

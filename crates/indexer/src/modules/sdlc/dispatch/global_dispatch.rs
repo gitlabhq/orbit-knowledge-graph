@@ -3,21 +3,14 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::configuration::ScheduleConfiguration;
+use crate::configuration::{GlobalDispatcherConfig, ScheduleConfiguration};
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct GlobalDispatcherConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-}
 
 pub struct GlobalDispatcher {
     nats: Arc<dyn NatsServices>,

@@ -3,7 +3,8 @@ mod destination;
 mod error;
 
 pub use clickhouse_client::{
-    ArrowClickHouseClient, ArrowQuery, ClickHouseConfiguration, ClickHouseError,
+    ArrowClickHouseClient, ArrowQuery, ClickHouseConfiguration, ClickHouseConfigurationExt,
+    ClickHouseError,
 };
 pub use destination::ClickHouseDestination;
 

@@ -9,6 +9,7 @@ default = []
 testkit = []
 
 [dependencies]
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 arrow = { workspace = true }
 arrow-ipc = { workspace = true, features = ["lz4"] }

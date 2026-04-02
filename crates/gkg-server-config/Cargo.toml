@@ -4,11 +4,14 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+config = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 serde_yaml = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

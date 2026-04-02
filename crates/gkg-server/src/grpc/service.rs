@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::content::ColumnResolverRegistry;
-use clickhouse_client::ClickHouseConfiguration;
+use clickhouse_client::{ClickHouseConfiguration, ClickHouseConfigurationExt};
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;

@@ -1,5 +1,6 @@
 mod global_dispatch;
 mod namespace_dispatch;
 
-pub use global_dispatch::{GlobalDispatcher, GlobalDispatcherConfig};
-pub use namespace_dispatch::{NamespaceDispatcher, NamespaceDispatcherConfig};
+pub use crate::configuration::{GlobalDispatcherConfig, NamespaceDispatcherConfig};
+pub use global_dispatch::GlobalDispatcher;
+pub use namespace_dispatch::NamespaceDispatcher;

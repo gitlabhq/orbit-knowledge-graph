@@ -5,6 +5,7 @@ use super::common;
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
+use clickhouse_client::ClickHouseConfigurationExt;
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
 use indexer::modules::sdlc::dispatch::{

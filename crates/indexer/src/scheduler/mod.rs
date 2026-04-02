@@ -1,8 +1,9 @@
 mod metrics;
 pub mod table_cleanup;
 
+pub use crate::configuration::TableCleanupConfig;
 pub use metrics::ScheduledTaskMetrics;
-pub use table_cleanup::{TableCleanup, TableCleanupConfig};
+pub use table_cleanup::TableCleanup;
 
 use std::sync::Arc;
 
@@ -10,15 +11,10 @@ use async_trait::async_trait;
 use tracing::{info, warn};
 
 use crate::configuration::ScheduleConfiguration;
-use crate::configuration::ScheduledTasksConfiguration;
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsConfiguration, NatsServices, NatsServicesImpl};
 
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-pub struct ScheduleConfig {
-    #[serde(default)]
-    pub tasks: ScheduledTasksConfiguration,
-}
+pub use gkg_server_config::ScheduleConfig;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]

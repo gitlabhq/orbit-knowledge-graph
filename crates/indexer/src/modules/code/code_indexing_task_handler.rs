@@ -4,24 +4,16 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tracing::{debug, info, warn};
 
-use serde::{Deserialize, Serialize};
-
 use super::checkpoint_store::CodeCheckpointStore;
 use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::locking::project_lock_key;
 use super::metrics::CodeMetrics;
 use super::repository::RepositoryService;
-use crate::configuration::HandlerConfiguration;
+use crate::configuration::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct CodeIndexingTaskHandlerConfig {
-    #[serde(flatten)]
-    pub engine: HandlerConfiguration,
-}
 
 pub struct CodeIndexingTaskHandler {
     pipeline: Arc<CodeIndexingPipeline>,

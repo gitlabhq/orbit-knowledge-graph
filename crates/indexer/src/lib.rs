@@ -32,7 +32,6 @@ pub mod configuration;
 pub mod dead_letter;
 pub mod destination;
 pub mod engine;
-pub(crate) mod env;
 pub mod handler;
 pub mod health;
 pub mod llqm_v1;
@@ -52,6 +51,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use clickhouse::ClickHouseConfiguration;
+use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseDestination;
 use configuration::EngineConfiguration;
 use engine::EngineBuilder;

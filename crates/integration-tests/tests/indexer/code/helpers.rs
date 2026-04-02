@@ -10,6 +10,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use base64::Engine;
+use clickhouse_client::ClickHouseConfigurationExt;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use gitlab_client::{GitlabClient, GitlabClientConfiguration};

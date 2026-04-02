@@ -1148,6 +1148,7 @@ dependencies = [
  "bytes",
  "clickhouse",
  "futures",
+ "gkg-server-config",
  "gkg-utils",
  "once_cell",
  "reqwest 0.13.2",
@@ -2977,6 +2978,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "gkg-server-config",
  "jsonwebtoken",
  "reqwest 0.13.2",
  "rustls",
@@ -3001,7 +3003,6 @@ dependencies = [
  "clap",
  "clickhouse",
  "clickhouse-client",
- "config",
  "enum-as-inner",
  "futures",
  "gitlab-client",
@@ -3026,7 +3027,6 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.28.0",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -3044,9 +3044,12 @@ dependencies = [
 name = "gkg-server-config"
 version = "0.1.0"
 dependencies = [
+ "config",
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3189,6 +3192,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "clickhouse-client",
+ "gkg-server-config",
  "k8s-openapi",
  "kube",
  "serde",
@@ -3611,6 +3615,7 @@ dependencies = [
  "futures",
  "gitaly-protos",
  "gitlab-client",
+ "gkg-server-config",
  "gkg-utils",
  "internment",
  "moka",
