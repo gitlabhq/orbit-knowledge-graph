@@ -82,6 +82,8 @@ edges:
   REVIEWER: edges/reviewer.yaml
   ASSIGNED: edges/assigned.yaml
   MERGED_BY: edges/merged_by.yaml
+  CLOSED_BY: edges/closed_by.yaml
+  APPROVED_BY: edges/approved_by.yaml
   HAS_FILE: edges/has_file.yaml
   HAS_STAGE: edges/has_stage.yaml
   HAS_JOB: edges/has_job.yaml

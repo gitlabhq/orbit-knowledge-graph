@@ -69,8 +69,8 @@ pub async fn processes_work_item_single_value_edges(ctx: &TestContext) {
     ctx.execute(
         "INSERT INTO work_items
             (id, iid, title, description, author_id, state_id, work_item_type_id, confidential,
-             milestone_id, namespace_id, traversal_path, _siphon_replicated_at)
-        VALUES (1, 1, 'Test issue', 'Test description', 1, 1, 1, false, 10, 100, '1/100/', '2024-01-20 12:00:00')",
+             milestone_id, namespace_id, project_id, closed_by_id, traversal_path, _siphon_replicated_at)
+        VALUES (1, 1, 'Test issue', 'Test description', 1, 2, 1, false, 10, 100, 1000, 2, '1/100/', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -84,6 +84,8 @@ pub async fn processes_work_item_single_value_edges(ctx: &TestContext) {
     assert_edges_have_traversal_path(ctx, "IN_MILESTONE", "WorkItem", "Milestone", "1/100/", 1)
         .await;
     assert_edges_have_traversal_path(ctx, "IN_GROUP", "WorkItem", "Group", "1/100/", 1).await;
+    assert_edges_have_traversal_path(ctx, "IN_PROJECT", "WorkItem", "Project", "1/100/", 1).await;
+    assert_edges_have_traversal_path(ctx, "CLOSED_BY", "User", "WorkItem", "1/100/", 1).await;
 }
 
 pub async fn processes_work_item_multi_target_edges(ctx: &TestContext) {
