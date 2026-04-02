@@ -1,0 +1,6 @@
+description: User who closed a work item
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: WorkItem, id: id }
+    description: "User closed a work item."
