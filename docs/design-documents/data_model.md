@@ -42,6 +42,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `User`                | Represents a GitLab user.                                                                               | `id`, `username`, `name`                                                    |
 | `Note`                | Represents a comment on an issue, merge request, or epic.                                               | `id`, `body`, `author_id`, `project_id`                                     |
 | `Epic`                | Represents a GitLab epic.                                                                               | `id`, `iid`, `title`, `state`, `group_id`, `author_id`                        |
+| `WorkItem`            | Represents a GitLab work item (issue, task, epic, objective, etc.).                                     | `id`, `iid`, `title`, `state`, `project_id`, `author_id`                      |
 | `Branch`              | Represents a Git branch.                                                                                | `id`, `name`, `project_id`, `is_default`                                    |
 
 ### Relationship Visualization
@@ -69,6 +70,11 @@ graph TD
     MergeRequest -- RELATED_TO --> Issue
     Pipeline -- TRIGGERED_FOR --> MergeRequest
     Pipeline -- TRIGGERED_FOR --> Branch
+
+    WorkItem -- IN_PROJECT --> Project
+    User -- CLOSED_BY --> WorkItem
+    User -- APPROVED_BY --> MergeRequest
+    User -- REVIEWER --> MergeRequest
 ```
 
 ### Relationship Types
@@ -80,13 +86,16 @@ graph TD
 | `HAS_MERGE_REQUEST`                 | `Project`      | `MergeRequest` | A project has a merge request.                                                                          |
 | `HAS_PIPELINE`                      | `Project`      | `Pipeline`     | A project has a CI/CD pipeline.                                                                         |
 | `HAS_VULNERABILITY`                 | `Project`      | `Vulnerability`| A project has a vulnerability finding.                                                                  |
-| `IN_PROJECT`                        | `Branch`       | `Project`      | A branch belongs to a project.                                                                          |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`... | `Project` | An entity belongs to a project.                                                                   |
 | `CREATED`                           | `User`         | `Issue`, `MR`... | A user created an entity.                                                                               |
 | `COMMENTS_ON`                       | `User`         | `Issue`, `MR`... | A user commented on an entity (via a `Note`).                                                           |
 | `IS_COMMENT_ON`                     | `Note`         | `Issue`, `MR`... | A note is a comment on a specific entity.                                                               |
 | `MERGES_TO`                         | `MergeRequest` | `Branch`       | A merge request targets a specific branch for merging.                                                  |
 | `RELATED_TO`                        | `MergeRequest` | `Issue`        | A merge request is related to or closes an issue.                                                       |
 | `TRIGGERED_FOR`                     | `Pipeline`     | `MR`, `Branch` | A pipeline was triggered for a merge request or a branch push.                                          |
+| `CLOSED_BY`                         | `User`         | `WorkItem`     | A user closed a work item.                                                                              |
+| `APPROVED_BY`                       | `MergeRequest` | `User`         | A merge request was approved by a user.                                                                 |
+| `REVIEWER`                          | `MergeRequest` | `User`         | A merge request has a user as reviewer.                                                                 |
 
 ---
 
