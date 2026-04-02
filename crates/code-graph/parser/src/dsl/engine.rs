@@ -233,4 +233,34 @@ mod tests {
         assert_eq!(dsl_fqn_to_string(&method.fqn), "A.method");
         assert_eq!(method.definition_type.label, "FlatMethod");
     }
+
+    #[test]
+    fn test_auto_with_override() {
+        let spec = LanguageSpec::new(
+            "test",
+            // Override: methods inside classes get a different label
+            vec![scope("function_definition", "Method").when(grandparent_is("class_definition"))],
+            vec![],
+            vec![],
+        )
+        .auto(&[
+            ("class_definition", "Class"),
+            ("function_definition", "Function"),
+        ]);
+        let parser = GenericParser::new(SupportedLanguage::Python);
+        let code = "class A:\n    def b(self): pass\ndef c(): pass";
+        let result = parser.parse(code, Some("test.py")).unwrap();
+        let output = spec.analyze(&result).unwrap();
+
+        assert_eq!(output.definitions.len(), 3);
+
+        let a = output.definitions.iter().find(|d| d.name == "A").unwrap();
+        assert_eq!(a.definition_type.label, "Class");
+
+        let b = output.definitions.iter().find(|d| d.name == "b").unwrap();
+        assert_eq!(b.definition_type.label, "Method");
+
+        let c = output.definitions.iter().find(|d| d.name == "c").unwrap();
+        assert_eq!(c.definition_type.label, "Function");
+    }
 }

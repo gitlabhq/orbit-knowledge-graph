@@ -9,7 +9,7 @@ pub fn python_language_spec() -> LanguageSpec {
     LanguageSpec::new(
         "python",
         vec![
-            scope("class_definition", "Class"),
+            // Override: decorated classes get a different label
             scope("class_definition", "DecoratedClass").when(parent_is("decorated_definition")),
             scope_fn("function_definition", classify_function),
             scope("assignment", "Lambda")
@@ -30,6 +30,7 @@ pub fn python_language_spec() -> LanguageSpec {
                 .symbol_from(field("name")),
         ],
     )
+    .auto(&[("class_definition", "Class")])
 }
 
 fn classify_function(node: &Node<StrDoc<SupportLang>>) -> &'static str {
