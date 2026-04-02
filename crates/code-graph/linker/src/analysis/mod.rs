@@ -1,9 +1,7 @@
-pub mod backtracking;
 pub mod files;
 pub mod languages;
 pub mod types;
 
-use crate::analysis::backtracking::GlobalBacktracker;
 use crate::analysis::types::rels_by_kind;
 use crate::analysis::types::{
     ConsolidatedRelationship, DefinitionNode, DirectoryNode, FileNode, FqnType, GraphData,
@@ -489,15 +487,6 @@ impl AnalysisService {
                     self.typescript_analyzer.process_references(
                         &references,
                         &relative_path,
-                        relationships,
-                    );
-                }
-                SupportedLanguage::C | SupportedLanguage::Cpp => {
-                    let backtracker = GlobalBacktracker::from_definition_map(definition_map);
-                    backtracker.process_dsl_references(
-                        &references,
-                        &relative_path,
-                        definition_map,
                         relationships,
                     );
                 }
