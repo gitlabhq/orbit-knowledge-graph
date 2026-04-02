@@ -58,7 +58,7 @@ q4:
         {"id": "merger", "entity": "User", "node_ids": "$sample"}
       ],
       "relationships": [
-        {"type": "MERGED_BY", "from": "mr", "to": "merger"}
+        {"type": "MERGED_BY", "from": "merger", "to": "mr"}
       ],
       "limit": 30,
       "order_by": {"node": "mr", "property": "updated_at", "direction": "DESC"}
@@ -218,7 +218,7 @@ q14:
         {"id": "assignee", "entity": "User", "node_ids": "$sample"}
       ],
       "relationships": [
-        {"type": "ASSIGNED", "from": "wi", "to": "assignee"}
+        {"type": "ASSIGNED", "from": "assignee", "to": "wi"}
       ],
       "limit": 20
     }
@@ -332,7 +332,7 @@ q21:
         {"id": "p", "entity": "Project"}
       ],
       "relationships": [
-        {"type": "REVIEWER", "from": "mr", "to": "reviewer"},
+        {"type": "REVIEWER", "from": "reviewer", "to": "mr"},
         {"type": "IN_PROJECT", "from": "mr", "to": "p"}
       ],
       "aggregations": [
