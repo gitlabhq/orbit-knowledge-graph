@@ -150,8 +150,13 @@ etl:
       as: HAS_LABEL
       direction: outgoing
       array_field: label_id
-    approvals:
+    reviewers:
       to: User
       as: REVIEWER
+      direction: outgoing
+      array_field: user_id
+    approvals:
+      to: User
+      as: APPROVED_BY
       direction: outgoing
       array_field: user_id
