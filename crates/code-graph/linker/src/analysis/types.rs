@@ -11,7 +11,6 @@ use crate::graph::{RelationshipKind, RelationshipType};
 use parser_core::{
     csharp::types::{CSharpDefinitionType, CSharpFqn, CSharpImportType},
     definitions::DefinitionTypeInfo,
-    dsl::types::{DslDefinitionType, DslFqn, dsl_fqn_to_string},
     imports::ImportTypeInfo,
     java::ast::java_fqn_to_string,
     java::types::{JavaDefinitionType, JavaFqn, JavaImportType},
@@ -395,7 +394,7 @@ impl FileNode {
 }
 
 /// Represents a language-specific definition type (e.g. class, module, method, etc.)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum DefinitionType {
     Ruby(RubyDefinitionType),
     Python(PythonDefinitionType),
@@ -404,7 +403,6 @@ pub enum DefinitionType {
     CSharp(CSharpDefinitionType),
     TypeScript(TypeScriptDefinitionType),
     Rust(RustDefinitionType),
-    Dsl(DslDefinitionType),
     Unsupported(),
 }
 
@@ -418,7 +416,6 @@ impl DefinitionType {
             DefinitionType::CSharp(csharp_type) => csharp_type.as_str(),
             DefinitionType::TypeScript(typescript_type) => typescript_type.as_str(),
             DefinitionType::Rust(rust_type) => rust_type.as_str(),
-            DefinitionType::Dsl(dsl_type) => dsl_type.as_str(),
             DefinitionType::Unsupported() => "unsupported",
         }
     }
@@ -434,7 +431,6 @@ pub enum FqnType {
     CSharp(CSharpFqn),
     TypeScript(TypeScriptFqn),
     Rust(RustFqn),
-    Dsl(DslFqn),
 }
 
 impl std::fmt::Display for FqnType {
@@ -457,7 +453,6 @@ impl std::fmt::Display for FqnType {
                 write!(f, "{}", typescript_fqn_to_string(typescript_type))
             }
             FqnType::Rust(rust_type) => write!(f, "{}", rust_fqn_to_string(rust_type)),
-            FqnType::Dsl(dsl_type) => write!(f, "{}", dsl_fqn_to_string(dsl_type)),
         }
     }
 }
@@ -473,7 +468,6 @@ impl FqnType {
             FqnType::CSharp(csharp_type) => csharp_type.last().unwrap().node_name(),
             FqnType::TypeScript(typescript_type) => typescript_type.last().unwrap().node_name(),
             FqnType::Rust(rust_type) => rust_type.parts.last().unwrap().node_name(),
-            FqnType::Dsl(dsl_type) => dsl_type.parts.last().unwrap(),
         }
     }
 }

@@ -343,14 +343,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::C | SupportedLanguage::Cpp => {
-                languages::dsl::process_definitions(
-                    file_result,
-                    &relative_path,
-                    definition_map,
-                    relationships,
-                );
-            }
+            SupportedLanguage::C | SupportedLanguage::Cpp => {}
         }
     }
 
@@ -564,9 +557,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::C | SupportedLanguage::Cpp => {
-                languages::dsl::add_definition_relationships(definition_map, relationships);
-            }
+            SupportedLanguage::C | SupportedLanguage::Cpp => {}
         }
     }
 }

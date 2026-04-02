@@ -300,7 +300,7 @@ impl TypeScriptAnalyzer {
             DefinitionType::TypeScript(TypeScriptDefinitionType::NamedCallExpression) => {
                 DefinitionType::TypeScript(TypeScriptDefinitionType::Function)
             }
-            _ => definition_type.clone(),
+            _ => *definition_type,
         }
     }
     /// Determine the relationship type between parent and child definitions using proper types
