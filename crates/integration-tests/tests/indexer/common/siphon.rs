@@ -1,5 +1,9 @@
 use integration_testkit::TestContext;
 
+fn sql_escape(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
 pub async fn create_namespace(
     ctx: &TestContext,
     id: i64,
@@ -20,7 +24,7 @@ pub async fn create_namespace_with_path(
 ) {
     let parent_val = parent_id.map_or("NULL".to_string(), |p| p.to_string());
     let default_slug = format!("namespace-{id}");
-    let path_slug = slug.unwrap_or(&default_slug);
+    let path_slug = sql_escape(slug.unwrap_or(&default_slug));
     let traversal_ids: Vec<i64> = traversal_path
         .trim_end_matches('/')
         .split('/')
@@ -81,7 +85,7 @@ pub async fn create_project_with_path(
     slug: Option<&str>,
 ) {
     let default_slug = format!("project-{id}");
-    let path_slug = slug.unwrap_or(&default_slug);
+    let path_slug = sql_escape(slug.unwrap_or(&default_slug));
     ctx.execute(&format!(
         "INSERT INTO siphon_projects \
          (id, name, description, visibility_level, path, namespace_id, creator_id, \
@@ -104,10 +108,11 @@ pub async fn create_route(
     path: &str,
     namespace_id: i64,
 ) {
+    let escaped_path = sql_escape(path);
     ctx.execute(&format!(
         "INSERT INTO siphon_routes \
          (id, source_id, source_type, path, namespace_id, created_at, updated_at, _siphon_replicated_at) \
-         VALUES ({id}, {source_id}, '{source_type}', '{path}', {namespace_id}, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')"
+         VALUES ({id}, {source_id}, '{source_type}', '{escaped_path}', {namespace_id}, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')"
     ))
     .await;
 }

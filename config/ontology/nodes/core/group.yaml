@@ -77,7 +77,7 @@ etl:
     namespace.id AS id, namespace.name AS name,
     namespace_details.description AS description,
     namespace.visibility_level AS visibility_level,
-    if(route.id > 0, route.path, namespace.path) AS full_path,
+    if(isNotNull(route.source_id), route.path, namespace.path) AS full_path,
     namespace.parent_id AS parent_id, namespace.owner_id AS owner_id,
     namespace.created_at AS created_at, namespace.updated_at AS updated_at,
     traversal_paths.traversal_path AS traversal_path
@@ -91,8 +91,12 @@ etl:
       WHERE startsWith(traversal_path, {traversal_path:String})
     ) traversal_paths
     ON namespace.id = traversal_paths.id
-    LEFT JOIN (SELECT * FROM siphon_routes FINAL) route
-    ON namespace.id = route.source_id AND route.source_type = 'Namespace'
+    LEFT JOIN (
+      SELECT source_id, argMax(path, _siphon_replicated_at) AS path
+      FROM siphon_routes
+      WHERE source_type = 'Namespace' AND NOT _siphon_deleted
+      GROUP BY source_id
+    ) route ON namespace.id = route.source_id
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: namespace._siphon_replicated_at
   deleted: namespace._siphon_deleted

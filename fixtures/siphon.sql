@@ -165,20 +165,25 @@ SETTINGS index_granularity = 512, deduplicate_merge_projection_mode = 'rebuild';
 -- Siphon source tables for routes (authoritative full_path)
 CREATE TABLE IF NOT EXISTS siphon_routes
 (
-    `id` Int64,
-    `source_id` Int64,
-    `source_type` LowCardinality(String),
-    `path` String DEFAULT '',
-    `name` String DEFAULT '',
-    `namespace_id` Nullable(Int64),
-    `created_at` Nullable(DateTime64(6, 'UTC')),
-    `updated_at` Nullable(DateTime64(6, 'UTC')),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
-    `_siphon_deleted` Bool DEFAULT false
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `source_id` Int64 CODEC(ZSTD(1)),
+    `source_type` LowCardinality(String) CODEC(LZ4),
+    `path` String CODEC(ZSTD(3)),
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `name` String,
+    `namespace_id` Int64,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC') CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
 ) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY id
-ORDER BY id
-SETTINGS index_granularity = 8192;
+PRIMARY KEY (traversal_path, source_type, source_id, id)
+ORDER BY (traversal_path, source_type, source_id, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild';
 
 -- Siphon source tables for notes
 CREATE TABLE IF NOT EXISTS siphon_notes

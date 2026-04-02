@@ -94,7 +94,7 @@ etl:
   select: >-
     project.id AS id, project.name AS name, project.description AS description,
     project.visibility_level AS visibility_level,
-    if(route.id > 0, route.path, project.path) AS full_path,
+    if(isNotNull(route.source_id), route.path, project.path) AS full_path,
     project.namespace_id AS namespace_id, project.creator_id AS creator_id,
     project.created_at AS created_at, project.updated_at AS updated_at,
     project.archived AS archived, project.star_count AS star_count,
@@ -108,8 +108,12 @@ etl:
       WHERE startsWith(traversal_path, {traversal_path:String})
     ) traversal_paths
     ON project.id = traversal_paths.id
-    LEFT JOIN (SELECT * FROM siphon_routes FINAL) route
-    ON project.id = route.source_id AND route.source_type = 'Project'
+    LEFT JOIN (
+      SELECT source_id, argMax(path, _siphon_replicated_at) AS path
+      FROM siphon_routes
+      WHERE source_type = 'Project' AND NOT _siphon_deleted
+      GROUP BY source_id
+    ) route ON project.id = route.source_id
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: project._siphon_replicated_at
   deleted: project._siphon_deleted
