@@ -1,8 +1,7 @@
-use crate::dsl::extractors::{declarator, field, field_chain};
+use crate::c::C;
+use crate::dsl::extractors::{declarator, field};
 use crate::dsl::predicates::*;
-use crate::dsl::types::{
-    DslLanguage, ImportRule, ReferenceRule, ScopeRule, import, reference, scope_fn,
-};
+use crate::dsl::types::{DslLanguage, ImportRule, ReferenceRule, ScopeRule, reference, scope_fn};
 
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -29,21 +28,17 @@ impl DslLanguage for Cpp {
     }
 
     fn refs() -> Vec<ReferenceRule> {
-        vec![
-            reference("call_expression")
-                .when(field_kind("function", &["identifier"]))
-                .name_from(field("function")),
-            reference("call_expression")
-                .when(field_kind("function", &["field_expression"]))
-                .name_from(field_chain(&["function", "field"])),
+        let mut refs = C::refs();
+        refs.push(
             reference("call_expression")
                 .when(field_kind("function", &["qualified_identifier"]))
                 .name_from(field("function")),
-        ]
+        );
+        refs
     }
 
     fn imports() -> Vec<ImportRule> {
-        vec![import("preproc_include").path_from(field("path"))]
+        C::imports()
     }
 }
 
