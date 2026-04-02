@@ -54,3 +54,7 @@ variants:
   - from_node: { type: Branch, id: id }
     to_node: { type: Project, id: id }
     description: "Branch belongs to project."
+
+  - from_node: { type: VulnerabilityOccurrence, id: id }
+    to_node: { type: Project, id: id }
+    description: "Vulnerability occurrence belongs to project."

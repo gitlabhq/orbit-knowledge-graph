@@ -153,10 +153,10 @@ etl:
     reviewers:
       to: User
       as: REVIEWER
-      direction: outgoing
+      direction: incoming
       array_field: user_id
     approvals:
       to: User
       as: APPROVED_BY
-      direction: outgoing
+      direction: incoming
       array_field: user_id
