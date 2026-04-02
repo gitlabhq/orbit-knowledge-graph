@@ -10,42 +10,19 @@ use crate::error::ClickHouseError;
 use crate::stats::{DiskInfo, InstanceHealth, ProcessorProfile, QueryLogEntry, TablePartsInfo};
 
 impl ArrowClickHouseClient {
-    /// Execute a SQL statement and return the response as raw text.
-    ///
-    /// Uses `TabSeparatedRaw` format so ClickHouse returns the bytes as-is.
-    /// Suitable for EXPLAIN output, SYSTEM commands, and any query where
-    /// the FORMAT is not embedded in the SQL.
-    pub async fn fetch_text(&self, sql: &str) -> Result<String, ClickHouseError> {
-        let mut cursor = self
-            .query(sql)
-            .inner
-            .fetch_bytes("TabSeparatedRaw")
-            .map_err(ClickHouseError::Query)?;
-
-        let mut buffer = Vec::new();
-        loop {
-            match cursor.next().await {
-                Ok(Some(chunk)) => buffer.extend(chunk),
-                Ok(None) => break,
-                Err(e) => return Err(ClickHouseError::Query(e)),
-            }
-        }
-
-        String::from_utf8(buffer).map_err(|e| ClickHouseError::BadResponse {
-            status: 0,
-            body: format!("non-UTF8 response: {e}"),
-        })
+    pub(crate) async fn fetch_text(&self, sql: &str) -> Result<String, ClickHouseError> {
+        self.fetch_as_string(sql, "TabSeparatedRaw").await
     }
 
-    /// Execute a SQL query that returns JSONEachRow and return the raw text.
-    ///
-    /// Appends `FORMAT JSONEachRow` via the clickhouse-rs client (not in the
-    /// SQL text itself).
     async fn fetch_json_text(&self, sql: &str) -> Result<String, ClickHouseError> {
+        self.fetch_as_string(sql, "JSONEachRow").await
+    }
+
+    async fn fetch_as_string(&self, sql: &str, format: &str) -> Result<String, ClickHouseError> {
         let mut cursor = self
             .query(sql)
             .inner
-            .fetch_bytes("JSONEachRow")
+            .fetch_bytes(format)
             .map_err(ClickHouseError::Query)?;
 
         let mut buffer = Vec::new();
@@ -72,10 +49,6 @@ impl ArrowClickHouseClient {
 
     pub async fn explain_pipeline(&self, sql: &str) -> Result<String, ClickHouseError> {
         self.fetch_text(&format!("EXPLAIN PIPELINE {sql}")).await
-    }
-
-    pub async fn explain_estimate(&self, sql: &str) -> Result<String, ClickHouseError> {
-        self.fetch_text(&format!("EXPLAIN ESTIMATE {sql}")).await
     }
 
     /// Fetch a query_log entry by matching against `log_comment`.
@@ -321,9 +294,10 @@ fn validate_log_comment_match(s: &str) -> Result<(), ClickHouseError> {
 }
 
 fn validate_query_id(query_id: &str) -> Result<(), ClickHouseError> {
-    if !query_id
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    if query_id.is_empty()
+        || !query_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
     {
         return Err(ClickHouseError::BadResponse {
             status: 0,

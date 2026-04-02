@@ -3,23 +3,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct QueryStats {
-    pub query_id: String,
-    pub read_rows: u64,
-    pub read_bytes: u64,
-    pub result_rows: u64,
-    pub result_bytes: u64,
-    pub elapsed_ns: u64,
-    pub memory_usage: i64,
-}
-
-impl QueryStats {
-    pub fn elapsed_ms(&self) -> f64 {
-        self.elapsed_ns as f64 / 1_000_000.0
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QueryLogEntry {
     #[serde(default)]
     pub query_id: String,
@@ -93,18 +76,4 @@ pub struct TablePartsInfo {
     pub active_mutations: u64,
     pub detached_parts: u64,
     pub last_modification_time: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn elapsed_ms_conversion() {
-        let stats = QueryStats {
-            elapsed_ns: 62_800_000,
-            ..Default::default()
-        };
-        assert!((stats.elapsed_ms() - 62.8).abs() < 0.001);
-    }
 }
