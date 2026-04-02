@@ -153,9 +153,11 @@ async fn data_correctness() {
         // work items: search
         work_items::search_returns_correct_work_item_properties,
         work_items::search_filter_work_item_type_returns_matching_rows,
-        // work items: traversal (all 5 edge types)
+        // work items: traversal (all 7 edge types)
         work_items::traversal_user_authored_work_item_returns_correct_edges,
         work_items::traversal_work_item_in_group_returns_correct_edges,
+        work_items::traversal_work_item_in_project_returns_correct_edges,
+        work_items::traversal_user_closed_work_item_returns_correct_edges,
         work_items::traversal_work_item_in_milestone_returns_correct_edges,
         work_items::traversal_user_assigned_work_item_returns_correct_edges,
         work_items::traversal_work_item_has_label_returns_correct_edges,
