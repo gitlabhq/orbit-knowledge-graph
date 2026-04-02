@@ -1,8 +1,8 @@
-//! Post-execution enrichment queries against ClickHouse system tables.
+//! Post-execution profiling queries against ClickHouse system tables.
 //!
-//! These functions retrieve profiling data (EXPLAIN plans, query_log entries,
-//! processor profiles, instance health) using the standard `ArrowClickHouseClient`.
-//! They replace the former `QueryProfiler` which maintained a separate `reqwest`
+//! Retrieves EXPLAIN plans, query_log entries, processor profiles, and
+//! instance health using the standard `ArrowClickHouseClient`. Replaces
+//! the former `QueryProfiler` which maintained a separate `reqwest`
 //! HTTP client.
 
 use std::collections::HashMap;

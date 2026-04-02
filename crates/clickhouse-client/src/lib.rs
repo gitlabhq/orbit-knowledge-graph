@@ -1,8 +1,8 @@
 mod arrow_client;
 mod configuration;
-pub mod enrichment;
 mod error;
 mod extract;
+pub mod profiling;
 pub mod stats;
 
 pub use arrow_client::{ArrowClickHouseClient, ArrowQuery};
