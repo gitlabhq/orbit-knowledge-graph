@@ -8,7 +8,7 @@ use crate::analysis::types::{
     ImportedSymbolLocation, ImportedSymbolNode, OptimizedFileTree,
 };
 use crate::graph::{RelationshipKind, RelationshipType};
-use crate::parsing::processor::{FileProcessingResult, References};
+use crate::parse_types::{FileProcessingResult, References};
 use internment::ArcIntern;
 use parser_core::parser::SupportedLanguage;
 use parser_core::utils::{Position, Range};

@@ -5,16 +5,14 @@ use parser_core::java::types::{
     JavaDefinitionType, JavaFqn, JavaFqnPartType, JavaImportedSymbolInfo,
 };
 
-use crate::{
-    analysis::{
-        languages::java::{expression_resolver::ExpressionResolver, utils::full_import_path},
-        types::{
-            ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
-            ImportType, ImportedSymbolLocation, ImportedSymbolNode,
-        },
+use crate::analysis::{
+    languages::java::{expression_resolver::ExpressionResolver, utils::full_import_path},
+    types::{
+        ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
+        ImportType, ImportedSymbolLocation, ImportedSymbolNode,
     },
-    parsing::processor::{FileProcessingResult, References},
 };
+use crate::parse_types::{FileProcessingResult, References};
 use internment::ArcIntern;
 use parser_core::utils::Range;
 

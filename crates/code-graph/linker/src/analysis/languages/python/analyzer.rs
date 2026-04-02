@@ -6,7 +6,7 @@ use crate::analysis::types::{
     ImportType, ImportedSymbolLocation, ImportedSymbolNode, OptimizedFileTree,
 };
 use crate::graph::{RelationshipKind, RelationshipType};
-use crate::parsing::processor::{FileProcessingResult, References};
+use crate::parse_types::{FileProcessingResult, References};
 use internment::ArcIntern;
 use parser_core::python::types::PythonReferenceInfo;
 use parser_core::python::types::{Connector, PythonImportType, Symbol};
@@ -796,7 +796,7 @@ impl PythonAnalyzer {
         visited: &mut HashSet<ImportedSymbolLocation>,
     ) {
         let remaining_stack = stacker::remaining_stack().unwrap_or(0);
-        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        if remaining_stack < parser_core::MINIMUM_STACK_REMAINING {
             error!(
                 remaining_stack,
                 "stack limit reached, aborting Python imported symbol resolution"

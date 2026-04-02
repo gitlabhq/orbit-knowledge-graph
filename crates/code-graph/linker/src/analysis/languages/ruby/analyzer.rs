@@ -6,7 +6,7 @@
 
 use crate::analysis::types::{ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType};
 use crate::graph::RelationshipType;
-use crate::parsing::processor::{FileProcessingResult, References};
+use crate::parse_types::{FileProcessingResult, References};
 use internment::ArcIntern;
 use parser_core::utils::Range;
 use parser_core::{

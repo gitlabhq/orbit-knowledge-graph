@@ -5,19 +5,16 @@ use parser_core::java::{
 };
 use tracing::{debug, error};
 
-use crate::{
-    analysis::{
-        languages::java::{
-            java_file::{JavaClass, JavaFile},
-            utils::full_import_path,
-        },
-        types::{
-            ConsolidatedRelationship, DefinitionNode, DefinitionType, ImportType,
-            ImportedSymbolNode,
-        },
+use crate::analysis::{
+    languages::java::{
+        java_file::{JavaClass, JavaFile},
+        utils::full_import_path,
     },
-    parsing::processor::References,
+    types::{
+        ConsolidatedRelationship, DefinitionNode, DefinitionType, ImportType, ImportedSymbolNode,
+    },
 };
+use crate::parse_types::References;
 
 use internment::ArcIntern;
 use rustc_hash::FxHashMap;
@@ -311,7 +308,7 @@ impl ExpressionResolver {
         resolutions: &mut Resolutions,
     ) -> Option<ResolvedType> {
         let remaining_stack = stacker::remaining_stack().unwrap_or(0);
-        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        if remaining_stack < parser_core::MINIMUM_STACK_REMAINING {
             error!(
                 remaining_stack,
                 "stack limit reached, aborting Java method resolution in class hierarchy"
@@ -474,7 +471,7 @@ impl ExpressionResolver {
         file: &JavaFile,
     ) -> Option<ResolvedType> {
         let remaining_stack = stacker::remaining_stack().unwrap_or(0);
-        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        if remaining_stack < parser_core::MINIMUM_STACK_REMAINING {
             error!(
                 remaining_stack,
                 "stack limit reached, aborting Java field resolution in class hierarchy"

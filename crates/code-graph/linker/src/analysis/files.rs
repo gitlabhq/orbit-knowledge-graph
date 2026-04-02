@@ -2,7 +2,7 @@ use super::{DirectoryNode, FileNode};
 use crate::analysis::types::ConsolidatedRelationship;
 
 use crate::graph::RelationshipType;
-use crate::parsing::processor::FileProcessingResult;
+use crate::parse_types::FileProcessingResult;
 use internment::ArcIntern;
 use std::{collections::HashSet, path::Path};
 

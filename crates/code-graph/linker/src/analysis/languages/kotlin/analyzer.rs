@@ -4,19 +4,15 @@ use parser_core::kotlin::types::{
     KotlinDefinitionType, KotlinFqn, KotlinFqnPartType, KotlinImportedSymbolInfo,
 };
 
-use crate::graph::RelationshipType;
-use crate::{
-    analysis::{
-        languages::kotlin::{
-            expression_resolver::KotlinExpressionResolver, utils::full_import_path,
-        },
-        types::{
-            ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
-            ImportType, ImportedSymbolLocation, ImportedSymbolNode,
-        },
+use crate::analysis::{
+    languages::kotlin::{expression_resolver::KotlinExpressionResolver, utils::full_import_path},
+    types::{
+        ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
+        ImportType, ImportedSymbolLocation, ImportedSymbolNode,
     },
-    parsing::processor::{FileProcessingResult, References},
 };
+use crate::graph::RelationshipType;
+use crate::parse_types::{FileProcessingResult, References};
 use internment::ArcIntern;
 use parser_core::utils::Range;
 
