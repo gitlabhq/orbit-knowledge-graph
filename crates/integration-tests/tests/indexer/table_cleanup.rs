@@ -1,5 +1,5 @@
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
-use indexer::configuration::TableCleanupConfig;
+use gkg_server_config::TableCleanupConfig;
 use indexer::scheduler::table_cleanup::TableCleanup;
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext};

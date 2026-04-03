@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
+use clickhouse_client::ArrowClickHouseClient;
+use gkg_server_config::ProfilingConfig;
 use query_engine::compiler::{
     ColumnSelection, DynamicEntityColumns, HydrationPlan, HydrationTemplate, Input, InputNode,
     QueryType, VirtualColumnRequest, compile_input,

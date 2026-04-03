@@ -172,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_traversal_path_rejected() {
-        let client = Arc::new(clickhouse_client::ClickHouseConfiguration::default().build_client());
+        let client = Arc::new(gkg_server_config::ClickHouseConfiguration::default().build_client());
         let service = GraphStatsService::new(client, test_ontology());
 
         let result = service.get_stats("").await;

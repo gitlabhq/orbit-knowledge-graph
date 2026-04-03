@@ -28,7 +28,6 @@
 //!
 pub mod checkpoint;
 pub mod clickhouse;
-pub mod configuration;
 pub mod dead_letter;
 pub mod destination;
 pub mod engine;
@@ -50,17 +49,18 @@ pub mod testkit;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use clickhouse::ClickHouseConfiguration;
 use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseDestination;
-use configuration::EngineConfiguration;
-use configuration::ScheduleConfig;
 use engine::EngineBuilder;
-use gitlab_client::{GitlabClient, GitlabClientConfiguration};
+use gitlab_client::GitlabClient;
+use gkg_server_config::{
+    ClickHouseConfiguration, EngineConfiguration, GitlabClientConfiguration, NatsConfiguration,
+    ScheduleConfig,
+};
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
 use locking::INDEXING_LOCKS_BUCKET;
-use nats::{KvBucketConfig, NatsBroker, NatsConfiguration};
+use nats::{KvBucketConfig, NatsBroker};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::info;

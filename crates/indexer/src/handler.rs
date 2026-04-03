@@ -28,12 +28,12 @@ use parking_lot::RwLock;
 use thiserror::Error;
 
 use crate::{
-    configuration::HandlerConfiguration,
     destination::Destination,
     locking::LockService,
     nats::{NatsServices, ProgressNotifier},
     types::{Envelope, Subscription},
 };
+use gkg_server_config::HandlerConfiguration;
 
 /// Errors that can occur during message handling.
 #[derive(Debug, Error)]

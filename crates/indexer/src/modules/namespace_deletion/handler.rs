@@ -4,10 +4,10 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tracing::{error, info, warn};
 
-use crate::configuration::{HandlerConfiguration, NamespaceDeletionHandlerConfig};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::{Envelope, Event, SerializationError, Subscription};
+use gkg_server_config::{HandlerConfiguration, NamespaceDeletionHandlerConfig};
 
 use super::metrics::DeletionMetrics;
 use super::store::NamespaceDeletionStore;

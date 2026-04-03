@@ -10,9 +10,9 @@ use reqwest::StatusCode;
 use serde::Serialize;
 use tracing::debug;
 
-use crate::config::GitlabClientConfiguration;
 use crate::error::GitlabClientError;
 use crate::types::ProjectInfo;
+use gkg_server_config::GitlabClientConfiguration;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
 

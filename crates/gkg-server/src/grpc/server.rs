@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::content::ColumnResolverRegistry;
-use clickhouse_client::ClickHouseConfiguration;
+use gkg_server_config::ClickHouseConfiguration;
 use ontology::Ontology;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::ServerTlsConfig;
@@ -11,8 +11,8 @@ use tracing::info;
 
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
-use crate::config::GrpcConfig;
 use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
+use gkg_server_config::GrpcConfig;
 
 use super::service::KnowledgeGraphServiceImpl;
 

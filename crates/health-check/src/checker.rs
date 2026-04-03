@@ -1,10 +1,10 @@
 use clickhouse_client::ArrowClickHouseClient;
 
 use crate::clickhouse::ClickHouseChecker;
-use crate::config::HealthCheckConfig;
 use crate::error::Error;
 use crate::k8s::K8sChecker;
 use crate::types::HealthStatus;
+use gkg_server_config::HealthCheckConfig;
 
 pub struct HealthChecker {
     k8s: K8sChecker,

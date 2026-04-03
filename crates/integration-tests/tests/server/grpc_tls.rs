@@ -3,11 +3,10 @@ use std::sync::Arc;
 
 use gkg_server::auth::JwtValidator;
 use gkg_server::cluster_health::ClusterHealthChecker;
-use gkg_server::config::GrpcConfig;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::proto::GetClusterHealthRequest;
 use gkg_server::proto::knowledge_graph_service_client::KnowledgeGraphServiceClient;
-use indexer::clickhouse::ClickHouseConfiguration;
+use gkg_server_config::{ClickHouseConfiguration, GrpcConfig};
 use tonic::transport::server::ServerTlsConfig;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 

@@ -6,8 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
+use gkg_server_config::NatsConfiguration;
 use indexer::metrics::EngineMetrics;
-use indexer::nats::{NatsBroker, NatsConfiguration};
+use indexer::nats::NatsBroker;
 use indexer::types::{Envelope, Event, Subscription};
 use serde::{Deserialize, Serialize};
 use testcontainers::ImageExt;

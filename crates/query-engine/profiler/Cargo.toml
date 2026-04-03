@@ -15,6 +15,7 @@ workspace = true
 clickhouse-client = { path = "../../clickhouse-client" }
 compiler = { path = "../compiler" }
 gkg-server = { path = "../../gkg-server" }
+gkg-server-config = { path = "../../gkg-server-config" }
 pipeline = { path = "../pipeline" }
 shared = { path = "../shared" }
 types = { path = "../types" }
