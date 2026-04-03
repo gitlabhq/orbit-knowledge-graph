@@ -34,7 +34,7 @@ The web server will expose endpoints for GitLab Rails to consume. This will powe
 
 ### Request Routing and Query Execution
 
-- **REST endpoints** under `/api/graph/*` and `/api/v1/*` serve code graph workflows (symbols, references, dependencies) and namespace graph analytics. Each handler resolves the target scope (tenant/namespace/project), constructs a `DatabaseQueryingService`, and executes parameterized SQL.
+- **REST endpoints** under `/api/graph/*` and `/api/v1/*` serve code graph workflows (symbols, references, dependencies) and namespace graph analytics. Each handler resolves the target scope (tenant/namespace/project), constructs the appropriate query service, and executes parameterized SQL.
 - **MCP interface** mounts under `/mcp`. The adapter shares the same query services, exposing the intermediate JSON language so agents receive both the generated SQL (for transparency) and the actual query results.
 - **Web server process** (`gkg-webserver`) runs as the query front end in deployed environments. It connects to ClickHouse in read‑only mode, ensuring the query tier cannot mutate graph state while still serving low‑latency requests across multiple replicas.
 
@@ -63,6 +63,6 @@ flowchart LR
 
 ## Additional Notes
 
-- All query paths reuse the shared schema and query helpers in `crates/database`, so code and namespace graphs adhere to the same table/relationship definitions.
+- All query paths reuse the shared ontology and query infrastructure from `config/ontology/`, `config/schemas/graph_query.schema.json`, and the `query-engine/*` crates, so code and namespace graphs adhere to the same entity and relationship definitions.
 - SQL generation is guard-railed: hop limits (max three for namespace traversals), explicit relationship lists, and schema-driven validation prevent runaway queries.
 - The response format is defined by [ADR 004](../decisions/004_unified_response_schema.md). Every query returns a unified `{ query_type, nodes, edges, columns?, pagination? }` payload with deduplicated entity objects and instance-level edges. Aggregation queries include `columns` to describe computed values. Proto-level metadata (row count, generated SQL, pagination info) travels alongside the JSON payload in `QueryMetadata`.
