@@ -79,14 +79,6 @@ impl AppConfig {
         let config = config::Config::builder()
             .add_source(config::File::with_name("config/default").required(false))
             .add_source(SecretFileSource::new(secret_dir))
-            .add_source(
-                config::Environment::with_prefix("GKG")
-                    .prefix_separator("_")
-                    .separator("__")
-                    .list_separator(",")
-                    .with_list_parse_key("health_check.services")
-                    .try_parsing(true),
-            )
             .build()
             .map_err(ConfigError::Config)?;
 
@@ -116,6 +108,89 @@ pub type SharedAppConfig = Arc<AppConfig>;
 pub enum ConfigError {
     #[error("configuration error: {0}")]
     Config(#[from] config::ConfigError),
-    #[error("GKG_GITLAB__JWT__VERIFYING_KEY is required")]
+    #[error(
+        "gitlab.jwt.verifying_key is required (set in config/default.yaml or mount at /etc/secrets/gitlab/jwt/verifying_key)"
+    )]
     MissingJwtSecret,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::engine::EngineConfiguration;
+
+    /// Verifies the kebab-case handler config keys in YAML actually
+    /// deserialize into the correct Rust struct fields.
+    #[test]
+    fn handler_configs_deserialize_from_kebab_case_yaml() {
+        let yaml = r#"
+max_concurrent_workers: 16
+concurrency_groups:
+  sdlc: 12
+  code: 4
+handlers:
+  global-handler:
+    concurrency_group: sdlc
+    max_attempts: 1
+    retry_interval_secs: 60
+  namespace-handler:
+    concurrency_group: sdlc
+    max_attempts: 1
+    retry_interval_secs: 60
+  code-indexing-task:
+    concurrency_group: code
+    max_attempts: 5
+    retry_interval_secs: 60
+  namespace-deletion:
+    concurrency_group: code
+    max_attempts: 1
+"#;
+
+        let engine: EngineConfiguration =
+            serde_yaml::from_str(yaml).expect("engine config should deserialize");
+
+        assert_eq!(
+            engine
+                .handlers
+                .global_handler
+                .engine
+                .concurrency_group
+                .as_deref(),
+            Some("sdlc"),
+        );
+        assert_eq!(
+            engine
+                .handlers
+                .namespace_handler
+                .engine
+                .concurrency_group
+                .as_deref(),
+            Some("sdlc"),
+        );
+        assert_eq!(
+            engine
+                .handlers
+                .code_indexing_task
+                .engine
+                .concurrency_group
+                .as_deref(),
+            Some("code"),
+        );
+        assert_eq!(
+            engine.handlers.code_indexing_task.engine.max_attempts,
+            Some(5)
+        );
+        assert_eq!(
+            engine
+                .handlers
+                .namespace_deletion
+                .engine
+                .concurrency_group
+                .as_deref(),
+            Some("code"),
+        );
+        assert_eq!(
+            engine.handlers.namespace_deletion.engine.max_attempts,
+            Some(1)
+        );
+    }
 }
