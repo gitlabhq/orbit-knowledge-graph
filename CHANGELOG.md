@@ -1,3 +1,33 @@
+## [0.21.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.20.0...v0.21.0) (2026-04-03)
+
+### Features
+
+* **config:** generate JSON schema for server config ([24cda9e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/24cda9e91e3e9d8c984b7a2820319e636c6040fe)) by Bohdan Parkhomchuk
+* **docker:** optimize build for better layer caching ([e19fc06](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e19fc065e741dc70bbdfeeb352e793221f0d8e0c)) by Bohdan Parkhomchuk
+* **ontology:** add IN_PROJECT, CLOSED_BY, APPROVED_BY edges and fix REVIEWER source ([89d4eb1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/89d4eb18e34484fad90b422af7dc9825aec8efcf)) by Michael Angelo Rivera
+* **server:** tune tonic gRPC HTTP/2 settings for production ([e30a8d0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e30a8d081998af252feb8afd489f9225be2ac56c)) by Michael Angelo Rivera
+* **server:** type-safe ClickHouse settings and log_comment tracing ([0848f5b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0848f5b6d8d7d2b4877ea6c4534cd5ce24549da9)) by Michael Usachenko
+* **server:** wire Gitaly content resolution end-to-end ([c08d0b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c08d0b96654ecdfda701ad08701aa1b3017057cc)) by Michael Usachenko
+
+### Fixes
+
+* **config:** fix handler config deserialization and drop unused env var source ([7c8b6e9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7c8b6e906cf5bb32a5afee64d05602e3393e9459)) by Michael Usachenko
+* **ontology:** compute full_path from routes table instead of slug ([2d784f8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d784f8ede2da4a7a63c5559fa7e493d0dd18d36)) by Michael Angelo Rivera
+* **ontology:** standardize person-action edges to person-is-source direction ([ad8cf90](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ad8cf900d51a44be90f1b9fd667ebe9851a07f4a)) by Michael Angelo Rivera
+* **tests:** fix integration test failures from edge direction change and stale cache ([deb3bf0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/deb3bf0dad43867527730cd371b25c5b3af569b1)) by Michael Usachenko
+
+### Other
+
+* add MIT license and go.mod to gkgpb Go submodule ([e165a69](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e165a6955adf13266b1aad929e6851de7c5b93ca)) by Michael Angelo Rivera
+* add MR issue-link guidance ([4202298](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/420229853a89ca16690646ddc80968ea52b35af6)) by Dmitry Gruzd
+* **config:** load query settings from YAML via gkg-server-config crate ([e49e797](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e49e797aa090bb702fbc762426d32746cc3f8b8c)) by Michael Usachenko
+* **config:** remove config re-export shims ([c6af4f0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c6af4f082e283cf45f0dd963fdcc396dcacca7b9)) by Michael Usachenko
+* **config:** unify all config types in gkg-server-config crate ([5fedf4e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5fedf4ef9d233ba4d5bd11900570c481f5384368)) by Michael Usachenko
+* **server:** rename config.rs to tls.rs ([f507fe5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f507fe5e42e4f29b32e0a9ad5185dab0dd6805a2)) by Michael Usachenko
+* **server:** replace QueryProfiler with log_comment-based system table queries ([f5f52bf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f5f52bfd664dddf28baf027cc13bb3bd78a0202d)) by Michael Usachenko
+* tag gkgpb Go submodule on release ([8758034](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/87580344056dad0153ebf9a33bba03f3bf357741)) by Michael Angelo Rivera
+* update design document to reflect current codebase ([4251b16](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4251b1669214d863dc2a148b223b73d4049bd642)) by Dmitry Gruzd
+
 ## [0.20.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.19.0...v0.20.0) (2026-04-01)
 
 ### Features
