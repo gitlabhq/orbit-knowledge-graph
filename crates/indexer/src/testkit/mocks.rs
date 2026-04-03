@@ -12,7 +12,6 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::configuration::HandlerConfiguration;
 use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockService};
@@ -20,6 +19,7 @@ use crate::nats::{
     KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
 };
 use crate::types::{Envelope, MessageId, Subscription};
+use gkg_server_config::HandlerConfiguration;
 
 /// Mock implementation of [`NatsServices`] for testing handlers.
 ///

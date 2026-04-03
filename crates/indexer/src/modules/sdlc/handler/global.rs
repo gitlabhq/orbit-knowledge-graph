@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::configuration::{GlobalHandlerConfig, HandlerConfiguration};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
+use gkg_server_config::{GlobalHandlerConfig, HandlerConfiguration};
 use tracing::info;
 
 use crate::modules::sdlc::metrics::SdlcMetrics;

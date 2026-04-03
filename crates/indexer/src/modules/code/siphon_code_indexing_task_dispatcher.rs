@@ -8,12 +8,12 @@ use tracing::{debug, info, warn};
 
 use super::config::subjects;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
-use crate::configuration::{ScheduleConfiguration, SiphonCodeIndexingTaskDispatcherConfig};
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
+use gkg_server_config::{ScheduleConfiguration, SiphonCodeIndexingTaskDispatcherConfig};
 
 type ProjectBranch = (i64, String);
 

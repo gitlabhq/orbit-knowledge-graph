@@ -24,8 +24,8 @@ use opentelemetry::KeyValue;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info};
 
-use crate::configuration::EngineConfiguration;
 use crate::metrics::EngineMetrics;
+use gkg_server_config::EngineConfiguration;
 
 /// A permit that reserves capacity for one handler execution.
 ///

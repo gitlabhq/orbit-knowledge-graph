@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
+use clickhouse_client::ArrowClickHouseClient;
+use gkg_server_config::ProfilingConfig;
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,

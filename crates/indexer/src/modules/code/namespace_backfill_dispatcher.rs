@@ -8,12 +8,12 @@ use tracing::{debug, info, warn};
 use super::config::subjects;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::configuration::{NamespaceCodeBackfillDispatcherConfig, ScheduleConfiguration};
 use crate::nats::NatsServices;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 use clickhouse_client::FromArrowColumn;
+use gkg_server_config::{NamespaceCodeBackfillDispatcherConfig, ScheduleConfiguration};
 
 const NAMESPACE_TRAVERSAL_PATH_QUERY: &str = r#"
 SELECT traversal_path

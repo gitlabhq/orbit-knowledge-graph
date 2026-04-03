@@ -11,13 +11,15 @@ use arrow::array::{Int32Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use gkg_server_config::{
+    ClickHouseConfiguration, EngineConfiguration, HandlerConfiguration, NatsConfiguration,
+};
 use gkg_utils::arrow::ArrowUtils;
-use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
-use indexer::configuration::{EngineConfiguration, HandlerConfiguration};
+use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseDestination};
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
-use indexer::nats::{NatsBroker, NatsConfiguration};
+use indexer::nats::NatsBroker;
 use indexer::types::{Envelope, Event, Subscription};
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;

@@ -10,10 +10,10 @@ use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::locking::project_lock_key;
 use super::metrics::CodeMetrics;
 use super::repository::RepositoryService;
-use crate::configuration::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
+use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
 
 pub struct CodeIndexingTaskHandler {
     pipeline: Arc<CodeIndexingPipeline>,

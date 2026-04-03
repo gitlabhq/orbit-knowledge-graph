@@ -12,6 +12,7 @@ publish = false
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
 gkg-server = { path = "../gkg-server", features = ["testkit"] }
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }

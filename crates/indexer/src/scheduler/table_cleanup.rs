@@ -5,8 +5,8 @@ use clickhouse_client::FromArrowColumn;
 use tracing::{info, warn};
 
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::configuration::{ScheduleConfiguration, TableCleanupConfig};
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 pub struct TableCleanup {
     graph: ArrowClickHouseClient,

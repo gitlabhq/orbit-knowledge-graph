@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, handler_context};
-use indexer::configuration::NamespaceDeletionHandlerConfig;
+use gkg_server_config::NamespaceDeletionHandlerConfig;
 use indexer::handler::Handler;
 use indexer::modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionHandler, NamespaceDeletionStore,
