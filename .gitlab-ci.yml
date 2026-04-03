@@ -397,12 +397,12 @@ check-go-proto:
     - apt-get update -qq && apt-get install -y -qq unzip
   script:
     - scripts/proto-go.sh check
-    - cd tools/gkgpb && go build ./...
+    - cd clients/gkgpb && go build ./...
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
     - changes:
         - crates/gkg-server/proto/**/*
-        - tools/gkgpb/**/*
+        - clients/gkgpb/**/*
 
 build-proto-gem:
   needs: []
@@ -412,18 +412,18 @@ build-proto-gem:
   stage: build
   before_script: []
   script:
-    - BUNDLE_GEMFILE=tools/protogem/Gemfile bundle install --quiet
+    - BUNDLE_GEMFILE=clients/protogem/Gemfile bundle install --quiet
     - |
       if [ -n "$CI_COMMIT_TAG" ]; then
-        ruby tools/protogem/build-proto-gem --version "${CI_COMMIT_TAG#v}"
+        ruby clients/protogem/build-proto-gem --version "${CI_COMMIT_TAG#v}"
       else
-        ruby tools/protogem/build-proto-gem
+        ruby clients/protogem/build-proto-gem
       fi
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
     - changes:
         - crates/gkg-server/proto/**/*
-        - tools/protogem/**/*
+        - clients/protogem/**/*
   artifacts:
     paths:
       - _build/gitlab-gkg-proto-*.gem
