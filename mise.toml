@@ -171,6 +171,10 @@ description = "Start the GKG server (dispatch-indexing mode)"
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
 
+[tasks."schema:generate"]
+run = "cargo xtask schema -o config/schemas/config.schema.json"
+description = "Generate JSON Schema for the server configuration"
+
 [tasks."e2e:setup"]
 run = "cargo xtask e2e setup"
 description = "Set up the full E2E environment (cluster, GitLab, GKG stack)"

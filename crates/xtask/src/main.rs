@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use xshell::Shell;
 
 mod e2e;
+mod schema;
 mod synth;
 
 /// GKG development task runner.
@@ -27,6 +28,12 @@ enum Command {
     Synth {
         #[command(subcommand)]
         command: SynthCommand,
+    },
+    /// Generate JSON Schema for the server configuration.
+    Schema {
+        /// Write schema to a file instead of stdout.
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
     },
 }
 
@@ -199,6 +206,7 @@ async fn main() -> Result<()> {
                 synth::evaluation::run::run(&config, verbose).await
             }
         },
+        Command::Schema { output } => schema::run(output),
         Command::E2e { command } => {
             for tool in e2e::constants::REQUIRED_TOOLS {
                 if !e2e::cmd::exists(&sh, tool) {

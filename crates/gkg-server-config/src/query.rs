@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -23,7 +24,8 @@ fn escape_setting_str(s: &str) -> String {
 ///
 /// `None` means "not specified at this layer" -- the merge logic in
 /// [`QuerySettings::resolve`] fills in from the default.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct QueryConfig {
     /// ClickHouse `max_execution_time` in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -95,7 +97,7 @@ impl QueryConfig {
 ///   aggregation:
 ///     max_execution_time: 60
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, JsonSchema)]
 pub struct QuerySettings {
     #[serde(default)]
     pub default: QueryConfig,

@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // ── Base config types ────────────────────────────────────────────────
@@ -13,7 +14,8 @@ use serde::{Deserialize, Serialize};
 /// The engine reads it via `handler.engine_config()`.
 ///
 /// Retries are opt-in: a handler with no retry config will ack on failure.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct HandlerConfiguration {
     /// Which concurrency group this handler belongs to.
     /// Maps to a named semaphore in `EngineConfiguration::concurrency_groups`.
@@ -46,7 +48,8 @@ impl HandlerConfiguration {
 ///
 /// Each scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.
 /// The scheduler loop reads it via `task.schedule()`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct ScheduleConfiguration {
     /// Interval in seconds between task runs.
     /// When absent, the task runs every cycle.
@@ -66,7 +69,7 @@ fn default_datalake_batch_size() -> u64 {
     1_000_000
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct GlobalHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
@@ -84,7 +87,7 @@ impl Default for GlobalHandlerConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct NamespaceHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
@@ -102,21 +105,22 @@ impl Default for NamespaceHandlerConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub struct CodeIndexingTaskHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDeletionHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
 }
 
 /// Typed per-handler configuration for all registered handlers.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[schemars(deny_unknown_fields)]
 pub struct HandlersConfiguration {
     #[serde(default)]
     pub global_handler: GlobalHandlerConfig,
@@ -130,13 +134,13 @@ pub struct HandlersConfiguration {
 
 // ── Dispatcher / scheduler config types ──────────────────────────────
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct GlobalDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -150,7 +154,7 @@ fn default_dispatcher_batch_size() -> usize {
     100
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SiphonCodeIndexingTaskDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -172,7 +176,7 @@ impl Default for SiphonCodeIndexingTaskDispatcherConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceCodeBackfillDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -194,7 +198,7 @@ impl Default for NamespaceCodeBackfillDispatcherConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -210,7 +214,7 @@ impl Default for TableCleanupConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDeletionSchedulerConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
@@ -227,8 +231,9 @@ impl Default for NamespaceDeletionSchedulerConfig {
 }
 
 /// Typed per-task configuration for all registered scheduled tasks.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[schemars(deny_unknown_fields)]
 pub struct ScheduledTasksConfiguration {
     #[serde(default)]
     pub global: GlobalDispatcherConfig,
@@ -253,7 +258,8 @@ pub struct ScheduledTasksConfiguration {
 /// - `max_concurrent_workers`: 16
 /// - `concurrency_groups`: empty
 /// - `handlers`: defaults for all handlers
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct EngineConfiguration {
     /// Maximum concurrent message handlers across all modules. Defaults to 16.
     #[serde(default = "EngineConfiguration::default_max_concurrent_workers")]
@@ -286,7 +292,8 @@ impl EngineConfiguration {
 }
 
 /// Top-level schedule configuration.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct ScheduleConfig {
     #[serde(default)]
     pub tasks: ScheduledTasksConfiguration,
