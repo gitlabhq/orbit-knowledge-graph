@@ -3,8 +3,8 @@ set -euo pipefail
 
 PROTO_SRC="crates/gkg-server/proto/gkg.proto"
 PROTO_DIR="crates/gkg-server/proto"
-OUT_DIR="gkgpb"
-MODULE="gitlab.com/gitlab-org/orbit/knowledge-graph/gkgpb"
+OUT_DIR="clients/gkgpb"
+MODULE="gitlab.com/gitlab-org/orbit/knowledge-graph/clients/gkgpb"
 
 PROTOC_VERSION="34.1"
 PROTOC_GEN_GO_VERSION="v1.36.11"

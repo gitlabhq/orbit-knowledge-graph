@@ -8,10 +8,22 @@
       {
         "preset": "conventionalcommits",
         "releaseRules": [
-          { "type": "chore", "release": "patch" },
-          { "type": "refactor", "release": "patch" },
-          { "type": "perf", "release": "patch" },
-          { "type": "test", "release": "patch" }
+          {
+            "type": "chore",
+            "release": "patch"
+          },
+          {
+            "type": "refactor",
+            "release": "patch"
+          },
+          {
+            "type": "perf",
+            "release": "patch"
+          },
+          {
+            "type": "test",
+            "release": "patch"
+          }
         ]
       }
     ],
@@ -21,16 +33,46 @@
         "preset": "conventionalcommits",
         "presetConfig": {
           "types": [
-            { "type": "feat", "section": "Features" },
-            { "type": "fix", "section": "Fixes" },
-            { "type": "perf", "section": "Performance" },
-            { "type": "chore", "section": "Other" },
-            { "type": "refactor", "section": "Other" },
-            { "type": "test", "section": "Other" },
-            { "type": "docs", "section": "Other" },
-            { "type": "style", "section": "Other" },
-            { "type": "ci", "section": "Other" },
-            { "type": "build", "section": "Other" }
+            {
+              "type": "feat",
+              "section": "Features"
+            },
+            {
+              "type": "fix",
+              "section": "Fixes"
+            },
+            {
+              "type": "perf",
+              "section": "Performance"
+            },
+            {
+              "type": "chore",
+              "section": "Other"
+            },
+            {
+              "type": "refactor",
+              "section": "Other"
+            },
+            {
+              "type": "test",
+              "section": "Other"
+            },
+            {
+              "type": "docs",
+              "section": "Other"
+            },
+            {
+              "type": "style",
+              "section": "Other"
+            },
+            {
+              "type": "ci",
+              "section": "Other"
+            },
+            {
+              "type": "build",
+              "section": "Other"
+            }
           ]
         },
         "writerOpts": {
@@ -44,6 +86,12 @@
       {
         "successCommentCondition": false,
         "failCommentCondition": false
+      }
+    ],
+    [
+      "@semantic-release/exec",
+      {
+        "publishCmd": "git tag clients/gkgpb/v${nextRelease.version} && git push origin clients/gkgpb/v${nextRelease.version}"
       }
     ],
     [
