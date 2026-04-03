@@ -1,18 +1,17 @@
-# config/ontology/edges/related_to.yaml
+# config/ontology/edges/blocks.yaml
 
-description: Peer relationship between work items (bidirectional)
+description: Blocking relationship between work items (directional)
 
 variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: WorkItem, id: id }
-    description: "Work item is related to another work item."
+    description: "Work item blocks another work item."
 
 etl:
   scope: namespaced
   source: siphon_issue_links
   order_by: [traversal_path, source_id, id]
-  filter: "link_type = 0"
-  bidirectional: true
+  filter: "link_type = 1"
   from:
     id: source_id
     type: WorkItem

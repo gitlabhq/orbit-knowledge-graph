@@ -54,6 +54,7 @@ pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub filters: Vec<EdgeFilter>,
     pub namespaced: bool,
     pub extract: ExtractPlan,
+    pub bidirectional: bool,
 }
 
 pub(in crate::modules::sdlc) enum EdgeId {
@@ -364,8 +365,9 @@ fn resolve_standalone_edge(
             order_by: config.order_by.clone(),
             namespaced,
             traversal_path_filter: None,
-            additional_where: None,
+            additional_where: config.filter.clone(),
         },
+        bidirectional: config.bidirectional,
     }
 }
 

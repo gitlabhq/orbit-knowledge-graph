@@ -581,7 +581,16 @@
           "minItems": 1
         },
         "from": { "$ref": "#/definitions/edgeEtlEndpoint" },
-        "to": { "$ref": "#/definitions/edgeEtlEndpoint" }
+        "to": { "$ref": "#/definitions/edgeEtlEndpoint" },
+        "filter": {
+          "type": "string",
+          "description": "SQL WHERE clause to filter source rows."
+        },
+        "bidirectional": {
+          "type": "boolean",
+          "description": "When true, emit edges in both directions (A->B and B->A) for each source row.",
+          "default": false
+        }
       },
       "required": ["scope", "source", "order_by", "from", "to"],
       "additionalProperties": false

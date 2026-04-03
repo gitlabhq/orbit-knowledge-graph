@@ -128,8 +128,9 @@ fn lower_node_column(column: &NodeColumn) -> SelectExpr {
 fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> PipelinePlan {
     let destination_table = input.extract.destination_table.clone();
     let extract_query = lower_extract_plan(input.extract, batch_size);
+    let where_clause = lower_filters(&input.filters);
 
-    let transform_query = Query {
+    let forward_query = Query {
         select: lower_edge_select(
             lower_edge_id(&input.source_id),
             lower_edge_kind(&input.source_kind),
@@ -139,18 +140,41 @@ fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> Pip
             input.namespaced,
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
-        where_clause: lower_filters(&input.filters),
+        where_clause: where_clause.clone(),
         order_by: vec![],
         limit: None,
     };
 
+    let mut transforms = vec![Transformation {
+        query: forward_query,
+        destination_table: destination_table.clone(),
+    }];
+
+    if input.bidirectional {
+        let reverse_query = Query {
+            select: lower_edge_select(
+                lower_edge_id(&input.target_id),
+                lower_edge_kind(&input.target_kind),
+                &input.relationship_kind,
+                lower_edge_id(&input.source_id),
+                lower_edge_kind(&input.source_kind),
+                input.namespaced,
+            ),
+            from: TableRef::scan(SOURCE_DATA_TABLE, None),
+            where_clause,
+            order_by: vec![],
+            limit: None,
+        };
+        transforms.push(Transformation {
+            query: reverse_query,
+            destination_table,
+        });
+    }
+
     PipelinePlan {
         name: input.relationship_kind,
         extract_query,
-        transforms: vec![Transformation {
-            query: transform_query,
-            destination_table,
-        }],
+        transforms,
     }
 }
 

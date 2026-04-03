@@ -98,6 +98,8 @@ graph TD
 | `COMMENTS_ON`                       | `User`         | `MergeRequest`, `WorkItem` | A user commented on an entity (via a `Note`).                                            |
 | `IS_COMMENT_ON`                     | `Note`         | `MergeRequest`, `WorkItem` | A note is a comment on a specific entity.                                                |
 | `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |
+| `RELATED_TO`                        | `WorkItem`     | `WorkItem`     | Peer relationship between work items (bidirectional).                                                    |
+| `BLOCKS`                            | `WorkItem`     | `WorkItem`     | A work item blocks another work item (directional).                                                     |
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
 | `TRIGGERED`                         | `Pipeline`     | `MergeRequest`, `Branch` | A pipeline was triggered for a merge request or a branch push.                                  |
 | `CLOSED_BY`                         | `User`         | `WorkItem`     | A user closed a work item.                                                                              |

@@ -41,6 +41,10 @@ struct EdgeEtlYaml {
     order_by: Vec<String>,
     from: EdgeEndpointYaml,
     to: EdgeEndpointYaml,
+    #[serde(default)]
+    filter: Option<String>,
+    #[serde(default)]
+    bidirectional: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +96,8 @@ impl EdgeYaml {
             order_by: etl.order_by,
             from,
             to,
+            filter: etl.filter,
+            bidirectional: etl.bidirectional,
         }))
     }
 }

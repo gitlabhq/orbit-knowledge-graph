@@ -164,6 +164,10 @@ pub struct EdgeSourceEtlConfig {
     pub from: EdgeEndpoint,
     /// Target endpoint configuration.
     pub to: EdgeEndpoint,
+    /// Optional SQL WHERE clause to filter source rows.
+    pub filter: Option<String>,
+    /// When true, emit edges in both directions (A->B and B->A) for each source row.
+    pub bidirectional: bool,
 }
 
 /// Configuration for an edge endpoint (source or target).

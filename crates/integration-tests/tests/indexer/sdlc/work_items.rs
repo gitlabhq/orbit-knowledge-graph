@@ -172,5 +172,8 @@ pub async fn processes_issue_links(ctx: &TestContext) {
         .await
         .unwrap();
 
+    // link_type=0 (relates_to) is bidirectional: 1->2 and 2->1
     assert_edges_have_traversal_path(ctx, "RELATED_TO", "WorkItem", "WorkItem", "1/100/", 2).await;
+    // link_type=1 (blocks) is directional: 2->3 only
+    assert_edges_have_traversal_path(ctx, "BLOCKS", "WorkItem", "WorkItem", "1/100/", 1).await;
 }
