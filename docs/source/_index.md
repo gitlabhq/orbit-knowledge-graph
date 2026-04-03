@@ -64,6 +64,32 @@ To turn Orbit on or off:
 1. Select **Orbit** > **Configuration**.
 1. Next to the top-level group you want to index, turn **Enable** on or off.
 
+## View the knowledge graph
+
+Use the data explorer to visualize your instance and verify that Orbit indexed your groups correctly.
+
+Prerequisites:
+
+- Orbit must be turned on for a group or project.
+- You must have the Reporter, Developer, Maintainer, or Owner role for the group or project.
+
+To view the knowledge graph:
+
+1. In the top bar, select **Search or go to** > **Your work**.
+1. Select **Orbit** > **Data explorer**.
+1. Explore the knowledge graph:
+   - In the **Node explorer** view, for details about a graph node, double-click the node.
+   - In the **Table** view, to download your data as a CSV file, select **Download CSV**.
+
+## Performance
+
+The Orbit indexer runs in a separate Kubernetes cluster and does not
+impact the performance of your instance. The indexer job completes in
+seconds, even for large groups.
+
+Changes to a group, project, or repository are reindexed automatically.
+Reindexing typically completes a few minutes after a change.
+
 ## Coverage
 
 Orbit indexes only the top-level groups where it is turned on.
@@ -88,6 +114,8 @@ Orbit indexes two types of data:
 
    Code is indexed from only the default branch.
 
+<!--- Re-add diagram --->
+
 ### Supported languages
 
 Orbit supports code indexing for the following languages:
@@ -100,15 +128,6 @@ Orbit supports code indexing for the following languages:
 - JavaScript
 - Rust
 - C#
-
-## Performance
-
-The Orbit indexer runs in a separate Kubernetes cluster and does not
-impact the performance of your instance. The indexer job completes in
-seconds, even for large groups.
-
-Changes to a group, project, or repository are reindexed automatically.
-Reindexing typically completes a few minutes after a change.
 
 <!--- ## Billing and usage --->
 
