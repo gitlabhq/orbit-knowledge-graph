@@ -28,8 +28,7 @@ This issue occurs when indexing for the group or project is in progress or is te
 
 To resolve this issue:
 
-1. In Orbit, check the status of the affected group.
-1. Wait for indexing to finish.
+- Wait for indexing to complete.
 
 ### User does not have permission to view the data
 
