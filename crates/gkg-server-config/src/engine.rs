@@ -116,6 +116,7 @@ pub struct NamespaceDeletionHandlerConfig {
 
 /// Typed per-handler configuration for all registered handlers.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct HandlersConfiguration {
     #[serde(default)]
     pub global_handler: GlobalHandlerConfig,
@@ -227,6 +228,7 @@ impl Default for NamespaceDeletionSchedulerConfig {
 
 /// Typed per-task configuration for all registered scheduled tasks.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct ScheduledTasksConfiguration {
     #[serde(default)]
     pub global: GlobalDispatcherConfig,
