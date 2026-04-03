@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 fn default_bind_address() -> SocketAddr {
@@ -21,7 +22,8 @@ fn default_services() -> Vec<String> {
     ]
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct HealthCheckConfig {
     #[serde(default = "default_bind_address")]
     pub bind_address: SocketAddr,

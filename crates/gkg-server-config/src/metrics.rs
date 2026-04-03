@@ -1,8 +1,10 @@
 //! Observability / metrics configuration.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct MetricsConfig {
     #[serde(default)]
     pub log_level: Option<String>,
@@ -12,7 +14,8 @@ pub struct MetricsConfig {
     pub prometheus: PrometheusConfig,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct OtelConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -24,7 +27,8 @@ fn default_prometheus_port() -> u16 {
     9394
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct PrometheusConfig {
     #[serde(default)]
     pub enabled: bool,

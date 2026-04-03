@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::clickhouse::ClickHouseConfiguration;
@@ -34,7 +35,8 @@ fn default_jwt_clock_skew_secs() -> u64 {
     60
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct AppConfig {
     #[serde(default = "default_bind_address")]
     pub bind_address: SocketAddr,

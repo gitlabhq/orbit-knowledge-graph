@@ -108,6 +108,21 @@ ontology-schema-validate:
     - test "$(wc -c < config/schemas/ontology.schema.json)" -le 32768 || (echo "config/schemas/ontology.schema.json must stay at or below 32 KB" && exit 1)
     - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
 
+generate-config-schema:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run schema:generate
+    - git diff --exit-code config/schemas/config.schema.json || (echo "config/schemas/config.schema.json is out of date. Run 'mise schema:generate' and commit." && exit 1)
+  artifacts:
+    paths:
+      - config/schemas/config.schema.json
+    expire_in: 24 hours
+
 fmt-check:
   stage: lint
   extends:

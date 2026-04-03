@@ -43,7 +43,9 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 indicatif = { workspace = true }
 rayon = { workspace = true }
+gkg-server-config = { path = "../gkg-server-config" }
 ontology = { path = "../ontology" }
+schemars = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 gkg-utils = { path = "../utils" }

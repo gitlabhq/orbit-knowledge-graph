@@ -1,9 +1,11 @@
 //! gRPC server HTTP/2 tuning configuration.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
+#[schemars(deny_unknown_fields)]
 pub struct GrpcConfig {
     pub keepalive_interval_secs: u64,
     pub keepalive_timeout_secs: u64,

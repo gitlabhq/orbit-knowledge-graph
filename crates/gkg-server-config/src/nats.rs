@@ -3,12 +3,14 @@
 use std::path::Path;
 use std::time::Duration;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// NATS connection settings.
 ///
 /// Matches siphon's QueuingConfig fields.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct NatsConfiguration {
     /// Server address, e.g. "localhost:4222".
     pub url: String,

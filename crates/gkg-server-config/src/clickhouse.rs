@@ -2,9 +2,11 @@
 
 use std::collections::HashMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct ClickHouseConfiguration {
     pub database: String,
     pub url: String,
@@ -17,7 +19,8 @@ pub struct ClickHouseConfiguration {
     pub profiling: ProfilingConfig,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct ProfilingConfig {
     #[serde(default)]
     pub enabled: bool,
