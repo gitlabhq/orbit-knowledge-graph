@@ -1,7 +1,6 @@
 pub mod auth;
 pub mod cli;
 pub mod cluster_health;
-pub mod config;
 pub mod content;
 pub mod graph_stats;
 pub mod grpc;
@@ -10,5 +9,6 @@ pub mod pipeline;
 pub mod proto;
 pub mod redaction;
 pub mod shutdown;
+pub mod tls;
 pub mod tools;
 pub mod webserver;
