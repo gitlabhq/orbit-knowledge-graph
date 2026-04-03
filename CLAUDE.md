@@ -57,7 +57,7 @@ Integration tests need Docker: `mise test:integration`. Correctness subset: `mis
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/gkg-server-config/` |
 | Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |
 | Local development guide | `docs/dev/local-development.md` |
-| GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
+| GitLab instance config | `docs/dev/GitLab_INSTANCE.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
 | Helm charts | `helm/gkg/` (vendored via vendir), `helm/local/` (dev Prometheus + Grafana) |

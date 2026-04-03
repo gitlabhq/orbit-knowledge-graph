@@ -330,7 +330,19 @@ The discussion below captures why ClickHouse was chosen and remains useful archi
 
 In October 2025, KuzuDB [was archived](https://www.theregister.com/2025/10/14/kuzudb_abandoned/) by maintainers. The Knowledge Graph Team spent time validating various database options against both Code Indexing and SDLC indexing, using the SLDC [dataset generator](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/292) and pre-existing Code Index parquet files ([Database Selection Epic](https://gitlab.com/groups/gitlab-org/rust/-/epics/31)). We explored both new databases (Neo4J, FalkorBD, Memgraph, etc.) and already-deployed, approved GitLab databases (PostgreSQL and ClickHouse).
 
-Inspired by [Brahmand](https://www.brahmanddb.com/) and [SQL 2023’s Standardization of Property Graphs](https://www.iso.org/standard/79473.html) (ISO/IEC 9075-16:2023), the team created a modified version of the [Demo Instance](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263) (which originally used Kuzu) and swapped it out with ClickHouse ([demo](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/268#note_2873427090), [code](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/391)), proving that we can still get a functioning product with a ClickHouse/Postgres-backed Property Graph model. @andrewn also created a [Cypher to Postgres](https://gitlab.com/andrewn/opencypher-to-postgres#project-walkthrough) project that [passes 70%](https://gitlab.com/gitlab-com/gl-infra/sandbox/opencypher-to-postgres/-/merge_requests/20) of OpenCypher’s TCK suite, which much of the team can leverage.
+Inspired by [Brahmand](https://www.brahmanddb.com/) and
+[SQL 2023’s Standardization of Property Graphs](https://www.iso.org/standard/79473.html)
+(ISO/IEC 9075-16:2023), the team created a modified version of the
+[Demo Instance](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263)
+(which originally used Kuzu) and swapped it out with ClickHouse
+([demo](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/268#note_2873427090),
+[code](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/391)),
+proving that we can still get a functioning product with a
+ClickHouse/Postgres-backed Property Graph model. @andrewn also created a
+[Cypher to Postgres](https://gitlab.com/andrewn/opencypher-to-postgres#project-walkthrough)
+project that
+[passes 70%](https://gitlab.com/gitlab-com/gl-infra/sandbox/opencypher-to-postgres/-/merge_requests/20)
+of OpenCypher’s TCK suite, which much of the team can leverage.
 
 Kùzu is a columnar system similar to modern read-optimized analytical DBMSs, like ClickHouse. The team conducted [research and benchmarking](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/267) against a ClickHouse and Postgres-backed Property Graph, which has alleviated our performance concerns. We achieved <300ms p95 query speeds for 3-hop traversals on a 20M+ row, 11GB dataset by leveraging CSR adjacency list index concepts from [KuzuDB’s whitepaper](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf). There is still much room for improvement, but the research so far gives us confidence in betting on ClickHouse. Postgres will be our backup, leveraging @andrewn work.
 
@@ -411,7 +423,7 @@ Follow up MR: New section/page on deployment resource requirements, and plan for
 - Aim for independent upgrade & security patching without Rails as a dependency to enable continuous delivery for both .com and self-managed customers.
 - The design of the service should incorporate [Cells](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/tenant-scale/cells_and_organizations/) architectural implications where applicable.
 - Build a **data model configuration layer** for SDLC metadata sources to support Rails database migrations and schema changes, and to add new data source entities.
-- Avoid requiring customers to run any scripts (rake tasks) to fix data state issues.
+- Avoid requiring customers to run any scripts (Rake tasks) to fix data state issues.
 
 ## Code Indexing vs SDLC Metadata Indexing
 
