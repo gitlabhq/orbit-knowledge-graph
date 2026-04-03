@@ -5,12 +5,12 @@ use async_trait::async_trait;
 use chrono::Utc;
 use tracing::info;
 
-use crate::configuration::{GlobalDispatcherConfig, ScheduleConfiguration};
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
+use gkg_server_config::{GlobalDispatcherConfig, ScheduleConfiguration};
 
 pub struct GlobalDispatcher {
     nats: Arc<dyn NatsServices>,

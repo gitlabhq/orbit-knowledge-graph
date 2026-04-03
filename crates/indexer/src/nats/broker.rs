@@ -31,10 +31,10 @@ use crate::types::{Envelope, MessageId, Subscription};
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 
-use super::configuration::NatsConfiguration;
 use super::error::{NatsError, map_connect_error, map_subscribe_error};
 use super::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
 use super::message::{NatsAcker, NatsMessage, NatsSubscription};
+use gkg_server_config::NatsConfiguration;
 
 /// NATS JetStream message broker.
 ///

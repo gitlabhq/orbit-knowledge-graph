@@ -1,11 +1,6 @@
+use gkg_server_config::TlsConfig;
 use tonic::transport::Identity;
 use tonic::transport::server::ServerTlsConfig;
-
-// Re-export everything from gkg-server-config for backward compatibility.
-pub use gkg_server_config::{
-    AppConfig, ConfigError, GitlabConfig, GrpcConfig, JwtConfig, MetricsConfig, OtelConfig,
-    PrometheusConfig, SECRET_FILE_DIR, SharedAppConfig, TlsConfig,
-};
 
 /// Load TLS identity from the paths in [`TlsConfig`].
 ///

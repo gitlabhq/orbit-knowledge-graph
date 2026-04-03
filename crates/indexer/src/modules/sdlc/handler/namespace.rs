@@ -3,10 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::checkpoint::namespace_position_key;
-use crate::configuration::{HandlerConfiguration, NamespaceHandlerConfig};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
+use gkg_server_config::{HandlerConfiguration, NamespaceHandlerConfig};
 use tracing::info;
 
 use crate::modules::sdlc::metrics::SdlcMetrics;

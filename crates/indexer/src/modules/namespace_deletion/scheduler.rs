@@ -8,11 +8,11 @@ use tracing::{debug, info};
 use super::NamespaceDeletionStore;
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::TIMESTAMP_FORMAT;
-use crate::configuration::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};
 use crate::nats::NatsServices;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::Envelope;
+use gkg_server_config::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};
 
 const CHECKPOINT_KEY: &str = "namespace_deletion_scheduler";
 const GRACE_PERIOD_DAYS: i64 = 30;

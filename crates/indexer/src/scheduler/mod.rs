@@ -9,9 +9,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use crate::configuration::ScheduleConfiguration;
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
-use crate::nats::{KvBucketConfig, NatsBroker, NatsConfiguration, NatsServices, NatsServicesImpl};
+use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
+use gkg_server_config::NatsConfiguration;
+use gkg_server_config::ScheduleConfiguration;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]

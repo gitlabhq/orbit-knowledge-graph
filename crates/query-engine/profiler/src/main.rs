@@ -1,4 +1,3 @@
-mod config;
 mod executor;
 mod output;
 mod service;
@@ -14,8 +13,8 @@ use compiler::SecurityContext;
 use ontology::Ontology;
 use tracing_subscriber::EnvFilter;
 
-use config::ProfilingConfig;
 use executor::enrich_output;
+use gkg_server_config::ProfilingConfig;
 use output::{ProfilerOutput, build_output};
 use service::ProfilerPipelineService;
 

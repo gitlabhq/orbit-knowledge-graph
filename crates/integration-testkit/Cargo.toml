@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 arrow = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 futures = { workspace = true }
 gkg-server = { path = "../gkg-server" }

@@ -6,13 +6,13 @@ use chrono::Utc;
 use tracing::{debug, info};
 
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::configuration::{NamespaceDispatcherConfig, ScheduleConfiguration};
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
+use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
 const ENABLED_NAMESPACE_QUERY: &str = r#"
 SELECT root_namespace_id, organization_id
