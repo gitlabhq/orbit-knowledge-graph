@@ -461,7 +461,7 @@ semantic-release:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
-    - npm install -g semantic-release @semantic-release/gitlab @semantic-release/git @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog conventional-changelog-conventionalcommits @semantic-release/exec semantic-release-slack-bot
+    - npm ci
   script:
     - npx semantic-release
 
