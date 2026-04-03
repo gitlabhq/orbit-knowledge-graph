@@ -461,9 +461,9 @@ semantic-release:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
-    - npm ci
+    - cd tools/release && npm ci
   script:
-    - npx semantic-release
+    - npx --prefix tools/release semantic-release
 
 .docker-release:
   stage: build
