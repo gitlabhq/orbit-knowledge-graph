@@ -23,7 +23,9 @@ When a scope fails to converge:
 2. The scheduler continues dispatching other stale scopes — one scope failure does not block others.
 3. Failed scopes are retried on subsequent scheduler runs, up to a per-scope retry limit.
 4. The migration remains in `converging` status until all scopes are either `converged` or permanently failed.
-5. If too many scopes fail (configurable threshold), the reconciler emits an alert and stops dispatching.
+5. If too many scopes fail (configurable threshold), the reconciler emits an alert and pauses dispatching.
+
+**Failure classification** is an open design question (see [open questions](README.md#still-open)). A simple initial approach: all scope failures are treated as transient and retried up to a per-scope limit. After exhausting retries, a scope is marked `permanently_failed` and excluded from the convergence count. The migration can still complete if the remaining scopes converge, but the permanently failed scopes are surfaced in metrics and logs for operator attention.
 
 ### Reconciler crash
 
@@ -54,6 +56,14 @@ The migration framework is designed for rolling deployments where old and new bi
 4. **Old pods continue operating** against the updated schema. `CREATE TABLE IF NOT EXISTS` and `ADD COLUMN IF NOT EXISTS` are safe for old readers/writers.
 5. **Convergent migrations** (V2) start dual-write in new pods. Old pods write to old columns only — this is acceptable because convergence backfills the new columns.
 6. **All pods updated** — dual-write is now universal. Convergence proceeds.
+
+**Compatibility determination.** The reconciler determines compatibility by comparing its migration registry against the persisted ledger:
+
+- An instance is **eligible to drive migrations** if its registry contains the migration currently in a non-terminal state (`preparing`, `converging`, `failed`) or the next pending migration.
+- An instance is **compatible but passive** if its registry does not contain any migrations beyond those already completed. It can safely operate (read/write graph data) but should not hold the migration lock.
+- An instance is **incompatible** if the ledger contains completed migrations that are not in its registry (i.e., it is an older binary than expected). This should not happen in normal rolling deployments but would indicate a problematic rollback. The instance logs a warning and continues operating — it does not attempt to acquire the migration lock.
+
+This means the framework supports **one migration version ahead** during rolling deployments. Multi-hop upgrades (skipping releases) are supported as long as each intermediate migration's DDL is idempotent and backward-compatible.
 
 ### Rollback
 
@@ -93,6 +103,10 @@ The migration framework should expose Prometheus metrics for monitoring and aler
 | `gkg_migration_scopes_total` | Gauge | `version`, `status` | Count of convergence scopes by status (V2) |
 | `gkg_migration_scopes_converged_ratio` | Gauge | `version` | Fraction of scopes converged (V2) |
 | `gkg_migration_finalization_pending` | Gauge | `version` | 1 if a migration is waiting for finalization approval (V3) |
+| `gkg_migration_desired_version` | Gauge | | Highest migration version in the registry (target state) |
+| `gkg_migration_current_version` | Gauge | | Highest completed migration version (actual state) |
+| `gkg_migration_oldest_stale_scope_age_seconds` | Gauge | `version` | Age of the oldest unconverged scope (V2) |
+| `gkg_migration_blocking_release` | Gauge | `version` | 1 if a migration is in a non-terminal state (blocks next release) |
 
 ### Logging
 

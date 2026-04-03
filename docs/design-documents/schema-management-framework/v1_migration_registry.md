@@ -82,21 +82,73 @@ ORDER BY (version)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 ```
 
-**Status values in V1**: `pending`, `preparing`, `prepared`, `completed`, `failed`.
+**Status values in V1**: `pending`, `preparing`, `completed`, `failed`. The `prepared` status is not used in V1 — additive migrations go directly from `preparing` to `completed`. The `prepared` → `converging` transition is introduced in V2 for convergent migrations.
 
 This table is bootstrapped by the reconciler using `CREATE TABLE IF NOT EXISTS` — the one piece of DDL that runs outside the migration framework. This is safe because `CREATE TABLE IF NOT EXISTS` is idempotent and metadata-only in ClickHouse.
 
+### Control-plane table semantics
+
+The `gkg_migrations` table (and `gkg_migration_scopes` in V2) use `ReplacingMergeTree`, which provides **eventual deduplication** rather than transactional row updates. This is workable for migration control state, but requires explicit conventions:
+
+**Single-writer guarantee.** All writes to `gkg_migrations` are serialized through the migration reconciler, which holds an exclusive NATS KV lock. There is never concurrent write contention on these rows. Scope status updates in V2 may come from multiple workers, but each worker writes to a distinct `(migration_version, scope_kind, scope_key)` row — no two workers update the same scope simultaneously (guaranteed by the existing per-scope NATS locking pattern).
+
+**Read semantics.** The reconciler reads current state using `SELECT ... FROM gkg_migrations FINAL ORDER BY version`. The `FINAL` modifier is acceptable here because:
+
+- The table is tiny (tens to low hundreds of rows — one per migration).
+- Reads happen once per reconciler loop iteration (every ~30s), not on the hot path.
+- The reconciler is the only component that makes decisions based on this data.
+
+For V2's `gkg_migration_scopes`, which may have more rows (thousands of scopes), the reconciler uses aggregate queries rather than full table scans:
+
+```sql
+-- Count non-converged scopes (efficient even without FINAL on large tables)
+SELECT count() FROM gkg_migration_scopes FINAL
+WHERE migration_version = {version:UInt64} AND status != 'converged';
+```
+
+If `FINAL` performance becomes a concern at scale, an `argMax`-style projection can be added:
+
+```sql
+PROJECTION latest_status (
+    SELECT migration_version, scope_kind, scope_key,
+           argMax(status, _version) AS status,
+           argMax(retry_count, _version) AS retry_count
+    GROUP BY migration_version, scope_kind, scope_key
+)
+```
+
+**Version column semantics.** The `_version` column uses `now64(6)` (wall-clock microseconds). This is safe because:
+
+- The reconciler is single-writer, so there are no concurrent conflicting writes to the same row.
+- Wall-clock monotonicity within a single process is sufficient; cross-process ordering is guaranteed by the NATS lock (only one writer at a time).
+- For V2 scope updates from workers, each worker updates a distinct row, so `_version` ordering only matters within a single scope's history.
+
+**Manual intervention.** The operational procedures use direct `INSERT` statements to override migration state. Because `ReplacingMergeTree` keeps the row with the highest `_version`, a new insert with `now64(6)` will always supersede previous state after the next merge. Operators should verify the result with `SELECT ... FINAL` after insertion.
+
 ### Migration lock (NATS KV)
 
-The reconciler acquires an exclusive lock before advancing migration state, reusing the existing `LockService` trait and `indexing_locks` bucket:
+The reconciler acquires an exclusive lock before advancing migration state, reusing the existing `indexing_locks` NATS KV bucket:
 
 | Key | Purpose | TTL |
 |---|---|---|
-| `migration.reconciler` | Exclusive lock for the reconciler loop | ~60s, refreshed periodically |
+| `migration.reconciler` | Exclusive lock for the reconciler loop | ~60s |
 
-The lock uses TTL-based leasing. If the lock-holding instance dies, the lease expires and another eligible instance acquires it.
+**Lock semantics.** The migration lock provides **leader election**, not strong mutual exclusion with fencing. This is sufficient because all lock-protected operations (DDL application, ledger writes) are designed to be **idempotent** — if a former lock-holder's stale operation completes after the lease expires and a new holder takes over, the duplicate operation is a no-op.
 
-**Lock-holder eligibility.** After acquiring the lock, the instance compares its migration registry against the persisted ledger. If it cannot advance any migration (e.g., an older binary during rolling deployment), it releases the lock. This ensures the newest compatible binary drives migration progression during mixed-version windows.
+**Acquisition and refresh.** The current `LockService` trait supports only `try_acquire` (create-only with TTL) and `release` (delete). For the migration reconciler, we extend this with a **lease refresh** operation that updates the existing key's value with a new TTL using NATS KV's `update` API (compare-and-swap on the key revision). The reconciler:
+
+1. Acquires the lock via `try_acquire("migration.reconciler", ttl=60s)`.
+2. Stores the NATS KV key revision returned on successful create.
+3. Before each migration step, refreshes the lease by calling `kv_put` with `expected_revision` (optimistic concurrency) and a new TTL. The existing `KvPutOptions` already supports `expected_revision`.
+4. If the refresh fails with `RevisionMismatch`, another instance has taken over — the reconciler stops and re-enters the acquisition loop.
+
+This means a reconciler that loses its lease **discovers this before its next DDL operation**, rather than racing blindly.
+
+**Long DDL safety.** ClickHouse additive DDL (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ADD COLUMN IF NOT EXISTS`) is metadata-only and completes in milliseconds. The 60s TTL is more than sufficient. If a future migration requires longer operations, the reconciler should break them into sub-steps with lease refreshes between each step.
+
+**No fencing tokens.** We do not implement fencing tokens (e.g., writing the lock revision into ClickHouse rows). This is a deliberate simplicity trade-off: the idempotency requirement on all DDL operations makes fencing unnecessary for V1. If V2/V3 introduce non-idempotent operations, fencing should be revisited.
+
+**Lock-holder eligibility.** After acquiring the lock, the instance compares its migration registry against the persisted ledger. If it cannot advance any migration (e.g., an older binary during rolling deployment), it releases the lock. This ensures the newest compatible binary drives migration progression during mixed-version windows. "Compatible" means: the instance's registry contains at least one migration whose version is greater than the highest completed version in the ledger, or it contains the migration currently in `preparing`/`failed` state.
 
 ### Migration reconciler
 
@@ -211,6 +263,23 @@ In V1, `config/graph.sql` continues to serve as:
 Migrations represent **deltas** from the schema defined in `config/graph.sql` at the time migration tracking begins. When a migration adds a table, the DDL should also be added to `graph.sql` so that fresh installations get the complete schema without replaying all migrations.
 
 This is the same pattern used by Rails: `db/schema.rb` is the canonical schema, and `db/migrate/` contains the deltas.
+
+### Authoring contract
+
+To prevent drift between `config/graph.sql` and the migration registry, the following rules apply:
+
+1. **Every schema-changing MR must update both.** If a migration adds a table or column, the same MR must add the corresponding DDL to `config/graph.sql`. If only `graph.sql` is updated without a migration, existing installations will not receive the change.
+2. **`graph.sql` is always the complete current schema.** A fresh install using only `graph.sql` must produce the same schema as an existing install that has replayed all migrations.
+3. **Migrations must use idempotent DDL.** Because fresh installs apply `graph.sql` first (which already includes the migration's DDL), the migration's `prepare()` must be a no-op if the DDL was already applied. Use `IF NOT EXISTS` / `IF EXISTS` clauses.
+
+### CI enforcement
+
+A CI check validates that `config/graph.sql` and the migration registry are consistent:
+
+- **Fresh-install compatibility test**: Apply `graph.sql` to an empty ClickHouse, then run all migrations — every migration should succeed (idempotent DDL means no-ops for already-applied DDL).
+- **Migration-only compatibility test**: Apply only migrations (without `graph.sql`) to an empty ClickHouse — the resulting schema should match what `graph.sql` produces. This can be verified by comparing `SHOW CREATE TABLE` output for all graph tables.
+
+These tests run as part of the existing integration test suite using testcontainers. The exact implementation (e.g., a dedicated test case in `integration-tests`) is a V1 implementation detail.
 
 ## Acceptance criteria
 

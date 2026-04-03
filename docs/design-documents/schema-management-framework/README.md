@@ -201,13 +201,24 @@ GKG combines these patterns because it needs both a migration control plane (lik
 
 ## Open questions
 
-1. **Convergence scope granularity.** What are the correct convergence scopes for SDLC vs. code indexing? Namespace-level for SDLC and project+branch for code seems right, but needs validation.
-2. **Mutable state in ClickHouse.** How should the migration ledger handle concurrent reads during `FINAL` merges? Should we use a separate `MergeTree` variant or accept eventual consistency with `FINAL` queries?
-3. **Runtime compatibility checks.** How should the webserver express "I can serve queries during migration X but not migration Y"? Should compatibility be per-migration or per-schema-version?
-4. **Finalization policy.** Should finalization be automatic (reconciler triggers it when converged) or always require an explicit operator action / separate migration?
-5. **Reconciler scheduling.** Should the reconciler run continuously (loop with sleep), be event-triggered (NATS notification), or be periodic (invoked by DispatchIndexing)?
-6. **Relationship to `config/graph.sql`.** Should `graph.sql` become the "initial schema" (migration version 0) and all subsequent changes be migrations? Or should `graph.sql` continue to be the canonical full schema and migrations be deltas?
-7. **Self-managed deployments.** How does the migration framework behave for self-managed instances where the deployment lifecycle is different from `.com`?
+### Resolved in this proposal
+
+The following questions from the original draft have been addressed based on review feedback:
+
+- **Mutable state in ClickHouse** → Resolved: single-writer guarantee via NATS lock; `FINAL` for small ledger table; `argMax` projection available for larger scope table. See [V1 control-plane table semantics](v1_migration_registry.md#control-plane-table-semantics).
+- **Runtime compatibility checks** → Resolved: per-migration `CompatibilityMode` enum consulted by writers and readers. See [V2 runtime compatibility contract](v2_distributed_convergence.md#runtime-compatibility-contract).
+- **Finalization policy** → Resolved: standalone finalization migrations as the default; inline finalization available but discouraged. See [V3 reconciler finalization logic](v3_finalization.md#reconciler-finalization-logic).
+- **Relationship to `config/graph.sql`** → Resolved: `graph.sql` stays as canonical full schema; migrations are deltas; CI enforces consistency. See [V1 authoring contract](v1_migration_registry.md#authoring-contract).
+
+### Still open
+
+1. **Convergence scope granularity.** Namespace-level for SDLC and project+branch for code is the working assumption. Are there migration types that do not fit these scopes (e.g., table-specific, entity-specific, or global-but-batchable)?
+2. **Reconciler scheduling.** Should the reconciler run continuously (loop with sleep) or be periodic (invoked by DispatchIndexing CronJob)? Continuous is simpler but uses a persistent background task; periodic aligns with the existing scheduling model.
+3. **Self-managed deployments.** How does the migration framework behave for self-managed instances where the deployment lifecycle is different from `.com`? Are there constraints on migration timing or operator tooling?
+4. **Scope discovery completeness.** The current design discovers scopes from checkpoint tables. Are there edge cases where graph data exists but checkpoint state is absent, partially deleted, or stale? Should scope discovery also scan graph tables directly?
+5. **Intermediate binary compatibility.** During a multi-version rolling deployment (A → B → C), how do we prevent binary B from advancing a migration it only partially understands? Is registry/ledger comparison sufficient, or do we need explicit version compatibility metadata on each migration?
+6. **Failure classification.** Should the framework distinguish between transient failures (retry automatically) and permanent failures (stop and alert) for convergence scopes? What heuristics determine the classification?
+7. **`config/graph.sql` as migration version 0.** Should the initial `graph.sql` be represented as a migration in the registry (version 0) so that fresh installs and migration-replayed installs produce identical ledger state?
 
 ## Detailed phase documents
 
