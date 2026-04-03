@@ -338,13 +338,13 @@ Inspired by [Brahmand](https://www.brahmanddb.com/) and
 ([demo](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/268#note_2873427090),
 [code](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/391)),
 proving that we can still get a functioning product with a
-ClickHouse/Postgres-backed Property Graph model. @andrewn also created a
+ClickHouse/Postgres-backed Property Graph model. `@andrewn` also created a
 [Cypher to Postgres](https://gitlab.com/andrewn/opencypher-to-postgres#project-walkthrough)
 project that
 [passes 70%](https://gitlab.com/gitlab-com/gl-infra/sandbox/opencypher-to-postgres/-/merge_requests/20)
 of OpenCypher’s TCK suite, which much of the team can leverage.
 
-Kùzu is a columnar system similar to modern read-optimized analytical DBMSs, like ClickHouse. The team conducted [research and benchmarking](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/267) against a ClickHouse and Postgres-backed Property Graph, which has alleviated our performance concerns. We achieved <300ms p95 query speeds for 3-hop traversals on a 20M+ row, 11GB dataset by leveraging CSR adjacency list index concepts from [KuzuDB’s whitepaper](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf). There is still much room for improvement, but the research so far gives us confidence in betting on ClickHouse. Postgres will be our backup, leveraging @andrewn work.
+Kùzu is a columnar system similar to modern read-optimized analytical DBMSs, like ClickHouse. The team conducted [research and benchmarking](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/267) against a ClickHouse and Postgres-backed Property Graph, which has alleviated our performance concerns. We achieved <300ms p95 query speeds for 3-hop traversals on a 20M+ row, 11GB dataset by leveraging CSR adjacency list index concepts from [KuzuDB’s whitepaper](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf). There is still much room for improvement, but the research so far gives us confidence in betting on ClickHouse. Postgres will be our backup, leveraging `@andrewn` work.
 
 #### Why a Graph Query Engine on ClickHouse?
 

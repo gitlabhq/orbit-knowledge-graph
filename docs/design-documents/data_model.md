@@ -40,7 +40,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `Pipeline`            | Represents a CI/CD pipeline.                                                                            | `id`, `status`, `source`, `project_id`, `user_id`                             |
 | `Vulnerability`       | Represents a security vulnerability finding.                                                            | `id`, `title`, `severity`, `state`, `project_id`                              |
 | `User`                | Represents a GitLab user.                                                                               | `id`, `username`, `name`                                                    |
-| `Note`                | Represents a comment on a merge request or work item.                                                   | `id`, `note`, `discussion_id`, `internal`, `confidential`                    |
+| `Note`                | Represents a comment or annotation on a GitLab object (issue, merge request, commit, vulnerability, etc.). | `id`, `note`, `noteable_type`, `noteable_id`, `author_id`                 |
 | `WorkItem`            | Represents a GitLab work item (issue, task, epic, objective, etc.).                                     | `id`, `iid`, `title`, `state`, `project_id`, `author_id`                      |
 | `Milestone`           | Represents a milestone attached to projects or work items.                                              | `id`, `iid`, `title`, `state`, `due_date`                                    |
 | `Label`               | Represents a label applied to work items.                                                               | `id`, `title`, `color`                                                        |
@@ -75,8 +75,8 @@ graph TD
 
     MergeRequest -- TARGETS --> Branch
     MergeRequest -- CLOSES --> WorkItem
-    Pipeline -- TRIGGERED_FOR --> MergeRequest
-    Pipeline -- TRIGGERED_FOR --> Branch
+    Pipeline -- TRIGGERED --> MergeRequest
+    Pipeline -- TRIGGERED --> Branch
 
     WorkItem -- IN_PROJECT --> Project
     WorkItem -- IN_GROUP --> Group
