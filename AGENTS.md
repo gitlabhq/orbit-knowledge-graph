@@ -105,3 +105,20 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 - No narration comments. Keep only *why* comments. Use `/remove-llm-comments` to clean up.
 - Prefer `ast-grep` over text-based Grep/Edit for structural code transformations (batch renames, pattern-based rewrites).
 - Check crates.io for latest version before adding dependencies.
+
+## Design docs
+
+Design docs live in `docs/design-documents/` and must describe the current repository state, not an aspirational or legacy architecture.
+
+**Rules:**
+
+- **When you change behavior covered by a design doc, update that design doc in the same MR.** Do not leave design-doc cleanup for a later follow-up.
+- **When you add, remove, rename, or substantially repurpose a subsystem, runtime mode, crate, schema shape, or external dependency, update the relevant design docs and this file in the same MR.**
+- **Prefer as-built descriptions over historical ones.** If the code no longer matches a section, rewrite or remove the stale section instead of leaving contradictory text in place.
+- **Treat these files as sync points:**
+  - `docs/design-documents/README.md` for the high-level architecture and current system state
+  - `docs/design-documents/data_model.md` for implemented entities and relationships
+  - `docs/design-documents/indexing/` for indexing flow and runtime modes
+  - `docs/design-documents/querying/` for query surface, DSL, and response shape
+  - `AGENTS.md` / `CLAUDE.md` for agent-facing architecture summaries and doc-sync rules
+- **If your MR changes the architecture but no design doc changed, assume the documentation is incomplete and fix it before merging.**

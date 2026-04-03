@@ -24,12 +24,17 @@ With this service, we strive to transform how teams understand, navigate, and au
 
 ### Current State
 
-Today, we offer a local code-indexing CLI tool that agents can connect to via MCP. We currently include the following:
+This repository now implements the deployed service architecture described in the rest of this design document. The current codebase is no longer centered on the original local Kuzu-backed desktop tool.
 
-- The `orbit` CLI provides local code indexing, supports parallel parsing across multiple repositories, and emits statistics via `orbit index`.
-- [`Kuzu`](https://kuzudb.com/docs/) ships statically linked inside the CLI so the graph runtime travels as a single binary for local MCP servers, while contributors can switch to dynamic linking for faster builds; see the [Build guide](https://gitlab-org.gitlab.io/rust/knowledge-graph/contribute/build/).
-- The bundled Vue/Vite UI is embedded in the desktop HTTP server, letting users launch `gkg server start` and browse indexed projects through the local web experience; see the [Usage guide](https://gitlab-org.gitlab.io/rust/knowledge-graph/getting-started/usage/).
-- We have a *full delivery pipeline* for all major OSs for the CLI, including Windows. See this [epic](https://gitlab.com/groups/gitlab-org/rust/-/epics/3) and the [release page](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/releases) for more details.
+Today, the repository includes the following major components:
+
+- A single Rust workspace with one primary service binary, `gkg-server`, that runs in four modes: `Webserver`, `Indexer`, `DispatchIndexing`, and `HealthCheck`.
+- A ClickHouse-backed graph runtime with ontology-driven schema, ETL, and query validation. The authoritative schema lives in `config/ontology/` and `config/graph.sql`.
+- A deployed query surface that serves HTTP, gRPC, and MCP requests from the webserver mode and compiles the intermediate JSON query language into parameterized ClickHouse SQL.
+- A distributed indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
+- Shared crates for indexing, query compilation, formatting, ontology loading, ClickHouse access, GitLab API access, health checks, and integration testing.
+
+The legacy local-only tooling from the earlier `gitlab-org/rust/knowledge-graph` project remains useful as historical context, but it is not the best description of the current Orbit knowledge-graph service. Where the service intentionally differs from that earlier tool, the service architecture in this repository is the source of truth.
 
 ### Why a Property Graph? Why not a REST and GraphQL layer?
 
@@ -184,10 +189,12 @@ We will then build a secure query layer on top of the Data Insights Platform to 
 - [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) acts as the CDC bridge, streaming PostgreSQL logical replication events into NATS.
 - [NATS](https://docs.nats.io/) acts as the durable message broker between Siphon and ClickHouse. Additionally, we will leverage NATS to power all event-driven logic, high availability, and queuing, such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing (see [ADR 005](decisions/005_code_indexing_task_table.md)).
 - [ClickHouse](https://clickhouse.com/) will act as the primary data store and data lake. With ClickHouse, we will build namespace property graphs and project-level indexes. We will never establish a direct connection to the OLTP database.
-- **Knowledge Graph Web Server and Indexer** as a unified binary with two modes:
-  - **`gkg-webserver`**: Serves web traffic requests coming from the Rails instance, executes GKG MCP tool calls, shares logic with the indexer, builds the graph queries, communicates with NATS for indexing status and namespace routing, and writes to ClickHouse to record customer usage for impact analytics and usage billing.
-  - **`gkg-indexer`**: Performs SDLC ETL indexing for each customer's top-level namespace metadata by converting normalized tables into property graph tables, computing traversal_ids as needed for each entity type, and consuming code indexing tasks to fetch repository archives via the Rails internal API for code indexing. Leverages NATS as the distributed queuing and locking system across indexing types.
-- **The Software Architecture Map (UI)** will be a Vue3-based visual explorer embedded directly into Rails and will communicate with the Knowledge Graph service. It will auto-discover components and dependencies from the Knowledge Graph to visualize lineage and ownership. Teams can use it for faster onboarding, blast radius and impact analysis during incidents/changes, and more precise service ownership boundaries for structural lineage. Additionally, we will use this same UI to power Knowledge Graph usage analytics and admin settings.
+- **Knowledge Graph service** as a unified binary with four runtime modes:
+  - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, and MCP traffic; validates graph queries against the JSON schema and ontology; compiles them to ClickHouse SQL; and applies authorization and formatting before returning results.
+  - **`Indexer`** (`gkg-server --mode Indexer`): Runs the shared indexing engine, consumes SDLC and code indexing requests from NATS JetStream, and writes graph data into ClickHouse.
+  - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): Pulls Siphon CDC events, converts them into internal indexing requests, and publishes deduplicated work to the internal `GKG_INDEXER` stream.
+  - **`HealthCheck`** (`gkg-server --mode HealthCheck`): Exposes readiness and liveness checks for deployed environments.
+- **UI and product experiences** are downstream consumers of this service. The current repository contains the graph/querying service and indexing platform rather than an embedded desktop UI.
 
 ```mermaid
 graph TD
@@ -241,7 +248,7 @@ Please see the following design documents for more details on the Knowledge Grap
 
 ## Binary Breakdown
 
-Below is a breakdown of the components, their respective binaries, and their roles in the system.
+Below is a breakdown of the deployed components and runtime modes used by the current codebase.
 
 ```mermaid
 flowchart TD
@@ -268,8 +275,10 @@ flowchart TD
     end
 
     subgraph KGGrp[Knowledge Graph - Rust]
-      IDX[gkg-indexer]
-      WEB[gkg-webserver]
+      IDX[gkg-server --mode Indexer]
+      WEB[gkg-server --mode Webserver]
+      DSP[gkg-server --mode DispatchIndexing]
+      HC[gkg-server --mode HealthCheck]
     end
 
     subgraph CHGrp[ClickHouse]
@@ -284,7 +293,9 @@ flowchart TD
   SiphonMain --> JS
   SiphonCI --> JS
 
-  JS -->|CDC events| IDX
+  JS -->|CDC events| DSP
+  DSP -->|internal indexing requests| JS
+  JS -->|indexing requests| IDX
   IDX -- archive download --> RailsAPI
 
   %% Durable store: ClickHouse only
@@ -297,7 +308,7 @@ flowchart TD
   JS --> |namespace cache, node registration| WEB
 
   %% ====== Classes ======
-  class SiphonMain,SiphonCI,IDX,WEB bin
+  class SiphonMain,SiphonCI,IDX,WEB,DSP,HC bin
   class JS queue
   class CH db
   class RailsAPI ext
@@ -308,11 +319,32 @@ flowchart TD
 
 As a first iteration, the team aims to build **a [Graph Query Engine](querying/graph_engine.md) on ClickHouse** that translates basic Cypher (aka GQL) queries into SQL-compatible multi-hop graph traversals.
 
+The current implementation has already standardized on ClickHouse for deployed graph storage and query execution. In the current repository state:
+
+- Graph nodes live in typed `gl_*` ClickHouse tables such as `gl_group`, `gl_project`, `gl_merge_request`, `gl_pipeline`, `gl_job`, `gl_vulnerability`, `gl_branch`, `gl_file`, `gl_definition`, and `gl_imported_symbol`.
+- Relationships are stored in a shared `gl_edge` table with adjacency-optimized ordering and projections.
+- Code indexing progress is tracked in `code_indexing_checkpoint`.
+- The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
+
+The discussion below captures why ClickHouse was chosen and remains useful architectural context, but the implementation choice is no longer hypothetical.
+
 In October 2025, KuzuDB [was archived](https://www.theregister.com/2025/10/14/kuzudb_abandoned/) by maintainers. The Knowledge Graph Team spent time validating various database options against both Code Indexing and SDLC indexing, using the SLDC [dataset generator](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/292) and pre-existing Code Index parquet files ([Database Selection Epic](https://gitlab.com/groups/gitlab-org/rust/-/epics/31)). We explored both new databases (Neo4J, FalkorBD, Memgraph, etc.) and already-deployed, approved GitLab databases (PostgreSQL and ClickHouse).
 
-Inspired by [Brahmand](https://www.brahmanddb.com/) and [SQL 2023’s Standardization of Property Graphs](https://www.iso.org/standard/79473.html) (ISO/IEC 9075-16:2023), the team created a modified version of the [Demo Instance](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263) (which originally used Kuzu) and swapped it out with ClickHouse ([demo](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/268#note_2873427090), [code](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/391)), proving that we can still get a functioning product with a ClickHouse/Postgres-backed Property Graph model. @andrewn also created a [Cypher to Postgres](https://gitlab.com/andrewn/opencypher-to-postgres#project-walkthrough) project that [passes 70%](https://gitlab.com/gitlab-com/gl-infra/sandbox/opencypher-to-postgres/-/merge_requests/20) of OpenCypher’s TCK suite, which much of the team can leverage.
+Inspired by [Brahmand](https://www.brahmanddb.com/) and
+[SQL 2023’s Standardization of Property Graphs](https://www.iso.org/standard/79473.html)
+(ISO/IEC 9075-16:2023), the team created a modified version of the
+[Demo Instance](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263)
+(which originally used Kuzu) and swapped it out with ClickHouse
+([demo](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/268#note_2873427090),
+[code](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/391)),
+proving that we can still get a functioning product with a
+ClickHouse/Postgres-backed Property Graph model. `@andrewn` also created a
+[Cypher to Postgres](https://gitlab.com/andrewn/opencypher-to-postgres#project-walkthrough)
+project that
+[passes 70%](https://gitlab.com/gitlab-com/gl-infra/sandbox/opencypher-to-postgres/-/merge_requests/20)
+of OpenCypher’s TCK suite, which much of the team can leverage.
 
-Kùzu is a columnar system similar to modern read-optimized analytical DBMSs, like ClickHouse. The team conducted [research and benchmarking](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/267) against a ClickHouse and Postgres-backed Property Graph, which has alleviated our performance concerns. We achieved <300ms p95 query speeds for 3-hop traversals on a 20M+ row, 11GB dataset by leveraging CSR adjacency list index concepts from [KuzuDB’s whitepaper](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf). There is still much room for improvement, but the research so far gives us confidence in betting on ClickHouse. Postgres will be our backup, leveraging @andrewn work.
+Kùzu is a columnar system similar to modern read-optimized analytical DBMSs, like ClickHouse. The team conducted [research and benchmarking](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/267) against a ClickHouse and Postgres-backed Property Graph, which has alleviated our performance concerns. We achieved <300ms p95 query speeds for 3-hop traversals on a 20M+ row, 11GB dataset by leveraging CSR adjacency list index concepts from [KuzuDB’s whitepaper](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf). There is still much room for improvement, but the research so far gives us confidence in betting on ClickHouse. Postgres will be our backup, leveraging `@andrewn` work.
 
 #### Why a Graph Query Engine on ClickHouse?
 
@@ -391,7 +423,7 @@ Follow up MR: New section/page on deployment resource requirements, and plan for
 - Aim for independent upgrade & security patching without Rails as a dependency to enable continuous delivery for both .com and self-managed customers.
 - The design of the service should incorporate [Cells](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/tenant-scale/cells_and_organizations/) architectural implications where applicable.
 - Build a **data model configuration layer** for SDLC metadata sources to support Rails database migrations and schema changes, and to add new data source entities.
-- Avoid requiring customers to run any scripts (rake tasks) to fix data state issues.
+- Avoid requiring customers to run any scripts (Rake tasks) to fix data state issues.
 
 ## Code Indexing vs SDLC Metadata Indexing
 
@@ -425,7 +457,11 @@ Please see the [Code Indexing](./indexing/code_indexing.md) and [SDLC Metadata I
 
 ### Phase 1 - SDLC Metadata Indexing and Project Level Code Graph Indexing
 
-For the first phase, we will keep code graphs and SDLC metadata graphs separate, but they will share the same architecture, codebase, and API layer.
+This is still the current implementation shape in the repository. SDLC and code data share the same codebase, ontology-driven graph model, and API layer, but they remain operationally distinct in how they are indexed and stored:
+
+- SDLC data is loaded into typed `gl_*` node tables plus the shared `gl_edge` relationship table using namespaced ETL driven by the ontology.
+- Code data is loaded into `gl_branch`, `gl_directory`, `gl_file`, `gl_definition`, `gl_imported_symbol`, and the shared `gl_edge` table, keyed by `traversal_path`, `project_id`, and `branch`.
+- Cross-graph linkage happens through shared entity identifiers and shared relationship semantics rather than by collapsing everything into a single undifferentiated store.
 
 ### Workstreams Roadmap
 
