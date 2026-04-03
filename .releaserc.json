@@ -91,7 +91,7 @@
     [
       "@semantic-release/exec",
       {
-        "publishCmd": "git tag gkgpb/v${nextRelease.version} && git push origin gkgpb/v${nextRelease.version}"
+        "publishCmd": "git tag tools/gkgpb/v${nextRelease.version} && git push origin tools/gkgpb/v${nextRelease.version}"
       }
     ],
     [

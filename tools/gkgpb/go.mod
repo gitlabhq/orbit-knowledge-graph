@@ -1,4 +1,4 @@
-module gitlab.com/gitlab-org/orbit/knowledge-graph/gkgpb
+module gitlab.com/gitlab-org/orbit/knowledge-graph/tools/gkgpb
 
 go 1.24.0
 

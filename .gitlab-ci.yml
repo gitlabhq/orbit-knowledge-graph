@@ -397,12 +397,12 @@ check-go-proto:
     - apt-get update -qq && apt-get install -y -qq unzip
   script:
     - scripts/proto-go.sh check
-    - cd gkgpb && go build ./...
+    - cd tools/gkgpb && go build ./...
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
     - changes:
         - crates/gkg-server/proto/**/*
-        - gkgpb/**/*
+        - tools/gkgpb/**/*
 
 build-proto-gem:
   needs: []
@@ -461,9 +461,9 @@ semantic-release:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
-    - cd tools/release && npm ci
+    - npm ci
   script:
-    - npx --prefix tools/release semantic-release
+    - npx semantic-release
 
 .docker-release:
   stage: build
