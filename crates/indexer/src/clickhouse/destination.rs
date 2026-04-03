@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfiguration};
+use clickhouse_client::{
+    ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseConfigurationExt,
+};
 
 use super::batch_writer::ClickHouseBatchWriter;
 use crate::destination::{BatchWriter, Destination, DestinationError};

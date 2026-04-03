@@ -9,6 +9,18 @@ nats:
   # tls_ca_cert_path: "/etc/nats/ca.pem"
   # tls_cert_path: "/etc/nats/client.pem"
   # tls_key_path: "/etc/nats/client-key.pem"
+  # connection_timeout_secs: 10
+  # request_timeout_secs: 5
+  # ack_wait_secs: 300
+  # max_deliver: 5
+  # subscription_buffer_size: 100
+  # consumer_name: null
+  # batch_size: 10
+  # auto_create_streams: true
+  # stream_replicas: 1
+  # stream_max_age_secs: null
+  # stream_max_bytes: null
+  # stream_max_messages: null
 
 datalake:
   url: "http://127.0.0.1:8123"

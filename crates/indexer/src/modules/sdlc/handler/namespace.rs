@@ -3,36 +3,16 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::checkpoint::namespace_position_key;
-use crate::configuration::HandlerConfiguration;
+use crate::configuration::{HandlerConfiguration, NamespaceHandlerConfig};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::modules::sdlc::handler::default_datalake_batch_size;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext};
 use crate::modules::sdlc::plan::PipelinePlan;
 use crate::topic::NamespaceIndexingRequest;
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct NamespaceHandlerConfig {
-    #[serde(flatten)]
-    pub engine: HandlerConfiguration,
-
-    #[serde(default = "default_datalake_batch_size")]
-    pub datalake_batch_size: u64,
-}
-
-impl Default for NamespaceHandlerConfig {
-    fn default() -> Self {
-        Self {
-            engine: HandlerConfiguration::default(),
-            datalake_batch_size: default_datalake_batch_size(),
-        }
-    }
-}
 
 pub struct NamespaceHandler {
     plans: Vec<PipelinePlan>,

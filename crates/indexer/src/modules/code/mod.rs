@@ -23,19 +23,15 @@ mod test_helpers;
 use std::sync::Arc;
 
 use crate::IndexerConfig;
+use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 pub use code_indexing_task_handler::CodeIndexingTaskHandler;
-pub use code_indexing_task_handler::CodeIndexingTaskHandlerConfig;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
-pub use namespace_backfill_dispatcher::{
-    NamespaceCodeBackfillDispatcher, NamespaceCodeBackfillDispatcherConfig,
-};
+pub use namespace_backfill_dispatcher::NamespaceCodeBackfillDispatcher;
 use repository::RepositoryResolver;
-pub use siphon_code_indexing_task_dispatcher::{
-    SiphonCodeIndexingTaskDispatcher, SiphonCodeIndexingTaskDispatcherConfig,
-};
+pub use siphon_code_indexing_task_dispatcher::SiphonCodeIndexingTaskDispatcher;
 
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};

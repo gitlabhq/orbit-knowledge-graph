@@ -7,6 +7,7 @@ license = "LicenseRef-EE"
 [dependencies]
 axum = { workspace = true }
 clickhouse-client = { workspace = true }
+gkg-server-config = { path = "../gkg-server-config" }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }
 serde = { workspace = true }

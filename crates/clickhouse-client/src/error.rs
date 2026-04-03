@@ -17,15 +17,3 @@ pub enum ClickHouseError {
     #[error("bad response ({status}): {body}")]
     BadResponse { status: u16, body: String },
 }
-
-#[derive(Debug, Error)]
-pub enum ConfigurationError {
-    #[error("database cannot be empty")]
-    EmptyDatabase,
-
-    #[error("url cannot be empty")]
-    EmptyUrl,
-
-    #[error("username cannot be empty")]
-    EmptyUsername,
-}
