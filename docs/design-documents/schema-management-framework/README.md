@@ -1,0 +1,217 @@
+# Schema migration framework
+
+## Status
+
+Proposal
+
+## Overview
+
+GKG needs a migration framework that can evolve the ClickHouse graph schema, coordinate distributed data convergence, and integrate with the existing indexer architecture. This document proposes an **indexer-owned reconciliation model** rolled out in three phases:
+
+| Phase | Scope | Summary |
+|-------|-------|---------|
+| [V1 — Migration registry](v1_migration_registry.md) | Additive DDL | Rust migration registry, ClickHouse-backed ledger, NATS KV lock, additive schema changes |
+| [V2 — Distributed convergence](v2_distributed_convergence.md) | Backfill / reindex | Per-scope schema version tracking, scheduler-integrated reindex progression, compatibility-aware cutover |
+| [V3 — Finalization](v3_finalization.md) | Cleanup | Delayed destructive migrations, automated or policy-driven safe finalization |
+
+Cross-cutting concerns (failure handling, observability, deployment integration) are covered in [Operational model](operational_model.md).
+
+### Related documents
+
+- [Schema management](../schema_management.md) — earlier strategy document describing migration approaches and shadow column patterns
+- [SDLC indexing](../indexing/sdlc_indexing.md) — indexing pipeline architecture
+- [Code indexing](../indexing/code_indexing.md) — code indexing pipeline architecture
+
+## Problem statement
+
+Today, GKG graph schema changes are applied manually. The authoritative DDL lives in [`config/graph.sql`](../../../config/graph.sql) as `CREATE TABLE IF NOT EXISTS` statements. There is no versioning, no runtime migration tracking, and no integration with the deployment lifecycle.
+
+This creates several problems:
+
+1. **Manual intervention on every schema change.** Adding a column, creating a table, or adding a projection requires someone to manually apply DDL against ClickHouse during deployment.
+2. **No version tracking.** There is no record of which migrations have been applied. The system cannot tell whether a given ClickHouse instance is current, behind, or in an inconsistent state.
+3. **No distributed convergence.** Some schema changes require reindexing affected scopes (namespaces, projects, branches). There is no mechanism to track which scopes have been brought to the new schema version.
+4. **No deployment integration.** Schema changes are decoupled from the application release cycle. Rolling deployments cannot reason about schema compatibility.
+
+### Scope and ownership boundary
+
+This framework applies to the **GKG-owned graph and control-plane schema** in ClickHouse — all tables defined in `config/graph.sql`: node tables (`gl_user`, `gl_group`, `gl_project`, etc.), the `gl_edge` relationship table, checkpoint tables, and any future control-plane tables.
+
+It does **not** apply to:
+
+- **Siphon datalake tables.** These are owned by Rails and managed through Rails ClickHouse migration mechanisms. GKG reads from them but does not own their schema lifecycle.
+- **Ontology definitions.** The YAML in `config/ontology/` defines entity types, properties, and ETL mappings. Ontology changes may *trigger* migrations but are not themselves managed by this framework.
+
+## Current state
+
+### DDL management
+
+All graph DDL is defined in `config/graph.sql` (585 lines, 23+ `CREATE TABLE IF NOT EXISTS` statements). It is applied:
+
+- **In production**: externally during deployment, not by the service itself.
+- **In integration tests**: `include_str!` of `config/graph.sql`, split by `;`, executed statement-by-statement against a testcontainer ClickHouse instance.
+- **In the E2E pipeline**: copied into a ClickHouse pod and executed via `clickhouse-client --multiquery`.
+
+There is no `ALTER TABLE` usage, no versioned migrations, and no automatic DDL application at service startup.
+
+### NATS KV usage
+
+A single NATS KV bucket is in use: `indexing_locks` (defined in `crates/indexer/src/locking.rs`).
+
+| Key pattern | Purpose |
+|---|---|
+| `cadence.<task_name>` | Interval-based scheduling dedup (create-only with TTL) |
+| `project.<project_id>.<branch>` | Code indexing concurrency lock per project+branch |
+
+The `LockService` trait provides `try_acquire(key, ttl) -> bool` and `release(key)` using NATS KV create-only semantics with per-message TTL. This is the foundation we extend for migration lock coordination.
+
+There is no schema cache bucket, no migration tracking bucket, and no version coordination bucket.
+
+### Indexer scheduling
+
+The `DispatchIndexing` mode runs as a **run-once-and-exit process** (designed for K8s CronJob invocation). It iterates over 6 `ScheduledTask` implementations sequentially, using the `LockService` for interval-based cadence control:
+
+- `GlobalDispatcher`, `NamespaceDispatcher` — SDLC indexing
+- `SiphonCodeIndexingTaskDispatcher`, `NamespaceCodeBackfillDispatcher` — code indexing
+- `TableCleanup` — `OPTIMIZE TABLE ... FINAL CLEANUP`
+- `NamespaceDeletionScheduler` — namespace deletion
+
+The `Indexer` mode runs continuously, consuming messages from the `GKG_INDEXER` NATS JetStream stream via a `WorkerPool` with global and per-group concurrency semaphores.
+
+### Health probes
+
+The indexer health server provides `/live` (always OK) and `/ready` (checks NATS, ClickHouse, GitLab connectivity). Readiness is independent of schema state — this is correct and should remain so.
+
+## Design principles
+
+1. **Application-native.** Migrations are defined in Rust and compiled into the application binary. No external migration tooling.
+2. **Reconciliation over one-shot execution.** The system continuously reconciles actual state toward desired state, rather than assuming a single DDL execution is sufficient.
+3. **Durable truth in ClickHouse.** Migration state is persisted in ClickHouse control tables. NATS KV is used for coordination (locks, invalidation) only.
+4. **Backward compatibility first.** Schema changes must support rolling upgrades and mixed-version windows. The expand/migrate/contract pattern is the default.
+5. **Decoupled from startup.** Migration progression runs as a background reconciliation loop, not as a startup side-effect. Pod readiness is never blocked by migration state.
+6. **Explicit multi-phase lifecycle.** The system distinguishes between: schema prepared, data converged, and old structures finalized.
+
+## Architecture overview
+
+### Why indexer-owned reconciliation
+
+The migration framework is owned by the indexer because the indexer already owns:
+
+- distributed work coordination (NATS JetStream consumers, worker pools)
+- data convergence (namespace reindexing, code backfill)
+- ClickHouse write access (graph tables, checkpoints)
+- NATS KV locking (the `LockService` trait)
+
+This makes the indexer the natural home for a reconciliation loop that advances schema state and coordinates distributed backfill. The webserver remains read-only and the DispatchIndexing scheduler remains a stateless dispatcher.
+
+### Core components
+
+```
+┌─────────────────────────────────────────────────┐
+│                Indexer process                   │
+│                                                  │
+│  ┌──────────────┐    ┌───────────────────────┐  │
+│  │ Message       │    │ Migration reconciler  │  │
+│  │ processing    │    │ (lock-holder only)    │  │
+│  │ engine        │    │                       │  │
+│  │               │    │ - Load registry       │  │
+│  │ NATS ──►      │    │ - Read CH ledger      │  │
+│  │ WorkerPool    │    │ - Advance phases      │  │
+│  │ ──► CH        │    │ - Declare convergence │  │
+│  └──────────────┘    └───────────────────────┘  │
+│         │                      │                 │
+│         ▼                      ▼                 │
+│  ┌──────────────────────────────────────────┐   │
+│  │           ClickHouse (graph DB)           │   │
+│  │                                           │   │
+│  │  graph tables    gkg_migrations           │   │
+│  │  gl_edge         gkg_migration_scopes     │   │
+│  │  checkpoint      (V2)                     │   │
+│  └──────────────────────────────────────────┘   │
+│         │                      │                 │
+│         ▼                      ▼                 │
+│  ┌──────────────────────────────────────────┐   │
+│  │        NATS KV (indexing_locks)           │   │
+│  │                                           │   │
+│  │  cadence.*            (existing)          │   │
+│  │  project.*            (existing)          │   │
+│  │  migration.reconciler (new — V1)          │   │
+│  │  migration.version    (new — V1)          │   │
+│  └──────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘
+```
+
+### Migration lifecycle
+
+Every migration moves through a well-defined set of phases:
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> preparing : reconciler picks up
+    preparing --> prepared : global DDL applied
+    prepared --> completed : additive (no convergence)
+    prepared --> converging : convergent (scopes declared)
+    converging --> converged : all scopes at target version
+    converged --> completed : no finalization needed
+    converged --> finalizing : finalization step defined
+    finalizing --> completed : cleanup applied
+    preparing --> failed : DDL error
+    converging --> failed : unrecoverable error
+    finalizing --> failed : cleanup error
+    failed --> preparing : retry
+```
+
+| Transition | Trigger | Phase introduced |
+|---|---|---|
+| `pending → preparing` | Reconciler picks up next migration | V1 |
+| `preparing → prepared` | Global DDL applied successfully | V1 |
+| `prepared → completed` | Additive migration, no backfill needed | V1 |
+| `prepared → converging` | Convergence targets declared | V2 |
+| `converging → converged` | All scopes at target version | V2 |
+| `converged → finalizing` | Finalization step begins | V3 |
+| `finalizing → completed` | Cleanup DDL applied | V3 |
+
+### Migration types
+
+| Type | Example | Backfill? | Phases |
+|---|---|---|---|
+| Additive | New table, new nullable column, new projection | No | pending → preparing → prepared → completed |
+| Convergent | Field type change, semantic rewrite, new required property | Yes | Full lifecycle through converging |
+| Finalization | Drop deprecated column, stop dual-write | No | converged → finalizing → completed |
+
+### Runtime behavior by component
+
+| Component | Migration role |
+|---|---|
+| **Indexer** | Owns the reconciler loop. Applies global DDL. Schedules convergence work. Updates migration state. |
+| **Webserver** | Read-only awareness. Refreshes in-memory caches on NATS KV notification. Remains query-compatible during mixed migration windows. |
+| **DispatchIndexing** | Extended (V2) to check for stale convergence scopes when dispatching work. Does not apply migrations. |
+| **HealthCheck** | Not migration-aware. Readiness checks remain infrastructure-level. |
+
+## Prior art
+
+This design is informed by existing GitLab systems:
+
+- **Advanced Search** — versioned migration registry, durable migration state, runtime completion checks.
+- **Active Context** — simpler DB-backed migration ledger reconciled from code-defined migrations.
+- **Exact Code Search / Zoekt** — scoped schema-version convergence, where completion requires reindexing stale indexed units over time.
+
+GKG combines these patterns because it needs both a migration control plane (like Advanced Search) and a convergence model (like Zoekt).
+
+## Open questions
+
+1. **Convergence scope granularity.** What are the correct convergence scopes for SDLC vs. code indexing? Namespace-level for SDLC and project+branch for code seems right, but needs validation.
+2. **Mutable state in ClickHouse.** How should the migration ledger handle concurrent reads during `FINAL` merges? Should we use a separate `MergeTree` variant or accept eventual consistency with `FINAL` queries?
+3. **Runtime compatibility checks.** How should the webserver express "I can serve queries during migration X but not migration Y"? Should compatibility be per-migration or per-schema-version?
+4. **Finalization policy.** Should finalization be automatic (reconciler triggers it when converged) or always require an explicit operator action / separate migration?
+5. **Reconciler scheduling.** Should the reconciler run continuously (loop with sleep), be event-triggered (NATS notification), or be periodic (invoked by DispatchIndexing)?
+6. **Relationship to `config/graph.sql`.** Should `graph.sql` become the "initial schema" (migration version 0) and all subsequent changes be migrations? Or should `graph.sql` continue to be the canonical full schema and migrations be deltas?
+7. **Self-managed deployments.** How does the migration framework behave for self-managed instances where the deployment lifecycle is different from `.com`?
+
+## Detailed phase documents
+
+- **[V1 — Migration registry](v1_migration_registry.md)**: The minimal viable framework. Rust registry, ClickHouse ledger, NATS lock, additive DDL only.
+- **[V2 — Distributed convergence](v2_distributed_convergence.md)**: Per-scope tracking, scheduler integration, compatibility-aware cutover.
+- **[V3 — Finalization](v3_finalization.md)**: Cleanup phases, delayed destructive migrations.
+- **[Operational model](operational_model.md)**: Failure handling, observability, deployment integration.
