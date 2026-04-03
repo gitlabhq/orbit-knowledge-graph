@@ -105,6 +105,9 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 - No narration comments. Keep only *why* comments. Use `/remove-llm-comments` to clean up.
 - Prefer `ast-grep` over text-based Grep/Edit for structural code transformations (batch renames, pattern-based rewrites).
 - Check crates.io for latest version before adding dependencies.
+- Non-trivial MRs (features, refactors, architectural changes) should reference an issue in the MR description, for example `Closes #123` or `Relates to #123`.
+- Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.
+- If you are opening an MR without an issue, consider whether the work is substantial enough that it should have one.
 
 ## Design docs
 
