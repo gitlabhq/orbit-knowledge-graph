@@ -185,7 +185,7 @@ async fn run_webserver(
     let http_server = HttpServer::bind(config.bind_address, graph_client).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
-    let tls_config = gkg_server::config::load_tls_config(&config.tls).await?;
+    let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
 
     let grpc_server = GrpcServer::new(
         config.grpc_bind_address,
