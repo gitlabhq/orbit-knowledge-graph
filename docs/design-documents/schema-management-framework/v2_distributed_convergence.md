@@ -138,14 +138,46 @@ This reuses the existing NATS JetStream → WorkerPool → Handler pipeline. Con
 
 ### Produced-data schema versioning
 
-To detect stale scopes and reason about mixed-version data, GKG should track the schema version that produced indexed data at the convergence scope level:
+Tracking the schema version that produced indexed data is a **core requirement** for V2 — not an optional follow-up. Without it, the system cannot reliably detect stale scopes, reason about mixed-version data, or determine when convergence is complete.
 
-- For SDLC: the schema version used when a namespace was last fully indexed.
-- For code: the schema version used when a project+branch was last indexed.
+**Design.** A `schema_version UInt64` column is added to the existing checkpoint tables:
 
-This can be added as a column to existing checkpoint tables or tracked in a dedicated table. The exact mechanism is a detailed design question for V2 implementation.
+```sql
+-- SDLC checkpoint (existing table, new column)
+ALTER TABLE checkpoint
+ADD COLUMN IF NOT EXISTS schema_version UInt64 DEFAULT 0;
 
-This is inspired by Zoekt, where indexed repositories carry a `schema_version` and stale scopes are detected by comparing against the current target.
+-- Code indexing checkpoint (existing table, new column)
+ALTER TABLE code_indexing_checkpoint
+ADD COLUMN IF NOT EXISTS schema_version UInt64 DEFAULT 0;
+```
+
+The indexer writes the current target schema version (highest completed migration version) into the checkpoint whenever it completes indexing work for a scope. This happens as part of the normal indexing write path — no separate write is needed.
+
+**Stale scope detection.** A scope is stale when its checkpoint `schema_version` is less than the target version declared by a convergent migration. The reconciler discovers stale scopes by querying:
+
+```sql
+-- Find SDLC scopes that need convergence for migration version 5
+SELECT DISTINCT key AS scope_key
+FROM checkpoint FINAL
+WHERE schema_version < {target_version:UInt64};
+
+-- Find code scopes that need convergence
+SELECT traversal_path, project_id, branch
+FROM code_indexing_checkpoint FINAL
+WHERE schema_version < {target_version:UInt64};
+```
+
+**New scopes.** Scopes that are first indexed after a migration is declared are written with the current target schema version from the start. They never appear as stale and require no convergence.
+
+**Unit of correctness.** A scope is considered "converged" when **both** conditions are met:
+
+1. The migration-specific `converge_scope()` backfill has completed (recorded in `gkg_migration_scopes`).
+2. The scope's checkpoint `schema_version` has been updated to the target version.
+
+The `converge_scope()` implementation is responsible for updating the checkpoint's `schema_version` as its final step. This ensures that a scope is only marked converged when the data has actually been produced at the target version.
+
+This design is inspired by Zoekt, where indexed repositories carry a `schema_version` and stale scopes are detected by comparing against the current target.
 
 ## Example: changing a column type via shadow column
 
@@ -161,12 +193,12 @@ impl Migration for MrStateToEnum {
     fn migration_type(&self) -> MigrationType { MigrationType::Convergent }
 
     async fn prepare(&self, ctx: &MigrationContext) -> Result<()> {
-        // Phase 1: Add shadow column
+        // Add shadow column with a Nullable type — NULL means "not yet backfilled"
         ctx.execute_ddl("
             ALTER TABLE gl_merge_request
-            ADD COLUMN IF NOT EXISTS state_v2 Enum8(
+            ADD COLUMN IF NOT EXISTS state_v2 Nullable(Enum8(
                 'opened' = 1, 'closed' = 2, 'merged' = 3, 'locked' = 4
-            ) DEFAULT 'opened'
+            ))
         ").await
     }
 
@@ -179,7 +211,11 @@ impl Migration for MrStateToEnum {
         ctx: &MigrationContext,
         scope: &ConvergenceScope,
     ) -> Result<()> {
-        // Backfill state_v2 from state for all MRs in this namespace
+        // Backfill state_v2 from state for all MRs in this namespace.
+        // Uses Nullable — NULL means not yet backfilled (avoids sentinel value confusion).
+        // This operation is idempotent: re-running it for already-backfilled rows
+        // produces the same result because ReplacingMergeTree deduplicates by
+        // ORDER BY key, and the new _version supersedes the old row.
         ctx.execute_dml("
             INSERT INTO gl_merge_request (id, traversal_path, state_v2, _version)
             SELECT id, traversal_path,
@@ -187,28 +223,88 @@ impl Migration for MrStateToEnum {
                    now64(6)
             FROM gl_merge_request FINAL
             WHERE traversal_path LIKE {scope_prefix:String}
-              AND state_v2 = 'opened'  -- default value = not yet backfilled
-        ", params!{ scope_prefix: format!("{}%", scope.key) }).await
+              AND state_v2 IS NULL
+        ", params!{ scope_prefix: format!("{}%", scope.key) }).await?;
+
+        // Update the checkpoint schema_version to mark this scope as converged
+        ctx.update_scope_schema_version(&scope, 5).await
     }
 }
 ```
+
+**Idempotence invariant.** Convergence operations must be safe to re-run. This example achieves idempotence through:
+
+- **Nullable for "not yet backfilled"**: Using `Nullable` with `IS NULL` instead of a default sentinel value avoids confusing real data values (like `'opened'`) with "not yet migrated" state.
+- **ReplacingMergeTree deduplication**: Re-inserting a row with the same ORDER BY key but a newer `_version` is a no-op after the next merge.
+- **Scope-level tracking**: The `gkg_migration_scopes` table records whether a scope's convergence has been attempted, so the scheduler does not re-dispatch already-converged scopes.
 
 The reconciler:
 
 1. Applies the `ALTER TABLE ADD COLUMN` (prepare phase).
 2. Discovers all namespaces and creates scope records.
 3. The scheduler dispatches convergence work per namespace.
-4. Workers backfill `state_v2` for each namespace.
+4. Workers backfill `state_v2` for each namespace and update the checkpoint `schema_version`.
 5. When all scopes are converged, the migration is marked converged.
 6. A subsequent V3 finalization migration would swap the columns and drop the old one.
 
-## Compatibility during convergence
+## Runtime compatibility contract
 
-During the convergence window:
+During the convergence window, both writers (indexer) and readers (webserver) need to know what behavior is expected. The **authoritative signal** is the migration status in the `gkg_migrations` table.
 
-- **Writes** (indexer): Must dual-write to both old and new columns. The indexer's ETL handlers check whether a convergent migration is active and write to both columns.
-- **Reads** (webserver): Must read from the old column until the migration is fully converged. The query compiler can check migration status to decide which column to use.
-- **New scopes**: Namespaces/projects onboarded during convergence are indexed with the latest schema from the start — no backfill needed.
+### Compatibility modes
+
+Each convergent migration defines a `CompatibilityMode` that the runtime consults:
+
+```rust
+pub enum CompatibilityMode {
+    /// Migration not yet started — use old schema only
+    Legacy,
+    /// Migration in progress (preparing/converging) — dual-write, read old
+    DualWrite,
+    /// Migration converged — dual-write, can read new
+    ReadNew,
+    /// Migration finalized — use new schema only
+    NewOnly,
+}
+```
+
+The migration framework exposes a query interface for runtime components:
+
+```rust
+/// Returns the current compatibility mode for a given migration.
+/// Cached in-memory, refreshed on NATS KV `migration.version` notification.
+fn compatibility_mode(migration_version: u64) -> CompatibilityMode;
+```
+
+### Writer behavior (indexer)
+
+The indexer's ETL handlers query the compatibility mode to determine write behavior:
+
+| Mode | Writer behavior |
+|---|---|
+| `Legacy` | Write to old columns/tables only |
+| `DualWrite` | Write to both old and new columns/tables |
+| `ReadNew` | Write to both (maintaining backward compatibility until finalization) |
+| `NewOnly` | Write to new columns/tables only (post-finalization) |
+
+Dual-write is activated when the reconciler transitions a migration to `preparing` or `converging` status. The indexer does not need to know which specific scopes are converged — it always dual-writes while the migration is active.
+
+### Reader behavior (webserver)
+
+The query compiler checks the compatibility mode to determine which column or table to reference:
+
+| Mode | Reader behavior |
+|---|---|
+| `Legacy` | Query old columns/tables |
+| `DualWrite` | Query old columns/tables (new data is incomplete) |
+| `ReadNew` | Query new columns/tables (all data is at target version) |
+| `NewOnly` | Query new columns/tables only |
+
+The webserver refreshes its cached compatibility state when it receives a NATS KV `migration.version` notification. Between refreshes, it operates on stale-but-safe state (reading from old columns when new columns are already available is always safe; reading from new columns before convergence completes is the only unsafe direction).
+
+### New scopes
+
+Namespaces/projects onboarded during convergence are indexed with the current target schema version from the start. The indexer dual-writes as usual, and the new scope's checkpoint `schema_version` is set to the target version immediately. No convergence backfill is needed for these scopes.
 
 ## Acceptance criteria
 

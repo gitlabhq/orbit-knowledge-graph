@@ -76,39 +76,32 @@ impl Migration for MrStateDropOldColumn {
 
 ### Reconciler finalization logic
 
-The reconciler handles finalization in two ways:
+**Standalone finalization migrations are the standard path.** This is the preferred model because it naturally creates a release boundary and soak window between convergence and cleanup. The finalization migration ships in a separate deployment from the convergent migration, giving operators explicit control over timing.
 
-**Inline finalization** (for convergent migrations with a `finalize()` method):
+The reconciler checks the `depends_on_converged()` precondition before applying a finalization migration. If the referenced convergent migration is not yet fully converged, the finalization migration blocks:
 
 ```
-Some(Status::Converged) if migration.finalize_is_defined() => {
-    if migration.requires_manual_finalization() {
-        // Check for operator approval flag (e.g., NATS KV key or CH record)
-        if !is_finalization_approved(migration.version()) {
-            break  // Wait for approval
-        }
+Some(Status::Pending) if migration.migration_type() == Finalization => {
+    let required = migration.depends_on_converged()
+        .expect("finalization migrations must declare dependency");
+    if ledger.status(required) != Some(Status::Converged | Status::Completed) {
+        break  // Blocked — prerequisite not met
     }
-    upsert_migration_status(migration, Status::Finalizing)
-    match migration.finalize(&ctx).await {
-        Ok(()) => upsert_migration_status(migration, Status::Completed),
-        Err(e) => upsert_migration_status(migration, Status::Failed, error: e),
-    }
+    // Proceed with normal preparing → completed flow
 }
 ```
 
-**Standalone finalization migrations** (separate migration with `MigrationType::Finalization`):
+**Inline finalization is available but discouraged.** For simple cases (e.g., dropping an unused index after an additive migration), a convergent migration may implement `finalize()` directly. When present, the reconciler calls it after convergence completes. However, because this removes the soak window, it should be reserved for low-risk operations and requires explicit opt-in via `fn has_inline_finalization(&self) -> bool`.
 
-The reconciler checks the `depends_on_converged()` precondition before applying. If the referenced migration is not yet converged, the finalization migration blocks.
+### Deployment-version precondition
 
-### Finalization policies
+A finalization migration is only safe when **all serving binaries understand the post-cutover schema**. The reconciler cannot verify this directly (it does not know what binary versions are running on other pods). Instead, the safety guarantee comes from the deployment model:
 
-| Policy | Behavior | Use case |
-|---|---|---|
-| **Auto-finalize** | Reconciler runs `finalize()` as soon as convergence completes | Low-risk cleanup (e.g., dropping an unused index) |
-| **Manual-finalize** | Reconciler waits for operator approval | High-risk changes (e.g., dropping a column, renaming a table) |
-| **Deferred finalization migration** | Separate migration that depends on convergence of a prior one | Complex multi-step cleanup or cleanup bundled with the next release |
+1. The finalization migration is added in a new release.
+2. The release is deployed via rolling update — all pods are updated before the reconciler runs.
+3. The reconciler applies the finalization migration only after acquiring the lock (which means a new-version pod is running).
 
-The choice between these policies is per-migration, set by the migration author.
+For extra safety, a finalization migration can implement `requires_manual_approval() -> bool`. When true, the reconciler waits for an operator to set an approval flag (a ClickHouse record in `gkg_migrations` with a dedicated `approved_for_finalization` status) before proceeding. This is recommended for destructive operations like column drops or table renames.
 
 ## Example: completing the MR state enum migration
 
