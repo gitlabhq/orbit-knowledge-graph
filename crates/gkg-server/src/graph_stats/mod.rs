@@ -111,6 +111,7 @@ fn present_domain_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clickhouse_client::ClickHouseConfigurationExt;
 
     fn test_ontology() -> Arc<Ontology> {
         Arc::new(Ontology::load_embedded().expect("ontology must load"))

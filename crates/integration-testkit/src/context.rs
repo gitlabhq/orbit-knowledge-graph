@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfiguration};
+use clickhouse_client::{
+    ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseConfigurationExt,
+};
 use query_engine::compiler::ParameterizedQuery;
 use testcontainers::bollard::Docker;
 use testcontainers::bollard::query_parameters::{

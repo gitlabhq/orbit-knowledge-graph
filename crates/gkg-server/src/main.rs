@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
@@ -184,7 +185,7 @@ async fn run_webserver(
     let http_server = HttpServer::bind(config.bind_address, graph_client).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
-    let tls_config = config.tls.load_tls_config().await?;
+    let tls_config = gkg_server::config::load_tls_config(&config.tls).await?;
 
     let grpc_server = GrpcServer::new(
         config.grpc_bind_address,

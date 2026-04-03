@@ -1,3 +1,4 @@
+use clickhouse_client::ClickHouseConfigurationExt;
 use health_check::{HealthChecker, run_server};
 
 use crate::config::AppConfig;

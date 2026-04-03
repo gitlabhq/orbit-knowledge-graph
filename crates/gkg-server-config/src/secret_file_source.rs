@@ -8,7 +8,7 @@ use config::ValueKind;
 /// Reads Kubernetes-mounted secret files and merges them into config.
 ///
 /// K8s projects each secret key as a file under a mount path:
-///   /etc/secrets/gitlab/jwt/signing_key  →  content becomes `gitlab.jwt.signing_key`
+///   /etc/secrets/gitlab/jwt/signing_key  ->  content becomes `gitlab.jwt.signing_key`
 ///
 /// Directory structure maps to dot-separated config keys,
 /// file content becomes the value. Empty files are skipped.

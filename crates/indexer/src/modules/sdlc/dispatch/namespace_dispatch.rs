@@ -3,11 +3,10 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::configuration::ScheduleConfiguration;
+use crate::configuration::{NamespaceDispatcherConfig, ScheduleConfiguration};
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
@@ -21,12 +20,6 @@ FROM siphon_knowledge_graph_enabled_namespaces
 INNER JOIN siphon_namespaces on siphon_knowledge_graph_enabled_namespaces.root_namespace_id = siphon_namespaces.id
 WHERE _siphon_deleted = false
 "#;
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct NamespaceDispatcherConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-}
 
 pub struct NamespaceDispatcher {
     nats: Arc<dyn NatsServices>,

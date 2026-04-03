@@ -1,68 +1,13 @@
-use std::collections::HashMap;
-
-use serde::{Deserialize, Serialize};
+use gkg_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
-use crate::error::ConfigurationError;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ClickHouseConfiguration {
-    pub database: String,
-    pub url: String,
-    pub username: String,
-    #[serde(default)]
-    pub password: Option<String>,
-    #[serde(default)]
-    pub query_settings: HashMap<String, String>,
-    #[serde(default)]
-    pub profiling: ProfilingConfig,
+pub trait ClickHouseConfigurationExt {
+    fn build_client(&self) -> ArrowClickHouseClient;
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct ProfilingConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub explain: bool,
-    #[serde(default)]
-    pub query_log: bool,
-    #[serde(default)]
-    pub processors: bool,
-    #[serde(default)]
-    pub instance_health: bool,
-}
-
-impl Default for ClickHouseConfiguration {
-    fn default() -> Self {
-        Self {
-            database: "default".to_string(),
-            url: "http://127.0.0.1:8123".to_string(),
-            username: "default".to_string(),
-            password: None,
-            query_settings: HashMap::new(),
-            profiling: ProfilingConfig::default(),
-        }
-    }
-}
-
-impl ClickHouseConfiguration {
-    pub fn validate(&self) -> Result<(), ConfigurationError> {
-        if self.database.is_empty() {
-            return Err(ConfigurationError::EmptyDatabase);
-        }
-
-        if self.url.is_empty() {
-            return Err(ConfigurationError::EmptyUrl);
-        }
-
-        if self.username.is_empty() {
-            return Err(ConfigurationError::EmptyUsername);
-        }
-
-        Ok(())
-    }
-
-    pub fn build_client(&self) -> ArrowClickHouseClient {
+impl ClickHouseConfigurationExt for ClickHouseConfiguration {
+    fn build_client(&self) -> ArrowClickHouseClient {
         ArrowClickHouseClient::new(
             &self.url,
             &self.database,
@@ -76,6 +21,7 @@ impl ClickHouseConfiguration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gkg_server_config::ConfigurationError;
 
     #[test]
     fn test_optional_password() {

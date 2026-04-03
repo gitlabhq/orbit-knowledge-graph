@@ -1,242 +1,29 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-
-use gitlab_client::GitlabClientConfiguration;
-use gkg_server_config::QuerySettings;
-use health_check::HealthCheckConfig;
-use indexer::clickhouse::ClickHouseConfiguration;
-use indexer::configuration::EngineConfiguration;
-use indexer::nats::NatsConfiguration;
-use indexer::scheduler::ScheduleConfig;
-use serde::{Deserialize, Serialize};
 use tonic::transport::Identity;
 use tonic::transport::server::ServerTlsConfig;
 
-use crate::constants::SECRET_FILE_DIR;
-use crate::secret_file_source::SecretFileSource;
+// Re-export everything from gkg-server-config for backward compatibility.
+pub use gkg_server_config::{
+    AppConfig, ConfigError, GitlabConfig, GrpcConfig, JwtConfig, MetricsConfig, OtelConfig,
+    PrometheusConfig, SECRET_FILE_DIR, SharedAppConfig, TlsConfig,
+};
 
-fn default_bind_address() -> SocketAddr {
-    "127.0.0.1:4200".parse().unwrap()
-}
-
-fn default_grpc_bind_address() -> SocketAddr {
-    "127.0.0.1:50054".parse().unwrap()
-}
-
-fn default_indexer_health_bind_address() -> SocketAddr {
-    "0.0.0.0:4202".parse().unwrap()
-}
-
-fn default_jwt_clock_skew_secs() -> u64 {
-    60
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct JwtConfig {
-    #[serde(default)]
-    pub signing_key: Option<String>,
-    #[serde(default)]
-    pub verifying_key: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct GitlabConfig {
-    #[serde(default)]
-    pub base_url: Option<String>,
-    #[serde(default)]
-    pub jwt: JwtConfig,
-    #[serde(default)]
-    pub resolve_host: Option<String>,
-}
-
-impl GitlabConfig {
-    pub fn client_config(&self) -> Option<GitlabClientConfiguration> {
-        let base_url = self.base_url.clone()?;
-        let signing_key = self.jwt.signing_key.clone()?;
-        Some(GitlabClientConfiguration {
-            base_url,
-            signing_key,
-            resolve_host: self.resolve_host.clone(),
-        })
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
-pub struct GrpcConfig {
-    pub keepalive_interval_secs: u64,
-    pub keepalive_timeout_secs: u64,
-    pub tcp_keepalive_secs: u64,
-    pub connection_window_size: u32,
-    pub stream_window_size: u32,
-    pub concurrency_limit: usize,
-    pub max_connection_age_secs: u64,
-    pub stream_timeout_secs: u64,
-}
-
-impl Default for GrpcConfig {
-    fn default() -> Self {
-        Self {
-            keepalive_interval_secs: 20,
-            keepalive_timeout_secs: 20,
-            tcp_keepalive_secs: 60,
-            connection_window_size: 2 * 1024 * 1024,
-            stream_window_size: 1024 * 1024,
-            concurrency_limit: 256,
-            max_connection_age_secs: 300,
-            stream_timeout_secs: 60,
+/// Load TLS identity from the paths in [`TlsConfig`].
+///
+/// This lives in `gkg-server` (not `gkg-server-config`) because it depends on
+/// `tonic`, which is a heavy runtime dependency.
+pub async fn load_tls_config(tls: &TlsConfig) -> anyhow::Result<Option<ServerTlsConfig>> {
+    match (&tls.cert_path, &tls.key_path) {
+        (Some(cert_path), Some(key_path)) => {
+            let cert = tokio::fs::read(cert_path).await?;
+            let key = tokio::fs::read(key_path).await?;
+            let identity = Identity::from_pem(cert, key);
+            Ok(Some(ServerTlsConfig::new().identity(identity)))
         }
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct TlsConfig {
-    #[serde(default)]
-    pub cert_path: Option<String>,
-    #[serde(default)]
-    pub key_path: Option<String>,
-}
-
-impl TlsConfig {
-    pub async fn load_tls_config(&self) -> anyhow::Result<Option<ServerTlsConfig>> {
-        match (&self.cert_path, &self.key_path) {
-            (Some(cert_path), Some(key_path)) => {
-                let cert = tokio::fs::read(cert_path).await?;
-                let key = tokio::fs::read(key_path).await?;
-                let identity = Identity::from_pem(cert, key);
-                Ok(Some(ServerTlsConfig::new().identity(identity)))
-            }
-            (Some(_), None) | (None, Some(_)) => {
-                anyhow::bail!("both `tls.cert_path` and `tls.key_path` must be set to enable TLS")
-            }
-            (None, None) => Ok(None),
+        (Some(_), None) | (None, Some(_)) => {
+            anyhow::bail!("both `tls.cert_path` and `tls.key_path` must be set to enable TLS")
         }
+        (None, None) => Ok(None),
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AppConfig {
-    #[serde(default = "default_bind_address")]
-    pub bind_address: SocketAddr,
-    #[serde(default = "default_grpc_bind_address")]
-    pub grpc_bind_address: SocketAddr,
-    #[serde(default = "default_jwt_clock_skew_secs")]
-    pub jwt_clock_skew_secs: u64,
-    #[serde(default)]
-    pub health_check_url: Option<String>,
-    #[serde(default)]
-    pub nats: NatsConfiguration,
-    #[serde(default)]
-    pub datalake: ClickHouseConfiguration,
-    #[serde(default)]
-    pub graph: ClickHouseConfiguration,
-    #[serde(default)]
-    pub engine: EngineConfiguration,
-    #[serde(default)]
-    pub gitlab: GitlabConfig,
-    #[serde(default)]
-    pub schedule: ScheduleConfig,
-    #[serde(default)]
-    pub health_check: HealthCheckConfig,
-    #[serde(default = "default_indexer_health_bind_address")]
-    pub indexer_health_bind_address: SocketAddr,
-    #[serde(default)]
-    pub metrics: MetricsConfig,
-    #[serde(default)]
-    pub tls: TlsConfig,
-    #[serde(default)]
-    pub query: QuerySettings,
-    #[serde(default)]
-    pub grpc: GrpcConfig,
-}
-
-impl AppConfig {
-    pub fn load() -> Result<Self, ConfigError> {
-        Self::load_with_secret_dir(SECRET_FILE_DIR)
-    }
-
-    fn load_with_secret_dir(secret_dir: &str) -> Result<Self, ConfigError> {
-        let config = config::Config::builder()
-            .add_source(config::File::with_name("config/default").required(false))
-            .add_source(SecretFileSource::new(secret_dir))
-            .add_source(
-                config::Environment::with_prefix("GKG")
-                    .prefix_separator("_")
-                    .separator("__")
-                    .list_separator(",")
-                    .with_list_parse_key("health_check.services")
-                    .try_parsing(true),
-            )
-            .build()
-            .map_err(ConfigError::Config)?;
-
-        config.try_deserialize().map_err(ConfigError::Config)
-    }
-
-    pub fn jwt_secret(&self) -> Result<&str, ConfigError> {
-        self.gitlab
-            .jwt
-            .verifying_key
-            .as_deref()
-            .ok_or(ConfigError::MissingJwtSecret)
-    }
-
-    pub fn gitlab_client_config(&self) -> Option<GitlabClientConfiguration> {
-        self.gitlab.client_config()
-    }
-
-    pub fn into_shared(self) -> SharedAppConfig {
-        Arc::new(self)
-    }
-}
-
-pub type SharedAppConfig = Arc<AppConfig>;
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct MetricsConfig {
-    #[serde(default)]
-    pub log_level: Option<String>,
-    #[serde(default)]
-    pub otel: OtelConfig,
-    #[serde(default)]
-    pub prometheus: PrometheusConfig,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct OtelConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub endpoint: String,
-}
-
-fn default_prometheus_port() -> u16 {
-    9394
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PrometheusConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_prometheus_port")]
-    pub port: u16,
-}
-
-impl Default for PrometheusConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            port: default_prometheus_port(),
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigError {
-    #[error("configuration error: {0}")]
-    Config(#[from] config::ConfigError),
-    #[error("GKG_GITLAB__JWT__VERIFYING_KEY is required")]
-    MissingJwtSecret,
 }
 
 #[cfg(test)]
