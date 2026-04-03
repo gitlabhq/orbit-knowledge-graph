@@ -8,6 +8,8 @@ that reviewers can understand your intent. Keeping the description updated is
 especially important if they didn't participate in the discussion.
 -->
 
+Closes # <!-- required for non-trivial MRs -->
+
 %{all_commits}
 
 ### Related Issues

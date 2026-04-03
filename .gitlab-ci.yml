@@ -96,6 +96,17 @@ mr-title-check:
   script:
     - ./scripts/check-mr-title.sh
 
+mr-issue-link-check:
+  stage: lint
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  script:
+    - ./scripts/check-mr-issue-link.sh
+
 ontology-schema-validate:
   stage: lint
   image: ghcr.io/astral-sh/uv:python3.12-alpine
