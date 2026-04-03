@@ -6,10 +6,13 @@ edition = "2024"
 [dependencies]
 arrow = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 futures = { workspace = true }
 gkg-server = { path = "../gkg-server" }
 query-engine = { path = "../query-engine" }
+rustls = { workspace = true }
+sqlparser = { workspace = true }
 serde_json = { workspace = true }
 testcontainers = { workspace = true }
 tokio = { workspace = true }

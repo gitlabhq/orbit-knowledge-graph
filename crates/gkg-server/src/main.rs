@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
-use gkg_server::config::AppConfig;
+use gkg_server::content;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
+use gkg_server_config::AppConfig;
 use indexer::IndexerConfig;
 use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
@@ -17,6 +19,8 @@ use indexer::modules::namespace_deletion::{
 };
 use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
+use query_engine::compiler::input::QueryType;
+use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -26,14 +30,38 @@ async fn main() -> anyhow::Result<()> {
         .install_default()
         .expect("Failed to install rustls CryptoProvider");
 
-    labkit_rs::logging::init();
-
     let args = Args::parse();
     let config = AppConfig::load()?;
+
+    let invalid_keys = config.query.validate_keys(QueryType::VARIANTS);
+    anyhow::ensure!(
+        invalid_keys.is_empty(),
+        "unknown query type(s) in config: {invalid_keys:?} (valid: {:?})",
+        QueryType::VARIANTS,
+    );
+    gkg_server_config::query::init(config.query.clone());
+
+    let mut builder = labkit::Builder::new(args.mode.service_name())
+        .propagate_correlation(true)
+        .echo_response_header(true);
+    if let Some(level) = config
+        .metrics
+        .log_level
+        .as_deref()
+        .filter(|s| !s.is_empty())
+    {
+        builder = builder.log_level(level);
+    }
+    if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
+        builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
+    }
+    if config.metrics.prometheus.enabled {
+        builder = builder.prometheus_metrics_port(config.metrics.prometheus.port);
+    }
+    let _guard = builder.init().expect("labkit init");
+
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     ontology::constants::validate_ontology_constants(&ontology);
-
-    let _metrics = labkit_rs::metrics::try_init_with_config(config.metrics.clone()).ok();
 
     info!(mode = ?args.mode, "starting");
 
@@ -78,7 +106,6 @@ async fn main() -> anyhow::Result<()> {
                 Box::new(NamespaceCodeBackfillDispatcher::new(
                     services.nats.clone(),
                     config.datalake.build_client(),
-                    config.graph.build_client(),
                     metrics.clone(),
                     config.schedule.tasks.namespace_code_backfill.clone(),
                 )),
@@ -133,9 +160,32 @@ async fn run_webserver(
 
     let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
 
+    let resolver_registry = config
+        .gitlab_client_config()
+        .map(|cfg| {
+            let client = gitlab_client::GitlabClient::new(cfg)
+                .map(Arc::new)
+                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?;
+            let mut registry = content::ColumnResolverRegistry::new();
+            registry.register(
+                "gitaly",
+                Arc::new(content::gitaly::GitalyContentService::new(client)),
+            );
+            Ok::<_, anyhow::Error>(Arc::new(registry))
+        })
+        .transpose()?;
+
+    if resolver_registry.is_some() {
+        info!("Content resolution enabled (GitlabClient configured)");
+    } else {
+        info!("Content resolution disabled (no GitLab client config)");
+    }
+
     let graph_client = config.graph.build_client();
     let http_server = HttpServer::bind(config.bind_address, graph_client).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
+
+    let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
 
     let grpc_server = GrpcServer::new(
         config.grpc_bind_address,
@@ -143,6 +193,9 @@ async fn run_webserver(
         ontology,
         &config.graph,
         cluster_health,
+        tls_config,
+        resolver_registry,
+        config.grpc.clone(),
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 

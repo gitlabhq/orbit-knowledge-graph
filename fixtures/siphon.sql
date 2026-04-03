@@ -112,11 +112,16 @@ CREATE TABLE IF NOT EXISTS namespace_traversal_paths
     `id` Int64 DEFAULT 0,
     `traversal_path` String DEFAULT '0/',
     `version` DateTime64(6, 'UTC') DEFAULT now(),
-    `deleted` Bool DEFAULT false
+    `deleted` Bool DEFAULT false,
+    PROJECTION by_traversal_path
+    (
+        SELECT *
+        ORDER BY traversal_path
+    )
 ) ENGINE = ReplacingMergeTree(version, deleted)
 PRIMARY KEY id
 ORDER BY id
-SETTINGS index_granularity = 512;
+SETTINGS index_granularity = 512, deduplicate_merge_projection_mode = 'rebuild';
 
 -- Siphon source tables for project data
 CREATE TABLE IF NOT EXISTS siphon_projects
@@ -146,11 +151,39 @@ CREATE TABLE IF NOT EXISTS project_namespace_traversal_paths
     `id` Int64 DEFAULT 0,
     `traversal_path` String DEFAULT '0/',
     `version` DateTime64(6, 'UTC') DEFAULT now(),
-    `deleted` Bool DEFAULT false
+    `deleted` Bool DEFAULT false,
+    PROJECTION by_traversal_path
+    (
+        SELECT *
+        ORDER BY traversal_path
+    )
 ) ENGINE = ReplacingMergeTree(version, deleted)
 PRIMARY KEY id
 ORDER BY id
-SETTINGS index_granularity = 512;
+SETTINGS index_granularity = 512, deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source tables for routes (authoritative full_path)
+CREATE TABLE IF NOT EXISTS siphon_routes
+(
+    `id` Int64 CODEC(DoubleDelta, ZSTD),
+    `source_id` Int64 CODEC(ZSTD(1)),
+    `source_type` LowCardinality(String) CODEC(LZ4),
+    `path` String CODEC(ZSTD(3)),
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta, ZSTD(1)),
+    `name` String,
+    `namespace_id` Int64,
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC') CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT FALSE CODEC(ZSTD(1)),
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, source_type, source_id, id)
+ORDER BY (traversal_path, source_type, source_id, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild';
 
 -- Siphon source tables for notes
 CREATE TABLE IF NOT EXISTS siphon_notes
@@ -392,108 +425,70 @@ PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
 
 
--- Hierarchy work items table
-CREATE TABLE IF NOT EXISTS hierarchy_work_items
+-- Work items table
+CREATE TABLE work_items
 (
-    `traversal_path` String,
-    `id` Int64,
-    `title` String DEFAULT '',
-    `author_id` Nullable(Int64),
-    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
-    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
-    `milestone_id` Nullable(Int64),
-    `iid` Nullable(Int64),
-    `updated_by_id` Nullable(Int64),
-    `weight` Nullable(Int64),
-    `confidential` Bool DEFAULT false,
-    `due_date` Nullable(Date32),
-    `moved_to_id` Nullable(Int64),
-    `time_estimate` Nullable(Int64) DEFAULT 0,
-    `relative_position` Nullable(Int64),
-    `last_edited_at` Nullable(DateTime64(6, 'UTC')),
-    `last_edited_by_id` Nullable(Int64),
-    `closed_at` Nullable(DateTime64(6, 'UTC')),
-    `closed_by_id` Nullable(Int64),
-    `state_id` Int8 DEFAULT 1,
-    `duplicated_to_id` Nullable(Int64),
-    `promoted_to_epic_id` Nullable(Int64),
-    `health_status` Nullable(Int8),
-    `sprint_id` Nullable(Int64),
-    `blocking_issues_count` Int64 DEFAULT 0,
-    `upvotes_count` Int64 DEFAULT 0,
-    `work_item_type_id` Int64,
-    `namespace_id` Int64,
-    `start_date` Nullable(Date32),
-    `custom_status_id` Int64,
-    `system_defined_status_id` Int64,
-    `version` DateTime64(6, 'UTC') DEFAULT now(),
-    `deleted` Bool DEFAULT false,
-    `label_ids` String DEFAULT '',
-    `assignee_ids` String DEFAULT ''
-)
-ENGINE = ReplacingMergeTree(version, deleted)
-PRIMARY KEY (traversal_path, work_item_type_id, id)
-ORDER BY (traversal_path, work_item_type_id, id)
-SETTINGS index_granularity = 8192;
-
--- Siphon source tables for issues (work items)
-CREATE TABLE IF NOT EXISTS siphon_issues
-(
-    `id` Int64,
-    `title` String DEFAULT '',
+    `id` Int64 CODEC(Delta(8), ZSTD(1)),
+    `title` String CODEC(ZSTD(3)),
     `author_id` Nullable(Int64),
     `project_id` Nullable(Int64),
-    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
-    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
-    `description` String DEFAULT '',
+    `created_at` DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    `updated_at` DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    `description` String CODEC(ZSTD(3)),
     `milestone_id` Nullable(Int64),
-    `iid` Nullable(Int64),
+    `iid` Int64,
     `updated_by_id` Nullable(Int64),
     `weight` Nullable(Int64),
-    `confidential` Bool DEFAULT false,
+    `confidential` Bool DEFAULT false CODEC(ZSTD(1)),
     `due_date` Nullable(Date32),
     `moved_to_id` Nullable(Int64),
-    `lock_version` Int64 DEFAULT 0,
     `time_estimate` Nullable(Int64) DEFAULT 0,
     `relative_position` Nullable(Int64),
     `service_desk_reply_to` Nullable(String),
     `cached_markdown_version` Nullable(Int64),
     `last_edited_at` Nullable(DateTime64(6, 'UTC')),
     `last_edited_by_id` Nullable(Int64),
-    `discussion_locked` Nullable(Bool),
+    `discussion_locked` Nullable(Bool) CODEC(ZSTD(1)),
     `closed_at` Nullable(DateTime64(6, 'UTC')),
     `closed_by_id` Nullable(Int64),
-    `state_id` Int8 DEFAULT 1,
+    `state_id` Int16 DEFAULT 1,
     `duplicated_to_id` Nullable(Int64),
     `promoted_to_epic_id` Nullable(Int64),
-    `health_status` Nullable(Int8),
-    `external_key` Nullable(String),
+    `health_status` Nullable(Int16),
     `sprint_id` Nullable(Int64),
     `blocking_issues_count` Int64 DEFAULT 0,
     `upvotes_count` Int64 DEFAULT 0,
-    `work_item_type_id` Int64 DEFAULT 0,
-    `namespace_id` Int64 DEFAULT 0,
+    `work_item_type_id` Int64,
+    `namespace_id` Int64,
     `start_date` Nullable(Date32),
-    `tmp_epic_id` Nullable(Int64),
-    `imported_from` Int8 DEFAULT 0,
-    `author_id_convert_to_bigint` Nullable(Int64),
-    `closed_by_id_convert_to_bigint` Nullable(Int64),
-    `duplicated_to_id_convert_to_bigint` Nullable(Int64),
-    `id_convert_to_bigint` Int64 DEFAULT 0,
-    `last_edited_by_id_convert_to_bigint` Nullable(Int64),
-    `milestone_id_convert_to_bigint` Nullable(Int64),
-    `moved_to_id_convert_to_bigint` Nullable(Int64),
-    `project_id_convert_to_bigint` Nullable(Int64),
-    `promoted_to_epic_id_convert_to_bigint` Nullable(Int64),
-    `updated_by_id_convert_to_bigint` Nullable(Int64),
-    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
-    `_siphon_deleted` Bool DEFAULT false,
-    `namespace_traversal_ids` Array(Int64) DEFAULT []
+    `imported_from` Int16 DEFAULT 0,
+    `namespace_traversal_ids` Array(Int64) DEFAULT [],
+    `traversal_path` String DEFAULT '0/' CODEC(ZSTD(3)),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    `_siphon_deleted` Bool DEFAULT false CODEC(ZSTD(1)),
+    `metric_first_mentioned_in_commit_at` Nullable(DateTime64(6, 'UTC')),
+    `metric_first_associated_with_milestone_at` Nullable(DateTime64(6, 'UTC')),
+    `metric_first_added_to_board_at` Nullable(DateTime64(6, 'UTC')),
+    `assignees` Array(UInt64),
+    `label_ids` Array(Tuple(
+        label_id UInt64,
+        created_at DateTime64(6, 'UTC'))),
+    `award_emojis` Array(Tuple(
+        name String,
+        user_id UInt64,
+        created_at DateTime64(6, 'UTC'))),
+    `system_defined_status_id` Nullable(Int64),
+    `custom_status_id` Nullable(Int64),
+    PROJECTION pg_pkey_ordered
+    (
+        SELECT *
+        ORDER BY id
+    )
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY id
-ORDER BY id
-SETTINGS index_granularity = 8192;
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild';
 
 -- Knowledge graph enabled namespaces
 CREATE TABLE IF NOT EXISTS test.siphon_knowledge_graph_enabled_namespaces

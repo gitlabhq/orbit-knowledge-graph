@@ -2,19 +2,18 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, info, warn};
 
 use super::config::subjects;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::configuration::ScheduleConfiguration;
 use crate::nats::NatsServices;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 use clickhouse_client::FromArrowColumn;
+use gkg_server_config::{NamespaceCodeBackfillDispatcherConfig, ScheduleConfiguration};
 
 const NAMESPACE_TRAVERSAL_PATH_QUERY: &str = r#"
 SELECT traversal_path
@@ -31,40 +30,9 @@ WHERE deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
-fn default_events_stream_name() -> String {
-    "siphon_stream_main_db".to_string()
-}
-
-fn default_batch_size() -> usize {
-    100
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NamespaceCodeBackfillDispatcherConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-
-    #[serde(default = "default_events_stream_name")]
-    pub events_stream_name: String,
-
-    #[serde(default = "default_batch_size")]
-    pub batch_size: usize,
-}
-
-impl Default for NamespaceCodeBackfillDispatcherConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration::default(),
-            events_stream_name: default_events_stream_name(),
-            batch_size: default_batch_size(),
-        }
-    }
-}
-
 pub struct NamespaceCodeBackfillDispatcher {
     nats: Arc<dyn NatsServices>,
     datalake: ArrowClickHouseClient,
-    graph: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     config: NamespaceCodeBackfillDispatcherConfig,
 }
@@ -73,14 +41,12 @@ impl NamespaceCodeBackfillDispatcher {
     pub fn new(
         nats: Arc<dyn NatsServices>,
         datalake: ArrowClickHouseClient,
-        graph: ArrowClickHouseClient,
         metrics: ScheduledTaskMetrics,
         config: NamespaceCodeBackfillDispatcherConfig,
     ) -> Self {
         Self {
             nats,
             datalake,
-            graph,
             metrics,
             config,
         }
@@ -322,7 +288,7 @@ impl NamespaceCodeBackfillDispatcher {
     ) -> Result<Vec<PendingProject>, TaskError> {
         let query_start = Instant::now();
         let batches = self
-            .graph
+            .datalake
             .query(NAMESPACE_PROJECTS_QUERY)
             .param("traversal_path", traversal_path)
             .fetch_arrow()
@@ -365,12 +331,16 @@ mod tests {
     }
 
     fn create_dispatcher(nats: Arc<MockNatsServices>) -> NamespaceCodeBackfillDispatcher {
-        let datalake = ArrowClickHouseClient::new("http://localhost:0", "default", "default", None);
-        let graph = ArrowClickHouseClient::new("http://localhost:0", "default", "default", None);
+        let datalake = ArrowClickHouseClient::new(
+            "http://localhost:0",
+            "default",
+            "default",
+            None,
+            &std::collections::HashMap::new(),
+        );
         NamespaceCodeBackfillDispatcher::new(
             nats,
             datalake,
-            graph,
             test_metrics(),
             NamespaceCodeBackfillDispatcherConfig::default(),
         )

@@ -1,6 +1,7 @@
+use clickhouse_client::ClickHouseConfigurationExt;
 use health_check::{HealthChecker, run_server};
 
-use crate::config::AppConfig;
+use gkg_server_config::AppConfig;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

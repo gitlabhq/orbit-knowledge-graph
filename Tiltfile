@@ -17,7 +17,7 @@ Missing .tilt-secrets file. Create it with:
 
   cp .tilt-secrets.example .tilt-secrets
 
-Then fill in passwords from GDK config.
+Then set GDK_ROOT to your GDK installation path.
 ''')
 
     secrets = {}
@@ -33,36 +33,30 @@ Then fill in passwords from GDK config.
 
 secrets = load_secrets()
 
-# Generate secrets YAML from loaded values
-secrets_yaml = '''
-apiVersion: v1
+gdk_root = secrets.get('GDK_ROOT', '')
+if not gdk_root:
+    fail('GDK_ROOT must be set in .tilt-secrets (path to your GDK installation)')
+
+jwt_key_path = os.path.join(gdk_root, 'gitlab', '.gitlab_knowledge_graph_secret')
+if not os.path.exists(jwt_key_path):
+    fail('JWT key not found at %s — is GDK configured for Knowledge Graph?' % jwt_key_path)
+
+jwt_secret = str(read_file(jwt_key_path)).strip()
+clickhouse_password = secrets.get('CLICKHOUSE_PASSWORD', '')
+
+# Single secret matching the official chart's secrets.keys structure
+secrets_yaml = '''apiVersion: v1
 kind: Secret
 metadata:
-  name: postgres-credentials
+  name: gkg-secrets
 type: Opaque
 stringData:
-  password: "{postgres_password}"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: clickhouse-credentials
-type: Opaque
-stringData:
-  password: "{clickhouse_password}"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: gkg-server-credentials
-type: Opaque
-stringData:
-  jwt-secret: "{jwt_secret}"
-'''.format(
-    postgres_password=secrets.get('POSTGRES_PASSWORD', ''),
-    clickhouse_password=secrets.get('CLICKHOUSE_PASSWORD', ''),
-    jwt_secret=secrets.get('GKG_JWT_SECRET', ''),
-)
+  gitlab-jwt-verifying-key: "{jwt}"
+  gitlab-jwt-signing-key: "{jwt}"
+  datalake-password: "{ch}"
+  graph-password: "{ch}"
+  graph-read-password: "{ch}"
+'''.format(jwt=jwt_secret, ch=clickhouse_password)
 
 k8s_yaml(blob(secrets_yaml))
 
@@ -73,44 +67,53 @@ custom_build(
     deps=['crates/', 'Cargo.toml', 'Cargo.lock'],
 )
 
-# Build helm dependencies
-local('helm repo add gitlab https://charts.gitlab.io 2>/dev/null || true', quiet=True)
-local('helm repo add nats https://nats-io.github.io/k8s/helm/charts/ 2>/dev/null || true', quiet=True)
-local('helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true', quiet=True)
-local('helm repo add grafana https://grafana.github.io/helm-charts 2>/dev/null || true', quiet=True)
-local('helm dependency build ./helm-dev/gkg', quiet=True)
-local('helm dependency build ./helm-dev/observability', quiet=True)
+# Install PodMonitor CRD (the GKG chart creates PodMonitor resources)
+PROMETHEUS_OPERATOR_VERSION = 'v0.90.0'
+local(
+    'kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/{}/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml 2>/dev/null || true'.format(PROMETHEUS_OPERATOR_VERSION),
+    quiet=True
+)
 
-# Install Prometheus Operator CRDs (required for kube-prometheus-stack)
-PROMETHEUS_OPERATOR_VERSION = 'v0.88.1'
-PROMETHEUS_CRDS = [
-    'alertmanagerconfigs', 'alertmanagers', 'podmonitors', 'probes',
-    'prometheusagents', 'prometheuses', 'prometheusrules', 'scrapeconfigs',
-    'servicemonitors', 'thanosrulers'
-]
-for crd in PROMETHEUS_CRDS:
-    local(
-        'kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/{}/example/prometheus-operator-crd/monitoring.coreos.com_{}.yaml 2>/dev/null || true'.format(PROMETHEUS_OPERATOR_VERSION, crd),
-        quiet=True
-    )
+# Deploy local observability (standalone Prometheus + Grafana)
+k8s_yaml('helm/local/prometheus.yaml')
+# Build dashboards ConfigMap from JSON files and deploy Grafana
+dashboards_cm = '''apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+data:
+'''
+for f in listdir('helm/local/dashboards'):
+    name = os.path.basename(f)
+    if name.endswith('.json'):
+        content = str(read_file(f))
+        dashboards_cm += '  {}: |\n'.format(name)
+        for line in content.split('\n'):
+            dashboards_cm += '    {}\n'.format(line)
+k8s_yaml(blob(dashboards_cm))
+k8s_yaml('helm/local/grafana.yaml')
 
-# Deploy observability chart first (so OTEL endpoint is available)
+# Vendor helm chart: bootstrap on fresh clone, re-sync when config changes
+if not os.path.exists('helm/gkg/Chart.yaml'):
+    local('helm/sync.sh')
+local_resource(
+    'helm-sync',
+    cmd='helm/sync.sh',
+    deps=['helm/vendir.yml', 'helm/vendir.lock.yml', 'helm/patches'],
+    labels=['setup'],
+)
+
+# Deploy gkg chart (vendored official chart + patches)
 k8s_yaml(helm(
-    './helm-dev/observability',
-    name='gkg-obs',
-    namespace='default',
-    values=['./helm-dev/observability/values-local.yaml'],
-))
-
-# Deploy gkg chart
-k8s_yaml(helm(
-    './helm-dev/gkg',
+    './helm/gkg',
     name='gkg',
     namespace='default',
-    values=['./helm-dev/gkg/values-local.yaml'],
+    values=['./helm/values/gkg-local.yaml'],
 ))
 
 # Skip readiness checks for components that may take time to connect
 k8s_resource('gkg-indexer', pod_readiness='ignore')
 k8s_resource('gkg-webserver', pod_readiness='ignore', port_forwards=['8080:8080'])
 k8s_resource('gkg-health-check', pod_readiness='ignore', port_forwards=['4201:4201'])
+k8s_resource('grafana', port_forwards=['3030:3000'])
+k8s_resource('prometheus', port_forwards=['9090:9090'])

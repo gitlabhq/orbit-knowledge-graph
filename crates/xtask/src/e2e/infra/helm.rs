@@ -171,12 +171,3 @@ pub fn uninstall_with_timeout(
     .ignore_status()
     .run();
 }
-
-/// Run `helm dependency build` on a chart directory. Best-effort.
-pub fn dependency_build(sh: &Shell, chart_path: &str, docker_host: &str) {
-    let _ = cmd!(sh, "helm dependency build {chart_path}")
-        .env(c::DOCKER_HOST_ENV, docker_host)
-        .quiet()
-        .ignore_status()
-        .run();
-}

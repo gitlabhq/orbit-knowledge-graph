@@ -130,4 +130,9 @@ We will leverage ClickHouse's columnar storage and merge tree engines to provide
 - Node tables for entities (e.g., `projects`, `files`, `definitions`, `issues`, `merge_requests`)
 - Edge tables for relationships (e.g., `project_has_file`, `mr_closes_issue`, `definition_calls_definition`)
 
-We will use the same schema defined in `crates/database` for both code and SDLC indexing. This allows for linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `File` node from the Code Graph).
+We will use the same repository-defined graph schema for both code and SDLC indexing. In the current codebase, that shared source of truth is split across:
+
+- `config/graph.sql` for the implemented ClickHouse tables
+- `config/ontology/` for entity definitions, relationship variants, redaction metadata, and ETL mappings
+
+This shared schema allows linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` node from the Code Graph).

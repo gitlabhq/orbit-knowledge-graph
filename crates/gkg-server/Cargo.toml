@@ -21,8 +21,8 @@ bytes = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
-config = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 health-check = { path = "../health-check" }
 indexmap = { workspace = true }
@@ -37,17 +37,16 @@ parking_lot = { workspace = true }
 query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonwebtoken = { workspace = true }
-labkit-rs = { path = "../labkit-rs", features = ["http", "grpc", "metrics-axum", "metrics-grpc"] }
+labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
 serde = { workspace = true }
+strum = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util.workspace = true
 tokio-stream = { workspace = true }
 tower = { workspace = true }
-tower-http = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 arrow-ipc = { workspace = true }
 clickhouse = { workspace = true }
@@ -65,8 +64,6 @@ prost-build = { workspace = true }
 
 [dev-dependencies]
 jsonschema = { workspace = true }
-query-engine = { path = "../query-engine" }
-tempfile = { workspace = true }
 tokio = { workspace = true }
 
 [lints.rust]

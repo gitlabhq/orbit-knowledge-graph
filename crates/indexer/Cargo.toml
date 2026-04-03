@@ -18,16 +18,19 @@ chrono = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
+gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
 moka = { workspace = true }
 ontology = { path = "../ontology" }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
+rustc-hash = { workspace = true }
 prost-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -38,16 +41,16 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
+sha2 = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
-
-sha2 = { workspace = true }
 internment = { workspace = true }
 parser-core = { workspace = true }
+serde_yaml = { workspace = true }
 smallvec = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }

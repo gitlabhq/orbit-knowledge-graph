@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
-use crate::entities::{DataType, EnumType, Field, NodeEntity, NodeStyle, RedactionConfig};
+use crate::entities::{
+    DataType, EnumType, Field, FieldSource, NodeEntity, NodeStyle, RedactionConfig, VirtualSource,
+};
 use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
 use super::EtlSettings;
@@ -82,19 +84,52 @@ struct EdgeMappingYaml {
     delimiter: Option<String>,
     #[serde(default)]
     array_field: Option<String>,
+    #[serde(default)]
+    array: bool,
 }
 
 #[derive(Debug, Deserialize)]
 struct PropertyYaml {
     #[serde(rename = "type")]
     data_type: DataType,
-    source: String,
+    /// Source column name. Required for column-backed fields, absent for virtual fields.
+    #[serde(default)]
+    source: Option<String>,
+    /// Virtual source configuration. Present only for fields resolved from a
+    /// remote service. Mutually exclusive with `source`.
+    #[serde(default, rename = "virtual")]
+    virtual_config: Option<VirtualSourceYaml>,
     #[serde(default)]
     nullable: bool,
     #[serde(default)]
     values: Option<BTreeMap<i64, String>>,
     #[serde(default)]
     enum_type: EnumType,
+    #[serde(default = "PropertyYaml::default_like_allowed")]
+    like_allowed: bool,
+    #[serde(default = "PropertyYaml::default_filterable")]
+    filterable: bool,
+}
+
+impl PropertyYaml {
+    fn default_like_allowed() -> bool {
+        true
+    }
+    fn default_filterable() -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct VirtualSourceYaml {
+    service: String,
+    lookup: String,
+    #[serde(default)]
+    disabled: bool,
+    /// Column-backed properties this virtual field needs in the property map
+    /// for resolution. The compiler ensures these are fetched during hydration.
+    #[serde(default)]
+    depends_on: Vec<String>,
 }
 
 impl NodeYaml {
@@ -103,6 +138,7 @@ impl NodeYaml {
         name: String,
         default_entity_sort_key: &[String],
         etl_settings: &EtlSettings,
+        internal_column_prefix: &str,
     ) -> Result<NodeEntity, OntologyError> {
         let mut primary_keys = Vec::new();
 
@@ -114,16 +150,50 @@ impl NodeYaml {
                     primary_keys.push(prop_name.clone());
                 }
 
-                Field {
+                let source = match (prop_def.source, prop_def.virtual_config) {
+                    (Some(col), None) => FieldSource::DatabaseColumn(col),
+                    (None, Some(v)) => FieldSource::Virtual(VirtualSource {
+                        service: v.service,
+                        lookup: v.lookup,
+                        disabled: v.disabled,
+                        depends_on: v.depends_on,
+                    }),
+                    (Some(_), Some(_)) => {
+                        return Err(OntologyError::Validation(format!(
+                            "property '{prop_name}' on node '{name}': \
+                             use 'source' or 'virtual', not both"
+                        )));
+                    }
+                    (None, None) => {
+                        return Err(OntologyError::Validation(format!(
+                            "property '{prop_name}' on node '{name}': \
+                             requires 'source' or 'virtual'"
+                        )));
+                    }
+                };
+
+                Ok(Field {
                     name: prop_name,
-                    source: prop_def.source,
+                    source,
                     data_type: prop_def.data_type,
                     nullable: prop_def.nullable,
                     enum_values: prop_def.values,
                     enum_type: prop_def.enum_type,
-                }
+                    like_allowed: prop_def.like_allowed,
+                    filterable: prop_def.filterable,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Reject field names that collide with the internal redaction column prefix.
+        for field in &fields {
+            if field.name.starts_with(internal_column_prefix) {
+                return Err(OntologyError::Validation(format!(
+                    "field '{}' on node '{}' uses reserved prefix '{internal_column_prefix}'",
+                    field.name, name
+                )));
+            }
+        }
 
         if primary_keys.is_empty() {
             primary_keys.push(DEFAULT_PRIMARY_KEY.to_string());
@@ -145,6 +215,32 @@ impl NodeYaml {
                     "default_columns entry '{}' is not a declared property of node '{}'",
                     col, name
                 )));
+            }
+        }
+
+        // Validate that every depends_on entry on a virtual field references
+        // an existing database-backed column on this same node.
+        for field in &fields {
+            if let FieldSource::Virtual(vs) = &field.source {
+                for dep in &vs.depends_on {
+                    match fields.iter().find(|f| f.name == *dep) {
+                        None => {
+                            return Err(OntologyError::Validation(format!(
+                                "virtual field '{}' on node '{}': depends_on references \
+                                 unknown field '{dep}'",
+                                field.name, name
+                            )));
+                        }
+                        Some(dep_field) if dep_field.is_virtual() => {
+                            return Err(OntologyError::Validation(format!(
+                                "virtual field '{}' on node '{}': depends_on references \
+                                 virtual field '{dep}' (must be database-backed)",
+                                field.name, name
+                            )));
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
 
@@ -197,9 +293,14 @@ fn convert_edge_mappings(
                     )));
                 }
             };
-            if mapping.delimiter.is_some() && mapping.array_field.is_some() {
+            let multi_value_options = [
+                mapping.delimiter.is_some(),
+                mapping.array_field.is_some(),
+                mapping.array,
+            ];
+            if multi_value_options.iter().filter(|&&v| v).count() > 1 {
                 return Err(OntologyError::Validation(format!(
-                    "edge '{}': use 'delimiter' or 'array_field', not both",
+                    "edge '{}': use only one of 'delimiter', 'array_field', or 'array'",
                     column
                 )));
             }
@@ -211,6 +312,7 @@ fn convert_edge_mappings(
                     direction: mapping.direction,
                     delimiter: mapping.delimiter,
                     array_field: mapping.array_field,
+                    array: mapping.array,
                 },
             ))
         })
@@ -257,5 +359,139 @@ impl EtlYaml {
                 edges: convert_edge_mappings(edges)?,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Ontology;
+
+    fn test_etl_settings() -> EtlSettings {
+        EtlSettings {
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["id".to_string()],
+        }
+    }
+
+    #[test]
+    fn embedded_ontology_depends_on_references_are_valid() {
+        // The real ontology should pass all validation including depends_on.
+        let ontology = Ontology::load_embedded().expect("embedded ontology should load");
+        // File.content has depends_on -- verify the field exists and has deps.
+        let file = ontology.get_node("File").expect("File node should exist");
+        let content = file.fields.iter().find(|f| f.name == "content");
+        assert!(content.is_some(), "File should have a content field");
+        if let Some(f) = content
+            && let FieldSource::Virtual(vs) = &f.source
+        {
+            assert!(
+                !vs.depends_on.is_empty(),
+                "File.content should have depends_on"
+            );
+        }
+    }
+
+    fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
+        let node: NodeYaml = serde_yaml::from_str(yaml).unwrap();
+        node.into_entity(
+            "TestNode".to_string(),
+            &["id".to_string()],
+            &test_etl_settings(),
+            "_gkg_",
+        )
+    }
+
+    #[test]
+    fn depends_on_rejects_unknown_field() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              content:
+                type: string
+                virtual:
+                  service: gitaly
+                  lookup: blob_content
+                  depends_on: [nonexistent_field]
+                nullable: true
+            "#,
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nonexistent_field"),
+            "error should mention the bad field name, got: {err}"
+        );
+    }
+
+    #[test]
+    fn depends_on_rejects_virtual_dependency() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              other_virtual:
+                type: string
+                virtual:
+                  service: foo
+                  lookup: bar
+                nullable: true
+              content:
+                type: string
+                virtual:
+                  service: gitaly
+                  lookup: blob_content
+                  depends_on: [other_virtual]
+                nullable: true
+            "#,
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("must be database-backed"),
+            "error should say virtual deps not allowed, got: {err}"
+        );
+    }
+
+    #[test]
+    fn depends_on_accepts_valid_db_column() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              project_id:
+                type: int64
+                source: project_id
+              content:
+                type: string
+                virtual:
+                  service: gitaly
+                  lookup: blob_content
+                  depends_on: [project_id]
+                nullable: true
+            "#,
+        );
+        assert!(
+            result.is_ok(),
+            "should accept valid depends_on: {:?}",
+            result.err()
+        );
     }
 }

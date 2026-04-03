@@ -1,0 +1,164 @@
+# Small simulator configuration for query plan analysis
+# ~1M edges, ~100k nodes - enough for EXPLAIN to show real plans
+
+clickhouse:
+  url: http://localhost:8123
+  database: default
+  password: password
+
+  client:
+    send_timeout: 300
+    receive_timeout: 300
+    max_insert_block_size: 100000
+
+  schema:
+    engine: MergeTree
+    index_granularity: 2048
+    use_ontology_sort_keys: true
+    edge_primary_key: [traversal_path, relationship_kind]
+    edge_order_by: [traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind]
+
+    indexes:
+      - name: idx_id
+        table: "*"
+        expression: id
+        type: bloom_filter(0.01)
+        granularity: 1
+      - { name: idx_state, table: gl_user, expression: state, type: "set(10)", granularity: 2 }
+      - { name: idx_user_type, table: gl_user, expression: user_type, type: "set(26)", granularity: 2 }
+      - { name: idx_archived, table: gl_project, expression: archived, type: minmax, granularity: 1 }
+      - { name: idx_state, table: gl_merge_request, expression: state, type: "set(6)", granularity: 2 }
+      - { name: idx_draft, table: gl_merge_request, expression: draft, type: minmax, granularity: 1 }
+      - { name: idx_state, table: gl_work_item, expression: state, type: "set(10)", granularity: 2 }
+      - { name: idx_status, table: gl_pipeline, expression: status, type: "set(16)", granularity: 2 }
+      - { name: idx_state, table: gl_vulnerability, expression: state, type: "set(4)", granularity: 2 }
+      - { name: idx_severity, table: gl_vulnerability, expression: severity, type: "set(8)", granularity: 2 }
+      - { name: idx_report_type, table: gl_vulnerability, expression: report_type, type: "set(4)", granularity: 2 }
+      - name: idx_relationship
+        table: edges
+        expression: relationship_kind
+        type: "set(50)"
+        granularity: 2
+
+    projections:
+      - name: by_target
+        table: edges
+        columns: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+        order_by: [target_id, relationship_kind]
+      - name: by_source
+        table: edges
+        columns: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+        order_by: [source_id, relationship_kind]
+
+generation:
+  ontology_path: config/ontology
+  output_dir: gl_synthetic_data_small
+  skip_if_present: false
+  parallel: false
+  batch_size: 50000
+
+  seed: 42
+  fake_data_path: crates/xtask/fake_data.yaml
+
+  organizations: 1
+  namespace_entity: Group
+
+  roots:
+    User: 500
+    Group: 5
+
+  relationships:
+    CONTAINS:
+      "Group -> Group":
+        count: 2
+        max_depth: 3
+      "Group -> Project": 5
+
+    IN_PROJECT:
+      "MergeRequest -> Project": 20
+      "WorkItem -> Project": 20
+      "Pipeline -> Project": 20
+      "Vulnerability -> Project": 3
+      "Finding -> Project": 3
+      "Milestone -> Project": 2
+      "Label -> Project": 3
+
+    HAS_STAGE:
+      "Pipeline -> Stage": 3
+
+    HAS_JOB:
+      "Stage -> Job": 3
+
+    HAS_DIFF:
+      "MergeRequest -> MergeRequestDiff": 2
+
+    HAS_FILE:
+      "MergeRequestDiff -> MergeRequestDiffFile": 3
+
+    HAS_NOTE:
+      "MergeRequest -> Note": 2
+      "WorkItem -> Note": 1
+
+    HAS_FINDING:
+      "Vulnerability -> Finding": 2
+
+    HAS_IDENTIFIER:
+      "Finding -> VulnerabilityIdentifier": 1
+
+  associations:
+    AUTHORED:
+      "User -> MergeRequest": 10
+      "User -> WorkItem": 10
+      "User -> Note": 5
+
+    MEMBER_OF:
+      "User -> Group": 20
+
+    ASSIGNED:
+      "User -> MergeRequest": 5
+      "User -> WorkItem": 3
+
+    REVIEWER:
+      "User -> MergeRequest":
+        ratio: 2
+        per: target
+
+    TRIGGERED:
+      "User -> Pipeline": 1
+      "MergeRequest -> Pipeline": 0.5
+
+    CREATOR:
+      "User -> Project": 1
+    OWNER:
+      "User -> Group": 1
+
+    MERGED_BY:
+      "User -> MergeRequest":
+        ratio: 1
+        per: target
+
+    CLOSES:
+      "MergeRequest -> WorkItem": 0.3
+
+    FIXES:
+      "MergeRequest -> Vulnerability": 0.1
+
+    IN_MILESTONE:
+      "WorkItem -> Milestone": 0.3
+
+    HAS_LABEL:
+      "WorkItem -> Label": 0.3
+
+evaluation:
+  queries_path: fixtures/queries/sdlc_queries.yaml
+  metadata_dir: ./evaluation_results_small
+  sample_size: 10
+  iterations: 1
+  skip_cache_warm: false
+  output:
+    format: text
+
+  # ClickHouse query-level SETTINGS appended to every evaluated query.
+  # These are passed as key=value pairs in the SETTINGS clause.
+  settings:
+    join_algorithm: full_sorting_merge

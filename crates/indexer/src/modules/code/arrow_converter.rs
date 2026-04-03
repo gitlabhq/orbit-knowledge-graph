@@ -1,21 +1,25 @@
 //! Arrow conversion for code graph data.
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Int64Builder, StringBuilder, TimestampMicrosecondBuilder};
+use arrow::array::{
+    ArrayRef, BooleanBuilder, Int64Builder, StringBuilder, TimestampMicrosecondBuilder,
+};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use code_graph::analysis::types::{
+use code_graph::linker::analysis::types::{
     DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode,
 };
-use code_graph::graph::{RelationshipKind, RelationshipType};
+use rustc_hash::FxHasher;
 
 pub struct ArrowConverter {
     traversal_path: String,
     project_id: i64,
     branch: String,
+    commit_sha: String,
     version_micros: i64,
 }
 
@@ -24,18 +28,21 @@ impl ArrowConverter {
         traversal_path: String,
         project_id: i64,
         branch: String,
+        commit_sha: String,
         version_timestamp: DateTime<Utc>,
     ) -> Self {
         Self {
             traversal_path,
             project_id,
             branch,
+            commit_sha,
             version_micros: version_timestamp.timestamp_micros(),
         }
     }
 
     pub fn convert_all(&self, graph_data: &GraphData) -> Result<ConvertedGraphData, ArrowError> {
         Ok(ConvertedGraphData {
+            branch: self.convert_branch()?,
             directories: self.convert_directories(&graph_data.directory_nodes)?,
             files: self.convert_files(&graph_data.file_nodes)?,
             definitions: self.convert_definitions(&graph_data.definition_nodes)?,
@@ -44,11 +51,48 @@ impl ArrowConverter {
         })
     }
 
+    pub fn convert_branch(&self) -> Result<RecordBatch, ArrowError> {
+        let branch_id = compute_branch_id(self.project_id, &self.branch);
+
+        let schema = Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("traversal_path", DataType::Utf8, false),
+            Field::new("project_id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, false),
+            Field::new("is_default", DataType::Boolean, false),
+            Field::new(
+                "_version",
+                DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                false,
+            ),
+            Field::new("_deleted", DataType::Boolean, false),
+        ]);
+
+        RecordBatch::try_new(
+            Arc::new(schema),
+            vec![
+                Arc::new(arrow::array::Int64Array::from(vec![branch_id])) as ArrayRef,
+                Arc::new(arrow::array::StringArray::from(vec![
+                    self.traversal_path.as_str(),
+                ])) as ArrayRef,
+                Arc::new(arrow::array::Int64Array::from(vec![self.project_id])) as ArrayRef,
+                Arc::new(arrow::array::StringArray::from(vec![self.branch.as_str()])) as ArrayRef,
+                Arc::new(arrow::array::BooleanArray::from(vec![true])) as ArrayRef,
+                Arc::new(
+                    arrow::array::TimestampMicrosecondArray::from(vec![self.version_micros])
+                        .with_timezone("UTC"),
+                ) as ArrayRef,
+                Arc::new(arrow::array::BooleanArray::from(vec![false])) as ArrayRef,
+            ],
+        )
+    }
+
     fn base_builders(&self, count: usize) -> BaseColumnBuilders {
         BaseColumnBuilders::new(
             &self.traversal_path,
             self.project_id,
             &self.branch,
+            &self.commit_sha,
             self.version_micros,
             count,
         )
@@ -324,17 +368,57 @@ impl ArrowConverter {
 
     pub fn convert_edges(&self, graph_data: &GraphData) -> Result<RecordBatch, ArrowError> {
         let rels = &graph_data.relationships;
+        let root_children: Vec<(i64, &str)> = graph_data
+            .directory_nodes
+            .iter()
+            .filter(|d| !d.path.contains('/'))
+            .filter_map(|d| d.id.map(|id| (id, "Directory")))
+            .chain(
+                graph_data
+                    .file_nodes
+                    .iter()
+                    .filter(|f| !f.path.contains('/'))
+                    .filter_map(|f| f.id.map(|id| (id, "File"))),
+            )
+            .collect();
+        // +1 for IN_PROJECT, +root children for CONTAINS
+        let capacity = rels.len() + 1 + root_children.len();
         let mut traversal_path =
-            StringBuilder::with_capacity(rels.len(), rels.len() * self.traversal_path.len());
-        let mut source_id = Int64Builder::with_capacity(rels.len());
-        let mut source_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 16);
-        let mut relationship_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 32);
-        let mut target_id = Int64Builder::with_capacity(rels.len());
-        let mut target_kind = StringBuilder::with_capacity(rels.len(), rels.len() * 16);
-        let mut version = TimestampMicrosecondBuilder::with_capacity(rels.len());
+            StringBuilder::with_capacity(capacity, capacity * self.traversal_path.len());
+        let mut source_id = Int64Builder::with_capacity(capacity);
+        let mut source_kind = StringBuilder::with_capacity(capacity, capacity * 16);
+        let mut relationship_kind = StringBuilder::with_capacity(capacity, capacity * 32);
+        let mut target_id = Int64Builder::with_capacity(capacity);
+        let mut target_kind = StringBuilder::with_capacity(capacity, capacity * 16);
+        let mut version = TimestampMicrosecondBuilder::with_capacity(capacity);
+        let mut deleted = BooleanBuilder::with_capacity(capacity);
+
+        let branch_id = compute_branch_id(self.project_id, &self.branch);
+
+        // Branch --IN_PROJECT--> Project
+        traversal_path.append_value(&self.traversal_path);
+        source_id.append_value(branch_id);
+        source_kind.append_value("Branch");
+        relationship_kind.append_value("IN_PROJECT");
+        target_id.append_value(self.project_id);
+        target_kind.append_value("Project");
+        version.append_value(self.version_micros);
+        deleted.append_value(false);
+
+        // Branch --CONTAINS--> root-level directories and files
+        for (child_id, child_kind) in &root_children {
+            traversal_path.append_value(&self.traversal_path);
+            source_id.append_value(branch_id);
+            source_kind.append_value("Branch");
+            relationship_kind.append_value("CONTAINS");
+            target_id.append_value(*child_id);
+            target_kind.append_value(child_kind);
+            version.append_value(self.version_micros);
+            deleted.append_value(false);
+        }
 
         for rel in rels {
-            let (src_kind_str, tgt_kind_str) = relationship_kind_to_strings(&rel.kind);
+            let (src_kind_str, tgt_kind_str) = rel.kind.source_target_kinds();
 
             let source_node_id = self.lookup_node_id(graph_data, src_kind_str, rel.source_id);
             let target_node_id = self.lookup_node_id(graph_data, tgt_kind_str, rel.target_id);
@@ -346,10 +430,11 @@ impl ArrowConverter {
             traversal_path.append_value(&self.traversal_path);
             source_id.append_value(src_id);
             source_kind.append_value(src_kind_str);
-            relationship_kind.append_value(edge_label(&rel.relationship_type));
+            relationship_kind.append_value(rel.relationship_type.edge_kind());
             target_id.append_value(tgt_id);
             target_kind.append_value(tgt_kind_str);
             version.append_value(self.version_micros);
+            deleted.append_value(false);
         }
 
         let schema = Schema::new(vec![
@@ -364,6 +449,7 @@ impl ArrowConverter {
                 DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
                 false,
             ),
+            Field::new("_deleted", DataType::Boolean, false),
         ]);
 
         RecordBatch::try_new(
@@ -376,6 +462,7 @@ impl ArrowConverter {
                 Arc::new(target_id.finish()) as ArrayRef,
                 Arc::new(target_kind.finish()) as ArrayRef,
                 Arc::new(version.finish().with_timezone("UTC")) as ArrayRef,
+                Arc::new(deleted.finish()) as ArrayRef,
             ],
         )
     }
@@ -404,10 +491,13 @@ struct BaseColumnBuilders {
     traversal_path: StringBuilder,
     project_id: Int64Builder,
     branch: StringBuilder,
+    commit_sha: StringBuilder,
     version: TimestampMicrosecondBuilder,
+    deleted: BooleanBuilder,
     traversal_path_value: String,
     project_id_value: i64,
     branch_value: String,
+    commit_sha_value: String,
     version_micros: i64,
 }
 
@@ -416,6 +506,7 @@ impl BaseColumnBuilders {
         traversal_path: &str,
         project_id: i64,
         branch: &str,
+        commit_sha: &str,
         version_micros: i64,
         capacity: usize,
     ) -> Self {
@@ -423,10 +514,13 @@ impl BaseColumnBuilders {
             traversal_path: StringBuilder::with_capacity(capacity, capacity * traversal_path.len()),
             project_id: Int64Builder::with_capacity(capacity),
             branch: StringBuilder::with_capacity(capacity, capacity * branch.len()),
+            commit_sha: StringBuilder::with_capacity(capacity, capacity * commit_sha.len()),
             version: TimestampMicrosecondBuilder::with_capacity(capacity),
+            deleted: BooleanBuilder::with_capacity(capacity),
             traversal_path_value: traversal_path.to_string(),
             project_id_value: project_id,
             branch_value: branch.to_string(),
+            commit_sha_value: commit_sha.to_string(),
             version_micros,
         }
     }
@@ -435,7 +529,9 @@ impl BaseColumnBuilders {
         self.traversal_path.append_value(&self.traversal_path_value);
         self.project_id.append_value(self.project_id_value);
         self.branch.append_value(&self.branch_value);
+        self.commit_sha.append_value(&self.commit_sha_value);
         self.version.append_value(self.version_micros);
+        self.deleted.append_value(false);
     }
 
     fn build_batch_with_id(
@@ -448,11 +544,13 @@ impl BaseColumnBuilders {
             Field::new("traversal_path", DataType::Utf8, false),
             Field::new("project_id", DataType::Int64, false),
             Field::new("branch", DataType::Utf8, false),
+            Field::new("commit_sha", DataType::Utf8, false),
             Field::new(
                 "_version",
                 DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
                 false,
             ),
+            Field::new("_deleted", DataType::Boolean, false),
         ];
 
         let mut columns: Vec<ArrayRef> = vec![
@@ -460,7 +558,9 @@ impl BaseColumnBuilders {
             Arc::new(self.traversal_path.finish()),
             Arc::new(self.project_id.finish()),
             Arc::new(self.branch.finish()),
+            Arc::new(self.commit_sha.finish()),
             Arc::new(self.version.finish().with_timezone("UTC")),
+            Arc::new(self.deleted.finish()),
         ];
 
         for (name, dtype, nullable, array) in extra_columns {
@@ -473,6 +573,7 @@ impl BaseColumnBuilders {
 }
 
 pub struct ConvertedGraphData {
+    pub branch: RecordBatch,
     pub directories: RecordBatch,
     pub files: RecordBatch,
     pub definitions: RecordBatch,
@@ -480,84 +581,16 @@ pub struct ConvertedGraphData {
     pub edges: RecordBatch,
 }
 
-fn relationship_kind_to_strings(kind: &RelationshipKind) -> (&'static str, &'static str) {
-    match kind {
-        RelationshipKind::DirectoryToDirectory => ("Directory", "Directory"),
-        RelationshipKind::DirectoryToFile => ("Directory", "File"),
-        RelationshipKind::FileToDefinition => ("File", "Definition"),
-        RelationshipKind::FileToImportedSymbol => ("File", "ImportedSymbol"),
-        RelationshipKind::DefinitionToDefinition => ("Definition", "Definition"),
-        RelationshipKind::DefinitionToImportedSymbol => ("Definition", "ImportedSymbol"),
-        RelationshipKind::ImportedSymbolToImportedSymbol => ("ImportedSymbol", "ImportedSymbol"),
-        RelationshipKind::ImportedSymbolToDefinition => ("ImportedSymbol", "Definition"),
-        RelationshipKind::ImportedSymbolToFile => ("ImportedSymbol", "File"),
-        RelationshipKind::Empty => ("Unknown", "Unknown"),
-    }
-}
-
-/// Maps a fine-grained `RelationshipType` to the ontology edge label
-/// stored in the `relationship_kind` column of the edges table.
-fn edge_label(relationship_type: &RelationshipType) -> &'static str {
-    match relationship_type {
-        RelationshipType::DirContainsDir | RelationshipType::DirContainsFile => "CONTAINS",
-
-        RelationshipType::FileDefines
-        | RelationshipType::DefinesImportedSymbol
-        | RelationshipType::ModuleToMethod
-        | RelationshipType::ModuleToSingletonMethod
-        | RelationshipType::ModuleToClass
-        | RelationshipType::ModuleToModule
-        | RelationshipType::ClassToMethod
-        | RelationshipType::ClassToSingletonMethod
-        | RelationshipType::ClassToClass
-        | RelationshipType::ClassToLambda
-        | RelationshipType::ClassToProc
-        | RelationshipType::ClassToInterface
-        | RelationshipType::ClassToProperty
-        | RelationshipType::ClassToConstructor
-        | RelationshipType::ClassToEnumEntry
-        | RelationshipType::FunctionToFunction
-        | RelationshipType::FunctionToClass
-        | RelationshipType::FunctionToLambda
-        | RelationshipType::FunctionToProc
-        | RelationshipType::LambdaToLambda
-        | RelationshipType::LambdaToClass
-        | RelationshipType::LambdaToFunction
-        | RelationshipType::LambdaToProc
-        | RelationshipType::LambdaToMethod
-        | RelationshipType::LambdaToProperty
-        | RelationshipType::LambdaToInterface
-        | RelationshipType::MethodToMethod
-        | RelationshipType::MethodToClass
-        | RelationshipType::MethodToFunction
-        | RelationshipType::MethodToLambda
-        | RelationshipType::MethodToProc
-        | RelationshipType::MethodToProperty
-        | RelationshipType::MethodToInterface
-        | RelationshipType::InterfaceToInterface
-        | RelationshipType::InterfaceToClass
-        | RelationshipType::InterfaceToMethod
-        | RelationshipType::InterfaceToFunction
-        | RelationshipType::InterfaceToProperty
-        | RelationshipType::InterfaceToLambda => "DEFINES",
-
-        RelationshipType::FileImports
-        | RelationshipType::ImportedSymbolToImportedSymbol
-        | RelationshipType::ImportedSymbolToDefinition
-        | RelationshipType::ImportedSymbolToFile => "IMPORTS",
-
-        RelationshipType::Calls
-        | RelationshipType::AmbiguouslyCalls
-        | RelationshipType::PropertyReference => "CALLS",
-
-        RelationshipType::Empty => "EMPTY",
-    }
+fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
+    let mut hasher = FxHasher::default();
+    [&project_id.to_string(), branch, "branch"].hash(&mut hasher);
+    hasher.finish() as i64
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph::analysis::types::{DefinitionType, FqnType};
+    use code_graph::linker::analysis::types::{DefinitionType, FqnType};
     use internment::ArcIntern;
     use parser_core::ruby::types::{RubyDefinitionType, RubyFqn, RubyFqnPart, RubyFqnPartType};
     use parser_core::utils::{Position, Range};

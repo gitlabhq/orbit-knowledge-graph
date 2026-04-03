@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
@@ -17,8 +18,17 @@ impl From<std::io::Error> for ArchiveError {
     }
 }
 
-pub fn extract_tar_gz(data: &[u8], target_dir: &Path) -> Result<(), ArchiveError> {
+#[cfg(test)]
+fn extract_tar_gz(data: &[u8], target_dir: &Path) -> Result<(), ArchiveError> {
     let decoder = GzDecoder::new(data);
+    unpack_tar(decoder, target_dir)
+}
+
+pub fn extract_tar_gz_from_reader<R: Read>(
+    reader: R,
+    target_dir: &Path,
+) -> Result<(), ArchiveError> {
+    let decoder = GzDecoder::new(reader);
     unpack_tar(decoder, target_dir)
 }
 
@@ -30,6 +40,10 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
     let target_canonical = target_dir
         .canonicalize()
         .map_err(|e| ArchiveError::Io(e.to_string()))?;
+
+    // Tracks the archive root directory. The first entry sets it; all
+    // subsequent entries must share the same root or extraction fails.
+    let mut archive_root: Option<OsString> = None;
 
     for entry in archive
         .entries()
@@ -46,7 +60,16 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
         }
 
         let relative_path = entry_path.strip_prefix("/").unwrap_or(&entry_path);
-        let dest = target_canonical.join(relative_path);
+
+        // Strip the Gitaly archive root (`<slug>-<ref>/`). Validates all
+        // entries share the same root. The root directory entry itself
+        // becomes empty after stripping and is skipped.
+        let relative_path = strip_archive_root(relative_path, &mut archive_root)?;
+        if relative_path.as_os_str().is_empty() {
+            continue;
+        }
+
+        let dest = target_canonical.join(&relative_path);
 
         let dest_canonical = if dest.exists() {
             dest.canonicalize()
@@ -96,6 +119,40 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
     }
 
     Ok(())
+}
+
+/// Strip the Gitaly archive root prefix from a path during extraction.
+///
+/// On the first entry, detects the root directory name and validates it
+/// matches the `<slug>-<ref>` pattern. Subsequent entries must share the
+/// same root or extraction fails. Returns the path with the root stripped,
+/// or an empty path for the root directory entry itself (which callers skip).
+fn strip_archive_root(
+    path: &Path,
+    detected_root: &mut Option<OsString>,
+) -> Result<PathBuf, ArchiveError> {
+    let mut components = path.components();
+    let first = match components.next() {
+        Some(c) => c.as_os_str().to_os_string(),
+        None => return Ok(PathBuf::new()),
+    };
+
+    match detected_root {
+        None => {
+            // First entry -- record the root directory name.
+            *detected_root = Some(first);
+        }
+        Some(expected) if first != *expected => {
+            return Err(ArchiveError::Archive(format!(
+                "archive entry '{}' is not under the expected root directory '{}'",
+                path.display(),
+                expected.to_string_lossy()
+            )));
+        }
+        _ => {}
+    }
+
+    Ok(components.as_path().to_path_buf())
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
@@ -162,14 +219,37 @@ mod tests {
     }
 
     #[test]
-    fn extracts_valid_archive() {
+    fn extracts_and_strips_archive_root() {
         let dir = tempfile::tempdir().unwrap();
-        let data = build_tar_gz(vec![("src/main.rs", b"fn main() {}")]);
+        // Gitaly archives wrap under <slug>-<ref>/
+        let data = build_tar_gz(vec![
+            ("project-main/src/main.rs", b"fn main() {}"),
+            ("project-main/src/lib.rs", b"pub mod lib;"),
+        ]);
 
         extract_tar_gz(&data, dir.path()).unwrap();
 
+        // Root directory stripped -- paths are repo-relative
         let content = std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap();
         assert_eq!(content, "fn main() {}");
+        let content = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+        assert_eq!(content, "pub mod lib;");
+        assert!(!dir.path().join("project-main").exists());
+    }
+
+    #[test]
+    fn rejects_inconsistent_archive_root() {
+        let dir = tempfile::tempdir().unwrap();
+        // Two entries under different roots -- invalid archive
+        let data = build_tar_gz(vec![("root-a/file1.rs", b"a"), ("root-b/file2.rs", b"b")]);
+
+        let result = extract_tar_gz(&data, dir.path());
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("not under the expected root"),
+            "got: {error}"
+        );
     }
 
     fn build_tar_gz_with_raw_path(path: &str, content: &[u8]) -> Vec<u8> {
@@ -178,7 +258,6 @@ mod tests {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_entry_type(tar::EntryType::Regular);
-        // Write the path directly into the header bytes to bypass tar crate validation
         let path_bytes = path.as_bytes();
         let raw = header.as_mut_bytes();
         raw[..path_bytes.len()].copy_from_slice(path_bytes);
@@ -194,9 +273,33 @@ mod tests {
     }
 
     #[test]
+    fn handles_root_dir_only_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        // Archive with only the root directory entry (no files)
+        let mut tar_builder = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_size(0);
+        header.set_mode(0o755);
+        header.set_cksum();
+        tar_builder
+            .append_data(&mut header, "project-main/", &[] as &[u8])
+            .unwrap();
+        let tar_bytes = tar_builder.into_inner().unwrap();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&tar_bytes).unwrap();
+        let data = encoder.finish().unwrap();
+
+        // Should succeed but extract nothing
+        extract_tar_gz(&data, dir.path()).unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
     fn rejects_path_traversal() {
         let dir = tempfile::tempdir().unwrap();
-        let data = build_tar_gz_with_raw_path("../escape.txt", b"malicious");
+        // After stripping root, the remaining path still attempts traversal
+        let data = build_tar_gz_with_raw_path("root/../../escape.txt", b"malicious");
 
         let result = extract_tar_gz(&data, dir.path());
 
@@ -208,7 +311,8 @@ mod tests {
     #[test]
     fn rejects_symlink_escaping_target_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let data = build_tar_gz_with_symlink("legit.txt", "escape", "../../etc/passwd");
+        let data =
+            build_tar_gz_with_symlink("root/legit.txt", "root/escape", "../../../etc/passwd");
 
         let result = extract_tar_gz(&data, dir.path());
 

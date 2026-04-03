@@ -4,32 +4,42 @@ version = "0.1.0"
 [workspace]
 resolver = "2"
 members = [
-  "crates/treesitter-visit",
-  "crates/code-parser",
   "crates/code-graph",
-  "crates/labkit-rs",
+  "crates/code-graph/treesitter-visit",
+  "crates/code-graph/parser",
+  "crates/code-graph/linker",
   "crates/clickhouse-client",
   "crates/indexer",
   "crates/query-engine",
+  "crates/query-engine/compiler",
+  "crates/query-engine/types",
+  "crates/query-engine/pipeline",
+  "crates/query-engine/shared",
+  "crates/query-engine/formatters",
+  "crates/query-engine/profiler",
+  "crates/query-engine/compiler-pipeline-macros",
   "crates/cli",
 
+  "crates/gkg-server-config",
   "crates/gkg-server",
   "crates/ontology",
 
   "crates/health-check",
   "crates/siphon-proto",
-  "crates/datalake-generator",
+  "crates/gitaly-protos",
   "crates/gitlab-client",
   "crates/xtask",
   "crates/integration-testkit",
   "crates/utils",
   "crates/integration-tests",
+  "crates/duckdb-client",
 ]
 
 [workspace.dependencies]
-arrow = "57.2.0"
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "594f02c" }
+arrow = "58.0.0"
 enum-as-inner = "0.7.0"
-datafusion = { version = "52.1.0", default-features = false, features = ["sql", "nested_expressions"] }
+datafusion = { version = "53.0.0", default-features = false, features = ["sql", "nested_expressions"] }
 ulid = "1.1"
 clap = { version = "4.5.57", features = ["derive", "env"] }
 dirs = "6"
@@ -48,6 +58,7 @@ parking_lot = "0.12.5"
 pastey = "0.2.1"
 rust-lapper = "1.2.0"
 rustc-hash = "2.1.1"
+schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
@@ -55,14 +66,14 @@ smallvec = "1.15.1"
 stacker = "0.1.23"
 tempfile = "3.24.0"
 xshell = "0.2.7"
-cliclack = "0.4.0"
+cliclack = "0.5.0"
 
 # Indexer dependencies
 anyhow = "1.0.100"
 config = { version = "0.15", default-features = false, features = ["yaml"] }
 log = "0.4.29"
 num_cpus = "1.17.0"
-parquet = { version = "57", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
+parquet = { version = "58", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
 strum = { version = "0.28.0", features = ["derive"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
@@ -76,8 +87,9 @@ criterion = { version = "0.8.1", features = ["html_reports"] }
 tracing-test = "0.2.5"
 
 # Parser-core
-parser-core = { path = "crates/code-parser" }
+parser-core = { path = "crates/code-graph/parser" }
 clickhouse-client = { path = "crates/clickhouse-client" }
+duckdb = { version = "1.10501.0", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.7.0" }
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
@@ -86,7 +98,7 @@ opentelemetry = { version = "0.31", default-features = false, features = ["metri
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
 async-nats = { version = "0.46.0", features = ["server_2_11"] }
-arrow-ipc = "57.2.0"
+arrow-ipc = "58.0.0"
 clickhouse = { version = "0.14", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
 testcontainers = "0.27.1"
 testcontainers-modules = { version = "0.15.0", features = ["nats"] }
@@ -95,6 +107,9 @@ testcontainers-modules = { version = "0.15.0", features = ["nats"] }
 indexmap = "2"
 jsonschema = "0.44.0"
 const_format = "0.2.35"
+syn = { version = "2.0.117", features = ["full"] }
+quote = "1.0.45"
+proc-macro2 = "1.0.106"
 
 # Simulator dependencies
 rand = "0.10"
@@ -103,7 +118,9 @@ tabled = "0.20"
 indicatif = "0.18"
 
 
+rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
+sqlparser = { version = "0.61.0", features = ["visitor"] }
 hex = "0.4.3"
 hmac = "0.12.1"
 hyper-util = { version = "0.1", features = ["client", "tokio"] }
@@ -113,7 +130,7 @@ prost-types = "0.14.3"
 protoc-bin-vendored = "3.2.0"
 sha2 = "0.10.9"
 tar = "0.4.44"
-tonic = "0.14.2"
+tonic = { version = "0.14.2", features = ["tls-aws-lc"] }
 tonic-build = "0.14.2"
 tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"

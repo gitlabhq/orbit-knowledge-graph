@@ -1,0 +1,429 @@
+# Optimization benchmark queries for A/B comparison.
+#
+# Each group tests a specific compiler optimization with a control (no optimization)
+# and one or more treatment variants. Queries use raw SQL, not the DSL, so they can
+# be run directly against ClickHouse with different SETTINGS.
+#
+# Placeholder syntax (same as sdlc_queries.yaml):
+#   "$sample"   — sample 1 random ID from ClickHouse
+#   "$sample:N" — sample N random IDs
+#
+# Recommended SETTINGS per variant are listed but not embedded in the SQL
+# so the evaluate harness can mix-and-match.
+
+# ---------------------------------------------------------------------------
+# 1. Cascading SIP — CTE chains that pre-materialize reachable IDs
+# ---------------------------------------------------------------------------
+
+cascading_sip_3node:
+  desc: "3-node chain: User -> AUTHORED -> MR(opened) -> IN_PROJECT -> Project"
+  variants:
+    no_sip:
+      desc: Plain joins, no SIP CTEs
+      query: |
+        SELECT u.id, mr.id, p.id
+        FROM gl_user AS u
+        INNER JOIN gl_edge AS e0 ON u.id = e0.source_id AND e0.relationship_kind = 'AUTHORED'
+        INNER JOIN gl_merge_request AS mr ON e0.target_id = mr.id
+        INNER JOIN gl_edge AS e1 ON mr.id = e1.source_id AND e1.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e1.target_id = p.id
+        WHERE startsWith(e0.traversal_path, '1/') AND startsWith(mr.traversal_path, '1/')
+          AND startsWith(e1.traversal_path, '1/') AND startsWith(p.traversal_path, '1/')
+          AND u.id IN $sample:3 AND mr.state = 'opened' AND p.archived = false
+        LIMIT 50
+    with_sip:
+      desc: Cascading SIP CTEs narrowing each hop
+      query: |
+        WITH _root_ids AS (
+          SELECT u.id AS id FROM gl_user AS u WHERE u.id IN $sample:3
+        ),
+        _cascade_mr AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/')
+            AND _ce.source_id IN (SELECT id FROM _root_ids)
+            AND _ce.relationship_kind = 'AUTHORED'
+        ),
+        _cascade_p AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/')
+            AND _ce.source_id IN (SELECT id FROM _cascade_mr)
+            AND _ce.relationship_kind = 'IN_PROJECT'
+        )
+        SELECT u.id, mr.id, p.id
+        FROM gl_user AS u
+        INNER JOIN gl_edge AS e0 ON u.id = e0.source_id AND e0.relationship_kind = 'AUTHORED'
+        INNER JOIN gl_merge_request AS mr ON e0.target_id = mr.id
+        INNER JOIN gl_edge AS e1 ON mr.id = e1.source_id AND e1.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e1.target_id = p.id
+        WHERE startsWith(e0.traversal_path, '1/') AND startsWith(mr.traversal_path, '1/')
+          AND startsWith(e1.traversal_path, '1/') AND startsWith(p.traversal_path, '1/')
+          AND u.id IN $sample:3 AND mr.state = 'opened' AND p.archived = false
+          AND e0.source_id IN (SELECT id FROM _root_ids)
+          AND e1.source_id IN (SELECT id FROM _cascade_mr)
+          AND p.id IN (SELECT id FROM _cascade_p)
+          AND mr.id IN (SELECT id FROM _cascade_mr)
+        LIMIT 50
+
+cascading_sip_4node_fanout:
+  desc: "4-node fan-out: Project <- MR -> Author, Project <- Vuln"
+  variants:
+    no_sip:
+      desc: Plain joins
+      query: |
+        SELECT p.id, mr.id, author.id, v.id
+        FROM gl_merge_request AS mr
+        INNER JOIN gl_edge AS e0 ON mr.id = e0.source_id AND e0.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e0.target_id = p.id
+        INNER JOIN gl_edge AS e1 ON e1.target_id = mr.id AND e1.relationship_kind = 'AUTHORED'
+        INNER JOIN gl_user AS author ON author.id = e1.source_id
+        INNER JOIN gl_edge AS e2 ON e2.target_id = p.id AND e2.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_vulnerability AS v ON v.id = e2.source_id
+        WHERE startsWith(mr.traversal_path, '1/') AND startsWith(e0.traversal_path, '1/')
+          AND startsWith(p.traversal_path, '1/') AND startsWith(e1.traversal_path, '1/')
+          AND startsWith(e2.traversal_path, '1/') AND startsWith(v.traversal_path, '1/')
+          AND p.id IN $sample:3 AND mr.state = 'merged'
+          AND v.state = 'detected' AND v.severity = 'critical'
+        LIMIT 30
+    with_sip:
+      desc: Cascading SIP with fan-out from root through two paths
+      query: |
+        WITH _root_ids AS (
+          SELECT mr.id AS id FROM gl_merge_request AS mr
+          WHERE startsWith(mr.traversal_path, '1/') AND mr.state = 'merged'
+        ),
+        _cascade_p AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/')
+            AND _ce.source_id IN (SELECT id FROM _root_ids)
+            AND _ce.relationship_kind = 'IN_PROJECT'
+        ),
+        _cascade_author AS (
+          SELECT _ce.source_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/')
+            AND _ce.target_id IN (SELECT id FROM _root_ids)
+            AND _ce.relationship_kind = 'AUTHORED'
+        ),
+        _cascade_v AS (
+          SELECT _ce.source_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/')
+            AND _ce.target_id IN (SELECT id FROM _cascade_p)
+            AND _ce.relationship_kind = 'IN_PROJECT'
+        )
+        SELECT p.id, mr.id, author.id, v.id
+        FROM gl_merge_request AS mr
+        INNER JOIN gl_edge AS e0 ON mr.id = e0.source_id AND e0.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e0.target_id = p.id
+        INNER JOIN gl_edge AS e1 ON e1.target_id = mr.id AND e1.relationship_kind = 'AUTHORED'
+        INNER JOIN gl_user AS author ON author.id = e1.source_id
+        INNER JOIN gl_edge AS e2 ON e2.target_id = p.id AND e2.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_vulnerability AS v ON v.id = e2.source_id
+        WHERE startsWith(mr.traversal_path, '1/') AND startsWith(e0.traversal_path, '1/')
+          AND startsWith(p.traversal_path, '1/') AND startsWith(e1.traversal_path, '1/')
+          AND startsWith(e2.traversal_path, '1/') AND startsWith(v.traversal_path, '1/')
+          AND p.id IN $sample:3 AND mr.state = 'merged'
+          AND v.state = 'detected' AND v.severity = 'critical'
+          AND e0.source_id IN (SELECT id FROM _root_ids)
+          AND e1.target_id IN (SELECT id FROM _root_ids)
+          AND e2.target_id IN (SELECT id FROM _cascade_p)
+          AND author.id IN (SELECT id FROM _cascade_author)
+          AND v.id IN (SELECT id FROM _cascade_v)
+          AND p.id IN (SELECT id FROM _cascade_p)
+        LIMIT 30
+
+# ---------------------------------------------------------------------------
+# 2. Neighbors UNION ALL — split bidirectional into two projection-friendly arms
+# ---------------------------------------------------------------------------
+
+neighbors_both:
+  desc: "Bidirectional neighbors of MergeRequest nodes"
+  variants:
+    or_join:
+      desc: OR in join condition — forces full edge scan, no projection
+      query: |
+        SELECT
+          CASE WHEN mr.id = e.source_id THEN e.target_id ELSE e.source_id END AS neighbor_id,
+          CASE WHEN mr.id = e.source_id THEN e.target_kind ELSE e.source_kind END AS neighbor_type,
+          e.relationship_kind,
+          CASE WHEN mr.id = e.source_id THEN 1 ELSE 0 END AS is_outgoing,
+          mr.id AS anchor_id
+        FROM gl_merge_request AS mr
+        INNER JOIN gl_edge AS e
+          ON (mr.id = e.source_id AND e.source_kind = 'MergeRequest')
+          OR (mr.id = e.target_id AND e.target_kind = 'MergeRequest')
+        WHERE startsWith(mr.traversal_path, '1/') AND startsWith(e.traversal_path, '1/')
+          AND mr.id IN $sample:3
+        LIMIT 100
+    union_all:
+      desc: UNION ALL — each arm uses by_source / by_target projection
+      query: |
+        SELECT e.target_id AS neighbor_id, e.target_kind AS neighbor_type,
+               e.relationship_kind, 1 AS is_outgoing, mr.id AS anchor_id
+        FROM gl_merge_request AS mr
+        INNER JOIN gl_edge AS e ON mr.id = e.source_id AND e.source_kind = 'MergeRequest'
+        WHERE startsWith(mr.traversal_path, '1/') AND startsWith(e.traversal_path, '1/')
+          AND mr.id IN $sample:3
+        UNION ALL
+        SELECT e.source_id AS neighbor_id, e.source_kind AS neighbor_type,
+               e.relationship_kind, 0 AS is_outgoing, mr.id AS anchor_id
+        FROM gl_merge_request AS mr
+        INNER JOIN gl_edge AS e ON mr.id = e.target_id AND e.target_kind = 'MergeRequest'
+        WHERE startsWith(mr.traversal_path, '1/') AND startsWith(e.traversal_path, '1/')
+          AND mr.id IN $sample:3
+        LIMIT 100
+
+neighbors_both_with_rel_filter:
+  desc: "Bidirectional neighbors with relationship type filter"
+  variants:
+    or_join:
+      desc: OR join with rel filter
+      query: |
+        SELECT
+          CASE WHEN p.id = e.source_id THEN e.target_id ELSE e.source_id END AS neighbor_id,
+          CASE WHEN p.id = e.source_id THEN e.target_kind ELSE e.source_kind END AS neighbor_type,
+          e.relationship_kind,
+          CASE WHEN p.id = e.source_id THEN 1 ELSE 0 END AS is_outgoing,
+          p.id AS anchor_id
+        FROM gl_project AS p
+        INNER JOIN gl_edge AS e
+          ON ((p.id = e.source_id AND e.source_kind = 'Project')
+          OR  (p.id = e.target_id AND e.target_kind = 'Project'))
+          AND e.relationship_kind IN ('IN_PROJECT', 'CONTAINS', 'IN_GROUP')
+        WHERE startsWith(p.traversal_path, '1/') AND startsWith(e.traversal_path, '1/')
+          AND p.id IN $sample:3
+        LIMIT 50
+    union_all:
+      desc: UNION ALL with rel filter per arm
+      query: |
+        SELECT e.target_id AS neighbor_id, e.target_kind AS neighbor_type,
+               e.relationship_kind, 1 AS is_outgoing, p.id AS anchor_id
+        FROM gl_project AS p
+        INNER JOIN gl_edge AS e
+          ON p.id = e.source_id AND e.source_kind = 'Project'
+          AND e.relationship_kind IN ('IN_PROJECT', 'CONTAINS', 'IN_GROUP')
+        WHERE startsWith(p.traversal_path, '1/') AND startsWith(e.traversal_path, '1/')
+          AND p.id IN $sample:3
+        UNION ALL
+        SELECT e.source_id AS neighbor_id, e.source_kind AS neighbor_type,
+               e.relationship_kind, 0 AS is_outgoing, p.id AS anchor_id
+        FROM gl_project AS p
+        INNER JOIN gl_edge AS e
+          ON p.id = e.target_id AND e.target_kind = 'Project'
+          AND e.relationship_kind IN ('IN_PROJECT', 'CONTAINS', 'IN_GROUP')
+        WHERE startsWith(p.traversal_path, '1/') AND startsWith(e.traversal_path, '1/')
+          AND p.id IN $sample:3
+        LIMIT 50
+
+# ---------------------------------------------------------------------------
+# 3. countIf / sumIf fold — lift target filters into aggregate combinators
+# ---------------------------------------------------------------------------
+
+agg_countif:
+  desc: "Merged MR count per project"
+  variants:
+    where_count:
+      desc: WHERE filter + count() — pre-filters rows before aggregation
+      query: |
+        SELECT p.name, count(mr.id) AS cnt, p.id
+        FROM gl_merge_request AS mr
+        INNER JOIN gl_edge AS e0 ON mr.id = e0.source_id AND e0.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e0.target_id = p.id
+        WHERE startsWith(mr.traversal_path, '1/') AND startsWith(e0.traversal_path, '1/')
+          AND startsWith(p.traversal_path, '1/')
+          AND mr.state = 'merged' AND mr.draft = false
+        GROUP BY p.name, p.id ORDER BY cnt DESC LIMIT 20
+    countif:
+      desc: countIf() — single pass, predicate evaluated inline
+      query: |
+        SELECT p.name, countIf(mr.id, mr.state = 'merged' AND mr.draft = false) AS cnt, p.id
+        FROM gl_merge_request AS mr
+        INNER JOIN gl_edge AS e0 ON mr.id = e0.source_id AND e0.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e0.target_id = p.id
+        WHERE startsWith(mr.traversal_path, '1/') AND startsWith(e0.traversal_path, '1/')
+          AND startsWith(p.traversal_path, '1/')
+        GROUP BY p.name, p.id ORDER BY cnt DESC LIMIT 20
+
+agg_sumif:
+  desc: "Total pipeline duration per project (success only, >120s)"
+  variants:
+    where_sum:
+      desc: WHERE filter + sum()
+      query: |
+        SELECT p.name, sum(pipe.duration) AS total_secs, p.id
+        FROM gl_pipeline AS pipe
+        INNER JOIN gl_edge AS e0 ON pipe.id = e0.source_id AND e0.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e0.target_id = p.id
+        WHERE startsWith(pipe.traversal_path, '1/') AND startsWith(e0.traversal_path, '1/')
+          AND startsWith(p.traversal_path, '1/')
+          AND pipe.status = 'success' AND pipe.duration > 120
+        GROUP BY p.name, p.id ORDER BY total_secs DESC LIMIT 15
+    sumif:
+      desc: sumIf() — single pass with inline predicate
+      query: |
+        SELECT p.name,
+               sumIf(pipe.duration, pipe.status = 'success' AND pipe.duration > 120) AS total_secs,
+               p.id
+        FROM gl_pipeline AS pipe
+        INNER JOIN gl_edge AS e0 ON pipe.id = e0.source_id AND e0.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e0.target_id = p.id
+        WHERE startsWith(pipe.traversal_path, '1/') AND startsWith(e0.traversal_path, '1/')
+          AND startsWith(p.traversal_path, '1/')
+        GROUP BY p.name, p.id ORDER BY total_secs DESC LIMIT 15
+
+# ---------------------------------------------------------------------------
+# 4. Join algorithm comparison — hash vs full_sorting_merge
+# ---------------------------------------------------------------------------
+
+join_algorithm_traversal:
+  desc: "3-node traversal under non-selective path — hash vs merge × SIP"
+  note: "Run each variant with SETTINGS join_algorithm='hash' and join_algorithm='full_sorting_merge'"
+  variants:
+    no_sip:
+      desc: Plain joins, vary join_algorithm
+      query: |
+        SELECT u.id, mr.id, p.id
+        FROM gl_user AS u
+        INNER JOIN gl_edge AS e0 ON u.id = e0.source_id AND e0.relationship_kind = 'AUTHORED'
+        INNER JOIN gl_merge_request AS mr ON e0.target_id = mr.id
+        INNER JOIN gl_edge AS e1 ON mr.id = e1.source_id AND e1.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e1.target_id = p.id
+        WHERE startsWith(e0.traversal_path, '1/') AND startsWith(mr.traversal_path, '1/')
+          AND startsWith(e1.traversal_path, '1/') AND startsWith(p.traversal_path, '1/')
+          AND u.id IN $sample:3 AND mr.state = 'opened' AND p.archived = false
+        LIMIT 50
+    with_sip:
+      desc: Cascading SIP CTEs, vary join_algorithm
+      query: |
+        WITH _root_ids AS (
+          SELECT u.id AS id FROM gl_user AS u WHERE u.id IN $sample:3
+        ),
+        _cascade_mr AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/')
+            AND _ce.source_id IN (SELECT id FROM _root_ids)
+            AND _ce.relationship_kind = 'AUTHORED'
+        ),
+        _cascade_p AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/')
+            AND _ce.source_id IN (SELECT id FROM _cascade_mr)
+            AND _ce.relationship_kind = 'IN_PROJECT'
+        )
+        SELECT u.id, mr.id, p.id
+        FROM gl_user AS u
+        INNER JOIN gl_edge AS e0 ON u.id = e0.source_id AND e0.relationship_kind = 'AUTHORED'
+        INNER JOIN gl_merge_request AS mr ON e0.target_id = mr.id
+        INNER JOIN gl_edge AS e1 ON mr.id = e1.source_id AND e1.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e1.target_id = p.id
+        WHERE startsWith(e0.traversal_path, '1/') AND startsWith(mr.traversal_path, '1/')
+          AND startsWith(e1.traversal_path, '1/') AND startsWith(p.traversal_path, '1/')
+          AND u.id IN $sample:3 AND mr.state = 'opened' AND p.archived = false
+          AND e0.source_id IN (SELECT id FROM _root_ids)
+          AND e1.source_id IN (SELECT id FROM _cascade_mr)
+          AND p.id IN (SELECT id FROM _cascade_p)
+          AND mr.id IN (SELECT id FROM _cascade_mr)
+        LIMIT 50
+
+# ---------------------------------------------------------------------------
+# 5. Traversal path selectivity — same query at different path depths
+# ---------------------------------------------------------------------------
+
+traversal_selectivity:
+  desc: "Same 3-node chain at different traversal path depths (merge+SIP)"
+  note: "Tests how selectivity of traversal_path affects SIP payoff"
+  variants:
+    depth1_nonselective:
+      desc: "1/ — covers 100% of data"
+      query: |
+        WITH _root_ids AS (
+          SELECT u.id AS id FROM gl_user AS u WHERE u.id IN $sample:3
+        ),
+        _cascade_mr AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/')
+            AND _ce.source_id IN (SELECT id FROM _root_ids)
+            AND _ce.relationship_kind = 'AUTHORED'
+        ),
+        _cascade_p AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/')
+            AND _ce.source_id IN (SELECT id FROM _cascade_mr)
+            AND _ce.relationship_kind = 'IN_PROJECT'
+        )
+        SELECT u.id, mr.id, p.id
+        FROM gl_user AS u
+        INNER JOIN gl_edge AS e0 ON u.id = e0.source_id AND e0.relationship_kind = 'AUTHORED'
+        INNER JOIN gl_merge_request AS mr ON e0.target_id = mr.id
+        INNER JOIN gl_edge AS e1 ON mr.id = e1.source_id AND e1.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e1.target_id = p.id
+        WHERE startsWith(e0.traversal_path, '1/') AND startsWith(mr.traversal_path, '1/')
+          AND startsWith(e1.traversal_path, '1/') AND startsWith(p.traversal_path, '1/')
+          AND u.id IN $sample:3 AND mr.state = 'opened' AND p.archived = false
+          AND e0.source_id IN (SELECT id FROM _root_ids)
+          AND e1.source_id IN (SELECT id FROM _cascade_mr)
+          AND p.id IN (SELECT id FROM _cascade_p)
+          AND mr.id IN (SELECT id FROM _cascade_mr)
+        LIMIT 50
+    depth2_selective:
+      desc: "1/37/ — covers ~3% of data"
+      query: |
+        WITH _root_ids AS (
+          SELECT u.id AS id FROM gl_user AS u WHERE u.id IN $sample:3
+        ),
+        _cascade_mr AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/37/')
+            AND _ce.source_id IN (SELECT id FROM _root_ids)
+            AND _ce.relationship_kind = 'AUTHORED'
+        ),
+        _cascade_p AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/37/')
+            AND _ce.source_id IN (SELECT id FROM _cascade_mr)
+            AND _ce.relationship_kind = 'IN_PROJECT'
+        )
+        SELECT u.id, mr.id, p.id
+        FROM gl_user AS u
+        INNER JOIN gl_edge AS e0 ON u.id = e0.source_id AND e0.relationship_kind = 'AUTHORED'
+        INNER JOIN gl_merge_request AS mr ON e0.target_id = mr.id
+        INNER JOIN gl_edge AS e1 ON mr.id = e1.source_id AND e1.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e1.target_id = p.id
+        WHERE startsWith(e0.traversal_path, '1/37/') AND startsWith(mr.traversal_path, '1/37/')
+          AND startsWith(e1.traversal_path, '1/37/') AND startsWith(p.traversal_path, '1/37/')
+          AND u.id IN $sample:3 AND mr.state = 'opened' AND p.archived = false
+          AND e0.source_id IN (SELECT id FROM _root_ids)
+          AND e1.source_id IN (SELECT id FROM _cascade_mr)
+          AND p.id IN (SELECT id FROM _cascade_p)
+          AND mr.id IN (SELECT id FROM _cascade_mr)
+        LIMIT 50
+    depth3_very_selective:
+      desc: "1/37/130/ — covers ~0.9% of data"
+      query: |
+        WITH _root_ids AS (
+          SELECT u.id AS id FROM gl_user AS u WHERE u.id IN $sample:3
+        ),
+        _cascade_mr AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/37/130/')
+            AND _ce.source_id IN (SELECT id FROM _root_ids)
+            AND _ce.relationship_kind = 'AUTHORED'
+        ),
+        _cascade_p AS (
+          SELECT _ce.target_id AS id FROM gl_edge AS _ce
+          WHERE startsWith(_ce.traversal_path, '1/37/130/')
+            AND _ce.source_id IN (SELECT id FROM _cascade_mr)
+            AND _ce.relationship_kind = 'IN_PROJECT'
+        )
+        SELECT u.id, mr.id, p.id
+        FROM gl_user AS u
+        INNER JOIN gl_edge AS e0 ON u.id = e0.source_id AND e0.relationship_kind = 'AUTHORED'
+        INNER JOIN gl_merge_request AS mr ON e0.target_id = mr.id
+        INNER JOIN gl_edge AS e1 ON mr.id = e1.source_id AND e1.relationship_kind = 'IN_PROJECT'
+        INNER JOIN gl_project AS p ON e1.target_id = p.id
+        WHERE startsWith(e0.traversal_path, '1/37/130/') AND startsWith(mr.traversal_path, '1/37/130/')
+          AND startsWith(e1.traversal_path, '1/37/130/') AND startsWith(p.traversal_path, '1/37/130/')
+          AND u.id IN $sample:3 AND mr.state = 'opened' AND p.archived = false
+          AND e0.source_id IN (SELECT id FROM _root_ids)
+          AND e1.source_id IN (SELECT id FROM _cascade_mr)
+          AND p.id IN (SELECT id FROM _cascade_p)
+          AND mr.id IN (SELECT id FROM _cascade_mr)
+        LIMIT 50

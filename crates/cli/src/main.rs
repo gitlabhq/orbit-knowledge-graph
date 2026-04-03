@@ -2,10 +2,10 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
-use code_graph::loading::DirectoryFileSource;
+use code_graph::linker::indexer::{IndexingConfig, RepositoryIndexer, RepositoryIndexingResult};
+use code_graph::linker::loading::DirectoryFileSource;
 use ontology::Ontology;
-use query_engine::SecurityContext;
+use query_engine::compiler::SecurityContext;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -220,7 +220,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
 fn build_index_output(
     repo_name: &str,
     path: &str,
-    result: &code_graph::indexer::RepositoryIndexingResult,
+    result: &RepositoryIndexingResult,
     show_stats: bool,
 ) -> IndexOutput {
     let (graph, rel_counts, def_counts) = match result.graph_data {
@@ -302,6 +302,7 @@ struct QueryResult {
     input: Value,
     sql: String,
     params: HashMap<String, Value>,
+    rendered_sql: String,
 }
 
 #[derive(Serialize)]
@@ -363,8 +364,9 @@ fn run_query(
     for (label, input) in sorted_queries {
         let input_json = serde_json::to_string(&input).context("failed to serialize input")?;
 
-        match query_engine::compile(&input_json, &ontology, &security_ctx) {
+        match query_engine::compiler::compile(&input_json, &ontology, &security_ctx) {
             Ok(result) => {
+                let rendered_sql = result.base.render();
                 results.push(QueryOutput::Success(QueryResult {
                     label,
                     input,
@@ -375,6 +377,7 @@ fn run_query(
                         .into_iter()
                         .map(|(k, v)| (k, v.value))
                         .collect(),
+                    rendered_sql,
                 }));
             }
             Err(e) => {
@@ -406,10 +409,11 @@ fn run_query(
                         println!("**SQL:**\n```sql\n{}\n```\n", r.sql);
                         if !r.params.is_empty() {
                             println!(
-                                "**Params:**\n```json\n{}\n```",
+                                "**Params:**\n```json\n{}\n```\n",
                                 serde_json::to_string_pretty(&r.params)?
                             );
                         }
+                        println!("**Rendered SQL:**\n```sql\n{}\n```", r.rendered_sql);
                     }
                     QueryOutput::Error(e) => {
                         println!("\n### {} [ERROR]\n", e.label);

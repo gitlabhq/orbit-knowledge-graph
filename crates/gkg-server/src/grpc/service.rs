@@ -1,44 +1,39 @@
 use std::pin::Pin;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
-use clickhouse_client::ClickHouseConfiguration;
-use labkit_rs::correlation::grpc::{
-    context_from_request, with_correlation, with_correlation_stream,
-};
-use labkit_rs::metrics::grpc::GrpcMetrics;
+use crate::content::ColumnResolverRegistry;
+use clickhouse_client::ClickHouseConfigurationExt;
+use gkg_server_config::ClickHouseConfiguration;
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{info, instrument};
+use tracing::{Instrument, info, instrument};
 
-use crate::auth::JwtValidator;
+use crate::auth::{Claims, JwtValidator};
 use crate::cluster_health::ClusterHealthChecker;
+use crate::graph_stats::GraphStatsService;
+use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
-    GetGraphSchemaRequest, GetGraphSchemaResponse, ListToolsRequest, ListToolsResponse,
-    QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
-    SchemaNodeStyle, SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition,
-    execute_query_message, get_graph_schema_response,
-};
-use crate::query_pipeline::{
-    GoonFormatter, GraphFormatter, QueryPipelineService, receive_query_request, send_query_error,
+    GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
+    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
+    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
+    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
+use query_engine::formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
 
 use super::auth::extract_claims;
-
-const SERVICE_NAME: &str = "gkg.v1.KnowledgeGraphService";
-
-static METRICS: LazyLock<GrpcMetrics> = LazyLock::new(GrpcMetrics::new);
 
 pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
     ontology: Arc<Ontology>,
     tool_service: ToolService,
-    query_pipeline: QueryPipelineService<GraphFormatter>,
-    llm_pipeline: QueryPipelineService<GoonFormatter>,
+    pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
+    graph_stats: GraphStatsService,
+    stream_timeout_secs: u64,
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -47,19 +42,28 @@ impl KnowledgeGraphServiceImpl {
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
+        resolver_registry: Option<Arc<ColumnResolverRegistry>>,
+        stream_timeout_secs: u64,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
-        let query_pipeline =
-            QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), GraphFormatter);
-        let llm_pipeline = QueryPipelineService::new(Arc::clone(&ontology), client, GoonFormatter);
+        let mut pipeline = QueryPipelineService::new(
+            Arc::clone(&ontology),
+            Arc::clone(&client),
+            clickhouse_config.profiling.clone(),
+        );
+        if let Some(registry) = resolver_registry {
+            pipeline = pipeline.with_resolver_registry(registry);
+        }
+        let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {
             validator,
             ontology,
             tool_service,
-            query_pipeline,
-            llm_pipeline,
+            pipeline,
             cluster_health,
+            graph_stats,
+            stream_timeout_secs,
         }
     }
 }
@@ -79,24 +83,18 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        METRICS
-            .record(SERVICE_NAME, "ListTools", || {
-                with_correlation(&request, async {
-                    info!("Listing tools for user");
+        info!("Listing tools for user");
 
-                    let tools = ToolRegistry::get_all_tools(&self.ontology)
-                        .into_iter()
-                        .map(|t| ProtoToolDefinition {
-                            name: t.name,
-                            description: t.description,
-                            parameters_json_schema: t.parameters.to_string(),
-                        })
-                        .collect();
-
-                    Ok(Response::new(ListToolsResponse { tools }))
-                })
+        let tools = ToolRegistry::get_all_tools(&self.ontology)
+            .into_iter()
+            .map(|t| ProtoToolDefinition {
+                name: t.name,
+                description: t.description,
+                parameters_json_schema: t.parameters.to_string(),
             })
-            .await
+            .collect();
+
+        Ok(Response::new(ListToolsResponse { tools }))
     }
 
     type ExecuteQueryStream = ExecuteQueryStream;
@@ -109,72 +107,81 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        let context = context_from_request(&request);
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
 
-        let raw_pipeline = self.query_pipeline.clone();
-        let llm_pipeline = self.llm_pipeline.clone();
+        let pipeline = self.pipeline.clone();
+        let stream_timeout = self.stream_timeout_secs;
+        let span = tracing::Span::current();
 
-        tokio::spawn(async move {
-            let req = match receive_query_request(&mut stream, &tx).await {
-                Some(r) => r,
-                None => return,
-            };
-
-            info!(query_len = req.query.len(), "Executing query");
-
-            let use_llm_format = req.format == ResponseFormat::Llm as i32;
-
-            let result = if use_llm_format {
-                llm_pipeline
-                    .run_query(&claims, &req.query, &tx, &mut stream)
-                    .await
-            } else {
-                raw_pipeline
-                    .run_query(&claims, &req.query, &tx, &mut stream)
-                    .await
-            };
-
-            match result {
-                Ok(output) => {
-                    info!("Sending final query result");
-
-                    use crate::proto::execute_query_result::Content;
-
-                    let content = if use_llm_format {
-                        Some(Content::FormattedText(output.formatted_result.to_string()))
-                    } else {
-                        Some(Content::ResultJson(output.formatted_result.to_string()))
+        tokio::spawn(
+            async move {
+                let handler = async {
+                    let req = match receive_query_request(&mut stream, &tx).await {
+                        Some(r) => r,
+                        None => return,
                     };
 
-                    let metadata = Some(QueryMetadata {
-                        query_type: output.query_type,
-                        raw_query_strings: output.raw_query_strings,
-                        row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
-                    });
+                    info!(query_len = req.query.len(), "Executing query");
 
+                    let use_llm_format = req.format == ResponseFormat::Llm as i32;
+
+                    let result = pipeline
+                        .run_query(claims, &req.query, tx.clone(), stream)
+                        .await;
+
+                    match result {
+                        Ok(output) => {
+                            info!("Sending final query result");
+
+                            use crate::proto::execute_query_result::Content;
+
+                            let formatted = if use_llm_format {
+                                GoonFormatter.format(&output)
+                            } else {
+                                GraphFormatter.format(&output)
+                            };
+
+                            let content = if use_llm_format {
+                                Some(Content::FormattedText(formatted.to_string()))
+                            } else {
+                                Some(Content::ResultJson(formatted.to_string()))
+                            };
+
+                            let metadata = Some(QueryMetadata {
+                                query_type: output.query_type,
+                                raw_query_strings: output.raw_query_strings,
+                                row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                            });
+
+                            let _ = tx
+                                .send(Ok(ExecuteQueryMessage {
+                                    content: Some(execute_query_message::Content::Result(
+                                        ExecuteQueryResult { content, metadata },
+                                    )),
+                                }))
+                                .await;
+                        }
+                        Err(e) => {
+                            send_query_error(&tx, e).await;
+                        }
+                    }
+                };
+
+                if tokio::time::timeout(std::time::Duration::from_secs(stream_timeout), handler)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("Query stream timed out after 60s");
                     let _ = tx
-                        .send(Ok(ExecuteQueryMessage {
-                            content: Some(execute_query_message::Content::Result(
-                                ExecuteQueryResult { content, metadata },
-                            )),
-                        }))
+                        .send(Err(Status::deadline_exceeded("Query stream timed out")))
                         .await;
                 }
-                Err(e) => {
-                    send_query_error(&tx, e).await;
-                }
             }
-        });
+            .instrument(span),
+        );
 
-        let stream = ReceiverStream::new(rx);
-        let metered_stream = METRICS.record_stream(SERVICE_NAME, "ExecuteQuery", stream);
-
-        Ok(Response::new(Box::pin(with_correlation_stream(
-            context,
-            metered_stream,
-        ))))
+        Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
     #[instrument(skip(self, request), fields(user_id))]
@@ -185,35 +192,25 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        METRICS
-            .record(SERVICE_NAME, "GetGraphSchema", || {
-                with_correlation(&request, async {
-                    let req = request.get_ref();
-                    info!(format = ?req.format, "Fetching graph schema for user");
+        let req = request.get_ref();
+        info!(format = ?req.format, "Fetching graph schema for user");
 
-                    let response = if req.format == ResponseFormat::Llm as i32 {
-                        let toon_text = self
-                            .tool_service
-                            .build_schema_toon(&req.expand_nodes)
-                            .map_err(|e| Status::internal(e.to_string()))?;
-                        GetGraphSchemaResponse {
-                            content: Some(get_graph_schema_response::Content::FormattedText(
-                                toon_text,
-                            )),
-                        }
-                    } else {
-                        let structured = self.build_structured_schema(&req.expand_nodes);
-                        GetGraphSchemaResponse {
-                            content: Some(get_graph_schema_response::Content::Structured(
-                                structured,
-                            )),
-                        }
-                    };
+        let response = if req.format == ResponseFormat::Llm as i32 {
+            let toon_text = self
+                .tool_service
+                .build_schema_toon(&req.expand_nodes)
+                .map_err(|e| Status::internal(e.to_string()))?;
+            GetGraphSchemaResponse {
+                content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
+            }
+        } else {
+            let structured = self.build_structured_schema(&req.expand_nodes);
+            GetGraphSchemaResponse {
+                content: Some(get_graph_schema_response::Content::Structured(structured)),
+            }
+        };
 
-                    Ok(Response::new(response))
-                })
-            })
-            .await
+        Ok(Response::new(response))
     }
 
     #[instrument(skip(self, request), fields(user_id))]
@@ -224,17 +221,28 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
 
-        METRICS
-            .record(SERVICE_NAME, "GetClusterHealth", || {
-                with_correlation(&request, async {
-                    let req = request.get_ref();
-                    info!(format = ?req.format, "Fetching cluster health for user");
+        let req = request.get_ref();
+        info!(format = ?req.format, "Fetching cluster health for user");
 
-                    let response = self.cluster_health.get_cluster_health(req.format).await;
-                    Ok(Response::new(response))
-                })
-            })
-            .await
+        let response = self.cluster_health.get_cluster_health(req.format).await;
+        Ok(Response::new(response))
+    }
+
+    #[instrument(skip(self, request), fields(user_id))]
+    async fn get_graph_stats(
+        &self,
+        request: Request<GetGraphStatsRequest>,
+    ) -> Result<Response<GetGraphStatsResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+
+        let req = request.get_ref();
+        authorize_traversal_path(&claims, &req.traversal_path)?;
+
+        info!(traversal_path = %req.traversal_path, "Fetching graph stats for user");
+
+        let response = self.graph_stats.get_stats(&req.traversal_path).await?;
+        Ok(Response::new(response))
     }
 }
 
@@ -379,6 +387,30 @@ impl KnowledgeGraphServiceImpl {
     }
 }
 
+fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(), Status> {
+    let org_id = claims
+        .organization_id
+        .ok_or_else(|| Status::unauthenticated("missing organization_id in claims"))?;
+
+    let authorized_paths = if claims.admin {
+        vec![format!("{org_id}/")]
+    } else {
+        claims.group_traversal_ids.clone()
+    };
+
+    let is_authorized = authorized_paths
+        .iter()
+        .any(|allowed| requested_path.starts_with(allowed));
+
+    if !is_authorized {
+        return Err(Status::permission_denied(
+            "traversal_path is not within any authorized scope",
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +435,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let plan = service
@@ -429,6 +463,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&[]);
@@ -457,6 +493,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -491,6 +529,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("User");
@@ -513,6 +553,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
@@ -529,6 +571,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -556,6 +600,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&[]);
@@ -578,6 +624,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&[]);
@@ -604,6 +652,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response =
@@ -626,6 +676,76 @@ mod tests {
         );
     }
 
+    fn test_claims() -> Claims {
+        Claims {
+            sub: "u:1".into(),
+            iss: "gitlab".into(),
+            aud: "gitlab-knowledge-graph".into(),
+            iat: 0,
+            exp: i64::MAX,
+            user_id: 1,
+            username: "test".into(),
+            admin: false,
+            organization_id: Some(1),
+            min_access_level: None,
+            group_traversal_ids: vec![],
+        }
+    }
+
+    #[test]
+    fn authorize_traversal_path_grants_and_denies_correctly() {
+        let admin = |org| Claims {
+            admin: true,
+            organization_id: Some(org),
+            ..test_claims()
+        };
+        let user = |org, groups: Vec<&str>| Claims {
+            organization_id: Some(org),
+            group_traversal_ids: groups.into_iter().map(String::from).collect(),
+            ..test_claims()
+        };
+
+        for (claims, path) in [
+            (admin(42), "42/"),
+            (admin(42), "42/100/200/"),
+            (user(1, vec!["1/22/", "1/33/"]), "1/22/"),
+            (user(1, vec!["1/22/", "1/33/"]), "1/22/44/"),
+            (user(1, vec!["1/22/", "1/33/"]), "1/33/55/"),
+        ] {
+            assert!(
+                authorize_traversal_path(&claims, path).is_ok(),
+                "expected OK for {path}"
+            );
+        }
+
+        for (claims, path) in [
+            (admin(42), "99/100/"),
+            (user(1, vec!["1/22/"]), "1/99/"),
+            (user(1, vec!["1/22/33/"]), "1/22/"),
+            (user(1, vec![]), "1/22/"),
+        ] {
+            assert_eq!(
+                authorize_traversal_path(&claims, path).unwrap_err().code(),
+                tonic::Code::PermissionDenied,
+                "expected PermissionDenied for {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn authorize_traversal_path_missing_org_id_returns_unauthenticated() {
+        let claims = Claims {
+            organization_id: None,
+            ..test_claims()
+        };
+        assert_eq!(
+            authorize_traversal_path(&claims, "1/22/")
+                .unwrap_err()
+                .code(),
+            tonic::Code::Unauthenticated
+        );
+    }
+
     #[test]
     fn test_expand_all_wildcard() {
         let ontology = test_ontology();
@@ -636,6 +756,8 @@ mod tests {
             Arc::clone(&ontology),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&["*".to_string()]);

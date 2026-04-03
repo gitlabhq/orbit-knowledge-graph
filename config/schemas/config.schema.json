@@ -1,0 +1,1121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AppConfig",
+  "type": "object",
+  "properties": {
+    "bind_address": {
+      "type": "string",
+      "default": "127.0.0.1:4200"
+    },
+    "datalake": {
+      "$ref": "#/$defs/ClickHouseConfiguration",
+      "default": {
+        "database": "default",
+        "password": null,
+        "profiling": {
+          "enabled": false,
+          "explain": false,
+          "instance_health": false,
+          "processors": false,
+          "query_log": false
+        },
+        "query_settings": {},
+        "url": "http://127.0.0.1:8123",
+        "username": "default"
+      }
+    },
+    "engine": {
+      "$ref": "#/$defs/EngineConfiguration",
+      "default": {
+        "concurrency_groups": {},
+        "handlers": {
+          "code-indexing-task": {
+            "concurrency_group": null,
+            "max_attempts": null,
+            "retry_interval_secs": null
+          },
+          "global-handler": {
+            "concurrency_group": null,
+            "datalake_batch_size": 1000000,
+            "max_attempts": null,
+            "retry_interval_secs": null
+          },
+          "namespace-deletion": {
+            "concurrency_group": null,
+            "max_attempts": null,
+            "retry_interval_secs": null
+          },
+          "namespace-handler": {
+            "concurrency_group": null,
+            "datalake_batch_size": 1000000,
+            "max_attempts": null,
+            "retry_interval_secs": null
+          }
+        },
+        "max_concurrent_workers": 16
+      }
+    },
+    "gitlab": {
+      "$ref": "#/$defs/GitlabConfig",
+      "default": {
+        "base_url": null,
+        "jwt": {
+          "signing_key": null,
+          "verifying_key": null
+        },
+        "resolve_host": null
+      }
+    },
+    "graph": {
+      "$ref": "#/$defs/ClickHouseConfiguration",
+      "default": {
+        "database": "default",
+        "password": null,
+        "profiling": {
+          "enabled": false,
+          "explain": false,
+          "instance_health": false,
+          "processors": false,
+          "query_log": false
+        },
+        "query_settings": {},
+        "url": "http://127.0.0.1:8123",
+        "username": "default"
+      }
+    },
+    "grpc": {
+      "$ref": "#/$defs/GrpcConfig",
+      "default": {
+        "concurrency_limit": 256,
+        "connection_window_size": 2097152,
+        "keepalive_interval_secs": 20,
+        "keepalive_timeout_secs": 20,
+        "max_connection_age_secs": 300,
+        "stream_timeout_secs": 60,
+        "stream_window_size": 1048576,
+        "tcp_keepalive_secs": 60
+      }
+    },
+    "grpc_bind_address": {
+      "type": "string",
+      "default": "127.0.0.1:50054"
+    },
+    "health_check": {
+      "$ref": "#/$defs/HealthCheckConfig",
+      "default": {
+        "bind_address": "0.0.0.0:4201",
+        "namespace": "default",
+        "services": [
+          "siphon-consumer",
+          "siphon-producer",
+          "gkg-indexer",
+          "nats"
+        ]
+      }
+    },
+    "health_check_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "indexer_health_bind_address": {
+      "type": "string",
+      "default": "0.0.0.0:4202"
+    },
+    "jwt_clock_skew_secs": {
+      "type": "integer",
+      "format": "uint64",
+      "default": 60,
+      "minimum": 0
+    },
+    "metrics": {
+      "$ref": "#/$defs/MetricsConfig",
+      "default": {
+        "log_level": null,
+        "otel": {
+          "enabled": false,
+          "endpoint": ""
+        },
+        "prometheus": {
+          "enabled": false,
+          "port": 9394
+        }
+      }
+    },
+    "nats": {
+      "$ref": "#/$defs/NatsConfiguration",
+      "default": {
+        "ack_wait_secs": 300,
+        "auto_create_streams": true,
+        "batch_size": 10,
+        "connection_timeout_secs": 10,
+        "consumer_name": null,
+        "max_deliver": 5,
+        "password": null,
+        "request_timeout_secs": 5,
+        "stream_max_age_secs": null,
+        "stream_max_bytes": null,
+        "stream_max_messages": null,
+        "stream_replicas": 1,
+        "subscription_buffer_size": 100,
+        "tls_ca_cert_path": null,
+        "tls_cert_path": null,
+        "tls_key_path": null,
+        "url": "localhost:4222",
+        "username": null
+      }
+    },
+    "query": {
+      "$ref": "#/$defs/QuerySettings",
+      "default": {
+        "default": {}
+      }
+    },
+    "schedule": {
+      "$ref": "#/$defs/ScheduleConfig",
+      "default": {
+        "tasks": {
+          "code-indexing-task": {
+            "batch_size": 100,
+            "events_stream_name": "siphon_stream_main_db",
+            "interval_secs": null
+          },
+          "global": {
+            "interval_secs": null
+          },
+          "namespace": {
+            "interval_secs": null
+          },
+          "namespace-code-backfill": {
+            "batch_size": 100,
+            "events_stream_name": "siphon_stream_main_db",
+            "interval_secs": null
+          },
+          "namespace-deletion": {
+            "interval_secs": 86400
+          },
+          "table-cleanup": {
+            "interval_secs": 86400
+          }
+        }
+      }
+    },
+    "tls": {
+      "$ref": "#/$defs/TlsConfig",
+      "default": {
+        "cert_path": null,
+        "key_path": null
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "ClickHouseConfiguration": {
+      "type": "object",
+      "properties": {
+        "database": {
+          "type": "string"
+        },
+        "password": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "profiling": {
+          "$ref": "#/$defs/ProfilingConfig",
+          "default": {
+            "enabled": false,
+            "explain": false,
+            "instance_health": false,
+            "processors": false,
+            "query_log": false
+          }
+        },
+        "query_settings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "url": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "database",
+        "url",
+        "username"
+      ]
+    },
+    "CodeIndexingTaskHandlerConfig": {
+      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
+      "type": "object",
+      "properties": {
+        "concurrency_group": {
+          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "max_attempts": {
+          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "retry_interval_secs": {
+          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "EngineConfiguration": {
+      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `handlers`: defaults for all handlers",
+      "type": "object",
+      "properties": {
+        "concurrency_groups": {
+          "description": "Named concurrency groups with their limits.\nHandlers reference these by name via `HandlerConfiguration::concurrency_group`.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "default": {}
+        },
+        "handlers": {
+          "description": "Per-handler configuration.",
+          "$ref": "#/$defs/HandlersConfiguration",
+          "default": {
+            "code-indexing-task": {
+              "concurrency_group": null,
+              "max_attempts": null,
+              "retry_interval_secs": null
+            },
+            "global-handler": {
+              "concurrency_group": null,
+              "datalake_batch_size": 1000000,
+              "max_attempts": null,
+              "retry_interval_secs": null
+            },
+            "namespace-deletion": {
+              "concurrency_group": null,
+              "max_attempts": null,
+              "retry_interval_secs": null
+            },
+            "namespace-handler": {
+              "concurrency_group": null,
+              "datalake_batch_size": 1000000,
+              "max_attempts": null,
+              "retry_interval_secs": null
+            }
+          }
+        },
+        "max_concurrent_workers": {
+          "description": "Maximum concurrent message handlers across all modules. Defaults to 16.",
+          "type": "integer",
+          "format": "uint",
+          "default": 16,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitlabConfig": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "jwt": {
+          "$ref": "#/$defs/JwtConfig",
+          "default": {
+            "signing_key": null,
+            "verifying_key": null
+          }
+        },
+        "resolve_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "GlobalDispatcherConfig": {
+      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "interval_secs": {
+          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "GlobalHandlerConfig": {
+      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
+      "type": "object",
+      "properties": {
+        "concurrency_group": {
+          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "datalake_batch_size": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 1000000,
+          "minimum": 0
+        },
+        "max_attempts": {
+          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "retry_interval_secs": {
+          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "GrpcConfig": {
+      "type": "object",
+      "properties": {
+        "concurrency_limit": {
+          "type": "integer",
+          "format": "uint",
+          "default": 256,
+          "minimum": 0
+        },
+        "connection_window_size": {
+          "type": "integer",
+          "format": "uint32",
+          "default": 2097152,
+          "minimum": 0
+        },
+        "keepalive_interval_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 20,
+          "minimum": 0
+        },
+        "keepalive_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 20,
+          "minimum": 0
+        },
+        "max_connection_age_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 300,
+          "minimum": 0
+        },
+        "stream_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        },
+        "stream_window_size": {
+          "type": "integer",
+          "format": "uint32",
+          "default": 1048576,
+          "minimum": 0
+        },
+        "tcp_keepalive_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "HandlersConfiguration": {
+      "description": "Typed per-handler configuration for all registered handlers.",
+      "type": "object",
+      "properties": {
+        "code-indexing-task": {
+          "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
+          "default": {
+            "concurrency_group": null,
+            "max_attempts": null,
+            "retry_interval_secs": null
+          }
+        },
+        "global-handler": {
+          "$ref": "#/$defs/GlobalHandlerConfig",
+          "default": {
+            "concurrency_group": null,
+            "datalake_batch_size": 1000000,
+            "max_attempts": null,
+            "retry_interval_secs": null
+          }
+        },
+        "namespace-deletion": {
+          "$ref": "#/$defs/NamespaceDeletionHandlerConfig",
+          "default": {
+            "concurrency_group": null,
+            "max_attempts": null,
+            "retry_interval_secs": null
+          }
+        },
+        "namespace-handler": {
+          "$ref": "#/$defs/NamespaceHandlerConfig",
+          "default": {
+            "concurrency_group": null,
+            "datalake_batch_size": 1000000,
+            "max_attempts": null,
+            "retry_interval_secs": null
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "HealthCheckConfig": {
+      "type": "object",
+      "properties": {
+        "bind_address": {
+          "type": "string",
+          "default": "0.0.0.0:4201"
+        },
+        "namespace": {
+          "type": "string",
+          "default": "default"
+        },
+        "services": {
+          "type": "array",
+          "default": [
+            "siphon-consumer",
+            "siphon-producer",
+            "gkg-indexer",
+            "nats"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "JwtConfig": {
+      "type": "object",
+      "properties": {
+        "signing_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "verifying_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "MetricsConfig": {
+      "type": "object",
+      "properties": {
+        "log_level": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "otel": {
+          "$ref": "#/$defs/OtelConfig",
+          "default": {
+            "enabled": false,
+            "endpoint": ""
+          }
+        },
+        "prometheus": {
+          "$ref": "#/$defs/PrometheusConfig",
+          "default": {
+            "enabled": false,
+            "port": 9394
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "NamespaceCodeBackfillDispatcherConfig": {
+      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "batch_size": {
+          "type": "integer",
+          "format": "uint",
+          "default": 100,
+          "minimum": 0
+        },
+        "events_stream_name": {
+          "type": "string",
+          "default": "siphon_stream_main_db"
+        },
+        "interval_secs": {
+          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "NamespaceDeletionHandlerConfig": {
+      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
+      "type": "object",
+      "properties": {
+        "concurrency_group": {
+          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "max_attempts": {
+          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "retry_interval_secs": {
+          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "NamespaceDeletionSchedulerConfig": {
+      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "interval_secs": {
+          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "NamespaceDispatcherConfig": {
+      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "interval_secs": {
+          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "NamespaceHandlerConfig": {
+      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
+      "type": "object",
+      "properties": {
+        "concurrency_group": {
+          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "datalake_batch_size": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 1000000,
+          "minimum": 0
+        },
+        "max_attempts": {
+          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "retry_interval_secs": {
+          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "NatsConfiguration": {
+      "description": "NATS connection settings.\n\nMatches siphon's QueuingConfig fields.",
+      "type": "object",
+      "properties": {
+        "ack_wait_secs": {
+          "description": "Acknowledgment wait time in seconds before message redelivery. Defaults to 300.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 300,
+          "minimum": 0
+        },
+        "auto_create_streams": {
+          "description": "Whether to auto-create streams on startup. Defaults to true.",
+          "type": "boolean",
+          "default": true
+        },
+        "batch_size": {
+          "description": "How many messages to fetch per batch. Higher values improve throughput\nbut increase memory usage. Defaults to 10.",
+          "type": "integer",
+          "format": "uint",
+          "default": 10,
+          "minimum": 0
+        },
+        "connection_timeout_secs": {
+          "description": "Connection timeout in seconds. Defaults to 10.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 10,
+          "minimum": 0
+        },
+        "consumer_name": {
+          "description": "Consumer name for durable subscriptions. Defaults to None (ephemeral consumer).\n\n**Ephemeral consumers** (`None`): Created on subscribe, destroyed on disconnect.\nMessages are only delivered while connected. Good for transient workers or testing.\n\n**Durable consumers** (`Some(\"name\")`): Persist across restarts. NATS tracks the\nlast acknowledged message, so reconnecting consumers resume where they left off.\nRequired for reliable message processing.\n\nFor horizontal scaling, give all instances the same `consumer_name`. NATS will\ndistribute messages across them (each message delivered to exactly one instance).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "max_deliver": {
+          "description": "Maximum redelivery attempts. None means unlimited. Defaults to 5.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": 5,
+          "minimum": 0
+        },
+        "password": {
+          "description": "Optional password for authentication.\nFor production, prefer environment variables over storing in config files.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "request_timeout_secs": {
+          "description": "Request timeout in seconds. Defaults to 5.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 5,
+          "minimum": 0
+        },
+        "stream_max_age_secs": {
+          "description": "Maximum age of messages in seconds before deletion. Defaults to None (unlimited).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "stream_max_bytes": {
+          "description": "Maximum bytes per stream before oldest messages are deleted. Defaults to None (unlimited).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64",
+          "default": null
+        },
+        "stream_max_messages": {
+          "description": "Maximum messages per stream. Defaults to None (unlimited).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64",
+          "default": null
+        },
+        "stream_replicas": {
+          "description": "Number of stream replicas for fault tolerance. Defaults to 1.\nProduction should use 3 for fault tolerance.",
+          "type": "integer",
+          "format": "uint",
+          "default": 1,
+          "minimum": 0
+        },
+        "subscription_buffer_size": {
+          "description": "How many messages to buffer per subscription. Defaults to 100.\n\nThis controls the capacity of the internal channel between the NATS fetch loop\nand your message handler. When `subscribe()` is called, a background task fetches\nmessages and queues them in this buffer.\n\n- **Smaller buffer**: Less memory, but the fetch loop may block waiting for the handler\n- **Larger buffer**: More messages pre-fetched, smoother throughput, higher memory usage\n\nFor slow handlers or bursty workloads, consider increasing this value.",
+          "type": "integer",
+          "format": "uint",
+          "default": 100,
+          "minimum": 0
+        },
+        "tls_ca_cert_path": {
+          "description": "Path to CA certificate (PEM) for verifying the NATS server.\nSetting this enables TLS (connection uses `tls://` scheme).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "tls_cert_path": {
+          "description": "Path to client certificate (PEM) for mTLS authentication.\nMust be paired with `tls_key_path`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "tls_key_path": {
+          "description": "Path to client private key (PEM) for mTLS authentication.\nMust be paired with `tls_cert_path`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "url": {
+          "description": "Server address, e.g. \"localhost:4222\".",
+          "type": "string"
+        },
+        "username": {
+          "description": "Optional username for authentication.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ]
+    },
+    "OtelConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "endpoint": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProfilingConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "explain": {
+          "type": "boolean",
+          "default": false
+        },
+        "instance_health": {
+          "type": "boolean",
+          "default": false
+        },
+        "processors": {
+          "type": "boolean",
+          "default": false
+        },
+        "query_log": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "PrometheusConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "port": {
+          "type": "integer",
+          "format": "uint16",
+          "default": 9394,
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "QueryConfig": {
+      "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default.",
+      "type": "object",
+      "properties": {
+        "max_execution_time": {
+          "description": "ClickHouse `max_execution_time` in seconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "query_cache_ttl": {
+          "description": "ClickHouse `query_cache_ttl` in seconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "use_query_cache": {
+          "description": "ClickHouse `use_query_cache`. Enabled for cursor pagination.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "QuerySettings": {
+      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: false\n    query_cache_ttl: 60\n  aggregation:\n    max_execution_time: 60\n```",
+      "type": "object",
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/QueryConfig",
+          "default": {}
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/QueryConfig"
+      }
+    },
+    "ScheduleConfig": {
+      "description": "Top-level schedule configuration.",
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "$ref": "#/$defs/ScheduledTasksConfiguration",
+          "default": {
+            "code-indexing-task": {
+              "batch_size": 100,
+              "events_stream_name": "siphon_stream_main_db",
+              "interval_secs": null
+            },
+            "global": {
+              "interval_secs": null
+            },
+            "namespace": {
+              "interval_secs": null
+            },
+            "namespace-code-backfill": {
+              "batch_size": 100,
+              "events_stream_name": "siphon_stream_main_db",
+              "interval_secs": null
+            },
+            "namespace-deletion": {
+              "interval_secs": 86400
+            },
+            "table-cleanup": {
+              "interval_secs": 86400
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScheduledTasksConfiguration": {
+      "description": "Typed per-task configuration for all registered scheduled tasks.",
+      "type": "object",
+      "properties": {
+        "code-indexing-task": {
+          "$ref": "#/$defs/SiphonCodeIndexingTaskDispatcherConfig",
+          "default": {
+            "batch_size": 100,
+            "events_stream_name": "siphon_stream_main_db",
+            "interval_secs": null
+          }
+        },
+        "global": {
+          "$ref": "#/$defs/GlobalDispatcherConfig",
+          "default": {
+            "interval_secs": null
+          }
+        },
+        "namespace": {
+          "$ref": "#/$defs/NamespaceDispatcherConfig",
+          "default": {
+            "interval_secs": null
+          }
+        },
+        "namespace-code-backfill": {
+          "$ref": "#/$defs/NamespaceCodeBackfillDispatcherConfig",
+          "default": {
+            "batch_size": 100,
+            "events_stream_name": "siphon_stream_main_db",
+            "interval_secs": null
+          }
+        },
+        "namespace-deletion": {
+          "$ref": "#/$defs/NamespaceDeletionSchedulerConfig",
+          "default": {
+            "interval_secs": 86400
+          }
+        },
+        "table-cleanup": {
+          "$ref": "#/$defs/TableCleanupConfig",
+          "default": {
+            "interval_secs": 86400
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SiphonCodeIndexingTaskDispatcherConfig": {
+      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "batch_size": {
+          "type": "integer",
+          "format": "uint",
+          "default": 100,
+          "minimum": 0
+        },
+        "events_stream_name": {
+          "type": "string",
+          "default": "siphon_stream_main_db"
+        },
+        "interval_secs": {
+          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "TableCleanupConfig": {
+      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "interval_secs": {
+          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
+    },
+    "TlsConfig": {
+      "type": "object",
+      "properties": {
+        "cert_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "key_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

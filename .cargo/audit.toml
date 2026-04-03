@@ -8,4 +8,7 @@ ignore = [
     "RUSTSEC-2025-0111", # tokio-tar vulnerability (dev-only)
     # jsonwebtoken pulls in rsa crate, but we ONLY use HS256 (HMAC). See #17.
     "RUSTSEC-2023-0071",
+    # rustls-webpki 0.102.8 - transitive dep from async-nats, no patch for 0.102.x
+    # Remove when async-nats drops rustls-webpki 0.102.x (check: cargo tree -i rustls-webpki@0.102.8)
+    "RUSTSEC-2026-0049",
 ]

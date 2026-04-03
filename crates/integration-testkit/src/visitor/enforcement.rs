@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use query_engine::input::{Input, QueryType};
+use query_engine::compiler::input::{Input, QueryType};
 
 /// Query features that require corresponding assertions in the test.
 ///
@@ -28,8 +28,8 @@ pub enum Requirement {
     Neighbors,
     /// Query has `aggregation_sort` — test must call `assert_node_order`.
     AggregationSort,
-    /// Query has `range` — test must call `assert_node_count`.
-    Range,
+    /// Query has `cursor` — test must call `assert_node_count` to verify the page.
+    Cursor,
     /// Query returns nodes — test must call `assert_node_count`.
     ///
     /// Always derived for `search`, `traversal`, and `neighbors` queries
@@ -57,7 +57,12 @@ impl std::fmt::Display for Requirement {
                     "AggregationSort (query has aggregation_sort — call assert_node_order)"
                 )
             }
-            Self::Range => write!(f, "Range (query has range — call assert_node_count)"),
+            Self::Cursor => {
+                write!(
+                    f,
+                    "Cursor (query has cursor — call assert_node_count to verify page)"
+                )
+            }
             Self::NodeCount => {
                 write!(f, "NodeCount (call assert_node_count to verify total rows)")
             }
@@ -111,6 +116,7 @@ impl QueryRequirements for Input {
             QueryType::Traversal | QueryType::Search => {
                 reqs.insert(Requirement::NodeCount);
             }
+            QueryType::Hydration => {}
         }
 
         // Traversal queries with joins produce edges the test must verify per type.
@@ -129,8 +135,8 @@ impl QueryRequirements for Input {
             reqs.insert(Requirement::AggregationSort);
         }
 
-        if self.range.is_some() {
-            reqs.insert(Requirement::Range);
+        if self.cursor.is_some() {
+            reqs.insert(Requirement::Cursor);
         }
 
         reqs
@@ -198,14 +204,14 @@ impl Drop for AssertionTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_engine::input::parse_input;
+    use query_engine::compiler::input::parse_input;
 
     use crate::visitor::tests::{
         make_node, make_path_edge, sample_aggregation_response, sample_neighbors_response,
         sample_response, sample_search_response,
     };
     use crate::visitor::{NodeExt, ResponseView};
-    use gkg_server::query_pipeline::GraphResponse;
+    use query_engine::formatters::GraphResponse;
 
     fn parse_test_input(json: &str) -> Input {
         parse_input(json).expect("test query JSON should parse into Input")
@@ -420,20 +426,6 @@ mod tests {
         assert_eq!(reqs.len(), 2);
     }
 
-    #[test]
-    fn requirements_from_range() {
-        let input = parse_test_input(
-            r#"{"query_type": "search",
-                "node": {"id": "u", "entity": "User"},
-                "range": {"start": 0, "end": 5},
-                "limit": 10}"#,
-        );
-        let reqs = input.requirements();
-        assert!(reqs.contains(&Requirement::Range));
-        assert!(reqs.contains(&Requirement::NodeCount));
-        assert_eq!(reqs.len(), 2);
-    }
-
     // ── Assertion enforcement ────────────────────────────────────────
 
     #[test]
@@ -534,6 +526,8 @@ mod tests {
             query_type: "path_finding".to_string(),
             nodes: vec![make_node("User", 1, &[]), make_node("Project", 1000, &[])],
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
+            columns: None,
+            pagination: None,
         };
         let view = ResponseView::for_query(&input, resp);
         assert_eq!(view.path_ids().len(), 1);
@@ -671,11 +665,25 @@ mod tests {
     }
 
     #[test]
-    fn for_query_range_satisfied_by_assert_node_count() {
+    fn requirements_from_cursor() {
         let input = parse_test_input(
             r#"{"query_type": "search",
                 "node": {"id": "u", "entity": "User"},
-                "range": {"start": 0, "end": 5},
+                "cursor": {"offset": 0, "page_size": 5},
+                "limit": 10}"#,
+        );
+        let reqs = input.requirements();
+        assert!(reqs.contains(&Requirement::Cursor));
+        assert!(reqs.contains(&Requirement::NodeCount));
+        assert_eq!(reqs.len(), 2);
+    }
+
+    #[test]
+    fn for_query_cursor_satisfied_by_assert_node_count() {
+        let input = parse_test_input(
+            r#"{"query_type": "search",
+                "node": {"id": "u", "entity": "User"},
+                "cursor": {"offset": 0, "page_size": 5},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -812,12 +820,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "unsatisfied assertion requirements")]
-    fn for_query_panics_on_unsatisfied_range() {
+    #[should_panic(expected = "Cursor")]
+    fn for_query_panics_on_unsatisfied_cursor() {
         let input = parse_test_input(
             r#"{"query_type": "search",
                 "node": {"id": "u", "entity": "User"},
-                "range": {"start": 0, "end": 5},
+                "cursor": {"offset": 0, "page_size": 5},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -837,6 +845,8 @@ mod tests {
             query_type: "path_finding".to_string(),
             nodes: vec![make_node("User", 1, &[]), make_node("Project", 1000, &[])],
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
+            columns: None,
+            pagination: None,
         };
         let view = ResponseView::for_query(&input, resp);
         drop(view);
@@ -876,7 +886,7 @@ mod tests {
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2],
                          "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}},
                 "order_by": {"node": "u", "property": "id"},
-                "range": {"start": 0, "end": 5},
+                "cursor": {"offset": 0, "page_size": 5},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());

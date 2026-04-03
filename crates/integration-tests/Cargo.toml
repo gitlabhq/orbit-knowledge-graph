@@ -5,10 +5,14 @@ edition = "2024"
 publish = false
 
 # No src/lib.rs — this crate only contains integration tests.
+# Test targets are auto-discovered from tests/*.rs files.
+# Shared helpers live in tests/common/ (subdirectory, ignored by auto-discovery).
 
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
+compiler = { path = "../query-engine/compiler" }
 gkg-server = { path = "../gkg-server", features = ["testkit"] }
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
@@ -27,6 +31,8 @@ futures = { workspace = true }
 gitlab-client = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
 serde = { workspace = true }
 health-check = { workspace = true }
 serde_json = { workspace = true }
@@ -36,7 +42,12 @@ tar = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
 tokio = { workspace = true }
+tonic = { workspace = true }
 tokio-stream = { workspace = true }
 tower = { workspace = true }
 tempfile = { workspace = true }
+labkit = { workspace = true, features = ["http"] }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio", "testing"] }
 zstd = "0.13.3"
+sqlparser.workspace = true

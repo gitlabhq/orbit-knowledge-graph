@@ -35,16 +35,16 @@ The service is implemented as a Cargo workspace with 16 crates:
 | `query-engine` | JSON DSL to parameterized ClickHouse SQL compilation |
 | `indexer` | NATS consumer, SDLC + code indexing handlers, worker pools |
 | `ontology` | YAML ontology loading, JSON schema validation, query validators |
-| `code-parser` | Multi-language parser (7 langs) via tree-sitter + SWC |
-| `code-graph` | In-memory property graph construction from parsed code |
+| `code-graph` | Parent crate for code parsing and graph construction |
+| `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper |
+| `code-graph/parser` | Multi-language parser (7 langs) via tree-sitter + SWC |
+| `code-graph/linker` | In-memory property graph construction from parsed code |
 | `clickhouse-client` | Async ClickHouse client with Arrow-IPC streaming |
 
 | `siphon-proto` | Protobuf types for Siphon CDC replication events |
 | `labkit-rs` | Structured logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | Kubernetes readiness/liveness probes |
-| `treesitter-visit` | Tree-sitter language bindings wrapper |
 | `cli` | Local `orbit index` and `orbit query` commands |
-| `datalake-generator` | Synthetic GitLab data for load testing |
 | `xtask` | Build automation, synthetic data generation, query evaluation |
 
 Runtime dependencies worth noting: Tokio (async runtime), Axum (HTTP), Tonic (gRPC), Arrow/DataFusion (columnar data), async-nats (message broker), tree-sitter (code parsing).

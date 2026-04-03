@@ -25,8 +25,8 @@ pub use enforcement::{QueryRequirements, Requirement};
 
 use std::collections::HashSet;
 
-use gkg_server::query_pipeline::{GraphEdge, GraphNode, GraphResponse};
-use query_engine::input::{Input, QueryType};
+use query_engine::compiler::input::{Input, QueryType};
+use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse};
 use serde_json::Value;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,14 +175,14 @@ impl ResponseView {
         self.response.nodes.len()
     }
 
-    /// Assert exact node count. Satisfies [`Requirement::Range`] and
-    /// [`Requirement::NodeCount`].
+    /// Assert exact node count. Satisfies [`Requirement::NodeCount`] and
+    /// [`Requirement::Cursor`].
     ///
     /// Does NOT satisfy [`Requirement::NodeIds`] — use [`node_ids`](Self::node_ids)
     /// or [`assert_node_order`](Self::assert_node_order) to verify which IDs were returned.
     pub fn assert_node_count(&self, expected: usize) {
-        self.tracker.satisfy(Requirement::Range);
         self.tracker.satisfy(Requirement::NodeCount);
+        self.tracker.satisfy(Requirement::Cursor);
         assert_eq!(
             self.response.nodes.len(),
             expected,
@@ -725,6 +725,8 @@ pub(crate) mod tests {
                 make_edge("User", 1, "Group", 101, "MEMBER_OF"),
                 make_edge("User", 2, "Group", 100, "MEMBER_OF"),
             ],
+            columns: None,
+            pagination: None,
         }
     }
 
@@ -736,6 +738,8 @@ pub(crate) mod tests {
                 make_node("User", 2, &[("username", json!("bob"))]),
             ],
             edges: vec![],
+            columns: None,
+            pagination: None,
         }
     }
 
@@ -747,6 +751,8 @@ pub(crate) mod tests {
                 make_node("User", 2, &[("username", json!("bob"))]),
             ],
             edges: vec![],
+            columns: None,
+            pagination: None,
         }
     }
 
@@ -762,6 +768,8 @@ pub(crate) mod tests {
                 make_edge("User", 1, "Group", 100, "MEMBER_OF"),
                 make_edge("User", 1, "Group", 101, "MEMBER_OF"),
             ],
+            columns: None,
+            pagination: None,
         }
     }
 
@@ -912,6 +920,8 @@ pub(crate) mod tests {
                 make_path_edge("User", 1, "Group", 100, "MEMBER_OF", 2, 0),
                 make_path_edge("Group", 100, "Project", 1000, "CONTAINS", 2, 1),
             ],
+            columns: None,
+            pagination: None,
         };
         let view = ResponseView::new(resp);
         assert_eq!(view.path_ids(), HashSet::from([0, 2]));
@@ -930,6 +940,8 @@ pub(crate) mod tests {
                 make_path_edge("Group", 100, "Project", 1000, "CONTAINS", 0, 1),
                 make_path_edge("User", 1, "Group", 100, "MEMBER_OF", 0, 0),
             ],
+            columns: None,
+            pagination: None,
         };
         let view = ResponseView::new(resp);
         let path = view.path(0);
@@ -1053,6 +1065,8 @@ pub(crate) mod tests {
             query_type: "traversal".to_string(),
             nodes: vec![make_node("User", 1, &[])],
             edges: vec![make_edge("User", 1, "Group", 999, "MEMBER_OF")],
+            columns: None,
+            pagination: None,
         };
         ResponseView::new(resp).assert_referential_integrity();
     }
@@ -1161,6 +1175,8 @@ pub(crate) mod tests {
             query_type: "search".to_string(),
             nodes: vec![],
             edges: vec![],
+            columns: None,
+            pagination: None,
         };
         let view = ResponseView::new(resp);
         assert_eq!(view.node_count(), 0);

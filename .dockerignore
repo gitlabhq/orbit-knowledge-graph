@@ -1,0 +1,10 @@
+target/**
+!target/*/debug/gkg-server
+.*
+!.cargo/
+docs/
+e2e/
+fixtures/
+helm/
+scripts/
+tools/

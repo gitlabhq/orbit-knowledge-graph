@@ -20,6 +20,9 @@ ignore = [
     "RUSTSEC-2023-0071",
     # paste unmaintained - transitive dep from clickhouse crate
     "RUSTSEC-2024-0436",
+    # rustls-webpki 0.102.8 - transitive dep from async-nats, no patch for 0.102.x
+    # Remove when async-nats drops rustls-webpki 0.102.x (check: cargo tree -i rustls-webpki@0.102.8)
+    "RUSTSEC-2026-0049",
 ]
 
 [licenses]
@@ -73,12 +76,27 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "code-graph-linker"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "orbit"
 expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
 name = "query-engine"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
+name = "compiler-pipeline-macros"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
+name = "compiler"
 expression = "LicenseRef-EE"
 license-files = []
 
@@ -93,15 +111,19 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "gkg-server-config"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "gkg-utils"
 expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "labkit-rs"
-expression = "MIT"
+name = "duckdb-client"
+expression = "LicenseRef-EE"
 license-files = []
-
 
 [[licenses.exceptions]]
 name = "ruby-prism"
@@ -122,4 +144,7 @@ external-default-features = "allow"
 unknown-registry = "deny"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://gitlab.com/gitlab-org/rust/gitalisk.git"]
+allow-git = [
+    "https://gitlab.com/gitlab-org/rust/gitalisk.git",
+    "https://gitlab.com/gitlab-org/rust/labkit-rs.git",
+]

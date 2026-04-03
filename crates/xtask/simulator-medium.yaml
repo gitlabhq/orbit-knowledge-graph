@@ -1,0 +1,234 @@
+# Simulator configuration - medium scale (~1.3M edges)
+#
+# Fast enough to generate in ~10s, large enough for meaningful query plans.
+#
+# Workflow:
+#   1. Generate data:  cargo xtask synth generate -c crates/xtask/simulator-medium.yaml
+#   2. Load to CH:     cargo xtask synth load -c crates/xtask/simulator-medium.yaml
+#   3. Evaluate:       cargo xtask synth evaluate -c crates/xtask/simulator-medium.yaml
+
+clickhouse:
+  url: http://localhost:8123
+  database: default
+  password: password
+
+  client:
+    send_timeout: 300
+    receive_timeout: 300
+    max_insert_block_size: 100000
+
+  schema:
+    engine: MergeTree
+    index_granularity: 8192
+
+    # Use per-node sort_key from ontology YAML (matches graph.sql).
+    use_ontology_sort_keys: true
+
+    # Edge table schema matches graph.sql exactly.
+    edge_primary_key: [traversal_path, relationship_kind]
+    edge_order_by: [traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind]
+
+    indexes:
+      # -- Node indexes (all tables) --
+      - name: idx_id
+        table: "*"
+        expression: id
+        type: bloom_filter(0.01)
+        granularity: 1
+
+      # -- Per-table skip indexes (matching graph.sql) --
+
+      # gl_user
+      - { name: idx_state, table: gl_user, expression: state, type: "set(10)", granularity: 2 }
+      - { name: idx_user_type, table: gl_user, expression: user_type, type: "set(26)", granularity: 2 }
+      - { name: idx_private_profile, table: gl_user, expression: private_profile, type: minmax, granularity: 1 }
+      - { name: idx_is_admin, table: gl_user, expression: is_admin, type: minmax, granularity: 1 }
+      - { name: idx_is_auditor, table: gl_user, expression: is_auditor, type: minmax, granularity: 1 }
+      - { name: idx_is_external, table: gl_user, expression: is_external, type: minmax, granularity: 1 }
+
+      # gl_project
+      - { name: idx_archived, table: gl_project, expression: archived, type: minmax, granularity: 1 }
+
+      # gl_merge_request
+      - { name: idx_state, table: gl_merge_request, expression: state, type: "set(6)", granularity: 2 }
+      - { name: idx_draft, table: gl_merge_request, expression: draft, type: minmax, granularity: 1 }
+      - { name: idx_squash, table: gl_merge_request, expression: squash, type: minmax, granularity: 1 }
+      - { name: idx_discussion_locked, table: gl_merge_request, expression: discussion_locked, type: minmax, granularity: 1 }
+
+      # gl_note
+      - { name: idx_noteable_type, table: gl_note, expression: noteable_type, type: "set(14)", granularity: 2 }
+      - { name: idx_internal, table: gl_note, expression: internal, type: minmax, granularity: 1 }
+      - { name: idx_confidential, table: gl_note, expression: confidential, type: minmax, granularity: 1 }
+
+      # gl_work_item
+      - { name: idx_state, table: gl_work_item, expression: state, type: "set(10)", granularity: 2 }
+      - { name: idx_work_item_type, table: gl_work_item, expression: work_item_type, type: "set(10)", granularity: 2 }
+      - { name: idx_confidential, table: gl_work_item, expression: confidential, type: minmax, granularity: 1 }
+
+      # gl_pipeline
+      - { name: idx_status, table: gl_pipeline, expression: status, type: "set(16)", granularity: 2 }
+      - { name: idx_tag, table: gl_pipeline, expression: tag, type: minmax, granularity: 1 }
+
+      # gl_job
+      - { name: idx_status, table: gl_job, expression: status, type: "set(16)", granularity: 2 }
+      - { name: idx_allow_failure, table: gl_job, expression: allow_failure, type: minmax, granularity: 1 }
+      - { name: idx_retried, table: gl_job, expression: retried, type: minmax, granularity: 1 }
+
+      # gl_vulnerability
+      - { name: idx_state, table: gl_vulnerability, expression: state, type: "set(4)", granularity: 2 }
+      - { name: idx_severity, table: gl_vulnerability, expression: severity, type: "set(8)", granularity: 2 }
+      - { name: idx_report_type, table: gl_vulnerability, expression: report_type, type: "set(4)", granularity: 2 }
+      - { name: idx_resolved_on_default_branch, table: gl_vulnerability, expression: resolved_on_default_branch, type: minmax, granularity: 1 }
+      - { name: idx_present_on_default_branch, table: gl_vulnerability, expression: present_on_default_branch, type: minmax, granularity: 1 }
+
+      # gl_finding
+      - { name: idx_deduplicated, table: gl_finding, expression: deduplicated, type: minmax, granularity: 1 }
+
+      # gl_merge_request_diff_file
+      - { name: idx_too_large, table: gl_merge_request_diff_file, expression: too_large, type: minmax, granularity: 1 }
+      - { name: idx_new_file, table: gl_merge_request_diff_file, expression: new_file, type: minmax, granularity: 1 }
+      - { name: idx_renamed_file, table: gl_merge_request_diff_file, expression: renamed_file, type: minmax, granularity: 1 }
+      - { name: idx_deleted_file, table: gl_merge_request_diff_file, expression: deleted_file, type: minmax, granularity: 1 }
+      - { name: idx_binary, table: gl_merge_request_diff_file, expression: binary, type: minmax, granularity: 1 }
+
+      # gl_security_scan
+      - { name: idx_latest, table: gl_security_scan, expression: latest, type: minmax, granularity: 1 }
+
+      # -- Edge table --
+      - name: idx_relationship
+        table: edges
+        expression: relationship_kind
+        type: "set(50)"
+        granularity: 2
+
+    projections:
+      - name: by_target
+        table: edges
+        columns: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+        order_by: [target_id, relationship_kind]
+      - name: by_source
+        table: edges
+        columns: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+        order_by: [source_id, relationship_kind]
+
+generation:
+  ontology_path: config/ontology
+  output_dir: gl_synthetic_data_medium
+  skip_if_present: false
+  parallel: false
+  batch_size: 50000
+
+  seed: 42
+  fake_data_path: crates/xtask/fake_data.yaml
+
+  # Single org, ~1.3M edges / ~500k nodes
+  organizations: 1
+  namespace_entity: Group
+
+  roots:
+    User: 1000                        # 1k users
+    Group: 10                         # 10 top-level groups
+
+  # Node estimates (~500k nodes):
+  # - 70 groups × 5 projects = 350 projects
+  # - 350 × 20 MRs = 7k MRs
+  # - 7k × 2 diffs = 14k diffs
+  # - 14k × 3 files = 42k files
+  # - 350 × 20 pipelines = 7k pipelines
+  # - 7k × 3 stages = 21k stages
+  # - 21k × 3 jobs = 63k jobs
+  #
+  # Edge estimates (~1.3M edges):
+  # - Relationship edges: ~150k
+  # - Association edges:  ~1.1M
+
+  relationships:
+    CONTAINS:
+      "Group -> Group":
+        count: 2
+        max_depth: 3
+      "Group -> Project": 5
+
+    IN_PROJECT:
+      "MergeRequest -> Project": 20
+      "WorkItem -> Project": 20
+      "Pipeline -> Project": 20
+      "Vulnerability -> Project": 3
+      "Finding -> Project": 5
+      "Milestone -> Project": 2
+      "Label -> Project": 3
+
+    HAS_STAGE:
+      "Pipeline -> Stage": 3
+
+    HAS_JOB:
+      "Stage -> Job": 3
+
+    HAS_DIFF:
+      "MergeRequest -> MergeRequestDiff": 2
+
+    HAS_FILE:
+      "MergeRequestDiff -> MergeRequestDiffFile": 3
+
+    HAS_NOTE:
+      "MergeRequest -> Note": 2
+      "WorkItem -> Note": 1
+
+    HAS_FINDING:
+      "Vulnerability -> Finding": 2
+
+    HAS_IDENTIFIER:
+      "Finding -> VulnerabilityIdentifier": 1
+
+  associations:
+    AUTHORED:
+      "User -> MergeRequest": 10
+      "User -> WorkItem": 10
+      "User -> Note": 5
+
+    MEMBER_OF:
+      "User -> Group": 10
+
+    ASSIGNED:
+      "User -> MergeRequest": 5
+      "User -> WorkItem": 3
+
+    REVIEWER:
+      "User -> MergeRequest":
+        ratio: 2
+        per: target
+
+    TRIGGERED:
+      "User -> Pipeline": 1
+      "MergeRequest -> Pipeline": 0.5
+
+    CREATOR:
+      "User -> Project": 1
+    OWNER:
+      "User -> Group": 1
+
+    MERGED_BY:
+      "User -> MergeRequest":
+        ratio: 1
+        per: target
+
+    CLOSES:
+      "MergeRequest -> WorkItem": 0.5
+
+    FIXES:
+      "MergeRequest -> Vulnerability": 0.2
+
+    IN_MILESTONE:
+      "WorkItem -> Milestone": 0.5
+
+    HAS_LABEL:
+      "WorkItem -> Label": 0.5
+
+evaluation:
+  queries_path: fixtures/queries/sdlc_queries.yaml
+  metadata_dir: ./evaluation_results_medium
+  sample_size: 50
+  iterations: 1
+  skip_cache_warm: false
+  output:
+    format: text

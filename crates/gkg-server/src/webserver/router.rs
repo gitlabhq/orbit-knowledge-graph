@@ -5,11 +5,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router, routing::get};
 use clickhouse_client::ArrowClickHouseClient;
-use labkit_rs::correlation::http::{CorrelationIdLayer, PropagateCorrelationIdLayer};
-use labkit_rs::metrics::http::HttpMetricsLayer;
+use labkit::http::{CorrelationLayer, GitlabTraceLayer, HttpMetricsLayer};
 use serde::Serialize;
 use tokio::time::timeout;
-use tower_http::trace::TraceLayer;
 
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -27,10 +25,16 @@ struct HealthResponse {
 }
 
 fn version() -> &'static str {
-    match option_env!("GKG_VERSION") {
-        Some(v) => v,
-        None => env!("CARGO_PKG_VERSION"),
-    }
+    use std::sync::OnceLock;
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            std::env::var("GKG_VERSION")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+        })
+        .as_str()
 }
 
 async fn live() -> Json<HealthResponse> {
@@ -77,7 +81,6 @@ pub fn create_router(graph_client: ArrowClickHouseClient) -> Router {
         .route("/ready", get(ready))
         .with_state(state)
         .layer(HttpMetricsLayer::new())
-        .layer(CorrelationIdLayer::new())
-        .layer(TraceLayer::new_for_http())
-        .layer(PropagateCorrelationIdLayer::new())
+        .layer(GitlabTraceLayer::new())
+        .layer(CorrelationLayer::new())
 }

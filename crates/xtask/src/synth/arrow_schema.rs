@@ -131,6 +131,7 @@ pub(crate) fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ontology::FieldSource;
 
     #[test]
     fn test_node_to_arrow_schema() {
@@ -142,27 +143,22 @@ mod tests {
             fields: vec![
                 Field {
                     name: "id".to_string(),
-                    source: "id".to_string(),
+                    source: FieldSource::DatabaseColumn("id".to_string()),
                     data_type: DataType::Int,
-                    nullable: false,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
+                    ..Default::default()
                 },
                 Field {
                     name: "username".to_string(),
-                    source: "username".to_string(),
+                    source: FieldSource::DatabaseColumn("username".to_string()),
                     data_type: DataType::String,
-                    nullable: false,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
+                    ..Default::default()
                 },
                 Field {
                     name: "email".to_string(),
-                    source: "email".to_string(),
+                    source: FieldSource::DatabaseColumn("email".to_string()),
                     data_type: DataType::String,
                     nullable: true,
-                    enum_values: None,
-                    enum_type: ontology::EnumType::default(),
+                    ..Default::default()
                 },
             ],
             destination_table: "gl_user".to_string(),

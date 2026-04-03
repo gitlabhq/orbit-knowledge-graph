@@ -28,7 +28,8 @@ pub use constants::{
 };
 pub use entities::{
     DataType, DomainInfo, EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity,
-    EdgeSourceEtlConfig, EnumType, Field, NodeEntity, NodeStyle, RedactionConfig,
+    EdgeSourceEtlConfig, EnumType, Field, FieldSource, NodeEntity, NodeStyle, RedactionConfig,
+    VirtualSource,
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -99,6 +100,8 @@ pub struct Ontology {
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
     pub(crate) edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
     pub(crate) etl_settings: EtlSettings,
+    pub(crate) internal_column_prefix: String,
+    pub(crate) skip_security_filter_for_tables: Vec<String>,
 }
 
 impl Default for Ontology {
@@ -137,6 +140,8 @@ impl Ontology {
                     DEFAULT_PRIMARY_KEY.to_string(),
                 ],
             },
+            internal_column_prefix: "_gkg_".to_string(),
+            skip_security_filter_for_tables: Vec::new(),
         }
     }
 
@@ -213,16 +218,21 @@ impl Ontology {
         })?;
         for (field_name, data_type, nullable) in fields {
             let field_name_string: String = field_name.into();
+            if field_name_string.starts_with(&self.internal_column_prefix) {
+                return Err(OntologyError::Validation(format!(
+                    "field \"{field_name_string}\" on node \"{node_name}\" uses reserved prefix '{}'",
+                    self.internal_column_prefix
+                )));
+            }
             if field_name_string == constants::TRAVERSAL_PATH_COLUMN {
                 node.has_traversal_path = true;
             }
             node.fields.push(Field {
                 name: field_name_string.clone(),
-                source: field_name_string,
+                source: FieldSource::DatabaseColumn(field_name_string),
                 data_type,
                 nullable,
-                enum_values: None,
-                enum_type: EnumType::default(),
+                ..Default::default()
             });
         }
         Ok(self)
@@ -269,6 +279,60 @@ impl Ontology {
                 "default_columns entry '{col}' is not a declared field of node '{node_name}'"
             );
         }
+        self
+    }
+
+    /// Mutate a field on a node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node or field doesn't exist.
+    pub fn modify_field(
+        mut self,
+        node_name: &str,
+        field_name: &str,
+        f: impl FnOnce(&mut Field),
+    ) -> Result<Self, OntologyError> {
+        let field = self.get_field_mut(node_name, field_name)?;
+        f(field);
+        Ok(self)
+    }
+
+    fn get_field_mut(
+        &mut self,
+        node_name: &str,
+        field_name: &str,
+    ) -> Result<&mut Field, OntologyError> {
+        let node = self.nodes.get_mut(node_name).ok_or_else(|| {
+            OntologyError::Validation(format!("node \"{node_name}\" does not exist"))
+        })?;
+        node.fields
+            .iter_mut()
+            .find(|f| f.name == field_name)
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "field \"{field_name}\" not found on \"{node_name}\""
+                ))
+            })
+    }
+
+    /// Builder: set redaction config for a node (for testing).
+    #[must_use]
+    pub fn with_redaction(
+        mut self,
+        node_name: &str,
+        resource_type: impl Into<String>,
+        id_column: impl Into<String>,
+    ) -> Self {
+        let node = self
+            .nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"));
+        node.redaction = Some(RedactionConfig {
+            resource_type: resource_type.into(),
+            id_column: id_column.into(),
+            ability: "read".to_string(),
+        });
         self
     }
 
@@ -447,6 +511,18 @@ impl Ontology {
         &self.edge_table
     }
 
+    /// Prefix for internal columns injected by the compiler.
+    #[must_use]
+    pub fn internal_column_prefix(&self) -> &str {
+        &self.internal_column_prefix
+    }
+
+    /// Tables excluded from traversal-path security filters.
+    #[must_use]
+    pub fn skip_security_filter_tables(&self) -> &[String] {
+        &self.skip_security_filter_for_tables
+    }
+
     /// Default ORDER BY / dedup key columns for node tables.
     #[must_use]
     pub fn default_entity_sort_key(&self) -> &[String] {
@@ -571,6 +647,30 @@ impl Ontology {
             .map(|f| f.data_type)
     }
 
+    /// Check a boolean property on a node field.
+    ///
+    /// Returns `true` for reserved columns (e.g. `id`). Returns `false` for
+    /// unknown fields (fail-closed). Unknown nodes return `true` since edge
+    /// filters pass entity names like `"relationship[0]"`.
+    #[must_use]
+    pub fn check_field_flag(
+        &self,
+        node_name: &str,
+        field_name: &str,
+        flag: impl Fn(&Field) -> bool,
+    ) -> bool {
+        if NODE_RESERVED_COLUMNS.contains(&field_name) {
+            return true;
+        }
+        let Some(node) = self.nodes.get(node_name) else {
+            return true;
+        };
+        node.fields
+            .iter()
+            .find(|f| f.name == field_name)
+            .is_some_and(&flag)
+    }
+
     /// Validate that a type is a valid node label or edge type.
     ///
     /// # Errors
@@ -690,20 +790,17 @@ mod tests {
 
         let field = Field {
             name: "email".into(),
-            source: "email".into(),
+            source: FieldSource::DatabaseColumn("email".into()),
             data_type: DataType::String,
             nullable: true,
-            enum_values: None,
-            enum_type: EnumType::default(),
+            ..Default::default()
         };
         assert_eq!(format!("{field}"), "email: String?");
         let field = Field {
             name: "id".into(),
-            source: "id".into(),
+            source: FieldSource::DatabaseColumn("id".into()),
             data_type: DataType::Int,
-            nullable: false,
-            enum_values: None,
-            enum_type: EnumType::default(),
+            ..Default::default()
         };
         assert_eq!(format!("{field}"), "id: Int");
     }
@@ -889,11 +986,12 @@ mod tests {
             label: "username".to_string(),
             fields: vec![Field {
                 name: "status".to_string(),
-                source: "status".to_string(),
+                source: FieldSource::DatabaseColumn("status".to_string()),
                 data_type: DataType::Enum,
                 nullable: false,
                 enum_values: Some(enum_values),
                 enum_type: EnumType::Int,
+                ..Default::default()
             }],
             destination_table: "gl_user".to_string(),
             ..Default::default()
@@ -1189,7 +1287,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .expect("should succeed");
         assert_eq!(entity.sort_key, vec!["project_id", "branch", "id"]);
     }
@@ -1222,7 +1325,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .expect("should succeed");
         assert_eq!(entity.sort_key, default_sort_key);
     }
@@ -1249,6 +1357,7 @@ schema_version: "1.0"
 settings:
   table_prefix: "kg_"
   edge_table: "kg_edge"
+  internal_column_prefix: "_gkg_"
   default_entity_sort_key: [traversal_path, id]
   edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
   edge_columns:
@@ -1429,7 +1538,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let err = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .unwrap_err();
         assert!(
             err.to_string().contains("nonexistent_field"),
@@ -1469,9 +1583,81 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
         assert_eq!(entity.sort_key, default_sort_key);
+    }
+
+    // ── check_field_flag / modify_field ────────────────────────────
+
+    fn field_flags_ontology() -> Ontology {
+        Ontology::new()
+            .with_nodes(["User"])
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("email", DataType::String)],
+            )
+            .modify_field("User", "email", |f| {
+                f.like_allowed = false;
+                f.filterable = false;
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn check_field_flag_returns_true_for_reserved_columns() {
+        let ont = field_flags_ontology();
+        assert!(ont.check_field_flag("User", "id", |f| f.like_allowed));
+        assert!(ont.check_field_flag("User", "id", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_returns_true_for_allowed_field() {
+        let ont = field_flags_ontology();
+        assert!(ont.check_field_flag("User", "username", |f| f.like_allowed));
+        assert!(ont.check_field_flag("User", "username", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_returns_false_for_disallowed_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.check_field_flag("User", "email", |f| f.like_allowed));
+        assert!(!ont.check_field_flag("User", "email", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_fails_closed_for_unknown_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.like_allowed));
+        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_returns_true_for_unknown_node() {
+        let ont = field_flags_ontology();
+        assert!(ont.check_field_flag("Unknown", "whatever", |f| f.like_allowed));
+    }
+
+    #[test]
+    fn modify_field_errors_for_unknown_node() {
+        let result = Ontology::new()
+            .with_nodes(["User"])
+            .modify_field("Bogus", "field", |_| {});
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn modify_field_errors_for_unknown_field() {
+        let result = Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("name", DataType::String)])
+            .modify_field("User", "bogus", |_| {});
+        assert!(result.is_err());
     }
 }

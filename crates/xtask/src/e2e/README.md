@@ -36,7 +36,7 @@ e2e/cng/gitlab-values.yaml               -- GitLab Helm overrides
 e2e/cng/traefik-values.yaml              -- Traefik Helm overrides
 e2e/cng/clickhouse.yaml.tmpl             -- ClickHouse k8s manifest (templated)
 e2e/cng/Dockerfile.rails                 -- CNG image overlay
-e2e/helm-values.yaml                     -- GKG Helm overrides
+helm/values/gkg-e2e.yaml                 -- GKG Helm overrides
 e2e/templates/dispatch-indexing-job.yaml.tmpl
 e2e/templates/rails-clickhouse-config.yml.tmpl
 e2e/tests/{redaction_test,test_helper,create_test_data}.rb

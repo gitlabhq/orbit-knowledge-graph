@@ -50,25 +50,27 @@
     },
     "limit": {
       "type": "integer",
-      "description": "Maximum number of results to return. Mutually exclusive with range.",
+      "description": "Maximum number of results to return.",
       "minimum": 1,
       "maximum": 1000,
       "default": 30
     },
-    "range": {
+    "cursor": {
       "type": "object",
-      "description": "Bounded result window for pagination. Mutually exclusive with limit. Size (end - start) capped at 1000 by the server.",
-      "required": ["start", "end"],
+      "description": "Agent-driven pagination cursor. Slices the authorized result set (after redaction) by offset and page_size.",
+      "required": ["offset", "page_size"],
       "properties": {
-        "start": {
+        "offset": {
           "type": "integer",
-          "description": "Index of the first row to return (0-based), applied after filtering and ordering",
-          "minimum": 0
+          "description": "0-based offset into the authorized (post-redaction) result set.",
+          "minimum": 0,
+          "maximum": 999
         },
-        "end": {
+        "page_size": {
           "type": "integer",
-          "description": "Index of the last row to return (exclusive). end - start must not exceed 1000.",
-          "minimum": 1
+          "description": "Number of rows to return from the offset position. offset + page_size must not exceed limit.",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "additionalProperties": false
@@ -86,12 +88,8 @@
       "description": "Consumer-level preferences that affect result presentation, not query semantics."
     }
   },
+  "additionalProperties": false,
   "allOf": [
-    {
-      "not": {
-        "required": ["limit", "range"]
-      }
-    },
     {
       "if": {
         "properties": {
@@ -147,10 +145,15 @@
         }
       },
       "then": {
+        "required": ["relationships"],
         "properties": {
           "nodes": {
             "minItems": 2,
-            "description": "Traversal and pathfinding queries require at least 2 nodes"
+            "description": "Traversal queries require at least 2 nodes"
+          },
+          "relationships": {
+            "minItems": 1,
+            "description": "Traversal queries require at least 1 relationship"
           }
         }
       }
@@ -269,7 +272,8 @@
           "description": "Which property to use as ID (default: 'id')",
           "default": "id"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "ColumnSelection": {
       "description": "Column selection for a node. Use '*' for all columns or an array of specific column names.",
@@ -304,7 +308,8 @@
           "description": "End of ID range (inclusive)",
           "minimum": 1
         }
-      }
+      },
+      "additionalProperties": false
     },
     "Filter": {
       "description": "Property filter - supports both simple equality and advanced operators",
@@ -359,6 +364,7 @@
           "description": "Filter value. Required for all operators except is_null and is_not_null. Type depends on operator: array for 'in', string for contains/starts_with/ends_with, FilterValue for comparison operators."
         }
       },
+      "additionalProperties": false,
       "allOf": [
         {
           "if": { "properties": { "op": { "enum": ["eq", "gt", "lt", "gte", "lte"] } } },
@@ -433,6 +439,7 @@
           "default": {}
         }
       },
+      "additionalProperties": false,
       "allOf": [
         {
           "description": "max_hops must be >= min_hops",
@@ -500,6 +507,7 @@
           "description": "Output column alias for the aggregation result"
         }
       },
+      "additionalProperties": false,
       "if": {
         "properties": {
           "function": { "enum": ["sum", "avg", "min", "max"] }
@@ -545,7 +553,8 @@
           },
           "maxItems": 10
         }
-      }
+      },
+      "additionalProperties": false
     },
     "PathType": {
       "type": "string",
@@ -575,7 +584,8 @@
           "maxItems": 10,
           "default": []
         }
-      }
+      },
+      "additionalProperties": false
     },
     "OrderBy": {
       "type": "object",
@@ -595,7 +605,8 @@
           "description": "Sort direction",
           "default": "ASC"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "AggregationSort": {
       "type": "object",
@@ -612,7 +623,8 @@
           "description": "Sort direction",
           "default": "ASC"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "OrderDirection": {
       "type": "string",

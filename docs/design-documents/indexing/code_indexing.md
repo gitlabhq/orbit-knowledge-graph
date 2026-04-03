@@ -93,7 +93,7 @@ graph LR
     Dispatcher --> IntNATS["NATS JetStream<br/>(GKG_INDEXER stream)"]
     Backfill --> IntNATS
     IntNATS --> Handler["CodeIndexingTaskHandler<br/>(Indexer mode)"]
-    Handler --> Rails["Rails internal API<br/>(archive download)"]
+    Handler --> Rails["Rails internal API<br/>(archive download | incremental fetch)"]
     Rails --> CodeGraph["code-graph<br/>(parse + analyze)"]
     CodeGraph --> Arrow["ArrowConverter"]
     Arrow --> ClickHouse["ClickHouse"]
@@ -103,15 +103,15 @@ graph LR
 
 | Component | Description |
 |---|---|
-| `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
-| `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
+| `code-graph/parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
+| `code-graph/linker` crate | Streaming indexing pipeline, graph data model, analysis |
 | `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
 
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
 | ClickHouse | Columnar OLAP database storing the datalake and the property graph |
-| Rails internal API | Proxies repository archive downloads and project info lookups |
+| Rails internal API | Proxies repository operations: project info lookups, archive downloads, changed path diffs (NDJSON), and blob streaming (length-delimited protobuf) |
 
 For background on Siphon CDC, NATS, and ClickHouse architecture, see the
 [SDLC indexing design document](sdlc_indexing.md).
@@ -183,11 +183,11 @@ The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexi
 
 Example NATS KV:
 
-- Key: `/gkg-indexer/indexing/{project_id}/{branch_name}/lock`
+- Key: `project.{project_id}.{base64_encoded_branch}`
 - Value: `{ "worker_id": String, "started_at": Instant }`
-- TTL: 1 hour (estimated based on the amount of resources)
+- TTL: 60 seconds
 
-After acquiring the lock, the service downloads the repository archive from the Rails internal API.
+After acquiring the lock, the service resolves the repository using a three-tier strategy: if the branch is already cached at the same commit, the cached files are reused directly. If the cache exists at an older commit, an incremental update fetches only the changed paths and their blob content from the Rails internal API, applying renames, deletions, and writes to the cache. If no cache exists or the incremental update fails (e.g. due to a force push), the service falls back to downloading the full repository archive. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions.
 
 #### Transform (call graph construction)
 
@@ -259,7 +259,7 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 
 1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
-3. Downloads the repository archive from the Rails internal API and extracts it to a temp directory
+3. Resolves the repository via `RepositoryResolver`, which checks the local disk cache and applies one of three strategies: cache hit (same commit), incremental update (fetch only changed files via `changed_paths` + `list_blobs` streaming endpoints), or full archive download as a fallback
 4. Runs the streaming indexing pipeline to produce the graph
 5. Converts the graph to Arrow record batches and writes them to ClickHouse
 6. Cleans up stale data from the previous indexing run
@@ -267,7 +267,7 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 
 ##### Storage in ClickHouse
 
-The graph is converted to Apache Arrow record batches and written to five ClickHouse tables: one each for directories, files, definitions, imported symbols, and edges (shared with SDLC data). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
+The graph is converted to Apache Arrow record batches and written to six ClickHouse tables: one each for branches, directories, files, definitions, imported symbols, and edges (shared with SDLC data). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
@@ -304,17 +304,16 @@ The `code_indexing_checkpoint` table records the last successfully indexed point
                            |- 2. Resolve default branch from Rails (if not provided)
                            |- 3. Check checkpoint (skip already-indexed commits)
                            |- 4. Acquire distributed lock via NATS KV
-                           |- 5. Download repository archive from Rails internal API
-                           |- 6. Extract to temp directory
-                           |- 7. Run indexing pipeline
+                           |- 5. Resolve repository (cache hit, incremental update, or full download)
+                           |- 6. Run indexing pipeline
                            |       |- File discovery (respects .gitignore)
                            |       |- Async file reads
                            |       |- CPU-bound parsing (bounded parallelism)
                            |       \- Analysis phase -> graph
-                           |- 8. Convert graph to Arrow record batches
-                           |- 9. Write to ClickHouse (5 tables)
-                           |- 10. Clean up stale data
-                           \- 11. Update checkpoint, release lock
+                           |- 7. Convert graph to Arrow record batches
+                           |- 8. Write to ClickHouse (6 tables)
+                           |- 9. Clean up stale data
+                           \- 10. Update checkpoint, release lock
 ```
 
 ### Differences from the original local tool
@@ -325,13 +324,13 @@ tool. Here are the main architectural differences in the current service:
 | Aspect | Original (local) | Current (service) |
 |---|---|---|
 | Graph database | lbug (embedded) | ClickHouse |
-| Code access | Local filesystem | Rails internal API (archive download) |
+| Code access | Local filesystem | Rails internal API (incremental fetch with full archive fallback) |
 | Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC → dispatcher → internal NATS stream |
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
 | Authorization | None (local tool) | Rails gRPC delegation |
-| Parser crate | External `parser-core` dependency | In-tree `code-parser` (forked and evolved) |
-| Graph builder | External `indexer` crate | In-tree `code-graph` |
+| Parser crate | External `parser-core` dependency | In-tree `code-graph/parser` (forked and evolved) |
+| Graph builder | External `indexer` crate | In-tree `code-graph/linker` |
 | Concurrency | Streaming model (Rayon + semaphore) | Same streaming model (preserved) |
 
 ### Indexing the active branches

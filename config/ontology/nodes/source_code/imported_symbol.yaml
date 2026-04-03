@@ -27,6 +27,7 @@ properties:
   traversal_path:
     type: string
     source: traversal_path
+    filterable: false
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
@@ -41,6 +42,12 @@ properties:
     source: branch
     nullable: false
     description: "Git branch where this import exists."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    description: "Commit SHA at which this import was indexed."
 
   file_path:
     type: string

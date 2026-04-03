@@ -3,18 +3,16 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use code_graph::analysis::types::GraphData;
-use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
-use code_graph::loading::DirectoryFileSource;
-use tempfile::TempDir;
+use code_graph::linker::analysis::types::GraphData;
+use code_graph::linker::indexer::{IndexingConfig, RepositoryIndexer};
+use code_graph::linker::loading::DirectoryFileSource;
 use tracing::{debug, info, warn};
 
-use super::archive;
 use super::arrow_converter::ArrowConverter;
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
-use super::repository_service::RepositoryService;
+use super::repository::RepositoryResolver;
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
 
@@ -27,7 +25,7 @@ pub struct IndexingRequest {
 }
 
 pub struct CodeIndexingPipeline {
-    repository_service: Arc<dyn RepositoryService>,
+    resolver: RepositoryResolver,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
@@ -36,14 +34,14 @@ pub struct CodeIndexingPipeline {
 
 impl CodeIndexingPipeline {
     pub fn new(
-        repository_service: Arc<dyn RepositoryService>,
+        resolver: RepositoryResolver,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
     ) -> Self {
         Self {
-            repository_service,
+            resolver,
             checkpoint_store,
             stale_data_cleaner,
             metrics,
@@ -56,16 +54,15 @@ impl CodeIndexingPipeline {
         context: &HandlerContext,
         request: &IndexingRequest,
     ) -> Result<(), HandlerError> {
-        let temp_dir = TempDir::new()
-            .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
-
         let fetch_start = Instant::now();
-        let ref_name = request.commit_sha.as_deref().unwrap_or(&request.branch);
-        let archive_bytes = self
-            .repository_service
-            .download_archive(request.project_id, ref_name)
+        let repo_path = self
+            .resolver
+            .resolve(
+                request.project_id,
+                &request.branch,
+                request.commit_sha.as_deref(),
+            )
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))
             .record_error_stage(&self.metrics, "repository_fetch")?;
         self.metrics
             .repository_fetch_duration
@@ -73,24 +70,19 @@ impl CodeIndexingPipeline {
 
         context.progress.notify_in_progress().await;
 
-        let extract_start = Instant::now();
-        archive::extract_tar_gz(&archive_bytes, temp_dir.path())
-            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
-            .record_error_stage(&self.metrics, "repository_extract")?;
-        self.metrics
-            .repository_extract_duration
-            .record(extract_start.elapsed().as_secs_f64(), &[]);
-
-        context.progress.notify_in_progress().await;
-
         let indexed_at = Utc::now();
+        // ref_name for repository resolution: commit SHA preferred, branch as fallback.
+        // commit_sha for storage: only the actual SHA, empty string if unavailable.
+        let _ref_name = request.commit_sha.as_deref().unwrap_or(&request.branch);
+        let commit_sha = request.commit_sha.as_deref().unwrap_or("");
         self.run_indexing(
             context,
             request.project_id,
             &request.branch,
+            commit_sha,
             &request.traversal_path,
             indexed_at,
-            temp_dir.path(),
+            &repo_path,
         )
         .await?;
 
@@ -140,11 +132,13 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_indexing(
         &self,
         context: &HandlerContext,
         project_id: i64,
         branch: &str,
+        commit_sha: &str,
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
         repo_dir: &Path,
@@ -197,6 +191,7 @@ impl CodeIndexingPipeline {
             context,
             project_id,
             branch,
+            commit_sha,
             traversal_path,
             indexed_at,
             &graph_data,
@@ -219,11 +214,13 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn write_graph_data(
         &self,
         ctx: &HandlerContext,
         project_id: i64,
         branch: &str,
+        commit_sha: &str,
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
         graph_data: &GraphData,
@@ -232,6 +229,7 @@ impl CodeIndexingPipeline {
             traversal_path.to_string(),
             project_id,
             branch.to_string(),
+            commit_sha.to_string(),
             indexed_at,
         );
 
@@ -240,6 +238,8 @@ impl CodeIndexingPipeline {
             .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
             .record_error_stage(&self.metrics, "arrow_conversion")?;
 
+        self.write_batch(ctx, &self.table_names.branch, &converted.branch)
+            .await?;
         self.write_batch(ctx, &self.table_names.directory, &converted.directories)
             .await?;
         self.write_batch(ctx, &self.table_names.file, &converted.files)

@@ -30,12 +30,6 @@ pub const TABLE_PATTERN_EDGES: &str = "edges";
 
 // --- Generator internals ---
 
-/// Traversal path sentinel for association edges (cross-namespace).
-///
-/// Association edges don't belong to a specific namespace, so they use
-/// this sentinel value instead of a real traversal path.
-pub const ASSOCIATION_TRAVERSAL_PATH: &str = "0/";
-
 // --- ClickHouse infrastructure ---
 
 /// Default native protocol port for `clickhouse client` CLI.

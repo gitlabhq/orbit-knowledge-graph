@@ -14,6 +14,9 @@ GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}"
 # Clone from: https://gitlab.com/gitlab-org/analytics-section/siphon
 SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/siphon"
 
+# Auto-download prebuilt DuckDB shared library on first build (cached in target/).
+DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
+
 [tools]
 "rust" = { version = "1.93.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu" }
 "cargo:cargo-nextest" = "0.9.123"
@@ -23,6 +26,7 @@ SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/
 "cargo:cargo-geiger" = "0.13.0"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.21.5"
+"cargo:ast-grep" = "0.42.0"
 "sccache" = "0.13.0"
 "tilt" = "0.36.1"
 "zig" = "0.15.2"
@@ -32,6 +36,8 @@ node = "24"
 vale = "3.13.0"
 lychee = "0.21.0"
 lefthook = "2.1.3"
+protoc = "34.1"
+jq = "1.7"
 
 [tasks."hooks:install"]
 run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
@@ -42,17 +48,26 @@ run = "cargo build --release"
 description = "Build the crates"
 
 [tasks.test]
-run = "cargo nextest run --lib --bins"
-description = "Run unit tests with full debug symbols"
+run = "./scripts/run-unit-tests.sh"
+description = "Run unit + non-Docker integration tests (auto-discovers test targets)"
 
 [tasks."test:fast"]
-run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins"
-description = "Run unit tests with reduced debug info for faster builds"
+run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked ./scripts/run-unit-tests.sh"
+description = "Run unit + non-Docker integration tests with reduced debug info"
+
+[tasks."test:local"]
+run = "cargo nextest run --test local"
+description = "Run local integration tests — compiler + querying pipeline (no Docker)"
 
 [tasks."test:integration"]
-run = "cargo nextest run --all-features --test '*'"
+run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run integration tests (requires Docker and `mise colima:start`)"
+
+[tasks."test:integration:server"]
+run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run server integration tests (data correctness, hydration, redaction, graph formatter)"
 
 [tasks.clean]
 run = ["cargo clean", "rm -rf lib/*/"]
@@ -63,13 +78,17 @@ run = "cargo fmt --all -- --check"
 description = "Check Rust formatting"
 
 [tasks."lint:code"]
-run = "cargo clippy --all-targets --all-features -- -D warnings"
+run = [
+  "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings",
+  "cargo clippy -p duckdb-client --all-targets -- -D warnings",
+]
 description = "Run clippy lint checks"
 
 [tasks."lint:code:fix"]
 run = [
   "cargo fmt",
-  "cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings",
+  "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features --fix --allow-dirty -- -D warnings",
+  "cargo clippy -p duckdb-client --all-targets --fix --allow-dirty -- -D warnings",
   "cargo fmt",
 ]
 description = "Run clippy lint checks and fix applicable issues"
@@ -89,6 +108,14 @@ description = "Diff current branch against an origin branch (default: main)"
 usage = 'arg "[base]" default="main" help="Branch on origin to diff against"'
 
 
+[tasks."query:profile"]
+run = 'cargo run -p query-profiler -- "$@"'
+description = "Profile a GKG query against ClickHouse (use -- to pass args)"
+
+[tasks."query:diff"]
+run = 'python3 scripts/devtools/diff-profiler-results.py "$@"'
+description = "Compare query-profiler result files (use -- to pass args)"
+
 [tasks."perf:gtime"]
 run = "./scripts/devtools/gtime.sh"
 
@@ -99,6 +126,14 @@ usage = '''
 arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
+
+[tasks."proto:go"]
+run = "scripts/proto-go.sh generate"
+description = "Generate Go protobuf/gRPC stubs for Workhorse integration"
+
+[tasks."proto:go:check"]
+run = "scripts/proto-go.sh check"
+description = "Verify Go proto stubs are up to date"
 
 [tasks."proto:ruby"]
 run = '''
@@ -128,9 +163,17 @@ description = "Publish gitlab-gkg-proto gem to RubyGems.org"
 run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_knowledge_graph_secret 2>/dev/null || cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p gkg-server'
 description = "Start the GKG server (webserver mode)"
 
+[tasks."server:dispatch"]
+run = './scripts/run-dispatcher.sh'
+description = "Start the GKG server (dispatch-indexing mode)"
+
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
+
+[tasks."schema:generate"]
+run = "cargo xtask schema -o config/schemas/config.schema.json"
+description = "Generate JSON Schema for the server configuration"
 
 [tasks."e2e:setup"]
 run = "cargo xtask e2e setup"
@@ -177,7 +220,7 @@ run = "vale --minAlertLevel error ."
 description = "Run Vale prose linting on markdown files"
 
 [tasks."lint:links"]
-run = "lychee --offline --include-fragments --exclude-path output '**/*.md'"
+run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode '**/*.md'"
 description = "Check for broken links in markdown files"
 
 [tasks."lint:docs"]

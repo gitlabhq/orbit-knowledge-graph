@@ -1,10 +1,14 @@
 mod aggregation;
+mod dedup;
 mod edge_cases;
 mod helpers;
 mod neighbors;
+mod pagination;
 mod path_finding;
 mod search;
+mod security;
 mod traversal;
+mod work_items;
 
 use helpers::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, seed};
 use integration_testkit::run_subtests_shared;
@@ -19,6 +23,9 @@ async fn data_correctness() {
         // search: column value correctness
         search::search_returns_correct_user_properties,
         search::search_returns_correct_project_properties,
+        search::search_returns_correct_group_full_path,
+        search::search_returns_correct_project_full_path,
+        search::search_default_columns_include_full_path,
         search::search_filter_eq_returns_matching_rows,
         search::search_filter_in_returns_matching_rows,
         search::search_filter_starts_with_returns_matching_rows,
@@ -33,8 +40,7 @@ async fn data_correctness() {
         search::search_boolean_columns_have_correct_values,
         search::search_datetime_columns_serialize_as_strings,
         search::search_nullable_datetime_returns_null_when_unset,
-        // search: pagination, limits, combined
-        search::search_range_returns_paginated_results,
+        // search: limits
         search::search_limit_truncates_results,
         search::search_filter_no_match_returns_empty,
         search::search_combined_filter_node_ids_order_by,
@@ -51,6 +57,9 @@ async fn data_correctness() {
         traversal::traversal_variable_length_with_redaction_at_depth,
         traversal::traversal_deduplicates_shared_nodes,
         traversal::traversal_shared_target_fan_in,
+        traversal::traversal_order_by_node_property,
+        traversal::traversal_order_by_source_node_property,
+        traversal::traversal_order_by_with_node_ids_filter,
         // aggregation
         aggregation::aggregation_count_returns_correct_values,
         aggregation::aggregation_count_group_contains_projects,
@@ -91,7 +100,76 @@ async fn data_correctness() {
         edge_cases::giant_string_survives_pipeline,
         edge_cases::sql_injection_string_preserved,
         edge_cases::empty_result_has_valid_schema,
+        // SIP pre-filter correctness
+        edge_cases::sip_prefilter_with_node_ids_returns_correct_results,
+        edge_cases::sip_prefilter_with_filter_returns_correct_results,
+        edge_cases::sip_prefilter_multi_hop_returns_correct_results,
+        edge_cases::sip_target_aggregation_with_filter_returns_correct_counts,
+        // cross-namespace correctness
+        edge_cases::cross_namespace_user_authors_mr_in_different_group,
+        edge_cases::cross_namespace_group_containment_across_depth,
+        edge_cases::cross_namespace_isolation_no_leakage,
+        edge_cases::cross_namespace_narrow_scope_returns_all_authors,
+        edge_cases::cross_namespace_aggregation_respects_scope,
+        // non-default redaction id_column
+        edge_cases::non_default_redaction_id_entity_traversal,
+        edge_cases::non_default_redaction_id_denies_unauthorized,
+        edge_cases::non_default_redaction_id_with_multiple_mrs,
         // referential integrity
         edge_cases::traversal_referential_integrity_on_complex_query,
+        // LIKE data correctness
+        edge_cases::like_contains_returns_matching_rows,
+        edge_cases::like_contains_matches_multiple,
+        edge_cases::like_contains_no_match_returns_empty,
+        edge_cases::like_starts_with_returns_matching_rows,
+        edge_cases::like_starts_with_no_match,
+        edge_cases::like_ends_with_returns_matching_rows,
+        edge_cases::like_percent_matched_literally,
+        edge_cases::like_underscore_matched_literally,
+        edge_cases::like_equality_on_email_returns_correct_row,
+        edge_cases::like_in_filter_on_email_works,
+        // filterable: false data correctness
+        edge_cases::filterable_traversal_path_readable_as_column,
+        edge_cases::filterable_traversal_path_readable_on_project,
+        edge_cases::filterable_other_filters_still_work_alongside_traversal_path_column,
+        // security: traversal path scoping for search
+        security::search_scoped_path_excludes_other_namespaces,
+        security::search_scoped_to_single_project_namespace,
+        security::search_multi_path_returns_union_of_scopes,
+        security::search_scoped_mr_excludes_other_namespaces,
+        security::search_with_filter_respects_scope,
+        // security: traversal path scoping for path finding
+        security::path_finding_scoped_excludes_paths_through_other_namespaces,
+        security::path_finding_multi_path_scope_finds_both,
+        security::path_finding_narrow_scope_excludes_all_targets,
+        // cursor pagination
+        pagination::cursor_first_page,
+        pagination::cursor_second_page,
+        pagination::cursor_last_page_partial,
+        pagination::cursor_offset_beyond_data,
+        pagination::cursor_with_filter,
+        pagination::cursor_with_filter_second_page,
+        pagination::cursor_with_redaction,
+        pagination::cursor_with_redaction_second_page,
+        pagination::cursor_pages_cover_all_data,
+        pagination::cursor_traversal,
+        // work items: search
+        work_items::search_returns_correct_work_item_properties,
+        work_items::search_filter_work_item_type_returns_matching_rows,
+        // work items: traversal (all 7 edge types)
+        work_items::traversal_user_authored_work_item_returns_correct_edges,
+        work_items::traversal_work_item_in_group_returns_correct_edges,
+        work_items::traversal_work_item_in_project_returns_correct_edges,
+        work_items::traversal_user_closed_work_item_returns_correct_edges,
+        work_items::traversal_work_item_in_milestone_returns_correct_edges,
+        work_items::traversal_user_assigned_work_item_returns_correct_edges,
+        work_items::traversal_work_item_has_label_returns_correct_edges,
+        // dedup: LIMIT 1 BY correctness
+        dedup::search_returns_latest_version,
+        dedup::search_excludes_deleted_rows,
+        dedup::search_filter_returns_latest_matching_version,
+        dedup::search_filter_excludes_stale_match,
+        dedup::aggregation_dedup_counts_unique_entities,
+        dedup::traversal_dedup_returns_single_edge,
     );
 }

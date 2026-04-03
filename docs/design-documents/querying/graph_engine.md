@@ -26,6 +26,31 @@ The storage model aims to replicate the CSR (Compressed Sparse Row) adjacency li
 
 - Multi‑tenancy and authorization are enforced in every query by prefix filtering on `organization_id` and `traversal_id` to keep scans local and permission-scoped.
 
+### Edge table schema (`gl_edge`)
+
+The unified edge table uses an adjacency-optimized primary key:
+
+```sql
+PRIMARY KEY (source_id, relationship_kind, target_id)
+ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)
+PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, target_kind, source_id, traversal_path))
+```
+
+The primary key serves as a forward adjacency index, giving O(log N) lookup for all
+outgoing edges from a node. The `by_target` projection serves as the reverse adjacency
+index for incoming edge lookups.
+
+Sort key column order matters: `(id, relationship_kind, ...)` ensures ClickHouse can use
+prefix-based primary index pruning for both the base table and projections. Placing
+`source_kind`/`target_kind` before `relationship_kind` breaks prefix matching since
+queries rarely filter on entity kind alone.
+
+Bloom filter indexes on `source_id`/`target_id` are intentionally omitted. They compete
+with projections in ClickHouse's cost optimizer: the optimizer counts granules and picks
+the "cheaper" path, but bloom-filtered base table granules appear cheaper than projection
+granules even though projection data is contiguous and bloom data is scattered. Removing
+bloom filters lets projections be correctly selected.
+
 ## Query Engine Design
 
 There will be two ways to interact with the graph engine:
@@ -55,7 +80,7 @@ These choices preserve factorization: each hop operates on a compact frontier an
 
 ### Unified Response Format
 
-After ClickHouse returns rows, the formatting stage transforms the raw `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ query_type, nodes, edges }` shape for all five query types (search, traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
+After ClickHouse returns rows and redaction completes, the server applies agent-driven cursor pagination (`{ offset, page_size }`) to slice the authorized result set. A query result cache (moka, 60s TTL) stores the full authorized result so subsequent pages skip ClickHouse, authorization, and redaction. The formatting stage then transforms the sliced `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ query_type, nodes, edges, columns?, pagination? }` shape for all five query types (search, traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. Aggregation queries include `columns` to describe computed values. A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
 
@@ -69,9 +94,10 @@ Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](.
 
 ## Observability
 
-- Per‑phase timings (parse/plan/render/execute) and row counts.
+- Per-phase timings (parse/plan/render/execute) and row counts.
 - Emitted SQL and parameter map for debugging.
 - ClickHouse query metrics (system.query_log) correlated by request ID.
+- Query result cache metrics: lookups (hit/miss/error), stores (success/error/too_large), evictions (per_user_limit).
 
 ## Integration with Indexing
 

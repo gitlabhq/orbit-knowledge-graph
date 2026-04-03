@@ -28,7 +28,7 @@ If agent teams are available, create an agent team for each major section of the
 Before editing, research what changed and what the current state looks like:
 
 ```shell
-git log --oneline --since="2 weeks ago" -- crates/query-engine/
+git log --oneline --since="2 weeks ago" -- crates/query-engine/compiler/
 glab issue list --label "knowledge graph" --state opened
 glab mr list --state merged --per-page 20
 ```

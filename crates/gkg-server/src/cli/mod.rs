@@ -14,3 +14,14 @@ pub enum Mode {
     Indexer,
     Webserver,
 }
+
+impl Mode {
+    pub fn service_name(self) -> &'static str {
+        match self {
+            Self::Webserver => "gkg-webserver",
+            Self::Indexer => "gkg-indexer",
+            Self::DispatchIndexing => "gkg-dispatcher",
+            Self::HealthCheck => "gkg-healthcheck",
+        }
+    }
+}

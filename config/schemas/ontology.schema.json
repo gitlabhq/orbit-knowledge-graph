@@ -48,35 +48,99 @@
       "default": "int"
     },
 
-    "propertyDefinition": {
+    "virtualSourceDefinition": {
       "type": "object",
-      "description": "Definition of a node property/field.",
+      "description": "Configuration for a field resolved from a remote service at query time.",
       "properties": {
-        "type": { "$ref": "#/definitions/propertyType" },
-        "source": {
+        "service": {
           "type": "string",
-          "description": "Source column name in the database table."
+          "description": "Logical service name (e.g. 'gitaly')."
         },
-        "nullable": {
+        "lookup": {
+          "type": "string",
+          "description": "Logical operation name (e.g. 'blob_content')."
+        },
+        "disabled": {
           "type": "boolean",
-          "description": "Whether this field can be null.",
+          "description": "When true, the virtual field is declared but not resolvable. Queries requesting it will receive null.",
           "default": false
         },
-        "description": {
-          "type": "string",
-          "description": "Human-readable description of the property."
-        },
-        "values": {
-          "$ref": "#/definitions/enumValues",
-          "description": "For enum types, maps integer values to string labels."
-        },
-        "enum_type": {
-          "$ref": "#/definitions/enumType",
-          "description": "For enum types, specifies how the enum is stored in the source database."
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Column-backed properties this virtual field needs in the property map for resolution. The compiler ensures these are fetched during hydration even if the user didn't request them.",
+          "default": []
         }
       },
-      "required": ["type", "source"],
+      "required": ["service", "lookup"],
       "additionalProperties": false
+    },
+
+    "propertyDefinition": {
+      "description": "Definition of a node property/field. Exactly one of 'source' (column-backed) or 'virtual' (remote-resolved) must be present.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Column-backed property read from ClickHouse.",
+          "properties": {
+            "type": { "$ref": "#/definitions/propertyType" },
+            "source": {
+              "type": "string",
+              "description": "Source column name in the database table."
+            },
+            "nullable": {
+              "type": "boolean",
+              "description": "Whether this field can be null.",
+              "default": false
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable description of the property."
+            },
+            "values": {
+              "$ref": "#/definitions/enumValues",
+              "description": "For enum types, maps integer values to string labels."
+            },
+            "enum_type": {
+              "$ref": "#/definitions/enumType",
+              "description": "For enum types, specifies how the enum is stored in the source database."
+            },
+            "like_allowed": {
+              "type": "boolean",
+              "description": "Whether LIKE-based operators (contains, starts_with, ends_with) are permitted on this field. Defaults to true. Set to false for sensitive columns to prevent probing.",
+              "default": true
+            },
+            "filterable": {
+              "type": "boolean",
+              "description": "Whether users can filter on this field. Defaults to true. Set to false for internal columns (e.g. traversal_path) that should only be system-controlled.",
+              "default": true
+            }
+          },
+          "required": ["type", "source"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "Virtual property resolved from a remote service at query time.",
+          "properties": {
+            "type": { "$ref": "#/definitions/propertyType" },
+            "virtual": {
+              "$ref": "#/definitions/virtualSourceDefinition"
+            },
+            "nullable": {
+              "type": "boolean",
+              "description": "Whether this field can be null.",
+              "default": false
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable description of the property."
+            }
+          },
+          "required": ["type", "virtual"],
+          "additionalProperties": false
+        }
+      ]
     },
 
     "edgeMappingDefinition": {
@@ -106,6 +170,11 @@
         "array_field": {
           "type": "string",
           "description": "When a datalake column is typed Array(Tuple(...)), names the tuple element holding the foreign key ID (e.g. 'user_id'). The indexer will ARRAY JOIN the column and extract one edge per element."
+        },
+        "array": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, indicates the column is a flat array (e.g. Array(UInt64)). The indexer will unnest the array and create one edge per element."
         }
       },
       "required": ["as"],
@@ -279,12 +348,23 @@
           },
           "minItems": 1
         },
+        "internal_column_prefix": {
+          "type": "string",
+          "pattern": "^_[a-z_]+$",
+          "minLength": 5,
+          "description": "Prefix for internal columns injected by the compiler (e.g. '_gkg_'). Ontology field names starting with this prefix are rejected at load time."
+        },
+        "skip_security_filter_for_entities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Entity names (e.g. 'User') excluded from traversal-path security filters. Resolved to physical table names at load time. These are entities whose visibility is determined through relationships rather than direct path hierarchy."
+        },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."
         }
       },
-      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "edge_columns", "etl"],
+      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "edge_columns", "internal_column_prefix", "etl"],
       "additionalProperties": false
     },
 

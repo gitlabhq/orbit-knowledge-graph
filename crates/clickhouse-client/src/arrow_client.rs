@@ -25,16 +25,30 @@ pub struct ArrowClickHouseClient {
 }
 
 impl ArrowClickHouseClient {
-    pub fn new(url: &str, database: &str, username: &str, password: Option<&str>) -> Self {
+    pub fn new(
+        url: &str,
+        database: &str,
+        username: &str,
+        password: Option<&str>,
+        query_settings: &std::collections::HashMap<String, String>,
+    ) -> Self {
         let mut client = Client::default()
             .with_url(url)
             .with_database(database)
             .with_user(username)
             .with_option("output_format_arrow_string_as_string", "1")
-            .with_option("output_format_arrow_fixed_string_as_fixed_byte_array", "1");
+            .with_option("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
+            .with_option("join_algorithm", "hash")
+            .with_option("query_plan_join_swap_table", "true")
+            .with_option("use_query_condition_cache", "true")
+            .with_option("join_use_nulls", "0");
 
         if let Some(password) = password {
             client = client.with_password(password);
+        }
+
+        for (k, v) in query_settings {
+            client = client.with_option(k, v);
         }
 
         Self {
@@ -104,6 +118,10 @@ impl ArrowClickHouseClient {
 
     pub fn inner(&self) -> &Client {
         &self.client
+    }
+
+    pub fn new_query_id() -> String {
+        uuid::Uuid::new_v4().to_string()
     }
 
     /// Bind a named parameter to a query.
@@ -179,7 +197,13 @@ fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize)
 impl ArrowClickHouseClient {
     /// Unconfigured client for unit tests. Never connects to anything.
     pub fn dummy() -> Self {
-        Self::new("http://localhost:0", "default", "default", None)
+        Self::new(
+            "http://localhost:0",
+            "default",
+            "default",
+            None,
+            &std::collections::HashMap::new(),
+        )
     }
 }
 
@@ -192,12 +216,17 @@ impl std::fmt::Debug for ArrowClickHouseClient {
 }
 
 pub struct ArrowQuery {
-    inner: Query,
+    pub(crate) inner: Query,
 }
 
 impl ArrowQuery {
     pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
         self.inner = self.inner.param(name, value);
+        self
+    }
+
+    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.inner = self.inner.with_option(name, value);
         self
     }
 

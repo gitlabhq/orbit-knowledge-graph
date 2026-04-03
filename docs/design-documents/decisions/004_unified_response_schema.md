@@ -65,13 +65,13 @@ This already exists via `GET /api/v4/orbit/schema` / `GetGraphSchema` gRPC (see 
 
 **Layer 2: Query response (per-request)**
 
-Typed metadata goes in the proto envelope. The JSON payload is always `{ query_type, nodes, edges }`.
+Typed metadata goes in the proto envelope. The JSON payload is always `{ query_type, nodes, edges }` with an optional `columns` array for aggregation queries.
 
 Target proto shape (changes pending in !479; current proto uses `QueryMetadata` with `query_type`, `raw_query_strings`, `row_count` only):
 
 ```protobuf
 message ExecuteQueryResult {
-  string result_json = 1;               // JSON: { query_type, nodes, edges }
+  string result_json = 1;               // JSON: { query_type, nodes, edges, columns? }
   string query_type = 2;               // "search", "traversal", etc.
   repeated string raw_query_strings = 3; // SQL through pipeline stages
   int32 row_count = 4;
@@ -82,7 +82,7 @@ Node `id` is always a JSON integer (ClickHouse Int64). All entity primary keys i
 
 ### Examples by query type
 
-Every query returns `{ query_type, nodes, edges }`. The content varies, the shape does not.
+Every query returns `{ query_type, nodes, edges }`. Aggregation queries additionally include `columns`. The content varies, the base shape does not.
 
 #### Search
 
@@ -145,9 +145,9 @@ Edges carry a `depth` field.
 }
 ```
 
-#### Aggregation
+#### Aggregation (grouped)
 
-Computed values are inlined on the group-by nodes. The frontend uses `query_type` to determine display mode (table vs graph).
+Computed values are inlined on the group-by nodes. `columns` describes each aggregate so the consumer can distinguish computed values from entity properties. The frontend uses `query_type` to determine display mode (table vs graph).
 
 ```json
 {
@@ -156,7 +156,27 @@ Computed values are inlined on the group-by nodes. The frontend uses `query_type
     { "type": "Project", "id": 101, "name": "Alpha", "mr_count": 15, "avg_mr": 42.7 },
     { "type": "Project", "id": 102, "name": "Beta", "mr_count": 8, "avg_mr": 23.1 }
   ],
-  "edges": []
+  "edges": [],
+  "columns": [
+    { "name": "mr_count", "function": "count", "target": "m" },
+    { "name": "avg_mr", "function": "avg", "target": "m", "property": "id" }
+  ]
+}
+```
+
+#### Aggregation (ungrouped / scalar)
+
+When no `group_by` is specified, the SQL returns only aggregate values with no entity columns. There are no nodes to carry the values, so `columns` holds both the metadata and the computed `value` directly. `nodes` is empty.
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [],
+  "edges": [],
+  "columns": [
+    { "name": "total", "function": "count", "target": "p", "value": 42 },
+    { "name": "avg_size", "function": "avg", "target": "p", "property": "size", "value": 128.5 }
+  ]
 }
 ```
 
@@ -217,6 +237,14 @@ The center node (Project:101) is just another node in the list. Neighbor types a
 
 The frontend builds composite IDs (`"User:42"`) for deduplication. Property names match the ontology, so the frontend can look up data types from the cached schema. For aggregation queries, computed values (like `mr_count`) are inlined as additional properties on the node.
 
+**Column:** describes a computed aggregation value.
+
+```json
+{ "name": "mr_count", "function": "count", "target": "m" }
+```
+
+Optional fields: `target` (node alias being aggregated), `property` (field being aggregated, absent for plain `count`), `value` (the computed result, present only for ungrouped aggregations where `nodes` is empty). Present for all aggregation queries so the consumer can distinguish computed values from entity properties and display correct table headers.
+
 **Edge:** two nodes connected by type and ID.
 
 ```json
@@ -229,13 +257,13 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 
 1. Nodes are deduplicated. Each entity appears once.
 2. Edges are instance-level. Each edge connects two specific nodes by `type`+`id`.
-3. One shape for all query types. Search, traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges }`.
+3. One shape for all query types. Search, traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns` to describe the computed values.
 4. No internal columns leak. The formatter strips `_gkg_*` prefixes.
-5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count` are typed proto fields. The JSON has domain data only.
+5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count`, `pagination` are typed proto fields. The JSON includes `pagination` when a cursor was requested.
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.
 7. Ontology is cached. Display metadata (labels, styles, descriptions) comes from the schema, not the response.
 8. `id` and `type` are always included on nodes, even if the user didn't select them.
-9. Pagination is out of scope for this ADR and will be covered in a separate decision (#248).
+9. Pagination uses an agent-driven cursor model (`{ offset, page_size }`) that slices the authorized (post-redaction) result set. `PaginationInfo { has_more, total_rows }` is returned in both the proto metadata and the JSON body.
 
 ### Display hint
 

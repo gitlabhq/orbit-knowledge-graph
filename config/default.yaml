@@ -6,6 +6,21 @@ nats:
   url: "localhost:4222"
   # username: ""
   # password: ""
+  # tls_ca_cert_path: "/etc/nats/ca.pem"
+  # tls_cert_path: "/etc/nats/client.pem"
+  # tls_key_path: "/etc/nats/client-key.pem"
+  # connection_timeout_secs: 10
+  # request_timeout_secs: 5
+  # ack_wait_secs: 300
+  # max_deliver: 5
+  # subscription_buffer_size: 100
+  # consumer_name: null
+  # batch_size: 10
+  # auto_create_streams: true
+  # stream_replicas: 1
+  # stream_max_age_secs: null
+  # stream_max_bytes: null
+  # stream_max_messages: null
 
 datalake:
   url: "http://127.0.0.1:8123"
@@ -25,6 +40,10 @@ graph:
 #     signing_key: ""
 #     verifying_key: ""
 
+# tls:
+#   cert_path: "/path/to/cert.pem"
+#   key_path: "/path/to/key.pem"
+
 engine:
   max_concurrent_workers: 16
   concurrency_groups:
@@ -39,14 +58,13 @@ engine:
       concurrency_group: sdlc
       max_attempts: 1  # re-dispatched every minute, no need to retry
       retry_interval_secs: 60
-    code-push-event:
+    code-indexing-task:
       concurrency_group: code
       max_attempts: 5  # event-driven, must retry to avoid data loss
       retry_interval_secs: 60
-      events_stream_name: siphon_stream_main_db
-    code-project-reconciliation:
+    namespace-deletion:
       concurrency_group: code
-      max_attempts: 1  # re-dispatched every 30 minutes, no need to retry
+      max_attempts: 1  # re-dispatched daily, no need to retry
 
 schedule:
   tasks: {}
@@ -60,6 +78,26 @@ health_check:
     - gkg-indexer
     - nats
 
+grpc:
+  keepalive_interval_secs: 20
+  keepalive_timeout_secs: 20
+  tcp_keepalive_secs: 60
+  connection_window_size: 2097152   # 2MB
+  stream_window_size: 1048576       # 1MB
+  concurrency_limit: 256
+  max_connection_age_secs: 300      # 5 min, for L4 ILB rebalancing
+  stream_timeout_secs: 60
+
+query:
+  default:
+    max_execution_time: 30
+    use_query_cache: false
+    query_cache_ttl: 60
+
 metrics:
-  otlp_endpoint: "http://localhost:4317"
-  service_name: gkg-server
+  otel:
+    enabled: false
+    endpoint: "http://localhost:4317"
+  prometheus:
+    enabled: false
+    port: 9394

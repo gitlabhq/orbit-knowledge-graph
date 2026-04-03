@@ -69,7 +69,6 @@ postgres:
   database: gitlabhq_production
   user: gitlab
   superuser: postgres
-  port: "5432"
   service_name: postgresql
   bridge_secret_name: postgres-credentials
   bridge_password_key: password
@@ -108,8 +107,8 @@ gkg:
   dispatch_job: gkg-dispatch-indexing
   indexer_configmap: gkg-indexer-config
   grpc_endpoint: gkg-webserver.default.svc.cluster.local:50054
-  server_credentials_secret: gkg-server-credentials
-  server_credentials_jwt_key: jwt-secret
+  server_credentials_secret: gkg-secrets
+  server_credentials_jwt_key: gitlab-jwt-verifying-key
   indexer_label: app.kubernetes.io/component=gkg-indexer
 
 # -- Port-forwards (cargo xtask e2e serve) -------------------------------------
@@ -143,9 +142,9 @@ pod_readiness:
 gkg_pod_readiness:
   - label: app.kubernetes.io/name=nats
     timeout: 120s
-  - label: app.kubernetes.io/component=siphon-producer
+  - label: app=siphon-producer
     timeout: 120s
-  - label: app.kubernetes.io/component=siphon-consumer
+  - label: app=siphon-consumer
     timeout: 120s
   - label: app.kubernetes.io/component=gkg-indexer
     timeout: 120s
