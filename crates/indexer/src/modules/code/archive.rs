@@ -50,6 +50,18 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
         .map_err(|e| ArchiveError::Archive(e.to_string()))?
     {
         let mut entry = entry.map_err(|e| ArchiveError::Archive(e.to_string()))?;
+
+        // Skip PAX metadata entries that aren't real files. XGlobalHeader
+        // appears in Gitaly archives and would otherwise be treated as the
+        // archive root by strip_archive_root. XHeader is included defensively
+        // (the tar crate already consumes it internally, but future versions
+        // may not). GNULongName/GNULongLink are consumed by the tar crate's
+        // iterator and never reach this loop.
+        let entry_type = entry.header().entry_type();
+        if entry_type == tar::EntryType::XGlobalHeader || entry_type == tar::EntryType::XHeader {
+            continue;
+        }
+
         let entry_path = entry
             .path()
             .map_err(|e| ArchiveError::Archive(e.to_string()))?;
@@ -235,6 +247,82 @@ mod tests {
         let content = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
         assert_eq!(content, "pub mod lib;");
         assert!(!dir.path().join("project-main").exists());
+    }
+
+    #[test]
+    fn skips_pax_global_header() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let mut tar_builder = tar::Builder::new(Vec::new());
+
+        // Add a PAX global header entry (like Gitaly produces)
+        let pax_content = b"comment=some metadata\n";
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::XGlobalHeader);
+        header.set_size(pax_content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar_builder
+            .append_data(&mut header, "pax_global_header", &pax_content[..])
+            .unwrap();
+
+        // Add actual files under the archive root
+        let content = b"fn main() {}";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar_builder
+            .append_data(&mut header, "project-main/src/main.rs", &content[..])
+            .unwrap();
+
+        let tar_bytes = tar_builder.into_inner().unwrap();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&tar_bytes).unwrap();
+        let data = encoder.finish().unwrap();
+
+        extract_tar_gz(&data, dir.path()).unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap();
+        assert_eq!(content, "fn main() {}");
+    }
+
+    #[test]
+    fn skips_pax_per_file_header() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let mut tar_builder = tar::Builder::new(Vec::new());
+
+        // Add a PAX per-file extended header (XHeader) before the root entry.
+        // The tar crate consumes these internally, but we skip them defensively.
+        let pax_content = b"path=project-main/src/main.rs\n";
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::XHeader);
+        header.set_size(pax_content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar_builder
+            .append_data(&mut header, "PaxHeader/main.rs", &pax_content[..])
+            .unwrap();
+
+        let content = b"fn main() {}";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar_builder
+            .append_data(&mut header, "project-main/src/main.rs", &content[..])
+            .unwrap();
+
+        let tar_bytes = tar_builder.into_inner().unwrap();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&tar_bytes).unwrap();
+        let data = encoder.finish().unwrap();
+
+        extract_tar_gz(&data, dir.path()).unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap();
+        assert_eq!(content, "fn main() {}");
     }
 
     #[test]
