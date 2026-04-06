@@ -23,6 +23,7 @@ mod enforcement;
 use enforcement::AssertionTracker;
 pub use enforcement::{QueryRequirements, Requirement};
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 
 use query_engine::compiler::input::{Input, QueryType};
@@ -107,6 +108,13 @@ impl<T> Drop for MustInspect<T> {
 pub struct ResponseView {
     pub response: GraphResponse,
     tracker: AssertionTracker,
+    /// Edge types that have been positively asserted by the test.
+    ///
+    /// Populated by methods that satisfy [`Requirement::Relationship`] or
+    /// [`Requirement::Neighbors`]. Used by [`assert_all_edge_types_covered`]
+    /// to verify that the test has acknowledged every edge type present in
+    /// the response.
+    asserted_edge_types: RefCell<HashSet<String>>,
 }
 
 impl ResponseView {
@@ -119,6 +127,7 @@ impl ResponseView {
         Self {
             response,
             tracker: AssertionTracker::empty(),
+            asserted_edge_types: RefCell::new(HashSet::new()),
         }
     }
 
@@ -151,6 +160,7 @@ impl ResponseView {
         Self {
             response,
             tracker: AssertionTracker::new(input.requirements()),
+            asserted_edge_types: RefCell::new(HashSet::new()),
         }
     }
 
@@ -284,6 +294,13 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
+        // Edge type is tracked eagerly here (before MustInspect is returned).
+        // If the caller discards the MustInspect, both panics fire — MustInspect
+        // first (discard), then edge_type is already tracked. In practice this is
+        // fine: MustInspect prevents the discard pattern entirely.
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         let edges = self
             .response
             .edges
@@ -390,6 +407,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         assert!(
             self.find_edge(from, from_id, to, to_id, edge_type)
                 .is_some(),
@@ -497,6 +517,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         let actual: HashSet<(i64, i64)> = self
             .response
             .edges
@@ -515,6 +538,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         let actual = self
             .response
             .edges
@@ -552,6 +578,49 @@ impl ResponseView {
                 all.contains(&to),
                 "edge references non-existent target node {to:?}"
             );
+        }
+    }
+    /// Assert that every edge type present in the response has been verified
+    /// by at least one edge assertion method.
+    ///
+    /// Call at the end of a neighbors test (or any test with edges) to ensure
+    /// the test has not silently ignored entire edge types. This closes the
+    /// coverage gap where asserting a single edge type satisfies the generic
+    /// [`Requirement::Neighbors`] but leaves other edge types unchecked.
+    ///
+    /// # Panics
+    ///
+    /// Panics with a prescriptive message listing the uncovered edge types
+    /// and which assertion methods to use:
+    ///
+    /// ```text
+    /// Uncovered edge types in response:
+    ///   - ASSIGNED (call assert_edge_exists, edges_of_type, assert_edge_set, or assert_edge_count)
+    ///   - AUTHORED (call assert_edge_exists, edges_of_type, assert_edge_set, or assert_edge_count)
+    /// ```
+    pub fn assert_all_edge_types_covered(&self) {
+        let response_types: HashSet<String> = self
+            .response
+            .edges
+            .iter()
+            .map(|e| e.edge_type.clone())
+            .collect();
+        let asserted = self.asserted_edge_types.borrow();
+        let uncovered: Vec<&String> = {
+            let mut v: Vec<&String> = response_types.difference(&*asserted).collect();
+            v.sort();
+            v
+        };
+        if !uncovered.is_empty() {
+            let list: Vec<String> = uncovered
+                .iter()
+                .map(|t| {
+                    format!(
+                        "  - {t} (call assert_edge_exists, edges_of_type, assert_edge_set, or assert_edge_count)"
+                    )
+                })
+                .collect();
+            panic!("Uncovered edge types in response:\n{}", list.join("\n"));
         }
     }
 }
@@ -1185,5 +1254,130 @@ pub(crate) mod tests {
         assert!(view.edges_of_type("MEMBER_OF").is_empty());
         assert!(view.path_ids().is_empty());
         view.assert_referential_integrity();
+    }
+}
+
+#[cfg(test)]
+mod edge_coverage_tests {
+    use super::tests::{make_edge, make_node};
+    use super::*;
+    use query_engine::formatters::GraphResponse;
+
+    fn response_with_two_edge_types() -> GraphResponse {
+        GraphResponse {
+            query_type: "neighbors".to_string(),
+            nodes: vec![
+                make_node("User", 1, &[]),
+                make_node("Group", 100, &[]),
+                make_node("MergeRequest", 2000, &[]),
+            ],
+            edges: vec![
+                make_edge("User", 1, "Group", 100, "MEMBER_OF"),
+                make_edge("User", 1, "MergeRequest", 2000, "AUTHORED"),
+            ],
+            columns: None,
+            pagination: None,
+        }
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_passes_when_all_asserted() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+        view.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    #[should_panic(expected = "Uncovered edge types")]
+    fn assert_all_edge_types_covered_panics_on_missing_type() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        // Only assert MEMBER_OF, skip AUTHORED
+        view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    #[should_panic(expected = "AUTHORED")]
+    fn assert_all_edge_types_covered_names_missing_type_in_panic() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_with_edges_of_type() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        assert!(!view.edges_of_type("MEMBER_OF").is_empty());
+        assert!(!view.edges_of_type("AUTHORED").is_empty());
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_with_edge_set() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        view.assert_edge_set("MEMBER_OF", &[(1, 100)]);
+        view.assert_edge_set("AUTHORED", &[(1, 2000)]);
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_with_edge_count() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        view.assert_edge_count("MEMBER_OF", 1);
+        view.assert_edge_count("AUTHORED", 1);
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_empty_response_passes() {
+        let resp = GraphResponse {
+            query_type: "search".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            columns: None,
+            pagination: None,
+        };
+        let view = ResponseView::new(resp);
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_single_type_passes() {
+        let resp = GraphResponse {
+            query_type: "traversal".to_string(),
+            nodes: vec![make_node("User", 1, &[]), make_node("Group", 100, &[])],
+            edges: vec![make_edge("User", 1, "Group", 100, "MEMBER_OF")],
+            columns: None,
+            pagination: None,
+        };
+        let view = ResponseView::new(resp);
+        view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_mixed_assertion_methods() {
+        let resp = GraphResponse {
+            query_type: "neighbors".to_string(),
+            nodes: vec![
+                make_node("User", 1, &[]),
+                make_node("Group", 100, &[]),
+                make_node("Group", 102, &[]),
+                make_node("MergeRequest", 2000, &[]),
+            ],
+            edges: vec![
+                make_edge("User", 1, "Group", 100, "MEMBER_OF"),
+                make_edge("User", 1, "Group", 102, "MEMBER_OF"),
+                make_edge("User", 1, "MergeRequest", 2000, "AUTHORED"),
+            ],
+            columns: None,
+            pagination: None,
+        };
+        let view = ResponseView::new(resp);
+        // Use different assertion methods for different edge types
+        view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 102)]);
+        view.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+        view.assert_all_edge_types_covered();
     }
 }
