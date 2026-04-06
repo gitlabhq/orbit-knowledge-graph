@@ -452,6 +452,14 @@ semantic-release:
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/node:22
   tags:
     - saas-linux-medium-amd64
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    SEMANTIC_RELEASE_GITLAB_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/semantic-release/token@ci
+      token: $VAULT_ID_TOKEN
   variables:
     GIT_STRATEGY: clone
   needs:
@@ -461,6 +469,8 @@ semantic-release:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
+    - test -n "${SEMANTIC_RELEASE_GITLAB_TOKEN}" || (echo "Missing SEMANTIC_RELEASE_GITLAB_TOKEN from Vault" && exit 1)
+    - export GITLAB_TOKEN="${SEMANTIC_RELEASE_GITLAB_TOKEN}"
     - npm ci
   script:
     - npx semantic-release
