@@ -164,7 +164,7 @@ async fn data_correctness() {
         work_items::traversal_work_item_in_milestone_returns_correct_edges,
         work_items::traversal_user_assigned_work_item_returns_correct_edges,
         work_items::traversal_work_item_has_label_returns_correct_edges,
-        // dedup: LIMIT 1 BY correctness
+        // dedup: correctness
         dedup::search_returns_latest_version,
         dedup::search_excludes_deleted_rows,
         dedup::search_filter_returns_latest_matching_version,
@@ -172,5 +172,9 @@ async fn data_correctness() {
         dedup::aggregation_dedup_counts_unique_entities,
         dedup::aggregation_filter_excludes_stale_mutable_match,
         dedup::traversal_dedup_returns_single_edge,
+        dedup::traversal_filter_excludes_stale_version,
+        dedup::traversal_excludes_deleted_entity,
+        dedup::neighbors_dedup_returns_unique_edges,
+        dedup::neighbors_excludes_deleted_entity,
     );
 }
