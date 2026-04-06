@@ -88,6 +88,12 @@ This table is bootstrapped by the reconciler using `CREATE TABLE IF NOT EXISTS` 
 
 ### Control-plane table semantics
 
+ClickHouse does not support OLTP-style atomic row updates or transactions. The migration ledger does not need them. Instead, the design relies on three properties that together provide equivalent safety:
+
+1. **Append-only writes.** State changes are expressed as `INSERT` of a new row with the same ORDER BY key but a newer `_version` timestamp — never as `UPDATE`. `ReplacingMergeTree` eventually deduplicates, keeping only the latest row per key. Reading with the `FINAL` modifier gives the authoritative current-state view at any time.
+2. **Single-writer serialization.** Only the NATS KV lock-holding reconciler writes to `gkg_migrations`. There is no concurrent-update race — the problem that OLTP transactions solve does not exist here.
+3. **Crash safety via idempotency.** If the reconciler crashes between applying DDL and recording the status update, the next reconciler re-reads the ledger, sees the migration still in `preparing`, and re-runs `prepare()`. Because all DDL uses `IF NOT EXISTS` / `IF EXISTS` clauses, re-execution is a no-op. We do not need a transaction wrapping "DDL + status write" — we need the invariant that re-running any step is safe.
+
 The `gkg_migrations` table (and `gkg_migration_scopes` in V2) use `ReplacingMergeTree`, which provides **eventual deduplication** rather than transactional row updates. This is workable for migration control state, but requires explicit conventions:
 
 **Single-writer guarantee.** All writes to `gkg_migrations` are serialized through the migration reconciler, which holds an exclusive NATS KV lock. There is never concurrent write contention on these rows. Scope status updates in V2 may come from multiple workers, but each worker writes to a distinct `(migration_version, scope_kind, scope_key)` row — no two workers update the same scope simultaneously (guaranteed by the existing per-scope NATS locking pattern).
@@ -122,6 +128,8 @@ PROJECTION latest_status (
 - The reconciler is single-writer, so there are no concurrent conflicting writes to the same row.
 - Wall-clock monotonicity within a single process is sufficient; cross-process ordering is guaranteed by the NATS lock (only one writer at a time).
 - For V2 scope updates from workers, each worker updates a distinct row, so `_version` ordering only matters within a single scope's history.
+
+**INSERT durability.** A ClickHouse `INSERT` is durable once acknowledged — the data is written to the write-ahead journal and survives restarts. This is not equivalent to a Postgres transaction, but for single-row status tracking with a single writer, it provides sufficient durability. The reconciler confirms each `INSERT` succeeded before proceeding to the next step.
 
 **Manual intervention.** The operational procedures use direct `INSERT` statements to override migration state. Because `ReplacingMergeTree` keeps the row with the highest `_version`, a new insert with `now64(6)` will always supersede previous state after the next merge. Operators should verify the result with `SELECT ... FINAL` after insertion.
 
