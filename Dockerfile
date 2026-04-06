@@ -8,6 +8,9 @@ RUN cargo build --release -p gkg-server --locked && \
 
 FROM registry.access.redhat.com/ubi10/ubi-minimal:10.1
 
+ARG GKG_VERSION=dev
+ENV GKG_VERSION=$GKG_VERSION
+
 WORKDIR /app
 
 COPY --from=builder /gkg-server /usr/local/bin/gkg-server
