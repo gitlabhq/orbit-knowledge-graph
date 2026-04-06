@@ -11,7 +11,7 @@
 //! | Aggregation  | LIMIT 1 BY subquery           | Needs property columns for countIf/sumIf   |
 //! | Neighbors    | LIMIT 1 BY subquery (CTEs)    | Edge-only lowering, node dedup via _nf CTE |
 //! | PathFinding  | LIMIT 1 BY subquery           | Recursive CTEs, multi-hop joins            |
-//! | Hydration    | (skipped)                     | Separate pipeline, no dedup pass           |
+//! | Hydration    | argMaxIfOrNull + GROUP BY     | Search-like UNION ALL of table scans       |
 //! | _nf_* CTEs   | argMaxIfOrNull + GROUP BY     | ID-only select, avoids sort overhead       |
 //!
 //! Edge tables are always excluded -- their full-tuple ORDER BY makes RMT
@@ -105,7 +105,7 @@ fn dispatch(q: &mut Query, input: &Input, ontology: &Ontology) {
                 | QueryType::Neighbors => {
                     apply_limit_by_dedup(&mut q.from, &mut q.where_clause, &table, ontology);
                 }
-                QueryType::Hydration => {} // separate pipeline, no dedup
+                QueryType::Hydration => apply_argmax_dedup(q, &alias),
             }
         }
         TableRef::Scan { .. } => {}
@@ -723,5 +723,104 @@ mod tests {
         assert!(where_contains(&q.where_clause, "startsWith"));
         assert!(where_contains(&q.where_clause, "status"));
         assert_eq!(q.limit, Some(50));
+    }
+
+    #[test]
+    fn hydration_uses_argmax() {
+        let ont = ontology();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![
+                SelectExpr::new(Expr::col("hydrate", "id"), "hydrate_id"),
+                SelectExpr::new(Expr::string("User"), "hydrate_entity_type"),
+                SelectExpr::new(
+                    Expr::func(
+                        "toJSONString",
+                        vec![Expr::func(
+                            "map",
+                            vec![
+                                Expr::string("username"),
+                                Expr::func("toString", vec![Expr::col("hydrate", "username")]),
+                            ],
+                        )],
+                    ),
+                    "hydrate_props",
+                ),
+            ],
+            from: TableRef::scan("gl_user", "hydrate"),
+            where_clause: Some(Expr::func(
+                "in",
+                vec![Expr::col("hydrate", "id"), Expr::lit(1)],
+            )),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Hydration), &ont);
+
+        let Node::Query(q) = &node;
+        assert!(
+            matches!(&q.from, TableRef::Scan { table, .. } if table == "gl_user"),
+            "hydration should not wrap in subquery"
+        );
+        assert!(!q.group_by.is_empty(), "should add GROUP BY");
+        assert!(q.having.is_some(), "should add HAVING clause");
+        let having_str = format!("{:?}", q.having);
+        assert!(
+            having_str.contains("argMaxIfOrNull"),
+            "HAVING should use argMaxIfOrNull"
+        );
+        let props_sel = &q.select[2];
+        let sel_str = format!("{:?}", props_sel.expr);
+        assert!(
+            sel_str.contains("argMaxIfOrNull"),
+            "props column should use argMaxIfOrNull"
+        );
+    }
+
+    #[test]
+    fn hydration_union_all_deduplicates_each_arm() {
+        let ont = ontology();
+        let user_arm = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("hydrate", "id"), "hydrate_id"),
+                SelectExpr::new(Expr::string("User"), "hydrate_entity_type"),
+                SelectExpr::new(
+                    Expr::func("toString", vec![Expr::col("hydrate", "username")]),
+                    "hydrate_props",
+                ),
+            ],
+            from: TableRef::scan("gl_user", "hydrate"),
+            where_clause: Some(Expr::func(
+                "in",
+                vec![Expr::col("hydrate", "id"), Expr::lit(1)],
+            )),
+            ..Default::default()
+        };
+        let project_arm = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("hydrate", "id"), "hydrate_id"),
+                SelectExpr::new(Expr::string("Project"), "hydrate_entity_type"),
+                SelectExpr::new(
+                    Expr::func("toString", vec![Expr::col("hydrate", "name")]),
+                    "hydrate_props",
+                ),
+            ],
+            from: TableRef::scan("gl_project", "hydrate"),
+            where_clause: Some(Expr::func(
+                "in",
+                vec![Expr::col("hydrate", "id"), Expr::lit(2)],
+            )),
+            ..Default::default()
+        };
+        let mut first = user_arm;
+        first.union_all.push(project_arm);
+        let mut node = Node::Query(Box::new(first));
+        deduplicate(&mut node, &input_for(QueryType::Hydration), &ont);
+
+        let Node::Query(q) = &node;
+        assert!(!q.group_by.is_empty(), "first arm should have GROUP BY");
+        assert!(q.having.is_some(), "first arm should have HAVING");
+        assert_eq!(q.union_all.len(), 1);
+        let arm2 = &q.union_all[0];
+        assert!(!arm2.group_by.is_empty(), "second arm should have GROUP BY");
+        assert!(arm2.having.is_some(), "second arm should have HAVING");
     }
 }
