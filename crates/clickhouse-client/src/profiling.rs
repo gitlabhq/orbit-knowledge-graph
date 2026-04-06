@@ -167,7 +167,7 @@ impl ArrowClickHouseClient {
 
     pub async fn fetch_instance_health(&self) -> Result<InstanceHealth, ClickHouseError> {
         let metrics_sql = "\
-            SELECT metric, value FROM clusterAllReplicas('default', system.metrics) \
+            SELECT metric, value FROM system.metrics \
             WHERE metric IN (\
                 'Query', 'MemoryTracking', 'MarkCacheBytes', 'MarkCacheFiles', \
                 'QueryCacheEntries', 'QueryCacheBytes', \
@@ -177,14 +177,14 @@ impl ArrowClickHouseClient {
             )";
 
         let uptime_sql = "\
-            SELECT value FROM clusterAllReplicas('default', system.asynchronous_metrics) \
+            SELECT value FROM system.asynchronous_metrics \
             WHERE metric = 'Uptime'";
 
         let disks_sql = "\
             SELECT name, path, total_space AS total_bytes, \
                    free_space AS free_bytes, \
                    (total_space - free_space) AS used_bytes \
-            FROM clusterAllReplicas('default', system.disks)";
+            FROM system.disks";
 
         let parts_sql = "\
             SELECT database, table, \
@@ -195,7 +195,7 @@ impl ArrowClickHouseClient {
                    0 AS active_mutations, \
                    0 AS detached_parts, \
                    toString(max(modification_time)) AS last_modification_time \
-            FROM clusterAllReplicas('default', system.parts) \
+            FROM system.parts \
             WHERE active AND database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema') \
             GROUP BY database, table \
             ORDER BY bytes_on_disk DESC";
