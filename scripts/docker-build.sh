@@ -19,6 +19,11 @@ case "$ARCH" in
   *)       PLATFORM="linux/amd64" ;;
 esac
 
+BUILD_ARGS=""
+if [ -n "$GKG_VERSION" ]; then
+  BUILD_ARGS="--build-arg GKG_VERSION=$GKG_VERSION"
+fi
+
 TAGS=""
 for tag in "$@"; do
   TAGS="$TAGS -t $tag"
@@ -37,5 +42,6 @@ docker buildx build \
   --label "com.gitlab/ci-job-url=${CI_JOB_URL}" \
   --label "com.gitlab/commit-sha=${CI_COMMIT_SHA}" \
   --provenance=true \
+  $BUILD_ARGS \
   $TAGS \
   .
