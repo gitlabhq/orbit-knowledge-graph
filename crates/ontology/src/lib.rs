@@ -505,10 +505,33 @@ impl Ontology {
         &self.table_prefix
     }
 
-    /// ClickHouse table name for all graph edges.
+    /// Default ClickHouse table name for graph edges.
     #[must_use]
     pub fn edge_table(&self) -> &str {
         &self.edge_table
+    }
+
+    /// All distinct edge table names referenced by edge definitions.
+    #[must_use]
+    pub fn edge_tables(&self) -> Vec<&str> {
+        let mut tables: Vec<&str> = self
+            .edges
+            .values()
+            .flatten()
+            .map(|e| e.destination_table.as_str())
+            .collect();
+        tables.sort_unstable();
+        tables.dedup();
+        tables
+    }
+
+    /// Check if a table name is an edge table.
+    #[must_use]
+    pub fn is_edge_table(&self, table: &str) -> bool {
+        self.edges
+            .values()
+            .flatten()
+            .any(|e| e.destination_table == table)
     }
 
     /// Prefix for internal columns injected by the compiler.
@@ -538,10 +561,10 @@ impl Ontology {
     /// Look up the dedup key (ORDER BY columns) for a ClickHouse table name.
     ///
     /// Returns the node's `sort_key` for node tables, the `edge_sort_key` for
-    /// the edge table, or `None` if the table is unknown.
+    /// any edge table, or `None` if the table is unknown.
     #[must_use]
     pub fn sort_key_for_table(&self, table: &str) -> Option<&[String]> {
-        if table == self.edge_table {
+        if self.is_edge_table(table) {
             return Some(&self.edge_sort_key);
         }
         self.nodes
@@ -1240,6 +1263,38 @@ mod tests {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
         assert_eq!(ontology.sort_key_for_table("nonexistent_table"), None);
+    }
+
+    // ── edge_tables tests ────────────────────────────────────────────
+
+    #[test]
+    fn edge_tables_includes_default_table() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let tables = ontology.edge_tables();
+        assert!(
+            tables.contains(&ontology.edge_table()),
+            "edge_tables should include the default edge table"
+        );
+    }
+
+    #[test]
+    fn is_edge_table_matches_default() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        assert!(ontology.is_edge_table(ontology.edge_table()));
+        assert!(!ontology.is_edge_table("gl_user"));
+        assert!(!ontology.is_edge_table("nonexistent"));
+    }
+
+    #[test]
+    fn edge_entity_has_destination_table() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        for entity in ontology.edges() {
+            assert!(
+                !entity.destination_table.is_empty(),
+                "edge '{}' should have a destination_table",
+                entity.relationship_kind
+            );
+        }
     }
 
     #[test]

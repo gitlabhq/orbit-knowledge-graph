@@ -174,7 +174,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         let content = reader.read(edge_path)?;
         let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
-        let entities = edge_def.to_entities(edge_name.clone());
+        let entities = edge_def.to_entities(edge_name.clone(), &ontology.edge_table);
 
         for entity in &entities {
             if !ontology.nodes.contains_key(&entity.source_kind) {

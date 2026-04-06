@@ -595,6 +595,10 @@
           "type": "string",
           "description": "Human-readable description of the relationship."
         },
+        "table": {
+          "type": "string",
+          "description": "Optional ClickHouse table for this edge type. Defaults to the global edge_table from settings."
+        },
         "properties": {
           "type": "object",
           "description": "Property definitions for this edge (for edges with additional data).",
