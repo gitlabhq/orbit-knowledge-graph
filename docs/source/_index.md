@@ -47,6 +47,7 @@ You can use Orbit to get answers to questions like:
 - Have any vulnerabilities been found in this project, and are any unresolved?
 - Which projects depend on this module or library?
 - What work items are assigned to this user in these projects?
+- Which projects do most pipeline failures come from?
 
 ## Turn Orbit on or off
 
