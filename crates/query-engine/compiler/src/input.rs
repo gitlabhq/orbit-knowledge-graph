@@ -5,7 +5,7 @@
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Top-level input
@@ -81,14 +81,29 @@ pub struct Input {
 
 /// Metadata accumulated across compiler passes.
 ///
-/// Written by lowering, read by downstream passes (enforce, SIP, fold, etc.).
-#[derive(Debug, Clone, Default)]
+/// Written by normalize/lowering, read by downstream passes (deduplicate,
+/// optimize, enforce, SIP, fold, etc.).
+#[derive(Debug, Clone)]
 pub struct CompilerMetadata {
     /// Maps node alias → (edge_alias, edge_column) for edge-only nodes.
     /// Written by lower, read by enforce to emit `_gkg_*` redaction columns
     /// from edge columns instead of node table columns. Also used by SIP
     /// and fold passes to skip edge-only targets.
     pub node_edge_col: HashMap<String, (String, String)>,
+    /// All edge table names from the ontology. Used by dedup and optimizer
+    /// passes to identify edge scans without needing the full ontology.
+    /// Defaults to `["gl_edge"]`; overwritten by normalize with the full
+    /// set from the ontology.
+    pub edge_tables: HashSet<String>,
+}
+
+impl Default for CompilerMetadata {
+    fn default() -> Self {
+        Self {
+            node_edge_col: HashMap::new(),
+            edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
+        }
+    }
 }
 
 impl Default for Input {

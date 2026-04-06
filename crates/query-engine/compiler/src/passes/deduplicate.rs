@@ -24,16 +24,14 @@ use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::node_filter_cte;
 use crate::input::{Input, QueryType};
 use ontology::Ontology;
-use ontology::constants::{
-    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_TABLE, GL_TABLE_PREFIX, VERSION_COLUMN,
-};
+use ontology::constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, GL_TABLE_PREFIX, VERSION_COLUMN};
 
-fn is_node_table(table: &str) -> bool {
-    table.starts_with(GL_TABLE_PREFIX) && table != EDGE_TABLE
+fn is_node_table(table: &str, edge_tables: &HashSet<String>) -> bool {
+    table.starts_with(GL_TABLE_PREFIX) && !edge_tables.contains(table)
 }
 
-fn is_edge_table(table: &str) -> bool {
-    table == EDGE_TABLE
+fn is_edge_table(table: &str, edge_tables: &HashSet<String>) -> bool {
+    edge_tables.contains(table)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,7 +44,7 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
         Node::Query(q) => {
             for cte in &mut q.ctes {
                 if cte.name.starts_with("_nf_") {
-                    dedup_nf_cte(&mut cte.query);
+                    dedup_nf_cte(&mut cte.query, input);
                 } else {
                     dedup_query(&mut cte.query, input, ontology);
                 }
@@ -58,9 +56,9 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
 
 /// Deduplicate a `_nf_*` CTE using argMax. These CTEs only select `id`,
 /// so argMax is cheaper than LIMIT BY (hash aggregate vs full sort).
-fn dedup_nf_cte(q: &mut Query) {
+fn dedup_nf_cte(q: &mut Query, input: &Input) {
     if let TableRef::Scan { table, alias } = &q.from
-        && is_node_table(table)
+        && is_node_table(table, &input.compiler.edge_tables)
     {
         let alias = alias.clone();
         apply_argmax_dedup(q, &alias);
@@ -73,16 +71,20 @@ fn dedup_query(q: &mut Query, input: &Input, ontology: &Ontology) {
         dedup_query(arm, input, ontology);
     }
     dispatch(q, input, ontology);
-    add_edge_deleted_filters(&q.from, &mut q.where_clause);
+    add_edge_deleted_filters(&q.from, &mut q.where_clause, input);
 }
 
 /// Add `_deleted = false` filters for every edge table scan in the FROM tree.
 /// Edge tables use ReplacingMergeTree with `_deleted` but are not wrapped
 /// in dedup subqueries (their full-tuple ORDER BY makes RMT dedup effective).
 /// Between merges, soft-deleted edge rows can still appear.
-fn add_edge_deleted_filters(from: &TableRef, where_clause: &mut Option<Expr>) {
+///
+/// Only handles Scan and Join variants. Union arms and Subquery inner queries
+/// are covered by `dedup_query`'s recursion, which calls this function on
+/// each nested query's own FROM/WHERE.
+fn add_edge_deleted_filters(from: &TableRef, where_clause: &mut Option<Expr>, input: &Input) {
     match from {
-        TableRef::Scan { table, alias } if is_edge_table(table) => {
+        TableRef::Scan { table, alias } if is_edge_table(table, &input.compiler.edge_tables) => {
             let filter = not_deleted(alias);
             *where_clause = Some(match where_clause.take() {
                 Some(existing) => Expr::and(existing, filter),
@@ -90,8 +92,8 @@ fn add_edge_deleted_filters(from: &TableRef, where_clause: &mut Option<Expr>) {
             });
         }
         TableRef::Join { left, right, .. } => {
-            add_edge_deleted_filters(left, where_clause);
-            add_edge_deleted_filters(right, where_clause);
+            add_edge_deleted_filters(left, where_clause, input);
+            add_edge_deleted_filters(right, where_clause, input);
         }
         _ => {}
     }
@@ -119,7 +121,7 @@ fn visit_derived_tables(from: &mut TableRef, input: &Input, ontology: &Ontology)
 
 fn dispatch(q: &mut Query, input: &Input, ontology: &Ontology) {
     match &q.from {
-        TableRef::Scan { table, alias } if is_node_table(table) => {
+        TableRef::Scan { table, alias } if is_node_table(table, &input.compiler.edge_tables) => {
             let alias = alias.clone();
             let table = table.clone();
 
@@ -137,7 +139,13 @@ fn dispatch(q: &mut Query, input: &Input, ontology: &Ontology) {
         TableRef::Scan { .. } => {}
         TableRef::Join { .. } => {
             let nf_cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
-            wrap_join_scans(&mut q.from, &mut q.where_clause, &nf_cte_names, ontology);
+            wrap_join_scans(
+                &mut q.from,
+                &mut q.where_clause,
+                &nf_cte_names,
+                input,
+                ontology,
+            );
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
@@ -334,10 +342,11 @@ fn wrap_join_scans(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
     cte_names: &HashSet<String>,
+    input: &Input,
     ontology: &Ontology,
 ) {
     match from {
-        TableRef::Scan { table, alias } if is_node_table(table) => {
+        TableRef::Scan { table, alias } if is_node_table(table, &input.compiler.edge_tables) => {
             let table_name = table.clone();
             let alias_str = alias.clone();
             let sort_key = ontology.sort_key_for_table(&table_name).unwrap_or_default();
@@ -358,8 +367,8 @@ fn wrap_join_scans(
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            wrap_join_scans(left, where_clause, cte_names, ontology);
-            wrap_join_scans(right, where_clause, cte_names, ontology);
+            wrap_join_scans(left, where_clause, cte_names, input, ontology);
+            wrap_join_scans(right, where_clause, cte_names, input, ontology);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
