@@ -176,5 +176,9 @@ async fn data_correctness() {
         dedup::traversal_deleted_node_visible_via_edge,
         dedup::neighbors_dedup_returns_unique_edges,
         dedup::neighbors_deleted_node_visible_via_edge,
+        dedup::hydration_returns_latest_properties,
+        dedup::traversal_excludes_deleted_edge,
+        dedup::search_three_versions_returns_latest,
+        dedup::aggregation_excludes_deleted_from_count,
     );
 }
