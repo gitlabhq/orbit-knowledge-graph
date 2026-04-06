@@ -88,6 +88,8 @@ This table is bootstrapped by the reconciler using `CREATE TABLE IF NOT EXISTS` 
 
 ### Control-plane table semantics
 
+The migration control plane is a **small, constrained use of ClickHouse** — tens of rows in `gkg_migrations`, potentially thousands in `gkg_migration_scopes` (V2). It is not a generic mutable state store. The design works because access patterns are deliberately restricted: single writer, infrequent reads, tiny row counts. These constraints must be preserved as the framework evolves.
+
 ClickHouse does not support OLTP-style atomic row updates or transactions. The migration ledger does not need them. Instead, the design relies on three properties that together provide equivalent safety:
 
 1. **Append-only writes.** State changes are expressed as `INSERT` of a new row with the same ORDER BY key but a newer `_version` timestamp — never as `UPDATE`. `ReplacingMergeTree` eventually deduplicates, keeping only the latest row per key. Reading with the `FINAL` modifier gives the authoritative current-state view at any time.

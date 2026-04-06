@@ -101,6 +101,7 @@ The indexer health server provides `/live` (always OK) and `/ready` (checks NATS
 4. **Backward compatibility first.** Schema changes must support rolling upgrades and mixed-version windows. The expand/migrate/contract pattern is the default.
 5. **Decoupled from startup.** Migration progression runs as a background reconciliation loop, not as a startup side-effect. Pod readiness is never blocked by migration state.
 6. **Explicit multi-phase lifecycle.** The system distinguishes between: schema prepared, data converged, and old structures finalized.
+7. **Idempotency as a hard invariant.** The framework only permits operations whose effects remain correct under duplicated or delayed execution. Every `prepare()`, `converge_scope()`, and `finalize()` implementation must be safe to re-run. This is a framework-level contract, not an optional best practice — the NATS KV lock provides leader election, not fenced mutual exclusion, so the system must tolerate stale or duplicated operations. If a future migration requires non-idempotent operations, fencing must be introduced at the framework level before that migration can be supported.
 
 ## Architecture overview
 

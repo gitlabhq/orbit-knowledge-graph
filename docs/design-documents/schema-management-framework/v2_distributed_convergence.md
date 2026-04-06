@@ -1,5 +1,7 @@
 # V2 — Distributed convergence
 
+> **Design maturity: directional.** This phase describes the target architecture for distributed convergence. The high-level model (scope tracking, scheduler integration, compatibility modes) is considered sound. However, several areas require a follow-up design pass before implementation: scope discovery completeness, the convergence correctness model (when exactly is a scope "converged"?), code vs SDLC interaction specifics, and duplicate-dispatch/retry semantics. These are tracked in the [open questions](README.md#still-open).
+
 Extends V1 to support migrations that require distributed data convergence — reindexing, backfilling, or rewriting data across many scopes before a migration can be considered complete.
 
 ## Goal

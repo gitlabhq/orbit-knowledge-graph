@@ -101,7 +101,7 @@ A finalization migration is only safe when **all serving binaries understand the
 2. The release is deployed via rolling update — all pods are updated before the reconciler runs.
 3. The reconciler applies the finalization migration only after acquiring the lock (which means a new-version pod is running).
 
-For extra safety, a finalization migration can implement `requires_manual_approval() -> bool`. When true, the reconciler waits for an operator to set an approval flag (a ClickHouse record in `gkg_migrations` with a dedicated `approved_for_finalization` status) before proceeding. This is recommended for destructive operations like column drops or table renames.
+For extra safety, a finalization migration can implement `requires_manual_finalization() -> bool` (defined on the `Migration` trait). When true, the reconciler waits for an operator to set an approval flag (a ClickHouse record in `gkg_migrations` with a dedicated `approved_for_finalization` status) before proceeding. This is recommended for destructive operations like column drops or table renames.
 
 ## Example: completing the MR state enum migration
 
