@@ -80,6 +80,10 @@ fn dedup_query(q: &mut Query, input: &Input, ontology: &Ontology) {
 /// Edge tables use ReplacingMergeTree with `_deleted` but are not wrapped
 /// in dedup subqueries (their full-tuple ORDER BY makes RMT dedup effective).
 /// Between merges, soft-deleted edge rows can still appear.
+///
+/// Only handles Scan and Join variants. Union arms and Subquery inner queries
+/// are covered by `dedup_query`'s recursion, which calls this function on
+/// each nested query's own FROM/WHERE.
 fn add_edge_deleted_filters(from: &TableRef, where_clause: &mut Option<Expr>) {
     match from {
         TableRef::Scan { table, alias } if is_edge_table(table) => {

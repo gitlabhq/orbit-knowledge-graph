@@ -418,7 +418,7 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
 /// don't join non-center node tables. In production the indexer soft-deletes
 /// FK edge rows alongside their parent node, so this scenario is synthetic.
 pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
-    // User 9301: v1 alive, v2 deleted. Should not appear as a neighbor.
+    // User 9301: v1 alive, v2 deleted. Still visible via edge (known limitation).
     ctx.execute(
         "INSERT INTO gl_user (id, username, name, state, user_type, _version, _deleted) VALUES
          (9301, 'del_nbr', 'Deleted Neighbor', 'active', 'human', '2024-01-01 00:00:00', false),
