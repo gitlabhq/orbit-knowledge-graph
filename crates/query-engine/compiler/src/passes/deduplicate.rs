@@ -540,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_edge_table() {
+    fn skips_edge_table_but_adds_deleted_filter() {
         let ont = ontology();
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr::new(Expr::col("e", "source_id"), "src")],
@@ -551,6 +551,10 @@ mod tests {
 
         let Node::Query(q) = &node;
         assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "gl_edge"));
+        assert!(
+            where_contains(&q.where_clause, "_deleted"),
+            "edge scan should have _deleted filter"
+        );
     }
 
     #[test]
