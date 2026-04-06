@@ -396,6 +396,33 @@ impl Expr {
         }
     }
 
+    /// Collect all column names (not aliases) referenced by this expression.
+    pub fn referenced_columns(&self) -> HashSet<String> {
+        let mut cols = HashSet::new();
+        self.collect_columns(&mut cols);
+        cols
+    }
+
+    fn collect_columns(&self, out: &mut HashSet<String>) {
+        match self {
+            Expr::Column { column, .. } => {
+                out.insert(column.clone());
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                left.collect_columns(out);
+                right.collect_columns(out);
+            }
+            Expr::FuncCall { args, .. } => {
+                for a in args {
+                    a.collect_columns(out);
+                }
+            }
+            Expr::UnaryOp { expr, .. } => expr.collect_columns(out),
+            Expr::InSubquery { expr, .. } => expr.collect_columns(out),
+            Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
+        }
+    }
+
     /// Check if this expression only references columns from `alias`
     /// (or is a constant/literal).
     pub fn references_only(&self, alias: &str) -> bool {

@@ -15,7 +15,7 @@ use super::helpers::*;
 fn dedup_svc() -> MockRedactionService {
     let mut svc = allow_all();
     svc.allow("user", &[9001, 9002, 9003, 9010, 9011]);
-    svc.allow("merge_request", &[9100, 9101]);
+    svc.allow("merge_request", &[9100, 9101, 9200, 9201]);
     svc
 }
 
@@ -182,6 +182,57 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
         resp.find_node("User", 9011).is_none(),
         "user 9011 should be excluded (latest version is blocked, not active)"
     );
+}
+
+/// Aggregation with mutable filter: v1 state='merged', v2 state='opened'.
+/// The filter `state = 'merged'` should NOT match because the latest version
+/// has state='opened'. Mutable filters must apply after deduplication.
+///
+/// Uses project 1002 (path `1/100/1002/`) to avoid data interference with
+/// other concurrent tests that use project 1000.
+pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestContext) {
+    // MR 9200: v1 merged, v2 opened -- latest is 'opened', should NOT match state='merged'
+    // MR 9201: single version, state='merged' -- should match
+    ctx.execute(
+        "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path, _version, _deleted) VALUES
+         (9200, 200, 'Flipped MR', 'merged', '1/100/1002/', '2024-01-01 00:00:00', false),
+         (9200, 200, 'Flipped MR', 'opened', '1/100/1002/', '2024-06-01 00:00:00', false),
+         (9201, 201, 'Stable MR',  'merged', '1/100/1002/', '2024-06-01 00:00:00', false)",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1002/', 9200, 'MergeRequest', 'IN_PROJECT', 1002, 'Project'),
+         ('1/100/1002/', 9201, 'MergeRequest', 'IN_PROJECT', 1002, 'Project')",
+    )
+    .await;
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
+            "limit": 10
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("Project", &[1002]);
+    resp.skip_requirement(Requirement::Filter {
+        field: "state".into(),
+    });
+    // Only MR 9201 should be counted (state='merged').
+    // MR 9200 must NOT be counted: its latest version has state='opened'.
+    resp.assert_node("Project", 1002, |n| {
+        n.prop_i64("mr_count") == Some(1) && n.prop_str("name") == Some("Internal Project")
+    });
 }
 
 /// Duplicate user rows. Traversal should produce one edge, not two.

@@ -5,6 +5,7 @@ domain: source_code
 description: A Git branch in a repository
 label: name
 destination_table: gl_branch
+sort_key: [traversal_path, project_id, id]
 default_columns: [id, name, is_default]
 
 style:
