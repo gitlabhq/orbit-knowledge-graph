@@ -102,7 +102,7 @@ impl ArrowClickHouseClient {
                 ProfileEvents['ExternalJoinCompressedBytes'] AS external_join_bytes, \
                 read_rows, read_bytes, result_rows, result_bytes, \
                 ProfileEvents.Names, ProfileEvents.Values \
-            FROM system.query_log \
+            FROM clusterAllReplicas('default', system.query_log) \
             WHERE {where_clause} \
             LIMIT 1"
         );
@@ -130,7 +130,7 @@ impl ArrowClickHouseClient {
         let sql = format!(
             "SELECT name, elapsed_us, input_wait_elapsed_us, output_wait_elapsed_us, \
                     input_rows, output_rows \
-             FROM system.processors_profile_log \
+             FROM clusterAllReplicas('default', system.processors_profile_log) \
              WHERE query_id = '{query_id}' \
              ORDER BY elapsed_us DESC"
         );
@@ -154,11 +154,11 @@ impl ArrowClickHouseClient {
 
             profiles.push(ProcessorProfile {
                 name: v["name"].as_str().unwrap_or("").to_string(),
-                elapsed_us: v["elapsed_us"].as_u64().unwrap_or(0),
-                input_wait_us: v["input_wait_elapsed_us"].as_u64().unwrap_or(0),
-                output_wait_us: v["output_wait_elapsed_us"].as_u64().unwrap_or(0),
-                input_rows: v["input_rows"].as_u64().unwrap_or(0),
-                output_rows: v["output_rows"].as_u64().unwrap_or(0),
+                elapsed_us: json_u64(&v["elapsed_us"]),
+                input_wait_us: json_u64(&v["input_wait_elapsed_us"]),
+                output_wait_us: json_u64(&v["output_wait_elapsed_us"]),
+                input_rows: json_u64(&v["input_rows"]),
+                output_rows: json_u64(&v["output_rows"]),
             });
         }
 
@@ -167,7 +167,7 @@ impl ArrowClickHouseClient {
 
     pub async fn fetch_instance_health(&self) -> Result<InstanceHealth, ClickHouseError> {
         let metrics_sql = "\
-            SELECT metric, value FROM system.metrics \
+            SELECT metric, value FROM clusterAllReplicas('default', system.metrics) \
             WHERE metric IN (\
                 'Query', 'MemoryTracking', 'MarkCacheBytes', 'MarkCacheFiles', \
                 'QueryCacheEntries', 'QueryCacheBytes', \
@@ -177,14 +177,14 @@ impl ArrowClickHouseClient {
             )";
 
         let uptime_sql = "\
-            SELECT value FROM system.asynchronous_metrics \
+            SELECT value FROM clusterAllReplicas('default', system.asynchronous_metrics) \
             WHERE metric = 'Uptime'";
 
         let disks_sql = "\
             SELECT name, path, total_space AS total_bytes, \
                    free_space AS free_bytes, \
                    (total_space - free_space) AS used_bytes \
-            FROM system.disks";
+            FROM clusterAllReplicas('default', system.disks)";
 
         let parts_sql = "\
             SELECT database, table, \
@@ -195,7 +195,7 @@ impl ArrowClickHouseClient {
                    0 AS active_mutations, \
                    0 AS detached_parts, \
                    toString(max(modification_time)) AS last_modification_time \
-            FROM system.parts \
+            FROM clusterAllReplicas('default', system.parts) \
             WHERE active AND database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema') \
             GROUP BY database, table \
             ORDER BY bytes_on_disk DESC";
@@ -216,7 +216,7 @@ impl ArrowClickHouseClient {
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
                 let metric = v["metric"].as_str().unwrap_or("");
-                let value = v["value"].as_u64().unwrap_or(0);
+                let value = json_u64(&v["value"]);
                 match metric {
                     "Query" => health.current_queries = value,
                     "MemoryTracking" => health.memory_tracking_bytes = value,
@@ -235,7 +235,7 @@ impl ArrowClickHouseClient {
 
         for line in uptime_text.lines() {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-                health.uptime_seconds = v["value"].as_f64().unwrap_or(0.0) as u64;
+                health.uptime_seconds = json_f64(&v["value"]) as u64;
             }
         }
 
@@ -248,9 +248,9 @@ impl ArrowClickHouseClient {
                 health.disk_usage.push(DiskInfo {
                     name: v["name"].as_str().unwrap_or("").to_string(),
                     path: v["path"].as_str().unwrap_or("").to_string(),
-                    total_bytes: v["total_bytes"].as_u64().unwrap_or(0),
-                    free_bytes: v["free_bytes"].as_u64().unwrap_or(0),
-                    used_bytes: v["used_bytes"].as_u64().unwrap_or(0),
+                    total_bytes: json_u64(&v["total_bytes"]),
+                    free_bytes: json_u64(&v["free_bytes"]),
+                    used_bytes: json_u64(&v["used_bytes"]),
                 });
             }
         }
@@ -264,12 +264,12 @@ impl ArrowClickHouseClient {
                 health.table_parts.push(TablePartsInfo {
                     database: v["database"].as_str().unwrap_or("").to_string(),
                     table: v["table"].as_str().unwrap_or("").to_string(),
-                    part_count: v["part_count"].as_u64().unwrap_or(0),
-                    total_rows: v["total_rows"].as_u64().unwrap_or(0),
-                    bytes_on_disk: v["bytes_on_disk"].as_u64().unwrap_or(0),
-                    partition_count: v["partition_count"].as_u64().unwrap_or(0),
-                    active_mutations: v["active_mutations"].as_u64().unwrap_or(0),
-                    detached_parts: v["detached_parts"].as_u64().unwrap_or(0),
+                    part_count: json_u64(&v["part_count"]),
+                    total_rows: json_u64(&v["total_rows"]),
+                    bytes_on_disk: json_u64(&v["bytes_on_disk"]),
+                    partition_count: json_u64(&v["partition_count"]),
+                    active_mutations: json_u64(&v["active_mutations"]),
+                    detached_parts: json_u64(&v["detached_parts"]),
                     last_modification_time: v["last_modification_time"].as_str().map(String::from),
                 });
             }
@@ -307,29 +307,44 @@ fn validate_query_id(query_id: &str) -> Result<(), ClickHouseError> {
     Ok(())
 }
 
+/// Extract a u64 from a JSON value that may be a number or a string.
+/// `clusterAllReplicas` wraps columns in `Nullable`, which ClickHouse
+/// serializes as strings in JSONEachRow format.
+fn json_u64(v: &serde_json::Value) -> u64 {
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or(0)
+}
+
+fn json_f64(v: &serde_json::Value) -> f64 {
+    v.as_f64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or(0.0)
+}
+
 fn parse_query_log_entry(v: &serde_json::Value) -> QueryLogEntry {
     QueryLogEntry {
         query_id: v["query_id"].as_str().unwrap_or("").to_string(),
-        query_duration_ms: v["query_duration_ms"].as_f64().unwrap_or(0.0),
-        memory_usage: v["memory_usage"].as_u64().unwrap_or(0),
+        query_duration_ms: json_f64(&v["query_duration_ms"]),
+        memory_usage: json_u64(&v["memory_usage"]),
         peak_memory_usage: 0,
-        read_rows: v["read_rows"].as_u64().unwrap_or(0),
-        read_bytes: v["read_bytes"].as_u64().unwrap_or(0),
-        result_rows: v["result_rows"].as_u64().unwrap_or(0),
-        result_bytes: v["result_bytes"].as_u64().unwrap_or(0),
-        real_time_us: v["real_time_us"].as_u64().unwrap_or(0),
-        user_time_us: v["user_time_us"].as_u64().unwrap_or(0),
-        system_time_us: v["system_time_us"].as_u64().unwrap_or(0),
-        os_cpu_wait_us: v["os_cpu_wait_us"].as_u64().unwrap_or(0),
-        os_io_wait_us: v["os_io_wait_us"].as_u64().unwrap_or(0),
-        selected_parts: v["selected_parts"].as_u64().unwrap_or(0),
-        selected_marks: v["selected_marks"].as_u64().unwrap_or(0),
-        selected_rows: v["selected_rows"].as_u64().unwrap_or(0),
-        mark_cache_hits: v["mark_cache_hits"].as_u64().unwrap_or(0),
-        mark_cache_misses: v["mark_cache_misses"].as_u64().unwrap_or(0),
-        external_sort_bytes: v["external_sort_bytes"].as_u64().unwrap_or(0),
-        external_agg_bytes: v["external_agg_bytes"].as_u64().unwrap_or(0),
-        external_join_bytes: v["external_join_bytes"].as_u64().unwrap_or(0),
+        read_rows: json_u64(&v["read_rows"]),
+        read_bytes: json_u64(&v["read_bytes"]),
+        result_rows: json_u64(&v["result_rows"]),
+        result_bytes: json_u64(&v["result_bytes"]),
+        real_time_us: json_u64(&v["real_time_us"]),
+        user_time_us: json_u64(&v["user_time_us"]),
+        system_time_us: json_u64(&v["system_time_us"]),
+        os_cpu_wait_us: json_u64(&v["os_cpu_wait_us"]),
+        os_io_wait_us: json_u64(&v["os_io_wait_us"]),
+        selected_parts: json_u64(&v["selected_parts"]),
+        selected_marks: json_u64(&v["selected_marks"]),
+        selected_rows: json_u64(&v["selected_rows"]),
+        mark_cache_hits: json_u64(&v["mark_cache_hits"]),
+        mark_cache_misses: json_u64(&v["mark_cache_misses"]),
+        external_sort_bytes: json_u64(&v["external_sort_bytes"]),
+        external_agg_bytes: json_u64(&v["external_agg_bytes"]),
+        external_join_bytes: json_u64(&v["external_join_bytes"]),
         profile_events: build_profile_events(v),
     }
 }
@@ -343,7 +358,7 @@ fn build_profile_events(v: &serde_json::Value) -> HashMap<String, u64> {
     if let (Some(names), Some(values)) = (names, values) {
         for (name, value) in names.iter().zip(values.iter()) {
             if let Some(n) = name.as_str() {
-                let val = value.as_u64().unwrap_or(0);
+                let val = json_u64(value);
                 if val > 0 {
                     map.insert(n.to_string(), val);
                 }
