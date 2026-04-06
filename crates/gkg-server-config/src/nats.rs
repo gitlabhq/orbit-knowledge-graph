@@ -107,6 +107,12 @@ pub struct NatsConfiguration {
     /// Maximum messages per stream. Defaults to None (unlimited).
     #[serde(default)]
     pub stream_max_messages: Option<i64>,
+
+    /// Server-side timeout in seconds for `consume_pending` batch fetch.
+    /// Must be long enough for the NATS server to scan through gaps between
+    /// matching messages in filtered consumers. Defaults to 5.
+    #[serde(default = "NatsConfiguration::default_fetch_expires_secs")]
+    pub fetch_expires_secs: u64,
 }
 
 impl NatsConfiguration {
@@ -140,6 +146,10 @@ impl NatsConfiguration {
 
     fn default_stream_replicas() -> usize {
         1
+    }
+
+    fn default_fetch_expires_secs() -> u64 {
+        5
     }
 
     /// Returns true when TLS is configured -- either via cert paths or a `tls://` url scheme.
@@ -225,6 +235,10 @@ impl NatsConfiguration {
         self.batch_size.max(1)
     }
 
+    pub fn fetch_expires(&self) -> Duration {
+        Duration::from_secs(self.fetch_expires_secs.max(1))
+    }
+
     pub fn stream_max_age(&self) -> Option<Duration> {
         self.stream_max_age_secs.map(Duration::from_secs)
     }
@@ -251,6 +265,7 @@ impl Default for NatsConfiguration {
             stream_max_age_secs: None,
             stream_max_bytes: None,
             stream_max_messages: None,
+            fetch_expires_secs: Self::default_fetch_expires_secs(),
         }
     }
 }
@@ -423,5 +438,22 @@ mod tests {
         assert!(config.tls_cert_path.is_none());
         assert!(config.tls_key_path.is_none());
         assert!(!config.tls_enabled());
+    }
+
+    #[test]
+    fn fetch_expires_defaults_to_5s() {
+        let yaml = r#"url: "localhost:4222""#;
+        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.fetch_expires(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn fetch_expires_clamps_zero_to_1s() {
+        let yaml = r#"
+            url: "localhost:4222"
+            fetch_expires_secs: 0
+        "#;
+        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.fetch_expires(), Duration::from_secs(1));
     }
 }
