@@ -315,10 +315,10 @@
           "pattern": "^[a-z_]+$",
           "description": "Prefix applied to all ClickHouse graph table names (e.g., 'gl_')."
         },
-        "edge_table": {
+        "default_edge_table": {
           "type": "string",
           "pattern": "^[a-z_]+$",
-          "description": "ClickHouse table name for all graph edges (e.g., 'gl_edge')."
+          "description": "Default ClickHouse edge table name. Must be a key in edge_tables."
         },
         "default_entity_sort_key": {
           "type": "array",
@@ -327,26 +327,39 @@
           "minItems": 1,
           "uniqueItems": true
         },
-        "edge_sort_key": {
-          "type": "array",
-          "description": "ClickHouse ORDER BY columns for the edge table. Used as the deduplication key for ReplacingMergeTree.",
-          "items": { "type": "string" },
-          "minItems": 1,
-          "uniqueItems": true
-        },
-        "edge_columns": {
-          "type": "array",
-          "description": "Column definitions for the unified edge table, in schema order.",
-          "items": {
+        "edge_tables": {
+          "type": "object",
+          "description": "Edge table definitions keyed by table name. Each defines sort_key and columns.",
+          "propertyNames": { "pattern": "^[a-z_]+$" },
+          "additionalProperties": {
             "type": "object",
             "properties": {
-              "name": {"type": "string", "description": "Column name."},
-              "type": {"$ref": "#/definitions/propertyType", "description": "Column data type."}
+              "sort_key": {
+                "type": "array",
+                "description": "ClickHouse ORDER BY columns for this edge table.",
+                "items": { "type": "string" },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "columns": {
+                "type": "array",
+                "description": "Column definitions for this edge table, in schema order.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {"type": "string", "description": "Column name."},
+                    "type": {"$ref": "#/definitions/propertyType", "description": "Column data type."}
+                  },
+                  "required": ["name", "type"],
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              }
             },
-            "required": ["name", "type"],
+            "required": ["sort_key", "columns"],
             "additionalProperties": false
           },
-          "minItems": 1
+          "minProperties": 1
         },
         "internal_column_prefix": {
           "type": "string",
@@ -364,7 +377,7 @@
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."
         }
       },
-      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "edge_columns", "internal_column_prefix", "etl"],
+      "required": ["table_prefix", "default_edge_table", "default_entity_sort_key", "edge_tables", "internal_column_prefix", "etl"],
       "additionalProperties": false
     },
 
@@ -594,6 +607,11 @@
         "description": {
           "type": "string",
           "description": "Human-readable description of the relationship."
+        },
+        "table": {
+          "type": "string",
+          "pattern": "^[a-z_]+$",
+          "description": "Optional ClickHouse table for this edge type. Must be a key in settings.edge_tables. Defaults to settings.default_edge_table."
         },
         "properties": {
           "type": "object",

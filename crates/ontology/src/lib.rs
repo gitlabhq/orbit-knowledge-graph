@@ -80,19 +80,25 @@ impl fmt::Display for OntologyError {
     }
 }
 
+/// Configuration for a single edge table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdgeTableConfig {
+    pub sort_key: Vec<String>,
+    pub columns: Vec<EdgeColumn>,
+}
+
 /// A loaded ontology containing all node and edge entities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ontology {
     schema_version: String,
     /// Prefix for all ClickHouse graph table names (e.g., `"gl_"`).
     pub(crate) table_prefix: String,
-    /// ClickHouse table name for all graph edges (e.g., `"gl_edge"`).
-    pub(crate) edge_table: String,
+    /// Default edge table name (e.g., `"gl_edge"`).
+    pub(crate) default_edge_table: String,
     /// Default ORDER BY columns for node tables (dedup key for ReplacingMergeTree).
     pub(crate) default_entity_sort_key: Vec<String>,
-    /// ORDER BY columns for the edge table (dedup key for ReplacingMergeTree).
-    pub(crate) edge_sort_key: Vec<String>,
-    pub(crate) edge_columns: Vec<EdgeColumn>,
+    /// Edge table configurations keyed by table name.
+    pub(crate) edge_table_configs: BTreeMap<String, EdgeTableConfig>,
     pub(crate) domains: BTreeMap<String, DomainInfo>,
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
@@ -114,19 +120,23 @@ impl Ontology {
     /// Create an empty ontology.
     #[must_use]
     pub fn new() -> Self {
+        let default_sort_key: Vec<String> = EDGE_RESERVED_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let default_config = EdgeTableConfig {
+            sort_key: default_sort_key,
+            columns: Vec::new(),
+        };
         Self {
             schema_version: String::new(),
             table_prefix: GL_TABLE_PREFIX.to_string(),
-            edge_table: EDGE_TABLE.to_string(),
+            default_edge_table: EDGE_TABLE.to_string(),
             default_entity_sort_key: vec![
                 TRAVERSAL_PATH_COLUMN.to_string(),
                 DEFAULT_PRIMARY_KEY.to_string(),
             ],
-            edge_sort_key: EDGE_RESERVED_COLUMNS
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect(),
-            edge_columns: Vec::new(),
+            edge_table_configs: BTreeMap::from([(EDGE_TABLE.to_string(), default_config)]),
             domains: BTreeMap::new(),
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
@@ -178,26 +188,38 @@ impl Ontology {
         mut self,
         columns: impl IntoIterator<Item = (impl Into<String>, DataType)>,
     ) -> Self {
-        self.edge_columns = columns
+        let cols: Vec<EdgeColumn> = columns
             .into_iter()
             .map(|(name, data_type)| EdgeColumn {
                 name: name.into(),
                 data_type,
             })
             .collect();
+        if let Some(config) = self.edge_table_configs.get_mut(&self.default_edge_table) {
+            config.columns = cols;
+        }
         self
     }
 
-    /// Columns of the unified edge table, in schema order.
+    /// Columns of the default edge table, in schema order.
     #[must_use]
     pub fn edge_columns(&self) -> &[EdgeColumn] {
-        &self.edge_columns
+        self.edge_table_configs
+            .get(&self.default_edge_table)
+            .map(|c| c.columns.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Get the configuration for a specific edge table.
+    #[must_use]
+    pub fn edge_table_config(&self, table: &str) -> Option<&EdgeTableConfig> {
+        self.edge_table_configs.get(table)
     }
 
     /// Look up the `DataType` of an edge table column by name.
     #[must_use]
     pub fn get_edge_column_type(&self, name: &str) -> Option<DataType> {
-        self.edge_columns
+        self.edge_columns()
             .iter()
             .find(|c| c.name == name)
             .map(|c| c.data_type)
@@ -505,10 +527,22 @@ impl Ontology {
         &self.table_prefix
     }
 
-    /// ClickHouse table name for all graph edges.
+    /// Default ClickHouse table name for graph edges.
     #[must_use]
     pub fn edge_table(&self) -> &str {
-        &self.edge_table
+        &self.default_edge_table
+    }
+
+    /// All edge table names defined in settings.
+    #[must_use]
+    pub fn edge_tables(&self) -> Vec<&str> {
+        self.edge_table_configs.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Check if a table name is an edge table.
+    #[must_use]
+    pub fn is_edge_table(&self, table: &str) -> bool {
+        self.edge_table_configs.contains_key(table)
     }
 
     /// Prefix for internal columns injected by the compiler.
@@ -529,20 +563,23 @@ impl Ontology {
         &self.default_entity_sort_key
     }
 
-    /// ORDER BY / dedup key columns for the edge table.
+    /// ORDER BY / dedup key columns for the default edge table.
     #[must_use]
     pub fn edge_sort_key(&self) -> &[String] {
-        &self.edge_sort_key
+        self.edge_table_configs
+            .get(&self.default_edge_table)
+            .map(|c| c.sort_key.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Look up the dedup key (ORDER BY columns) for a ClickHouse table name.
     ///
-    /// Returns the node's `sort_key` for node tables, the `edge_sort_key` for
-    /// the edge table, or `None` if the table is unknown.
+    /// Returns the node's `sort_key` for node tables, the edge table's
+    /// `sort_key` for edge tables, or `None` if the table is unknown.
     #[must_use]
     pub fn sort_key_for_table(&self, table: &str) -> Option<&[String]> {
-        if table == self.edge_table {
-            return Some(&self.edge_sort_key);
+        if let Some(config) = self.edge_table_configs.get(table) {
+            return Some(&config.sort_key);
         }
         self.nodes
             .values()
@@ -1242,6 +1279,38 @@ mod tests {
         assert_eq!(ontology.sort_key_for_table("nonexistent_table"), None);
     }
 
+    // ── edge_tables tests ────────────────────────────────────────────
+
+    #[test]
+    fn edge_tables_includes_default_table() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let tables = ontology.edge_tables();
+        assert!(
+            tables.contains(&ontology.edge_table()),
+            "edge_tables should include the default edge table"
+        );
+    }
+
+    #[test]
+    fn is_edge_table_matches_default() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        assert!(ontology.is_edge_table(ontology.edge_table()));
+        assert!(!ontology.is_edge_table("gl_user"));
+        assert!(!ontology.is_edge_table("nonexistent"));
+    }
+
+    #[test]
+    fn edge_entity_has_destination_table() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        for entity in ontology.edges() {
+            assert!(
+                !entity.destination_table.is_empty(),
+                "edge '{}' should have a destination_table",
+                entity.relationship_kind
+            );
+        }
+    }
+
     #[test]
     fn sort_key_with_nodes_builder_inherits_default() {
         let ontology = Ontology::new().with_nodes(["Foo", "Bar"]);
@@ -1356,17 +1425,19 @@ properties:
 schema_version: "1.0"
 settings:
   table_prefix: "kg_"
-  edge_table: "kg_edge"
+  default_edge_table: kg_edge
   internal_column_prefix: "_gkg_"
   default_entity_sort_key: [traversal_path, id]
-  edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
-  edge_columns:
-    - {name: traversal_path, type: string}
-    - {name: relationship_kind, type: string}
-    - {name: source_id, type: int64}
-    - {name: source_kind, type: string}
-    - {name: target_id, type: int64}
-    - {name: target_kind, type: string}
+  edge_tables:
+    kg_edge:
+      sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+      columns:
+        - {name: traversal_path, type: string}
+        - {name: relationship_kind, type: string}
+        - {name: source_id, type: int64}
+        - {name: source_kind, type: string}
+        - {name: target_id, type: int64}
+        - {name: target_kind, type: string}
   etl:
     default_watermark: _siphon_replicated_at
     default_deleted: _siphon_deleted

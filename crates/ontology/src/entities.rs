@@ -145,6 +145,8 @@ pub struct EdgeEntity {
     pub target: String,
     /// The kind of the target node.
     pub target_kind: String,
+    /// ClickHouse table that stores this edge (defaults to the global edge table).
+    pub destination_table: String,
 }
 
 /// ETL configuration for edges sourced from join tables.

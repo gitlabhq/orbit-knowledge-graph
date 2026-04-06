@@ -11,16 +11,18 @@ description: >
 
 settings:
   table_prefix: "gl_"
-  edge_table: "gl_edge"
+  default_edge_table: gl_edge
   default_entity_sort_key: [traversal_path, id]
-  edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
-  edge_columns:
-    - {name: traversal_path, type: string}
-    - {name: relationship_kind, type: string}
-    - {name: source_id, type: int64}
-    - {name: source_kind, type: string}
-    - {name: target_id, type: int64}
-    - {name: target_kind, type: string}
+  edge_tables:
+    gl_edge:
+      sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+      columns:
+        - {name: traversal_path, type: string}
+        - {name: relationship_kind, type: string}
+        - {name: source_id, type: int64}
+        - {name: source_kind, type: string}
+        - {name: target_id, type: int64}
+        - {name: target_kind, type: string}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User]
   etl:

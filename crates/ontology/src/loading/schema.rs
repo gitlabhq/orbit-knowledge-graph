@@ -13,20 +13,25 @@ pub(super) struct SchemaYaml {
     pub edges: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(super) struct EdgeColumnYaml {
     pub name: String,
     #[serde(rename = "type")]
     pub data_type: DataType,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct EdgeTableYaml {
+    pub sort_key: Vec<String>,
+    pub columns: Vec<EdgeColumnYaml>,
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct SettingsYaml {
     pub table_prefix: String,
-    pub edge_table: String,
+    pub default_edge_table: String,
     pub default_entity_sort_key: Vec<String>,
-    pub edge_sort_key: Vec<String>,
-    pub edge_columns: Vec<EdgeColumnYaml>,
+    pub edge_tables: BTreeMap<String, EdgeTableYaml>,
     pub internal_column_prefix: String,
     #[serde(default)]
     pub skip_security_filter_for_entities: Vec<String>,
