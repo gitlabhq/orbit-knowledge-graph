@@ -92,9 +92,9 @@ pub struct CompilerMetadata {
     pub node_edge_col: HashMap<String, (String, String)>,
     /// All edge table names from the ontology. Used by dedup and optimizer
     /// passes to identify edge scans without needing the full ontology.
-    /// Defaults to `["gl_edge"]`; overwritten by normalize with the full
-    /// set from the ontology.
     pub edge_tables: HashSet<String>,
+    /// Default edge table name for creating new edge scans.
+    pub default_edge_table: String,
 }
 
 impl Default for CompilerMetadata {
@@ -102,6 +102,7 @@ impl Default for CompilerMetadata {
         Self {
             node_edge_col: HashMap::new(),
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
+            default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
         }
     }
 }
