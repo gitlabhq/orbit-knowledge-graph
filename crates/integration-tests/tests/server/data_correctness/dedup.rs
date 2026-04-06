@@ -1,11 +1,17 @@
-//! Deduplication correctness tests.
+//! Deduplication correctness tests for `ReplacingMergeTree` node and edge tables.
+//!
+//! Validates that the query pipeline:
+//! - Returns only the latest `_version` when duplicate rows exist
+//! - Excludes soft-deleted rows (`_deleted = true`) from all query types
+//! - Evaluates mutable filters (`state`, `status`) against the latest
+//!   version, not stale ones
+//! - Applies `_deleted = false` filtering to edge table scans
 //!
 //! Each test runs in a forked database (`run_subtests!`) so INSERT
-//! operations are isolated from other tests. There are no cross-test
-//! data dependencies.
+//! operations are isolated. There are no cross-test data dependencies.
 //!
 //! Both versions are inserted in a single INSERT so they land in the same
-//! data part — ReplacingMergeTree never deduplicates within a part, only
+//! data part -- ReplacingMergeTree never deduplicates within a part, only
 //! across parts during background merges. This makes the tests deterministic.
 //!
 //! Uses IDs >= 9000 to avoid conflict with the main seed data.
