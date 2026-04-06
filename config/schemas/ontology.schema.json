@@ -330,6 +330,7 @@
         "edge_tables": {
           "type": "object",
           "description": "Edge table definitions keyed by table name. Each defines sort_key and columns.",
+          "propertyNames": { "pattern": "^[a-z_]+$" },
           "additionalProperties": {
             "type": "object",
             "properties": {
@@ -609,6 +610,7 @@
         },
         "table": {
           "type": "string",
+          "pattern": "^[a-z_]+$",
           "description": "Optional ClickHouse table for this edge type. Must be a key in settings.edge_tables. Defaults to settings.default_edge_table."
         },
         "properties": {

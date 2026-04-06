@@ -116,12 +116,22 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     ontology.etl_settings = etl_settings.clone();
     ontology.internal_column_prefix = schema.settings.internal_column_prefix;
 
-    // Validate edge table names.
+    // Validate edge table names: must start with table_prefix and contain
+    // only lowercase ASCII letters and underscores (safe for SQL identifiers).
     for table_name in ontology.edge_table_configs.keys() {
         if !table_name.starts_with(&ontology.table_prefix) {
             return Err(OntologyError::Validation(format!(
                 "edge table '{}' does not start with table_prefix '{}'",
                 table_name, ontology.table_prefix
+            )));
+        }
+        if !table_name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c == '_')
+        {
+            return Err(OntologyError::Validation(format!(
+                "edge table '{}' contains invalid characters (only a-z and _ allowed)",
+                table_name
             )));
         }
     }
