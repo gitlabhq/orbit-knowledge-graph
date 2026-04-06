@@ -120,8 +120,8 @@ pub fn compile(
 /// that bypass JSON schema validation.
 ///
 /// For hydration queries (`QueryType::Hydration`), skips security, check, and
-/// hydrate plan passes — codegen defaults to `HydrationPlan::None`.
-/// For all other query types, runs the full secure pipeline.
+/// hydrate plan passes but applies dedup (argMax) — codegen defaults to
+/// `HydrationPlan::None`. For all other query types, runs the full secure pipeline.
 pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
     let env = SecureEnv::new(Arc::new(Ontology::new()), ctx.clone());
     let is_hydration = input.query_type == QueryType::Hydration;

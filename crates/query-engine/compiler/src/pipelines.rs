@@ -146,16 +146,18 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
 /// Hydration compilation — skips security, check, and hydration plan generation.
 ///
 /// No `HydratePlanPass` means `CodegenPass` defaults to `HydrationPlan::None`,
-/// preventing recursive hydration.
+/// preventing recursive hydration. `DeduplicatePass` applies argMax dedup
+/// to each UNION ALL arm so hydration reads the latest non-deleted version.
 ///
 /// ```text
-/// Input → Lower → Optimize → Enforce → Settings → Codegen
+/// Input → Lower → Optimize → Enforce → Deduplicate → Settings → Codegen
 /// ```
 pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
+        .pass(DeduplicatePass)
         .pass(SettingsPass)
         .pass(CodegenPass)
         .build()
