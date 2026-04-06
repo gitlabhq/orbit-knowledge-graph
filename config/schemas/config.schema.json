@@ -152,6 +152,7 @@
         "batch_size": 10,
         "connection_timeout_secs": 10,
         "consumer_name": null,
+        "fetch_expires_secs": 5,
         "max_deliver": 5,
         "password": null,
         "request_timeout_secs": 5,
@@ -762,6 +763,13 @@
             "null"
           ],
           "default": null
+        },
+        "fetch_expires_secs": {
+          "description": "Server-side timeout in seconds for `consume_pending` batch fetch.\nMust be long enough for the NATS server to scan through gaps between\nmatching messages in filtered consumers. Defaults to 5.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 5,
+          "minimum": 0
         },
         "max_deliver": {
           "description": "Maximum redelivery attempts. None means unlimited. Defaults to 5.",
