@@ -11,6 +11,10 @@ use super::EtlSettings;
 pub(crate) struct EdgeYaml {
     #[serde(default)]
     pub description: Option<String>,
+    /// Optional override for the ClickHouse table storing this edge type.
+    /// Defaults to the global `edge_table` from settings.
+    #[serde(default)]
+    pub table: Option<String>,
     #[serde(default)]
     variants: Vec<EdgeVariantYaml>,
     #[serde(default)]
@@ -55,7 +59,12 @@ struct EdgeEndpointYaml {
 }
 
 impl EdgeYaml {
-    pub(crate) fn to_entities(&self, relationship_kind: String) -> Vec<EdgeEntity> {
+    pub(crate) fn to_entities(
+        &self,
+        relationship_kind: String,
+        default_table: &str,
+    ) -> Vec<EdgeEntity> {
+        let table = self.table.as_deref().unwrap_or(default_table).to_string();
         self.variants
             .iter()
             .map(|v| EdgeEntity {
@@ -64,6 +73,7 @@ impl EdgeYaml {
                 source_kind: v.from_node.node_type.clone(),
                 target: v.to_node.id.clone(),
                 target_kind: v.to_node.node_type.clone(),
+                destination_table: table.clone(),
             })
             .collect()
     }

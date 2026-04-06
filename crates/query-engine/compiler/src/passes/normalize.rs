@@ -62,6 +62,12 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
 /// - Expands wildcard column selections ("*") to explicit column lists
 pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     input.entity_auth = build_entity_auth(ontology);
+    input.compiler.edge_tables = ontology
+        .edge_tables()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+    input.compiler.default_edge_table = ontology.edge_table().to_string();
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {

@@ -314,10 +314,24 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         let aliases = HashSet::from([edge_alias]);
 
         if let Some(ref cte) = from_cte {
-            inject_sip_for_aliases(&mut q.from, &mut q.where_clause, start_col, cte, &aliases);
+            inject_sip_for_aliases(
+                &mut q.from,
+                &mut q.where_clause,
+                start_col,
+                cte,
+                &aliases,
+                input,
+            );
         }
         if let Some(ref cte) = to_cte {
-            inject_sip_for_aliases(&mut q.from, &mut q.where_clause, end_col, cte, &aliases);
+            inject_sip_for_aliases(
+                &mut q.from,
+                &mut q.where_clause,
+                end_col,
+                cte,
+                &aliases,
+                input,
+            );
         }
 
         // Cascading SIP: when the root is selective (node_ids, filters, etc.),
@@ -538,6 +552,7 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
             end_col,
             &cte_name,
             &aliases,
+            input,
         );
     }
 }
@@ -554,22 +569,36 @@ fn inject_sip_for_aliases(
     edge_col: &str,
     cte_name: &str,
     target_aliases: &HashSet<String>,
+    input: &Input,
 ) {
     match table_ref {
         TableRef::Scan { table, alias, .. }
-            if is_edge_table(table) && target_aliases.contains(alias.as_str()) =>
+            if is_edge_table(table, input) && target_aliases.contains(alias.as_str()) =>
         {
             let sip_filter = make_sip_filter(alias, edge_col, cte_name);
             *outer_where = Expr::and_all([outer_where.take(), Some(sip_filter)]);
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            inject_sip_for_aliases(left, outer_where, edge_col, cte_name, target_aliases);
-            inject_sip_for_aliases(right, outer_where, edge_col, cte_name, target_aliases);
+            inject_sip_for_aliases(left, outer_where, edge_col, cte_name, target_aliases, input);
+            inject_sip_for_aliases(
+                right,
+                outer_where,
+                edge_col,
+                cte_name,
+                target_aliases,
+                input,
+            );
         }
         TableRef::Union { alias, queries, .. } if target_aliases.contains(alias.as_str()) => {
             for arm in queries {
-                inject_sip_first_edge(&mut arm.from, &mut arm.where_clause, edge_col, cte_name);
+                inject_sip_first_edge(
+                    &mut arm.from,
+                    &mut arm.where_clause,
+                    edge_col,
+                    cte_name,
+                    input,
+                );
             }
         }
         TableRef::Union { .. } => {}
@@ -580,6 +609,7 @@ fn inject_sip_for_aliases(
                 edge_col,
                 cte_name,
                 target_aliases,
+                input,
             );
         }
     }
@@ -592,21 +622,22 @@ fn inject_sip_first_edge(
     where_clause: &mut Option<Expr>,
     edge_col: &str,
     cte_name: &str,
+    input: &Input,
 ) {
     match from {
-        TableRef::Scan { table, alias, .. } if is_edge_table(table) => {
+        TableRef::Scan { table, alias, .. } if is_edge_table(table, input) => {
             let sip_filter = make_sip_filter(alias, edge_col, cte_name);
             *where_clause = Expr::and_all([where_clause.take(), Some(sip_filter)]);
         }
         TableRef::Join { left, .. } => {
-            inject_sip_first_edge(left, where_clause, edge_col, cte_name);
+            inject_sip_first_edge(left, where_clause, edge_col, cte_name, input);
         }
         _ => {}
     }
 }
 
-fn is_edge_table(table: &str) -> bool {
-    table == EDGE_TABLE || table.starts_with(EDGE_TABLE)
+fn is_edge_table(table: &str, input: &Input) -> bool {
+    input.compiler.edge_tables.contains(table)
 }
 
 fn make_sip_filter(alias: &str, edge_col: &str, cte_name: &str) -> Expr {
@@ -1071,10 +1102,8 @@ fn apply_edge_led_reorder(q: &mut Query, input: &Input) {
     loop {
         match current {
             TableRef::Join { left, right, .. } => {
-                let r_edge =
-                    matches!(right.as_ref(), TableRef::Scan { table, .. } if is_edge_table(table));
-                let l_node =
-                    matches!(left.as_ref(), TableRef::Scan { table, .. } if !is_edge_table(table));
+                let r_edge = matches!(right.as_ref(), TableRef::Scan { table, .. } if is_edge_table(table, input));
+                let l_node = matches!(left.as_ref(), TableRef::Scan { table, .. } if !is_edge_table(table, input));
                 if r_edge && l_node {
                     std::mem::swap(left, right);
                     return;
