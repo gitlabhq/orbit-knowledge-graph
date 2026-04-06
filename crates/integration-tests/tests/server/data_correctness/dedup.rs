@@ -24,7 +24,8 @@ fn dedup_svc() -> MockRedactionService {
     svc.allow(
         "merge_request",
         &[
-            9100, 9101, 9200, 9201, 9400, 9401, 9500, 9501, 9700, 9701, 9800, 9801, 9900, 9901,
+            9100, 9101, 9200, 9201, 9310, 9311, 9400, 9401, 9500, 9501, 9700, 9701, 9800, 9801,
+            9900, 9901,
         ],
     );
     svc
@@ -382,7 +383,7 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
 
 /// Neighbors dedup: duplicate user rows should not produce duplicate edges.
 pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
-    // User 9300 has two versions. Should appear once as a neighbor of MR 9101.
+    // User 9300 has two versions, MR 9300 is the center node.
     ctx.execute(
         "INSERT INTO gl_user (id, username, name, state, user_type, _version, _deleted) VALUES
          (9300, 'nbr_old', 'Neighbor Old', 'active', 'human', '2024-01-01 00:00:00', false),
@@ -390,8 +391,13 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
     )
     .await;
     ctx.execute(
+        "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path, _version, _deleted) VALUES
+         (9310, 310, 'Neighbor center MR', 'opened', '1/100/1000/', '2024-06-01 00:00:00', false)",
+    )
+    .await;
+    ctx.execute(
         "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 9300, 'User', 'AUTHORED', 9101, 'MergeRequest')",
+         ('1/100/1000/', 9300, 'User', 'AUTHORED', 9310, 'MergeRequest')",
     )
     .await;
 
@@ -399,18 +405,16 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9101]},
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9310]},
             "neighbors": {"node": "mr", "direction": "both"}
         }"#,
         &dedup_svc(),
     )
     .await;
 
-    // MR 9101 should have user 9300 as a neighbor with exactly one edge.
     resp.skip_requirement(Requirement::NodeCount);
-    resp.assert_node_ids("MergeRequest", &[9101]);
-    // assert_edge_exists satisfies the Neighbors requirement.
-    resp.assert_edge_exists("User", 9300, "MergeRequest", 9101, "AUTHORED");
+    resp.assert_node_ids("MergeRequest", &[9310]);
+    resp.assert_edge_exists("User", 9300, "MergeRequest", 9310, "AUTHORED");
 }
 
 /// Edge-only neighbors cannot filter out deleted nodes at the query layer:
@@ -419,6 +423,7 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
 /// FK edge rows alongside their parent node, so this scenario is synthetic.
 pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
     // User 9301: v1 alive, v2 deleted. Still visible via edge (known limitation).
+    // MR 9311 is the center node.
     ctx.execute(
         "INSERT INTO gl_user (id, username, name, state, user_type, _version, _deleted) VALUES
          (9301, 'del_nbr', 'Deleted Neighbor', 'active', 'human', '2024-01-01 00:00:00', false),
@@ -426,8 +431,13 @@ pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
     )
     .await;
     ctx.execute(
+        "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path, _version, _deleted) VALUES
+         (9311, 311, 'Neighbor del center MR', 'opened', '1/100/1000/', '2024-06-01 00:00:00', false)",
+    )
+    .await;
+    ctx.execute(
         "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 9301, 'User', 'AUTHORED', 9101, 'MergeRequest')",
+         ('1/100/1000/', 9301, 'User', 'AUTHORED', 9311, 'MergeRequest')",
     )
     .await;
 
@@ -435,7 +445,7 @@ pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9101]},
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9311]},
             "neighbors": {"node": "mr", "direction": "both"}
         }"#,
         &dedup_svc(),
@@ -448,9 +458,8 @@ pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
     // documents a known limitation: edge-only queries cannot filter out
     // deleted nodes.
     resp.skip_requirement(Requirement::NodeCount);
-    resp.assert_node_ids("MergeRequest", &[9101]);
-    // The edge still appears because the edge row has _deleted=false.
-    resp.assert_edge_exists("User", 9301, "MergeRequest", 9101, "AUTHORED");
+    resp.assert_node_ids("MergeRequest", &[9311]);
+    resp.assert_edge_exists("User", 9301, "MergeRequest", 9311, "AUTHORED");
 }
 
 /// Hydration returns properties from the latest version, not a stale one.
@@ -496,18 +505,18 @@ pub(super) async fn hydration_returns_latest_properties(ctx: &TestContext) {
 /// Soft-deleted edge row excluded from traversal results.
 /// The edge itself has _deleted=true (as the indexer would set it).
 pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
-    // MR 9700: alive, with a deleted edge to project 1003
-    // MR 9701: alive, with a non-deleted edge to project 1003
+    // MR 9700: alive, with a deleted edge to project 1000
+    // MR 9701: alive, with a non-deleted edge to project 1000
     ctx.execute(
         "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path, _version, _deleted) VALUES
-         (9700, 700, 'Alive MR deleted edge', 'merged', '1/100/1003/', '2024-06-01 00:00:00', false),
-         (9701, 701, 'Alive MR good edge',    'merged', '1/100/1003/', '2024-06-01 00:00:00', false)",
+         (9700, 700, 'Alive MR deleted edge', 'merged', '1/100/1000/', '2024-06-01 00:00:00', false),
+         (9701, 701, 'Alive MR good edge',    'merged', '1/100/1000/', '2024-06-01 00:00:00', false)",
     )
     .await;
     ctx.execute(
         "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _deleted) VALUES
-         ('1/100/1003/', 9700, 'MergeRequest', 'IN_PROJECT', 1003, 'Project', true),
-         ('1/100/1003/', 9701, 'MergeRequest', 'IN_PROJECT', 1003, 'Project', false)",
+         ('1/100/1000/', 9700, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', true),
+         ('1/100/1000/', 9701, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', false)",
     )
     .await;
 
@@ -517,7 +526,7 @@ pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project", "node_ids": [1003]}
+                {"id": "p", "entity": "Project", "node_ids": [1000]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "limit": 10
@@ -528,10 +537,10 @@ pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
 
     // Only MR 9701's edge should appear. MR 9700's edge is soft-deleted.
     resp.skip_requirement(Requirement::NodeCount);
-    resp.assert_node_ids("Project", &[1003]);
-    resp.assert_edge_exists("MergeRequest", 9701, "Project", 1003, "IN_PROJECT");
+    resp.assert_node_ids("Project", &[1000]);
+    resp.assert_edge_exists("MergeRequest", 9701, "Project", 1000, "IN_PROJECT");
     assert!(
-        resp.find_edge("MergeRequest", 9700, "Project", 1003, "IN_PROJECT")
+        resp.find_edge("MergeRequest", 9700, "Project", 1000, "IN_PROJECT")
             .is_none(),
         "edge for MR 9700 should be excluded (_deleted=true)"
     );
