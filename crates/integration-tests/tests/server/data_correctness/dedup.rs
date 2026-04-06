@@ -326,8 +326,13 @@ pub(super) async fn traversal_filter_excludes_stale_version(ctx: &TestContext) {
     resp.assert_edge_count("IN_PROJECT", 1);
 }
 
-/// Edge-only traversals cannot filter out deleted nodes: the node is
-/// soft-deleted but the edge row is not, and the node table is not joined.
+/// Edge-only traversals cannot filter out deleted nodes at the query layer:
+/// the node is soft-deleted but the edge row is not, and the node table is
+/// not joined. In production this scenario does not arise because the SDLC
+/// indexer soft-deletes FK edge rows in the same ETL batch as their parent
+/// node (see `crates/indexer/src/modules/sdlc/pipeline.rs`). This test uses
+/// a synthetic setup (deleted node + non-deleted edge) to document the
+/// query-layer limitation.
 /// Uses project 1004 to avoid interference.
 pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
     // MR 9500: v1 alive, v2 deleted
@@ -406,9 +411,10 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
     resp.assert_edge_exists("User", 9300, "MergeRequest", 9101, "AUTHORED");
 }
 
-/// Edge-only neighbors cannot filter out deleted nodes: the node is
-/// soft-deleted but the edge row is not, and neighbor queries don't join
-/// non-center node tables.
+/// Edge-only neighbors cannot filter out deleted nodes at the query layer:
+/// the node is soft-deleted but the edge row is not, and neighbor queries
+/// don't join non-center node tables. In production the indexer soft-deletes
+/// FK edge rows alongside their parent node, so this scenario is synthetic.
 pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
     // User 9301: v1 alive, v2 deleted. Should not appear as a neighbor.
     ctx.execute(
