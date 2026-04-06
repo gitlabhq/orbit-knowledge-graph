@@ -179,6 +179,29 @@ impl TestContext {
         let schema_refs: Vec<&str> = self.schema_sqls.iter().map(|s| s.as_str()).collect();
         Self::run_schema_in(&self.url, name, &schema_refs).await;
 
+        // Copy data from parent into fork for tables that exist in both.
+        let src = &self.config.database;
+        let batches = self
+            .query(&format!(
+                "SELECT name FROM system.tables WHERE database = '{name}' AND engine != 'View'"
+            ))
+            .await;
+        for batch in &batches {
+            let names =
+                ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
+            for i in 0..batch.num_rows() {
+                let table = names.value(i);
+                admin
+                    .execute(&format!(
+                        "INSERT INTO `{name}`.`{table}` SELECT * FROM `{src}`.`{table}`"
+                    ))
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!("failed to copy {src}.{table} -> {name}.{table}: {e}")
+                    });
+            }
+        }
+
         Self {
             _container: Arc::clone(&self._container),
             config: ClickHouseConfiguration {
