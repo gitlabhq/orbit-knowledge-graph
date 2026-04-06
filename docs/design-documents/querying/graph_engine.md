@@ -68,8 +68,29 @@ The planner emits ClickHouse SQL similar to these patterns:
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
 - Derived‑table subqueries: `(SELECT ... GROUP BY ... HAVING ...) AS alias` in FROM/JOIN positions for deduplication patterns (e.g., `argMax(_deleted, _version)`).
+- Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
 
 These choices preserve factorization: each hop operates on a compact frontier and prunes the next edge scan via semi‑joins, mirroring Kùzu’s accumulate → semijoin → probe execution.
+
+### Row deduplication
+
+Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The compiler's `DeduplicatePass` (`crates/query-engine/compiler/src/passes/deduplicate.rs`) ensures query-time correctness:
+
+| Scan type | Strategy | Rationale |
+|---|---|---|
+| Search (single-node) | `argMaxIfOrNull` + `GROUP BY` + `HAVING` | Preserves LIMIT pushdown; filters verified against latest version in HAVING |
+| `_nf_*` CTEs (node filters) | `argMaxIfOrNull` + `GROUP BY` + `HAVING` | ID-only output; hash aggregate cheaper than sort |
+| Hydration (UNION ALL arms) | `argMaxIfOrNull` + `GROUP BY` + `HAVING` | Excludes deleted rows and stale properties |
+| Main query node scans | `ORDER BY _version DESC LIMIT 1 BY id` subquery | Multi-column output where argMax wrapping is impractical |
+| Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
+
+Filter placement rules for `LIMIT 1 BY` subqueries:
+
+- **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are pushed inside the subquery for primary key index pruning. These columns are invariant across row versions.
+- **Mutable filters** (`state`, `status`, `draft`) stay outside the subquery and evaluate against the deduplicated latest-version row, preventing stale version matches.
+- **`_deleted = false`** always stays outside (or is encoded in the `argMaxIfOrNull` condition for argMax strategies).
+
+Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 
 ## Request Flow (Deployed)
 

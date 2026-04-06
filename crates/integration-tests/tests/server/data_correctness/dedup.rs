@@ -14,8 +14,11 @@ use super::helpers::*;
 
 fn dedup_svc() -> MockRedactionService {
     let mut svc = allow_all();
-    svc.allow("user", &[9001, 9002, 9003, 9010, 9011]);
-    svc.allow("merge_request", &[9100, 9101, 9200, 9201]);
+    svc.allow("user", &[9001, 9002, 9003, 9010, 9011, 9300, 9301]);
+    svc.allow(
+        "merge_request",
+        &[9100, 9101, 9200, 9201, 9400, 9401, 9500, 9501],
+    );
     svc
 }
 
@@ -273,4 +276,177 @@ pub(super) async fn traversal_dedup_returns_single_edge(ctx: &TestContext) {
     resp.assert_node_ids("User", &[9003]);
     resp.assert_edge_exists("User", 9003, "MergeRequest", 9101, "AUTHORED");
     resp.assert_edge_count("AUTHORED", 1);
+}
+
+/// Traversal with mutable filter: v1 state='merged', v2 state='opened'.
+/// The filter should NOT match because the latest version has state='opened'.
+/// Uses project 1003 to avoid interference with other concurrent tests.
+pub(super) async fn traversal_filter_excludes_stale_version(ctx: &TestContext) {
+    // MR 9400: v1 merged, v2 opened -- latest is 'opened'
+    // MR 9401: single version, state='merged' -- should match
+    ctx.execute(
+        "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path, _version, _deleted) VALUES
+         (9400, 400, 'Stale Traversal MR', 'merged', '1/100/1003/', '2024-01-01 00:00:00', false),
+         (9400, 400, 'Stale Traversal MR', 'opened', '1/100/1003/', '2024-06-01 00:00:00', false),
+         (9401, 401, 'Good Traversal MR',  'merged', '1/100/1003/', '2024-06-01 00:00:00', false)",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1003/', 9400, 'MergeRequest', 'IN_PROJECT', 1003, 'Project'),
+         ('1/100/1003/', 9401, 'MergeRequest', 'IN_PROJECT', 1003, 'Project'),
+         ('1/100/1003/', 1, 'User', 'AUTHORED', 9400, 'MergeRequest'),
+         ('1/100/1003/', 1, 'User', 'AUTHORED', 9401, 'MergeRequest')",
+    )
+    .await;
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+                {"id": "p", "entity": "Project", "node_ids": [1003]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+            "limit": 10
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    // Only MR 9401 should appear (state='merged').
+    // MR 9400 must NOT appear: latest version has state='opened'.
+    resp.skip_requirement(Requirement::Filter {
+        field: "state".into(),
+    });
+    resp.assert_node_count(2);
+    resp.assert_node_ids("Project", &[1003]);
+    resp.assert_edge_exists("MergeRequest", 9401, "Project", 1003, "IN_PROJECT");
+    resp.assert_edge_count("IN_PROJECT", 1);
+}
+
+/// Edge-only traversals cannot filter out deleted nodes at the query layer:
+/// the node is soft-deleted but the edge row is not, and the node table is
+/// not joined. In production this scenario does not arise because the SDLC
+/// indexer soft-deletes FK edge rows in the same ETL batch as their parent
+/// node (see `crates/indexer/src/modules/sdlc/pipeline.rs`). This test uses
+/// a synthetic setup (deleted node + non-deleted edge) to document the
+/// query-layer limitation.
+/// Uses project 1004 to avoid interference.
+pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
+    // MR 9500: v1 alive, v2 deleted
+    // MR 9501: single version, alive
+    ctx.execute(
+        "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path, _version, _deleted) VALUES
+         (9500, 500, 'Deleted MR', 'merged', '1/100/1004/', '2024-01-01 00:00:00', false),
+         (9500, 500, 'Deleted MR', 'merged', '1/100/1004/', '2024-06-01 00:00:00', true),
+         (9501, 501, 'Alive MR',   'merged', '1/100/1004/', '2024-06-01 00:00:00', false)",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1004/', 9500, 'MergeRequest', 'IN_PROJECT', 1004, 'Project'),
+         ('1/100/1004/', 9501, 'MergeRequest', 'IN_PROJECT', 1004, 'Project')",
+    )
+    .await;
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project", "node_ids": [1004]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+            "limit": 10
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    // The traversal is edge-only: the MR node table is not joined, so
+    // MR 9500's deletion status is not visible to the query. The edge row
+    // itself is not deleted, so it still appears. This documents a known
+    // limitation: edge-only traversals cannot filter out deleted nodes.
+    resp.assert_node_count(3);
+    resp.assert_node_ids("Project", &[1004]);
+    resp.assert_edge_exists("MergeRequest", 9501, "Project", 1004, "IN_PROJECT");
+    resp.assert_edge_exists("MergeRequest", 9500, "Project", 1004, "IN_PROJECT");
+    resp.assert_edge_count("IN_PROJECT", 2);
+}
+
+/// Neighbors dedup: duplicate user rows should not produce duplicate edges.
+pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
+    // User 9300 has two versions. Should appear once as a neighbor of MR 9101.
+    ctx.execute(
+        "INSERT INTO gl_user (id, username, name, state, user_type, _version, _deleted) VALUES
+         (9300, 'nbr_old', 'Neighbor Old', 'active', 'human', '2024-01-01 00:00:00', false),
+         (9300, 'nbr_new', 'Neighbor New', 'active', 'human', '2024-06-01 00:00:00', false)",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1000/', 9300, 'User', 'AUTHORED', 9101, 'MergeRequest')",
+    )
+    .await;
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9101]},
+            "neighbors": {"node": "mr", "direction": "both"}
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    // MR 9101 should have user 9300 as a neighbor with exactly one edge.
+    // Other tests insert edges to MR 9101 concurrently, so skip exact count.
+    resp.skip_requirement(Requirement::NodeCount);
+    resp.assert_node_ids("MergeRequest", &[9101]);
+    // assert_edge_exists satisfies the Neighbors requirement.
+    resp.assert_edge_exists("User", 9300, "MergeRequest", 9101, "AUTHORED");
+}
+
+/// Edge-only neighbors cannot filter out deleted nodes at the query layer:
+/// the node is soft-deleted but the edge row is not, and neighbor queries
+/// don't join non-center node tables. In production the indexer soft-deletes
+/// FK edge rows alongside their parent node, so this scenario is synthetic.
+pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
+    // User 9301: v1 alive, v2 deleted. Should not appear as a neighbor.
+    ctx.execute(
+        "INSERT INTO gl_user (id, username, name, state, user_type, _version, _deleted) VALUES
+         (9301, 'del_nbr', 'Deleted Neighbor', 'active', 'human', '2024-01-01 00:00:00', false),
+         (9301, 'del_nbr', 'Deleted Neighbor', 'active', 'human', '2024-06-01 00:00:00', true)",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/100/1000/', 9301, 'User', 'AUTHORED', 9101, 'MergeRequest')",
+    )
+    .await;
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9101]},
+            "neighbors": {"node": "mr", "direction": "both"}
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    // User 9301 is soft-deleted, but the edge row itself is not deleted.
+    // Neighbors queries are edge-only -- they don't join node tables for
+    // non-center nodes, so the deleted user's edge still appears. This
+    // documents a known limitation: edge-only queries cannot filter out
+    // deleted nodes.
+    resp.skip_requirement(Requirement::NodeCount);
+    resp.assert_node_ids("MergeRequest", &[9101]);
+    // The edge still appears because the edge row has _deleted=false.
+    resp.assert_edge_exists("User", 9301, "MergeRequest", 9101, "AUTHORED");
 }

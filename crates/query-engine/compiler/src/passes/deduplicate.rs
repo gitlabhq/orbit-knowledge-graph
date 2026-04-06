@@ -32,6 +32,10 @@ fn is_node_table(table: &str) -> bool {
     table.starts_with(GL_TABLE_PREFIX) && table != EDGE_TABLE
 }
 
+fn is_edge_table(table: &str) -> bool {
+    table == EDGE_TABLE
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Entry point
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,6 +73,28 @@ fn dedup_query(q: &mut Query, input: &Input, ontology: &Ontology) {
         dedup_query(arm, input, ontology);
     }
     dispatch(q, input, ontology);
+    add_edge_deleted_filters(&q.from, &mut q.where_clause);
+}
+
+/// Add `_deleted = false` filters for every edge table scan in the FROM tree.
+/// Edge tables use ReplacingMergeTree with `_deleted` but are not wrapped
+/// in dedup subqueries (their full-tuple ORDER BY makes RMT dedup effective).
+/// Between merges, soft-deleted edge rows can still appear.
+fn add_edge_deleted_filters(from: &TableRef, where_clause: &mut Option<Expr>) {
+    match from {
+        TableRef::Scan { table, alias } if is_edge_table(table) => {
+            let filter = not_deleted(alias);
+            *where_clause = Some(match where_clause.take() {
+                Some(existing) => Expr::and(existing, filter),
+                None => filter,
+            });
+        }
+        TableRef::Join { left, right, .. } => {
+            add_edge_deleted_filters(left, where_clause);
+            add_edge_deleted_filters(right, where_clause);
+        }
+        _ => {}
+    }
 }
 
 fn visit_derived_tables(from: &mut TableRef, input: &Input, ontology: &Ontology) {
