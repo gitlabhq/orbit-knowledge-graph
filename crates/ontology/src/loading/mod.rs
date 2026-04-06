@@ -212,6 +212,15 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     edge_name, entity.target_kind
                 )));
             }
+            if !ontology
+                .edge_table_configs
+                .contains_key(&entity.destination_table)
+            {
+                return Err(OntologyError::Validation(format!(
+                    "edge '{}' references unknown edge table '{}'",
+                    edge_name, entity.destination_table
+                )));
+            }
         }
 
         ontology.edges.insert(edge_name.clone(), entities);

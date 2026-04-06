@@ -97,6 +97,8 @@ pub struct CompilerMetadata {
     pub default_edge_table: String,
 }
 
+/// Defaults to `gl_edge` for test convenience. In production, `normalize()`
+/// always overwrites `edge_tables` and `default_edge_table` from the ontology.
 impl Default for CompilerMetadata {
     fn default() -> Self {
         Self {
