@@ -42,6 +42,17 @@ It does **not** apply to:
 - **Siphon datalake tables.** These are owned by Rails and managed through Rails ClickHouse migration mechanisms. GKG reads from them but does not own their schema lifecycle.
 - **Ontology definitions.** The YAML in `config/ontology/` defines entity types, properties, and ETL mappings. Ontology changes may *trigger* migrations but are not themselves managed by this framework.
 
+### Relationship between ontology and migrations
+
+The ontology (`config/ontology/`) and the ClickHouse graph schema (`config/graph.sql`) are tightly coupled today — both are updated in the same MR when an entity type or property changes. The migration framework does not change this relationship; it adds a third artifact (the migration) that must also be updated in the same MR.
+
+In practice, changes that touch the ontology fall into two categories:
+
+1. **Ontology-only changes** (e.g., updating redaction metadata, ETL mappings, or query validation rules). These do not affect the ClickHouse schema and do not need a migration.
+2. **Schema-affecting changes** (e.g., adding a new entity type, adding a property that needs a ClickHouse column, changing a column type). These need both an ontology update and a migration.
+
+A future evolution could make this relationship more automatic — for example, the migration framework could diff the ontology's declared properties against the actual ClickHouse schema and generate migration steps. However, this is explicitly out of scope for V1/V2/V3 and would be a significant design effort in its own right. For now, the co-evolution is enforced by the [authoring contract](v1_migration_registry.md#authoring-contract): every schema-changing MR must update the ontology, `graph.sql`, and the migration registry together.
+
 ## Current state
 
 ### DDL management
@@ -212,7 +223,11 @@ The following questions from the original draft have been addressed based on rev
 
 ### Still open
 
-1. **Convergence scope granularity.** Namespace-level for SDLC and project+branch for code is the working assumption. Are there migration types that do not fit these scopes (e.g., table-specific, entity-specific, or global-but-batchable)?
+1. **Convergence scope granularity and code vs SDLC differences.** Namespace-level for SDLC and project+branch for code is the working assumption. However, these two indexing paths have meaningful differences that affect migration design:
+   - Code indexing tables (`gl_file`, `gl_definition`, `gl_directory`, `gl_imported_symbol`) use `ReplacingMergeTree(_version)` **without `_deleted`**, unlike SDLC tables which use `ReplacingMergeTree(_version, _deleted)`. Convergence backfill may need to account for this difference.
+   - Code re-indexing requires downloading repository archives via the Rails internal API — it is significantly more expensive than SDLC re-indexing which reads from the ClickHouse datalake.
+   - Code indexing uses `code_indexing_checkpoint` (keyed by `traversal_path, project_id, branch`), while SDLC uses the `checkpoint` table (keyed by handler name). The checkpoint models are different.
+   - Are there migration types that do not fit either scope (e.g., table-specific, entity-specific, or global-but-batchable like `gl_edge` restructuring)?
 2. **Reconciler scheduling.** Should the reconciler run continuously (loop with sleep) or be periodic (invoked by DispatchIndexing CronJob)? Continuous is simpler but uses a persistent background task; periodic aligns with the existing scheduling model.
 3. **Self-managed deployments.** How does the migration framework behave for self-managed instances where the deployment lifecycle is different from `.com`? Are there constraints on migration timing or operator tooling?
 4. **Scope discovery completeness.** The current design discovers scopes from checkpoint tables. Are there edge cases where graph data exists but checkpoint state is absent, partially deleted, or stale? Should scope discovery also scan graph tables directly?

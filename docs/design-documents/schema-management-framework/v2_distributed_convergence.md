@@ -306,6 +306,21 @@ The webserver refreshes its cached compatibility state when it receives a NATS K
 
 Namespaces/projects onboarded during convergence are indexed with the current target schema version from the start. The indexer dual-writes as usual, and the new scope's checkpoint `schema_version` is set to the target version immediately. No convergence backfill is needed for these scopes.
 
+### Watermark and checkpoint interaction
+
+The existing SDLC indexing pipeline uses cursor-based keyset pagination with watermarks stored in the `checkpoint` table (see [!446](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/446)). Code indexing uses `code_indexing_checkpoint` with `last_task_id` and `last_commit` (see [!564](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/564)). Migration convergence must interact correctly with these checkpoints.
+
+**Key invariant**: convergence backfill must not disrupt normal indexing watermarks. The backfill and normal indexing serve different purposes:
+
+- **Normal indexing** processes *new* CDC events from Siphon (SDLC) or new code pushes (code). Its watermark tracks "how far through the event stream have I processed?"
+- **Convergence backfill** re-processes *existing* data that was indexed at an older schema version. It does not consume new events — it re-reads data that was already ingested and rewrites it to the new schema.
+
+**SDLC convergence**: The backfill reads from the ClickHouse datalake (already-ingested Siphon data) and writes to graph tables. It does **not** reset or modify the SDLC handler's watermark in the `checkpoint` table. The watermark continues to track CDC stream position independently. The backfill tracks its own progress via the `gkg_migration_scopes` table and updates the checkpoint's `schema_version` column on completion.
+
+**Code convergence**: Re-indexing a project+branch requires downloading the repository archive from Rails and re-running the code parser. This is the same operation as a normal code indexing task. The convergence dispatcher publishes `CodeIndexingTaskRequest` messages (the same message type as normal code indexing). The existing handler processes them, and on completion the `code_indexing_checkpoint` row is updated with the new `last_commit` and `schema_version`. This means code convergence **does** update the code checkpoint — but this is correct because it produces a fresh, complete index of the project at the new schema version.
+
+**Dual-write and watermarks**: When the indexer dual-writes during a convergent migration, both old and new columns are written in the same `INSERT` batch. This does not affect watermark progression — the watermark advances normally because the same number of events are processed. The additional columns are simply extra data in the same write.
+
 ## Acceptance criteria
 
 1. **Convergence scope table** — `gkg_migration_scopes` created automatically. Records per-scope status transitions.
