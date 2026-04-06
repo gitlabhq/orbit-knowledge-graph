@@ -83,17 +83,28 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     let mut ontology = Ontology::new();
     ontology.schema_version = schema.schema_version.unwrap_or_default();
-    ontology.table_prefix = schema.settings.table_prefix;
-    ontology.edge_table = schema.settings.edge_table;
+    ontology.table_prefix = schema.settings.table_prefix.clone();
+    ontology.default_edge_table = schema.settings.default_edge_table;
     ontology.default_entity_sort_key = schema.settings.default_entity_sort_key;
-    ontology.edge_sort_key = schema.settings.edge_sort_key;
-    ontology.edge_columns = schema
+
+    // Load edge table configs.
+    ontology.edge_table_configs = schema
         .settings
-        .edge_columns
+        .edge_tables
         .into_iter()
-        .map(|c| crate::entities::EdgeColumn {
-            name: c.name,
-            data_type: c.data_type,
+        .map(|(name, cfg)| {
+            let config = crate::EdgeTableConfig {
+                sort_key: cfg.sort_key,
+                columns: cfg
+                    .columns
+                    .into_iter()
+                    .map(|c| crate::entities::EdgeColumn {
+                        name: c.name,
+                        data_type: c.data_type,
+                    })
+                    .collect(),
+            };
+            (name, config)
         })
         .collect();
 
@@ -104,24 +115,36 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     };
     ontology.etl_settings = etl_settings.clone();
     ontology.internal_column_prefix = schema.settings.internal_column_prefix;
-    // Resolve entity names → physical table names after nodes are loaded (see below).
 
-    if !ontology.edge_table.starts_with(&ontology.table_prefix) {
+    // Validate edge table names.
+    for table_name in ontology.edge_table_configs.keys() {
+        if !table_name.starts_with(&ontology.table_prefix) {
+            return Err(OntologyError::Validation(format!(
+                "edge table '{}' does not start with table_prefix '{}'",
+                table_name, ontology.table_prefix
+            )));
+        }
+    }
+    if !ontology
+        .edge_table_configs
+        .contains_key(&ontology.default_edge_table)
+    {
         return Err(OntologyError::Validation(format!(
-            "edge_table '{}' does not start with table_prefix '{}'",
-            ontology.edge_table, ontology.table_prefix
+            "default_edge_table '{}' is not defined in edge_tables",
+            ontology.default_edge_table
         )));
     }
 
+    // Validate default edge table columns match EDGE_RESERVED_COLUMNS.
     let actual_names: Vec<&str> = ontology
-        .edge_columns
+        .edge_columns()
         .iter()
         .map(|c| c.name.as_str())
         .collect();
     let expected: &[&str] = crate::constants::EDGE_RESERVED_COLUMNS;
     if actual_names != expected {
         return Err(OntologyError::Validation(format!(
-            "edge_columns names {:?} do not match EDGE_RESERVED_COLUMNS {:?}",
+            "default edge table columns {:?} do not match EDGE_RESERVED_COLUMNS {:?}",
             actual_names, expected
         )));
     }
@@ -174,7 +197,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         let content = reader.read(edge_path)?;
         let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
-        let entities = edge_def.to_entities(edge_name.clone(), &ontology.edge_table);
+        let entities = edge_def.to_entities(edge_name.clone(), ontology.edge_table());
 
         for entity in &entities {
             if !ontology.nodes.contains_key(&entity.source_kind) {
