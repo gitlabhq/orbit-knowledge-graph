@@ -440,7 +440,14 @@ fn hydration_preset_skips_security_and_check() {
 
     assert_eq!(
         pass_names,
-        vec!["lower", "optimize", "enforce", "settings", "codegen"]
+        vec![
+            "lower",
+            "optimize",
+            "enforce",
+            "deduplicate",
+            "settings",
+            "codegen"
+        ]
     );
     assert!(!pass_names.contains(&"security"));
     assert!(!pass_names.contains(&"check"));
