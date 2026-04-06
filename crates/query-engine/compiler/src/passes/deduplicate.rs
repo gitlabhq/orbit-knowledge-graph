@@ -12,6 +12,7 @@
 //! | Neighbors    | LIMIT 1 BY subquery (CTEs)    | Edge-only lowering, node dedup via _nf CTE |
 //! | PathFinding  | LIMIT 1 BY subquery           | Recursive CTEs, multi-hop joins            |
 //! | Hydration    | (skipped)                     | Separate pipeline, no dedup pass           |
+//! | _nf_* CTEs   | argMaxIfOrNull + GROUP BY     | ID-only select, avoids sort overhead       |
 //!
 //! Edge tables are always excluded -- their full-tuple ORDER BY makes RMT
 //! dedup effective, and wrapping them would kill LIMIT pushdown.
@@ -40,10 +41,25 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
     match node {
         Node::Query(q) => {
             for cte in &mut q.ctes {
-                dedup_query(&mut cte.query, input, ontology);
+                if cte.name.starts_with("_nf_") {
+                    dedup_nf_cte(&mut cte.query);
+                } else {
+                    dedup_query(&mut cte.query, input, ontology);
+                }
             }
             dedup_query(q, input, ontology);
         }
+    }
+}
+
+/// Deduplicate a `_nf_*` CTE using argMax. These CTEs only select `id`,
+/// so argMax is cheaper than LIMIT BY (hash aggregate vs full sort).
+fn dedup_nf_cte(q: &mut Query) {
+    if let TableRef::Scan { table, alias } = &q.from
+        && is_node_table(table)
+    {
+        let alias = alias.clone();
+        apply_argmax_dedup(q, &alias);
     }
 }
 
@@ -548,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn wraps_cte_node_scans() {
+    fn nf_cte_uses_argmax() {
         let ont = ontology();
         let mut node = Node::Query(Box::new(Query {
             ctes: vec![Cte::new(
@@ -556,6 +572,7 @@ mod tests {
                 Query {
                     select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
                     from: TableRef::scan("gl_merge_request", "mr"),
+                    where_clause: Some(Expr::eq(Expr::col("mr", "state"), Expr::string("merged"))),
                     ..Default::default()
                 },
             )],
@@ -566,9 +583,49 @@ mod tests {
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
         let Node::Query(q) = &node;
+        let cte_q = &q.ctes[0].query;
+        // _nf_* CTEs should use argMax, not LIMIT BY
+        assert!(
+            matches!(&cte_q.from, TableRef::Scan { table, .. } if table == "gl_merge_request"),
+            "CTE scan should NOT be wrapped in subquery"
+        );
+        assert!(!cte_q.group_by.is_empty(), "should add GROUP BY");
+        assert!(cte_q.having.is_some(), "should add HAVING clause");
+        let having_str = format!("{:?}", cte_q.having);
+        assert!(
+            having_str.contains("argMaxIfOrNull"),
+            "HAVING should use argMaxIfOrNull"
+        );
+        assert!(
+            having_str.contains("merged"),
+            "HAVING should re-check value filters via argMaxIfOrNull"
+        );
+        // WHERE still has the original filter (for index pruning)
+        assert!(where_contains(&cte_q.where_clause, "state"));
+        assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "_nf_mr"));
+    }
+
+    #[test]
+    fn non_nf_cte_uses_limit_by() {
+        let ont = ontology();
+        let mut node = Node::Query(Box::new(Query {
+            ctes: vec![Cte::new(
+                "some_other_cte",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+                    from: TableRef::scan("gl_merge_request", "mr"),
+                    ..Default::default()
+                },
+            )],
+            select: vec![SelectExpr::new(Expr::col("b", "id"), "id")],
+            from: TableRef::scan("some_other_cte", "b"),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
+
+        let Node::Query(q) = &node;
         let inner = find_subquery(&q.ctes[0].query.from, "mr").expect("CTE scan wrapped");
         assert!(has_limit_by(inner));
-        assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "_nf_mr"));
     }
 
     #[test]
