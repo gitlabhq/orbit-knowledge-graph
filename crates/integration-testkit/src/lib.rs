@@ -20,7 +20,7 @@ pub async fn collect_subtest_results(handles: Vec<(&str, tokio::task::JoinHandle
     for (name, handle) in handles {
         match handle.await {
             Ok(()) => {}
-            Err(e) => {
+            Err(e) if e.is_panic() => {
                 let payload = e.into_panic();
                 let msg = if let Some(s) = payload.downcast_ref::<String>() {
                     s.clone()
@@ -30,6 +30,9 @@ pub async fn collect_subtest_results(handles: Vec<(&str, tokio::task::JoinHandle
                     "panic (see stderr)".to_string()
                 };
                 failed.push(format!("{}: {}", name, msg));
+            }
+            Err(_) => {
+                failed.push(format!("{}: task cancelled", name));
             }
         }
     }
