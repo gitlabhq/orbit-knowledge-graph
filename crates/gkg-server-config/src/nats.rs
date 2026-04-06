@@ -236,7 +236,7 @@ impl NatsConfiguration {
     }
 
     pub fn fetch_expires(&self) -> Duration {
-        Duration::from_secs(self.fetch_expires_secs)
+        Duration::from_secs(self.fetch_expires_secs.max(1))
     }
 
     pub fn stream_max_age(&self) -> Option<Duration> {
@@ -438,5 +438,22 @@ mod tests {
         assert!(config.tls_cert_path.is_none());
         assert!(config.tls_key_path.is_none());
         assert!(!config.tls_enabled());
+    }
+
+    #[test]
+    fn fetch_expires_defaults_to_5s() {
+        let yaml = r#"url: "localhost:4222""#;
+        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.fetch_expires(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn fetch_expires_clamps_zero_to_1s() {
+        let yaml = r#"
+            url: "localhost:4222"
+            fetch_expires_secs: 0
+        "#;
+        let config: NatsConfiguration = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.fetch_expires(), Duration::from_secs(1));
     }
 }
