@@ -173,8 +173,8 @@ async fn data_correctness() {
         dedup::aggregation_filter_excludes_stale_mutable_match,
         dedup::traversal_dedup_returns_single_edge,
         dedup::traversal_filter_excludes_stale_version,
-        dedup::traversal_excludes_deleted_entity,
+        dedup::traversal_deleted_node_visible_via_edge,
         dedup::neighbors_dedup_returns_unique_edges,
-        dedup::neighbors_excludes_deleted_entity,
+        dedup::neighbors_deleted_node_visible_via_edge,
     );
 }

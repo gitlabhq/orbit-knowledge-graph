@@ -326,9 +326,10 @@ pub(super) async fn traversal_filter_excludes_stale_version(ctx: &TestContext) {
     resp.assert_edge_count("IN_PROJECT", 1);
 }
 
-/// Deleted MR excluded from traversal. Latest version has _deleted=true.
+/// Edge-only traversals cannot filter out deleted nodes: the node is
+/// soft-deleted but the edge row is not, and the node table is not joined.
 /// Uses project 1004 to avoid interference.
-pub(super) async fn traversal_excludes_deleted_entity(ctx: &TestContext) {
+pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
     // MR 9500: v1 alive, v2 deleted
     // MR 9501: single version, alive
     ctx.execute(
@@ -405,8 +406,10 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
     resp.assert_edge_exists("User", 9300, "MergeRequest", 9101, "AUTHORED");
 }
 
-/// Deleted user excluded from neighbors.
-pub(super) async fn neighbors_excludes_deleted_entity(ctx: &TestContext) {
+/// Edge-only neighbors cannot filter out deleted nodes: the node is
+/// soft-deleted but the edge row is not, and neighbor queries don't join
+/// non-center node tables.
+pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
     // User 9301: v1 alive, v2 deleted. Should not appear as a neighbor.
     ctx.execute(
         "INSERT INTO gl_user (id, username, name, state, user_type, _version, _deleted) VALUES
