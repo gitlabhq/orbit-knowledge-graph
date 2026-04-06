@@ -132,15 +132,15 @@ pub struct DeduplicatePass;
 
 impl<E, S> CompilerPass<E, S> for DeduplicatePass
 where
-    E: PipelineEnv,
+    E: PipelineEnv + HasOntology,
     S: PipelineState + HasNode + HasInput,
 {
     const NAME: &'static str = "deduplicate";
 
-    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+    fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let input = state.input()?.clone();
         let node = state.node_mut()?;
-        deduplicate::deduplicate(node, &input);
+        deduplicate::deduplicate(node, &input, env.ontology());
         Ok(())
     }
 }
