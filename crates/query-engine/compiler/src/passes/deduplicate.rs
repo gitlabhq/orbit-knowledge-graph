@@ -132,6 +132,7 @@ fn partition_filters(
         return (vec![], vec![]);
     };
 
+    let sort_key_set: HashSet<&str> = sort_key.iter().map(|s| s.as_str()).collect();
     let conjuncts = expr.flatten_and();
     let mut inner = vec![];
     let mut outer = vec![];
@@ -139,7 +140,7 @@ fn partition_filters(
     for c in conjuncts {
         if !is_deleted_filter(&c)
             && c.references_only(alias)
-            && references_only_sort_key(&c, sort_key)
+            && references_only_sort_key(&c, &sort_key_set)
         {
             inner.push(c);
         } else {
@@ -151,9 +152,9 @@ fn partition_filters(
 }
 
 /// Check if every column referenced by the expression is in the sort key.
-fn references_only_sort_key(expr: &Expr, sort_key: &[String]) -> bool {
+fn references_only_sort_key(expr: &Expr, sort_key: &HashSet<&str>) -> bool {
     let cols = expr.referenced_columns();
-    cols.iter().all(|c| sort_key.contains(c))
+    cols.iter().all(|c| sort_key.contains(c.as_str()))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
