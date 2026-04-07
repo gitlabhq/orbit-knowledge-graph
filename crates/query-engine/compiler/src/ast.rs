@@ -165,6 +165,10 @@ pub struct Cte {
     pub name: String,
     pub query: Box<Query>,
     pub recursive: bool,
+    /// Emit `AS MATERIALIZED (...)` so ClickHouse executes the CTE once
+    /// and serves all references from a temporary table. Requires
+    /// `enable_materialized_cte = 1` in SETTINGS.
+    pub materialized: bool,
 }
 
 impl Cte {
@@ -173,6 +177,16 @@ impl Cte {
             name: name.into(),
             query: Box::new(query),
             recursive: false,
+            materialized: false,
+        }
+    }
+
+    pub fn materialized(name: impl Into<String>, query: Query) -> Self {
+        Self {
+            name: name.into(),
+            query: Box::new(query),
+            recursive: false,
+            materialized: true,
         }
     }
 }

@@ -53,6 +53,7 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
+                apply_compute_first_aggregation(q, input);
             }
             if input.query_type == QueryType::PathFinding {
                 apply_path_hop_frontiers(q, input);
@@ -1112,6 +1113,252 @@ fn apply_edge_led_reorder(q: &mut Query, input: &Input) {
             }
             _ => return,
         }
+    }
+}
+
+const GROUP_SIP_CTE: &str = "_group_ids";
+
+/// Compute-first aggregation: rewrite eligible aggregation queries to
+/// pre-aggregate on the edge table before joining the group-by node table.
+///
+/// A materialized CTE (`_group_ids`) passes the group-by node's IDs into
+/// the inner subquery so ClickHouse can use them for primary key index
+/// pruning on the edge table -- restoring the granule selectivity that a
+/// flat join provides implicitly via its hash table.
+fn apply_compute_first_aggregation(q: &mut Query, input: &Input) {
+    if input.relationships.len() != 1 || input.compiler.node_edge_col.is_empty() {
+        return;
+    }
+    if q.group_by.is_empty() {
+        return;
+    }
+
+    let (edge_alias, node_alias, edge_col_for_join) = match extract_edge_node_join(&q.from, input) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let group_node = match input.nodes.iter().find(|n| n.id == node_alias) {
+        Some(n) => n,
+        None => return,
+    };
+    let group_table = match &group_node.table {
+        Some(t) => t.clone(),
+        None => return,
+    };
+
+    // Partition WHERE into edge-only and non-edge conjuncts.
+    let all_conjuncts = match q.where_clause.take() {
+        Some(w) => w.flatten_and(),
+        None => vec![],
+    };
+    let mut edge_where: Vec<Expr> = Vec::new();
+    let mut outer_where: Vec<Expr> = Vec::new();
+    for c in all_conjuncts {
+        let aliases = c.column_aliases();
+        if !aliases.is_empty() && aliases.iter().all(|a| a == &edge_alias) {
+            edge_where.push(c);
+        } else {
+            outer_where.push(c);
+        }
+    }
+
+    // Build a MATERIALIZED CTE for the group-by node's IDs. Executed once
+    // and reused by both the IN filter in the inner subquery and any other
+    // references. Reuse an existing _nf_* CTE if available.
+    let existing_nf = node_filter_cte(&node_alias);
+    let group_sip_name = if q.ctes.iter().any(|c| c.name == existing_nf) {
+        existing_nf
+    } else {
+        let group_only_conds: Vec<Expr> = outer_where
+            .iter()
+            .filter(|c| {
+                let aliases = c.column_aliases();
+                !aliases.is_empty() && aliases.iter().all(|a| a == &node_alias)
+            })
+            .cloned()
+            .collect();
+        let sip_cte = Query {
+            select: vec![SelectExpr::new(
+                Expr::col(&node_alias, DEFAULT_PRIMARY_KEY),
+                DEFAULT_PRIMARY_KEY,
+            )],
+            from: TableRef::scan(&group_table, &node_alias),
+            where_clause: Expr::conjoin(group_only_conds),
+            ..Default::default()
+        };
+        q.ctes.push(Cte::materialized(GROUP_SIP_CTE, sip_cte));
+        GROUP_SIP_CTE.to_string()
+    };
+
+    // Inject group SIP into the inner subquery's edge WHERE.
+    edge_where.push(Expr::InSubquery {
+        expr: Box::new(Expr::col(&edge_alias, &edge_col_for_join)),
+        cte_name: group_sip_name,
+        column: DEFAULT_PRIMARY_KEY.to_string(),
+    });
+
+    // Build inner SELECT: group key + aggregate expressions.
+    let agg_key_col = "_agg_key";
+    let agg_subquery_alias = "_agg";
+    let mut inner_select = vec![SelectExpr::new(
+        Expr::col(&edge_alias, &edge_col_for_join),
+        agg_key_col,
+    )];
+    let mut agg_select_indices: Vec<(usize, String)> = Vec::new();
+    for (i, sel) in q.select.iter().enumerate() {
+        if matches!(&sel.expr, Expr::FuncCall { .. }) {
+            let alias = sel.alias.clone().unwrap_or_else(|| format!("_agg_{i}"));
+            inner_select.push(SelectExpr::new(sel.expr.clone(), &alias));
+            agg_select_indices.push((i, alias));
+        }
+    }
+    if agg_select_indices.is_empty() {
+        q.where_clause = Expr::conjoin(edge_where.into_iter().chain(outer_where).collect());
+        return;
+    }
+
+    let edge_from = match take_edge_source(&mut q.from, &edge_alias) {
+        Some(f) => f,
+        None => {
+            q.where_clause = Expr::conjoin(edge_where.into_iter().chain(outer_where).collect());
+            return;
+        }
+    };
+
+    let inner_query = Query {
+        select: inner_select,
+        from: edge_from,
+        where_clause: Expr::conjoin(edge_where),
+        group_by: vec![Expr::col(&edge_alias, &edge_col_for_join)],
+        ..Default::default()
+    };
+
+    for (i, alias) in &agg_select_indices {
+        q.select[*i] = SelectExpr::new(Expr::col(agg_subquery_alias, alias), alias);
+    }
+    for ord in &mut q.order_by {
+        if matches!(&ord.expr, Expr::FuncCall { .. })
+            && let Some((_, alias)) = agg_select_indices.first()
+        {
+            ord.expr = Expr::col(agg_subquery_alias, alias);
+        }
+    }
+    q.group_by.clear();
+
+    let node_from = std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_"));
+    q.from = TableRef::join(
+        crate::ast::JoinType::Inner,
+        TableRef::subquery(inner_query, agg_subquery_alias),
+        node_from,
+        Expr::eq(
+            Expr::col(agg_subquery_alias, agg_key_col),
+            Expr::col(&node_alias, DEFAULT_PRIMARY_KEY),
+        ),
+    );
+
+    q.where_clause = Expr::conjoin(outer_where);
+}
+
+/// Extract (edge_alias, node_alias, edge_join_column) from a Join(node, edge)
+/// or Join(edge, node) FROM tree. The edge side can be a `Scan` (single-hop)
+/// or a `Union` (multi-hop).
+fn extract_edge_node_join(from: &TableRef, input: &Input) -> Option<(String, String, String)> {
+    let (left, right, on) = match from {
+        TableRef::Join {
+            left, right, on, ..
+        } => (left.as_ref(), right.as_ref(), on),
+        _ => return None,
+    };
+
+    let edge_alias_of = |t: &TableRef| -> Option<String> {
+        match t {
+            TableRef::Scan { table, alias, .. } if is_edge_table(table, input) => {
+                Some(alias.clone())
+            }
+            TableRef::Union { alias, .. } => Some(alias.clone()),
+            _ => None,
+        }
+    };
+    let node_alias_of = |t: &TableRef| -> Option<String> {
+        match t {
+            TableRef::Scan { table, alias, .. } if !is_edge_table(table, input) => {
+                Some(alias.clone())
+            }
+            _ => None,
+        }
+    };
+
+    let (edge_alias, node_alias) =
+        if let (Some(ea), Some(na)) = (edge_alias_of(left), node_alias_of(right)) {
+            (ea, na)
+        } else if let (Some(na), Some(ea)) = (node_alias_of(left), edge_alias_of(right)) {
+            (ea, na)
+        } else {
+            return None;
+        };
+
+    let edge_join_col = extract_edge_join_column(on, &edge_alias)?;
+    Some((edge_alias, node_alias, edge_join_col))
+}
+
+/// From a join ON expression like `p.id = e0.target_id`, extract the edge
+/// column name (e.g. "target_id").
+fn extract_edge_join_column(on: &Expr, edge_alias: &str) -> Option<String> {
+    match on {
+        Expr::BinaryOp {
+            op: crate::ast::Op::Eq,
+            left,
+            right,
+        } => {
+            if let Expr::Column { table, column, .. } = left.as_ref()
+                && table == edge_alias
+            {
+                return Some(column.clone());
+            }
+            if let Expr::Column { table, column, .. } = right.as_ref()
+                && table == edge_alias
+            {
+                return Some(column.clone());
+            }
+            None
+        }
+        Expr::BinaryOp {
+            op: crate::ast::Op::And,
+            left,
+            right,
+        } => extract_edge_join_column(left, edge_alias)
+            .or_else(|| extract_edge_join_column(right, edge_alias)),
+        _ => None,
+    }
+}
+
+/// Remove the edge source (Scan or Union) from a two-way Join and return it.
+fn take_edge_source(from: &mut TableRef, edge_alias: &str) -> Option<TableRef> {
+    let has_alias = |t: &TableRef| -> bool {
+        match t {
+            TableRef::Scan { alias, .. } | TableRef::Union { alias, .. } => alias == edge_alias,
+            _ => false,
+        }
+    };
+
+    match from {
+        TableRef::Join { left, right, .. } => {
+            if has_alias(right) {
+                let edge = std::mem::replace(right.as_mut(), TableRef::scan("_tmp", "_tmp"));
+                let node = std::mem::replace(left.as_mut(), TableRef::scan("_tmp", "_tmp"));
+                *from = node;
+                Some(edge)
+            } else if has_alias(left) {
+                let edge = std::mem::replace(left.as_mut(), TableRef::scan("_tmp", "_tmp"));
+                let node = std::mem::replace(right.as_mut(), TableRef::scan("_tmp", "_tmp"));
+                *from = node;
+                Some(edge)
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 

@@ -384,11 +384,11 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         .filter_map(|agg| agg.group_by.clone())
         .collect();
 
-    // Edge-only targets are only possible for single-hop, single-rel
-    // aggregations with relationships. No-rel (single-node) and multi-hop
-    // fall back to the standard join approach.
-    let has_multi_hop = input.relationships.iter().any(|r| r.max_hops > 1);
-    let can_edge_only = !input.relationships.is_empty() && !has_multi_hop;
+    // Edge-only targets: nodes whose aggregations are all property-less
+    // (e.g. COUNT without a property column). Their table scan can be
+    // skipped in the FROM tree — the aggregate references an edge column
+    // instead. Works for both single-hop and multi-hop relationships.
+    let can_edge_only = !input.relationships.is_empty();
 
     let mut edge_only_targets: HashSet<String> = HashSet::new();
     if can_edge_only {
@@ -437,11 +437,19 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     // targets also get their node_edge_col mapping populated here.
     if input.relationships.len() == 1 {
         let rel = &input.relationships[0];
-        let (start_col, end_col) = rel.direction.edge_columns();
-        let edge_alias = edge_aliases
-            .get(&0)
-            .cloned()
-            .unwrap_or_else(|| "e0".to_string());
+        let is_multi_hop = rel.max_hops > 1;
+        let (start_col, end_col) = if is_multi_hop {
+            rel.direction.union_columns()
+        } else {
+            rel.direction.edge_columns()
+        };
+        let edge_alias = edge_aliases.get(&0).cloned().unwrap_or_else(|| {
+            if is_multi_hop {
+                "hop_e0".to_string()
+            } else {
+                "e0".to_string()
+            }
+        });
 
         for node in &input.nodes {
             if group_by_ids.contains(&node.id) {

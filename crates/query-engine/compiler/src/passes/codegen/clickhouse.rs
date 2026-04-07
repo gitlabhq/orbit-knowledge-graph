@@ -16,11 +16,17 @@ use super::{ParamValue, ParameterizedQuery, SqlDialect};
 pub fn codegen(
     ast: &Node,
     result_context: ResultContext,
-    query_config: QueryConfig,
+    mut query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
     let mut sql = match ast {
-        Node::Query(q) => ctx.emit_query(q)?,
+        Node::Query(q) => {
+            // Auto-enable materialized CTEs if the AST contains any.
+            if q.ctes.iter().any(|c| c.materialized) {
+                query_config.enable_materialized_cte = Some(true);
+            }
+            ctx.emit_query(q)?
+        }
     };
 
     // SETTINGS — only on the top-level query, not subqueries/UNION arms.
@@ -80,7 +86,12 @@ impl Context {
             .iter()
             .map(|cte| {
                 let inner = self.emit_query_body(&cte.query)?;
-                Ok(format!("{} AS ({})", cte.name, inner))
+                let keyword = if cte.materialized {
+                    "AS MATERIALIZED"
+                } else {
+                    "AS"
+                };
+                Ok(format!("{} {} ({})", cte.name, keyword, inner))
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -724,6 +735,7 @@ mod tests {
                     ..Default::default()
                 }),
                 recursive: true,
+                materialized: false,
             }],
             select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
             from: TableRef::scan("path_cte", "r"),
@@ -880,6 +892,7 @@ mod tests {
             max_execution_time: None,
             use_query_cache: Some(true),
             query_cache_ttl: Some(60),
+            enable_materialized_cte: None,
         };
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), cfg).unwrap();
         assert!(

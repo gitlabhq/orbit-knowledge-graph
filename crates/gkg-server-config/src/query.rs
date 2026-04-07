@@ -38,6 +38,11 @@ pub struct QueryConfig {
     /// ClickHouse `query_cache_ttl` in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_cache_ttl: Option<u32>,
+
+    /// ClickHouse `enable_materialized_cte`. Set automatically when the
+    /// query uses `AS MATERIALIZED` CTEs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_materialized_cte: Option<bool>,
 }
 
 impl QueryConfig {
@@ -48,6 +53,9 @@ impl QueryConfig {
             max_execution_time: overrides.max_execution_time.or(self.max_execution_time),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
+            enable_materialized_cte: overrides
+                .enable_materialized_cte
+                .or(self.enable_materialized_cte),
         }
     }
 
@@ -162,11 +170,13 @@ mod tests {
             max_execution_time: Some(30),
             use_query_cache: Some(false),
             query_cache_ttl: Some(60),
+            enable_materialized_cte: None,
         };
         let over = QueryConfig {
             max_execution_time: Some(120),
             use_query_cache: None,
             query_cache_ttl: None,
+            enable_materialized_cte: None,
         };
         let merged = base.merge(&over);
         assert_eq!(merged.max_execution_time, Some(120));
@@ -180,6 +190,7 @@ mod tests {
             max_execution_time: Some(30),
             use_query_cache: Some(true),
             query_cache_ttl: None,
+            enable_materialized_cte: None,
         };
         let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
@@ -211,6 +222,7 @@ mod tests {
                 max_execution_time: Some(30),
                 use_query_cache: Some(false),
                 query_cache_ttl: Some(60),
+                enable_materialized_cte: None,
             },
             overrides,
         };
