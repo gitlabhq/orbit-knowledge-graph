@@ -7,7 +7,7 @@
 //! - Wildcard column selections are expanded to explicit column lists
 
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, EntityAuthConfig, Input};
+use crate::input::{ColumnSelection, EntityAuthConfig, Input, QueryType};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
@@ -99,18 +99,53 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
 
         // Expand wildcard/empty column selections to explicit lists for lowering.
         // Redaction columns (_gkg_*) are added separately by enforce.rs.
+        //
+        // Search and Aggregation emit columns directly in the SQL SELECT
+        // (no hydration pass), so virtual columns (backed by external
+        // services like Gitaly) must be stripped here to avoid referencing
+        // columns that don't exist in ClickHouse.
+        let skip_virtual = matches!(
+            input.query_type,
+            QueryType::Search | QueryType::Aggregation
+        );
         match &mut node.columns {
             Some(ColumnSelection::All) => {
-                let columns: Vec<String> =
-                    node_entity.fields.iter().map(|f| f.name.clone()).collect();
+                let columns: Vec<String> = node_entity
+                    .fields
+                    .iter()
+                    .filter(|f| !skip_virtual || !f.is_virtual())
+                    .map(|f| f.name.clone())
+                    .collect();
                 node.columns = Some(ColumnSelection::List(columns));
+            }
+            Some(ColumnSelection::List(cols)) if skip_virtual => {
+                cols.retain(|col_name| {
+                    !node_entity
+                        .fields
+                        .iter()
+                        .any(|f| f.name == *col_name && f.is_virtual())
+                });
             }
             Some(ColumnSelection::List(_)) => {}
             None => {
                 let columns = if node_entity.default_columns.is_empty() {
-                    node_entity.fields.iter().map(|f| f.name.clone()).collect()
+                    node_entity
+                        .fields
+                        .iter()
+                        .filter(|f| !skip_virtual || !f.is_virtual())
+                        .map(|f| f.name.clone())
+                        .collect()
                 } else {
-                    node_entity.default_columns.clone()
+                    let mut cols = node_entity.default_columns.clone();
+                    if skip_virtual {
+                        cols.retain(|col_name| {
+                            !node_entity
+                                .fields
+                                .iter()
+                                .any(|f| f.name == *col_name && f.is_virtual())
+                        });
+                    }
+                    cols
                 };
                 node.columns = Some(ColumnSelection::List(columns));
             }
