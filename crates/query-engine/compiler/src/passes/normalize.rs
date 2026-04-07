@@ -101,14 +101,16 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         // Expand wildcard/empty column selections to explicit lists for lowering.
         // Redaction columns (_gkg_*) are added separately by enforce.rs.
         //
-        // Search and Aggregation emit columns directly in the SQL SELECT,
-        // so virtual columns (backed by external services like Gitaly) must
-        // be stripped from the column list to avoid referencing columns that
-        // don't exist in ClickHouse. Stripped VCRs are stashed on the node
-        // so the hydration plan can pick them up for post-query resolution.
-        let strip_virtual = matches!(
+        // Virtual columns (backed by external services like Gitaly) are
+        // stripped from the column list and stashed on the node so the
+        // hydration plan can pick them up for post-query resolution.
+        //
+        // PathFinding/Neighbors use dynamic hydration (iterating all ontology
+        // types, not input nodes), so they handle virtual columns separately
+        // in build_dynamic_specs via split_columns.
+        let strip_virtual = !matches!(
             input.query_type,
-            QueryType::Search | QueryType::Aggregation
+            QueryType::PathFinding | QueryType::Neighbors
         );
 
         // First, expand columns to an explicit list (same as before).
