@@ -47,10 +47,10 @@ impl HydrationStage {
     /// the property map. Dispatches to the appropriate [`ColumnResolver`]
     /// by the `service` name declared in the ontology.
     ///
-    /// Currently a no-op in practice because all virtual fields are
-    /// `disabled: true` in the ontology. The full pipeline is wired up so
-    /// that enabling a virtual field only requires removing the `disabled`
-    /// flag and registering the service in [`ColumnResolverRegistry`].
+    /// Requires a [`ColumnResolverRegistry`] to be present in the pipeline's
+    /// server extensions. If virtual columns are requested but no registry
+    /// is available (e.g. GitLab client config is missing), this returns a
+    /// `ContentResolution` error.
     pub async fn resolve_virtual_columns(
         ctx: &QueryPipelineContext,
         entity_virtual_columns: &[EntityVirtualColumns<'_>],
