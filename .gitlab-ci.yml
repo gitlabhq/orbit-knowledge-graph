@@ -1,3 +1,6 @@
+variables:
+  CANONICAL_PROJECT_ID: "77960826"
+
 workflow:
   rules:
     - if: $CI_COMMIT_TAG
@@ -46,6 +49,9 @@ stages:
     - mise install
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
+        if [ "$CI_PROJECT_ID" != "$CANONICAL_PROJECT_ID" ]; then
+          export SCCACHE_GCS_RW_MODE="READ_ONLY"
+        fi
         export RUSTC_WRAPPER="sccache"
         sccache --start-server || true
       fi
@@ -69,6 +75,23 @@ stages:
 .mr-and-main-rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+.canonical-only-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+
+.canonical-mr-only-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+
+.canonical-main-only-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # Lint Stage
@@ -181,6 +204,8 @@ generate-sbom:
     - .job-template
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - cargo cyclonedx --format json > sbom.cdx.json
@@ -440,7 +465,9 @@ publish-proto-gem:
   script:
     - gem push "_build/gitlab-gkg-proto-${CI_COMMIT_TAG#v}.gem"
   rules:
-    - if: '$CI_SERVER_HOST == "gitlab.com" && $CI_PROJECT_NAMESPACE == "gitlab-org/orbit" && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
   environment:
     name: rubygems
     url: https://rubygems.org/gems/gitlab-gkg-proto
@@ -458,6 +485,8 @@ semantic-release:
     - job: build-proto-gem
       optional: true
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
@@ -521,7 +550,7 @@ release-manifest:
 .review-docs:
   image: ruby:3.3-alpine3.23
   extends:
-    - .mr-only-rules
+    - .canonical-mr-only-rules
   stage: review
   cache: {}
   dependencies: []
@@ -581,6 +610,8 @@ ai:performance:
   timeout: 1 hour
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
@@ -599,6 +630,8 @@ ai:security:
   timeout: 1 hour
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
@@ -617,6 +650,8 @@ ai:docs:
   timeout: 1 hour
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
