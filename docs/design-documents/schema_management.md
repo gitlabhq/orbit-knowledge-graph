@@ -10,6 +10,8 @@ This document covers four key areas:
 2. **Schema Registration**: How the query engine discovers and understands the current schema.
 3. **Schema Evolution**: The strategy for applying schema changes in a live environment with zero downtime.
 
+> Note: the V1 migration framework implementation has started in `crates/migration-framework/`, based on the schema management design work in `docs/design-documents/schema-management-framework/`.
+
 ## Schema Definition and Registration
 
 The schema is defined by the node and relationship types detailed in the [Data Model](./data_model.md) document. However, the Graph Query Engine (`gkg-webserver`) needs an efficient way to understand the available node types (e.g., `File`, `Issue`, `MergeRequest`) and their corresponding table names in ClickHouse without querying database metadata on every request.

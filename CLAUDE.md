@@ -42,6 +42,7 @@ Integration tests need Docker: `mise test:integration`. Correctness subset: `mis
 | Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
 | Namespace deletion pipeline | `docs/design-documents/indexing/namespace_deletion.md` |
 | Schema migration strategy | `docs/design-documents/schema_management.md` |
+| Schema migration design | `docs/design-documents/schema-management-framework/` |
 | Observability / SLOs | `docs/design-documents/observability.md` |
 | Ontology node definitions | `config/ontology/nodes/` |
 | Ontology edge definitions | `config/ontology/edges/` |
@@ -66,6 +67,7 @@ Integration tests need Docker: `mise test:integration`. Correctness subset: `mis
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Related repos and local paths | `/related-repositories` skill |
 | Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |
+| Migration framework | `crates/migration-framework/` |
 
 ## Crate map
 
@@ -83,6 +85,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/shared` | Shared pipeline stages (compilation, extraction, output) |
 | `query-engine/formatters` | Result formatters (graph, raw row, goon) |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/` |
+| `migration-framework` | Schema migration framework: `Migration` trait, `MigrationRegistry`, ClickHouse ledger (`gkg_migrations` table), status transitions |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `code-graph` | Parent crate for code parsing and graph construction; re-exports `treesitter-visit`, `parser-core`, `code-graph-linker` |
 | `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper |
