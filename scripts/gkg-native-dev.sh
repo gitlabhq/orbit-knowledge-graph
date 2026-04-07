@@ -84,6 +84,7 @@ fi
 
 run_checks() {
   local failures=0
+  local gdk_yml="$GDK_ROOT/gdk.yml"
 
   printf "Checking lightweight native-process prerequisites...\n\n"
 
@@ -103,6 +104,77 @@ run_checks() {
     failures=$((failures + 1))
   fi
 
+  if [[ ! -f "$gdk_yml" ]]; then
+    printf "\nERROR: GDK is not configured for GKG development.\n\n"
+    printf "Missing configuration in %s:\n" "$gdk_yml"
+    cat <<'EOF'
+  nats:
+    enabled: true
+  clickhouse:
+    enabled: true
+  siphon:
+    enabled: true
+
+Add the above to your gdk.yml, then run: cd ~/gdk && gdk reconfigure
+EOF
+    return 1
+  fi
+
+  if ! python3 - "$gdk_yml" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text()
+required = ["nats", "clickhouse", "siphon"]
+missing = []
+for name in required:
+    anchor = f"{name}:"
+    idx = text.find(anchor)
+    if idx == -1:
+        missing.append(name)
+        continue
+    block = text[idx:].splitlines()[0:8]
+    enabled = any(line.strip() == "enabled: true" for line in block[1:])
+    if not enabled:
+        missing.append(name)
+
+if missing:
+    print("\nERROR: GDK is not configured for GKG development.\n")
+    print(f"Missing configuration in {path}:")
+    print("  nats:")
+    print("    enabled: true")
+    print("  clickhouse:")
+    print("    enabled: true")
+    print("  siphon:")
+    print("    enabled: true")
+    print("\nAdd the above to your gdk.yml, then run: cd ~/gdk && gdk reconfigure")
+    sys.exit(1)
+PY
+  then
+    return 1
+  fi
+
+  printf "[ok] gdk.yml enables nats, clickhouse, and siphon\n"
+
+  if command -v gdk >/dev/null 2>&1; then
+    if (cd "$GDK_ROOT" && gdk status >/dev/null 2>&1); then
+      printf "[ok] gdk status succeeded\n"
+    else
+      printf "[fail] GDK is not running — start it with: cd %s && gdk start\n" "$GDK_ROOT"
+      failures=$((failures + 1))
+    fi
+  elif [[ -x "$GDK_ROOT/bin/gdk" ]]; then
+    if (cd "$GDK_ROOT" && "$GDK_ROOT/bin/gdk" status >/dev/null 2>&1); then
+      printf "[ok] gdk status succeeded\n"
+    else
+      printf "[fail] GDK is not running — start it with: cd %s && bin/gdk start\n" "$GDK_ROOT"
+      failures=$((failures + 1))
+    fi
+  else
+    printf "[warn] gdk executable not found; falling back to port checks only\n"
+  fi
+
   if [[ -f "$GITLAB_ROOT/.gitlab_knowledge_graph_secret" || -f "$GITLAB_ROOT/.gitlab_shell_secret" ]]; then
     printf "[ok] GitLab JWT secret file found\n"
   else
@@ -110,8 +182,9 @@ run_checks() {
   fi
 
   if command -v nc >/dev/null 2>&1; then
-    nc -z 127.0.0.1 4222 >/dev/null 2>&1 && printf "[ok] NATS reachable on localhost:4222\n" || { printf "[warn] NATS not reachable on localhost:4222 (enable nats in gdk.yml)\n"; failures=$((failures + 1)); }
-    nc -z 127.0.0.1 8123 >/dev/null 2>&1 && printf "[ok] ClickHouse HTTP reachable on localhost:8123\n" || { printf "[warn] ClickHouse HTTP not reachable on localhost:8123\n"; failures=$((failures + 1)); }
+    nc -z 127.0.0.1 4222 >/dev/null 2>&1 && printf "[ok] NATS reachable on localhost:4222\n" || { printf "[fail] NATS not running — enable it in gdk.yml: nats:\n  enabled: true\n"; failures=$((failures + 1)); }
+    nc -z 127.0.0.1 8123 >/dev/null 2>&1 && printf "[ok] ClickHouse reachable on localhost:8123\n" || { printf "[fail] ClickHouse not running — enable it in gdk.yml: clickhouse:\n  enabled: true\n"; failures=$((failures + 1)); }
+    nc -z 127.0.0.1 5432 >/dev/null 2>&1 && printf "[ok] PostgreSQL reachable on localhost:5432\n" || { printf "[fail] PostgreSQL not reachable on localhost:5432 — GDK and Siphon require PostgreSQL running\n"; failures=$((failures + 1)); }
     nc -z 127.0.0.1 3000 >/dev/null 2>&1 && printf "[ok] GitLab reachable on localhost:3000\n" || { printf "[warn] GitLab not reachable on localhost:3000\n"; failures=$((failures + 1)); }
     nc -z 127.0.0.1 8075 >/dev/null 2>&1 && printf "[ok] Gitaly reachable on localhost:8075\n" || printf "[warn] Gitaly not reachable on localhost:8075 (code indexing may fail if Gitaly is unix-socket only)\n"
   fi
@@ -227,6 +300,7 @@ run_mode() {
 }
 
 start_ha() {
+  run_checks
   ensure_dirs
 
   start_process web-1 env \
