@@ -159,6 +159,8 @@ async fn data_correctness() {
         pagination::cursor_without_order_by_pages_cover_all_data,
         pagination::cursor_traversal_without_order_by_is_deterministic,
         pagination::cursor_aggregation_without_sort_is_deterministic,
+        pagination::cursor_path_finding_pages_cover_all_paths,
+        pagination::cursor_path_finding_is_deterministic,
         // work items: search
         work_items::search_returns_correct_work_item_properties,
         work_items::search_filter_work_item_type_returns_matching_rows,
