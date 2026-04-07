@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_utils::arrow::ArrowUtils;
 use thiserror::Error;
+use tracing::{info, warn};
 
+use crate::metrics::MigrationMetrics;
 use crate::types::{Migration, MigrationStatus, MigrationType};
 
 pub const GKG_MIGRATIONS_TABLE: &str = "gkg_migrations";
@@ -48,11 +50,19 @@ pub struct LedgerMigrationRecord {
 
 pub struct MigrationLedger {
     client: ArrowClickHouseClient,
+    metrics: MigrationMetrics,
 }
 
 impl MigrationLedger {
     pub fn new(client: ArrowClickHouseClient) -> Self {
-        Self { client }
+        Self {
+            client,
+            metrics: MigrationMetrics::new(),
+        }
+    }
+
+    pub fn with_metrics(client: ArrowClickHouseClient, metrics: MigrationMetrics) -> Self {
+        Self { client, metrics }
     }
 
     pub async fn ensure_table(&self) -> Result<(), MigrationLedgerError> {
@@ -157,6 +167,7 @@ impl MigrationLedger {
             }
         }
 
+        self.metrics.record_ledger_state(&records);
         Ok(records)
     }
 
@@ -195,7 +206,49 @@ impl MigrationLedger {
         );
 
         self.client.execute(&sql).await?;
+        self.metrics
+            .record_transition(migration, status, retry_count);
+        log_transition(migration, status, retry_count, error_message);
         Ok(())
+    }
+}
+
+fn log_transition(
+    migration: &dyn Migration,
+    status: MigrationStatus,
+    retry_count: u32,
+    error_message: Option<&str>,
+) {
+    let from = previous_status(status);
+
+    match status {
+        MigrationStatus::Failed => warn!(
+            migration = migration.name(),
+            version = migration.version(),
+            migration_type = migration.migration_type().as_str(),
+            from = from.as_str(),
+            to = status.as_str(),
+            retry_count,
+            error = error_message.unwrap_or("unknown"),
+            "migration lifecycle transition"
+        ),
+        _ => info!(
+            migration = migration.name(),
+            version = migration.version(),
+            migration_type = migration.migration_type().as_str(),
+            from = from.as_str(),
+            to = status.as_str(),
+            retry_count,
+            "migration lifecycle transition"
+        ),
+    }
+}
+
+fn previous_status(status: MigrationStatus) -> MigrationStatus {
+    match status {
+        MigrationStatus::Pending => MigrationStatus::Pending,
+        MigrationStatus::Preparing => MigrationStatus::Pending,
+        MigrationStatus::Completed | MigrationStatus::Failed => MigrationStatus::Preparing,
     }
 }
 
@@ -239,8 +292,33 @@ fn parse_status(value: &str) -> Result<MigrationStatus, MigrationLedgerError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ledger::{escape_string, parse_migration_type, parse_status};
-    use crate::{MigrationStatus, MigrationType};
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use tracing_test::traced_test;
+
+    use crate::ledger::{escape_string, log_transition, parse_migration_type, parse_status};
+    use crate::{Migration, MigrationContext, MigrationStatus, MigrationType};
+
+    struct TestMigration;
+
+    #[async_trait]
+    impl Migration for TestMigration {
+        fn version(&self) -> u64 {
+            7
+        }
+
+        fn name(&self) -> &str {
+            "test_migration"
+        }
+
+        fn migration_type(&self) -> MigrationType {
+            MigrationType::Additive
+        }
+
+        async fn prepare(&self, _ctx: &MigrationContext) -> Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn migration_type_string_values_match_contract() {
@@ -280,5 +358,29 @@ mod tests {
             error.to_string(),
             "failed to decode ledger row: unknown migration status: unknown"
         );
+    }
+
+    #[test]
+    #[traced_test]
+    fn logs_info_for_non_failure_transitions() {
+        let migration = TestMigration;
+
+        log_transition(&migration, MigrationStatus::Preparing, 0, None);
+
+        assert!(logs_contain("INFO"));
+        assert!(logs_contain("migration lifecycle transition"));
+        assert!(logs_contain("to=\"preparing\""));
+    }
+
+    #[test]
+    #[traced_test]
+    fn logs_warn_for_failures() {
+        let migration = TestMigration;
+
+        log_transition(&migration, MigrationStatus::Failed, 2, Some("boom"));
+
+        assert!(logs_contain("WARN"));
+        assert!(logs_contain("to=\"failed\""));
+        assert!(logs_contain("error=\"boom\""));
     }
 }

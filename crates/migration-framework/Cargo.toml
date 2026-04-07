@@ -11,6 +11,7 @@ arrow = { workspace = true }
 chrono = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 gkg-utils = { path = "../utils" }
+opentelemetry = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -18,6 +19,8 @@ tracing = { workspace = true }
 [dev-dependencies]
 integration-testkit = { path = "../integration-testkit" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+opentelemetry_sdk = { version = "0.31", default-features = false, features = ["metrics", "testing"] }
+tracing-test = { workspace = true }
 
 [lints]
 workspace = true

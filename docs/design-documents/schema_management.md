@@ -58,6 +58,15 @@ The repository now treats `config/graph.sql` as the canonical full-schema snapsh
 
 This keeps the migration ledger, registry ordering, and the checked-in schema snapshot aligned as the migration framework evolves.
 
+The migration framework also emits OpenTelemetry metrics and structured `tracing` logs for operational visibility. The currently implemented signals are:
+
+- `gkg_migration_status`: gauge per migration/version populated from ledger reads and lifecycle transitions;
+- `gkg_migration_applied_total`: counter for terminal transitions with `outcome=success|failure`;
+- `gkg_migration_prepare_duration_seconds`: histogram around `prepare()` execution time;
+- `gkg_migration_desired_version`: gauge for the highest registered migration version;
+- `gkg_migration_current_version`: gauge for the highest completed migration version in the ledger.
+
+Failures are logged at WARN level and normal lifecycle transitions at INFO level so operators can correlate ledger state with recent migration activity. Reconciler-specific metrics remain deferred until the reconciler runtime is merged.
 As GitLab evolves, the Knowledge Graph schema must evolve with it. We must support schema changes, from adding a new property to introducing entirely new node types, without causing service interruptions. The primary goal is to achieve **zero-downtime migrations**.
 
 Our migration strategy will be based on a multi-step process inspired by blue-green deployments, ensuring the service remains available and queries are unaffected during the transition.

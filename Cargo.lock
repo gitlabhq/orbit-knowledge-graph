@@ -4377,10 +4377,13 @@ dependencies = [
  "clickhouse-client",
  "gkg-utils",
  "integration-testkit",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "serde",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-test",
 ]
 
 [[package]]
