@@ -868,6 +868,10 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 expr: Expr::col(PATHS_ALIAS, path_column()),
                 desc: false,
             },
+            OrderExpr {
+                expr: Expr::col(PATHS_ALIAS, edge_kinds_column()),
+                desc: false,
+            },
         ],
         limit,
         ..Default::default()
@@ -1980,6 +1984,51 @@ mod tests {
         assert_eq!(q.ctes[0].name, "forward");
         assert_eq!(q.ctes[1].name, "backward");
         assert!(q.ctes.iter().all(|c| !c.recursive));
+    }
+
+    #[test]
+    fn path_finding_order_by_depth_path_edge_kinds() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert_eq!(
+            q.order_by.len(),
+            3,
+            "path finding should ORDER BY depth, path, edge_kinds"
+        );
+        // depth ASC
+        if let Expr::Column { column, .. } = &q.order_by[0].expr {
+            assert_eq!(column, DEPTH_COLUMN);
+        } else {
+            panic!("expected depth column");
+        }
+        assert!(!q.order_by[0].desc);
+        // _gkg_path ASC (tie-breaker for same-depth paths with different nodes)
+        if let Expr::Column { column, .. } = &q.order_by[1].expr {
+            assert_eq!(column, &path_column());
+        } else {
+            panic!("expected path column");
+        }
+        assert!(!q.order_by[1].desc);
+        // _gkg_edge_kinds ASC (tie-breaker for same-node paths with different edges)
+        if let Expr::Column { column, .. } = &q.order_by[2].expr {
+            assert_eq!(column, &edge_kinds_column());
+        } else {
+            panic!("expected edge_kinds column");
+        }
+        assert!(!q.order_by[2].desc);
     }
 
     #[test]
