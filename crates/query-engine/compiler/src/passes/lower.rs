@@ -859,10 +859,16 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             SelectExpr::new(Expr::col(PATHS_ALIAS, DEPTH_COLUMN), DEPTH_COLUMN),
         ],
         from: paths_union,
-        order_by: vec![OrderExpr {
-            expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
-            desc: false,
-        }],
+        order_by: vec![
+            OrderExpr {
+                expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
+                desc: false,
+            },
+            OrderExpr {
+                expr: Expr::col(PATHS_ALIAS, path_column()),
+                desc: false,
+            },
+        ],
         limit,
         ..Default::default()
     })))
