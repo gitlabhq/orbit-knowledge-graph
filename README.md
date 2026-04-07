@@ -133,6 +133,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | [Readiness reviews (old)](https://gitlab.com/gitlab-com/gl-infra/readiness) | Legacy readiness repo. Siphon review [MR !231](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/231) (open, 78 comments), NATS review [MR !240](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/240) (merged). |
 | In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) -- GCP sandbox environment details (dev/sandbox only) |
 | Operational runbooks | [docs/dev/runbooks/](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs/dev/runbooks) -- indexing pipelines, configuration, troubleshooting |
+| Local GDK-connected development | [docs/dev/local-development.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/local-development.md) -- `mise run dev` to launch the full local stack against an existing GDK |
 | [Design Specs (Figma)](https://www.figma.com/design/GOrqDStp1E1SE0Ms7lVbXF/--588317--Orbit-GA-Designs?t=SLZ2CosGuBAzjC6r-0) | UI/UX design specs and visual references for Orbit GA features |
 
 ---

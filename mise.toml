@@ -169,6 +169,46 @@ description = "Start the GKG server (webserver mode)"
 run = './scripts/run-dispatcher.sh'
 description = "Start the GKG server (dispatch-indexing mode)"
 
+[tasks."dev:bootstrap"]
+run = '''
+if [ -f .tilt-secrets ]; then
+  echo ".tilt-secrets already exists"
+else
+  cp .tilt-secrets.example .tilt-secrets
+  echo "Created .tilt-secrets from .tilt-secrets.example"
+  echo "Edit .tilt-secrets and set GDK_ROOT before running the dev environment if needed"
+fi
+'''
+description = "Create .tilt-secrets from the example if needed"
+
+[tasks.dev]
+depends = ["dev:bootstrap"]
+run = "./scripts/gkg-dev.sh start"
+description = "Start the full GKG development environment connected to an existing GDK"
+
+[tasks.gdk]
+depends = ["dev:bootstrap"]
+run = "./scripts/gkg-dev.sh start"
+description = "Alias for the full GDK-connected local development environment"
+
+[tasks."dev:check"]
+depends = ["dev:bootstrap"]
+run = "./scripts/gkg-dev.sh check"
+description = "Verify local GDK-connected development prerequisites"
+
+[tasks."dev:status"]
+run = "./scripts/gkg-dev.sh status"
+description = "Show local GKG development environment status"
+
+[tasks."dev:restart"]
+depends = ["dev:bootstrap"]
+run = "./scripts/gkg-dev.sh restart"
+description = "Restart the local GKG development environment"
+
+[tasks."dev:stop"]
+run = "./scripts/gkg-dev.sh stop"
+description = "Stop the local GKG development environment"
+
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
@@ -229,4 +269,3 @@ description = "Check for broken links in markdown files"
 depends = ["lint:markdown", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
 description = "Run all documentation linters"
-
