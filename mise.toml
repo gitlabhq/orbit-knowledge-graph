@@ -38,6 +38,8 @@ lychee = "0.21.0"
 lefthook = "2.1.3"
 protoc = "34.1"
 jq = "1.7"
+vendir = "0.45.2"
+yq = "4.52.5"
 
 [tasks."hooks:install"]
 run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
