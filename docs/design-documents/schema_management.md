@@ -49,6 +49,13 @@ This approach centralizes schema management within the service itself, eliminati
 
 ## Schema Evolution and Migrations
 
+The repository now treats `config/graph.sql` as the canonical full-schema snapshot and validates it against the Rust migration registry in CI. The integration test suite runs two containerized checks:
+
+1. apply `config/graph.sql` to a fresh ClickHouse instance, then run all registered migrations and require them to succeed as idempotent no-ops;
+2. apply migrations to a fresh ClickHouse instance and compare the resulting table definitions against `config/graph.sql`.
+
+This keeps the migration ledger, registry ordering, and the checked-in schema snapshot aligned as the migration framework evolves.
+
 As GitLab evolves, the Knowledge Graph schema must evolve with it. We must support schema changes, from adding a new property to introducing entirely new node types, without causing service interruptions. The primary goal is to achieve **zero-downtime migrations**.
 
 Our migration strategy will be based on a multi-step process inspired by blue-green deployments, ensuring the service remains available and queries are unaffected during the transition.

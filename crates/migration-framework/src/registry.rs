@@ -31,6 +31,11 @@ impl MigrationRegistry {
     pub fn migrations(&self) -> &[Box<dyn Migration>] {
         &self.migrations
     }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.migrations.is_empty()
+    }
 }
 
 impl Default for MigrationRegistry {

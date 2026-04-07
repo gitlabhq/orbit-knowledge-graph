@@ -338,6 +338,30 @@ integration-test:
     - cargo nextest run --profile ci --all-features --test containers
     - sccache --show-stats || true
 
+migration-schema-check:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  tags:
+    - saas-linux-large-amd64
+  services:
+    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    TESTCONTAINERS_HOST_OVERRIDE: docker
+  needs: []
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
+    - docker pull ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12
+    - docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
+  script:
+    - cargo nextest run --profile ci --all-features --test containers migration_ci
+    - sccache --show-stats || true
+
 # Build Stage
 
 .docker-build:
