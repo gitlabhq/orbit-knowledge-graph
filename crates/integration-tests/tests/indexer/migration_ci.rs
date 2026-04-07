@@ -1,5 +1,5 @@
-use arrow::array::{Array, StringArray};
 use async_trait::async_trait;
+use gkg_utils::arrow::ArrowUtils;
 use migration_framework::{
     Migration, MigrationContext, MigrationLedger, MigrationRegistry, MigrationType,
     build_migration_registry,
@@ -103,13 +103,8 @@ async fn create_statement(ctx: &TestContext, table: &str) -> String {
     );
     let sql = format!("SHOW CREATE TABLE `{table}`");
     let result = ctx.query(&sql).await;
-    let text = result[0]
-        .column(0)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("SHOW CREATE TABLE returns String")
-        .value(0)
-        .to_string();
+    let text = ArrowUtils::array_value_to_string(result[0].column(0).as_ref(), 0)
+        .expect("show create result");
     normalize_show_create(&text)
 }
 
