@@ -189,6 +189,10 @@ fn traversal_hydration_injects_depends_on_columns() {
                     cols.iter().any(|c| c == dep),
                     "depends_on column '{dep}' should be auto-injected into hydration columns, got: {cols:?}"
                 );
+                assert!(
+                    file_template.injected_columns.contains(&dep.to_string()),
+                    "'{dep}' should be tracked in injected_columns for stripping"
+                );
             }
         }
         other => panic!("expected Static hydration plan, got: {other:?}"),
@@ -221,7 +225,14 @@ fn definition_content_also_handled() {
                 "Definition should have content virtual column in hydration plan"
             );
             let cols = &def_template.columns;
-            for dep in &["project_id", "file_path", "start_byte", "end_byte"] {
+            for dep in &[
+                "project_id",
+                "commit_sha",
+                "branch",
+                "file_path",
+                "start_byte",
+                "end_byte",
+            ] {
                 assert!(
                     cols.iter().any(|c| c == dep),
                     "depends_on column '{dep}' should be injected for Definition.content, got: {cols:?}"
