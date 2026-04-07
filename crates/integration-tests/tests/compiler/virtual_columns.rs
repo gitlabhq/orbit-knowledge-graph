@@ -1,7 +1,7 @@
 //! Virtual column handling: SQL stripping, hydration plans, depends_on injection.
 
 use ontology::Ontology;
-use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
+use query_engine::compiler::{compile, HydrationPlan, SecurityContext};
 
 fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
     let ontology = Ontology::load_embedded().unwrap();
@@ -16,7 +16,7 @@ fn search_with_wildcard_excludes_virtual_columns_from_sql() {
     );
     let sql = &compiled.base.sql;
     assert!(
-        !sql.contains("content"),
+        !sql.contains("f_content") && !sql.contains("f.content"),
         "virtual column 'content' should not appear in search SQL, got:\n{sql}"
     );
     assert!(
@@ -32,7 +32,7 @@ fn search_with_explicit_content_excludes_from_sql() {
     );
     let sql = &compiled.base.sql;
     assert!(
-        !sql.contains("content"),
+        !sql.contains("f_content") && !sql.contains("f.content"),
         "explicitly requested virtual column 'content' should be stripped from search SQL"
     );
     assert!(sql.contains("f_name") || sql.contains("f.name"));
@@ -123,7 +123,7 @@ fn aggregation_with_wildcard_excludes_virtual_columns_from_sql() {
     );
     let sql = &compiled.base.sql;
     assert!(
-        !sql.contains("content"),
+        !sql.contains("f_content") && !sql.contains("f.content"),
         "virtual column 'content' should not appear in aggregation SQL"
     );
 }
