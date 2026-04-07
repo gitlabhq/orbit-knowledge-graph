@@ -1,3 +1,29 @@
+## [0.22.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.21.0...v0.22.0) (2026-04-07)
+
+### Features
+
+* **ontology:** support per-edge destination_table for multiple edge tables ([5638a41](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5638a41c77a3162f5be0ba2eaec36b739ccfffac)) by Michael Usachenko
+* **testkit:** add assert_all_edge_types_covered for neighbors edge completeness ([beb423f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/beb423fa621472d7c6db48fd0759ce8e4df3fdcd)) by Andrew Dunn
+
+### Fixes
+
+* **ci:** use Vault for semantic-release auth ([d431f39](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d431f3921d30e94e70197313c083bb928e27547c)) by Bohdan Parkhomchuk
+* **compiler:** add _deleted filter for edge table scans ([c094da8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c094da8ec465d231645425f2e72f58c971b07a62)) by Michael Usachenko
+* **compiler:** apply argMax dedup to hydration queries ([b73fe58](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b73fe584e583523800658dbdd625631100f22dc3)) by Michael Usachenko
+* **compiler:** only push sort-key filters inside LIMIT BY dedup subquery ([8f6cacb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f6cacb8eca855bbed5261dbc29e2e3d3b7ca360)) by Michael Usachenko
+* **docker:** exclude release-only files from build context ([e5ba8c0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5ba8c0eef5a30f5673bf36c82f5ebb602942bcf)) by Bohdan Parkhomchuk
+* **docker:** restore GKG_VERSION in runtime stage ([91fea2b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/91fea2b0e1146be4b005ac0d90cd856844c074dc)) by Bohdan Parkhomchuk
+* **indexer:** make consume_pending fetch timeout configurable ([87bc6dd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/87bc6dd484e21b424352ac32dc40adfc31b0470a)) by Bohdan Parkhomchuk
+* **indexer:** skip PAX header entries during tar archive extraction ([ce7f6a8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ce7f6a86c1c3148d6397cbd41c0dc1795e412d7f)) by Michael Usachenko
+* **perf:** use argMax dedup for _nf_* CTEs instead of LIMIT BY ([7e0582f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7e0582f94e2d2768fcbeaba3df6dc1551a9e4552)) by Michael Usachenko
+* **profiler:** query system tables via clusterAllReplicas ([bdb7477](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bdb74772413c7443430da410cd5e3888aac61f5e)) by Michael Usachenko
+* **testkit:** fork copies seed data and run_subtests reports failures by name ([5ee4476](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5ee447668b4dc4c990f9e9db861a4ce5a493a513)) by Michael Usachenko
+
+### Other
+
+* add troubleshooting page ([215030f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/215030fb2636a5f378630254a89d65ff533dcf62)) by Phillip Wells
+* **dedup:** additional correctness coverage for hydration, edges, and multi-version ([679c64d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/679c64dc433b030fe6cbc69c02c3f3fdffcbad94)) by Michael Usachenko
+
 ## [0.21.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.20.0...v0.21.0) (2026-04-03)
 
 ### Features
