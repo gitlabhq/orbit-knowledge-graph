@@ -481,7 +481,7 @@ impl NatsBroker {
             .map_err(map_subscribe_error)?;
 
         let batch = consumer
-            .batch()
+            .fetch()
             .max_messages(batch_size)
             .expires(self.config.fetch_expires())
             .messages()
