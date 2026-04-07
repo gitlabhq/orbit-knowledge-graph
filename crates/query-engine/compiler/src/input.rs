@@ -228,6 +228,9 @@ pub struct InputNode {
     /// Always set before enforce.rs runs; do not add fallbacks in downstream code.
     #[serde(skip)]
     pub redaction_id_column: String,
+    /// Virtual columns stripped by normalize, consumed by the hydration plan.
+    #[serde(skip)]
+    pub virtual_columns: Vec<crate::passes::hydrate::VirtualColumnRequest>,
 }
 
 impl Default for InputNode {
@@ -242,6 +245,7 @@ impl Default for InputNode {
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
+            virtual_columns: Vec::new(),
         }
     }
 }
