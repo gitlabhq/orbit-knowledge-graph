@@ -22,6 +22,9 @@ impl MigrationRegistry {
             );
         }
 
+        // V1 only executes additive migrations. Convergent and Finalization are
+        // accepted here for forward compatibility; the reconciler introduced in
+        // follow-up work enforces additive-only execution semantics.
         self.migrations.push(migration);
     }
 

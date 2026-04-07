@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS gkg_migrations (
     _version DateTime64(6, 'UTC') DEFAULT now64(6)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (version)
+-- This tiny control-plane table has low write volume and few rows, so the
+-- cleanup setting is acceptable and avoids relying on manual OPTIMIZE FINAL.
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1
 "#;
 
@@ -120,8 +122,8 @@ impl MigrationLedger {
                 .ok_or_else(|| MigrationLedgerError::Decode("missing status column".to_string()))?;
             let retry_counts = ArrowUtils::get_column_by_name::<UInt32Array>(&batch, "retry_count")
                 .ok_or_else(|| {
-                    MigrationLedgerError::Decode("missing retry_count column".to_string())
-                })?;
+                MigrationLedgerError::Decode("missing retry_count column".to_string())
+            })?;
             let started_ats =
                 ArrowUtils::get_column_by_name::<TimestampMicrosecondArray>(&batch, "started_at")
                     .ok_or_else(|| {
@@ -167,6 +169,8 @@ impl MigrationLedger {
     ) -> Result<(), MigrationLedgerError> {
         let started_at = match status {
             MigrationStatus::Pending => "NULL",
+            // ReplacingMergeTree stores the latest whole row, so this records the
+            // start time of the latest attempt rather than the first attempt.
             _ => "now64(6)",
         };
         let completed_at = match status {
@@ -204,7 +208,10 @@ fn timestamp_value(array: &TimestampMicrosecondArray, row: usize) -> Option<Date
 }
 
 fn escape_string(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('\'', "\\'")
+    value
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\0', "")
 }
 
 fn parse_migration_type(value: &str) -> Result<MigrationType, MigrationLedgerError> {
@@ -235,6 +242,7 @@ mod tests {
     use anyhow::Result;
     use async_trait::async_trait;
 
+    use crate::ledger::{escape_string, parse_migration_type, parse_status};
     use crate::{Migration, MigrationContext, MigrationLedger, MigrationStatus, MigrationType};
 
     struct TestMigration;
@@ -271,6 +279,44 @@ mod tests {
         assert_eq!(MigrationStatus::Preparing.as_str(), "preparing");
         assert_eq!(MigrationStatus::Completed.as_str(), "completed");
         assert_eq!(MigrationStatus::Failed.as_str(), "failed");
+    }
+
+    #[test]
+    fn escape_string_handles_adversarial_input() {
+        assert_eq!(escape_string("it's"), "it\\'s");
+        assert_eq!(escape_string("a\\b"), "a\\\\b");
+        assert_eq!(escape_string("null\0byte"), "nullbyte");
+    }
+
+    #[test]
+    fn parse_migration_type_rejects_unknown_values() {
+        let error = parse_migration_type("unknown").expect_err("should fail");
+        assert_eq!(error.to_string(), "failed to decode ledger row: unknown migration type: unknown");
+    }
+
+    #[test]
+    fn parse_status_rejects_unknown_values() {
+        let error = parse_status("unknown").expect_err("should fail");
+        assert_eq!(error.to_string(), "failed to decode ledger row: unknown migration status: unknown");
+    }
+
+    #[tokio::test]
+    async fn ensure_table_is_idempotent() {
+        let ctx = integration_testkit::TestContext::new(&[]).await;
+        let ledger = MigrationLedger::new(ctx.create_client());
+
+        ledger.ensure_table().await.expect("first create");
+        ledger.ensure_table().await.expect("second create");
+    }
+
+    #[tokio::test]
+    async fn list_returns_empty_vec_for_empty_table() {
+        let ctx = integration_testkit::TestContext::new(&[]).await;
+        let ledger = MigrationLedger::new(ctx.create_client());
+
+        ledger.ensure_table().await.expect("table");
+        let rows = ledger.list().await.expect("list rows");
+        assert!(rows.is_empty());
     }
 
     #[tokio::test]
