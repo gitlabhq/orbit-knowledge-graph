@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Knowledge Graph unlocks querying capabilities across an entire GitLab namespace. To ensure data is never exposed to unauthorized users, the architecture implements a multi-layered security model that is enforced on every query. This document outlines the three layers of defense that work together to protect user data:
+The Knowledge Graph allows querying across an entire GitLab namespace. To prevent unauthorized data exposure, every query passes through three security layers:
 
 - Logical tenant segregation at the storage layer via indexed columns.
 - Query-time filtering using traversal IDs.
@@ -21,31 +21,37 @@ For the initial release, the Knowledge Graph enforces a simplified permission mo
 
 ### Request Flow
 
-The following diagram illustrates the end-to-end flow of a secure query, from the initial tool call to the final, redacted response.
+With [Workhorse query acceleration](decisions/008_workhorse_query_acceleration.md), the gRPC stream runs in Workhorse rather than on a Puma thread.
 
 ```mermaid
 sequenceDiagram
     participant Client as AI Agent/Client
+    participant Workhorse as Workhorse (Go)
     participant Rails as GitLab Rails
     participant AuthZ as Rails Permission Model<br/>(Declarative Policy)
     participant GKG as Knowledge Graph Service
 
-    Client->>+Rails: 1. Execute MCP tool call (e.g., query)
-    Rails->>+AuthZ: 2. Check: User has Reporter+ on group(s)?
+    Client->>+Workhorse: 1. POST /api/v4/orbit/query
+    Workhorse->>+Rails: 2. Proxy to Puma
+    Rails->>+AuthZ: 3. Check: User has Reporter+ on group(s)?
     AuthZ-->>-Rails: Yes + Get user's accessible traversal IDs
     Note over Rails: Trie-optimized: [[100], [200, 300], ...]
+    Rails-->>-Workhorse: 4. SendData header (JWT, GKG address, query)
 
-    Rails->>+GKG: 3. Forward query + traversal_ids + user context<br/>(via JWT + MTLS)
-    Note over GKG: 4. Layer 1: Inject organization_id filter<br/>Layer 2: Inject traversal_ids prefix filters
-    GKG->>GKG: 5. Execute filtered SQL query on ClickHouse
+    Workhorse->>+GKG: 5. gRPC ExecuteQuery (bidi stream)<br/>with JWT + traversal_ids
+    Note over GKG: 6. Layer 1: Inject organization_id filter<br/>Layer 2: Inject traversal_ids prefix filters
+    GKG->>GKG: 7. Execute filtered SQL query on ClickHouse
 
-    GKG->>+Rails: 6. For each result: Ability.allowed?<br/>(user, :read_issue, issue)
-    Note over GKG, Rails: Layer 3: Batch permission checks<br/>for confidential items, etc.
-    Rails-->>-GKG: ALLOW/DENY per resource
+    GKG-->>Workhorse: 8. RedactionRequired (resource IDs)
+    Workhorse->>+Rails: 9. POST /internal/orbit/redaction
+    Rails->>Rails: Ability.allowed? per resource
+    Note over Workhorse, Rails: Layer 3: Batch permission checks<br/>for confidential items, etc.
+    Rails-->>-Workhorse: ALLOW/DENY per resource
+    Workhorse-->>GKG: 10. RedactionResponse
 
-    GKG->>GKG: 7. Remove denied resources
-    GKG-->>-Rails: 8. Return sanitized results
-    Rails-->>-Client: 9. Return final, redacted data
+    GKG->>GKG: 11. Remove denied resources
+    GKG-->>-Workhorse: 12. ExecuteQueryResult
+    Workhorse-->>-Client: 13. Return final, redacted data
 ```
 
 ## Layer 1: Logical Tenant Segregation by Organization
@@ -172,7 +178,7 @@ graph TD
     Q -.-> C
 ```
 
-While this serves as an efficient first pass of authorization and reduces the result set, it does not account for resource-specific permissions like confidential issues, which is why a final redaction layer is required.
+This is an efficient first pass that reduces the result set, but it does not account for resource-specific permissions like confidential issues. That is why Layer 3 exists.
 
 ### Additional Query Safeguards
 
@@ -190,10 +196,10 @@ In addition to authorization filtering, the query engine implements further safe
 
 **Detection and Monitoring**:
 
-- **Metric**: `qe.threat.depth_exceeded` (counter) — queries rejected for exceeding traversal depth or hop cap.
-- **Metric**: `qe.threat.limit_exceeded` (counter) — queries rejected for exceeding array cardinality caps (node_ids, IN filter values).
-- **Metric**: `qe.threat.timeout` (counter) — queries that timed out.
-- **Metric**: `qe.threat.rate_limited` (counter) — queries rejected due to rate limiting.
+- **Metric**: `qe.threat.depth_exceeded` (counter) -queries rejected for exceeding traversal depth or hop cap.
+- **Metric**: `qe.threat.limit_exceeded` (counter) -queries rejected for exceeding array cardinality caps (node_ids, IN filter values).
+- **Metric**: `qe.threat.timeout` (counter) -queries that timed out.
+- **Metric**: `qe.threat.rate_limited` (counter) -queries rejected due to rate limiting.
 - **Alert**: Trigger warning if timeout rate exceeds 5% of total queries.
 
 ## Layer 3: Final Redaction Layer via Rails Authorization
@@ -229,18 +235,20 @@ end
 
 The `Ability.allowed?` method is the single source of truth for resource-level permissions in GitLab. It evaluates all declarative policies, custom roles, and special cases including runtime checks (such as SAML group links or IP restrictions).
 
-**Component**: Knowledge Graph Service (`gkg-webserver`) + GitLab Rails via gRPC bidirectional streaming
+**Component**: Knowledge Graph Service (`gkg-webserver`) + Workhorse (gRPC client) + GitLab Rails (redaction callback)
 
-See [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md) for full protocol details.
+See [ADR 001](decisions/001_grpc_communication.md) for the protocol design and [ADR 008](decisions/008_workhorse_query_acceleration.md) for the Workhorse acceleration architecture.
 
-Rather than a separate authorization endpoint, the redaction exchange occurs inside the same gRPC bidirectional stream that carries the query. The flow is:
+The redaction exchange occurs inside a bidirectional gRPC stream between Workhorse and the GKG server. Workhorse calls back to Rails for authorization checks via an internal HTTP endpoint. The flow is:
 
-1. Rails sends the query to GKG over a gRPC bidirectional stream.
-2. GKG runs the query on ClickHouse and identifies redactable columns from the ontology.
-3. GKG sends a `RedactionExchange.required` message back through the stream with `ResourceToAuthorize[]` entries, grouped by entity type and ability (e.g., all issues that need `read_issue` checks).
-4. Rails calls `Ability.allowed?` for each resource and responds with `ResourceAuthorization[]` on the same stream.
-5. GKG applies those authorizations -- the query pipeline marks unauthorized rows and drops them from the result set.
-6. GKG returns the redacted results to Rails as an `ExecuteQueryResult`.
+1. Rails authenticates the user, builds a JWT, and returns a SendData header to Workhorse.
+2. Workhorse opens a bidirectional `ExecuteQuery` gRPC stream to GKG.
+3. GKG runs the query on ClickHouse and identifies redactable columns from the ontology.
+4. GKG sends a `RedactionExchange.required` message back through the stream with `ResourceToAuthorize[]` entries, grouped by entity type and ability (e.g., all issues that need `read_issue` checks).
+5. Workhorse calls `POST /api/v4/internal/orbit/redaction` with the resource IDs and the user's forwarded auth headers. Rails calls `Ability.allowed?` for each resource and returns the authorization map.
+6. Workhorse sends the `RedactionResponse` back on the gRPC stream.
+7. GKG applies those authorizations, marks unauthorized rows, and drops them from the result set.
+8. GKG returns the redacted results to Workhorse as an `ExecuteQueryResult`.
 
 **Code Review Requirements**:
 
@@ -261,13 +269,17 @@ Rather than a separate authorization endpoint, the redaction exchange occurs ins
 ```mermaid
 sequenceDiagram
     actor Client
+    participant Workhorse
     participant Rails
     participant WebServer as GKG Web Server
     participant AuthEngine as Query Pipeline
 
-    Client->>Rails: Send Request
-    Rails->>WebServer: Query Knowledge Graph (gRPC bidi stream)
+    Client->>Workhorse: Send Request
+    Workhorse->>Rails: Proxy to Puma
+    Rails->>Rails: Authenticate, build JWT
+    Rails-->>Workhorse: SendData header (orbit-query:...)
 
+    Workhorse->>WebServer: gRPC ExecuteQuery (bidi stream)
     activate WebServer
     WebServer->>WebServer: Compile Graph Query & Execute on ClickHouse
     WebServer->>AuthEngine: Pass result set
@@ -276,18 +288,19 @@ sequenceDiagram
     AuthEngine->>AuthEngine: Identify redactable columns from ontology
     AuthEngine->>AuthEngine: Group rows by entity type + permission + resource IDs
 
-    Note over AuthEngine, Rails: gRPC Bidirectional Streaming RedactionExchange
-    AuthEngine->>Rails: RedactionExchange.required (ResourceToAuthorize[])
+    AuthEngine->>Workhorse: RedactionExchange.required (ResourceToAuthorize[])
+    Workhorse->>Rails: POST /internal/orbit/redaction
     Rails->>Rails: Ability.allowed? per resource
-    Rails-->>AuthEngine: RedactionExchange.response (ResourceAuthorization[])
+    Rails-->>Workhorse: authorization map
+    Workhorse-->>AuthEngine: RedactionExchange.response (ResourceAuthorization[])
 
     AuthEngine->>AuthEngine: apply_authorizations() - mark unauthorized rows
     AuthEngine->>WebServer: Redacted result set
     deactivate AuthEngine
     deactivate WebServer
 
-    WebServer-->>Rails: ExecuteQueryResult with redacted payload
-    Rails-->>Client: Final redacted data
+    WebServer-->>Workhorse: ExecuteQueryResult with redacted payload
+    Workhorse-->>Client: Final redacted data
 ```
 
 This final check guarantees that:
@@ -299,9 +312,13 @@ This final check guarantees that:
 
 ### Thread and connection model
 
-The redaction exchange runs on the same Puma thread that initiated the request. The bidi stream blocks this thread for the full round-trip: query execution, redaction exchange (including `Ability.allowed?` DB lookups), and result delivery. This is one thread per query -- an improvement over the REST callback alternative, which would have consumed two threads (one blocked waiting, one handling the callback).
+With Workhorse query acceleration ([ADR 008](decisions/008_workhorse_query_acceleration.md)), the bidirectional gRPC stream runs in Workhorse (Go) rather than on a Puma thread. Puma handles two short calls: authentication and JWT construction (~10ms), and the redaction callback (~50ms). The gRPC stream, ClickHouse execution, and result hydration happen entirely in Workhorse goroutines.
 
-Explicit gRPC deadlines must be configured on both the Rails client and the GKG server before production rollout to prevent indefinite thread blocking on stalled streams. See [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md) for details on known gaps.
+Workhorse forwards the original client's auth headers (`Authorization`, `Private-Token`, `Cookie`) to the internal redaction endpoint at `POST /api/v4/internal/orbit/redaction`. This endpoint requires both Workhorse API signing and a valid user session, so Rails still authenticates the user for every redaction check.
+
+The Go gRPC client enforces a configurable timeout (default 30s, max 120s) and a maximum of 10 stream messages per query. Connection health is monitored via keepalive (60s interval, 20s timeout), and stale connections in `Shutdown` or `TransientFailure` state are replaced automatically.
+
+See [ADR 001](decisions/001_grpc_communication.md) for the original protocol design and [ADR 008](decisions/008_workhorse_query_acceleration.md) for the Workhorse acceleration architecture.
 
 ## Service-to-Service Authentication and Authorization
 
