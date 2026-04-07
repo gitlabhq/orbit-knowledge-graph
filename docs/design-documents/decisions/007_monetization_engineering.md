@@ -214,21 +214,9 @@ dws -[#7B1FA2]> snowplow : DAP_FLOW_ON_COMPLETION\n+ gkg_called=true in metadata
 @enduml
 ```
 
-### Proto changes
+### JWT claims change
 
-The gRPC proto (`gkg.proto`) and JWT claims struct need a `source_type` field:
-
-```protobuf
-// In gkg.proto -- added to request messages or metadata
-enum SourceType {
-  SOURCE_TYPE_UNSPECIFIED = 0;
-  SOURCE_TYPE_FRONTEND = 1;
-  SOURCE_TYPE_DAP = 2;
-  SOURCE_TYPE_MCP = 3;
-  SOURCE_TYPE_CORE = 4;
-  SOURCE_TYPE_REST = 5;
-}
-```
+`source_type` is propagated exclusively via JWT claims — it is **not** added to the gRPC proto message body. This is intentional: the JWT is signed by Rails with the shared HS256 secret, so GKG can trust the value. An unsigned proto field in the request body would carry no trust guarantee and could be spoofed by any caller.
 
 ```rust
 // In crates/gkg-server/src/auth/claims.rs
@@ -238,7 +226,7 @@ pub struct Claims {
 }
 ```
 
-Rails sets `source_type` when constructing the JWT before calling GKG. GKG reads it and uses it for:
+Rails sets `source_type` when constructing the JWT before calling GKG. GKG reads it from the validated token and uses it for:
 1. Billing events: included in the billable event payload sent to `billing.prdsub.gitlab.net`
 2. OTel metrics: added as a `KeyValue` label on all `gkg.query.pipeline.*` metrics via the `OTelPipelineObserver`
 
@@ -416,22 +404,11 @@ let needs_quota_check = matches!(
 );
 ```
 
-### 1.6 Proto changes
+### 1.6 JWT claims change
 
-Add `SourceType` enum to `gkg.proto`:
+`source_type` is carried exclusively in the JWT claims — the gRPC proto (`gkg.proto`) is **not** modified. Adding `source_type` to the proto request body would create an unsigned, untrusted field that any caller could set to any value, enabling spoofing. The JWT is signed by Rails with the shared HS256 secret, so GKG can trust the claim.
 
-```protobuf
-enum SourceType {
-  SOURCE_TYPE_UNSPECIFIED = 0;
-  SOURCE_TYPE_FRONTEND = 1;
-  SOURCE_TYPE_DAP = 2;
-  SOURCE_TYPE_MCP = 3;
-  SOURCE_TYPE_CORE = 4;
-  SOURCE_TYPE_REST = 5;
-}
-```
-
-Add to JWT claims struct in `crates/gkg-server/src/auth/claims.rs`:
+Add `source_type` to the JWT claims struct in `crates/gkg-server/src/auth/claims.rs`:
 
 ```rust
 pub struct Claims {
@@ -440,7 +417,9 @@ pub struct Claims {
 }
 ```
 
-### 1.6 Validation
+`SourceType` is a Rust enum defined in the GKG codebase (not generated from proto). Rails sets the `source_type` claim when constructing the JWT before calling GKG. GKG reads it from the validated token.
+
+### 1.7 Validation
 
 - **Billing events:** Confirm events arrive at `billing.prdsub.gitlab.net` from staging GKG deployment. Verify all source types produce events.
 - **OTel metrics:** Query Prometheus for `gkg_query_pipeline_duration_bucket` with `source_type` label and confirm breakdown by channel.
