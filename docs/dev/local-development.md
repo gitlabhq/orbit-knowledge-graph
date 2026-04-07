@@ -313,12 +313,22 @@ For example, you can change the webserver and indexer ports if you want to run
 multiple isolated local clusters on the same machine. You do not need to copy
 GDK connection details into `.env`; those are parsed from `gdk.yml`.
 
+Prerequisites:
+
+- A working GDK with `nats`, `clickhouse`, and `siphon` enabled in `gdk.yml`
+- PostgreSQL `wal_level = logical` (required for Siphon CDC)
+- `mise` shell activation so that `cargo`, `ruby`, and `clickhouse` are on `PATH`
+- Run `mise run dev:check` to validate all prerequisites
+
 Typical usage:
 
 ```shell
 export GDK_ROOT=~/workspace/gdk
 mise run dev
 ```
+
+On the first run, `cargo` compiles the full workspace which takes several
+minutes. Subsequent runs use the cached build and start in seconds.
 
 `mise run dev:setup` creates the graph database (default `gkg-development`) and
 applies `config/graph.sql` to the configured ClickHouse instance.

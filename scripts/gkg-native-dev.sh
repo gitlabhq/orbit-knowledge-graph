@@ -205,14 +205,13 @@ EOF
   printf "[ok] gdk.yml enables nats, clickhouse, and siphon\n"
 
   if ! gdk_enabled duo_workflow; then
-    printf "[fail] gdk.yml does not enable duo_workflow — add the following to gdk.yml:\n"
+    printf "[warn] gdk.yml does not enable duo_workflow — add the following to gdk.yml:\n"
     cat <<'EOF'
   duo_workflow:
     enabled: true
 
 Then run: cd ~/gdk && gdk reconfigure
 EOF
-    failures=$((failures + 1))
   else
     printf "[ok] gdk.yml enables duo_workflow\n"
   fi
@@ -255,7 +254,7 @@ EOF
       printf "  Then restart PostgreSQL: gdk restart postgresql\n"
       failures=$((failures + 1))
     fi
-    nc -z 127.0.0.1 "$GDK_GITLAB_PORT" >/dev/null 2>&1 && printf "[ok] GitLab reachable on localhost:%s\n" "$GDK_GITLAB_PORT" || { printf "[warn] GitLab not reachable on localhost:%s\n" "$GDK_GITLAB_PORT"; failures=$((failures + 1)); }
+    nc -z 127.0.0.1 "$GDK_GITLAB_PORT" >/dev/null 2>&1 && printf "[ok] GitLab reachable on localhost:%s\n" "$GDK_GITLAB_PORT" || { printf "[fail] GitLab not reachable on localhost:%s — GKG requires GitLab for JWT auth\n" "$GDK_GITLAB_PORT"; failures=$((failures + 1)); }
     if [[ -n "$GITALY_TCP_ADDR" ]]; then
       local gitaly_host="${GITALY_TCP_ADDR%:*}"
       local gitaly_port="${GITALY_TCP_ADDR##*:}"
