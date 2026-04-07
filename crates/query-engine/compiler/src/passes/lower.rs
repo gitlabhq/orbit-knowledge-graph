@@ -351,10 +351,20 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
             }]
         }
         None if input.cursor.is_some() => {
-            vec![OrderExpr {
-                expr: Expr::col(edge_alias, start_col),
-                desc: false,
-            }]
+            vec![
+                OrderExpr {
+                    expr: Expr::col(edge_alias, start_col),
+                    desc: false,
+                },
+                OrderExpr {
+                    expr: Expr::col(edge_alias, end_col),
+                    desc: false,
+                },
+                OrderExpr {
+                    expr: Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
+                    desc: false,
+                },
+            ]
         }
         None => vec![],
     };
@@ -538,13 +548,13 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
                 desc: s.direction == OrderDirection::Desc,
             }]
         }
-        None if input.cursor.is_some() && !input.aggregations.is_empty() => {
-            let agg = &input.aggregations[0];
-            vec![OrderExpr {
-                expr: agg_expr_with_edge_col(agg, &input.compiler.node_edge_col),
+        None if input.cursor.is_some() && !group_by_exprs.is_empty() => group_by_exprs
+            .iter()
+            .map(|expr| OrderExpr {
+                expr: expr.clone(),
                 desc: false,
-            }]
-        }
+            })
+            .collect(),
         None => vec![],
     };
 
@@ -999,6 +1009,10 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
             },
             OrderExpr {
                 expr: Expr::col(edge_alias, TARGET_ID_COLUMN),
+                desc: false,
+            },
+            OrderExpr {
+                expr: Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
                 desc: false,
             },
         ],
@@ -3081,8 +3095,30 @@ mod tests {
             panic!("expected Query");
         };
 
-        assert_eq!(q.order_by.len(), 1, "cursor should inject default ORDER BY");
-        assert!(!q.order_by[0].desc, "default order should be ASC");
+        assert_eq!(
+            q.order_by.len(),
+            3,
+            "cursor should inject ORDER BY start_col, end_col, relationship_kind"
+        );
+        for ob in &q.order_by {
+            assert!(!ob.desc, "default order should be ASC");
+        }
+        // Verify the columns form a total order on the edge.
+        if let Expr::Column { column, .. } = &q.order_by[0].expr {
+            assert_eq!(column, SOURCE_ID_COLUMN);
+        } else {
+            panic!("expected column expression for first ORDER BY");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[1].expr {
+            assert_eq!(column, TARGET_ID_COLUMN);
+        } else {
+            panic!("expected column expression for second ORDER BY");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[2].expr {
+            assert_eq!(column, RELATIONSHIP_KIND_COLUMN);
+        } else {
+            panic!("expected column expression for third ORDER BY");
+        }
     }
 
     #[test]
@@ -3103,11 +3139,27 @@ mod tests {
 
         assert_eq!(
             q.order_by.len(),
-            2,
-            "cursor should inject ORDER BY source_id, target_id"
+            3,
+            "cursor should inject ORDER BY source_id, target_id, relationship_kind"
         );
-        assert!(!q.order_by[0].desc, "default order should be ASC");
-        assert!(!q.order_by[1].desc, "secondary order should be ASC");
+        for ob in &q.order_by {
+            assert!(!ob.desc, "default order should be ASC");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[0].expr {
+            assert_eq!(column, SOURCE_ID_COLUMN);
+        } else {
+            panic!("expected column expression for first ORDER BY");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[1].expr {
+            assert_eq!(column, TARGET_ID_COLUMN);
+        } else {
+            panic!("expected column expression for second ORDER BY");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[2].expr {
+            assert_eq!(column, RELATIONSHIP_KIND_COLUMN);
+        } else {
+            panic!("expected column expression for third ORDER BY");
+        }
     }
 
     #[test]
@@ -3115,8 +3167,12 @@ mod tests {
         let mut input = validated_input(
             r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "p", "entity": "Project", "columns": ["id"]}],
-            "aggregations": [{"function": "count", "target": "p", "alias": "total"}],
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["id", "username"]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
             "limit": 10,
             "cursor": {"offset": 0, "page_size": 5}
         }"#,
@@ -3126,8 +3182,29 @@ mod tests {
             panic!("expected Query");
         };
 
-        assert_eq!(q.order_by.len(), 1, "cursor should inject default ORDER BY");
-        assert!(!q.order_by[0].desc, "default order should be ASC");
+        // Cursor should inject ORDER BY using group-by columns (u.id, u.username),
+        // not the aggregate expression, because group-by keys are unique while
+        // aggregate values (counts) frequently collide.
+        assert_eq!(
+            q.order_by.len(),
+            2,
+            "cursor should inject ORDER BY for each group-by column"
+        );
+        for ob in &q.order_by {
+            assert!(!ob.desc, "default order should be ASC");
+        }
+        if let Expr::Column { table, column } = &q.order_by[0].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "id");
+        } else {
+            panic!("expected column expression for first ORDER BY");
+        }
+        if let Expr::Column { table, column } = &q.order_by[1].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "username");
+        } else {
+            panic!("expected column expression for second ORDER BY");
+        }
     }
 
     // ── path finding entity type filter ─────────────────────────────
@@ -3149,13 +3226,23 @@ mod tests {
             panic!("expected Query");
         };
 
-        fn has_string_eq(expr: &Expr, value: &str) -> bool {
+        /// Check that `expr` contains `table.column = 'value'` somewhere
+        /// in its AND-tree. Checks both sides of equality and matches
+        /// the column reference, not just the literal.
+        fn has_column_eq(expr: &Expr, table: &str, column: &str, value: &str) -> bool {
             match expr {
                 Expr::BinaryOp {
                     op: Op::Eq,
                     left,
                     right,
                 } => {
+                    let matches_col = |e: &Expr| {
+                        matches!(
+                            e,
+                            Expr::Column { table: t, column: c }
+                                if t == table && c == column
+                        )
+                    };
                     let matches_val = |e: &Expr| match e {
                         Expr::Literal(serde_json::Value::String(s)) => s == value,
                         Expr::Param {
@@ -3164,34 +3251,38 @@ mod tests {
                         } => s == value,
                         _ => false,
                     };
-                    matches_val(right) || matches_val(left)
+                    (matches_col(left) && matches_val(right))
+                        || (matches_col(right) && matches_val(left))
                 }
                 Expr::BinaryOp {
                     op: Op::And,
                     left,
                     right,
-                } => has_string_eq(left, value) || has_string_eq(right, value),
+                } => {
+                    has_column_eq(left, table, column, value)
+                        || has_column_eq(right, table, column, value)
+                }
                 _ => false,
             }
         }
 
-        // Forward CTE anchor should filter source_kind = 'User'.
+        // Forward CTE anchor should filter e1.source_kind = 'User'.
         let forward_cte = q.ctes.iter().find(|c| c.name == "forward").unwrap();
         let fwd_where = forward_cte.query.where_clause.as_ref().unwrap();
         assert!(
-            has_string_eq(fwd_where, "User"),
-            "forward CTE should filter source_kind = 'User', got: {fwd_where:?}"
+            has_column_eq(fwd_where, "e1", SOURCE_KIND_COLUMN, "User"),
+            "forward CTE should filter e1.source_kind = 'User', got: {fwd_where:?}"
         );
 
-        // Backward CTE anchor should filter target_kind = 'Project'.
+        // Backward CTE anchor should filter e1.target_kind = 'Project'.
         let backward_cte = q.ctes.iter().find(|c| c.name == "backward").unwrap();
         let bwd_where = backward_cte.query.where_clause.as_ref().unwrap();
         assert!(
-            has_string_eq(bwd_where, "Project"),
-            "backward CTE should filter target_kind = 'Project', got: {bwd_where:?}"
+            has_column_eq(bwd_where, "e1", TARGET_KIND_COLUMN, "Project"),
+            "backward CTE should filter e1.target_kind = 'Project', got: {bwd_where:?}"
         );
 
-        // Direct query (inside the paths UNION) should filter end_kind = 'Project'.
+        // Direct query (inside the paths UNION) should filter f.end_kind = 'Project'.
         let direct_query = match &q.from {
             TableRef::Union { queries, .. } => &queries[0],
             TableRef::Subquery { query, .. } => query.as_ref(),
@@ -3199,8 +3290,8 @@ mod tests {
         };
         let direct_where = direct_query.where_clause.as_ref().unwrap();
         assert!(
-            has_string_eq(direct_where, "Project"),
-            "direct query should filter end_kind = 'Project', got: {direct_where:?}"
+            has_column_eq(direct_where, FORWARD_ALIAS, END_KIND_COLUMN, "Project"),
+            "direct query should filter f.end_kind = 'Project', got: {direct_where:?}"
         );
     }
 }
