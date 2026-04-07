@@ -174,7 +174,9 @@ async fn run_webserver(
     let mut registry = content::ColumnResolverRegistry::new();
     registry.register(
         "gitaly",
-        Arc::new(content::gitaly::GitalyContentService::new(gitlab_client.clone())),
+        Arc::new(content::gitaly::GitalyContentService::new(
+            gitlab_client.clone(),
+        )),
     );
     let resolver_registry = Some(Arc::new(registry));
     info!("Content resolution enabled (GitlabClient configured)");
