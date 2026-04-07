@@ -7,7 +7,7 @@ toc_hide: true
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -20,12 +20,12 @@ Every GKG graph query holds a Rails Puma worker for the full duration of a bidir
 1. The client sends `POST /api/v4/orbit/query` (or `POST /api/v4/orbit/mcp` with a `query_graph` tool call).
 2. Workhorse proxies the request to Rails.
 3. A Puma worker picks it up, authenticates the user, builds a JWT, and opens a bidirectional gRPC stream to the GKG Rust server.
-4. GKG compiles a ClickHouse query, executes it, and sends a `RedactionRequired` message back through the stream — a batch of resource IDs that need permission checks.
+4. GKG compiles a ClickHouse query, executes it, and sends a `RedactionRequired` message back through the stream: a batch of resource IDs that need permission checks.
 5. Rails loads each resource, runs `Ability.allowed?` through `Authz::RedactionService`, and sends a `RedactionResponse` back.
 6. GKG filters the results, hydrates node properties, and returns the final `ExecuteQueryResult`.
 7. The Puma worker writes the response and is finally released.
 
-The entire round-trip — query compilation, ClickHouse execution, redaction exchange, hydration — keeps the Puma worker blocked. Median latency for basic graph queries sits around 500 ms. Larger queries (1000-row scans with redaction) reach 7–8 seconds. During load testing on staging at 1K requests per second, Puma saturation hit 70%. At 150 RPS, three failure modes appeared: gRPC deadline exceeded (503), nginx bad gateway (502), and ClickHouse OOM (400).
+The entire round-trip (query compilation, ClickHouse execution, redaction exchange, hydration) keeps the Puma worker blocked. Median latency for basic graph queries sits around 500 ms. Larger queries (1000-row scans with redaction) reach 7–8 seconds. During load testing on staging at 1K requests per second, Puma saturation hit 70%. At 150 RPS, three failure modes appeared: gRPC deadline exceeded (503), nginx bad gateway (502), and ClickHouse OOM (400).
 
 Puma workers are finite. Each one is a thread that cannot serve other requests while blocked on a gRPC stream. More GKG query traffic, especially from AI agent clients hitting the MCP endpoint, means more threads stuck waiting on ClickHouse and redaction round-trips.
 
@@ -33,7 +33,7 @@ Puma workers are finite. Each one is a thread that cannot serve other requests w
 @startuml
 skinparam backgroundColor #FEFEFE
 skinparam sequenceMessageAlign center
-title Current architecture — Puma worker held for full request
+title Current architecture: Puma worker held for full request
 
 actor Client
 participant Workhorse
@@ -67,7 +67,7 @@ note over Puma: Worker blocked 500ms – 8s\n(entire gRPC round-trip)
 
 ### The MCP endpoint has the same problem
 
-The MCP endpoint (`POST /api/v4/orbit/mcp`) handles JSON-RPC calls. When a client invokes `tools/call` with the `query_graph` tool, the handler calls `GrpcClient.execute_query` — the same bidirectional stream, the same Puma blocking. MCP uses OAuth authentication with the `mcp_orbit` scope instead of standard GitLab auth, but the gRPC layer is identical. AI agent clients will call `query_graph` repeatedly, so MCP will generate more sustained gRPC streaming load than the REST endpoint.
+The MCP endpoint (`POST /api/v4/orbit/mcp`) handles JSON-RPC calls. When a client invokes `tools/call` with the `query_graph` tool, the handler calls `GrpcClient.execute_query`. Same bidirectional stream, same Puma blocking. MCP uses OAuth authentication with the `mcp_orbit` scope instead of standard GitLab auth, but the gRPC layer is identical. AI agent clients will call `query_graph` repeatedly, so MCP will generate more sustained gRPC streaming load than the REST endpoint.
 
 ## Decision
 
@@ -81,7 +81,7 @@ This is the standard Workhorse mechanism for offloading expensive I/O from Puma.
 2. Rails handles authentication and business logic, then sets the `Gitlab-Workhorse-Send-Data` response header with a prefix and base64-encoded parameters.
 3. Workhorse intercepts the header, cancels the Rails response body, and runs the operation itself using the parameters Rails provided.
 
-The pattern is already used for Gitaly gRPC streams (`git-changed-paths:`, `git-list-blobs:`), file downloads (`send-url:`), and dependency proxying (`send-dependency:`). This decision adds a `gkg-query:` prefix.
+The pattern is already used for Gitaly gRPC streams (`git-changed-paths:`, `git-list-blobs:`), file downloads (`send-url:`), and dependency proxying (`send-dependency:`). This decision adds an `orbit-query:` prefix.
 
 ### Proposed architecture
 
@@ -89,7 +89,7 @@ The pattern is already used for Gitaly gRPC streams (`git-changed-paths:`, `git-
 @startuml
 skinparam backgroundColor #FEFEFE
 skinparam sequenceMessageAlign center
-title Proposed architecture — Workhorse handles gRPC stream
+title Implemented architecture: Workhorse handles gRPC stream
 
 actor Client
 participant Workhorse
@@ -103,7 +103,7 @@ Workhorse -> Puma: proxy request
 activate Puma #B3FFB3
 
 Puma -> Puma: authenticate, build JWT
-Puma --> Workhorse: SendData header\ngkg-query:{jwt, address, query}
+Puma --> Workhorse: SendData header\norbit-query:{jwt, address, query}
 deactivate Puma
 
 note over Puma: Worker freed in ~10ms
@@ -131,7 +131,7 @@ Workhorse --> Client: JSON result
 @enduml
 ```
 
-Puma workers handle two short calls instead of one long one. The first (~10 ms) authenticates the user and returns connection parameters. The second (~50 ms) runs authorization checks during the redaction exchange. The gRPC stream — the expensive part — lives entirely in Workhorse, a Go process that handles concurrent connections with goroutines instead of threads.
+Puma workers handle two short calls instead of one long one. The first (~10 ms) authenticates the user and returns connection parameters. The second (~50 ms) runs authorization checks during the redaction exchange. The gRPC stream, the expensive part, lives entirely in Workhorse, a Go process that handles concurrent connections with goroutines instead of threads.
 
 ### The GKG injecter
 
@@ -139,44 +139,51 @@ A new `workhorse/internal/orbit/` package implements the `senddata.Injecter` int
 
 The injecter's `Inject()` method:
 
-1. Unpacks the SendData parameters (JWT, GKG server address, query DSL, format, user ID).
-2. Opens a gRPC connection to the GKG server, using a connection cache keyed by address (same pattern as `workhorse/internal/gitaly/gitaly.go`).
-3. Attaches the JWT as `Authorization: Bearer <token>` in gRPC metadata.
-4. Opens a bidirectional `ExecuteQuery` stream and sends the initial `ExecuteQueryRequest`.
-5. Reads stream messages in a loop:
-   - `RedactionRequired`: calls the internal Rails redaction endpoint, sends the authorization result back as `RedactionResponse`.
-   - `ExecuteQueryResult`: writes JSON to the HTTP response.
-   - `ExecuteQueryError`: writes an error response.
+1. Unpacks the base64-encoded SendData parameters (GKG server config, query, format, timeout, optional McpID).
+2. Validates the McpID if present (must be a string, number, or null per JSON-RPC spec).
+3. Sets a context timeout from the `TimeoutSeconds` parameter (default 30s, capped at 120s).
+4. Gets or creates a gRPC connection from a thread-safe connection cache keyed by address. Connections in `Shutdown` or `TransientFailure` state are replaced automatically.
+5. Attaches the JWT as gRPC metadata if present in the server config.
+6. Opens a bidirectional `ExecuteQuery` stream and sends the initial `ExecuteQueryRequest`.
+7. Enters a receive loop (max 10 messages) that dispatches on message type:
+   - `RedactionRequired`: forwards the original user's auth headers (`Authorization`, `Private-Token`, `Cookie`) to the internal Rails redaction endpoint via a signed request, converts the response back to a protobuf `RedactionResponse`, and sends it on the stream.
+   - `ExecuteQueryResult`: writes the query result as a JSON HTTP response. If `McpId` is present, wraps the result in a JSON-RPC 2.0 envelope with MCP `CallToolResult` structure.
+   - `ExecuteQueryError`: maps GKG error codes to HTTP status codes (`compile_error`/`validation_error` to 400, `execution`/`internal` to 502, `timeout` to 504) and writes an error response.
 
 ### What Rails sends to Workhorse
 
-The `Gitlab::Workhorse.send_gkg_query` method (added to `lib/gitlab/workhorse.rb`) builds the SendData header:
+The `Gitlab::Workhorse.send_orbit_query` method (added to `lib/gitlab/workhorse.rb`) builds the SendData header:
 
 ```ruby
 {
   'GkgServer' => {
-    'address' => Settings.knowledge_graph.grpc_endpoint,
-    'jwt'     => JwtAuth.generate_token(user: user),
-    'tls'     => GrpcClient.secure_channel?(address)
+    'address' => resolved_address,
+    'jwt'     => jwt_token,          # omitted for insecure non-private channels
+    'tls'     => private_address?(address)
   },
-  'Query'     => query_json,
-  'Format'    => 'raw',       # or 'llm' for MCP
-  'QueryType' => 'json',
-  'UserId'    => user.id
+  'Query'          => query_json,
+  'Format'         => 'raw',        # or 'llm' for MCP
+  'TimeoutSeconds' => orbit_timeout_seconds,
+  'McpId'          => mcp_request_id # present only for MCP tool calls
 }
 ```
 
-The JWT is generated during this call — `AuthorizationContext` computes traversal IDs, compacts them via a trie to a maximum of 500 entries, and caches the result in `Rails.cache` for 5 minutes.
+`TimeoutSeconds` is read from `Gitlab.config.knowledge_graph.streaming_timeout_seconds`, falls back to the `KNOWLEDGE_GRAPH_STREAMING_TIMEOUT` environment variable, and defaults to 30 seconds.
+
+`McpId` is included only when the request originates from an MCP `tools/call` invocation. When present, the Workhorse injecter wraps the query result in a JSON-RPC 2.0 response envelope containing an MCP `CallToolResult`.
+
+The JWT is generated during this call. `AuthorizationContext` computes traversal IDs, compacts them via a trie to a maximum of 500 entries, and caches the result in `Rails.cache` for 5 minutes.
 
 ### Internal redaction endpoint
 
 A new endpoint at `POST /api/v4/internal/orbit/redaction` handles the mid-stream authorization callback from Workhorse.
 
+**Authentication:** The endpoint requires both Workhorse API signing (`verify_workhorse_api!`) and a valid user session (`authenticate!`). Workhorse forwards the original client's auth headers (`Authorization`, `Private-Token`, `Cookie`) so Rails can identify the user without a separate `user_id` parameter. The endpoint also accepts OAuth tokens with the `mcp_orbit` scope, which covers MCP clients.
+
 **Request:**
 
 ```json
 {
-  "user_id": 123,
   "resources": [
     { "resource_type": "project", "resource_ids": [1, 2, 3], "ability": "read_project" },
     { "resource_type": "merge_request", "resource_ids": [10, 20], "ability": "read_merge_request" }
@@ -195,7 +202,7 @@ A new endpoint at `POST /api/v4/internal/orbit/redaction` handles the mid-stream
 }
 ```
 
-This endpoint is authenticated via the Workhorse shared secret (`Gitlab-Workhorse-Api-Request` header). It loads the user, calls `Authz::RedactionService`, and returns the authorization map. The endpoint enforces the same limits the current in-process redaction uses: resource types are restricted to the set `Authz::RedactionService` supports, and the total number of resource IDs per request is bounded to prevent abuse.
+The endpoint rejects duplicate `resource_type` entries in a single request. It delegates to `Authz::RedactionService` for batch permission checks and records Prometheus metrics for redaction duration, batch size, and filtered count via `Gitlab::Metrics::KnowledgeGraph::Request`.
 
 ### Handling `precomputed_member_access` at scale
 
@@ -237,7 +244,27 @@ note bottom of Cache: Both calls share the same\n5-minute traversal ID cache
 1. During the SendData call, `AuthorizationContext` computes traversal IDs and caches them in `Rails.cache` (5-minute TTL). The JWT embeds the compacted traversal IDs (max 500).
 2. During the redaction call, `AuthorizationContext` hits the same cache. `GroupsFinder` runs and populates `member_access_levels` into `SafeRequestStore` as a side effect. `RedactionService` reads them via `precomputed_member_access`. All of this happens within one Rails request. Nothing is serialized over the wire.
 
-Workhorse passes only `user_id` and resource IDs.
+Workhorse passes only the user's auth headers and resource IDs.
+
+### gRPC client configuration
+
+The Go gRPC client in `workhorse/internal/orbit/client.go` mirrors the Ruby `GrpcClient` channel configuration:
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Keepalive time | 60s | Matches Ruby `grpc.keepalive_time_ms` |
+| Keepalive timeout | 20s | Detects dead connections |
+| Max receive message | 8 MB | Handles large query results |
+| Max send message | 8 MB | Handles large redaction batches |
+| Interceptors | tracing, correlation ID, Prometheus | Standard Workhorse observability |
+
+The connection cache uses a double-checked locking pattern with `sync.RWMutex`. Connections are replaced when they enter `Shutdown` or `TransientFailure` state. Server-side connection rebalancing is handled by tonic's `MAX_CONNECTION_AGE` on the GKG side.
+
+The Ruby `GrpcClient` was also updated: `STREAMING_TIMEOUT` increased from 10 to 30 seconds, and the same keepalive and message size settings were added to `CHANNEL_ARGS`.
+
+### Go proto dependency
+
+The Workhorse Go module imports `gitlab.com/gitlab-org/orbit/knowledge-graph/clients/gkgpb` for the generated protobuf types. This module is published from the `clients/gkgpb/` directory in this repository. Proto changes require updating the Go module version in `workhorse/go.mod`.
 
 ### TLS and transport security
 
@@ -249,7 +276,7 @@ There are three network legs in this architecture, each with different security 
 
 **Workhorse → Rails internal API (internal):** The redaction callback uses the same `secret.NewRoundTripper` signing that all Workhorse-to-Rails internal requests use. The request is signed with a JWT derived from the shared `.gitlab_workhorse_secret` file. This is the same mechanism that protects `/api/v4/internal/*` endpoints for Gitaly, GOB, and other services.
 
-**JWT in the SendData header:** The GKG JWT (containing user identity and traversal IDs) is serialized into the `Gitlab-Workhorse-Send-Data` response header from Rails to Workhorse. This header never leaves the machine — it travels over the Unix socket or loopback connection between Puma and Workhorse. The JWT is then forwarded as `Authorization: Bearer <token>` gRPC metadata to GKG over the internal network.
+**JWT in the SendData header:** The GKG JWT (containing user identity and traversal IDs) is serialized into the `Gitlab-Workhorse-Send-Data` response header from Rails to Workhorse. This header never leaves the machine. It travels over the Unix socket or loopback connection between Puma and Workhorse. The JWT is then forwarded as `Authorization: Bearer <token>` gRPC metadata to GKG over the internal network.
 
 ### What does not change
 
@@ -270,13 +297,13 @@ There are three network legs in this architecture, each with different security 
 
 ### Rollout
 
-The existing `knowledge_graph` feature flag already gates all Orbit endpoints. The Workhorse path is enabled under the same flag — no additional feature flag is needed. When disabled, the existing synchronous Rails flow runs unchanged.
+The Workhorse path is gated by the existing `knowledge_graph_infra` feature flag (instance-level). This is the same flag that gates all Orbit internal endpoints. No additional rollout mechanism is needed.
 
 ## Why not the alternatives
 
 ### Keep the synchronous Rails flow and optimize redaction further
 
-The redaction preloading work reduced SQL queries from 348 to 5 for 100 projects. That is a real improvement, but redaction is still the primary bottleneck — it accounts for the majority of the end-to-end latency in large queries. Moving the stream to Workhorse does not make redaction faster. What it does is free the Puma thread while the slow parts run (ClickHouse execution, redaction exchange, hydration), so other Rails requests are not starved. Both optimizations are needed: faster redaction reduces total latency, Workhorse offloading reduces thread utilization.
+The redaction preloading work reduced SQL queries from 348 to 5 for 100 projects. That is a real improvement, but redaction is still the primary bottleneck, accounting for the majority of end-to-end latency in large queries. Moving the stream to Workhorse does not make redaction faster. What it does is free the Puma thread while the slow parts run (ClickHouse execution, redaction exchange, hydration), so other Rails requests are not starved. Both optimizations are needed: faster redaction reduces total latency, Workhorse offloading reduces thread utilization.
 
 ### GOB-style proxy (Workhorse intercepts the route directly)
 
@@ -292,7 +319,7 @@ Instead of holding the HTTP connection, Rails could enqueue a Sidekiq job for th
 
 ### Expose GKG directly (future consideration)
 
-Longer term, it may make sense to expose the GKG query endpoint directly to clients without going through Workhorse or Rails at all. This would require GKG to handle its own authentication and authorization, which is out of scope for this ADR. The Workhorse approach is the right intermediate step — it removes the Puma bottleneck while keeping authorization in Rails.
+Longer term, it may make sense to expose the GKG query endpoint directly to clients without going through Workhorse or Rails at all. This would require GKG to handle its own authentication and authorization, which is out of scope for this ADR. The Workhorse approach is the right intermediate step: it removes the Puma bottleneck while keeping authorization in Rails.
 
 ## Consequences
 
@@ -313,10 +340,14 @@ Longer term, it may make sense to expose the GKG query endpoint directly to clie
 
 ## References
 
-- [gitlab-org/orbit/knowledge-graph#349](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/349) — Move GKG queries to Workhorse
-- [ADR 001: gRPC communication protocol](001_grpc_communication.md) — The bidirectional streaming redaction exchange this ADR builds on
-- `workhorse/internal/git/changedpaths.go` — Reference SendData injecter for Gitaly gRPC streams
-- `workhorse/internal/gob/proxy.go` — Reference for Workhorse modules that call back to Rails
-- `workhorse/internal/senddata/injecter.go` — The `Injecter` interface
-- `app/services/authz/redaction_service.rb` — The authorization service called during redaction
-- `ee/lib/analytics/knowledge_graph/authorization_context.rb` — Traversal ID computation and caching
+- [gitlab-org/gitlab!229394](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/229394) - Implementation MR
+- [gitlab-org/orbit/knowledge-graph#349](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/349) - Move GKG queries to Workhorse
+- [ADR 001: gRPC communication protocol](001_grpc_communication.md) - The bidirectional streaming redaction exchange this ADR builds on
+- `workhorse/internal/orbit/sendquery.go` - The `SendQuery` injecter implementation
+- `workhorse/internal/orbit/client.go` - gRPC connection management
+- `workhorse/internal/orbit/redaction.go` - Rails redaction callback
+- `workhorse/internal/senddata/injecter.go` - The `Injecter` interface
+- `lib/gitlab/workhorse.rb` - `send_orbit_query` method
+- `ee/lib/api/internal/orbit.rb` - Internal redaction endpoint
+- `app/services/authz/redaction_service.rb` - The authorization service called during redaction
+- `ee/lib/analytics/knowledge_graph/authorization_context.rb` - Traversal ID computation and caching
