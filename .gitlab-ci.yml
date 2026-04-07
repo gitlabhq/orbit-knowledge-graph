@@ -49,9 +49,6 @@ stages:
     - mise install
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
-        if [ "$CI_PROJECT_ID" != "$CANONICAL_PROJECT_ID" ]; then
-          export SCCACHE_GCS_RW_MODE="READ_ONLY"
-        fi
         export RUSTC_WRAPPER="sccache"
         sccache --start-server || true
       fi
