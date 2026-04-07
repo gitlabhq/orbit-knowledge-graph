@@ -108,12 +108,27 @@ fn lower_search(input: &Input) -> Result<Node> {
         }
     }
 
-    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
-        vec![OrderExpr {
-            expr: Expr::col(&ob.node, &ob.property),
-            desc: ob.direction == OrderDirection::Desc,
-        }]
-    });
+    let pk_tiebreaker = OrderExpr {
+        expr: Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+        desc: false,
+    };
+    let order_by = match &input.order_by {
+        Some(ob) => {
+            let mut exprs = vec![OrderExpr {
+                expr: Expr::col(&ob.node, &ob.property),
+                desc: ob.direction == OrderDirection::Desc,
+            }];
+            // Append PK tie-breaker for cursor pagination. The user's sort
+            // column may not be unique (e.g. username), so we need the PK
+            // to guarantee deterministic OFFSET slicing.
+            if input.cursor.is_some() && ob.property != DEFAULT_PRIMARY_KEY {
+                exprs.push(pk_tiebreaker);
+            }
+            exprs
+        }
+        None if input.cursor.is_some() => vec![pk_tiebreaker],
+        None => vec![],
+    };
     let limit = Some(input.limit);
 
     Ok(Node::Query(Box::new(Query {
@@ -146,6 +161,10 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
     let mut ctes = Vec::new();
     let mut node_edge_col: HashMap<String, (String, String)> = HashMap::new();
 
+    // Track all edge aliases for cursor tie-breaker ordering.
+    // Each entry is (alias, start_col, end_col, is_multi_hop).
+    let mut all_edge_aliases: Vec<(String, &str, &str, bool)> = Vec::new();
+
     // Build driving edge: flat scan for single-hop, UNION ALL for multi-hop
     let mut from;
     let edge_alias;
@@ -165,6 +184,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
             first_rel.to.clone(),
             (edge_alias.to_string(), to_col.to_string()),
         );
+        all_edge_aliases.push((edge_alias.to_string(), start_col, end_col, true));
     } else {
         edge_alias = "e0";
         let (edge, edge_type_cond) = edge_scan(edge_alias, &type_filter(&first_rel.types));
@@ -181,6 +201,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
             first_rel.to.clone(),
             (edge_alias.to_string(), end_col.to_string()),
         );
+        all_edge_aliases.push((edge_alias.to_string(), start_col, end_col, false));
     }
 
     // JOIN secondary relationships on shared columns
@@ -219,6 +240,8 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 &rel.from
             };
             let other_col = if other == &rel.from { from_col } else { to_col };
+            let (sec_start, sec_end) = rel.direction.edge_columns();
+            all_edge_aliases.push((alias.clone(), sec_start, sec_end, true));
             node_edge_col
                 .entry(other.clone())
                 .or_insert((alias, other_col.to_string()));
@@ -258,6 +281,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
             } else {
                 sec_end
             };
+            all_edge_aliases.push((alias.clone(), sec_start, sec_end, false));
             node_edge_col
                 .entry(other.clone())
                 .or_insert((alias, other_col.to_string()));
@@ -332,16 +356,56 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
     }
 
     let where_clause = Expr::and_all(where_parts.into_iter().map(Some));
-    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
-        let expr = match (ob.property.as_str(), node_edge_col.get(&ob.node)) {
-            (DEFAULT_PRIMARY_KEY, Some((alias, edge_col))) => Expr::col(alias, edge_col.as_str()),
-            _ => Expr::col(&ob.node, &ob.property),
-        };
-        vec![OrderExpr {
-            expr,
-            desc: ob.direction == OrderDirection::Desc,
-        }]
-    });
+
+    // Build edge-based tie-breaker columns for cursor pagination.
+    // For each edge in the query, add (source_id, target_id, relationship_kind)
+    // and depth for multi-hop edges. This combination forms a total order
+    // over the result set so OFFSET/LIMIT slicing is deterministic.
+    let edge_tiebreakers = || -> Vec<OrderExpr> {
+        let mut exprs = Vec::new();
+        for (alias, s_col, e_col, is_multi_hop) in &all_edge_aliases {
+            exprs.push(OrderExpr {
+                expr: Expr::col(alias, *s_col),
+                desc: false,
+            });
+            exprs.push(OrderExpr {
+                expr: Expr::col(alias, *e_col),
+                desc: false,
+            });
+            exprs.push(OrderExpr {
+                expr: Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
+                desc: false,
+            });
+            if *is_multi_hop {
+                exprs.push(OrderExpr {
+                    expr: Expr::col(alias, DEPTH_COLUMN),
+                    desc: false,
+                });
+            }
+        }
+        exprs
+    };
+
+    let order_by = match &input.order_by {
+        Some(ob) => {
+            let expr = match (ob.property.as_str(), node_edge_col.get(&ob.node)) {
+                (DEFAULT_PRIMARY_KEY, Some((alias, edge_col))) => {
+                    Expr::col(alias, edge_col.as_str())
+                }
+                _ => Expr::col(&ob.node, &ob.property),
+            };
+            let mut exprs = vec![OrderExpr {
+                expr,
+                desc: ob.direction == OrderDirection::Desc,
+            }];
+            if input.cursor.is_some() {
+                exprs.extend(edge_tiebreakers());
+            }
+            exprs
+        }
+        None if input.cursor.is_some() => edge_tiebreakers(),
+        None => vec![],
+    };
     let limit = Some(input.limit);
 
     Ok(Node::Query(Box::new(Query {
@@ -510,17 +574,40 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         ));
     }
 
-    let order_by = input
+    // Group-by key columns as tie-breakers. Each group-by key combination
+    // is unique by definition of GROUP BY, so these guarantee deterministic
+    // ordering for cursor pagination.
+    let group_by_tiebreakers = || -> Vec<OrderExpr> {
+        group_by_exprs
+            .iter()
+            .map(|expr| OrderExpr {
+                expr: expr.clone(),
+                desc: false,
+            })
+            .collect()
+    };
+
+    let order_by = match input
         .aggregation_sort
         .as_ref()
         .filter(|s| s.agg_index < input.aggregations.len())
-        .map_or(vec![], |s| {
+    {
+        Some(s) => {
             let agg = &input.aggregations[s.agg_index];
-            vec![OrderExpr {
+            let mut exprs = vec![OrderExpr {
                 expr: agg_expr_with_edge_col(agg, &input.compiler.node_edge_col),
                 desc: s.direction == OrderDirection::Desc,
-            }]
-        });
+            }];
+            // Aggregate values frequently collide (e.g. many groups with
+            // count=1). Append group-by keys so ties are resolved.
+            if input.cursor.is_some() {
+                exprs.extend(group_by_tiebreakers());
+            }
+            exprs
+        }
+        None if input.cursor.is_some() && !group_by_exprs.is_empty() => group_by_tiebreakers(),
+        None => vec![],
+    };
 
     let limit = Some(input.limit);
 
@@ -600,12 +687,24 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 
     let forward_cte = Cte::new(
         FORWARD_CTE,
-        build_frontier(&start.node_ids, forward_depth, &rel_type_filter, true),
+        build_frontier(
+            &start.node_ids,
+            forward_depth,
+            &rel_type_filter,
+            true,
+            Some(start_entity),
+        ),
     );
     let backward_cte = if backward_depth > 0 {
         Some(Cte::new(
             BACKWARD_CTE,
-            build_frontier(&end.node_ids, backward_depth, &rel_type_filter, false),
+            build_frontier(
+                &end.node_ids,
+                backward_depth,
+                &rel_type_filter,
+                false,
+                Some(end_entity),
+            ),
         ))
     } else {
         None
@@ -653,6 +752,10 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 Op::Eq,
                 Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
                 Expr::int(1),
+            )),
+            Some(Expr::eq(
+                Expr::col(FORWARD_ALIAS, END_KIND_COLUMN),
+                Expr::string(end_entity),
             )),
             Expr::col_in(
                 FORWARD_ALIAS,
@@ -769,14 +872,27 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 ///
 /// `is_forward=true`:  anchors on source_id, traverses source→target
 /// `is_forward=false`: anchors on target_id, traverses target→source
+///
+/// `anchor_entity`: when set, adds `e1.source_kind = entity` (forward) or
+/// `e1.target_kind = entity` (backward) to constrain the anchor side to
+/// the expected entity type.
 fn build_frontier(
     anchor_ids: &[i64],
     max_depth: u32,
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
+    anchor_entity: Option<&str>,
 ) -> Query {
     let arms: Vec<Query> = (1..=max_depth)
-        .map(|depth| build_frontier_arm(anchor_ids, depth, rel_type_filter, is_forward))
+        .map(|depth| {
+            build_frontier_arm(
+                anchor_ids,
+                depth,
+                rel_type_filter,
+                is_forward,
+                anchor_entity,
+            )
+        })
         .collect();
 
     // Wrap in a UNION ALL. For a single arm just return it directly.
@@ -797,12 +913,16 @@ fn build_frontier(
 /// Forward arm (depth=2, anchor=start):
 ///   SELECT e2.target_id AS end_id, ...
 ///   FROM gl_edge e1 JOIN gl_edge e2 ON e1.target_id = e2.source_id
-///   WHERE e1.source_id IN (start_ids)
+///   WHERE e1.source_id IN (start_ids) AND e1.source_kind = 'User'
+///
+/// `anchor_entity`: when set, adds a kind predicate on the anchor side of
+/// the first edge so the frontier only starts from the expected entity type.
 fn build_frontier_arm(
     anchor_ids: &[i64],
     depth: u32,
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
+    anchor_entity: Option<&str>,
 ) -> Query {
     // Column naming: forward traverses source→target, backward target→source.
     let (anchor_col, next_col, next_kind_col) = if is_forward {
@@ -880,6 +1000,16 @@ fn build_frontier_arm(
         anchor_ids.iter().map(|id| Value::from(*id)).collect(),
     );
 
+    // Anchor entity kind filter: constrain the anchor side of the first edge
+    // to the expected entity type (e.g. source_kind = 'User' for forward).
+    let anchor_kind_col = if is_forward {
+        SOURCE_KIND_COLUMN
+    } else {
+        TARGET_KIND_COLUMN
+    };
+    let anchor_kind_cond = anchor_entity
+        .map(|entity| Expr::eq(Expr::col("e1", anchor_kind_col), Expr::string(entity)));
+
     Query {
         select: vec![
             SelectExpr::new(Expr::col("e1", anchor_col), ANCHOR_ID_COLUMN),
@@ -890,7 +1020,7 @@ fn build_frontier_arm(
             SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
         ],
         from,
-        where_clause: Expr::and_all([anchor_cond, first_type_cond]),
+        where_clause: Expr::and_all([anchor_cond, first_type_cond, anchor_kind_cond]),
         ..Default::default()
     }
 }
@@ -918,12 +1048,36 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
     let center_id = center_node.id.clone();
     let center_uses_default_pk = center_node.redaction_id_column == DEFAULT_PRIMARY_KEY;
     let center_redaction_col = center_node.redaction_id_column.clone();
-    let order_by = input.order_by.as_ref().map_or(vec![], |ob| {
-        vec![OrderExpr {
-            expr: Expr::col(&ob.node, &ob.property),
-            desc: ob.direction == OrderDirection::Desc,
-        }]
-    });
+    let edge_tiebreakers = || -> Vec<OrderExpr> {
+        vec![
+            OrderExpr {
+                expr: Expr::col(edge_alias, SOURCE_ID_COLUMN),
+                desc: false,
+            },
+            OrderExpr {
+                expr: Expr::col(edge_alias, TARGET_ID_COLUMN),
+                desc: false,
+            },
+            OrderExpr {
+                expr: Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
+                desc: false,
+            },
+        ]
+    };
+    let order_by = match &input.order_by {
+        Some(ob) => {
+            let mut exprs = vec![OrderExpr {
+                expr: Expr::col(&ob.node, &ob.property),
+                desc: ob.direction == OrderDirection::Desc,
+            }];
+            if input.cursor.is_some() {
+                exprs.extend(edge_tiebreakers());
+            }
+            exprs
+        }
+        None if input.cursor.is_some() => edge_tiebreakers(),
+        None => vec![],
+    };
     let limit = Some(input.limit);
 
     // Build _nf CTE for center node filtering (IDs + filters).
@@ -2910,5 +3064,465 @@ mod tests {
     #[test]
     fn escape_like_escapes_all_metacharacters() {
         assert_eq!(super::escape_like("100%_\\"), "100\\%\\_\\\\");
+    }
+
+    // ── cursor default ordering ─────────────────────────────────────
+
+    #[test]
+    fn search_cursor_injects_default_order_by_id() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10,
+            "cursor": {"offset": 0, "page_size": 5}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert_eq!(q.order_by.len(), 1, "cursor should inject default ORDER BY");
+        if let Expr::Column { table, column } = &q.order_by[0].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "id");
+        } else {
+            panic!("expected column expression");
+        }
+        assert!(!q.order_by[0].desc, "default order should be ASC");
+    }
+
+    #[test]
+    fn search_without_cursor_has_no_default_order() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert!(q.order_by.is_empty(), "no cursor = no default ORDER BY");
+    }
+
+    #[test]
+    fn search_explicit_order_by_with_cursor_appends_pk_tiebreaker() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "order_by": {"node": "u", "property": "username", "direction": "DESC"},
+            "limit": 10,
+            "cursor": {"offset": 0, "page_size": 5}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert_eq!(
+            q.order_by.len(),
+            2,
+            "explicit order + cursor should append PK tie-breaker"
+        );
+        // Primary: user-specified column
+        if let Expr::Column { table, column } = &q.order_by[0].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "username");
+        } else {
+            panic!("expected column expression");
+        }
+        assert!(q.order_by[0].desc);
+        // Tie-breaker: PK ASC
+        if let Expr::Column { table, column } = &q.order_by[1].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "id");
+        } else {
+            panic!("expected column expression for PK tie-breaker");
+        }
+        assert!(!q.order_by[1].desc);
+    }
+
+    #[test]
+    fn search_explicit_order_by_id_with_cursor_no_duplicate_tiebreaker() {
+        // When the user already sorts by "id", don't append a redundant PK tie-breaker.
+        let mut input = validated_input(
+            r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "limit": 10,
+            "cursor": {"offset": 0, "page_size": 5}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert_eq!(
+            q.order_by.len(),
+            1,
+            "order by id + cursor should not duplicate PK"
+        );
+    }
+
+    #[test]
+    fn traversal_cursor_injects_default_order_by() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 10,
+            "cursor": {"offset": 0, "page_size": 5}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert_eq!(
+            q.order_by.len(),
+            3,
+            "cursor should inject ORDER BY start_col, end_col, relationship_kind"
+        );
+        for ob in &q.order_by {
+            assert!(!ob.desc, "default order should be ASC");
+        }
+        // Verify the columns form a total order on the edge.
+        if let Expr::Column { column, .. } = &q.order_by[0].expr {
+            assert_eq!(column, SOURCE_ID_COLUMN);
+        } else {
+            panic!("expected column expression for first ORDER BY");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[1].expr {
+            assert_eq!(column, TARGET_ID_COLUMN);
+        } else {
+            panic!("expected column expression for second ORDER BY");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[2].expr {
+            assert_eq!(column, RELATIONSHIP_KIND_COLUMN);
+        } else {
+            panic!("expected column expression for third ORDER BY");
+        }
+    }
+
+    #[test]
+    fn neighbors_cursor_injects_default_order_by() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "neighbors",
+            "node": {"id": "p", "entity": "Project", "node_ids": [100]},
+            "neighbors": {"node": "p", "direction": "incoming"},
+            "limit": 10,
+            "cursor": {"offset": 0, "page_size": 5}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert_eq!(
+            q.order_by.len(),
+            3,
+            "cursor should inject ORDER BY source_id, target_id, relationship_kind"
+        );
+        for ob in &q.order_by {
+            assert!(!ob.desc, "default order should be ASC");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[0].expr {
+            assert_eq!(column, SOURCE_ID_COLUMN);
+        } else {
+            panic!("expected column expression for first ORDER BY");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[1].expr {
+            assert_eq!(column, TARGET_ID_COLUMN);
+        } else {
+            panic!("expected column expression for second ORDER BY");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[2].expr {
+            assert_eq!(column, RELATIONSHIP_KIND_COLUMN);
+        } else {
+            panic!("expected column expression for third ORDER BY");
+        }
+    }
+
+    #[test]
+    fn aggregation_cursor_injects_default_order_by() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["id", "username"]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+            "limit": 10,
+            "cursor": {"offset": 0, "page_size": 5}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Cursor should inject ORDER BY using group-by columns (u.id, u.username),
+        // not the aggregate expression, because group-by keys are unique while
+        // aggregate values (counts) frequently collide.
+        assert_eq!(
+            q.order_by.len(),
+            2,
+            "cursor should inject ORDER BY for each group-by column"
+        );
+        for ob in &q.order_by {
+            assert!(!ob.desc, "default order should be ASC");
+        }
+        if let Expr::Column { table, column } = &q.order_by[0].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "id");
+        } else {
+            panic!("expected column expression for first ORDER BY");
+        }
+        if let Expr::Column { table, column } = &q.order_by[1].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "username");
+        } else {
+            panic!("expected column expression for second ORDER BY");
+        }
+    }
+
+    // ── cursor explicit order + tie-breakers ───────────────────────
+
+    #[test]
+    fn traversal_explicit_order_with_cursor_appends_edge_tiebreakers() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "limit": 10,
+            "cursor": {"offset": 0, "page_size": 5}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Primary (user sort) + 3 edge tie-breakers = 4
+        assert_eq!(
+            q.order_by.len(),
+            4,
+            "explicit order + cursor should append edge tie-breakers"
+        );
+        // First: user-specified column (mapped to edge column for PK)
+        assert!(!q.order_by[0].desc);
+        // Tie-breakers: source_id, target_id, relationship_kind
+        if let Expr::Column { column, .. } = &q.order_by[1].expr {
+            assert_eq!(column, SOURCE_ID_COLUMN);
+        } else {
+            panic!("expected column expression");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[2].expr {
+            assert_eq!(column, TARGET_ID_COLUMN);
+        } else {
+            panic!("expected column expression");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[3].expr {
+            assert_eq!(column, RELATIONSHIP_KIND_COLUMN);
+        } else {
+            panic!("expected column expression");
+        }
+    }
+
+    #[test]
+    fn neighbors_explicit_order_with_cursor_appends_edge_tiebreakers() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "neighbors",
+            "node": {"id": "p", "entity": "Project", "node_ids": [100]},
+            "neighbors": {"node": "p", "direction": "incoming"},
+            "order_by": {"node": "p", "property": "id", "direction": "ASC"},
+            "limit": 10,
+            "cursor": {"offset": 0, "page_size": 5}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Primary (user sort) + 3 edge tie-breakers = 4
+        assert_eq!(
+            q.order_by.len(),
+            4,
+            "explicit order + cursor should append edge tie-breakers"
+        );
+        if let Expr::Column { column, .. } = &q.order_by[1].expr {
+            assert_eq!(column, SOURCE_ID_COLUMN);
+        } else {
+            panic!("expected column expression");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[2].expr {
+            assert_eq!(column, TARGET_ID_COLUMN);
+        } else {
+            panic!("expected column expression");
+        }
+        if let Expr::Column { column, .. } = &q.order_by[3].expr {
+            assert_eq!(column, RELATIONSHIP_KIND_COLUMN);
+        } else {
+            panic!("expected column expression");
+        }
+    }
+
+    #[test]
+    fn aggregation_explicit_sort_with_cursor_appends_group_by_tiebreakers() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["id", "username"]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+            "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+            "limit": 10,
+            "cursor": {"offset": 0, "page_size": 5}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Primary (aggregate DESC) + 2 group-by tie-breakers = 3
+        assert_eq!(
+            q.order_by.len(),
+            3,
+            "explicit sort + cursor should append group-by tie-breakers"
+        );
+        // First: aggregate expression DESC
+        assert!(q.order_by[0].desc);
+        // Tie-breakers: u.id, u.username ASC
+        if let Expr::Column { table, column } = &q.order_by[1].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "id");
+        } else {
+            panic!("expected column expression for first tie-breaker");
+        }
+        assert!(!q.order_by[1].desc);
+        if let Expr::Column { table, column } = &q.order_by[2].expr {
+            assert_eq!(table, "u");
+            assert_eq!(column, "username");
+        } else {
+            panic!("expected column expression for second tie-breaker");
+        }
+        assert!(!q.order_by[2].desc);
+    }
+
+    // ── path finding entity type filter ─────────────────────────────
+
+    #[test]
+    fn path_finding_direct_query_filters_end_entity_kind() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "p", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2}
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        /// Check that `expr` contains `table.column = 'value'` somewhere
+        /// in its AND-tree. Checks both sides of equality and matches
+        /// the column reference, not just the literal.
+        fn has_column_eq(expr: &Expr, table: &str, column: &str, value: &str) -> bool {
+            match expr {
+                Expr::BinaryOp {
+                    op: Op::Eq,
+                    left,
+                    right,
+                } => {
+                    let matches_col = |e: &Expr| {
+                        matches!(
+                            e,
+                            Expr::Column { table: t, column: c }
+                                if t == table && c == column
+                        )
+                    };
+                    let matches_val = |e: &Expr| match e {
+                        Expr::Literal(serde_json::Value::String(s)) => s == value,
+                        Expr::Param {
+                            value: serde_json::Value::String(s),
+                            ..
+                        } => s == value,
+                        _ => false,
+                    };
+                    (matches_col(left) && matches_val(right))
+                        || (matches_col(right) && matches_val(left))
+                }
+                Expr::BinaryOp {
+                    op: Op::And,
+                    left,
+                    right,
+                } => {
+                    has_column_eq(left, table, column, value)
+                        || has_column_eq(right, table, column, value)
+                }
+                _ => false,
+            }
+        }
+
+        // Forward CTE anchor should filter e1.source_kind = 'User'.
+        let forward_cte = q.ctes.iter().find(|c| c.name == "forward").unwrap();
+        let fwd_where = forward_cte.query.where_clause.as_ref().unwrap();
+        assert!(
+            has_column_eq(fwd_where, "e1", SOURCE_KIND_COLUMN, "User"),
+            "forward CTE should filter e1.source_kind = 'User', got: {fwd_where:?}"
+        );
+
+        // Backward CTE anchor should filter e1.target_kind = 'Project'.
+        let backward_cte = q.ctes.iter().find(|c| c.name == "backward").unwrap();
+        let bwd_where = backward_cte.query.where_clause.as_ref().unwrap();
+        assert!(
+            has_column_eq(bwd_where, "e1", TARGET_KIND_COLUMN, "Project"),
+            "backward CTE should filter e1.target_kind = 'Project', got: {bwd_where:?}"
+        );
+
+        // Direct query (inside the paths UNION) should filter f.end_kind = 'Project'.
+        let direct_query = match &q.from {
+            TableRef::Union { queries, .. } => &queries[0],
+            TableRef::Subquery { query, .. } => query.as_ref(),
+            other => panic!("expected Union or Subquery for paths, got: {other:?}"),
+        };
+        let direct_where = direct_query.where_clause.as_ref().unwrap();
+        assert!(
+            has_column_eq(direct_where, FORWARD_ALIAS, END_KIND_COLUMN, "Project"),
+            "direct query should filter f.end_kind = 'Project', got: {direct_where:?}"
+        );
     }
 }
