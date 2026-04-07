@@ -66,7 +66,8 @@ The migration framework also emits OpenTelemetry metrics and structured `tracing
 - `gkg_migration_desired_version`: gauge for the highest registered migration version;
 - `gkg_migration_current_version`: gauge for the highest completed migration version in the ledger.
 
-Failures are logged at WARN level and normal lifecycle transitions at INFO level so operators can correlate ledger state with recent migration activity. Reconciler-specific metrics remain deferred until the reconciler runtime is merged.
+Failures are logged at WARN level and normal lifecycle transitions at INFO level so operators can correlate ledger state with recent migration activity. Lifecycle transition metrics bucket retry counts as `0`, `1-3`, or `4+` to keep label cardinality bounded. `prepare()` duration recording is wired through the ledger/test execution flows that invoke migration preparation; reconciler-specific metrics remain deferred until the reconciler runtime is merged.
+
 As GitLab evolves, the Knowledge Graph schema must evolve with it. We must support schema changes, from adding a new property to introducing entirely new node types, without causing service interruptions. The primary goal is to achieve **zero-downtime migrations**.
 
 Our migration strategy will be based on a multi-step process inspired by blue-green deployments, ensuring the service remains available and queries are unaffected during the transition.

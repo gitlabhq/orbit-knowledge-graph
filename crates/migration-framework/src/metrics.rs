@@ -9,6 +9,8 @@ use crate::ledger::LedgerMigrationRecord;
 use crate::registry::MigrationRegistry;
 use crate::types::{Migration, MigrationContext, MigrationStatus};
 
+// These buckets are tuned for today's additive DDL migrations. If prepare()
+// starts covering longer-running convergent/finalization work, revisit them.
 const DURATION_BUCKETS: &[f64] = &[
     0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
 ];
@@ -116,7 +118,6 @@ impl MigrationMetrics {
                     version_label(migration.version()),
                     migration_type_label(migration),
                     KeyValue::new("outcome", terminal_outcome(status)),
-                    KeyValue::new("retry_count", i64::from(retry_count)),
                 ],
             );
         }
@@ -129,7 +130,7 @@ impl MigrationMetrics {
     pub async fn record_prepare<T>(
         &self,
         migration: &dyn Migration,
-        _ctx: &MigrationContext,
+        ctx: &MigrationContext,
         operation: impl std::future::Future<Output = Result<T>>,
     ) -> Result<T> {
         let start = Instant::now();
@@ -145,7 +146,7 @@ impl MigrationMetrics {
                     "outcome",
                     if result.is_ok() { "success" } else { "failure" },
                 ),
-                KeyValue::new("context", "migration"),
+                KeyValue::new("context", prepare_context_label(ctx)),
             ],
         );
         result
@@ -158,6 +159,7 @@ impl Default for MigrationMetrics {
     }
 }
 
+/// Keep this in sync with the gkg_migration_status metric description above.
 fn status_code(status: MigrationStatus) -> u64 {
     match status {
         MigrationStatus::Pending => 0,
@@ -177,6 +179,8 @@ fn terminal_outcome(status: MigrationStatus) -> &'static str {
     }
 }
 
+// This allocates per observation. That's acceptable for the current control
+// plane path and should only be revisited if ledger polling becomes hot.
 fn status_labels(record: &LedgerMigrationRecord) -> [KeyValue; 4] {
     [
         KeyValue::new("migration", record.name.clone()),
@@ -196,10 +200,21 @@ fn transition_labels(
         version_label(migration.version()),
         migration_type_label(migration),
         KeyValue::new("status", status.as_str()),
-        KeyValue::new("retry_count", i64::from(retry_count)),
+        KeyValue::new("retry_count", retry_bucket(retry_count)),
     ]
 }
 
+fn retry_bucket(retry_count: u32) -> &'static str {
+    match retry_count {
+        0 => "0",
+        1..=3 => "1-3",
+        _ => "4+",
+    }
+}
+
+fn prepare_context_label(_ctx: &MigrationContext) -> &'static str {
+    "migration"
+}
 fn migration_label(migration: &dyn Migration) -> KeyValue {
     KeyValue::new("migration", migration.name().to_owned())
 }

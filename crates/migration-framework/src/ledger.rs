@@ -87,6 +87,15 @@ impl MigrationLedger {
             .await
     }
 
+    pub async fn record_prepare<T>(
+        &self,
+        migration: &dyn Migration,
+        ctx: &crate::types::MigrationContext,
+        operation: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
+        self.metrics.record_prepare(migration, ctx, operation).await
+    }
+
     pub async fn mark_completed(
         &self,
         migration: &dyn Migration,
@@ -219,6 +228,9 @@ fn log_transition(
     retry_count: u32,
     error_message: Option<&str>,
 ) {
+    // This infers the source state from the target transition. Retries that move
+    // from failed -> preparing will still log from="pending" until the ledger
+    // plumbs the prior persisted status into this logger.
     let from = previous_status(status);
 
     match status {

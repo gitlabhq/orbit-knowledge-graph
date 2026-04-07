@@ -81,8 +81,10 @@ async fn run_all_migrations(ctx: &TestContext, registry: &MigrationRegistry) {
             .mark_preparing(migration.as_ref(), 0)
             .await
             .expect("preparing");
-        migration
-            .prepare(&migration_ctx)
+        ledger
+            .record_prepare(migration.as_ref(), &migration_ctx, async {
+                migration.prepare(&migration_ctx).await
+            })
             .await
             .expect("migration apply");
         ledger

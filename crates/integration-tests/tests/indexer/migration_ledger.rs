@@ -82,7 +82,12 @@ async fn run_registry(
             .await
             .expect("preparing");
 
-        match migration.prepare(&migration_ctx).await {
+        match ledger
+            .record_prepare(migration.as_ref(), &migration_ctx, async {
+                migration.prepare(&migration_ctx).await
+            })
+            .await
+        {
             Ok(()) => ledger
                 .mark_completed(migration.as_ref(), retry_count)
                 .await
