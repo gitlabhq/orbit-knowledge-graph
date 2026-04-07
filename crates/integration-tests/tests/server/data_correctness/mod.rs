@@ -87,6 +87,8 @@ async fn data_correctness() {
         path_finding::path_finding_any_returns_at_least_one_path,
         path_finding::path_finding_rel_types_restricts_traversal,
         path_finding::path_finding_step_indices_are_sequential,
+        path_finding::path_finding_target_entity_constrains_results,
+        path_finding::path_finding_entity_filter_excludes_wrong_types,
         // neighbors
         neighbors::neighbors_outgoing_returns_correct_targets,
         neighbors::neighbors_incoming_returns_correct_sources,
@@ -153,6 +155,10 @@ async fn data_correctness() {
         pagination::cursor_with_redaction_second_page,
         pagination::cursor_pages_cover_all_data,
         pagination::cursor_traversal,
+        pagination::cursor_without_order_by_is_deterministic,
+        pagination::cursor_without_order_by_pages_cover_all_data,
+        pagination::cursor_traversal_without_order_by_is_deterministic,
+        pagination::cursor_aggregation_without_sort_is_deterministic,
         // work items: search
         work_items::search_returns_correct_work_item_properties,
         work_items::search_filter_work_item_type_returns_matching_rows,

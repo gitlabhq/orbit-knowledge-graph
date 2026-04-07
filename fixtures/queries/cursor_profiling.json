@@ -1,0 +1,182 @@
+{
+  "01_cascading_sip_3node_chain_cursor": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "entity": "User", "node_ids": [1, 3, 5]},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "u", "to": "mr"},
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "limit": 50,
+    "cursor": {"offset": 0, "page_size": 10}
+  },
+
+  "02_cascading_sip_4node_fan_out_cursor": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p", "entity": "Project", "node_ids": [20699]},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "author", "entity": "User"},
+      {"id": "note", "entity": "Note"}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+      {"type": "AUTHORED", "from": "author", "to": "mr"},
+      {"type": "HAS_NOTE", "from": "mr", "to": "note"}
+    ],
+    "limit": 30,
+    "cursor": {"offset": 0, "page_size": 10}
+  },
+
+  "03_neighbors_both_directions_cursor": {
+    "query_type": "neighbors",
+    "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9206503, 9605986, 9605991]},
+    "neighbors": {"node": "mr", "direction": "both"},
+    "limit": 100,
+    "cursor": {"offset": 0, "page_size": 20}
+  },
+
+  "04_neighbors_outgoing_rel_filter_cursor": {
+    "query_type": "neighbors",
+    "node": {"id": "p", "entity": "Project", "node_ids": [13083]},
+    "neighbors": {"node": "p", "direction": "outgoing", "rel_types": ["IN_PROJECT"]},
+    "limit": 50,
+    "cursor": {"offset": 0, "page_size": 10}
+  },
+
+  "05_aggregation_count_merged_mrs_cursor": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+    "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "merged_mr_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20,
+    "cursor": {"offset": 0, "page_size": 5}
+  },
+
+  "06_aggregation_sum_pipeline_duration_cursor": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": "success"}},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
+    "aggregations": [{"function": "sum", "target": "pipe", "property": "duration", "group_by": "p", "alias": "total_pipeline_seconds"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 15,
+    "cursor": {"offset": 0, "page_size": 5}
+  },
+
+  "07_traversal_user_to_group_cursor": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "entity": "User", "node_ids": [1]},
+      {"id": "g", "entity": "Group"}
+    ],
+    "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+    "limit": 50,
+    "cursor": {"offset": 0, "page_size": 10}
+  },
+
+  "08_traversal_project_pipelines_jobs_cursor": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p", "entity": "Project", "node_ids": [13083]},
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed"}},
+      {"id": "j", "entity": "Job", "filters": {"status": "failed"}}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "pipe", "to": "p"},
+      {"type": "IN_PIPELINE", "from": "j", "to": "pipe"}
+    ],
+    "limit": 50,
+    "cursor": {"offset": 0, "page_size": 10}
+  },
+
+  "09_ns_traversal_all_mrs_cursor": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u", "entity": "User"},
+      {"id": "mr", "entity": "MergeRequest"}
+    ],
+    "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+    "limit": 50,
+    "cursor": {"offset": 0, "page_size": 10}
+  },
+
+  "10_search_pipelines_failed_cursor": {
+    "query_type": "search",
+    "node": {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed"}, "columns": ["id", "status", "ref"]},
+    "limit": 50,
+    "cursor": {"offset": 0, "page_size": 10}
+  },
+
+  "11_search_all_mrs_cursor": {
+    "query_type": "search",
+    "node": {"id": "mr", "entity": "MergeRequest", "columns": ["id", "title", "state"]},
+    "limit": 100,
+    "cursor": {"offset": 0, "page_size": 20}
+  },
+
+  "12_complex_mr_full_context_cursor": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "author", "entity": "User"},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "author", "to": "mr"},
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    ],
+    "limit": 100,
+    "cursor": {"offset": 0, "page_size": 20}
+  },
+
+  "13_large_result_traversal_all_jobs_cursor": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "j", "entity": "Job"},
+      {"id": "pipe", "entity": "Pipeline"}
+    ],
+    "relationships": [{"type": "IN_PIPELINE", "from": "j", "to": "pipe"}],
+    "limit": 500,
+    "cursor": {"offset": 0, "page_size": 50}
+  },
+
+  "14_aggregation_no_sort_cursor": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest"},
+      {"id": "p", "entity": "Project", "columns": ["name"]}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+    "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
+    "limit": 20,
+    "cursor": {"offset": 0, "page_size": 5}
+  },
+
+  "15_path_finding_depth2_user_to_project": {
+    "query_type": "path_finding",
+    "nodes": [
+      {"id": "start", "entity": "User", "node_ids": [1]},
+      {"id": "end", "entity": "Project", "node_ids": [13083]}
+    ],
+    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+  },
+
+  "16_path_finding_depth3": {
+    "query_type": "path_finding",
+    "nodes": [
+      {"id": "start", "entity": "Project", "node_ids": [13083]},
+      {"id": "end", "entity": "Project", "node_ids": [13764]}
+    ],
+    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+  }
+}
