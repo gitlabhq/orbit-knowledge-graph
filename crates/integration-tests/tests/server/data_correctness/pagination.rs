@@ -328,3 +328,130 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         edge_type: "MEMBER_OF".into(),
     });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cursor without explicit order_by: deterministic default ordering
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) {
+    // Without explicit order_by, cursor queries now inject a default ORDER BY id ASC.
+    // Run the same query twice and verify identical results.
+    let query = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "columns": ["username"]},
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 3}
+    }"#;
+
+    let resp1 = run_query(ctx, query, &allow_all()).await;
+    let ids1 = resp1.node_ids_ordered("User");
+    resp1.assert_node_count(3);
+
+    let resp2 = run_query(ctx, query, &allow_all()).await;
+    let ids2 = resp2.node_ids_ordered("User");
+    resp2.assert_node_count(3);
+
+    assert_eq!(
+        ids1, ids2,
+        "repeated cursor queries without order_by should return identical results"
+    );
+}
+
+pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestContext) {
+    // Page through all 6 users in pages of 2 without explicit order_by.
+    // The default ORDER BY id ASC should give stable, non-overlapping pages.
+    let mut all_ids: Vec<i64> = Vec::new();
+
+    for offset in (0u32..).step_by(2) {
+        let json = format!(
+            r#"{{
+                "query_type": "search",
+                "node": {{"id": "u", "entity": "User", "columns": ["username"]}},
+                "limit": 100,
+                "cursor": {{"offset": {offset}, "page_size": 2}}
+            }}"#
+        );
+
+        let resp = run_query(ctx, &json, &allow_all()).await;
+        let count = resp.node_count();
+
+        if count == 0 {
+            resp.assert_node_count(0);
+            break;
+        }
+
+        let page_ids = resp.node_ids_ordered("User");
+
+        for id in &page_ids {
+            assert!(!all_ids.contains(id), "ID {id} appeared in multiple pages");
+        }
+        all_ids.extend(page_ids);
+        resp.skip_requirement(Requirement::Cursor);
+        resp.skip_requirement(Requirement::NodeCount);
+    }
+
+    assert_eq!(
+        all_ids,
+        vec![1, 2, 3, 4, 5, 6],
+        "pages without explicit order_by should cover all users in id-ascending order"
+    );
+}
+
+pub(super) async fn cursor_traversal_without_order_by_is_deterministic(ctx: &TestContext) {
+    let query = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "g", "entity": "Group"}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 4}
+    }"#;
+
+    let resp1 = run_query(ctx, query, &allow_all()).await;
+    let edges1 = resp1.edge_tuples();
+    let count1 = resp1.node_count();
+    resp1.assert_node_count(count1);
+    resp1.skip_requirement(Requirement::Relationship {
+        edge_type: "MEMBER_OF".into(),
+    });
+
+    let resp2 = run_query(ctx, query, &allow_all()).await;
+    let edges2 = resp2.edge_tuples();
+    let count2 = resp2.node_count();
+    resp2.assert_node_count(count2);
+    resp2.skip_requirement(Requirement::Relationship {
+        edge_type: "MEMBER_OF".into(),
+    });
+
+    assert_eq!(count1, count2, "same cursor query should return same count");
+    assert_eq!(edges1, edges2, "same cursor query should return same edges");
+}
+
+pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestContext) {
+    let query = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["id", "username"]},
+            {"id": "mr", "entity": "MergeRequest"}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+        "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
+    }"#;
+
+    let resp1 = run_query(ctx, query, &allow_all()).await;
+    let ids1 = resp1.node_ids_ordered("User");
+    resp1.assert_node_count(resp1.node_count());
+
+    let resp2 = run_query(ctx, query, &allow_all()).await;
+    let ids2 = resp2.node_ids_ordered("User");
+    resp2.assert_node_count(resp2.node_count());
+
+    assert_eq!(
+        ids1, ids2,
+        "aggregation cursor without sort should return deterministic results"
+    );
+}
