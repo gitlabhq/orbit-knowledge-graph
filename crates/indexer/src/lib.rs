@@ -84,8 +84,20 @@ pub struct IndexerConfig {
     pub gitlab: Option<GitlabClientConfiguration>,
     #[serde(default)]
     pub schedule: ScheduleConfig,
+    #[serde(default)]
+    pub migration_reconciler: MigrationReconcilerConfig,
     #[serde(default = "default_health_bind_address")]
     pub health_bind_address: SocketAddr,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct MigrationReconcilerConfig {
+    #[serde(default = "default_reconciler_enabled")]
+    pub enabled: bool,
+}
+
+fn default_reconciler_enabled() -> bool {
+    true
 }
 
 impl Default for IndexerConfig {
@@ -97,6 +109,7 @@ impl Default for IndexerConfig {
             engine: EngineConfiguration::default(),
             gitlab: None,
             schedule: ScheduleConfig::default(),
+            migration_reconciler: MigrationReconcilerConfig::default(),
             health_bind_address: default_health_bind_address(),
         }
     }
@@ -131,7 +144,10 @@ pub async fn run(
 
     let per_message_ttl = KvBucketConfig::with_per_message_ttl();
     broker
-        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
+        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl.clone())
+        .await?;
+    broker
+        .ensure_kv_bucket_exists(migration_framework::INDEXING_LOCKS_BUCKET, per_message_ttl)
         .await?;
 
     let metrics = Arc::new(metrics::EngineMetrics::new());
@@ -182,12 +198,21 @@ pub async fn run(
     );
 
     let engine_handle = engine.clone();
-    let reconciler_shutdown = shutdown.clone();
-    let reconciler_clickhouse = config.graph.build_client();
-    let reconciler_nats = nats_services.clone();
-    let reconciler_task = tokio::spawn(async move {
-        migrations::run_reconciler(reconciler_nats, reconciler_clickhouse, reconciler_shutdown)
-            .await;
+    let reconciler_task = config.migration_reconciler.enabled.then(|| {
+        let reconciler_shutdown = shutdown.clone();
+        let reconciler_clickhouse = config.graph.build_client();
+        let reconciler_nats = nats_services.clone();
+        tokio::spawn(async move {
+            if let Err(error) = migrations::run_reconciler(
+                reconciler_nats,
+                reconciler_clickhouse,
+                reconciler_shutdown,
+            )
+            .await
+            {
+                tracing::error!(error = %error, "migration reconciler exited with error");
+            }
+        })
     });
 
     let shutdown_task = tokio::spawn(async move {
@@ -208,7 +233,9 @@ pub async fn run(
     };
 
     shutdown_task.abort();
-    reconciler_task.abort();
+    if let Some(reconciler_task) = reconciler_task {
+        reconciler_task.abort();
+    }
 
     info!("indexer stopped");
     result

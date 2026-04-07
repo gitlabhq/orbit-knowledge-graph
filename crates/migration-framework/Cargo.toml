@@ -14,7 +14,7 @@ clickhouse-client = { path = "../clickhouse-client" }
 gkg-utils = { path = "../utils" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 

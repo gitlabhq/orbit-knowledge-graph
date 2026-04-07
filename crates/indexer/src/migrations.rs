@@ -8,6 +8,7 @@ use migration_framework::{
     build_migration_registry,
 };
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 use crate::nats::{KvEntry, KvPutOptions, KvPutResult, NatsServices};
 
@@ -15,7 +16,8 @@ pub async fn run_reconciler(
     nats: Arc<dyn NatsServices>,
     clickhouse: clickhouse_client::ArrowClickHouseClient,
     shutdown: CancellationToken,
-) {
+) -> anyhow::Result<()> {
+    info!("starting migration reconciler");
     let kv: Arc<dyn KvStore> = Arc::new(IndexerKvStore::new(nats));
     let reconciler = Reconciler::new(
         Arc::new(build_migration_registry()),
@@ -29,6 +31,8 @@ pub async fn run_reconciler(
     );
 
     reconciler.run(shutdown).await;
+    info!("migration reconciler stopped");
+    Ok(())
 }
 
 struct IndexerKvStore {
