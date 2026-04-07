@@ -70,22 +70,60 @@ pub struct VirtualColumnRequest {
 
 /// Build the hydration plan for a compiled query.
 ///
-/// - Aggregation: no hydration (results are aggregate values, not entity rows).
-/// - Search: no hydration (base query already carries node columns).
+/// - Aggregation/Search: no hydration unless virtual columns were requested.
+///   If virtual columns are present (stashed by normalize), a Static plan is
+///   returned with only the VCRs — the DB columns are already in the base query.
 /// - Traversal (edge-centric): static hydration — entity types are known at
 ///   compile time, so we build one template per entity type with pre-resolved
 ///   destination table, column-backed columns, and virtual column requests.
 /// - PathFinding/Neighbors: dynamic hydration — entity types are discovered at
 ///   runtime. Column specs are pre-resolved for all ontology entity types so
-///   the server just does a lookup, no ontology re-queries.
+///   the server just looks up the matching spec — no ontology queries.
 pub fn generate_hydration_plan(input: &Input, ontology: &Ontology) -> HydrationPlan {
     match input.query_type {
-        QueryType::Aggregation | QueryType::Hydration => HydrationPlan::None,
+        QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => {
             HydrationPlan::Dynamic(build_dynamic_specs(input, ontology))
         }
-        QueryType::Search => HydrationPlan::None,
+        QueryType::Search | QueryType::Aggregation => build_virtual_only_plan(input, ontology),
         QueryType::Traversal => HydrationPlan::Static(build_static_templates(input, ontology)),
+    }
+}
+
+/// For Search/Aggregation: if any node has virtual columns stashed by
+/// normalize, build a Static plan with only VCRs (no DB columns, since
+/// the base query already fetched them).
+fn build_virtual_only_plan(input: &Input, ontology: &Ontology) -> HydrationPlan {
+    let templates: Vec<HydrationTemplate> = input
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            if node.virtual_columns.is_empty() {
+                return None;
+            }
+            let entity = node.entity.as_ref()?;
+            let ont_node = ontology.get_node(entity)?;
+
+            // Collect depends_on columns so the resolver has the data it needs.
+            // These are already in the base query result (Search selects them),
+            // so we just list them here for the hydration stage to pass through.
+            let mut dep_columns = Vec::new();
+            inject_virtual_dependencies(&mut dep_columns, &node.virtual_columns, ont_node);
+
+            Some(HydrationTemplate {
+                entity_type: entity.clone(),
+                node_alias: node.id.clone(),
+                destination_table: ont_node.destination_table.clone(),
+                columns: dep_columns,
+                virtual_columns: node.virtual_columns.clone(),
+            })
+        })
+        .collect();
+
+    if templates.is_empty() {
+        HydrationPlan::None
+    } else {
+        HydrationPlan::Static(templates)
     }
 }
 

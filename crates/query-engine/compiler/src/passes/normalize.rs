@@ -8,6 +8,7 @@
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, EntityAuthConfig, Input, QueryType};
+use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
@@ -100,54 +101,55 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         // Expand wildcard/empty column selections to explicit lists for lowering.
         // Redaction columns (_gkg_*) are added separately by enforce.rs.
         //
-        // Search and Aggregation emit columns directly in the SQL SELECT
-        // (no hydration pass), so virtual columns (backed by external
-        // services like Gitaly) must be stripped here to avoid referencing
-        // columns that don't exist in ClickHouse.
-        let skip_virtual = matches!(
+        // Search and Aggregation emit columns directly in the SQL SELECT,
+        // so virtual columns (backed by external services like Gitaly) must
+        // be stripped from the column list to avoid referencing columns that
+        // don't exist in ClickHouse. Stripped VCRs are stashed on the node
+        // so the hydration plan can pick them up for post-query resolution.
+        let strip_virtual = matches!(
             input.query_type,
             QueryType::Search | QueryType::Aggregation
         );
+
+        // First, expand columns to an explicit list (same as before).
         match &mut node.columns {
             Some(ColumnSelection::All) => {
-                let columns: Vec<String> = node_entity
-                    .fields
-                    .iter()
-                    .filter(|f| !skip_virtual || !f.is_virtual())
-                    .map(|f| f.name.clone())
-                    .collect();
+                let columns: Vec<String> =
+                    node_entity.fields.iter().map(|f| f.name.clone()).collect();
                 node.columns = Some(ColumnSelection::List(columns));
-            }
-            Some(ColumnSelection::List(cols)) if skip_virtual => {
-                cols.retain(|col_name| {
-                    !node_entity
-                        .fields
-                        .iter()
-                        .any(|f| f.name == *col_name && f.is_virtual())
-                });
             }
             Some(ColumnSelection::List(_)) => {}
             None => {
                 let columns = if node_entity.default_columns.is_empty() {
-                    node_entity
-                        .fields
-                        .iter()
-                        .filter(|f| !skip_virtual || !f.is_virtual())
-                        .map(|f| f.name.clone())
-                        .collect()
+                    node_entity.fields.iter().map(|f| f.name.clone()).collect()
                 } else {
-                    let mut cols = node_entity.default_columns.clone();
-                    if skip_virtual {
-                        cols.retain(|col_name| {
-                            !node_entity
-                                .fields
-                                .iter()
-                                .any(|f| f.name == *col_name && f.is_virtual())
-                        });
-                    }
-                    cols
+                    node_entity.default_columns.clone()
                 };
                 node.columns = Some(ColumnSelection::List(columns));
+            }
+        }
+
+        // Then, for Search/Aggregation, extract virtual columns from the
+        // list and stash them on the node for the hydration plan.
+        if strip_virtual {
+            if let Some(ColumnSelection::List(cols)) = &mut node.columns {
+                let mut virtual_cols = Vec::new();
+                cols.retain(|col_name| {
+                    if let Some(field) = node_entity.fields.iter().find(|f| f.name == *col_name) {
+                        if let ontology::FieldSource::Virtual(vs) = &field.source {
+                            if !vs.disabled {
+                                virtual_cols.push(VirtualColumnRequest {
+                                    column_name: col_name.clone(),
+                                    service: vs.service.clone(),
+                                    lookup: vs.lookup.clone(),
+                                });
+                            }
+                            return false; // strip from SQL columns
+                        }
+                    }
+                    true // keep DB columns
+                });
+                node.virtual_columns = virtual_cols;
             }
         }
 

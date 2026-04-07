@@ -213,6 +213,71 @@ mod compiler_integration {
     }
 
     #[test]
+    fn search_with_content_produces_hydration_plan() {
+        // Search with virtual columns should produce a Static hydration plan
+        // so content resolution can happen post-query.
+        let compiled = compile_query(
+            r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": ["id", "name", "content"]}, "limit": 5}"#,
+        );
+        match &compiled.hydration {
+            query_engine::compiler::HydrationPlan::Static(templates) => {
+                assert_eq!(templates.len(), 1);
+                let t = &templates[0];
+                assert_eq!(t.entity_type, "File");
+                assert_eq!(t.node_alias, "f");
+                // Should have the content VCR
+                assert!(
+                    t.virtual_columns.iter().any(|vc| vc.column_name == "content" && vc.service == "gitaly"),
+                    "search hydration plan should include content VCR"
+                );
+                // DB columns list should be empty (search already has them)
+                // but depends_on columns should be present for the resolver
+                for dep in &["project_id", "commit_sha", "branch", "path"] {
+                    assert!(
+                        t.columns.contains(&dep.to_string()),
+                        "depends_on column '{dep}' should be in search hydration plan"
+                    );
+                }
+            }
+            other => panic!("expected Static hydration plan for search with virtual cols, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_without_content_has_no_hydration_plan() {
+        // Search without virtual columns should still produce HydrationPlan::None.
+        let compiled = compile_query(
+            r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": ["id", "name", "path"]}, "limit": 5}"#,
+        );
+        assert!(
+            matches!(&compiled.hydration, query_engine::compiler::HydrationPlan::None),
+            "search without virtual cols should have HydrationPlan::None, got: {:?}",
+            compiled.hydration
+        );
+    }
+
+    #[test]
+    fn aggregation_with_content_produces_hydration_plan() {
+        let compiled = compile_query(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "f", "entity": "File", "columns": ["id", "content"]}],
+                "aggregations": [{"function": "count", "target": "f", "alias": "total"}],
+                "limit": 5
+            }"#,
+        );
+        match &compiled.hydration {
+            query_engine::compiler::HydrationPlan::Static(templates) => {
+                assert!(
+                    templates.iter().any(|t| t.virtual_columns.iter().any(|vc| vc.column_name == "content")),
+                    "aggregation hydration plan should include content VCR"
+                );
+            }
+            other => panic!("expected Static hydration plan for aggregation with virtual cols, got: {other:?}"),
+        }
+    }
+
+    #[test]
     fn aggregation_with_wildcard_excludes_virtual_columns_from_sql() {
         let compiled = compile_query(
             r#"{
