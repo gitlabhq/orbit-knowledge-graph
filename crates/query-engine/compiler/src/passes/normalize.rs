@@ -98,22 +98,13 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .map(|r| r.id_column.clone())
             .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
 
-        // Expand wildcard/empty column selections to explicit lists for lowering.
-        // Redaction columns (_gkg_*) are added separately by enforce.rs.
-        //
-        // Virtual columns (backed by external services like Gitaly) are
-        // stripped from the column list and stashed on the node so the
-        // hydration plan can pick them up for post-query resolution.
-        //
-        // PathFinding/Neighbors use dynamic hydration (iterating all ontology
-        // types, not input nodes), so they handle virtual columns separately
-        // in build_dynamic_specs via split_columns.
+        // Expand column selections to explicit lists. Strip virtual columns
+        // into node.virtual_columns for the hydration plan.
+        // PathFinding/Neighbors handle virtuals in build_dynamic_specs.
         let strip_virtual = !matches!(
             input.query_type,
             QueryType::PathFinding | QueryType::Neighbors
         );
-
-        // First, expand columns to an explicit list (same as before).
         match &mut node.columns {
             Some(ColumnSelection::All) => {
                 let columns: Vec<String> =
@@ -131,8 +122,6 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             }
         }
 
-        // Then, for Search/Aggregation, extract virtual columns from the
-        // list and stash them on the node for the hydration plan.
         if strip_virtual && let Some(ColumnSelection::List(cols)) = &mut node.columns {
             let mut virtual_cols = Vec::new();
             cols.retain(|col_name| {
@@ -146,9 +135,9 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
                             lookup: vs.lookup.clone(),
                         });
                     }
-                    return false; // strip from SQL columns
+                    return false;
                 }
-                true // keep DB columns
+                true
             });
             node.virtual_columns = virtual_cols;
         }

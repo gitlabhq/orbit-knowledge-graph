@@ -1,9 +1,4 @@
-//! Compiler-level tests for virtual column handling.
-//!
-//! Verifies that:
-//! - Search/Aggregation strip virtual columns from SQL and produce hydration plans
-//! - Traversal preserves virtual columns in hydration plans
-//! - depends_on columns are auto-injected for content resolution
+//! Virtual column handling: SQL stripping, hydration plans, depends_on injection.
 
 use ontology::Ontology;
 use query_engine::compiler::{compile, HydrationPlan, SecurityContext};
@@ -20,12 +15,10 @@ fn search_with_wildcard_excludes_virtual_columns_from_sql() {
         r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": "*"}, "limit": 5}"#,
     );
     let sql = &compiled.base.sql;
-    // "content" should not appear anywhere in the SQL for a search query
     assert!(
         !sql.contains("content"),
         "virtual column 'content' should not appear in search SQL, got:\n{sql}"
     );
-    // But normal columns should be present
     assert!(
         sql.contains("f_name") || sql.contains("f.name"),
         "normal columns should be in SQL"
@@ -47,8 +40,6 @@ fn search_with_explicit_content_excludes_from_sql() {
 
 #[test]
 fn search_with_content_produces_hydration_plan() {
-    // Search with virtual columns should produce a Static hydration plan
-    // so content resolution can happen post-query.
     let compiled = compile_query(
         r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": ["id", "name", "content"]}, "limit": 5}"#,
     );
@@ -58,14 +49,12 @@ fn search_with_content_produces_hydration_plan() {
             let t = &templates[0];
             assert_eq!(t.entity_type, "File");
             assert_eq!(t.node_alias, "f");
-            // Should have the content VCR
             assert!(
                 t.virtual_columns
                     .iter()
                     .any(|vc| vc.column_name == "content" && vc.service == "gitaly"),
                 "search hydration plan should include content VCR"
             );
-            // depends_on columns should be present for the resolver
             for dep in &["project_id", "commit_sha", "branch", "path"] {
                 assert!(
                     t.columns.contains(&dep.to_string()),
@@ -81,7 +70,6 @@ fn search_with_content_produces_hydration_plan() {
 
 #[test]
 fn search_without_content_has_no_hydration_plan() {
-    // Search without virtual columns should still produce HydrationPlan::None.
     let compiled = compile_query(
         r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": ["id", "name", "path"]}, "limit": 5}"#,
     );
@@ -149,14 +137,12 @@ fn traversal_with_content_includes_virtual_in_hydration_plan() {
         }"#,
     );
 
-    // The base SQL should NOT contain "content" (it's resolved post-query)
     let sql = &compiled.base.sql;
     assert!(
         !sql.contains("f_content") && !sql.contains("f.content"),
         "virtual column should not be in traversal base SQL"
     );
 
-    // But the hydration plan should have a virtual column request
     match &compiled.hydration {
         HydrationPlan::Static(templates) => {
             let file_template = templates.iter().find(|t| t.entity_type == "File");
@@ -177,9 +163,6 @@ fn traversal_with_content_includes_virtual_in_hydration_plan() {
 
 #[test]
 fn traversal_hydration_injects_depends_on_columns() {
-    // Request only "content" (virtual) -- the hydration plan should still
-    // include depends_on columns (project_id, commit_sha, branch, path)
-    // so the resolver has the data it needs.
     let compiled = compile_query(
         r#"{
             "query_type": "traversal",
@@ -195,7 +178,6 @@ fn traversal_hydration_injects_depends_on_columns() {
     match &compiled.hydration {
         HydrationPlan::Static(templates) => {
             let file_template = templates.iter().find(|t| t.entity_type == "File").unwrap();
-            // depends_on for File.content: [project_id, commit_sha, branch, path]
             let cols = &file_template.columns;
             for dep in &["project_id", "commit_sha", "branch", "path"] {
                 assert!(
@@ -233,7 +215,6 @@ fn definition_content_also_handled() {
                 vcs.iter().any(|vc| vc.column_name == "content"),
                 "Definition should have content virtual column in hydration plan"
             );
-            // Definition.content depends_on includes start_byte/end_byte for slicing
             let cols = &def_template.columns;
             for dep in &["project_id", "file_path", "start_byte", "end_byte"] {
                 assert!(
@@ -248,7 +229,6 @@ fn definition_content_also_handled() {
 
 #[test]
 fn multiple_virtual_entities_in_same_query() {
-    // Both File and Definition request "content" in the same traversal
     let compiled = compile_query(
         r#"{
             "query_type": "traversal",

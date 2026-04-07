@@ -228,9 +228,7 @@ pub struct InputNode {
     /// Always set before enforce.rs runs; do not add fallbacks in downstream code.
     #[serde(skip)]
     pub redaction_id_column: String,
-    /// Virtual columns stripped during normalization for query types that emit
-    /// columns directly in SQL (Search, Aggregation). Stashed here so the
-    /// hydration plan can pick them up for post-query resolution.
+    /// Virtual columns stripped by normalize, consumed by the hydration plan.
     #[serde(skip)]
     pub virtual_columns: Vec<crate::passes::hydrate::VirtualColumnRequest>,
 }

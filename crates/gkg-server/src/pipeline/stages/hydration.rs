@@ -43,14 +43,8 @@ impl HydrationStage {
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }
 
-    /// Resolve virtual columns from remote services and merge results into
-    /// the property map. Dispatches to the appropriate [`ColumnResolver`]
-    /// by the `service` name declared in the ontology.
-    ///
-    /// Requires a [`ColumnResolverRegistry`] to be present in the pipeline's
-    /// server extensions. If virtual columns are requested but no registry
-    /// is available (e.g. GitLab client config is missing), this returns a
-    /// `ContentResolution` error.
+    /// Resolve virtual columns via [`ColumnResolverRegistry`] from server
+    /// extensions. Returns `ContentResolution` error if absent.
     pub async fn resolve_virtual_columns(
         ctx: &QueryPipelineContext,
         entity_virtual_columns: &[EntityVirtualColumns<'_>],
