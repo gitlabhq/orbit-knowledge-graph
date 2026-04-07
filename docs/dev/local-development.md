@@ -286,6 +286,10 @@ By default it starts a small HA-style local cluster:
 This is useful for exercising the distributed locking and coordination behavior
 that relies on NATS KV.
 
+`mise run dev` orchestrates these four long-running processes directly via mise
+tasks, so you get mise's built-in prefixed output and Ctrl+C shutdown behavior
+without introducing any additional process manager.
+
 Useful companion tasks:
 
 ```shell
@@ -293,7 +297,6 @@ mise run dev:check
 mise run dev:setup
 mise run dev:status
 mise run dev:env
-mise run dev:logs
 mise run dev:restart
 mise run dev:stop
 ```

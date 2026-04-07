@@ -77,10 +77,6 @@ GDK_YML="$GDK_ROOT/gdk.yml"
 GDK_DEFAULT_YML="$GDK_ROOT/gdk.example.yml"
 GITLAB_ROOT="${GITLAB_ROOT:-$GDK_ROOT/gitlab}"
 
-DEV_DIR="${REPO_ROOT}/.dev/native"
-LOG_DIR="${DEV_DIR}/logs"
-PID_DIR="${DEV_DIR}/pids"
-
 WEB1_HTTP="127.0.0.1:${GKG_SERVER_PORT_1:-8090}"
 WEB1_GRPC="127.0.0.1:${GKG_SERVER_GRPC_PORT_1:-50054}"
 WEB2_HTTP="127.0.0.1:${GKG_SERVER_PORT_2:-8091}"
@@ -282,59 +278,6 @@ GKG_SCHEDULE__TASKS__NAMESPACE_CODE_BACKFILL__EVENTS_STREAM_NAME=$GKG_SIPHON_STR
 EOF
 }
 
-ensure_dirs() {
-  mkdir -p "$LOG_DIR" "$PID_DIR"
-}
-
-is_running() {
-  local pid_file="$1"
-  [[ -f "$pid_file" ]] || return 1
-  local pid
-  pid="$(cat "$pid_file")"
-  kill -0 "$pid" 2>/dev/null
-}
-
-start_process() {
-  local name="$1"
-  local pid_file="$PID_DIR/$name.pid"
-  local log_file="$LOG_DIR/$name.log"
-  shift
-
-  if is_running "$pid_file"; then
-    printf "[skip] %s already running (pid %s)\n" "$name" "$(cat "$pid_file")"
-    return
-  fi
-
-  rm -f "$pid_file"
-  : > "$log_file"
-  (
-    stdbuf -oL -eL "$@" 2>&1 | sed -u "s/^/[$name] /"
-  ) >> "$log_file" &
-  echo $! > "$pid_file"
-  printf "[ok] started %s (pid %s)\n" "$name" "$(cat "$pid_file")"
-}
-
-stop_process() {
-  local name="$1"
-  local pid_file="$PID_DIR/$name.pid"
-  if is_running "$pid_file"; then
-    local pid
-    pid="$(cat "$pid_file")"
-    kill "$pid" 2>/dev/null || true
-    rm -f "$pid_file"
-    printf "[ok] stopped %s\n" "$name"
-  else
-    rm -f "$pid_file"
-    printf "[skip] %s not running\n" "$name"
-  fi
-}
-
-stream_logs() {
-  ensure_dirs
-  touch "$LOG_DIR"/*.log 2>/dev/null || true
-  exec tail -n +1 -F "$LOG_DIR"/*.log
-}
-
 apply_schema() {
   clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --query "CREATE DATABASE IF NOT EXISTS \`$GKG_GRAPH__DATABASE\`"
 
@@ -359,93 +302,15 @@ PY
 run_mode() {
   local mode="$1"
   shift
-  exec env "$@" cargo run -p gkg-server -- --mode="$mode"
-}
-
-start_ha() {
-  run_checks
-  ensure_dirs
-
-  start_process web-1 env \
-    GKG_BIND_ADDRESS="$WEB1_HTTP" \
-    GKG_GRPC_BIND_ADDRESS="$WEB1_GRPC" \
-    GKG_METRICS__PROMETHEUS__ENABLED="$GKG_ENABLE_METRICS" \
-    GKG_METRICS__PROMETHEUS__PORT="${GKG_METRICS_PORT_1:-9100}" \
-    cargo run -p gkg-server -- --mode=webserver
-
-  start_process web-2 env \
-    GKG_BIND_ADDRESS="$WEB2_HTTP" \
-    GKG_GRPC_BIND_ADDRESS="$WEB2_GRPC" \
-    GKG_METRICS__PROMETHEUS__ENABLED="$GKG_ENABLE_METRICS" \
-    GKG_METRICS__PROMETHEUS__PORT="${GKG_METRICS_PORT_2:-9101}" \
-    cargo run -p gkg-server -- --mode=webserver
-
-  start_process indexer-1 env \
-    GKG_INDEXER_HEALTH_BIND_ADDRESS="$IDX1_HEALTH" \
-    GKG_NATS__CONSUMER_NAME="${GKG_INDEXER_CONSUMER_1:-gkg-indexer-1}" \
-    GKG_METRICS__PROMETHEUS__ENABLED="$GKG_ENABLE_METRICS" \
-    GKG_METRICS__PROMETHEUS__PORT="${GKG_INDEXER_METRICS_PORT_1:-9200}" \
-    cargo run -p gkg-server -- --mode=indexer
-
-  start_process indexer-2 env \
-    GKG_INDEXER_HEALTH_BIND_ADDRESS="$IDX2_HEALTH" \
-    GKG_NATS__CONSUMER_NAME="${GKG_INDEXER_CONSUMER_2:-gkg-indexer-2}" \
-    GKG_METRICS__PROMETHEUS__ENABLED="$GKG_ENABLE_METRICS" \
-    GKG_METRICS__PROMETHEUS__PORT="${GKG_INDEXER_METRICS_PORT_2:-9201}" \
-    cargo run -p gkg-server -- --mode=indexer
-
-  cat <<EOF
-
-Lightweight HA dev environment started.
-
-Webservers:
-  - http://$WEB1_HTTP
-  - http://$WEB2_HTTP
-
-Indexers:
-  - health $IDX1_HEALTH
-  - health $IDX2_HEALTH
-
-Logs:
-  mise run dev:logs
-
-Stop:
-  mise run dev:stop
-EOF
-
-  stream_logs
-}
-
-stop_ha() {
-  stop_process web-1
-  stop_process web-2
-  stop_process indexer-1
-  stop_process indexer-2
-}
-
-restart_ha() {
-  stop_ha
-  start_ha
+  exec cargo run -p gkg-server -- --mode="$mode"
 }
 
 case "${1:-webserver}" in
-  start)
-    start_ha
-    ;;
-  stop)
-    stop_ha
-    ;;
-  restart)
-    restart_ha
-    ;;
   check)
     run_checks
     ;;
   env)
     print_env
-    ;;
-  logs)
-    stream_logs
     ;;
   setup)
     apply_schema
@@ -464,7 +329,7 @@ case "${1:-webserver}" in
     run_mode health-check
     ;;
   *)
-    printf "Usage: %s {start|stop|restart|check|env|logs|setup|webserver|indexer|dispatcher|healthcheck}\n" "$(basename "$0")"
+    printf "Usage: %s {check|env|setup|webserver|indexer|dispatcher|healthcheck}\n" "$(basename "$0")"
     exit 1
     ;;
 esac
