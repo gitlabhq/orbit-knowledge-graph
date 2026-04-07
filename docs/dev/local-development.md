@@ -302,14 +302,24 @@ mise run dev:stop
 development workflow.
 
 Port assignments and GDK connection settings can be overridden in a gitignored
-`.env` file. Start from the checked-in template:
+`.env` file. The only required input is `GDK_ROOT`, and the script derives GDK
+service ports from `gdk.yml` automatically. Start from the checked-in template
+if you want to override only the GKG-local listen ports:
 
 ```shell
 cp .env.example .env
 ```
 
 For example, you can change the webserver and indexer ports if you want to run
-multiple isolated local clusters on the same machine.
+multiple isolated local clusters on the same machine. You do not need to copy
+GDK connection details into `.env`; those are parsed from `gdk.yml`.
+
+Typical usage:
+
+```shell
+export GDK_ROOT=~/workspace/gdk
+mise run dev
+```
 
 `mise run dev:setup` creates the graph database (default `gkg-development`) and
 applies `config/graph.sql` to the configured ClickHouse instance.

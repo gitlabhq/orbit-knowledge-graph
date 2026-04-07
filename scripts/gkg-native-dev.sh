@@ -16,7 +16,65 @@ fi
 # `gdk.yml`. This script intentionally targets the existing GDK services rather
 # than starting extra local infrastructure.
 
-GDK_ROOT="${GDK_ROOT:-${GDK_ROOT_RESOLVED:-$HOME/workspace/gdk}}"
+parse_gdk_value() {
+  local expr="$1"
+  python3 - "$GDK_DEFAULT_YML" "$GDK_YML" "$expr" <<'PY'
+import sys
+from pathlib import Path
+
+default_path = Path(sys.argv[1])
+local_path = Path(sys.argv[2])
+expr = sys.argv[3].split('.')
+
+import yaml
+
+def load(path):
+    if not path.exists():
+        return {}
+    data = yaml.safe_load(path.read_text())
+    return data or {}
+
+def lookup(data, keys):
+    cur = data
+    for key in keys:
+        if not isinstance(cur, dict) or key not in cur:
+            return None
+        cur = cur[key]
+    return cur
+
+value = lookup(load(local_path), expr)
+if value is None:
+    value = lookup(load(default_path), expr)
+
+if value is None:
+    sys.exit(1)
+
+if isinstance(value, bool):
+    print(str(value).lower())
+else:
+    print(value)
+PY
+}
+
+gdk_enabled() {
+  [[ "$(parse_gdk_value "$1.enabled" 2>/dev/null || true)" == "true" ]]
+}
+
+if [[ -z "${GDK_ROOT:-${GDK_DIR:-}}" ]]; then
+  cat <<'EOF'
+ERROR: GDK_ROOT is not set.
+
+Set it to the path of your GDK installation:
+  export GDK_ROOT=/path/to/your/gdk
+  mise run dev
+EOF
+  exit 1
+fi
+
+GDK_ROOT="${GDK_ROOT:-${GDK_DIR}}"
+GDK_ROOT="${GDK_ROOT/#\~/$HOME}"
+GDK_YML="$GDK_ROOT/gdk.yml"
+GDK_DEFAULT_YML="$GDK_ROOT/gdk.example.yml"
 GITLAB_ROOT="${GITLAB_ROOT:-$GDK_ROOT/gitlab}"
 
 DEV_DIR="${REPO_ROOT}/.dev/native"
@@ -31,19 +89,34 @@ IDX1_HEALTH="127.0.0.1:${GKG_INDEXER_PORT_1:-4202}"
 IDX2_HEALTH="127.0.0.1:${GKG_INDEXER_PORT_2:-4203}"
 GKG_HEALTHCHECK_BIND_ADDRESS="${GKG_HEALTHCHECK_BIND_ADDRESS:-127.0.0.1:4201}"
 
-GKG_NATS__URL="${GKG_NATS__URL:-${GKG_NATS_URL:-nats://localhost:4222}}"
-GKG_DATALAKE__URL="${GKG_DATALAKE__URL:-${GKG_CLICKHOUSE_URL:-http://127.0.0.1:8123}}"
+GDK_CLICKHOUSE_HTTP_PORT="$(parse_gdk_value clickhouse.http_port 2>/dev/null || echo 8123)"
+GDK_CLICKHOUSE_TCP_PORT="$(parse_gdk_value clickhouse.tcp_port 2>/dev/null || echo 9001)"
+GDK_POSTGRES_PORT="$(parse_gdk_value postgresql.port 2>/dev/null || echo 5432)"
+GDK_GITLAB_PORT="$(parse_gdk_value gitlab.rails.port 2>/dev/null || echo 3000)"
+GKG_NATS__URL="${GKG_NATS__URL:-nats://127.0.0.1:4222}"
+GKG_DATALAKE__URL="${GKG_DATALAKE__URL:-http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}}"
 GKG_DATALAKE__DATABASE="${GKG_DATALAKE__DATABASE:-gitlab_clickhouse_development}"
 GKG_DATALAKE__USERNAME="${GKG_DATALAKE__USERNAME:-default}"
-GKG_GRAPH__URL="${GKG_GRAPH__URL:-${GKG_CLICKHOUSE_URL:-http://127.0.0.1:8123}}"
+GKG_GRAPH__URL="${GKG_GRAPH__URL:-http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}}"
 GKG_GRAPH__DATABASE="${GKG_GRAPH__DATABASE:-gkg-development}"
 GKG_GRAPH__USERNAME="${GKG_GRAPH__USERNAME:-default}"
-GKG_GITLAB__BASE_URL="${GKG_GITLAB__BASE_URL:-${GKG_GITLAB_BASE_URL:-http://127.0.0.1:3000}}"
+GKG_GITLAB__BASE_URL="${GKG_GITLAB__BASE_URL:-http://127.0.0.1:${GDK_GITLAB_PORT}}"
 GKG_SIPHON_STREAM_NAME="${GKG_SIPHON_STREAM_NAME:-siphon_stream_main_db}"
-
-GKG_DATALAKE__DATABASE="${GKG_DATALAKE__DATABASE:-${GKG_DATALAKE_DATABASE:-gitlab_clickhouse_development}}"
-GKG_GRAPH__DATABASE="${GKG_GRAPH__DATABASE:-${GKG_GRAPH_DATABASE:-gkg-development}}"
 GKG_ENABLE_METRICS="${GKG_ENABLE_METRICS:-false}"
+
+GITALY_TCP_ADDR="$(python3 - "$GDK_ROOT/gitaly/gitaly.config.toml" <<'PY'
+import re
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+if not path.exists():
+    sys.exit(0)
+text = path.read_text()
+match = re.search(r'^listen_addr\s*=\s*"([^"]+)"', text, re.M)
+if match:
+    print(match.group(1))
+PY
+)"
 
 if [[ -z "${GKG_GITLAB__JWT__VERIFYING_KEY:-}" ]]; then
   GKG_GITLAB__JWT__VERIFYING_KEY="$(cat "$GITLAB_ROOT/.gitlab_knowledge_graph_secret" 2>/dev/null || cat "$GITLAB_ROOT/.gitlab_shell_secret" 2>/dev/null || echo "development-secret-at-least-32-bytes")"
@@ -84,8 +157,6 @@ fi
 
 run_checks() {
   local failures=0
-  local gdk_yml="$GDK_ROOT/gdk.yml"
-
   printf "Checking lightweight native-process prerequisites...\n\n"
 
   for tool in cargo clickhouse ruby; do
@@ -104,9 +175,9 @@ run_checks() {
     failures=$((failures + 1))
   fi
 
-  if [[ ! -f "$gdk_yml" ]]; then
+  if [[ ! -f "$GDK_YML" ]]; then
     printf "\nERROR: GDK is not configured for GKG development.\n\n"
-    printf "Missing configuration in %s:\n" "$gdk_yml"
+    printf "Missing configuration in %s:\n" "$GDK_YML"
     cat <<'EOF'
   nats:
     enabled: true
@@ -120,38 +191,19 @@ EOF
     return 1
   fi
 
-  if ! python3 - "$gdk_yml" <<'PY'
-import sys
-from pathlib import Path
+  if ! gdk_enabled nats || ! gdk_enabled clickhouse || ! gdk_enabled siphon; then
+    printf "\nERROR: GDK is not configured for GKG development.\n\n"
+    printf "Missing configuration in %s:\n" "$GDK_YML"
+    cat <<'EOF'
+  nats:
+    enabled: true
+  clickhouse:
+    enabled: true
+  siphon:
+    enabled: true
 
-path = Path(sys.argv[1])
-text = path.read_text()
-required = ["nats", "clickhouse", "siphon"]
-missing = []
-for name in required:
-    anchor = f"{name}:"
-    idx = text.find(anchor)
-    if idx == -1:
-        missing.append(name)
-        continue
-    block = text[idx:].splitlines()[0:8]
-    enabled = any(line.strip() == "enabled: true" for line in block[1:])
-    if not enabled:
-        missing.append(name)
-
-if missing:
-    print("\nERROR: GDK is not configured for GKG development.\n")
-    print(f"Missing configuration in {path}:")
-    print("  nats:")
-    print("    enabled: true")
-    print("  clickhouse:")
-    print("    enabled: true")
-    print("  siphon:")
-    print("    enabled: true")
-    print("\nAdd the above to your gdk.yml, then run: cd ~/gdk && gdk reconfigure")
-    sys.exit(1)
-PY
-  then
+Add the above to your gdk.yml, then run: cd ~/gdk && gdk reconfigure
+EOF
     return 1
   fi
 
@@ -183,10 +235,16 @@ PY
 
   if command -v nc >/dev/null 2>&1; then
     nc -z 127.0.0.1 4222 >/dev/null 2>&1 && printf "[ok] NATS reachable on localhost:4222\n" || { printf "[fail] NATS not running — enable it in gdk.yml: nats:\n  enabled: true\n"; failures=$((failures + 1)); }
-    nc -z 127.0.0.1 8123 >/dev/null 2>&1 && printf "[ok] ClickHouse reachable on localhost:8123\n" || { printf "[fail] ClickHouse not running — enable it in gdk.yml: clickhouse:\n  enabled: true\n"; failures=$((failures + 1)); }
-    nc -z 127.0.0.1 5432 >/dev/null 2>&1 && printf "[ok] PostgreSQL reachable on localhost:5432\n" || { printf "[fail] PostgreSQL not reachable on localhost:5432 — GDK and Siphon require PostgreSQL running\n"; failures=$((failures + 1)); }
-    nc -z 127.0.0.1 3000 >/dev/null 2>&1 && printf "[ok] GitLab reachable on localhost:3000\n" || { printf "[warn] GitLab not reachable on localhost:3000\n"; failures=$((failures + 1)); }
-    nc -z 127.0.0.1 8075 >/dev/null 2>&1 && printf "[ok] Gitaly reachable on localhost:8075\n" || printf "[warn] Gitaly not reachable on localhost:8075 (code indexing may fail if Gitaly is unix-socket only)\n"
+    nc -z 127.0.0.1 "$GDK_CLICKHOUSE_HTTP_PORT" >/dev/null 2>&1 && printf "[ok] ClickHouse reachable on localhost:%s\n" "$GDK_CLICKHOUSE_HTTP_PORT" || { printf "[fail] ClickHouse not running — enable it in gdk.yml: clickhouse:\n  enabled: true\n"; failures=$((failures + 1)); }
+    nc -z 127.0.0.1 "$GDK_POSTGRES_PORT" >/dev/null 2>&1 && printf "[ok] PostgreSQL reachable on localhost:%s\n" "$GDK_POSTGRES_PORT" || { printf "[fail] PostgreSQL not reachable on localhost:%s — GDK and Siphon require PostgreSQL running\n" "$GDK_POSTGRES_PORT"; failures=$((failures + 1)); }
+    nc -z 127.0.0.1 "$GDK_GITLAB_PORT" >/dev/null 2>&1 && printf "[ok] GitLab reachable on localhost:%s\n" "$GDK_GITLAB_PORT" || { printf "[warn] GitLab not reachable on localhost:%s\n" "$GDK_GITLAB_PORT"; failures=$((failures + 1)); }
+    if [[ -n "$GITALY_TCP_ADDR" ]]; then
+      local gitaly_host="${GITALY_TCP_ADDR%:*}"
+      local gitaly_port="${GITALY_TCP_ADDR##*:}"
+      nc -z "$gitaly_host" "$gitaly_port" >/dev/null 2>&1 && printf "[ok] Gitaly reachable on %s\n" "$GITALY_TCP_ADDR" || printf "[warn] Gitaly not reachable on %s\n" "$GITALY_TCP_ADDR"
+    else
+      printf "[warn] Gitaly TCP listen_addr is not configured; code indexing may require enabling it in gitaly.config.toml\n"
+    fi
   fi
 
   printf "\nDerived config:\n"
@@ -202,6 +260,11 @@ print_env() {
   cat <<EOF
 GDK_ROOT=$GDK_ROOT
 ENV_FILE=${REPO_ROOT}/.env
+GDK_CLICKHOUSE_HTTP_PORT=$GDK_CLICKHOUSE_HTTP_PORT
+GDK_CLICKHOUSE_TCP_PORT=$GDK_CLICKHOUSE_TCP_PORT
+GDK_POSTGRES_PORT=$GDK_POSTGRES_PORT
+GDK_GITLAB_PORT=$GDK_GITLAB_PORT
+GITALY_TCP_ADDR=${GITALY_TCP_ADDR:-<not configured>}
 WEB1_HTTP=$WEB1_HTTP
 WEB1_GRPC=$WEB1_GRPC
 WEB2_HTTP=$WEB2_HTTP
@@ -273,7 +336,7 @@ stream_logs() {
 }
 
 apply_schema() {
-  clickhouse client --host 127.0.0.1 --port 9001 --query "CREATE DATABASE IF NOT EXISTS \`$GKG_GRAPH__DATABASE\`"
+  clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --query "CREATE DATABASE IF NOT EXISTS \`$GKG_GRAPH__DATABASE\`"
 
   python3 - <<'PY' | while IFS= read -r stmt; do
 from pathlib import Path
@@ -289,7 +352,7 @@ for stmt in joined.split(";"):
     if stmt:
         print(stmt + ";")
 PY
-    clickhouse client --host 127.0.0.1 --port 9001 --database "$GKG_GRAPH__DATABASE" --query "$stmt"
+    clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --database "$GKG_GRAPH__DATABASE" --query "$stmt"
   done
 }
 
