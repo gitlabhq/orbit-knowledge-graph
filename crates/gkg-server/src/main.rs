@@ -160,22 +160,26 @@ async fn run_webserver(
 
     let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
 
-    let gitlab_client_config = config.gitlab_client_config().ok_or_else(|| {
-        anyhow::anyhow!(
-            "GitLab client config is required: set gitlab.base_url and provide \
-             the JWT signing key (via config or /etc/secrets/gitlab/jwt/signing_key)"
-        )
-    })?;
-    let client = gitlab_client::GitlabClient::new(gitlab_client_config)
-        .map(Arc::new)
-        .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?;
-    let mut registry = content::ColumnResolverRegistry::new();
-    registry.register(
-        "gitaly",
-        Arc::new(content::gitaly::GitalyContentService::new(client)),
-    );
-    let resolver_registry = Some(Arc::new(registry));
-    info!("Content resolution enabled (GitlabClient configured)");
+    let resolver_registry = config
+        .gitlab_client_config()
+        .map(|cfg| {
+            let client = gitlab_client::GitlabClient::new(cfg)
+                .map(Arc::new)
+                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?;
+            let mut registry = content::ColumnResolverRegistry::new();
+            registry.register(
+                "gitaly",
+                Arc::new(content::gitaly::GitalyContentService::new(client)),
+            );
+            Ok::<_, anyhow::Error>(Arc::new(registry))
+        })
+        .transpose()?;
+
+    if resolver_registry.is_some() {
+        info!("Content resolution enabled (GitlabClient configured)");
+    } else {
+        info!("Content resolution disabled (no GitLab client config)");
+    }
 
     let graph_client = config.graph.build_client();
     let http_server = HttpServer::bind(config.bind_address, graph_client).await?;
