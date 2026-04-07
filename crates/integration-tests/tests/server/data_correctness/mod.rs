@@ -11,7 +11,7 @@ mod traversal;
 mod work_items;
 
 use helpers::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, seed};
-use integration_testkit::run_subtests_shared;
+use integration_testkit::{run_subtests, run_subtests_shared};
 
 #[tokio::test]
 async fn data_correctness() {
@@ -164,7 +164,12 @@ async fn data_correctness() {
         work_items::traversal_work_item_in_milestone_returns_correct_edges,
         work_items::traversal_user_assigned_work_item_returns_correct_edges,
         work_items::traversal_work_item_has_label_returns_correct_edges,
-        // dedup: correctness
+    );
+
+    // Dedup tests INSERT extra rows, so they run in forked (isolated) databases
+    // to avoid cross-test data interference.
+    run_subtests!(
+        &ctx,
         dedup::search_returns_latest_version,
         dedup::search_excludes_deleted_rows,
         dedup::search_filter_returns_latest_matching_version,
