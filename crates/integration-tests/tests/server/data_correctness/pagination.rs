@@ -459,3 +459,146 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
         "aggregation cursor without sort should return deterministic results"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Path finding pagination
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext) {
+    // User 1 -> Projects 1000, 1002, 1004 via MEMBER_OF + CONTAINS = 3 paths.
+    // Page through them in pages of 2 and verify full coverage without overlap.
+    let full = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let full_pids = full.path_ids();
+    assert_eq!(full_pids.len(), 3, "3 shortest paths expected");
+
+    // Collect all destination IDs from the full result for comparison.
+    let full_destinations: Vec<i64> = {
+        let mut dests: Vec<i64> = full_pids
+            .iter()
+            .filter_map(|&pid| full.path(pid).last().map(|e| e.to_id))
+            .collect();
+        dests.sort();
+        dests
+    };
+
+    // Page 1: offset=0, page_size=2
+    let page1 = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "limit": 100,
+            "cursor": {"offset": 0, "page_size": 2}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let p1_pids = page1.path_ids();
+    assert_eq!(p1_pids.len(), 2, "first page should have 2 paths");
+    page1.assert_node_count(page1.node_count());
+
+    // Page 2: offset=2, page_size=2
+    let page2 = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "limit": 100,
+            "cursor": {"offset": 2, "page_size": 2}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let p2_pids = page2.path_ids();
+    assert_eq!(p2_pids.len(), 1, "second page should have 1 path");
+    page2.assert_node_count(page2.node_count());
+
+    // Combine destinations from both pages and verify full coverage.
+    let mut all_destinations: Vec<i64> = Vec::new();
+    for &pid in p1_pids.iter() {
+        if let Some(last) = page1.path(pid).last() {
+            all_destinations.push(last.to_id);
+        }
+    }
+    for &pid in p2_pids.iter() {
+        if let Some(last) = page2.path(pid).last() {
+            all_destinations.push(last.to_id);
+        }
+    }
+    all_destinations.sort();
+
+    assert_eq!(
+        all_destinations, full_destinations,
+        "paginated results should cover all paths from the full query"
+    );
+}
+
+pub(super) async fn cursor_path_finding_is_deterministic(ctx: &TestContext) {
+    // Run the same cursored path finding query twice. The ORDER BY
+    // (depth, _gkg_path, _gkg_edge_kinds) should produce identical results.
+    let query = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                 "rel_types": ["MEMBER_OF", "CONTAINS"]},
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
+    }"#;
+
+    let resp1 = run_query(ctx, query, &allow_all()).await;
+    resp1.assert_node_count(resp1.node_count());
+    let resp2 = run_query(ctx, query, &allow_all()).await;
+    resp2.assert_node_count(resp2.node_count());
+
+    let pids1 = resp1.path_ids();
+    let pids2 = resp2.path_ids();
+    assert_eq!(
+        pids1.len(),
+        pids2.len(),
+        "same query should return same path count"
+    );
+
+    // Compare the destination nodes of each path to verify identical ordering.
+    let dests1: Vec<i64> = pids1
+        .iter()
+        .map(|&pid| resp1.path(pid).last().unwrap().to_id)
+        .collect();
+    let dests2: Vec<i64> = pids2
+        .iter()
+        .map(|&pid| resp2.path(pid).last().unwrap().to_id)
+        .collect();
+
+    assert_eq!(
+        dests1, dests2,
+        "repeated cursor path_finding queries should return identical results"
+    );
+}

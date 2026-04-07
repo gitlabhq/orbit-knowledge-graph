@@ -160,32 +160,28 @@ async fn run_webserver(
 
     let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
 
-    let gitlab_client = config
-        .gitlab_client_config()
-        .map(|cfg| {
-            gitlab_client::GitlabClient::new(cfg)
-                .map(Arc::new)
-                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))
-        })
-        .transpose()?;
+    let gitlab_client_config = config.gitlab_client_config().ok_or_else(|| {
+        anyhow::anyhow!(
+            "GitLab client config is required: set gitlab.base_url and provide \
+             the JWT signing key (via config or /etc/secrets/gitlab/jwt/signing_key)"
+        )
+    })?;
+    let gitlab_client = Arc::new(
+        gitlab_client::GitlabClient::new(gitlab_client_config)
+            .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
+    );
 
-    let resolver_registry = gitlab_client.as_ref().map(|client| {
-        let mut registry = content::ColumnResolverRegistry::new();
-        registry.register(
-            "gitaly",
-            Arc::new(content::gitaly::GitalyContentService::new(client.clone())),
-        );
-        Arc::new(registry)
-    });
-
-    if resolver_registry.is_some() {
-        info!("Content resolution enabled (GitlabClient configured)");
-    } else {
-        info!("Content resolution disabled (no GitLab client config)");
-    }
+    let mut registry = content::ColumnResolverRegistry::new();
+    registry.register(
+        "gitaly",
+        Arc::new(content::gitaly::GitalyContentService::new(gitlab_client.clone())),
+    );
+    let resolver_registry = Some(Arc::new(registry));
+    info!("Content resolution enabled (GitlabClient configured)");
 
     let graph_client = config.graph.build_client();
-    let http_server = HttpServer::bind(config.bind_address, graph_client, gitlab_client).await?;
+    let http_server =
+        HttpServer::bind(config.bind_address, graph_client, Some(gitlab_client)).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
     let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
