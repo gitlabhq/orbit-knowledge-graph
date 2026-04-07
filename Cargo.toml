@@ -33,6 +33,7 @@ members = [
   "crates/utils",
   "crates/integration-tests",
   "crates/duckdb-client",
+  "crates/migration-framework",
 ]
 
 [workspace.dependencies]

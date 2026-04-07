@@ -1,0 +1,23 @@
+[package]
+name = "migration-framework"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+arrow = { workspace = true }
+chrono = { workspace = true }
+clickhouse-client = { path = "../clickhouse-client" }
+gkg-utils = { path = "../utils" }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+integration-testkit = { path = "../integration-testkit" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true
