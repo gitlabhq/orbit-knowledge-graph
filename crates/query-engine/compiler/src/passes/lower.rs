@@ -351,15 +351,10 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
             }]
         }
         None if input.cursor.is_some() => {
-            let from_node = &first_rel.from;
-            if let Some((alias, edge_col)) = node_edge_col.get(from_node) {
-                vec![OrderExpr {
-                    expr: Expr::col(alias, edge_col.as_str()),
-                    desc: false,
-                }]
-            } else {
-                vec![]
-            }
+            vec![OrderExpr {
+                expr: Expr::col(edge_alias, start_col),
+                desc: false,
+            }]
         }
         None => vec![],
     };
@@ -997,10 +992,16 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
             expr: Expr::col(&ob.node, &ob.property),
             desc: ob.direction == OrderDirection::Desc,
         }],
-        None if input.cursor.is_some() => vec![OrderExpr {
-            expr: Expr::col(edge_alias, SOURCE_ID_COLUMN),
-            desc: false,
-        }],
+        None if input.cursor.is_some() => vec![
+            OrderExpr {
+                expr: Expr::col(edge_alias, SOURCE_ID_COLUMN),
+                desc: false,
+            },
+            OrderExpr {
+                expr: Expr::col(edge_alias, TARGET_ID_COLUMN),
+                desc: false,
+            },
+        ],
         None => vec![],
     };
     let limit = Some(input.limit);
@@ -3100,8 +3101,13 @@ mod tests {
             panic!("expected Query");
         };
 
-        assert_eq!(q.order_by.len(), 1, "cursor should inject default ORDER BY");
+        assert_eq!(
+            q.order_by.len(),
+            2,
+            "cursor should inject ORDER BY source_id, target_id"
+        );
         assert!(!q.order_by[0].desc, "default order should be ASC");
+        assert!(!q.order_by[1].desc, "secondary order should be ASC");
     }
 
     #[test]
@@ -3169,14 +3175,32 @@ mod tests {
             }
         }
 
-        // The outer query selects from the paths UNION subquery.
-        // The direct query inside should filter end_kind = 'Project'.
-        // Verify via the forward CTE: its WHERE should contain source_kind = 'User'.
+        // Forward CTE anchor should filter source_kind = 'User'.
         let forward_cte = q.ctes.iter().find(|c| c.name == "forward").unwrap();
-        let where_clause = forward_cte.query.where_clause.as_ref().unwrap();
+        let fwd_where = forward_cte.query.where_clause.as_ref().unwrap();
         assert!(
-            has_string_eq(where_clause, "User"),
-            "forward CTE should filter source_kind = 'User', got: {where_clause:?}"
+            has_string_eq(fwd_where, "User"),
+            "forward CTE should filter source_kind = 'User', got: {fwd_where:?}"
+        );
+
+        // Backward CTE anchor should filter target_kind = 'Project'.
+        let backward_cte = q.ctes.iter().find(|c| c.name == "backward").unwrap();
+        let bwd_where = backward_cte.query.where_clause.as_ref().unwrap();
+        assert!(
+            has_string_eq(bwd_where, "Project"),
+            "backward CTE should filter target_kind = 'Project', got: {bwd_where:?}"
+        );
+
+        // Direct query (inside the paths UNION) should filter end_kind = 'Project'.
+        let direct_query = match &q.from {
+            TableRef::Union { queries, .. } => &queries[0],
+            TableRef::Subquery { query, .. } => query.as_ref(),
+            other => panic!("expected Union or Subquery for paths, got: {other:?}"),
+        };
+        let direct_where = direct_query.where_clause.as_ref().unwrap();
+        assert!(
+            has_string_eq(direct_where, "Project"),
+            "direct query should filter end_kind = 'Project', got: {direct_where:?}"
         );
     }
 }
