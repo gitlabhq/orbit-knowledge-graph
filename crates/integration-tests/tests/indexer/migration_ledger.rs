@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use migration_framework::{
     Migration, MigrationContext, MigrationLedger, MigrationRegistry, MigrationStatus, MigrationType,
 };
+use std::collections::HashMap;
 
 use crate::common::TestContext;
 
@@ -47,7 +48,7 @@ impl Migration for NamedTestMigration {
 
     async fn prepare(&self, ctx: &MigrationContext) -> std::result::Result<(), anyhow::Error> {
         ctx.execute_ddl(&format!(
-            "CREATE TABLE IF NOT EXISTS {} (id UInt64) ENGINE = MergeTree ORDER BY id",
+            "CREATE TABLE IF NOT EXISTS `{}` (id UInt64) ENGINE = MergeTree ORDER BY id",
             self.name
         ))
         .await
@@ -61,15 +62,16 @@ async fn run_registry(
     let ledger = MigrationLedger::new(ctx.create_client());
     let migration_ctx = MigrationContext::new(ctx.create_client());
     ledger.ensure_table().await.expect("table");
+    let mut retry_counts = ledger
+        .list()
+        .await
+        .expect("list rows")
+        .into_iter()
+        .map(|record| (record.version, record.retry_count + 1))
+        .collect::<HashMap<_, _>>();
 
     for migration in registry.migrations() {
-        let retry_count = ledger
-            .list()
-            .await
-            .expect("list rows")
-            .into_iter()
-            .find(|record| record.version == migration.version())
-            .map_or(0, |record| record.retry_count + 1);
+        let retry_count = *retry_counts.get(&migration.version()).unwrap_or(&0);
 
         ledger
             .mark_pending(migration.as_ref())
@@ -90,6 +92,8 @@ async fn run_registry(
                 .await
                 .expect("failed"),
         }
+
+        retry_counts.insert(migration.version(), retry_count + 1);
     }
 
     ledger.list().await.expect("list rows")

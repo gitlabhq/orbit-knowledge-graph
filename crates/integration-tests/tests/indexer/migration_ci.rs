@@ -1,3 +1,4 @@
+use arrow::array::{Array, StringArray};
 use async_trait::async_trait;
 use migration_framework::{
     Migration, MigrationContext, MigrationLedger, MigrationRegistry, MigrationType,
@@ -92,9 +93,21 @@ async fn run_all_migrations(ctx: &TestContext, registry: &MigrationRegistry) {
 }
 
 async fn create_statement(ctx: &TestContext, table: &str) -> String {
+    assert!(
+        table
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_'),
+        "unexpected table identifier: {table}"
+    );
     let sql = format!("SHOW CREATE TABLE `{table}`");
     let result = ctx.query(&sql).await;
-    let text = format!("{:?}", result[0].column(0));
+    let text = result[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("SHOW CREATE TABLE returns String")
+        .value(0)
+        .to_string();
     normalize_show_create(&text)
 }
 
@@ -111,15 +124,19 @@ fn normalize_show_create(value: &str) -> String {
 async fn graph_sql_then_registered_migrations_are_idempotent_noops() {
     let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
     let registry = build_migration_registry();
+    let expected_migration_count = registry.migrations().len();
 
     run_all_migrations(&ctx, &registry).await;
 
-    let rows = MigrationLedger::new(ctx.create_client())
-        .list()
-        .await
-        .expect("list rows");
-    assert_eq!(rows.len(), registry.migrations().len());
-    assert!(registry.is_empty());
+    let ledger = MigrationLedger::new(ctx.create_client());
+    let rows = ledger.list().await.expect("list rows");
+    assert_eq!(rows.len(), expected_migration_count);
+
+    run_all_migrations(&ctx, &registry).await;
+
+    let rerun_rows = ledger.list().await.expect("list rows after rerun");
+    assert_eq!(rerun_rows.len(), expected_migration_count);
+    assert_eq!(rerun_rows, rows);
 }
 
 #[tokio::test]

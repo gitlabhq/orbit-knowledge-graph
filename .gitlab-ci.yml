@@ -359,6 +359,7 @@ migration-schema-check:
     - docker pull ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12
     - docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
   script:
+    # TODO: If this job becomes expensive, scope it to the minimal feature set needed for migration schema validation.
     - cargo nextest run --profile ci --all-features --test containers migration_ci
     - sccache --show-stats || true
 
