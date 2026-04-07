@@ -91,16 +91,6 @@ async fn ready_returns_503_when_clickhouse_unreachable() {
 // GitLab readiness probe
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn dummy_clickhouse() -> ArrowClickHouseClient {
-    ArrowClickHouseClient::new(
-        "http://127.0.0.1:1",
-        "default",
-        "x",
-        None,
-        &std::collections::HashMap::new(),
-    )
-}
-
 fn unreachable_gitlab_client() -> Arc<GitlabClient> {
     Arc::new(
         GitlabClient::new(GitlabClientConfiguration {
