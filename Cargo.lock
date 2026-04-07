@@ -3599,6 +3599,7 @@ dependencies = [
 name = "indexer"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arrow",
  "async-nats",
  "async-trait",
@@ -3617,6 +3618,7 @@ dependencies = [
  "gkg-server-config",
  "gkg-utils",
  "internment",
+ "migration-framework",
  "moka",
  "ontology",
  "opentelemetry",
@@ -4373,13 +4375,16 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
+ "bytes",
  "chrono",
  "clickhouse-client",
  "gkg-utils",
  "integration-testkit",
+ "parking_lot",
  "serde",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

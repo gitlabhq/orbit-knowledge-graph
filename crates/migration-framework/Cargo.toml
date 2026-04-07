@@ -8,16 +8,19 @@ license = "LicenseRef-EE"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 arrow = { workspace = true }
+bytes = { workspace = true }
 chrono = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 gkg-utils = { path = "../utils" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
 integration-testkit = { path = "../integration-testkit" }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+parking_lot = { workspace = true }
 
 [lints]
 workspace = true

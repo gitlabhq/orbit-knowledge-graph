@@ -36,6 +36,7 @@ pub mod health;
 pub mod llqm_v1;
 pub mod locking;
 pub mod metrics;
+pub mod migrations;
 pub mod modules;
 pub mod nats;
 pub mod scheduler;
@@ -60,7 +61,7 @@ use gkg_server_config::{
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
 use locking::INDEXING_LOCKS_BUCKET;
-use nats::{KvBucketConfig, NatsBroker};
+use nats::{KvBucketConfig, NatsBroker, NatsServicesImpl};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -134,6 +135,8 @@ pub async fn run(
         .await?;
 
     let metrics = Arc::new(metrics::EngineMetrics::new());
+    let nats_services: Arc<dyn nats::NatsServices> =
+        Arc::new(NatsServicesImpl::new(broker.clone()));
 
     info!(url = %config.graph.url, "connecting to graph ClickHouse");
     let destination = Arc::new(ClickHouseDestination::new(
@@ -179,6 +182,14 @@ pub async fn run(
     );
 
     let engine_handle = engine.clone();
+    let reconciler_shutdown = shutdown.clone();
+    let reconciler_clickhouse = config.graph.build_client();
+    let reconciler_nats = nats_services.clone();
+    let reconciler_task = tokio::spawn(async move {
+        migrations::run_reconciler(reconciler_nats, reconciler_clickhouse, reconciler_shutdown)
+            .await;
+    });
+
     let shutdown_task = tokio::spawn(async move {
         shutdown.cancelled().await;
         info!("received shutdown signal");
@@ -197,6 +208,7 @@ pub async fn run(
     };
 
     shutdown_task.abort();
+    reconciler_task.abort();
 
     info!("indexer stopped");
     result
