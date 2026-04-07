@@ -515,6 +515,7 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
 
     let p1_pids = page1.path_ids();
     assert_eq!(p1_pids.len(), 2, "first page should have 2 paths");
+    page1.assert_node_count(page1.node_count());
 
     // Page 2: offset=2, page_size=2
     let page2 = run_query(
@@ -536,6 +537,7 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
 
     let p2_pids = page2.path_ids();
     assert_eq!(p2_pids.len(), 1, "second page should have 1 path");
+    page2.assert_node_count(page2.node_count());
 
     // Combine destinations from both pages and verify full coverage.
     let mut all_destinations: Vec<i64> = Vec::new();
@@ -573,7 +575,9 @@ pub(super) async fn cursor_path_finding_is_deterministic(ctx: &TestContext) {
     }"#;
 
     let resp1 = run_query(ctx, query, &allow_all()).await;
+    resp1.assert_node_count(resp1.node_count());
     let resp2 = run_query(ctx, query, &allow_all()).await;
+    resp2.assert_node_count(resp2.node_count());
 
     let pids1 = resp1.path_ids();
     let pids2 = resp2.path_ids();
