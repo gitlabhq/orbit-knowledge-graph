@@ -55,7 +55,7 @@ fn dummy_client() -> ArrowClickHouseClient {
 #[tokio::test]
 async fn http_request_records_duration_metric() {
     let (provider, exporter) = setup_meter_provider();
-    let router = create_router(dummy_client());
+    let router = create_router(dummy_client(), None);
 
     let request = Request::get("/live").body(Body::empty()).unwrap();
     let response = router.oneshot(request).await.unwrap();
@@ -76,7 +76,7 @@ async fn http_request_records_duration_metric() {
 #[tokio::test]
 async fn http_metric_has_correct_attributes() {
     let (provider, exporter) = setup_meter_provider();
-    let router = create_router(dummy_client());
+    let router = create_router(dummy_client(), None);
 
     let request = Request::get("/live").body(Body::empty()).unwrap();
     router.oneshot(request).await.unwrap();
@@ -116,7 +116,7 @@ async fn correlation_id_echoed_in_response() {
         .init()
         .expect("labkit init");
 
-    let router = create_router(dummy_client());
+    let router = create_router(dummy_client(), None);
 
     let request = Request::get("/live")
         .header("x-request-id", "test-correlation-789")
@@ -137,7 +137,7 @@ async fn correlation_id_generated_when_absent() {
         .init()
         .expect("labkit init");
 
-    let router = create_router(dummy_client());
+    let router = create_router(dummy_client(), None);
 
     let request = Request::get("/live").body(Body::empty()).unwrap();
     let response = router.oneshot(request).await.unwrap();

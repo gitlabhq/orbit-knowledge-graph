@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::State;
@@ -5,6 +6,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router, routing::get};
 use clickhouse_client::ArrowClickHouseClient;
+use gitlab_client::GitlabClient;
 use labkit::http::{CorrelationLayer, GitlabTraceLayer, HttpMetricsLayer};
 use serde::Serialize;
 use tokio::time::timeout;
@@ -14,6 +16,7 @@ const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Clone)]
 pub struct AppState {
     pub graph_client: ArrowClickHouseClient,
+    pub gitlab_client: Option<Arc<GitlabClient>>,
 }
 
 #[derive(Serialize)]
@@ -50,9 +53,24 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
         .await
         .is_ok_and(|r| r.is_ok());
 
+    let gitlab_healthy = match &state.gitlab_client {
+        Some(client) => timeout(HEALTH_CHECK_TIMEOUT, client.project_info(1))
+            .await
+            .is_ok_and(|r| {
+                matches!(
+                    r,
+                    Ok(_) | Err(gitlab_client::GitlabClientError::NotFound(_))
+                )
+            }),
+        None => true,
+    };
+
     let mut unhealthy_components = Vec::new();
     if !graph_healthy {
         unhealthy_components.push("clickhouse_graph");
+    }
+    if !gitlab_healthy {
+        unhealthy_components.push("gitlab");
     }
 
     let healthy = unhealthy_components.is_empty();
@@ -73,8 +91,14 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
-pub fn create_router(graph_client: ArrowClickHouseClient) -> Router {
-    let state = AppState { graph_client };
+pub fn create_router(
+    graph_client: ArrowClickHouseClient,
+    gitlab_client: Option<Arc<GitlabClient>>,
+) -> Router {
+    let state = AppState {
+        graph_client,
+        gitlab_client,
+    };
 
     Router::new()
         .route("/live", get(live))

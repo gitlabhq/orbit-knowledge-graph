@@ -31,7 +31,7 @@ async fn live_returns_ok() {
         None,
         &std::collections::HashMap::new(),
     );
-    let router = create_router(client);
+    let router = create_router(client, None);
 
     let (status, json) = parse_response(router.oneshot(live_request()).await.unwrap()).await;
 
@@ -43,7 +43,7 @@ async fn live_returns_ok() {
 #[tokio::test]
 async fn ready_returns_ok_when_clickhouse_healthy() {
     let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
-    let router = create_router(ctx.create_client());
+    let router = create_router(ctx.create_client(), None);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 
@@ -65,7 +65,7 @@ async fn ready_returns_503_when_clickhouse_unreachable() {
         None,
         &std::collections::HashMap::new(),
     );
-    let router = create_router(client);
+    let router = create_router(client, None);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 
