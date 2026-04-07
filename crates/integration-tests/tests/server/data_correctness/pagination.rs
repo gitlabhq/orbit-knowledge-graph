@@ -445,10 +445,14 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
     let resp1 = run_query(ctx, query, &allow_all()).await;
     let ids1 = resp1.node_ids_ordered("User");
     resp1.assert_node_count(resp1.node_count());
+    // Satisfy Requirement::Aggregation by verifying a result value.
+    let first_id = ids1[0];
+    resp1.assert_node("User", first_id, |n| n.prop_i64("mr_count").is_some());
 
     let resp2 = run_query(ctx, query, &allow_all()).await;
     let ids2 = resp2.node_ids_ordered("User");
     resp2.assert_node_count(resp2.node_count());
+    resp2.assert_node("User", first_id, |n| n.prop_i64("mr_count").is_some());
 
     assert_eq!(
         ids1, ids2,
