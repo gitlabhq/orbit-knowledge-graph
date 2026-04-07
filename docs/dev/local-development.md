@@ -278,35 +278,31 @@ lightweight native Rust processes directly on your host and connects them to the
 existing services in your GDK instance (for example NATS, ClickHouse, GitLab,
 and Gitaly), without using Tilt, Helm, Colima, or minikube.
 
-By default it starts a small HA-style local cluster:
+It starts all three GKG runtime modes in the foreground:
 
-- 2 webserver instances on different ports
-- 2 indexer instances with distinct health ports and consumer names
+- 1 webserver (HTTP + gRPC)
+- 1 indexer
+- 1 dispatcher (dispatch-indexing)
 
-This is useful for exercising the distributed locking and coordination behavior
-that relies on NATS KV.
-
-`mise run dev` orchestrates these four long-running processes directly via mise
-tasks, so you get mise's built-in prefixed output and Ctrl+C shutdown behavior
-without introducing any additional process manager.
+`mise run dev` orchestrates these long-running processes directly via mise
+tasks, so you get mise's built-in prefixed output and Ctrl+C stops
+everything.
 
 Useful companion tasks:
 
 ```shell
-mise run dev:check
-mise run dev:setup
-mise run dev:status
-mise run dev:env
-mise run dev:restart
-mise run dev:stop
+mise run dev:check    # validate prerequisites
+mise run dev:setup    # create graph DB + apply schema
+mise run dev:status   # show derived config
+mise run dev:env      # print env vars
 ```
 
 `mise run gdk` is also available as an alias for the same GDK-connected local
 development workflow.
 
 Port assignments and GDK connection settings can be overridden in a gitignored
-`.env` file. The only required input is `GDK_ROOT`, and the script derives GDK
-service ports from `gdk.yml` automatically. Start from the checked-in template
+`.env` file. The only required input is `GDK_ROOT` (or `GDK_DIR` as an alias),
+and the script derives GDK service ports from `gdk.yml` automatically. Start from the checked-in template
 if you want to override only the GKG-local listen ports:
 
 ```shell

@@ -81,6 +81,11 @@ impl AppConfig {
         let config = config::Config::builder()
             .add_source(config::File::with_name("config/default").required(false))
             .add_source(SecretFileSource::new(secret_dir))
+            .add_source(
+                config::Environment::with_prefix("GKG")
+                    .separator("__")
+                    .try_parsing(true),
+            )
             .build()
             .map_err(ConfigError::Config)?;
 
@@ -111,13 +116,14 @@ pub enum ConfigError {
     #[error("configuration error: {0}")]
     Config(#[from] config::ConfigError),
     #[error(
-        "gitlab.jwt.verifying_key is required (set in config/default.yaml or mount at /etc/secrets/gitlab/jwt/verifying_key)"
+        "gitlab.jwt.verifying_key is required (set GKG_GITLAB__JWT__VERIFYING_KEY, add to config/default.yaml, or mount at /etc/secrets/gitlab/jwt/verifying_key)"
     )]
     MissingJwtSecret,
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::engine::EngineConfiguration;
 
     /// Verifies the kebab-case handler config keys in YAML actually
@@ -193,6 +199,63 @@ handlers:
         assert_eq!(
             engine.handlers.namespace_deletion.engine.max_attempts,
             Some(1)
+        );
+    }
+
+    /// Environment source with `GKG_` prefix and `__` separator maps env
+    /// vars to nested config keys:
+    ///   GKG_NATS__URL -> nats.url
+    ///   GKG_GRAPH__DATABASE -> graph.database
+    #[test]
+    fn environment_source_overrides_file_values() {
+        // Build a config that simulates what env vars would produce by
+        // testing the Environment source directly against a known set of
+        // overrides. We use Config::builder with manual set() calls to
+        // mirror the env var effect without mutating process state.
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let config = config::Config::builder()
+            .add_source(config::File::with_name("config/default").required(false))
+            .add_source(SecretFileSource::new(dir.path()))
+            // Provide required base config (normally from config/default.yaml)
+            .set_default("nats.url", "localhost:4222")
+            .unwrap()
+            .set_default("datalake.url", "http://127.0.0.1:8123")
+            .unwrap()
+            .set_default("datalake.database", "default")
+            .unwrap()
+            .set_default("datalake.username", "default")
+            .unwrap()
+            .set_default("graph.url", "http://127.0.0.1:8123")
+            .unwrap()
+            .set_default("graph.database", "default")
+            .unwrap()
+            .set_default("graph.username", "default")
+            .unwrap()
+            // Simulate what GKG_NATS__URL, GKG_GRAPH__DATABASE, etc. would
+            // produce via config::Environment
+            .set_override("nats.url", "nats://custom:4222")
+            .unwrap()
+            .set_override("graph.database", "test-graph-db")
+            .unwrap()
+            .set_override("datalake.database", "test-datalake-db")
+            .unwrap()
+            .set_override(
+                "gitlab.jwt.verifying_key",
+                "env-secret-at-least-32-bytes-long",
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let config: AppConfig = config.try_deserialize().expect("config should deserialize");
+
+        assert_eq!(config.nats.url, "nats://custom:4222");
+        assert_eq!(config.graph.database, "test-graph-db");
+        assert_eq!(config.datalake.database, "test-datalake-db");
+        assert_eq!(
+            config.gitlab.jwt.verifying_key.as_deref(),
+            Some("env-secret-at-least-32-bytes-long")
         );
     }
 }

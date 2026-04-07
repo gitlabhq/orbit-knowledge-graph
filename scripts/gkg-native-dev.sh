@@ -67,6 +67,8 @@ ERROR: GDK_ROOT is not set.
 Set it to the path of your GDK installation:
   export GDK_ROOT=/path/to/your/gdk
   mise run dev
+
+GDK_DIR is also accepted as an alias for GDK_ROOT.
 EOF
   exit 1
 fi
@@ -77,12 +79,9 @@ GDK_YML="$GDK_ROOT/gdk.yml"
 GDK_DEFAULT_YML="$GDK_ROOT/gdk.example.yml"
 GITLAB_ROOT="${GITLAB_ROOT:-$GDK_ROOT/gitlab}"
 
-WEB1_HTTP="127.0.0.1:${GKG_SERVER_PORT_1:-8090}"
-WEB1_GRPC="127.0.0.1:${GKG_SERVER_GRPC_PORT_1:-50054}"
-WEB2_HTTP="127.0.0.1:${GKG_SERVER_PORT_2:-8091}"
-WEB2_GRPC="127.0.0.1:${GKG_SERVER_GRPC_PORT_2:-50055}"
-IDX1_HEALTH="127.0.0.1:${GKG_INDEXER_PORT_1:-4202}"
-IDX2_HEALTH="127.0.0.1:${GKG_INDEXER_PORT_2:-4203}"
+WEB_HTTP="127.0.0.1:${GKG_SERVER_PORT:-8090}"
+WEB_GRPC="127.0.0.1:${GKG_SERVER_GRPC_PORT:-50054}"
+IDX_HEALTH="127.0.0.1:${GKG_INDEXER_PORT:-4202}"
 GKG_HEALTHCHECK_BIND_ADDRESS="${GKG_HEALTHCHECK_BIND_ADDRESS:-127.0.0.1:4201}"
 
 GDK_CLICKHOUSE_HTTP_PORT="$(parse_gdk_value clickhouse.http_port 2>/dev/null || echo 8123)"
@@ -97,7 +96,7 @@ GKG_GRAPH__URL="${GKG_GRAPH__URL:-http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}}"
 GKG_GRAPH__DATABASE="${GKG_GRAPH__DATABASE:-gkg-development}"
 GKG_GRAPH__USERNAME="${GKG_GRAPH__USERNAME:-default}"
 GKG_GITLAB__BASE_URL="${GKG_GITLAB__BASE_URL:-http://127.0.0.1:${GDK_GITLAB_PORT}}"
-GKG_SIPHON_STREAM_NAME="${GKG_SIPHON_STREAM_NAME:-siphon_stream_main_db}"
+GKG_SIPHON_STREAM_NAME="${GKG_SIPHON_STREAM_NAME:-siphon_stream}"
 GKG_ENABLE_METRICS="${GKG_ENABLE_METRICS:-false}"
 
 GITALY_TCP_ADDR="$(python3 - "$GDK_ROOT/gitaly/gitaly.config.toml" <<'PY'
@@ -205,6 +204,19 @@ EOF
 
   printf "[ok] gdk.yml enables nats, clickhouse, and siphon\n"
 
+  if ! gdk_enabled duo_workflow; then
+    printf "[fail] gdk.yml does not enable duo_workflow — add the following to gdk.yml:\n"
+    cat <<'EOF'
+  duo_workflow:
+    enabled: true
+
+Then run: cd ~/gdk && gdk reconfigure
+EOF
+    failures=$((failures + 1))
+  else
+    printf "[ok] gdk.yml enables duo_workflow\n"
+  fi
+
   if command -v gdk >/dev/null 2>&1; then
     if (cd "$GDK_ROOT" && gdk status >/dev/null 2>&1); then
       printf "[ok] gdk status succeeded\n"
@@ -233,6 +245,16 @@ EOF
     nc -z 127.0.0.1 4222 >/dev/null 2>&1 && printf "[ok] NATS reachable on localhost:4222\n" || { printf "[fail] NATS not running — enable it in gdk.yml: nats:\n  enabled: true\n"; failures=$((failures + 1)); }
     nc -z 127.0.0.1 "$GDK_CLICKHOUSE_HTTP_PORT" >/dev/null 2>&1 && printf "[ok] ClickHouse reachable on localhost:%s\n" "$GDK_CLICKHOUSE_HTTP_PORT" || { printf "[fail] ClickHouse not running — enable it in gdk.yml: clickhouse:\n  enabled: true\n"; failures=$((failures + 1)); }
     nc -z 127.0.0.1 "$GDK_POSTGRES_PORT" >/dev/null 2>&1 && printf "[ok] PostgreSQL reachable on localhost:%s\n" "$GDK_POSTGRES_PORT" || { printf "[fail] PostgreSQL not reachable on localhost:%s — GDK and Siphon require PostgreSQL running\n" "$GDK_POSTGRES_PORT"; failures=$((failures + 1)); }
+    local wal_level
+    wal_level="$(psql -h 127.0.0.1 -p "$GDK_POSTGRES_PORT" -U "$USER" -d gitlabhq_development -tAc "SHOW wal_level" 2>/dev/null || true)"
+    if [[ "$wal_level" == "logical" ]]; then
+      printf "[ok] PostgreSQL wal_level is 'logical' (required for Siphon CDC)\n"
+    elif [[ -n "$wal_level" ]]; then
+      printf "[fail] PostgreSQL wal_level is '%s', must be 'logical' for Siphon CDC\n" "$wal_level"
+      printf "  Edit %s/postgresql/data/postgresql.conf and set: wal_level = logical\n" "$GDK_ROOT"
+      printf "  Then restart PostgreSQL: gdk restart postgresql\n"
+      failures=$((failures + 1))
+    fi
     nc -z 127.0.0.1 "$GDK_GITLAB_PORT" >/dev/null 2>&1 && printf "[ok] GitLab reachable on localhost:%s\n" "$GDK_GITLAB_PORT" || { printf "[warn] GitLab not reachable on localhost:%s\n" "$GDK_GITLAB_PORT"; failures=$((failures + 1)); }
     if [[ -n "$GITALY_TCP_ADDR" ]]; then
       local gitaly_host="${GITALY_TCP_ADDR%:*}"
@@ -261,12 +283,9 @@ GDK_CLICKHOUSE_TCP_PORT=$GDK_CLICKHOUSE_TCP_PORT
 GDK_POSTGRES_PORT=$GDK_POSTGRES_PORT
 GDK_GITLAB_PORT=$GDK_GITLAB_PORT
 GITALY_TCP_ADDR=${GITALY_TCP_ADDR:-<not configured>}
-WEB1_HTTP=$WEB1_HTTP
-WEB1_GRPC=$WEB1_GRPC
-WEB2_HTTP=$WEB2_HTTP
-WEB2_GRPC=$WEB2_GRPC
-IDX1_HEALTH=$IDX1_HEALTH
-IDX2_HEALTH=$IDX2_HEALTH
+WEB_HTTP=$WEB_HTTP
+WEB_GRPC=$WEB_GRPC
+IDX_HEALTH=$IDX_HEALTH
 GKG_NATS__URL=$GKG_NATS__URL
 GKG_DATALAKE__URL=$GKG_DATALAKE__URL
 GKG_DATALAKE__DATABASE=$GKG_DATALAKE__DATABASE

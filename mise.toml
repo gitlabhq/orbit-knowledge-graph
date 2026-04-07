@@ -6,13 +6,14 @@ postinstall = "if [ -z \"$CI\" ]; then lefthook install --force; fi"
 
 [env]
 # GDK root directory. Override with an absolute path, e.g: export GDK_ROOT=$HOME/workspace/gdk
+# GDK_DIR is also accepted as an alias for GDK_ROOT.
 # Do not use ~ (tilde is not expanded in variable values).
-GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}"
+GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=env.HOME ~ '/gitlab/gdk'))}}"
 
 
 # Path to Siphon repository for proto compilation (siphon-proto crate)
 # Clone from: https://gitlab.com/gitlab-org/analytics-section/siphon
-SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/siphon"
+SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=env.HOME ~ '/gitlab/gdk'))}}/siphon"
 
 # Auto-download prebuilt DuckDB shared library on first build (cached in target/).
 DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
@@ -172,65 +173,53 @@ description = "Start the GKG server (dispatch-indexing mode)"
 [tasks.dev]
 run = [
   "mise run dev:check",
-  "mise run dev:web:1 ::: dev:web:2 ::: dev:indexer:1 ::: dev:indexer:2",
+  "mise run dev:web ::: dev:indexer ::: dev:dispatcher",
 ]
-description = "Start a lightweight HA local GKG environment (2 webservers + 2 indexers) connected to GDK services"
+description = "Start a local GKG environment (webserver + indexer + dispatcher) connected to GDK services"
 
 [tasks.gdk]
 run = "mise run dev"
-description = "Alias for the lightweight HA local GKG environment connected to GDK services"
+description = "Alias for the local GKG environment connected to GDK services"
 
 [tasks."dev:check"]
 run = "./scripts/gkg-native-dev.sh check"
-description = "Verify lightweight GDK-connected local development prerequisites"
+description = "Verify GDK-connected local development prerequisites"
 
 [tasks."dev:status"]
 run = "./scripts/gkg-native-dev.sh env"
-description = "Show the derived GDK-backed environment for lightweight local development"
+description = "Show the derived GDK-backed environment for local development"
 
 [tasks."dev:restart"]
 run = "mise run dev"
-description = "Restart the lightweight HA local GKG environment"
+description = "Restart the local GKG environment"
 
 [tasks."dev:stop"]
 run = "echo 'Use Ctrl+C in the running mise session to stop all dev processes'"
-description = "Explain how to stop the lightweight HA local GKG environment"
+description = "Explain how to stop the local GKG environment"
 
 [tasks."dev:setup"]
 run = "./scripts/gkg-native-dev.sh setup"
 description = "Create the graph database and apply config/graph.sql to ClickHouse"
 
+[tasks."dev:web"]
+run = "GKG_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_PORT:-8090} GKG_GRPC_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_GRPC_PORT:-50054} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_METRICS_PORT:-9100} ./scripts/gkg-native-dev.sh webserver"
+description = "Start a local GKG webserver connected to GDK services"
+
 [tasks."dev:indexer"]
-run = "./scripts/gkg-native-dev.sh indexer"
-description = "Start a lightweight local GKG indexer process connected to GDK services"
-
-[tasks."dev:web:1"]
-run = "GKG_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_PORT_1:-8090} GKG_GRPC_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_GRPC_PORT_1:-50054} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_METRICS_PORT_1:-9100} ./scripts/gkg-native-dev.sh webserver"
-description = "Start webserver instance 1"
-
-[tasks."dev:web:2"]
-run = "GKG_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_PORT_2:-8091} GKG_GRPC_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_GRPC_PORT_2:-50055} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_METRICS_PORT_2:-9101} ./scripts/gkg-native-dev.sh webserver"
-description = "Start webserver instance 2"
-
-[tasks."dev:indexer:1"]
-run = "GKG_INDEXER_HEALTH_BIND_ADDRESS=127.0.0.1:${GKG_INDEXER_PORT_1:-4202} GKG_NATS__CONSUMER_NAME=${GKG_INDEXER_CONSUMER_1:-gkg-indexer-1} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_INDEXER_METRICS_PORT_1:-9200} ./scripts/gkg-native-dev.sh indexer"
-description = "Start indexer instance 1"
-
-[tasks."dev:indexer:2"]
-run = "GKG_INDEXER_HEALTH_BIND_ADDRESS=127.0.0.1:${GKG_INDEXER_PORT_2:-4203} GKG_NATS__CONSUMER_NAME=${GKG_INDEXER_CONSUMER_2:-gkg-indexer-2} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_INDEXER_METRICS_PORT_2:-9201} ./scripts/gkg-native-dev.sh indexer"
-description = "Start indexer instance 2"
+run = "GKG_INDEXER_HEALTH_BIND_ADDRESS=127.0.0.1:${GKG_INDEXER_PORT:-4202} GKG_NATS__CONSUMER_NAME=${GKG_INDEXER_CONSUMER:-gkg-indexer-dev} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_INDEXER_METRICS_PORT:-9200} ./scripts/gkg-native-dev.sh indexer"
+description = "Start a local GKG indexer connected to GDK services"
 
 [tasks."dev:dispatcher"]
 run = "./scripts/gkg-native-dev.sh dispatcher"
-description = "Start a lightweight local GKG dispatch-indexing process connected to GDK services"
+description = "Start a local GKG dispatch-indexing process connected to GDK services"
 
 [tasks."dev:healthcheck"]
 run = "./scripts/gkg-native-dev.sh healthcheck"
-description = "Start the lightweight local GKG health-check process"
+description = "Start the local GKG health-check process"
 
 [tasks."dev:env"]
 run = "./scripts/gkg-native-dev.sh env"
-description = "Print the derived lightweight local GKG environment"
+description = "Print the derived local GKG environment"
 
 
 [tasks."ontology:validate"]
