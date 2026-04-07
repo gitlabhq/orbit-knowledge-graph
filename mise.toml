@@ -169,45 +169,53 @@ description = "Start the GKG server (webserver mode)"
 run = './scripts/run-dispatcher.sh'
 description = "Start the GKG server (dispatch-indexing mode)"
 
-[tasks."dev:bootstrap"]
-run = '''
-if [ -f .tilt-secrets ]; then
-  echo ".tilt-secrets already exists"
-else
-  cp .tilt-secrets.example .tilt-secrets
-  echo "Created .tilt-secrets from .tilt-secrets.example"
-  echo "Edit .tilt-secrets and set GDK_ROOT before running the dev environment if needed"
-fi
-'''
-description = "Create .tilt-secrets from the example if needed"
-
 [tasks.dev]
-depends = ["dev:bootstrap"]
-run = "./scripts/gkg-dev.sh start"
-description = "Start the full GKG development environment connected to an existing GDK"
+run = "./scripts/gkg-native-dev.sh start"
+description = "Start a lightweight HA local GKG environment (2 webservers + 2 indexers) connected to GDK services"
 
 [tasks.gdk]
-depends = ["dev:bootstrap"]
-run = "./scripts/gkg-dev.sh start"
-description = "Alias for the full GDK-connected local development environment"
+run = "./scripts/gkg-native-dev.sh start"
+description = "Alias for the lightweight HA local GKG environment connected to GDK services"
 
 [tasks."dev:check"]
-depends = ["dev:bootstrap"]
-run = "./scripts/gkg-dev.sh check"
-description = "Verify local GDK-connected development prerequisites"
+run = "./scripts/gkg-native-dev.sh check"
+description = "Verify lightweight GDK-connected local development prerequisites"
 
 [tasks."dev:status"]
-run = "./scripts/gkg-dev.sh status"
-description = "Show local GKG development environment status"
+run = "./scripts/gkg-native-dev.sh env"
+description = "Show the derived GDK-backed environment for lightweight local development"
 
 [tasks."dev:restart"]
-depends = ["dev:bootstrap"]
-run = "./scripts/gkg-dev.sh restart"
-description = "Restart the local GKG development environment"
+run = "./scripts/gkg-native-dev.sh restart"
+description = "Restart the lightweight HA local GKG environment"
 
 [tasks."dev:stop"]
-run = "./scripts/gkg-dev.sh stop"
-description = "Stop the local GKG development environment"
+run = "./scripts/gkg-native-dev.sh stop"
+description = "Stop the lightweight HA local GKG environment"
+
+[tasks."dev:setup"]
+run = "./scripts/gkg-native-dev.sh setup"
+description = "Create the graph database and apply config/graph.sql to ClickHouse"
+
+[tasks."dev:indexer"]
+run = "./scripts/gkg-native-dev.sh indexer"
+description = "Start a lightweight local GKG indexer process connected to GDK services"
+
+[tasks."dev:dispatcher"]
+run = "./scripts/gkg-native-dev.sh dispatcher"
+description = "Start a lightweight local GKG dispatch-indexing process connected to GDK services"
+
+[tasks."dev:healthcheck"]
+run = "./scripts/gkg-native-dev.sh healthcheck"
+description = "Start the lightweight local GKG health-check process"
+
+[tasks."dev:env"]
+run = "./scripts/gkg-native-dev.sh env"
+description = "Print the derived lightweight local GKG environment"
+
+[tasks."dev:logs"]
+run = "./scripts/gkg-native-dev.sh logs"
+description = "Tail logs for the lightweight HA local GKG environment"
 
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"

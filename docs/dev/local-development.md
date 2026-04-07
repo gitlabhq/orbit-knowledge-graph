@@ -273,21 +273,49 @@ shortcut is also available:
 mise run dev
 ```
 
-This uses the same underlying `scripts/gkg-dev.sh` workflow as the script-based
-setup above, but packages it behind a single `mise` command.
+This alternative is separate from the Tilt/Kubernetes workflow above. It starts
+lightweight native Rust processes directly on your host and connects them to the
+existing services in your GDK instance (for example NATS, ClickHouse, GitLab,
+and Gitaly), without using Tilt, Helm, Colima, or minikube.
+
+By default it starts a small HA-style local cluster:
+
+- 2 webserver instances on different ports
+- 2 indexer instances with distinct health ports and consumer names
+
+This is useful for exercising the distributed locking and coordination behavior
+that relies on NATS KV.
 
 Useful companion tasks:
 
 ```shell
 mise run dev:check
+mise run dev:setup
 mise run dev:status
+mise run dev:env
+mise run dev:logs
 mise run dev:restart
 mise run dev:stop
 ```
 
 `mise run gdk` is also available as an alias for the same GDK-connected local
-development workflow. On first run, the bootstrap step creates `.tilt-secrets`
-from `.tilt-secrets.example` if that file does not already exist.
+development workflow.
+
+Port assignments and GDK connection settings can be overridden in a gitignored
+`.env` file. Start from the checked-in template:
+
+```shell
+cp .env.example .env
+```
+
+For example, you can change the webserver and indexer ports if you want to run
+multiple isolated local clusters on the same machine.
+
+`mise run dev:setup` creates the graph database (default `gkg-development`) and
+applies `config/graph.sql` to the configured ClickHouse instance.
+
+This lightweight path assumes NATS, ClickHouse, Siphon, PostgreSQL, and Gitaly
+come from GDK.
 
 See `.gkg-dev.conf.example` for all configuration options (K8s runtime,
 resource allocation, Tilt streaming mode).
