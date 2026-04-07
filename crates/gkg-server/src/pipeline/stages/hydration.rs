@@ -508,7 +508,12 @@ impl PipelineStage for HydrationStage {
                     .collect();
                 Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
 
-                Self::strip_injected_columns(&mut property_map, templates.iter().map(|t| (t.entity_type.as_str(), &t.injected_columns)));
+                Self::strip_injected_columns(
+                    &mut property_map,
+                    templates
+                        .iter()
+                        .map(|t| (t.entity_type.as_str(), &t.injected_columns)),
+                );
 
                 if !property_map.is_empty() {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
@@ -541,7 +546,12 @@ impl PipelineStage for HydrationStage {
                         .collect();
                     Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
 
-                    Self::strip_injected_columns(&mut property_map, entity_specs.iter().map(|s| (s.entity_type.as_str(), &s.injected_columns)));
+                    Self::strip_injected_columns(
+                        &mut property_map,
+                        entity_specs
+                            .iter()
+                            .map(|s| (s.entity_type.as_str(), &s.injected_columns)),
+                    );
 
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
                 }

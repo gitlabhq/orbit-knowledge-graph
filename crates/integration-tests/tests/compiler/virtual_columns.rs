@@ -1,7 +1,7 @@
 //! Virtual column handling: SQL stripping, hydration plans, depends_on injection.
 
 use ontology::Ontology;
-use query_engine::compiler::{compile, HydrationPlan, SecurityContext};
+use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
 
 fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
     let ontology = Ontology::load_embedded().unwrap();
