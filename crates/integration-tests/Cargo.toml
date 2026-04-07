@@ -9,11 +9,13 @@ publish = false
 # Shared helpers live in tests/common/ (subdirectory, ignored by auto-discovery).
 
 [dev-dependencies]
+anyhow = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
 gkg-server = { path = "../gkg-server", features = ["testkit"] }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
+migration-framework = { path = "../migration-framework" }
 jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }

@@ -3707,6 +3707,7 @@ dependencies = [
 name = "integration-tests"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arrow",
  "async-nats",
  "async-trait",
@@ -3727,6 +3728,7 @@ dependencies = [
  "integration-testkit",
  "jsonschema",
  "labkit",
+ "migration-framework",
  "ontology",
  "opentelemetry",
  "opentelemetry_sdk",

@@ -122,8 +122,8 @@ impl MigrationLedger {
                 .ok_or_else(|| MigrationLedgerError::Decode("missing status column".to_string()))?;
             let retry_counts = ArrowUtils::get_column_by_name::<UInt32Array>(&batch, "retry_count")
                 .ok_or_else(|| {
-                MigrationLedgerError::Decode("missing retry_count column".to_string())
-            })?;
+                    MigrationLedgerError::Decode("missing retry_count column".to_string())
+                })?;
             let started_ats =
                 ArrowUtils::get_column_by_name::<TimestampMicrosecondArray>(&batch, "started_at")
                     .ok_or_else(|| {
@@ -239,32 +239,8 @@ fn parse_status(value: &str) -> Result<MigrationStatus, MigrationLedgerError> {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
-    use async_trait::async_trait;
-
     use crate::ledger::{escape_string, parse_migration_type, parse_status};
-    use crate::{Migration, MigrationContext, MigrationLedger, MigrationStatus, MigrationType};
-
-    struct TestMigration;
-
-    #[async_trait]
-    impl Migration for TestMigration {
-        fn version(&self) -> u64 {
-            1
-        }
-
-        fn name(&self) -> &str {
-            "test_migration"
-        }
-
-        fn migration_type(&self) -> MigrationType {
-            MigrationType::Additive
-        }
-
-        async fn prepare(&self, _ctx: &MigrationContext) -> Result<()> {
-            Ok(())
-        }
-    }
+    use crate::{MigrationStatus, MigrationType};
 
     #[test]
     fn migration_type_string_values_match_contract() {
@@ -291,79 +267,18 @@ mod tests {
     #[test]
     fn parse_migration_type_rejects_unknown_values() {
         let error = parse_migration_type("unknown").expect_err("should fail");
-        assert_eq!(error.to_string(), "failed to decode ledger row: unknown migration type: unknown");
+        assert_eq!(
+            error.to_string(),
+            "failed to decode ledger row: unknown migration type: unknown"
+        );
     }
 
     #[test]
     fn parse_status_rejects_unknown_values() {
         let error = parse_status("unknown").expect_err("should fail");
-        assert_eq!(error.to_string(), "failed to decode ledger row: unknown migration status: unknown");
-    }
-
-    #[tokio::test]
-    async fn ensure_table_is_idempotent() {
-        let ctx = integration_testkit::TestContext::new(&[]).await;
-        let ledger = MigrationLedger::new(ctx.create_client());
-
-        ledger.ensure_table().await.expect("first create");
-        ledger.ensure_table().await.expect("second create");
-    }
-
-    #[tokio::test]
-    async fn list_returns_empty_vec_for_empty_table() {
-        let ctx = integration_testkit::TestContext::new(&[]).await;
-        let ledger = MigrationLedger::new(ctx.create_client());
-
-        ledger.ensure_table().await.expect("table");
-        let rows = ledger.list().await.expect("list rows");
-        assert!(rows.is_empty());
-    }
-
-    #[tokio::test]
-    async fn ledger_round_trips_latest_status() {
-        let ctx = integration_testkit::TestContext::new(&[]).await;
-        let ledger = MigrationLedger::new(ctx.create_client());
-        let migration = TestMigration;
-
-        ledger.ensure_table().await.expect("table");
-        ledger.mark_pending(&migration).await.expect("pending");
-        ledger
-            .mark_preparing(&migration, 1)
-            .await
-            .expect("preparing");
-        ledger
-            .mark_completed(&migration, 1)
-            .await
-            .expect("completed");
-
-        let rows = ledger.list().await.expect("list rows");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].status, MigrationStatus::Completed);
-        assert_eq!(rows[0].retry_count, 1);
-        assert!(rows[0].started_at.is_some());
-        assert!(rows[0].completed_at.is_some());
-    }
-
-    #[tokio::test]
-    async fn ledger_records_failures() {
-        let ctx = integration_testkit::TestContext::new(&[]).await;
-        let ledger = MigrationLedger::new(ctx.create_client());
-        let migration = TestMigration;
-
-        ledger.ensure_table().await.expect("table");
-        ledger
-            .mark_preparing(&migration, 2)
-            .await
-            .expect("preparing");
-        ledger
-            .mark_failed(&migration, "boom", 2)
-            .await
-            .expect("failed");
-
-        let rows = ledger.list().await.expect("list rows");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].status, MigrationStatus::Failed);
-        assert_eq!(rows[0].error_message.as_deref(), Some("boom"));
-        assert_eq!(rows[0].retry_count, 2);
+        assert_eq!(
+            error.to_string(),
+            "failed to decode ledger row: unknown migration status: unknown"
+        );
     }
 }
