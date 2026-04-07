@@ -237,36 +237,14 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
 
 4. **Start local environment:**
 
-   The repo's local-dev entrypoint now uses `mise tasks`:
-
-   ```shell
-   mise run dev
-   ```
-
-   `mise run gdk` is an alias for the same GDK-connected local development
-   workflow. On first run the bootstrap step will create
-   `.tilt-secrets` from
-   `.tilt-secrets.example` if that file does not exist yet.
-
-   Useful companion targets:
-
-   ```shell
-   mise run dev:check
-   mise run dev:status
-   mise run dev:restart
-   mise run dev:stop
-   ```
-
-   You can still start Tilt directly if you want lower-level control:
-
    ```shell
    tilt up
    ```
 
 ## Quick start/stop script
 
-Once prerequisites are installed, you can use `mise run dev` to manage the
-full stack (K8s cluster, GDK, and Tilt) with a single command:
+Once prerequisites are installed, you can use `scripts/gkg-dev.sh` to manage
+the full stack (K8s cluster, GDK, and Tilt) with a single command:
 
 ```shell
 # Copy the config template and set your GDK path
@@ -274,20 +252,42 @@ cp .gkg-dev.conf.example .gkg-dev.conf
 # Edit .gkg-dev.conf — at minimum, set GDK_ROOT if your GDK is not at ~/gdk
 
 # Verify everything is installed and configured correctly
-mise run dev:check
+scripts/gkg-dev.sh check
 
 # Start all services (K8s → GDK → Tilt)
-mise run dev
+scripts/gkg-dev.sh start
 
 # Check what's running
-mise run dev:status
+scripts/gkg-dev.sh status
 
 # Stop all services (Tilt → GDK → K8s)
+scripts/gkg-dev.sh stop
+```
+
+## Alternative: quick start with mise
+
+If you prefer using the repository's existing `mise` task runner, an additive
+shortcut is also available:
+
+```shell
+mise run dev
+```
+
+This uses the same underlying `scripts/gkg-dev.sh` workflow as the script-based
+setup above, but packages it behind a single `mise` command.
+
+Useful companion tasks:
+
+```shell
+mise run dev:check
+mise run dev:status
+mise run dev:restart
 mise run dev:stop
 ```
 
-Under the hood these `mise` tasks delegate to `scripts/gkg-dev.sh`, so that
-script remains available for direct use when you need finer-grained control.
+`mise run gdk` is also available as an alias for the same GDK-connected local
+development workflow. On first run, the bootstrap step creates `.tilt-secrets`
+from `.tilt-secrets.example` if that file does not already exist.
 
 See `.gkg-dev.conf.example` for all configuration options (K8s runtime,
 resource allocation, Tilt streaming mode).
