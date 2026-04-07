@@ -196,7 +196,10 @@ mod compiler_integration {
             "virtual column 'content' should not appear in search SQL, got:\n{sql}"
         );
         // But normal columns should be present
-        assert!(sql.contains("f_name") || sql.contains("f.name"), "normal columns should be in SQL");
+        assert!(
+            sql.contains("f_name") || sql.contains("f.name"),
+            "normal columns should be in SQL"
+        );
     }
 
     #[test]
@@ -227,7 +230,9 @@ mod compiler_integration {
                 assert_eq!(t.node_alias, "f");
                 // Should have the content VCR
                 assert!(
-                    t.virtual_columns.iter().any(|vc| vc.column_name == "content" && vc.service == "gitaly"),
+                    t.virtual_columns
+                        .iter()
+                        .any(|vc| vc.column_name == "content" && vc.service == "gitaly"),
                     "search hydration plan should include content VCR"
                 );
                 // DB columns list should be empty (search already has them)
@@ -239,7 +244,9 @@ mod compiler_integration {
                     );
                 }
             }
-            other => panic!("expected Static hydration plan for search with virtual cols, got: {other:?}"),
+            other => panic!(
+                "expected Static hydration plan for search with virtual cols, got: {other:?}"
+            ),
         }
     }
 
@@ -250,7 +257,10 @@ mod compiler_integration {
             r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": ["id", "name", "path"]}, "limit": 5}"#,
         );
         assert!(
-            matches!(&compiled.hydration, query_engine::compiler::HydrationPlan::None),
+            matches!(
+                &compiled.hydration,
+                query_engine::compiler::HydrationPlan::None
+            ),
             "search without virtual cols should have HydrationPlan::None, got: {:?}",
             compiled.hydration
         );
@@ -269,11 +279,16 @@ mod compiler_integration {
         match &compiled.hydration {
             query_engine::compiler::HydrationPlan::Static(templates) => {
                 assert!(
-                    templates.iter().any(|t| t.virtual_columns.iter().any(|vc| vc.column_name == "content")),
+                    templates.iter().any(|t| t
+                        .virtual_columns
+                        .iter()
+                        .any(|vc| vc.column_name == "content")),
                     "aggregation hydration plan should include content VCR"
                 );
             }
-            other => panic!("expected Static hydration plan for aggregation with virtual cols, got: {other:?}"),
+            other => panic!(
+                "expected Static hydration plan for aggregation with virtual cols, got: {other:?}"
+            ),
         }
     }
 
@@ -319,10 +334,14 @@ mod compiler_integration {
         match &compiled.hydration {
             query_engine::compiler::HydrationPlan::Static(templates) => {
                 let file_template = templates.iter().find(|t| t.entity_type == "File");
-                assert!(file_template.is_some(), "File should have a hydration template");
+                assert!(
+                    file_template.is_some(),
+                    "File should have a hydration template"
+                );
                 let vcs = &file_template.unwrap().virtual_columns;
                 assert!(
-                    vcs.iter().any(|vc| vc.column_name == "content" && vc.service == "gitaly"),
+                    vcs.iter()
+                        .any(|vc| vc.column_name == "content" && vc.service == "gitaly"),
                     "hydration plan should include content virtual column, got: {vcs:?}"
                 );
             }
@@ -379,7 +398,10 @@ mod compiler_integration {
 
         match &compiled.hydration {
             query_engine::compiler::HydrationPlan::Static(templates) => {
-                let def_template = templates.iter().find(|t| t.entity_type == "Definition").unwrap();
+                let def_template = templates
+                    .iter()
+                    .find(|t| t.entity_type == "Definition")
+                    .unwrap();
                 let vcs = &def_template.virtual_columns;
                 assert!(
                     vcs.iter().any(|vc| vc.column_name == "content"),
@@ -415,10 +437,24 @@ mod compiler_integration {
 
         match &compiled.hydration {
             query_engine::compiler::HydrationPlan::Static(templates) => {
-                let def_vcs = &templates.iter().find(|t| t.entity_type == "Definition").unwrap().virtual_columns;
-                let file_vcs = &templates.iter().find(|t| t.entity_type == "File").unwrap().virtual_columns;
-                assert!(def_vcs.iter().any(|vc| vc.column_name == "content"), "Definition missing content VC");
-                assert!(file_vcs.iter().any(|vc| vc.column_name == "content"), "File missing content VC");
+                let def_vcs = &templates
+                    .iter()
+                    .find(|t| t.entity_type == "Definition")
+                    .unwrap()
+                    .virtual_columns;
+                let file_vcs = &templates
+                    .iter()
+                    .find(|t| t.entity_type == "File")
+                    .unwrap()
+                    .virtual_columns;
+                assert!(
+                    def_vcs.iter().any(|vc| vc.column_name == "content"),
+                    "Definition missing content VC"
+                );
+                assert!(
+                    file_vcs.iter().any(|vc| vc.column_name == "content"),
+                    "File missing content VC"
+                );
             }
             other => panic!("expected Static hydration plan, got: {other:?}"),
         }

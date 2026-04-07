@@ -133,26 +133,24 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
 
         // Then, for Search/Aggregation, extract virtual columns from the
         // list and stash them on the node for the hydration plan.
-        if strip_virtual {
-            if let Some(ColumnSelection::List(cols)) = &mut node.columns {
-                let mut virtual_cols = Vec::new();
-                cols.retain(|col_name| {
-                    if let Some(field) = node_entity.fields.iter().find(|f| f.name == *col_name) {
-                        if let ontology::FieldSource::Virtual(vs) = &field.source {
-                            if !vs.disabled {
-                                virtual_cols.push(VirtualColumnRequest {
-                                    column_name: col_name.clone(),
-                                    service: vs.service.clone(),
-                                    lookup: vs.lookup.clone(),
-                                });
-                            }
-                            return false; // strip from SQL columns
-                        }
+        if strip_virtual && let Some(ColumnSelection::List(cols)) = &mut node.columns {
+            let mut virtual_cols = Vec::new();
+            cols.retain(|col_name| {
+                if let Some(field) = node_entity.fields.iter().find(|f| f.name == *col_name)
+                    && let ontology::FieldSource::Virtual(vs) = &field.source
+                {
+                    if !vs.disabled {
+                        virtual_cols.push(VirtualColumnRequest {
+                            column_name: col_name.clone(),
+                            service: vs.service.clone(),
+                            lookup: vs.lookup.clone(),
+                        });
                     }
-                    true // keep DB columns
-                });
-                node.virtual_columns = virtual_cols;
-            }
+                    return false; // strip from SQL columns
+                }
+                true // keep DB columns
+            });
+            node.virtual_columns = virtual_cols;
         }
 
         // Coerce filter values to match ontology field types (e.g., enum int → string)
