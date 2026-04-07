@@ -57,3 +57,4 @@ benchmark_results/
 
 # Profiler result files (local benchmarks)
 fixtures/profiling/
+tmp/
