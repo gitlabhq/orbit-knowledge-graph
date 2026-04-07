@@ -864,12 +864,18 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
                 desc: false,
             },
+            // toString() forces a deterministic string comparison on the
+            // Array(Tuple(Int64, String)) path column, avoiding flaky
+            // ordering from ClickHouse parallel merge on complex types.
             OrderExpr {
-                expr: Expr::col(PATHS_ALIAS, path_column()),
+                expr: Expr::func("toString", vec![Expr::col(PATHS_ALIAS, path_column())]),
                 desc: false,
             },
             OrderExpr {
-                expr: Expr::col(PATHS_ALIAS, edge_kinds_column()),
+                expr: Expr::func(
+                    "toString",
+                    vec![Expr::col(PATHS_ALIAS, edge_kinds_column())],
+                ),
                 desc: false,
             },
         ],
@@ -2015,18 +2021,30 @@ mod tests {
             panic!("expected depth column");
         }
         assert!(!q.order_by[0].desc);
-        // _gkg_path ASC (tie-breaker for same-depth paths with different nodes)
-        if let Expr::Column { column, .. } = &q.order_by[1].expr {
-            assert_eq!(column, &path_column());
+        // toString(_gkg_path) ASC
+        if let Expr::FuncCall { name, args } = &q.order_by[1].expr {
+            assert_eq!(name, "toString");
+            assert_eq!(args.len(), 1);
+            if let Expr::Column { column, .. } = &args[0] {
+                assert_eq!(column, &path_column());
+            } else {
+                panic!("expected path column inside toString");
+            }
         } else {
-            panic!("expected path column");
+            panic!("expected toString(path) function");
         }
         assert!(!q.order_by[1].desc);
-        // _gkg_edge_kinds ASC (tie-breaker for same-node paths with different edges)
-        if let Expr::Column { column, .. } = &q.order_by[2].expr {
-            assert_eq!(column, &edge_kinds_column());
+        // toString(_gkg_edge_kinds) ASC
+        if let Expr::FuncCall { name, args } = &q.order_by[2].expr {
+            assert_eq!(name, "toString");
+            assert_eq!(args.len(), 1);
+            if let Expr::Column { column, .. } = &args[0] {
+                assert_eq!(column, &edge_kinds_column());
+            } else {
+                panic!("expected edge_kinds column inside toString");
+            }
         } else {
-            panic!("expected edge_kinds column");
+            panic!("expected toString(edge_kinds) function");
         }
         assert!(!q.order_by[2].desc);
     }
