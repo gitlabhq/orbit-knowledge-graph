@@ -43,14 +43,8 @@ impl HydrationStage {
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }
 
-    /// Resolve virtual columns from remote services and merge results into
-    /// the property map. Dispatches to the appropriate [`ColumnResolver`]
-    /// by the `service` name declared in the ontology.
-    ///
-    /// Currently a no-op in practice because all virtual fields are
-    /// `disabled: true` in the ontology. The full pipeline is wired up so
-    /// that enabling a virtual field only requires removing the `disabled`
-    /// flag and registering the service in [`ColumnResolverRegistry`].
+    /// Resolve virtual columns via [`ColumnResolverRegistry`] from server
+    /// extensions. Returns `ContentResolution` error if absent.
     pub async fn resolve_virtual_columns(
         ctx: &QueryPipelineContext,
         entity_virtual_columns: &[EntityVirtualColumns<'_>],
@@ -148,6 +142,26 @@ impl HydrationStage {
         }
 
         Ok(())
+    }
+
+    /// Remove columns that were injected as dependencies for virtual column
+    /// resolvers but not explicitly requested by the user.
+    fn strip_injected_columns<'a>(
+        property_map: &mut PropertyMap,
+        specs: impl Iterator<Item = (&'a str, &'a Vec<String>)>,
+    ) {
+        for (entity_type, injected) in specs {
+            if injected.is_empty() {
+                continue;
+            }
+            for ((et, _), props) in property_map.iter_mut() {
+                if et == entity_type {
+                    for col in injected {
+                        props.remove(col);
+                    }
+                }
+            }
+        }
     }
 
     async fn hydrate_static(
@@ -494,6 +508,13 @@ impl PipelineStage for HydrationStage {
                     .collect();
                 Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
 
+                Self::strip_injected_columns(
+                    &mut property_map,
+                    templates
+                        .iter()
+                        .map(|t| (t.entity_type.as_str(), &t.injected_columns)),
+                );
+
                 if !property_map.is_empty() {
                     Self::merge_static_properties(&mut query_result, &property_map, templates);
                 }
@@ -524,6 +545,13 @@ impl PipelineStage for HydrationStage {
                         .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
                         .collect();
                     Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
+
+                    Self::strip_injected_columns(
+                        &mut property_map,
+                        entity_specs
+                            .iter()
+                            .map(|s| (s.entity_type.as_str(), &s.injected_columns)),
+                    );
 
                     Self::merge_dynamic_properties(&mut query_result, &property_map);
                 }
