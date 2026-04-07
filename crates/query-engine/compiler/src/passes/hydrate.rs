@@ -26,31 +26,31 @@ pub enum HydrationPlan {
 pub struct HydrationTemplate {
     pub entity_type: String,
     /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
-    /// results back to the base query's `_gkg_{alias}_pk` (or `_gkg_{alias}_id`
-    /// when PK == auth ID) column.
+    /// results back to the base query's `_gkg_{alias}_pk` column.
     pub node_alias: String,
     /// ClickHouse table to query (resolved from ontology at compile time).
     pub destination_table: String,
-    /// Column-backed columns to fetch from ClickHouse. Resolved at compile time
-    /// from the user's explicit column selection or the ontology's default_columns,
-    /// with virtual columns filtered out.
+    /// DB columns to fetch from ClickHouse (user-requested columns with
+    /// virtual columns filtered out, plus injected dependencies).
     pub columns: Vec<String>,
     /// Virtual columns that need to be resolved from remote services after
     /// ClickHouse hydration completes.
     pub virtual_columns: Vec<VirtualColumnRequest>,
+    /// Dependency columns injected for virtual column resolvers that the
+    /// user didn't explicitly request. These should be stripped from the
+    /// final output after content resolution.
+    pub injected_columns: Vec<String>,
 }
 
 /// Pre-resolved column spec for an entity type in dynamic hydration.
-/// Built at compile time for every entity type in the ontology so the
-/// server avoids runtime ontology lookups.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicEntityColumns {
     pub entity_type: String,
     pub destination_table: String,
-    /// Column-backed columns to fetch from ClickHouse.
     pub columns: Vec<String>,
-    /// Virtual columns that need remote resolution.
     pub virtual_columns: Vec<VirtualColumnRequest>,
+    /// Columns injected as dependencies, not user-requested.
+    pub injected_columns: Vec<String>,
 }
 
 /// A column that must be resolved from a remote service rather than ClickHouse.
@@ -118,7 +118,8 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 return None;
             }
 
-            inject_virtual_dependencies(&mut columns, &virtual_columns, ont_node);
+            let injected_columns =
+                inject_virtual_dependencies(&mut columns, &virtual_columns, ont_node);
 
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
@@ -126,6 +127,7 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 destination_table: ont_node.destination_table.clone(),
                 columns,
                 virtual_columns,
+                injected_columns,
             })
         })
         .collect()
@@ -157,30 +159,34 @@ fn build_dynamic_specs(input: &Input, ontology: &Ontology) -> Vec<DynamicEntityC
                 return None;
             }
 
-            let (columns, virtual_columns) = split_columns(&requested, node);
+            let (mut columns, virtual_columns) = split_columns(&requested, node);
 
             if columns.is_empty() && virtual_columns.is_empty() {
                 return None;
             }
+
+            let injected_columns =
+                inject_virtual_dependencies(&mut columns, &virtual_columns, node);
 
             Some(DynamicEntityColumns {
                 entity_type: name.to_string(),
                 destination_table: node.destination_table.clone(),
                 columns,
                 virtual_columns,
+                injected_columns,
             })
         })
         .collect()
 }
 
-/// Ensure that database-backed columns required by virtual column resolvers
-/// are included in the hydration column list, even if the user didn't
-/// request them. Reads `depends_on` from the ontology's `VirtualSource`.
+/// Inject depends_on columns required by virtual column resolvers.
+/// Returns the list of columns that were injected (not originally requested).
 fn inject_virtual_dependencies(
     columns: &mut Vec<String>,
     virtual_columns: &[VirtualColumnRequest],
     node: &ontology::NodeEntity,
-) {
+) -> Vec<String> {
+    let mut injected = Vec::new();
     for vc in virtual_columns {
         let Some(field) = node.fields.iter().find(|f| f.name == vc.column_name) else {
             continue;
@@ -193,10 +199,12 @@ fn inject_virtual_dependencies(
                     })
                 {
                     columns.push(dep.clone());
+                    injected.push(dep.clone());
                 }
             }
         }
     }
+    injected
 }
 
 /// Partition requested column names into CH-backed and virtual based on
@@ -313,11 +321,12 @@ mod tests {
         let vcs = vec![vc_req("content", "gitaly", "blob_content")];
         let mut columns = vec!["name".to_string()];
 
-        inject_virtual_dependencies(&mut columns, &vcs, &node);
+        let injected = inject_virtual_dependencies(&mut columns, &vcs, &node);
 
         assert!(columns.contains(&"project_id".to_string()));
         assert!(columns.contains(&"branch".to_string()));
         assert!(columns.contains(&"path".to_string()));
+        assert_eq!(injected, vec!["project_id", "branch", "path"]);
     }
 
     #[test]
@@ -336,11 +345,13 @@ mod tests {
         let vcs = vec![vc_req("content", "gitaly", "blob_content")];
         let mut columns = vec!["project_id".to_string()];
 
-        inject_virtual_dependencies(&mut columns, &vcs, &node);
+        let injected = inject_virtual_dependencies(&mut columns, &vcs, &node);
 
         let count = columns.iter().filter(|c| *c == "project_id").count();
         assert_eq!(count, 1, "project_id should not be duplicated");
         assert!(columns.contains(&"branch".to_string()));
+        // project_id was already present, so only branch is injected
+        assert_eq!(injected, vec!["branch"]);
     }
 
     #[test]
@@ -349,9 +360,10 @@ mod tests {
         let vcs: Vec<VirtualColumnRequest> = vec![];
         let mut columns = vec!["name".to_string()];
 
-        inject_virtual_dependencies(&mut columns, &vcs, &node);
+        let injected = inject_virtual_dependencies(&mut columns, &vcs, &node);
 
         assert_eq!(columns, vec!["name".to_string()]);
+        assert!(injected.is_empty());
     }
 
     #[test]
