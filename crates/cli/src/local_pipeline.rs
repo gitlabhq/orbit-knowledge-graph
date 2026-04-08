@@ -1,10 +1,11 @@
 //! Local DuckDB query pipeline.
 //!
 //! ```text
-//! LocalCompilation → DuckDbExecution → Extraction → LocalOutput
+//! LocalCompilation → DuckDbExecution → Extraction → LocalHydration → LocalOutput
 //! ```
 //!
-//! No security, authorization, redaction, or hydration.
+//! No security, authorization, redaction, or hydration (hydration is a
+//! no-op pass-through until a local resolver is implemented).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,6 +26,9 @@ use query_engine::shared::{
 };
 
 /// Execute a query against the local DuckDB graph.
+///
+/// Builds a single-threaded tokio runtime internally if one isn't
+/// running, or uses `block_in_place` if called from an existing runtime.
 #[allow(dead_code)]
 pub fn run(
     query_json: &str,
@@ -45,24 +49,34 @@ pub fn run(
 
     let mut obs = NoOpObserver;
 
-    tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(async {
-            PipelineRunner::start(&mut ctx, &mut obs)
-                .then(&LocalCompilation)
-                .await?
-                .then(&DuckDbExecutor)
-                .await?
-                .then(&ExtractionStage)
-                .await?
-                .then(&LocalHydration)
-                .await?
-                .then(&LocalOutput)
-                .await?
-                .finish()
-                .ok_or_else(|| PipelineError::custom("pipeline did not produce output"))
-        })
-    })
-    .map_err(|e| anyhow::anyhow!("pipeline error: {e}"))
+    let run_pipeline = async {
+        PipelineRunner::start(&mut ctx, &mut obs)
+            .then(&LocalCompilation)
+            .await?
+            .then(&DuckDbExecutor)
+            .await?
+            .then(&ExtractionStage)
+            .await?
+            .then(&LocalHydration)
+            .await?
+            .then(&LocalOutput)
+            .await?
+            .finish()
+            .ok_or_else(|| PipelineError::custom("pipeline did not produce output"))
+    };
+
+    // Support both "called from tokio context" and "called standalone".
+    let result = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(run_pipeline))
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| anyhow::anyhow!("failed to build runtime: {e}"))?
+            .block_on(run_pipeline)
+    };
+
+    result.map_err(|e| anyhow::anyhow!("pipeline error: {e}"))
 }
 
 // ── Stages ───────────────────────────────────────────────────────────────────
@@ -99,6 +113,8 @@ impl PipelineStage for LocalCompilation {
 
 /// Execute compiled SQL against a local DuckDB database.
 /// Opens a connection from the path stored in server_extensions.
+/// DuckDB operations are synchronous -- the async boundary is handled
+/// by the caller via `block_in_place`.
 struct DuckDbExecutor;
 
 impl PipelineStage for DuckDbExecutor {
@@ -121,11 +137,16 @@ impl PipelineStage for DuckDbExecutor {
         let result_context = compiled.base.result_context.clone();
 
         let t = Instant::now();
-        let client =
-            DuckDbClient::open(&db_path).map_err(|e| PipelineError::Execution(e.to_string()))?;
-        let batches = client
-            .query_arrow(&rendered_sql)
-            .map_err(|e| PipelineError::Execution(e.to_string()))?;
+        let client = DuckDbClient::open(&db_path).map_err(|e| {
+            let err = PipelineError::Execution(e.to_string());
+            obs.record_error(&err);
+            err
+        })?;
+        let batches = client.query_arrow(&rendered_sql).map_err(|e| {
+            let err = PipelineError::Execution(e.to_string());
+            obs.record_error(&err);
+            err
+        })?;
         obs.executed(t.elapsed(), batches.len());
 
         Ok(ExecutionOutput {
