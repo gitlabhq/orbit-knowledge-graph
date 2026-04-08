@@ -60,26 +60,35 @@ fn definition_row(
     props
 }
 
+struct MockServer {
+    client: Arc<GitlabClient>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for MockServer {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
 /// Starts a mock HTTP server that serves list_blobs responses.
-/// `handler` maps (project_id, revisions) -> response body bytes.
+/// The server is aborted when the returned `MockServer` is dropped.
 async fn mock_gitlab_server(
     handler: impl Fn(i64, Vec<String>) -> Vec<u8> + Send + Sync + Clone + 'static,
-) -> (Arc<GitlabClient>, tokio::task::JoinHandle<()>) {
+) -> MockServer {
     let app = Router::new().route(
         "/api/v4/internal/orbit/project/{project_id}/repository/list_blobs",
         post(move |Path(project_id): Path<i64>, body: String| {
             let handler = handler.clone();
             async move {
-                let parsed: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-                let revisions: Vec<String> = parsed
-                    .get("revisions")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&body).expect("mock received invalid JSON from client");
+                let revisions: Vec<String> = parsed["revisions"]
+                    .as_array()
+                    .expect("missing 'revisions' array in request body")
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
                 let bytes = handler(project_id, revisions);
                 (StatusCode::OK, Body::from(bytes)).into_response()
             }
@@ -100,7 +109,10 @@ async fn mock_gitlab_server(
     })
     .unwrap();
 
-    (Arc::new(client), handle)
+    MockServer {
+        client: Arc::new(client),
+        handle,
+    }
 }
 
 fn single_blob_response(oid: &str, content: &[u8]) -> Vec<u8> {
@@ -131,11 +143,11 @@ fn multi_blob_response(blobs: &[(String, Vec<u8>)]) -> Vec<u8> {
 
 #[tokio::test]
 async fn resolves_single_file() {
-    let (client, _handle) =
+    let mock =
         mock_gitlab_server(|_project_id, _revisions| single_blob_response("abc", b"fn main() {}"))
             .await;
 
-    let service = GitalyContentService::new(client);
+    let service = GitalyContentService::new(mock.client.clone());
     let row = file_row(1, "main", "src/main.rs");
     let rows: Vec<&PropertyRow> = vec![&row];
     let ctx = resolver_ctx();
@@ -151,7 +163,7 @@ async fn resolves_single_file() {
 
 #[tokio::test]
 async fn resolves_multiple_files_same_project() {
-    let (client, _handle) = mock_gitlab_server(|_project_id, revisions| {
+    let mock = mock_gitlab_server(|_project_id, revisions| {
         let blobs: Vec<(String, Vec<u8>)> = revisions
             .iter()
             .map(|rev| {
@@ -163,7 +175,7 @@ async fn resolves_multiple_files_same_project() {
     })
     .await;
 
-    let service = GitalyContentService::new(client);
+    let service = GitalyContentService::new(mock.client.clone());
     let row1 = file_row(1, "main", "src/a.rs");
     let row2 = file_row(1, "main", "src/b.rs");
     let rows: Vec<&PropertyRow> = vec![&row1, &row2];
@@ -175,8 +187,14 @@ async fn resolves_multiple_files_same_project() {
         .unwrap();
 
     assert_eq!(results.len(), 2);
-    assert!(results[0].is_some());
-    assert!(results[1].is_some());
+    assert_eq!(
+        results[0],
+        Some(ColumnValue::String("// content of main:src/a.rs".into()))
+    );
+    assert_eq!(
+        results[1],
+        Some(ColumnValue::String("// content of main:src/b.rs".into()))
+    );
 }
 
 #[tokio::test]
@@ -184,9 +202,8 @@ async fn deduplicates_same_file() {
     let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let counter = call_count.clone();
 
-    let (client, _handle) = mock_gitlab_server(move |_project_id, revisions| {
+    let mock = mock_gitlab_server(move |_project_id, revisions| {
         counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        // Should only receive 1 unique revision even though 2 rows reference the same file
         assert_eq!(
             revisions.len(),
             1,
@@ -196,7 +213,7 @@ async fn deduplicates_same_file() {
     })
     .await;
 
-    let service = GitalyContentService::new(client);
+    let service = GitalyContentService::new(mock.client.clone());
     let row1 = file_row(1, "main", "src/lib.rs");
     let row2 = file_row(1, "main", "src/lib.rs"); // same file
     let rows: Vec<&PropertyRow> = vec![&row1, &row2];
@@ -221,13 +238,13 @@ async fn groups_by_project_id() {
     let projects_called = Arc::new(std::sync::Mutex::new(Vec::new()));
     let tracker = projects_called.clone();
 
-    let (client, _handle) = mock_gitlab_server(move |project_id, _revisions| {
+    let mock = mock_gitlab_server(move |project_id, _revisions| {
         tracker.lock().unwrap().push(project_id);
         single_blob_response("abc", b"content")
     })
     .await;
 
-    let service = GitalyContentService::new(client);
+    let service = GitalyContentService::new(mock.client.clone());
     let row1 = file_row(10, "main", "a.rs");
     let row2 = file_row(20, "main", "b.rs");
     let row3 = file_row(10, "main", "c.rs"); // same project as row1
@@ -246,12 +263,12 @@ async fn groups_by_project_id() {
 
 #[tokio::test]
 async fn definition_byte_range_slicing() {
-    let (client, _handle) = mock_gitlab_server(|_project_id, _revisions| {
+    let mock = mock_gitlab_server(|_project_id, _revisions| {
         single_blob_response("abc", b"0123456789abcdef")
     })
     .await;
 
-    let service = GitalyContentService::new(client);
+    let service = GitalyContentService::new(mock.client.clone());
     let row = definition_row(1, "main", "src/lib.rs", 4, 10);
     let rows: Vec<&PropertyRow> = vec![&row];
     let ctx = resolver_ctx();
@@ -267,13 +284,13 @@ async fn definition_byte_range_slicing() {
 
 #[tokio::test]
 async fn multiple_definitions_in_same_file() {
-    let (client, _handle) = mock_gitlab_server(|_project_id, revisions| {
+    let mock = mock_gitlab_server(|_project_id, revisions| {
         assert_eq!(revisions.len(), 1, "same file should be deduplicated");
         single_blob_response("abc", b"fn foo() {} fn bar() {}")
     })
     .await;
 
-    let service = GitalyContentService::new(client);
+    let service = GitalyContentService::new(mock.client.clone());
     let row1 = definition_row(1, "main", "src/lib.rs", 0, 11); // "fn foo() {}"
     let row2 = definition_row(1, "main", "src/lib.rs", 12, 23); // "fn bar() {}"
     let rows: Vec<&PropertyRow> = vec![&row1, &row2];
@@ -291,12 +308,12 @@ async fn multiple_definitions_in_same_file() {
 
 #[tokio::test]
 async fn missing_project_id_returns_none() {
-    let (client, _handle) = mock_gitlab_server(|_project_id, _revisions| {
+    let mock = mock_gitlab_server(|_project_id, _revisions| {
         panic!("should not be called when no valid rows exist");
     })
     .await;
 
-    let service = GitalyContentService::new(client);
+    let service = GitalyContentService::new(mock.client.clone());
     let mut row = PropertyRow::new();
     row.insert("branch".into(), ColumnValue::String("main".into()));
     row.insert("path".into(), ColumnValue::String("src/lib.rs".into()));
@@ -322,7 +339,7 @@ async fn gitlab_error_returns_none_gracefully() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let _handle = tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
 
@@ -350,17 +367,17 @@ async fn gitlab_error_returns_none_gracefully() {
         results[0], None,
         "failed list_blobs should result in None, not an error"
     );
+    handle.abort();
 }
 
 #[tokio::test]
 async fn binary_blob_returns_none() {
-    let (client, _handle) = mock_gitlab_server(|_project_id, _revisions| {
-        // Invalid UTF-8 bytes
+    let mock = mock_gitlab_server(|_project_id, _revisions| {
         single_blob_response("abc", &[0xFF, 0xFE, 0x00, 0x01])
     })
     .await;
 
-    let service = GitalyContentService::new(client);
+    let service = GitalyContentService::new(mock.client.clone());
     let row = file_row(1, "main", "image.png");
     let rows: Vec<&PropertyRow> = vec![&row];
     let ctx = resolver_ctx();
@@ -372,4 +389,112 @@ async fn binary_blob_returns_none() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], None, "binary blobs should resolve to None");
+}
+
+#[tokio::test]
+async fn empty_batch_returns_empty() {
+    let mock = mock_gitlab_server(|_project_id, _revisions| {
+        panic!("should not be called for empty batch");
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let rows: Vec<&PropertyRow> = vec![];
+    let ctx = resolver_ctx();
+
+    let results = service
+        .resolve_batch("blob_content", &rows, &ctx)
+        .await
+        .unwrap();
+
+    assert!(results.is_empty());
+}
+
+#[tokio::test]
+async fn mixed_valid_and_invalid_rows() {
+    let mock =
+        mock_gitlab_server(|_project_id, _revisions| single_blob_response("abc", b"resolved"))
+            .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let valid = file_row(1, "main", "src/lib.rs");
+    let mut invalid = PropertyRow::new();
+    invalid.insert("branch".into(), ColumnValue::String("main".into()));
+    // no project_id
+    let rows: Vec<&PropertyRow> = vec![&valid, &invalid];
+    let ctx = resolver_ctx();
+
+    let results = service
+        .resolve_batch("blob_content", &rows, &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0], Some(ColumnValue::String("resolved".into())));
+    assert_eq!(results[1], None, "invalid row should not block valid rows");
+}
+
+#[tokio::test]
+async fn prefers_commit_sha_over_branch() {
+    let mock = mock_gitlab_server(|_project_id, revisions| {
+        assert_eq!(revisions.len(), 1);
+        assert!(
+            revisions[0].starts_with("abc123:"),
+            "should use commit_sha not branch, got: {}",
+            revisions[0]
+        );
+        single_blob_response("abc", b"content")
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let mut row = PropertyRow::new();
+    row.insert("project_id".into(), ColumnValue::Int64(1));
+    row.insert("branch".into(), ColumnValue::String("main".into()));
+    row.insert("commit_sha".into(), ColumnValue::String("abc123".into()));
+    row.insert("path".into(), ColumnValue::String("src/lib.rs".into()));
+    let rows: Vec<&PropertyRow> = vec![&row];
+    let ctx = resolver_ctx();
+
+    let results = service
+        .resolve_batch("blob_content", &rows, &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].is_some());
+}
+
+#[tokio::test]
+async fn same_path_different_projects_fetched_separately() {
+    let projects_called = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let tracker = projects_called.clone();
+
+    let mock = mock_gitlab_server(move |project_id, _revisions| {
+        tracker.lock().unwrap().push(project_id);
+        let content = format!("from project {project_id}");
+        single_blob_response("abc", content.as_bytes())
+    })
+    .await;
+
+    let service = GitalyContentService::new(mock.client.clone());
+    let row1 = file_row(1, "main", "src/lib.rs");
+    let row2 = file_row(2, "main", "src/lib.rs"); // same path, different project
+    let rows: Vec<&PropertyRow> = vec![&row1, &row2];
+    let ctx = resolver_ctx();
+
+    let results = service
+        .resolve_batch("blob_content", &rows, &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 2);
+    assert_ne!(
+        results[0], results[1],
+        "different projects should yield different content"
+    );
+
+    let mut called = projects_called.lock().unwrap().clone();
+    called.sort();
+    assert_eq!(called, vec![1, 2]);
 }
