@@ -1,7 +1,3 @@
-use std::sync::Arc;
-
-use arrow::array::{ArrayRef, Int64Builder, StringBuilder};
-use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use code_graph::linker::analysis::types::GraphData;
 use gkg_utils::arrow::{BatchBuilder, ColumnSpec, ColumnType};
@@ -120,49 +116,68 @@ pub fn convert_graph_data(
 }
 
 fn convert_edges(graph_data: &GraphData) -> Result<RecordBatch> {
-    let rels = &graph_data.relationships;
-    let cap = rels.len();
-    let mut source_id = Int64Builder::with_capacity(cap);
-    let mut source_kind = StringBuilder::with_capacity(cap, cap * 16);
-    let mut rel_kind = StringBuilder::with_capacity(cap, cap * 16);
-    let mut target_id = Int64Builder::with_capacity(cap);
-    let mut target_kind = StringBuilder::with_capacity(cap, cap * 16);
-    let mut ver = Int64Builder::with_capacity(cap);
+    let specs = [
+        ColumnSpec {
+            name: "source_id".into(),
+            col_type: ColumnType::Int,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "source_kind".into(),
+            col_type: ColumnType::Str,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "relationship_kind".into(),
+            col_type: ColumnType::Str,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "target_id".into(),
+            col_type: ColumnType::Int,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "target_kind".into(),
+            col_type: ColumnType::Str,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "_version".into(),
+            col_type: ColumnType::Int,
+            nullable: false,
+        },
+    ];
 
-    for rel in rels {
-        let (src_kind_str, tgt_kind_str) = rel.kind.source_target_kinds();
-        let src_id = lookup_node_id(graph_data, src_kind_str, rel.source_id);
-        let tgt_id = lookup_node_id(graph_data, tgt_kind_str, rel.target_id);
+    // Pre-resolve node IDs so the fill closure only sees valid edges.
+    let resolved: Vec<_> = graph_data
+        .relationships
+        .iter()
+        .filter_map(|rel| {
+            let (src_kind, tgt_kind) = rel.kind.source_target_kinds();
+            let src_id = lookup_node_id(graph_data, src_kind, rel.source_id)?;
+            let tgt_id = lookup_node_id(graph_data, tgt_kind, rel.target_id)?;
+            Some((
+                src_id,
+                src_kind,
+                rel.relationship_type.edge_kind(),
+                tgt_id,
+                tgt_kind,
+            ))
+        })
+        .collect();
 
-        let (Some(s), Some(t)) = (src_id, tgt_id) else {
-            continue;
-        };
-
-        source_id.append_value(s);
-        source_kind.append_value(src_kind_str);
-        rel_kind.append_value(rel.relationship_type.edge_kind());
-        target_id.append_value(t);
-        target_kind.append_value(tgt_kind_str);
-        ver.append_value(0);
-    }
-
-    Ok(RecordBatch::try_new(
-        Arc::new(Schema::new(vec![
-            Field::new("source_id", DataType::Int64, false),
-            Field::new("source_kind", DataType::Utf8, false),
-            Field::new("relationship_kind", DataType::Utf8, false),
-            Field::new("target_id", DataType::Int64, false),
-            Field::new("target_kind", DataType::Utf8, false),
-            Field::new("_version", DataType::Int64, false),
-        ])),
-        vec![
-            Arc::new(source_id.finish()) as ArrayRef,
-            Arc::new(source_kind.finish()),
-            Arc::new(rel_kind.finish()),
-            Arc::new(target_id.finish()),
-            Arc::new(target_kind.finish()),
-            Arc::new(ver.finish()),
-        ],
+    Ok(BatchBuilder::new(&specs, resolved.len())?.build(
+        &resolved,
+        |&(src_id, src_kind, ref rel_kind, tgt_id, tgt_kind), b| {
+            b.col("source_id")?.push_int(src_id)?;
+            b.col("source_kind")?.push_str(src_kind)?;
+            b.col("relationship_kind")?.push_str(rel_kind)?;
+            b.col("target_id")?.push_int(tgt_id)?;
+            b.col("target_kind")?.push_str(tgt_kind)?;
+            b.col("_version")?.push_int(0)?;
+            Ok(())
+        },
     )?)
 }
 
