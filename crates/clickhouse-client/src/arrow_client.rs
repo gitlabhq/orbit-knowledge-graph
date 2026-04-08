@@ -16,6 +16,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::SyncIoBridge;
 use tracing::warn;
 
+pub use clickhouse::QuerySummary;
+
 use crate::error::ClickHouseError;
 
 #[derive(Clone)]
@@ -235,6 +237,15 @@ impl ArrowQuery {
     }
 
     pub async fn fetch_arrow(self) -> Result<Vec<RecordBatch>, ClickHouseError> {
+        let (batches, _) = self.fetch_arrow_with_summary().await?;
+        Ok(batches)
+    }
+
+    /// Like `fetch_arrow`, but also returns the `X-ClickHouse-Summary` header
+    /// parsed as a `QuerySummary` (if the server sent one).
+    pub async fn fetch_arrow_with_summary(
+        self,
+    ) -> Result<(Vec<RecordBatch>, Option<QuerySummary>), ClickHouseError> {
         let mut cursor = self
             .inner
             .fetch_bytes("ArrowStream")
@@ -249,17 +260,20 @@ impl ArrowQuery {
             }
         }
 
+        let summary = cursor.summary().cloned();
+
         if buffer.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), summary));
         }
 
         let data_cursor = Cursor::new(buffer);
         let reader =
             StreamReader::try_new(data_cursor, None).map_err(ClickHouseError::ArrowDecode)?;
 
-        reader
+        let batches: Result<Vec<_>, _> = reader
             .map(|result| result.map_err(ClickHouseError::ArrowDecode))
-            .collect()
+            .collect();
+        Ok((batches?, summary))
     }
 
     pub async fn fetch_arrow_stream(

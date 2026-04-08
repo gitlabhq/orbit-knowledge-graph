@@ -117,7 +117,7 @@ Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](.
 
 - Per-phase timings (parse/plan/render/execute) and row counts.
 - Emitted SQL and parameter map for debugging.
-- ClickHouse query metrics (system.query_log) correlated by request ID.
+- Per-query ClickHouse resource stats (`read_rows`, `read_bytes`, `memory_usage`) extracted from the `X-ClickHouse-Summary` response header on every query. When profiling is enabled, these are enriched from `system.query_log`.
 - Query result cache metrics: lookups (hit/miss/error), stores (success/error/too_large), evictions (per_user_limit).
 
 ## Integration with Indexing
