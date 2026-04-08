@@ -128,6 +128,14 @@ enum Commands {
         /// instead of compiling for ClickHouse.
         #[arg(long)]
         local: bool,
+
+        /// Output raw JSON rows (machine-optimized, one JSON array per query).
+        #[arg(long, conflicts_with = "llm")]
+        raw: bool,
+
+        /// Output LLM-friendly markdown tables (default for --local).
+        #[arg(long, conflicts_with = "raw")]
+        llm: bool,
     },
 }
 
@@ -168,9 +176,16 @@ async fn main() -> Result<()> {
             ontology,
             format,
             local,
+            raw,
+            llm: _,
         } => {
             if local {
-                run_local_query(file, json, ontology, format)
+                let output_mode = if raw {
+                    LocalOutputMode::Raw
+                } else {
+                    LocalOutputMode::Llm
+                };
+                run_local_query(file, json, ontology, output_mode)
             } else {
                 run_query(file, json, traversal_paths, ontology, format)
             }
@@ -386,11 +401,16 @@ enum QueryOutput {
     Error(QueryError),
 }
 
+enum LocalOutputMode {
+    Raw,
+    Llm,
+}
+
 fn run_local_query(
     file: Option<PathBuf>,
     json_input: Option<String>,
     ontology_path: Option<PathBuf>,
-    format: OutputFormat,
+    mode: LocalOutputMode,
 ) -> Result<()> {
     let json_str = match (file, json_input) {
         (Some(path), None) => std::fs::read_to_string(&path)
@@ -429,69 +449,76 @@ fn run_local_query(
     };
 
     for (i, (label, input)) in queries.iter().enumerate() {
-        if i > 0 {
-            println!("\n{}", "=".repeat(80));
-        }
-
         let input_json = serde_json::to_string(input).context("failed to serialize input")?;
         match query_engine::compiler::compile_local(&input_json, &ontology) {
-            Ok(result) => {
-                let rendered_sql = result.base.render();
+            Ok(compiled) => {
+                let rendered_sql = compiled.base.render();
+                let result_ctx = compiled.base.result_context;
 
-                match format {
-                    OutputFormat::Json => {
-                        let output = serde_json::json!({
-                            "label": label,
-                            "sql": rendered_sql,
-                        });
-                        println!("{}", serde_json::to_string_pretty(&output)?);
-                    }
-                    OutputFormat::Pretty => {
-                        println!("\n### {}\n", label);
-                        println!("**SQL:**\n```sql\n{}\n```\n", rendered_sql);
-                    }
-                }
-
-                // Execute against DuckDB.
                 match client.query_arrow(&rendered_sql) {
                     Ok(batches) => {
-                        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
-                        println!("**Results:** {} rows\n", total_rows);
-                        for batch in &batches {
-                            let schema = batch.schema();
-                            let col_names: Vec<&str> =
-                                schema.fields().iter().map(|f| f.name().as_str()).collect();
-                            println!("| {} |", col_names.join(" | "));
-                            println!(
-                                "| {} |",
-                                col_names
-                                    .iter()
-                                    .map(|_| "---")
-                                    .collect::<Vec<_>>()
-                                    .join(" | ")
-                            );
-                            for row in 0..batch.num_rows() {
-                                let vals: Vec<String> = (0..batch.num_columns())
-                                    .map(|col| {
-                                        gkg_utils::arrow::ArrowUtils::array_value_to_string(
-                                            batch.column(col).as_ref(),
-                                            row,
-                                        )
-                                        .unwrap_or_else(|| "NULL".to_string())
-                                    })
-                                    .collect();
-                                println!("| {} |", vals.join(" | "));
+                        let qr = types::QueryResult::from_batches(&batches, &result_ctx);
+                        let rows: Vec<Value> = qr
+                            .rows()
+                            .iter()
+                            .map(|row| formatters::row_to_json(row, &result_ctx))
+                            .collect();
+
+                        match mode {
+                            LocalOutputMode::Raw => {
+                                let output = serde_json::json!({
+                                    "label": label,
+                                    "rows": rows,
+                                    "total": rows.len(),
+                                });
+                                println!("{}", serde_json::to_string(&output)?);
+                            }
+                            LocalOutputMode::Llm => {
+                                if i > 0 {
+                                    println!();
+                                }
+                                println!("### {}\n", label);
+                                if rows.is_empty() {
+                                    println!("No results.");
+                                } else {
+                                    // Build markdown table from JSON rows.
+                                    let first = rows[0].as_object().unwrap();
+                                    let cols: Vec<&String> = first.keys().collect();
+                                    println!(
+                                        "| {} |",
+                                        cols.iter()
+                                            .map(|c| c.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(" | ")
+                                    );
+                                    println!(
+                                        "| {} |",
+                                        cols.iter().map(|_| "---").collect::<Vec<_>>().join(" | ")
+                                    );
+                                    for row in &rows {
+                                        let obj = row.as_object().unwrap();
+                                        let vals: Vec<String> = cols
+                                            .iter()
+                                            .map(|c| match obj.get(*c) {
+                                                Some(Value::String(s)) => s.clone(),
+                                                Some(Value::Null) | None => "NULL".to_string(),
+                                                Some(v) => v.to_string(),
+                                            })
+                                            .collect();
+                                        println!("| {} |", vals.join(" | "));
+                                    }
+                                    println!("\n{} rows", rows.len());
+                                }
                             }
                         }
                     }
                     Err(e) => {
-                        println!("**Execution error:** {e}");
+                        eprintln!("Execution error for '{label}': {e}");
                     }
                 }
             }
             Err(e) => {
-                println!("\n### {} [ERROR]\n", label);
-                println!("**Error:** {e}");
+                eprintln!("Compilation error for '{label}': {e}");
             }
         }
     }

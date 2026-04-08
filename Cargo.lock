@@ -4804,6 +4804,7 @@ dependencies = [
  "dirs",
  "duckdb-client",
  "dunce",
+ "formatters",
  "fs4",
  "gitalisk-core",
  "gkg-utils",
@@ -4816,6 +4817,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "typed-path",
+ "types",
 ]
 
 [[package]]
