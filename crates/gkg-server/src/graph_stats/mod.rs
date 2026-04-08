@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
+use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
 use ontology::Ontology;
 use query_engine::compiler::{ResultContext, codegen};
@@ -38,7 +39,7 @@ impl GraphStatsService {
         }
 
         let ast = lower::lower(&input);
-        let parameterized = codegen(&ast, ResultContext::new())
+        let parameterized = codegen(&ast, ResultContext::new(), QueryConfig::default())
             .map_err(|e| Status::internal(format!("codegen error: {e}")))?;
 
         debug!(sql = %parameterized.sql, "Graph stats query compiled");
@@ -110,6 +111,7 @@ fn present_domain_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clickhouse_client::ClickHouseConfigurationExt;
 
     fn test_ontology() -> Arc<Ontology> {
         Arc::new(Ontology::load_embedded().expect("ontology must load"))
@@ -170,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_traversal_path_rejected() {
-        let client = Arc::new(clickhouse_client::ClickHouseConfiguration::default().build_client());
+        let client = Arc::new(gkg_server_config::ClickHouseConfiguration::default().build_client());
         let service = GraphStatsService::new(client, test_ontology());
 
         let result = service.get_stats("").await;

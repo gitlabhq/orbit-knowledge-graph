@@ -18,6 +18,7 @@ chrono = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }
@@ -49,6 +50,7 @@ zstd = "0.13.3"
 [dev-dependencies]
 internment = { workspace = true }
 parser-core = { workspace = true }
+serde_yaml = { workspace = true }
 smallvec = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }

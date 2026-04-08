@@ -47,18 +47,21 @@ Integration tests need Docker: `mise test:integration`. Correctness subset: `mis
 | Ontology edge definitions | `config/ontology/edges/` |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
+| Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `crates/gkg-server/schemas/query_response.json` |
 | Query test fixtures | `fixtures/queries/` |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
 | Server config structure | `crates/gkg-server/src/config.rs` |
+| Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/gkg-server-config/` |
 | Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |
 | Local development guide | `docs/dev/local-development.md` |
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
 | Helm charts | `helm/gkg/` (vendored via vendir), `helm/local/` (dev Prometheus + Grafana) |
+| Local Grafana dashboards | `helm/local/dashboards/` |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
@@ -72,6 +75,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | Crate | Role |
 |---|---|
 | `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading |
+| `gkg-server-config` | Shared query config types (`QueryConfig`, `QuerySettings`) and `OnceLock` global; avoids circular dep between server and compiler |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
 | `query-engine/compiler` | JSON DSL -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
@@ -81,15 +85,16 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/formatters` | Result formatters (graph, raw row, goon) |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/` |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
-| `code-parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
-| `code-graph` | Builds in-memory property graphs from parsed code |
+| `code-graph` | Parent crate for code parsing and graph construction; re-exports `treesitter-visit`, `parser-core`, `code-graph-linker` |
+| `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper |
+| `code-graph/parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
+| `code-graph/linker` | Builds in-memory property graphs from parsed code |
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`) and Arrow extraction utilities |
-| `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QueryProfiler` for per-query stats |
+| `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `siphon-proto` | Protobuf types for CDC replication events |
 | `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | K8s readiness/liveness probes |
-| `treesitter-visit` | Tree-sitter language bindings wrapper |
 | `cli` | Local `orbit index` and `orbit query` commands |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, and `ResponseView` assertion framework for integration tests |
@@ -101,3 +106,22 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 - No narration comments. Keep only *why* comments. Use `/remove-llm-comments` to clean up.
 - Prefer `ast-grep` over text-based Grep/Edit for structural code transformations (batch renames, pattern-based rewrites).
 - Check crates.io for latest version before adding dependencies.
+- Non-trivial MRs (features, refactors, architectural changes) should reference an issue in the MR description, for example `Closes #123` or `Relates to #123`.
+- Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.
+
+## Design docs
+
+Design docs live in `docs/design-documents/` and must describe the current repository state, not an aspirational or legacy architecture.
+
+**Rules:**
+
+- **When you change behavior covered by a design doc, update that design doc in the same MR.** Do not leave design-doc cleanup for a later follow-up.
+- **When you add, remove, rename, or substantially repurpose a subsystem, runtime mode, crate, schema shape, or external dependency, update the relevant design docs and this file in the same MR.**
+- **Prefer as-built descriptions over historical ones.** If the code no longer matches a section, rewrite or remove the stale section instead of leaving contradictory text in place.
+- **Treat these files as sync points:**
+  - `docs/design-documents/README.md` for the high-level architecture and current system state
+  - `docs/design-documents/data_model.md` for implemented entities and relationships
+  - `docs/design-documents/indexing/` for indexing flow and runtime modes
+  - `docs/design-documents/querying/` for query surface, DSL, and response shape
+  - `AGENTS.md` / `CLAUDE.md` for agent-facing architecture summaries and doc-sync rules
+- **If your MR changes the architecture but no design doc changed, assume the documentation is incomplete and fix it before merging.**

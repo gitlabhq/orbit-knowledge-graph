@@ -11,7 +11,7 @@ mod traversal;
 mod work_items;
 
 use helpers::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, seed};
-use integration_testkit::run_subtests_shared;
+use integration_testkit::{run_subtests, run_subtests_shared};
 
 #[tokio::test]
 async fn data_correctness() {
@@ -23,6 +23,9 @@ async fn data_correctness() {
         // search: column value correctness
         search::search_returns_correct_user_properties,
         search::search_returns_correct_project_properties,
+        search::search_returns_correct_group_full_path,
+        search::search_returns_correct_project_full_path,
+        search::search_default_columns_include_full_path,
         search::search_filter_eq_returns_matching_rows,
         search::search_filter_in_returns_matching_rows,
         search::search_filter_starts_with_returns_matching_rows,
@@ -84,6 +87,8 @@ async fn data_correctness() {
         path_finding::path_finding_any_returns_at_least_one_path,
         path_finding::path_finding_rel_types_restricts_traversal,
         path_finding::path_finding_step_indices_are_sequential,
+        path_finding::path_finding_target_entity_constrains_results,
+        path_finding::path_finding_entity_filter_excludes_wrong_types,
         // neighbors
         neighbors::neighbors_outgoing_returns_correct_targets,
         neighbors::neighbors_incoming_returns_correct_sources,
@@ -150,21 +155,43 @@ async fn data_correctness() {
         pagination::cursor_with_redaction_second_page,
         pagination::cursor_pages_cover_all_data,
         pagination::cursor_traversal,
+        pagination::cursor_without_order_by_is_deterministic,
+        pagination::cursor_without_order_by_pages_cover_all_data,
+        pagination::cursor_traversal_without_order_by_is_deterministic,
+        pagination::cursor_aggregation_without_sort_is_deterministic,
+        pagination::cursor_path_finding_pages_cover_all_paths,
+        pagination::cursor_path_finding_is_deterministic,
         // work items: search
         work_items::search_returns_correct_work_item_properties,
         work_items::search_filter_work_item_type_returns_matching_rows,
-        // work items: traversal (all 5 edge types)
+        // work items: traversal (all 7 edge types)
         work_items::traversal_user_authored_work_item_returns_correct_edges,
         work_items::traversal_work_item_in_group_returns_correct_edges,
+        work_items::traversal_work_item_in_project_returns_correct_edges,
+        work_items::traversal_user_closed_work_item_returns_correct_edges,
         work_items::traversal_work_item_in_milestone_returns_correct_edges,
         work_items::traversal_user_assigned_work_item_returns_correct_edges,
         work_items::traversal_work_item_has_label_returns_correct_edges,
-        // dedup: LIMIT 1 BY correctness
+    );
+
+    // Dedup tests INSERT extra rows, so they run in forked (isolated) databases
+    // to avoid cross-test data interference.
+    run_subtests!(
+        &ctx,
         dedup::search_returns_latest_version,
         dedup::search_excludes_deleted_rows,
         dedup::search_filter_returns_latest_matching_version,
         dedup::search_filter_excludes_stale_match,
         dedup::aggregation_dedup_counts_unique_entities,
+        dedup::aggregation_filter_excludes_stale_mutable_match,
         dedup::traversal_dedup_returns_single_edge,
+        dedup::traversal_filter_excludes_stale_version,
+        dedup::traversal_deleted_node_visible_via_edge,
+        dedup::neighbors_dedup_returns_unique_edges,
+        dedup::neighbors_deleted_node_visible_via_edge,
+        dedup::hydration_returns_latest_properties,
+        dedup::traversal_excludes_deleted_edge,
+        dedup::search_three_versions_returns_latest,
+        dedup::aggregation_excludes_deleted_from_count,
     );
 }

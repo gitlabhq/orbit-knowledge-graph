@@ -16,14 +16,14 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::SyncIoBridge;
 use tracing::warn;
 
+pub use clickhouse::QuerySummary;
+
 use crate::error::ClickHouseError;
-use crate::profiler::QueryProfiler;
 
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
     base_url: String,
-    profiler: QueryProfiler,
 }
 
 impl ArrowClickHouseClient {
@@ -38,27 +38,24 @@ impl ArrowClickHouseClient {
             .with_url(url)
             .with_database(database)
             .with_user(username)
-            .with_option("output_format_arrow_string_as_string", "1")
-            .with_option("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
-            .with_option("join_algorithm", "hash")
-            .with_option("query_plan_join_swap_table", "true")
-            .with_option("use_query_condition_cache", "true")
-            .with_option("join_use_nulls", "0");
+            .with_setting("output_format_arrow_string_as_string", "1")
+            .with_setting("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
+            .with_setting("join_algorithm", "hash")
+            .with_setting("query_plan_join_swap_table", "true")
+            .with_setting("use_query_condition_cache", "true")
+            .with_setting("join_use_nulls", "0");
 
         if let Some(password) = password {
             client = client.with_password(password);
         }
 
         for (k, v) in query_settings {
-            client = client.with_option(k, v);
+            client = client.with_setting(k, v);
         }
-
-        let profiler = QueryProfiler::new(url, database, username, password, query_settings);
 
         Self {
             client,
             base_url: url.to_string(),
-            profiler,
         }
     }
 
@@ -123,10 +120,6 @@ impl ArrowClickHouseClient {
 
     pub fn inner(&self) -> &Client {
         &self.client
-    }
-
-    pub fn profiler(&self) -> &QueryProfiler {
-        &self.profiler
     }
 
     pub fn new_query_id() -> String {
@@ -225,7 +218,7 @@ impl std::fmt::Debug for ArrowClickHouseClient {
 }
 
 pub struct ArrowQuery {
-    inner: Query,
+    pub(crate) inner: Query,
 }
 
 impl ArrowQuery {
@@ -234,8 +227,8 @@ impl ArrowQuery {
         self
     }
 
-    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.inner = self.inner.with_option(name, value);
+    pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.inner = self.inner.with_setting(name, value);
         self
     }
 
@@ -244,6 +237,15 @@ impl ArrowQuery {
     }
 
     pub async fn fetch_arrow(self) -> Result<Vec<RecordBatch>, ClickHouseError> {
+        let (batches, _) = self.fetch_arrow_with_summary().await?;
+        Ok(batches)
+    }
+
+    /// Like `fetch_arrow`, but also returns the `X-ClickHouse-Summary` header
+    /// parsed as a `QuerySummary` (if the server sent one).
+    pub async fn fetch_arrow_with_summary(
+        self,
+    ) -> Result<(Vec<RecordBatch>, Option<QuerySummary>), ClickHouseError> {
         let mut cursor = self
             .inner
             .fetch_bytes("ArrowStream")
@@ -258,17 +260,20 @@ impl ArrowQuery {
             }
         }
 
+        let summary = cursor.summary().cloned();
+
         if buffer.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), summary));
         }
 
         let data_cursor = Cursor::new(buffer);
         let reader =
             StreamReader::try_new(data_cursor, None).map_err(ClickHouseError::ArrowDecode)?;
 
-        reader
+        let batches: Result<Vec<_>, _> = reader
             .map(|result| result.map_err(ClickHouseError::ArrowDecode))
-            .collect()
+            .collect();
+        Ok((batches?, summary))
     }
 
     pub async fn fetch_arrow_stream(
@@ -306,7 +311,7 @@ impl ArrowQuery {
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
         self.inner = self
             .inner
-            .with_option("max_block_size", max_block_size.to_string());
+            .with_setting("max_block_size", max_block_size.to_string());
 
         let cursor = self
             .inner

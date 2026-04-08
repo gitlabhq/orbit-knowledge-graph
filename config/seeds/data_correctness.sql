@@ -85,6 +85,8 @@
 --   WorkItem edges:
 --     AUTHORED:      User 1 -> WI 4000, User 2 -> WI 4001, User 1 -> WI 4002, User 3 -> WI 4003
 --     IN_GROUP:      WI 4000 -> Group 100, WI 4001 -> Group 100, WI 4002 -> Group 101, WI 4003 -> Group 102
+--     IN_PROJECT:    WI 4000 -> Project 1000, WI 4001 -> Project 1000
+--     CLOSED_BY:     User 2 -> WI 4001
 --     IN_MILESTONE:  WI 4000 -> Milestone 6000, WI 4001 -> Milestone 6000
 --     ASSIGNED:      User 1 -> WI 4000, User 2 -> WI 4000, User 3 -> WI 4001
 --     HAS_LABEL:     WI 4000 -> Label 7000, WI 4000 -> Label 7001, WI 4001 -> Label 7002
@@ -97,19 +99,19 @@ INSERT INTO gl_user (id, username, name, state, user_type, email) VALUES
     (5, 'eve', 'Eve External', 'blocked', 'service_account', 'eve@example.com'),
     (6, '用户_émoji_🎉', 'Ünïcödé Üser', 'active', 'human', 'unicode@example.com');
 
-INSERT INTO gl_group (id, name, visibility_level, traversal_path) VALUES
-    (100, 'Public Group', 'public', '1/100/'),
-    (101, 'Private Group', 'private', '1/101/'),
-    (102, 'Internal Group', 'internal', '1/102/'),
-    (200, 'Deep Group A', 'public', '1/100/200/'),
-    (300, 'Deep Group B', 'public', '1/100/200/300/');
+INSERT INTO gl_group (id, name, full_path, visibility_level, traversal_path) VALUES
+    (100, 'Public Group', 'public-group', 'public', '1/100/'),
+    (101, 'Private Group', 'private-group', 'private', '1/101/'),
+    (102, 'Internal Group', 'internal-group', 'internal', '1/102/'),
+    (200, 'Deep Group A', 'public-group/deep-a', 'public', '1/100/200/'),
+    (300, 'Deep Group B', 'public-group/deep-a/deep-b', 'public', '1/100/200/300/');
 
-INSERT INTO gl_project (id, name, visibility_level, traversal_path) VALUES
-    (1000, 'Public Project', 'public', '1/100/1000/'),
-    (1001, 'Private Project', 'private', '1/101/1001/'),
-    (1002, 'Internal Project', 'internal', '1/100/1002/'),
-    (1003, 'Secret Project', 'private', '1/101/1003/'),
-    (1004, 'Shared Project', 'public', '1/102/1004/');
+INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) VALUES
+    (1000, 'Public Project', 'public-group/public-project', 'public', '1/100/1000/'),
+    (1001, 'Private Project', 'private-group/private-project', 'private', '1/101/1001/'),
+    (1002, 'Internal Project', 'public-group/internal-project', 'internal', '1/100/1002/'),
+    (1003, 'Secret Project', 'private-group/secret-project', 'private', '1/101/1003/'),
+    (1004, 'Shared Project', 'internal-group/shared-project', 'public', '1/102/1004/');
 
 INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
     (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
@@ -188,3 +190,8 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7000, 'Label'),
     ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7001, 'Label'),
     ('1/100/', 4001, 'WorkItem', 'HAS_LABEL', 7002, 'Label');
+
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('1/100/', 4000, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
+    ('1/100/', 4001, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
+    ('1/100/', 2, 'User', 'CLOSED_BY', 4001, 'WorkItem');

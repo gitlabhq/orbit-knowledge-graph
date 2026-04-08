@@ -1113,9 +1113,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "clickhouse"
-version = "0.14.2"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d975a05171c6f8a453f60ec6287c0018c90911d5a8a46d9b6abe386ea359fab3"
+checksum = "35330181022b5f972325aa41fd3465f636be6527499c383cacd3fb2e51c5a8bc"
 dependencies = [
  "bnum",
  "bstr",
@@ -1134,8 +1134,10 @@ dependencies = [
  "quanta",
  "rustls",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "url",
 ]
 
@@ -1148,9 +1150,8 @@ dependencies = [
  "bytes",
  "clickhouse",
  "futures",
+ "gkg-server-config",
  "gkg-utils",
- "once_cell",
- "reqwest 0.13.2",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1175,9 +1176,9 @@ dependencies = [
 
 [[package]]
 name = "clickhouse-types"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "358fbfd439fb0bed02a3e2ecc5131f6a9d039ba5639aed650cf0e845f6ebfc16"
+checksum = "30a5efddc880ce9e2573bd867413d9056fa2bea0206af88dec21e72178b9dc74"
 dependencies = [
  "bytes",
  "thiserror 2.0.18",
@@ -1208,6 +1209,15 @@ dependencies = [
 
 [[package]]
 name = "code-graph"
+version = "0.1.0"
+dependencies = [
+ "code-graph-linker",
+ "parser-core",
+ "treesitter-visit",
+]
+
+[[package]]
+name = "code-graph-linker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1268,6 +1278,7 @@ version = "0.1.0"
 dependencies = [
  "compiler-pipeline-macros",
  "const_format",
+ "gkg-server-config",
  "gkg-utils",
  "jsonschema",
  "once_cell",
@@ -2349,7 +2360,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2563,7 +2574,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2967,6 +2978,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "gkg-server-config",
  "jsonwebtoken",
  "reqwest 0.13.2",
  "rustls",
@@ -2991,10 +3003,10 @@ dependencies = [
  "clap",
  "clickhouse",
  "clickhouse-client",
- "config",
  "enum-as-inner",
  "futures",
  "gitlab-client",
+ "gkg-server-config",
  "gkg-utils",
  "health-check",
  "indexer",
@@ -3014,7 +3026,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "tempfile",
+ "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -3026,6 +3038,19 @@ dependencies = [
  "tower",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "gkg-server-config"
+version = "0.1.0"
+dependencies = [
+ "config",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3168,6 +3193,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "clickhouse-client",
+ "gkg-server-config",
  "k8s-openapi",
  "kube",
  "serde",
@@ -3590,6 +3616,7 @@ dependencies = [
  "futures",
  "gitaly-protos",
  "gitlab-client",
+ "gkg-server-config",
  "gkg-utils",
  "internment",
  "moka",
@@ -3602,6 +3629,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "siphon-proto",
  "smallvec",
@@ -3666,6 +3694,7 @@ dependencies = [
  "clickhouse-client",
  "futures",
  "gkg-server",
+ "gkg-server-config",
  "gkg-utils",
  "query-engine",
  "rustls",
@@ -3691,8 +3720,10 @@ dependencies = [
  "compiler",
  "flate2",
  "futures",
+ "gitaly-protos",
  "gitlab-client",
  "gkg-server",
+ "gkg-server-config",
  "gkg-utils",
  "health-check",
  "indexer",
@@ -4447,7 +4478,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5373,7 +5404,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
  "heck",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "petgraph",
@@ -5394,7 +5425,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -5578,6 +5609,7 @@ dependencies = [
  "clickhouse-client",
  "compiler",
  "gkg-server",
+ "gkg-server-config",
  "ontology",
  "pipeline",
  "rustls",
@@ -5588,6 +5620,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "types",
+ "uuid",
 ]
 
 [[package]]
@@ -6181,7 +6214,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6262,7 +6295,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6349,8 +6382,21 @@ checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
  "dyn-clone",
  "ref-cast",
+ "schemars_derive",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -7218,7 +7264,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8407,7 +8453,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8811,6 +8857,7 @@ dependencies = [
  "cliclack",
  "const_format",
  "futures",
+ "gkg-server-config",
  "gkg-utils",
  "indicatif",
  "k8s-openapi",
@@ -8820,6 +8867,7 @@ dependencies = [
  "query-engine",
  "rand 0.10.0",
  "rayon",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "serde_yaml",

@@ -4,13 +4,14 @@ mod metrics;
 pub mod scheduler;
 pub(crate) mod store;
 
-pub use handler::{NamespaceDeletionHandler, NamespaceDeletionHandlerConfig};
-pub use scheduler::{NamespaceDeletionScheduler, NamespaceDeletionSchedulerConfig};
+pub use handler::NamespaceDeletionHandler;
+pub use scheduler::NamespaceDeletionScheduler;
 pub use store::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 
 use std::sync::Arc;
 
 use crate::IndexerConfig;
+use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 
 pub fn register_handlers(

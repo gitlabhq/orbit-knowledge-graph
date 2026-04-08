@@ -139,6 +139,14 @@ etl:
       as: ASSIGNED
       direction: incoming
       array: true
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+    closed_by_id:
+      to: User
+      as: CLOSED_BY
+      direction: incoming
     label_ids:
       to: Label
       as: HAS_LABEL

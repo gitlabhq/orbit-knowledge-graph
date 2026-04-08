@@ -23,6 +23,9 @@ struct QueryPipelineMetrics {
     result_set_size: Histogram<u64>,
     batch_count: Histogram<u64>,
     redacted_count: Histogram<u64>,
+    ch_read_rows: Counter<u64>,
+    ch_read_bytes: Counter<u64>,
+    ch_memory_usage: Histogram<u64>,
     security_rejected: Counter<u64>,
     execution_failed: Counter<u64>,
     authorization_failed: Counter<u64>,
@@ -82,6 +85,20 @@ impl QueryPipelineMetrics {
             redacted_count: meter
                 .u64_histogram("gkg.query.pipeline.redacted.count")
                 .with_description("Number of rows redacted per query")
+                .build(),
+            ch_read_rows: meter
+                .u64_counter("gkg.query.pipeline.ch.read_rows")
+                .with_description("ClickHouse rows read across all queries in the pipeline")
+                .build(),
+            ch_read_bytes: meter
+                .u64_counter("gkg.query.pipeline.ch.read_bytes")
+                .with_unit("By")
+                .with_description("ClickHouse bytes read across all queries in the pipeline")
+                .build(),
+            ch_memory_usage: meter
+                .u64_histogram("gkg.query.pipeline.ch.memory_usage")
+                .with_unit("By")
+                .with_description("ClickHouse peak memory usage per query execution")
                 .build(),
             security_rejected: meter
                 .u64_counter("gkg.query.pipeline.error.security_rejected")
@@ -166,6 +183,24 @@ impl PipelineObserver for OTelPipelineObserver {
 
     fn hydrated(&mut self, elapsed: Duration) {
         self.hydration_secs = elapsed.as_secs_f64();
+    }
+
+    fn query_executed(&mut self, label: &str, read_rows: u64, read_bytes: u64, memory: i64) {
+        let static_label: &'static str = match label {
+            "base" => "base",
+            "hydration:static" => "hydration:static",
+            "hydration:dynamic" => "hydration:dynamic",
+            _ => "other",
+        };
+        let attrs = [
+            KeyValue::new("query_type", self.query_type),
+            KeyValue::new("label", static_label),
+        ];
+        METRICS.ch_read_rows.add(read_rows, &attrs);
+        METRICS.ch_read_bytes.add(read_bytes, &attrs);
+        if memory > 0 {
+            METRICS.ch_memory_usage.record(memory as u64, &attrs);
+        }
     }
 
     fn record_error(&self, err: &PipelineError) {

@@ -103,8 +103,8 @@ graph LR
 
 | Component | Description |
 |---|---|
-| `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
-| `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
+| `code-graph/parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
+| `code-graph/linker` crate | Streaming indexing pipeline, graph data model, analysis |
 | `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
 
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
@@ -187,7 +187,7 @@ Example NATS KV:
 - Value: `{ "worker_id": String, "started_at": Instant }`
 - TTL: 60 seconds
 
-After acquiring the lock, the service resolves the repository using a three-tier strategy: if the branch is already cached at the same commit, the cached files are reused directly. If the cache exists at an older commit, an incremental update fetches only the changed paths and their blob content from the Rails internal API, applying renames, deletions, and writes to the cache. If no cache exists or the incremental update fails (e.g. due to a force push), the service falls back to downloading the full repository archive.
+After acquiring the lock, the service resolves the repository using a three-tier strategy: if the branch is already cached at the same commit, the cached files are reused directly. If the cache exists at an older commit, an incremental update fetches only the changed paths and their blob content from the Rails internal API, applying renames, deletions, and writes to the cache. If no cache exists or the incremental update fails (e.g. due to a force push), the service falls back to downloading the full repository archive. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions.
 
 #### Transform (call graph construction)
 
@@ -329,8 +329,8 @@ tool. Here are the main architectural differences in the current service:
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
 | Authorization | None (local tool) | Rails gRPC delegation |
-| Parser crate | External `parser-core` dependency | In-tree `code-parser` (forked and evolved) |
-| Graph builder | External `indexer` crate | In-tree `code-graph` |
+| Parser crate | External `parser-core` dependency | In-tree `code-graph/parser` (forked and evolved) |
+| Graph builder | External `indexer` crate | In-tree `code-graph/linker` |
 | Concurrency | Streaming model (Rayon + semaphore) | Same streaming model (preserved) |
 
 ### Indexing the active branches

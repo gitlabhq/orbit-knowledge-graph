@@ -17,12 +17,16 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
         "INSERT INTO merge_requests
             (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
              draft, squash, target_project_id, author_id, assignees, merge_user_id, milestone_id,
-             traversal_path, _siphon_replicated_at)
+             reviewers, approvals, traversal_path, _siphon_replicated_at)
         VALUES
             (1, 101, 'Add feature X', 'Implements feature X', 'feature-x', 'main', 1, 'can_be_merged',
-             false, true, 1000, 1, [(2, '2024-01-20 12:00:00'), (3, '2024-01-20 12:00:00')], NULL, 10, '1/100/', '2024-01-20 12:00:00'),
+             false, true, 1000, 1, [(2, '2024-01-20 12:00:00'), (3, '2024-01-20 12:00:00')], NULL, 10,
+             [(4, 0, '2024-01-20 12:00:00'), (5, 0, '2024-01-20 12:00:00')],
+             [(5, '2024-01-20 12:00:00')], '1/100/', '2024-01-20 12:00:00'),
             (2, 102, 'Fix bug Y', 'Fixes critical bug', 'fix-y', 'main', 3, 'merged',
-             false, false, 1000, 2, [], 1, NULL, '1/100/', '2024-01-20 12:00:00')",
+             false, false, 1000, 2, [], 1, NULL,
+             [(6, 0, '2024-01-20 12:00:00')],
+             [(3, '2024-01-20 12:00:00'), (4, '2024-01-20 12:00:00')], '1/100/', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -62,6 +66,8 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
         1,
     )
     .await;
+    assert_edges_have_traversal_path(ctx, "REVIEWER", "User", "MergeRequest", "1/100/", 3).await;
+    assert_edges_have_traversal_path(ctx, "APPROVED_BY", "MergeRequest", "User", "1/100/", 3).await;
 }
 
 pub async fn processes_merge_requests_closing_issues(ctx: &TestContext) {

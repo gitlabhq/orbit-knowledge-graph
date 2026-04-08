@@ -11,16 +11,18 @@ description: >
 
 settings:
   table_prefix: "gl_"
-  edge_table: "gl_edge"
+  default_edge_table: gl_edge
   default_entity_sort_key: [traversal_path, id]
-  edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
-  edge_columns:
-    - {name: traversal_path, type: string}
-    - {name: relationship_kind, type: string}
-    - {name: source_id, type: int64}
-    - {name: source_kind, type: string}
-    - {name: target_id, type: int64}
-    - {name: target_kind, type: string}
+  edge_tables:
+    gl_edge:
+      sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+      columns:
+        - {name: traversal_path, type: string}
+        - {name: relationship_kind, type: string}
+        - {name: source_id, type: int64}
+        - {name: source_kind, type: string}
+        - {name: target_id, type: int64}
+        - {name: target_kind, type: string}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User]
   etl:
@@ -82,6 +84,8 @@ edges:
   REVIEWER: edges/reviewer.yaml
   ASSIGNED: edges/assigned.yaml
   MERGED_BY: edges/merged_by.yaml
+  CLOSED_BY: edges/closed_by.yaml
+  APPROVED_BY: edges/approved_by.yaml
   HAS_FILE: edges/has_file.yaml
   HAS_STAGE: edges/has_stage.yaml
   HAS_JOB: edges/has_job.yaml

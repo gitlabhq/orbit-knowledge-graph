@@ -4,9 +4,10 @@ version = "0.1.0"
 [workspace]
 resolver = "2"
 members = [
-  "crates/treesitter-visit",
-  "crates/code-parser",
   "crates/code-graph",
+  "crates/code-graph/treesitter-visit",
+  "crates/code-graph/parser",
+  "crates/code-graph/linker",
   "crates/clickhouse-client",
   "crates/indexer",
   "crates/query-engine",
@@ -19,6 +20,7 @@ members = [
   "crates/query-engine/compiler-pipeline-macros",
   "crates/cli",
 
+  "crates/gkg-server-config",
   "crates/gkg-server",
   "crates/ontology",
 
@@ -56,6 +58,7 @@ parking_lot = "0.12.5"
 pastey = "0.2.1"
 rust-lapper = "1.2.0"
 rustc-hash = "2.1.1"
+schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
@@ -84,7 +87,7 @@ criterion = { version = "0.8.1", features = ["html_reports"] }
 tracing-test = "0.2.5"
 
 # Parser-core
-parser-core = { path = "crates/code-parser" }
+parser-core = { path = "crates/code-graph/parser" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 duckdb = { version = "1.10501.0", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.7.0" }
@@ -96,7 +99,7 @@ tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
 async-nats = { version = "0.46.0", features = ["server_2_11"] }
 arrow-ipc = "58.0.0"
-clickhouse = { version = "0.14", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
+clickhouse = { version = "0.15", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
 testcontainers = "0.27.1"
 testcontainers-modules = { version = "0.15.0", features = ["nats"] }
 

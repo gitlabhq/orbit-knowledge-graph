@@ -25,7 +25,7 @@ properties:
 
   full_path:
     type: string
-    source: path
+    source: full_path
     nullable: true
     description: "Full path for the group (e.g. gitlab-org/quality)."
 
@@ -76,7 +76,8 @@ etl:
   select: >-
     namespace.id AS id, namespace.name AS name,
     namespace_details.description AS description,
-    namespace.visibility_level AS visibility_level, namespace.path AS path,
+    namespace.visibility_level AS visibility_level,
+    if(isNotNull(route.source_id), route.path, namespace.path) AS full_path,
     namespace.parent_id AS parent_id, namespace.owner_id AS owner_id,
     namespace.created_at AS created_at, namespace.updated_at AS updated_at,
     traversal_paths.traversal_path AS traversal_path
@@ -84,8 +85,19 @@ etl:
     siphon_namespaces namespace
     INNER JOIN siphon_namespace_details namespace_details
     ON namespace.id = namespace_details.namespace_id
-    INNER JOIN namespace_traversal_paths traversal_paths
+    INNER JOIN (
+      SELECT id, traversal_path
+      FROM namespace_traversal_paths
+      WHERE startsWith(traversal_path, {traversal_path:String})
+    ) traversal_paths
     ON namespace.id = traversal_paths.id
+    LEFT JOIN (
+      SELECT toNullable(source_id) AS source_id, argMax(path, _siphon_replicated_at) AS path
+      FROM siphon_routes
+      WHERE startsWith(traversal_path, {traversal_path:String})
+        AND source_type = 'Namespace' AND NOT _siphon_deleted
+      GROUP BY source_id
+    ) route ON namespace.id = route.source_id
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: namespace._siphon_replicated_at
   deleted: namespace._siphon_deleted

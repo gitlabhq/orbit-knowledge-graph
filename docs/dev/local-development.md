@@ -271,7 +271,7 @@ resource allocation, Tilt streaming mode).
 
 - **Tilt UI**: http://localhost:10350
 - **GKG Webserver**: http://localhost:8080
-- **Grafana**: http://localhost:3030 (login: admin/admin)
+- **Grafana**: http://localhost:3030 (login: admin/admin). Dashboards: GKG Overview, ETL Engine, SDLC Indexing, Query Pipeline.
 - **Prometheus**: http://localhost:9090
 
 ## Architecture

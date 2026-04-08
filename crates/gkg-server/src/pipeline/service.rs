@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use crate::auth::Claims;
+use crate::content::ColumnResolverRegistry;
 use crate::proto::ExecuteQueryMessage;
-use clickhouse_client::{ArrowClickHouseClient, ProfilingConfig};
+use clickhouse_client::ArrowClickHouseClient;
+use gkg_server_config::ProfilingConfig;
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
@@ -22,6 +24,7 @@ pub struct QueryPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
     profiling: ProfilingConfig,
+    resolver_registry: Option<Arc<ColumnResolverRegistry>>,
 }
 
 impl QueryPipelineService {
@@ -34,7 +37,13 @@ impl QueryPipelineService {
             ontology,
             client,
             profiling,
+            resolver_registry: None,
         }
+    }
+
+    pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
+        self.resolver_registry = Some(registry);
+        self
     }
 
     pub async fn run_query(
@@ -52,6 +61,9 @@ impl QueryPipelineService {
         server_extensions.insert(claims);
         server_extensions.insert(tx);
         server_extensions.insert(stream);
+        if let Some(registry) = &self.resolver_registry {
+            server_extensions.insert(ColumnResolverRegistry::clone(registry));
+        }
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),

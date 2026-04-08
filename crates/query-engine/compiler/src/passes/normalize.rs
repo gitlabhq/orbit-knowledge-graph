@@ -7,7 +7,8 @@
 //! - Wildcard column selections are expanded to explicit column lists
 
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, EntityAuthConfig, Input};
+use crate::input::{ColumnSelection, EntityAuthConfig, Input, QueryType};
+use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
@@ -62,6 +63,12 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
 /// - Expands wildcard column selections ("*") to explicit column lists
 pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     input.entity_auth = build_entity_auth(ontology);
+    input.compiler.edge_tables = ontology
+        .edge_tables()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+    input.compiler.default_edge_table = ontology.edge_table().to_string();
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
@@ -91,8 +98,13 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .map(|r| r.id_column.clone())
             .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
 
-        // Expand wildcard/empty column selections to explicit lists for lowering.
-        // Redaction columns (_gkg_*) are added separately by enforce.rs.
+        // Expand column selections to explicit lists. Strip virtual columns
+        // into node.virtual_columns for the hydration plan.
+        // PathFinding/Neighbors handle virtuals in build_dynamic_specs.
+        let strip_virtual = !matches!(
+            input.query_type,
+            QueryType::PathFinding | QueryType::Neighbors
+        );
         match &mut node.columns {
             Some(ColumnSelection::All) => {
                 let columns: Vec<String> =
@@ -108,6 +120,26 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
                 };
                 node.columns = Some(ColumnSelection::List(columns));
             }
+        }
+
+        if strip_virtual && let Some(ColumnSelection::List(cols)) = &mut node.columns {
+            let mut virtual_cols = Vec::new();
+            cols.retain(|col_name| {
+                if let Some(field) = node_entity.fields.iter().find(|f| f.name == *col_name)
+                    && let ontology::FieldSource::Virtual(vs) = &field.source
+                {
+                    if !vs.disabled {
+                        virtual_cols.push(VirtualColumnRequest {
+                            column_name: col_name.clone(),
+                            service: vs.service.clone(),
+                            lookup: vs.lookup.clone(),
+                        });
+                    }
+                    return false;
+                }
+                true
+            });
+            node.virtual_columns = virtual_cols;
         }
 
         // Coerce filter values to match ontology field types (e.g., enum int → string)

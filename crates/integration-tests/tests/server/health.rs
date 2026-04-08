@@ -1,7 +1,13 @@
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use clickhouse_client::ArrowClickHouseClient;
+use gitlab_client::GitlabClient;
 use gkg_server::webserver::create_router;
+use gkg_server_config::GitlabClientConfiguration;
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext};
 use tower::ServiceExt;
 
@@ -31,7 +37,7 @@ async fn live_returns_ok() {
         None,
         &std::collections::HashMap::new(),
     );
-    let router = create_router(client);
+    let router = create_router(client, None);
 
     let (status, json) = parse_response(router.oneshot(live_request()).await.unwrap()).await;
 
@@ -43,7 +49,7 @@ async fn live_returns_ok() {
 #[tokio::test]
 async fn ready_returns_ok_when_clickhouse_healthy() {
     let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
-    let router = create_router(ctx.create_client());
+    let router = create_router(ctx.create_client(), None);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 
@@ -65,7 +71,7 @@ async fn ready_returns_503_when_clickhouse_unreachable() {
         None,
         &std::collections::HashMap::new(),
     );
-    let router = create_router(client);
+    let router = create_router(client, None);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 
@@ -79,4 +85,58 @@ async fn ready_returns_503_when_clickhouse_unreachable() {
         .filter_map(|v| v.as_str().map(String::from))
         .collect();
     assert!(components.contains(&"clickhouse_graph".to_string()));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GitLab readiness probe
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn unreachable_gitlab_client() -> Arc<GitlabClient> {
+    Arc::new(
+        GitlabClient::new(GitlabClientConfiguration {
+            base_url: "http://127.0.0.1:1".to_string(),
+            signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
+            resolve_host: None,
+        })
+        .unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn ready_skips_gitlab_probe_when_no_client() {
+    let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
+    let router = create_router(ctx.create_client(), None);
+
+    let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let components = json
+        .get("unhealthy_components")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !components.iter().any(|v| v.as_str() == Some("gitlab")),
+        "gitlab should not appear when no client configured"
+    );
+}
+
+#[tokio::test]
+async fn ready_reports_gitlab_unhealthy_when_unreachable() {
+    let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
+    let router = create_router(ctx.create_client(), Some(unreachable_gitlab_client()));
+
+    let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let components: Vec<String> = json["unhealthy_components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+    assert!(
+        components.contains(&"gitlab".to_string()),
+        "gitlab should be unhealthy when unreachable"
+    );
 }

@@ -2,13 +2,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-use crate::configuration::HandlerConfiguration;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::{Envelope, Event, SerializationError, Subscription};
+use gkg_server_config::{HandlerConfiguration, NamespaceDeletionHandlerConfig};
 
 use super::metrics::DeletionMetrics;
 use super::store::NamespaceDeletionStore;
@@ -23,12 +22,6 @@ fn is_valid_traversal_path(path: &str) -> bool {
         return false;
     };
     org.parse::<u64>().is_ok() && namespace.parse::<u64>().is_ok()
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct NamespaceDeletionHandlerConfig {
-    #[serde(flatten)]
-    pub engine: HandlerConfiguration,
 }
 
 pub struct NamespaceDeletionHandler {

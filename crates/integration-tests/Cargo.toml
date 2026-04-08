@@ -12,6 +12,7 @@ publish = false
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
 gkg-server = { path = "../gkg-server", features = ["testkit"] }
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
@@ -27,6 +28,7 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
+gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }

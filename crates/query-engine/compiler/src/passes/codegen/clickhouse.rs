@@ -3,7 +3,9 @@
 //! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax and
 //! ClickHouse-specific functions (`startsWith`, `has`, `array`, etc.).
 
-use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, QuerySetting, TableRef};
+use gkg_server_config::QueryConfig;
+
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -11,15 +13,32 @@ use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
 
-pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
+pub fn codegen(
+    ast: &Node,
+    result_context: ResultContext,
+    query_config: QueryConfig,
+) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
-    let sql = match ast {
+    let mut sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
     };
+
+    // SETTINGS — only on the top-level query, not subqueries/UNION arms.
+    // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
+    // (bare integers, 0/1 bools, escaped quoted strings).
+    let settings = query_config
+        .to_clickhouse_settings()
+        .map_err(crate::error::QueryError::Codegen)?;
+    if !settings.is_empty() {
+        let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();
+        sql.push_str(&format!(" SETTINGS {}", clause.join(", ")));
+    }
+
     Ok(ParameterizedQuery {
         sql,
         params: ctx.params,
         result_context,
+        query_config,
         dialect: SqlDialect::ClickHouse,
     })
 }
@@ -43,7 +62,7 @@ impl Context {
             parts.push(self.emit_ctes(&q.ctes)?);
         }
 
-        // SELECT, FROM, WHERE, GROUP BY, HAVING, UNION ALL, ORDER BY, LIMIT, OFFSET
+        // SELECT, FROM, WHERE, GROUP BY, HAVING, UNION ALL, ORDER BY, LIMIT
         parts.push(self.emit_query_body(q)?);
 
         Ok(parts.join(" "))
@@ -130,20 +149,6 @@ impl Context {
 
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
-        }
-
-        if !q.query_settings.is_empty() {
-            let settings: Vec<String> = q
-                .query_settings
-                .iter()
-                .map(|s| match s {
-                    QuerySetting::UseQueryCache(v) => {
-                        format!("use_query_cache = {}", u8::from(*v))
-                    }
-                    QuerySetting::QueryCacheTtl(v) => format!("query_cache_ttl = {v}"),
-                })
-                .collect();
-            parts.push(format!("SETTINGS {}", settings.join(", ")));
         }
 
         Ok(parts.join(" "))
@@ -314,7 +319,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
@@ -347,7 +357,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, e.label AS rel_type FROM nodes AS n INNER JOIN edges AS e ON (n.id = e.source_id)"
@@ -376,7 +391,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label ORDER BY COUNT(n.id) DESC"
@@ -403,7 +423,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE n.label IN ({p0:String}, {p1:String}, {p2:String})"
@@ -432,7 +457,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE ((n.label = {p0:String}) AND ((n.created_at > {p1:String}) OR (n.deleted_at IS NULL)))"
@@ -485,7 +515,12 @@ mod tests {
             ),
             ..Default::default()
         };
-        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let r = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert!(
             r.sql.contains("e.relationship_kind = {p0:String}"),
             "{}",
@@ -519,7 +554,12 @@ mod tests {
             ),
             ..Default::default()
         };
-        let r = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let r = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert!(
             r.sql.contains("e.relationship_kind IN {p0:Array(String)}"),
             "{}",
@@ -539,7 +579,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), ctx).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), ctx, QueryConfig::default()).unwrap();
         assert_eq!(result.result_context.len(), 1);
         assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
     }
@@ -561,7 +601,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label HAVING (COUNT(n.id) > {p0:Int64})"
@@ -584,7 +629,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("HAVING"));
         assert!(!result.sql.contains("GROUP BY"));
     }
@@ -607,7 +657,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(outer)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("(SELECT"));
         assert!(result.sql.contains(") AS sub"));
         assert!(result.sql.contains("gl_project AS p"));
@@ -640,7 +695,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(outer)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(outer)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("INNER JOIN (SELECT"));
         assert!(result.sql.contains("HAVING"));
         assert!(result.sql.contains(") AS deduped_e ON"));
@@ -671,7 +731,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("WITH RECURSIVE"));
         assert!(result.sql.contains("UNION ALL"));
     }
@@ -690,7 +755,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("UNION ALL"));
         assert!(result.sql.contains("LIMIT 10"));
         let union_pos = result.sql.find("UNION ALL").unwrap();
@@ -720,7 +790,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert!(result.sql.contains("UNION ALL"));
         assert!(result.sql.contains(") AS all_edges"));
     }
@@ -747,6 +822,7 @@ mod tests {
             sql: "SELECT * FROM t WHERE kind = {p0:String} AND state = {p1:String}".into(),
             params,
             result_context: empty_ctx(),
+            query_config: QueryConfig::default(),
             dialect: SqlDialect::ClickHouse,
         };
 
@@ -778,6 +854,7 @@ mod tests {
             sql: "SELECT * FROM t WHERE x IN {p0:Array(String)} AND y IN {p1:Array(Int64)}".into(),
             params,
             result_context: empty_ctx(),
+            query_config: QueryConfig::default(),
             dialect: SqlDialect::ClickHouse,
         };
 
@@ -789,7 +866,6 @@ mod tests {
 
     #[test]
     fn query_settings_emitted_after_limit() {
-        use crate::ast::QuerySetting;
         let q = Query {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
@@ -797,17 +873,25 @@ mod tests {
             }],
             from: TableRef::scan("nodes", "n"),
             limit: Some(100),
-            query_settings: vec![
-                QuerySetting::UseQueryCache(true),
-                QuerySetting::QueryCacheTtl(60),
-            ],
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert_eq!(
+        let cfg = QueryConfig {
+            max_execution_time: None,
+            use_query_cache: Some(true),
+            query_cache_ttl: Some(60),
+        };
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), cfg).unwrap();
+        assert!(
+            result.sql.contains("LIMIT 100 SETTINGS"),
+            "SETTINGS should come after LIMIT: {}",
             result.sql,
-            "SELECT n.id FROM nodes AS n LIMIT 100 SETTINGS use_query_cache = 1, query_cache_ttl = 60"
+        );
+        assert!(result.sql.contains("use_query_cache = 1"), "{}", result.sql);
+        assert!(
+            result.sql.contains("query_cache_ttl = 60"),
+            "{}",
+            result.sql
         );
     }
 
@@ -822,10 +906,15 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         assert!(
             !result.sql.contains("SETTINGS"),
-            "no SETTINGS without query_settings: {}",
+            "no SETTINGS with default config: {}",
             result.sql
         );
     }
@@ -836,6 +925,7 @@ mod tests {
             sql: "SELECT {p0:String} AND {p1:Int64}".into(),
             params: HashMap::new(),
             result_context: empty_ctx(),
+            query_config: QueryConfig::default(),
             dialect: SqlDialect::ClickHouse,
         };
 

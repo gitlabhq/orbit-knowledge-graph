@@ -118,9 +118,13 @@ The query pipeline instruments end-to-end query execution from security check th
 | `gkg.query.pipeline.result_set.size` | Histogram | count | `query_type` | Number of rows returned after formatting |
 | `gkg.query.pipeline.batch.count` | Histogram | count | `query_type` | Number of Arrow record batches returned from ClickHouse |
 | `gkg.query.pipeline.redacted.count` | Histogram | count | `query_type` | Number of rows redacted per query |
+| `gkg.query.pipeline.ch.read_rows` | Counter | count | `query_type`, `label` | ClickHouse rows read per query execution (from `X-ClickHouse-Summary` header) |
+| `gkg.query.pipeline.ch.read_bytes` | Counter | bytes | `query_type`, `label` | ClickHouse bytes read per query execution (from `X-ClickHouse-Summary` header) |
+| `gkg.query.pipeline.ch.memory_usage` | Histogram | bytes | `query_type`, `label` | ClickHouse peak memory usage per query execution (from `X-ClickHouse-Summary` header) |
 | `gkg.query.pipeline.error.security_rejected` | Counter | count | `reason` (security) | Pipeline rejected due to invalid or missing security context |
 | `gkg.query.pipeline.error.execution_failed` | Counter | count | `reason` (execution) | ClickHouse query execution failed |
 | `gkg.query.pipeline.error.authorization_failed` | Counter | count | `reason` (authorization) | Authorization exchange with Rails failed |
+| `gkg.query.pipeline.error.content_resolution_failed` | Counter | count | `reason` (content_resolution) | Virtual column resolution from remote service failed |
 | `gkg.query.pipeline.error.streaming_failed` | Counter | count | `reason` (streaming) | Streaming channel unavailable during authorization |
 
 *Query engine metrics (`gkg_query_engine`):*

@@ -1,8 +1,10 @@
 target/**
-!target/*/debug/
 !target/*/debug/gkg-server
 .*
 !.cargo/
+CHANGELOG.md
+package.json
+package-lock.json
 docs/
 e2e/
 fixtures/

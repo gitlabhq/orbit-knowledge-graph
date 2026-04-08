@@ -176,6 +176,60 @@ pub(super) async fn traversal_user_assigned_work_item_returns_correct_edges(ctx:
     });
 }
 
+pub(super) async fn traversal_work_item_in_project_returns_correct_edges(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "w", "entity": "WorkItem", "columns": ["title"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "w", "to": "p"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(3);
+    resp.assert_referential_integrity();
+
+    resp.assert_edge_exists("WorkItem", 4000, "Project", 1000, "IN_PROJECT");
+    resp.assert_edge_exists("WorkItem", 4001, "Project", 1000, "IN_PROJECT");
+
+    resp.assert_node("Project", 1000, |n| {
+        n.prop_str("name") == Some("Public Project")
+    });
+}
+
+pub(super) async fn traversal_user_closed_work_item_returns_correct_edges(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "w", "entity": "WorkItem", "columns": ["title", "state"]}
+            ],
+            "relationships": [{"type": "CLOSED_BY", "from": "u", "to": "w"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_referential_integrity();
+
+    resp.assert_edge_exists("User", 2, "WorkItem", 4001, "CLOSED_BY");
+
+    resp.assert_node("User", 2, |n| n.prop_str("username") == Some("bob"));
+    resp.assert_node("WorkItem", 4001, |n| {
+        n.prop_str("title") == Some("Fix auth bug") && n.prop_str("state") == Some("closed")
+    });
+}
+
 pub(super) async fn traversal_work_item_has_label_returns_correct_edges(ctx: &TestContext) {
     let resp = run_query(
         ctx,

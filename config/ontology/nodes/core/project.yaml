@@ -25,7 +25,7 @@ properties:
 
   full_path:
     type: string
-    source: path
+    source: full_path
     nullable: true
     description: "Full path for the project (e.g. gitlab-org/gitlab)."
 
@@ -93,7 +93,8 @@ etl:
   scope: namespaced
   select: >-
     project.id AS id, project.name AS name, project.description AS description,
-    project.visibility_level AS visibility_level, project.path AS path,
+    project.visibility_level AS visibility_level,
+    if(isNotNull(route.source_id), route.path, project.path) AS full_path,
     project.namespace_id AS namespace_id, project.creator_id AS creator_id,
     project.created_at AS created_at, project.updated_at AS updated_at,
     project.archived AS archived, project.star_count AS star_count,
@@ -101,8 +102,19 @@ etl:
     traversal_paths.traversal_path AS traversal_path
   from: >-
     siphon_projects project
-    INNER JOIN project_namespace_traversal_paths traversal_paths
+    INNER JOIN (
+      SELECT id, traversal_path
+      FROM project_namespace_traversal_paths
+      WHERE startsWith(traversal_path, {traversal_path:String})
+    ) traversal_paths
     ON project.id = traversal_paths.id
+    LEFT JOIN (
+      SELECT toNullable(source_id) AS source_id, argMax(path, _siphon_replicated_at) AS path
+      FROM siphon_routes
+      WHERE startsWith(traversal_path, {traversal_path:String})
+        AND source_type = 'Project' AND NOT _siphon_deleted
+      GROUP BY source_id
+    ) route ON project.id = route.source_id
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: project._siphon_replicated_at
   deleted: project._siphon_deleted

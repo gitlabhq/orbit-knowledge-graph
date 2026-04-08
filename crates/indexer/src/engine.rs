@@ -38,7 +38,6 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use crate::configuration::EngineConfiguration;
 use crate::destination::Destination;
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use crate::locking::{LockService, NatsLockService};
@@ -46,6 +45,7 @@ use crate::metrics::EngineMetrics;
 use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
 use crate::types::{Envelope, Subscription};
 use crate::worker_pool::WorkerPool;
+use gkg_server_config::EngineConfiguration;
 
 /// Errors that can occur during engine operation.
 #[derive(Debug, Error)]
@@ -439,11 +439,11 @@ fn extract_panic_message(payload: &Box<dyn Any + Send>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::configuration::HandlerConfiguration;
     use crate::nats::ProgressNotifier;
     use crate::testkit::mocks::{
         MockDestination, MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
     };
+    use gkg_server_config::HandlerConfiguration;
 
     fn test_context() -> HandlerContext {
         HandlerContext::new(

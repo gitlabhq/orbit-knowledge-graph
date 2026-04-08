@@ -10,15 +10,17 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use base64::Engine;
+use clickhouse_client::ClickHouseConfigurationExt;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use gitlab_client::{GitlabClient, GitlabClientConfiguration};
+use gitlab_client::GitlabClient;
+use gkg_server_config::{CodeIndexingTaskHandlerConfig, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
-    CodeIndexingTaskHandler, CodeIndexingTaskHandlerConfig, LocalRepositoryCache,
-    RailsRepositoryService, RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
-    repository::RepositoryCache, repository::RepositoryResolver,
+    CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
+    config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
+    repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
@@ -34,6 +36,7 @@ pub struct CodeIndexingDeps {
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
+    _cache_dir: tempfile::TempDir,
 }
 
 impl CodeIndexingDeps {
@@ -51,7 +54,9 @@ impl CodeIndexingDeps {
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
         let metrics = CodeMetrics::new();
 
-        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::default());
+        let cache_dir = tempfile::TempDir::new().expect("failed to create temp dir for cache");
+        let cache: Arc<dyn RepositoryCache> =
+            Arc::new(LocalRepositoryCache::new(cache_dir.path().to_path_buf()));
         let resolver =
             RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
 
@@ -68,6 +73,7 @@ impl CodeIndexingDeps {
             repository_service,
             checkpoint_store,
             metrics,
+            _cache_dir: cache_dir,
         }
     }
 
@@ -92,7 +98,10 @@ struct MockState {
 
 struct ProjectData {
     default_branch: String,
-    archive: Vec<u8>,
+    /// Raw file entries (path, content). The archive is built on-the-fly
+    /// in the handler using the ref from the request query, so the Gitaly
+    /// `<slug>-<ref>/` prefix matches whatever commit SHA the indexer asks for.
+    archive_files: Vec<(String, Vec<u8>)>,
     changed_paths_ndjson: Option<String>,
     blobs: HashMap<String, Vec<u8>>,
 }
@@ -151,11 +160,15 @@ impl MockGitlabServer {
     }
 
     pub fn add_project(&self, project_id: i64, default_branch: &str, files: &[(&str, &str)]) {
+        let archive_files: Vec<(String, Vec<u8>)> = files
+            .iter()
+            .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
+            .collect();
         self.state.projects.lock().insert(
             project_id,
             ProjectData {
                 default_branch: default_branch.to_string(),
-                archive: build_tar_gz(files),
+                archive_files,
                 changed_paths_ndjson: None,
                 blobs: HashMap::new(),
             },
@@ -165,7 +178,10 @@ impl MockGitlabServer {
     pub fn replace_archive(&self, project_id: i64, files: &[(&str, &str)]) {
         let mut projects = self.state.projects.lock();
         if let Some(project) = projects.get_mut(&project_id) {
-            project.archive = build_tar_gz(files);
+            project.archive_files = files
+                .iter()
+                .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
+                .collect();
         }
     }
 
@@ -210,11 +226,27 @@ async fn handle_project_info(
 async fn handle_download_archive(
     State(state): State<Arc<MockState>>,
     Path(project_id): Path<i64>,
-    Query(_query): Query<ArchiveQuery>,
+    Query(query): Query<ArchiveQuery>,
 ) -> impl IntoResponse {
     let projects = state.projects.lock();
     match projects.get(&project_id) {
-        Some(p) => (StatusCode::OK, p.archive.clone()).into_response(),
+        Some(p) => {
+            // Build the archive on-the-fly with the Gitaly prefix so the
+            // ref in the directory name matches the commit SHA the indexer sent.
+            let files: Vec<(&str, &str)> = p
+                .archive_files
+                .iter()
+                .map(|(path, content)| {
+                    (
+                        path.as_str(),
+                        std::str::from_utf8(content)
+                            .expect("test fixture content must be valid UTF-8"),
+                    )
+                })
+                .collect();
+            let archive = build_tar_gz(&files, &query.ref_name);
+            (StatusCode::OK, archive).into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -298,13 +330,15 @@ async fn handle_list_blobs(
     }
 }
 
-fn build_tar_gz(files: &[(&str, &str)]) -> Vec<u8> {
+/// Build a gzipped tar archive with the Gitaly `<slug>-<ref>/` prefix.
+fn build_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
     let mut tar_builder = tar::Builder::new(Vec::new());
 
     for (path, content) in files {
         let content_bytes = content.as_bytes();
         let mut header = tar::Header::new_gnu();
-        header.set_path(path).unwrap();
+        let archive_path = format!("project-{ref_name}/{path}");
+        header.set_path(&archive_path).unwrap();
         header.set_size(content_bytes.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();

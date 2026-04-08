@@ -1,7 +1,9 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use clickhouse_client::ClickHouseConfiguration;
+use crate::content::ColumnResolverRegistry;
+use clickhouse_client::ClickHouseConfigurationExt;
+use gkg_server_config::ClickHouseConfiguration;
 use ontology::Ontology;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -31,6 +33,7 @@ pub struct KnowledgeGraphServiceImpl {
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
     graph_stats: GraphStatsService,
+    stream_timeout_secs: u64,
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -39,14 +42,19 @@ impl KnowledgeGraphServiceImpl {
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
+        resolver_registry: Option<Arc<ColumnResolverRegistry>>,
+        stream_timeout_secs: u64,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
-        let pipeline = QueryPipelineService::new(
+        let mut pipeline = QueryPipelineService::new(
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
         );
+        if let Some(registry) = resolver_registry {
+            pipeline = pipeline.with_resolver_registry(registry);
+        }
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {
             validator,
@@ -55,6 +63,7 @@ impl KnowledgeGraphServiceImpl {
             pipeline,
             cluster_health,
             graph_stats,
+            stream_timeout_secs,
         }
     }
 }
@@ -102,58 +111,71 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
+        let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
         tokio::spawn(
             async move {
-                let req = match receive_query_request(&mut stream, &tx).await {
-                    Some(r) => r,
-                    None => return,
+                let handler = async {
+                    let req = match receive_query_request(&mut stream, &tx).await {
+                        Some(r) => r,
+                        None => return,
+                    };
+
+                    info!(query_len = req.query.len(), "Executing query");
+
+                    let use_llm_format = req.format == ResponseFormat::Llm as i32;
+
+                    let result = pipeline
+                        .run_query(claims, &req.query, tx.clone(), stream)
+                        .await;
+
+                    match result {
+                        Ok(output) => {
+                            info!("Sending final query result");
+
+                            use crate::proto::execute_query_result::Content;
+
+                            let formatted = if use_llm_format {
+                                GoonFormatter.format(&output)
+                            } else {
+                                GraphFormatter.format(&output)
+                            };
+
+                            let content = if use_llm_format {
+                                Some(Content::FormattedText(formatted.to_string()))
+                            } else {
+                                Some(Content::ResultJson(formatted.to_string()))
+                            };
+
+                            let metadata = Some(QueryMetadata {
+                                query_type: output.query_type,
+                                raw_query_strings: output.raw_query_strings,
+                                row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                            });
+
+                            let _ = tx
+                                .send(Ok(ExecuteQueryMessage {
+                                    content: Some(execute_query_message::Content::Result(
+                                        ExecuteQueryResult { content, metadata },
+                                    )),
+                                }))
+                                .await;
+                        }
+                        Err(e) => {
+                            send_query_error(&tx, e).await;
+                        }
+                    }
                 };
 
-                info!(query_len = req.query.len(), "Executing query");
-
-                let use_llm_format = req.format == ResponseFormat::Llm as i32;
-
-                let result = pipeline
-                    .run_query(claims, &req.query, tx.clone(), stream)
-                    .await;
-
-                match result {
-                    Ok(output) => {
-                        info!("Sending final query result");
-
-                        use crate::proto::execute_query_result::Content;
-
-                        let formatted = if use_llm_format {
-                            GoonFormatter.format(&output)
-                        } else {
-                            GraphFormatter.format(&output)
-                        };
-
-                        let content = if use_llm_format {
-                            Some(Content::FormattedText(formatted.to_string()))
-                        } else {
-                            Some(Content::ResultJson(formatted.to_string()))
-                        };
-
-                        let metadata = Some(QueryMetadata {
-                            query_type: output.query_type,
-                            raw_query_strings: output.raw_query_strings,
-                            row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
-                        });
-
-                        let _ = tx
-                            .send(Ok(ExecuteQueryMessage {
-                                content: Some(execute_query_message::Content::Result(
-                                    ExecuteQueryResult { content, metadata },
-                                )),
-                            }))
-                            .await;
-                    }
-                    Err(e) => {
-                        send_query_error(&tx, e).await;
-                    }
+                if tokio::time::timeout(std::time::Duration::from_secs(stream_timeout), handler)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("Query stream timed out after 60s");
+                    let _ = tx
+                        .send(Err(Status::deadline_exceeded("Query stream timed out")))
+                        .await;
                 }
             }
             .instrument(span),
@@ -413,6 +435,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let plan = service
@@ -439,6 +463,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&[]);
@@ -467,6 +493,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -501,6 +529,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("User");
@@ -523,6 +553,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
@@ -539,6 +571,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -566,6 +600,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&[]);
@@ -588,6 +624,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&[]);
@@ -614,6 +652,8 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response =
@@ -716,6 +756,8 @@ mod tests {
             Arc::clone(&ontology),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
+            60,
         );
 
         let response = service.build_structured_schema(&["*".to_string()]);

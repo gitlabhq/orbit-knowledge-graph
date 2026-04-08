@@ -29,10 +29,16 @@ struct HealthResponse {
 }
 
 fn version() -> &'static str {
-    match option_env!("GKG_VERSION") {
-        Some(v) => v,
-        None => env!("CARGO_PKG_VERSION"),
-    }
+    use std::sync::OnceLock;
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            std::env::var("GKG_VERSION")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+        })
+        .as_str()
 }
 
 async fn live() -> Json<HealthResponse> {

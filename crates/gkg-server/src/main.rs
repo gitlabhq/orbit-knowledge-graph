@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
-use gkg_server::config::AppConfig;
+use gkg_server::content;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
+use gkg_server_config::AppConfig;
 use indexer::IndexerConfig;
 use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
@@ -17,6 +19,8 @@ use indexer::modules::namespace_deletion::{
 };
 use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
+use query_engine::compiler::input::QueryType;
+use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -28,6 +32,14 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
     let config = AppConfig::load()?;
+
+    let invalid_keys = config.query.validate_keys(QueryType::VARIANTS);
+    anyhow::ensure!(
+        invalid_keys.is_empty(),
+        "unknown query type(s) in config: {invalid_keys:?} (valid: {:?})",
+        QueryType::VARIANTS,
+    );
+    gkg_server_config::query::init(config.query.clone());
 
     let mut builder = labkit::Builder::new(args.mode.service_name())
         .propagate_correlation(true)
@@ -148,11 +160,33 @@ async fn run_webserver(
 
     let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
 
+    let gitlab_client_config = config.gitlab_client_config().ok_or_else(|| {
+        anyhow::anyhow!(
+            "GitLab client config is required: set gitlab.base_url and provide \
+             the JWT signing key (via config or /etc/secrets/gitlab/jwt/signing_key)"
+        )
+    })?;
+    let gitlab_client = Arc::new(
+        gitlab_client::GitlabClient::new(gitlab_client_config)
+            .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
+    );
+
+    let mut registry = content::ColumnResolverRegistry::new();
+    registry.register(
+        "gitaly",
+        Arc::new(content::gitaly::GitalyContentService::new(
+            gitlab_client.clone(),
+        )),
+    );
+    let resolver_registry = Some(Arc::new(registry));
+    info!("Content resolution enabled (GitlabClient configured)");
+
     let graph_client = config.graph.build_client();
-    let http_server = HttpServer::bind(config.bind_address, graph_client).await?;
+    let http_server =
+        HttpServer::bind(config.bind_address, graph_client, Some(gitlab_client)).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
-    let tls_config = config.tls.load_tls_config().await?;
+    let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
 
     let grpc_server = GrpcServer::new(
         config.grpc_bind_address,
@@ -161,6 +195,8 @@ async fn run_webserver(
         &config.graph,
         cluster_health,
         tls_config,
+        resolver_registry,
+        config.grpc.clone(),
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 

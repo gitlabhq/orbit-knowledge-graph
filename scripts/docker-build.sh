@@ -13,16 +13,16 @@ if [ -n "$CI_REGISTRY_USER" ] && [ -n "$CI_REGISTRY_PASSWORD" ] && [ -n "$CI_REG
   echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
 fi
 
-BUILD_ARGS=""
-if [ -n "$GKG_VERSION" ]; then
-  BUILD_ARGS="--build-arg GKG_VERSION=$GKG_VERSION"
-fi
-
 ARCH=$(uname -m)
 case "$ARCH" in
   aarch64) PLATFORM="linux/arm64" ;;
   *)       PLATFORM="linux/amd64" ;;
 esac
+
+BUILD_ARGS=""
+if [ -n "$GKG_VERSION" ]; then
+  BUILD_ARGS="--build-arg GKG_VERSION=$GKG_VERSION"
+fi
 
 TAGS=""
 for tag in "$@"; do

@@ -9,14 +9,13 @@ default = []
 testkit = []
 
 [dependencies]
+gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 arrow = { workspace = true }
 arrow-ipc = { workspace = true, features = ["lz4"] }
 bytes = { workspace = true }
 clickhouse = { workspace = true }
 futures = { workspace = true }
-once_cell = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

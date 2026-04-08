@@ -14,21 +14,6 @@ pub enum ClickHouseError {
     #[error("arrow encode error: {0}")]
     ArrowEncode(#[source] arrow::error::ArrowError),
 
-    #[error("http error: {0}")]
-    Http(#[source] reqwest::Error),
-
     #[error("bad response ({status}): {body}")]
     BadResponse { status: u16, body: String },
-}
-
-#[derive(Debug, Error)]
-pub enum ConfigurationError {
-    #[error("database cannot be empty")]
-    EmptyDatabase,
-
-    #[error("url cannot be empty")]
-    EmptyUrl,
-
-    #[error("username cannot be empty")]
-    EmptyUsername,
 }

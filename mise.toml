@@ -38,6 +38,8 @@ lychee = "0.21.0"
 lefthook = "2.1.3"
 protoc = "34.1"
 jq = "1.7"
+vendir = "0.45.2"
+yq = "4.52.5"
 
 [tasks."hooks:install"]
 run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
@@ -127,6 +129,14 @@ arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
 
+[tasks."proto:go"]
+run = "scripts/proto-go.sh generate"
+description = "Generate Go protobuf/gRPC stubs for Workhorse integration"
+
+[tasks."proto:go:check"]
+run = "scripts/proto-go.sh check"
+description = "Verify Go proto stubs are up to date"
+
 [tasks."proto:ruby"]
 run = '''
 mkdir -p crates/gkg-server/proto/ruby
@@ -162,6 +172,10 @@ description = "Start the GKG server (dispatch-indexing mode)"
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
+
+[tasks."schema:generate"]
+run = "cargo xtask schema -o config/schemas/config.schema.json"
+description = "Generate JSON Schema for the server configuration"
 
 [tasks."e2e:setup"]
 run = "cargo xtask e2e setup"

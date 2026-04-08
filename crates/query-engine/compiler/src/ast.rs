@@ -198,18 +198,6 @@ pub struct Query {
     pub limit: Option<u32>,
     /// Additional queries to UNION ALL with this one (for recursive CTEs).
     pub union_all: Vec<Query>,
-    /// ClickHouse inline SETTINGS clause appended after LIMIT.
-    /// Uses a closed enum to prevent SQL injection — only known safe
-    /// settings can be emitted.
-    pub query_settings: Vec<QuerySetting>,
-}
-
-/// Allowed ClickHouse query-level settings. Closed enum prevents
-/// arbitrary user input from reaching the SETTINGS clause (CWE-89).
-#[derive(Debug, Clone, PartialEq)]
-pub enum QuerySetting {
-    UseQueryCache(bool),
-    QueryCacheTtl(u32),
 }
 
 impl Default for Query {
@@ -228,7 +216,6 @@ impl Default for Query {
             limit_by: None,
             limit: None,
             union_all: vec![],
-            query_settings: Vec::new(),
         }
     }
 }
@@ -405,6 +392,33 @@ impl Expr {
             }
             Expr::UnaryOp { expr, .. } => expr.collect_aliases(out),
             Expr::InSubquery { expr, .. } => expr.collect_aliases(out),
+            Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
+        }
+    }
+
+    /// Collect all column names (not aliases) referenced by this expression.
+    pub fn referenced_columns(&self) -> HashSet<String> {
+        let mut cols = HashSet::new();
+        self.collect_columns(&mut cols);
+        cols
+    }
+
+    fn collect_columns(&self, out: &mut HashSet<String>) {
+        match self {
+            Expr::Column { column, .. } => {
+                out.insert(column.clone());
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                left.collect_columns(out);
+                right.collect_columns(out);
+            }
+            Expr::FuncCall { args, .. } => {
+                for a in args {
+                    a.collect_columns(out);
+                }
+            }
+            Expr::UnaryOp { expr, .. } => expr.collect_columns(out),
+            Expr::InSubquery { expr, .. } => expr.collect_columns(out),
             Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
         }
     }

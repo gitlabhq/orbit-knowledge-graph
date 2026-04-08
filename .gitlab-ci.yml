@@ -1,3 +1,6 @@
+variables:
+  CANONICAL_PROJECT_ID: "77960826"
+
 workflow:
   rules:
     - if: $CI_COMMIT_TAG
@@ -71,6 +74,23 @@ stages:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+.canonical-only-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+
+.canonical-mr-only-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+
+.canonical-main-only-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # Lint Stage
 
 agent-file-sync-check:
@@ -107,6 +127,21 @@ ontology-schema-validate:
   script:
     - test "$(wc -c < config/schemas/ontology.schema.json)" -le 32768 || (echo "config/schemas/ontology.schema.json must stay at or below 32 KB" && exit 1)
     - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
+
+generate-config-schema:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run schema:generate
+    - git diff --exit-code config/schemas/config.schema.json || (echo "config/schemas/config.schema.json is out of date. Run 'mise schema:generate' and commit." && exit 1)
+  artifacts:
+    paths:
+      - config/schemas/config.schema.json
+    expire_in: 24 hours
 
 fmt-check:
   stage: lint
@@ -166,6 +201,8 @@ generate-sbom:
     - .job-template
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - cargo cyclonedx --format json > sbom.cdx.json
@@ -372,6 +409,23 @@ docker-build-mr:
   script:
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
+check-go-proto:
+  needs: []
+  image: golang:1.24
+  tags:
+    - saas-linux-medium-amd64
+  stage: lint
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq unzip
+  script:
+    - scripts/proto-go.sh check
+    - cd clients/gkgpb && go build ./...
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+    - changes:
+        - crates/gkg-server/proto/**/*
+        - clients/gkgpb/**/*
+
 build-proto-gem:
   needs: []
   image: ruby:3.3
@@ -380,18 +434,18 @@ build-proto-gem:
   stage: build
   before_script: []
   script:
-    - BUNDLE_GEMFILE=tools/protogem/Gemfile bundle install --quiet
+    - BUNDLE_GEMFILE=clients/protogem/Gemfile bundle install --quiet
     - |
       if [ -n "$CI_COMMIT_TAG" ]; then
-        ruby tools/protogem/build-proto-gem --version "${CI_COMMIT_TAG#v}"
+        ruby clients/protogem/build-proto-gem --version "${CI_COMMIT_TAG#v}"
       else
-        ruby tools/protogem/build-proto-gem
+        ruby clients/protogem/build-proto-gem
       fi
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
     - changes:
         - crates/gkg-server/proto/**/*
-        - tools/protogem/**/*
+        - clients/protogem/**/*
   artifacts:
     paths:
       - _build/gitlab-gkg-proto-*.gem
@@ -408,7 +462,9 @@ publish-proto-gem:
   script:
     - gem push "_build/gitlab-gkg-proto-${CI_COMMIT_TAG#v}.gem"
   rules:
-    - if: '$CI_SERVER_HOST == "gitlab.com" && $CI_PROJECT_NAMESPACE == "gitlab-org/orbit" && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
   environment:
     name: rubygems
     url: https://rubygems.org/gems/gitlab-gkg-proto
@@ -420,16 +476,29 @@ semantic-release:
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/node:22
   tags:
     - saas-linux-medium-amd64
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    SEMANTIC_RELEASE_GITLAB_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/semantic-release/token@ci
+      token: $VAULT_ID_TOKEN
   variables:
     GIT_STRATEGY: clone
   needs:
     - job: build-proto-gem
       optional: true
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
-    - npm install -g semantic-release @semantic-release/gitlab @semantic-release/git @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog conventional-changelog-conventionalcommits semantic-release-slack-bot
+    - test -n "${SEMANTIC_RELEASE_GITLAB_TOKEN}" || (echo "Missing SEMANTIC_RELEASE_GITLAB_TOKEN from Vault" && exit 1)
+    - export GITLAB_TOKEN="${SEMANTIC_RELEASE_GITLAB_TOKEN}"
+    - git remote set-url origin "https://semantic-release:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    - npm ci
   script:
     - npx semantic-release
 
@@ -489,7 +558,7 @@ release-manifest:
 .review-docs:
   image: ruby:3.3-alpine3.23
   extends:
-    - .mr-only-rules
+    - .canonical-mr-only-rules
   stage: review
   cache: {}
   dependencies: []
@@ -549,6 +618,8 @@ ai:performance:
   timeout: 1 hour
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
@@ -567,6 +638,8 @@ ai:security:
   timeout: 1 hour
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
@@ -585,6 +658,8 @@ ai:docs:
   timeout: 1 hour
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true

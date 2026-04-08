@@ -2,32 +2,11 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use clickhouse_client::FromArrowColumn;
-use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::configuration::ScheduleConfiguration;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-
-fn default_interval_secs() -> Option<u64> {
-    Some(86400) // 1 day in seconds
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableCleanupConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-}
-
-impl Default for TableCleanupConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                interval_secs: default_interval_secs(),
-            },
-        }
-    }
-}
+use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 pub struct TableCleanup {
     graph: ArrowClickHouseClient,

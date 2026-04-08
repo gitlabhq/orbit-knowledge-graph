@@ -56,6 +56,75 @@ pub(super) async fn search_returns_correct_project_properties(ctx: &TestContext)
     });
 }
 
+pub(super) async fn search_returns_correct_group_full_path(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group", "columns": ["name", "full_path"]},
+            "order_by": {"node": "g", "property": "id", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    resp.assert_node_order("Group", &[100, 101, 102, 200, 300]);
+    resp.assert_node("Group", 100, |n| {
+        n.prop_str("full_path") == Some("public-group")
+    });
+    resp.assert_node("Group", 200, |n| {
+        n.prop_str("full_path") == Some("public-group/deep-a")
+    });
+    resp.assert_node("Group", 300, |n| {
+        n.prop_str("full_path") == Some("public-group/deep-a/deep-b")
+    });
+}
+
+pub(super) async fn search_returns_correct_project_full_path(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "p", "entity": "Project", "columns": ["name", "full_path"]},
+            "order_by": {"node": "p", "property": "id", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    resp.assert_node_order("Project", &[1000, 1001, 1002, 1003, 1004]);
+    resp.assert_node("Project", 1000, |n| {
+        n.prop_str("full_path") == Some("public-group/public-project")
+    });
+    resp.assert_node("Project", 1004, |n| {
+        n.prop_str("full_path") == Some("internal-group/shared-project")
+    });
+}
+
+pub(super) async fn search_default_columns_include_full_path(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    let first = resp.find_node("Group", 100).unwrap();
+    assert!(
+        first.prop_str("full_path").is_some(),
+        "full_path should be in default columns"
+    );
+}
+
 pub(super) async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
     let resp = run_query(
         ctx,

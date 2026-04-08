@@ -43,6 +43,12 @@ properties:
     nullable: false
     description: "Git branch where this directory exists."
 
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    description: "Commit SHA at which this directory was indexed."
+
   path:
     type: string
     source: path

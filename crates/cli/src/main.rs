@@ -2,8 +2,8 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
-use code_graph::loading::DirectoryFileSource;
+use code_graph::linker::indexer::{IndexingConfig, RepositoryIndexer, RepositoryIndexingResult};
+use code_graph::linker::loading::DirectoryFileSource;
 use ontology::Ontology;
 use query_engine::compiler::SecurityContext;
 use serde::Serialize;
@@ -220,7 +220,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
 fn build_index_output(
     repo_name: &str,
     path: &str,
-    result: &code_graph::indexer::RepositoryIndexingResult,
+    result: &RepositoryIndexingResult,
     show_stats: bool,
 ) -> IndexOutput {
     let (graph, rel_counts, def_counts) = match result.graph_data {

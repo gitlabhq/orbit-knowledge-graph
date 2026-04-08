@@ -1,4 +1,3 @@
-mod config;
 mod executor;
 mod output;
 mod service;
@@ -14,8 +13,8 @@ use compiler::SecurityContext;
 use ontology::Ontology;
 use tracing_subscriber::EnvFilter;
 
-use config::ProfilingConfig;
 use executor::enrich_output;
+use gkg_server_config::ProfilingConfig;
 use output::{ProfilerOutput, build_output};
 use service::ProfilerPipelineService;
 
@@ -211,7 +210,7 @@ async fn main() -> Result<()> {
     let is_single_query = matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
 
     let instance_health = if profiling_config.instance_health {
-        match client.profiler().fetch_instance_health().await {
+        match client.fetch_instance_health().await {
             Ok(health) => Some(serde_json::to_value(&health).unwrap_or_default()),
             Err(e) => {
                 tracing::warn!("failed to fetch instance health: {e}");
