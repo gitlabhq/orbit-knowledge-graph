@@ -72,6 +72,32 @@ async fn infra_canary() {
     // Forked subtest gets its own DB and can write without affecting shared.
     run_subtests!(&ctx, forked_subtest_can_write);
 
-    // Verify the shared DB wasn't contaminated by the forked write.
-    run_subtests_shared!(&ctx, forked_write_does_not_leak_to_shared);
+    // Verify the shared DB wasn't contaminated by the forked write,
+    // and that fetch_arrow_with_summary returns ClickHouse stats.
+    run_subtests_shared!(
+        &ctx,
+        forked_write_does_not_leak_to_shared,
+        fetch_arrow_with_summary_returns_stats,
+    );
+}
+
+async fn fetch_arrow_with_summary_returns_stats(ctx: &TestContext) {
+    let client = ctx.create_client();
+    let (batches, summary) = client
+        .query("SELECT id, username FROM gl_user")
+        .fetch_arrow_with_summary()
+        .await
+        .expect("query should succeed");
+
+    assert!(!batches.is_empty(), "should return at least one batch");
+
+    let summary = summary.expect("summary should be present");
+    assert!(
+        summary.read_rows().unwrap_or(0) > 0,
+        "read_rows should be > 0"
+    );
+    assert!(
+        summary.read_bytes().unwrap_or(0) > 0,
+        "read_bytes should be > 0"
+    );
 }

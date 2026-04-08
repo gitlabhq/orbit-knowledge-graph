@@ -218,3 +218,25 @@ async fn enrich_execution(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_summary_no_op_when_none() {
+        let stats = QueryExecutionStats {
+            read_rows: 0,
+            read_bytes: 0,
+            result_rows: 42,
+            result_bytes: 0,
+            elapsed_ns: 1000,
+            memory_usage: 0,
+        };
+        let result = apply_summary(stats, None);
+        assert_eq!(result.read_rows, 0);
+        assert_eq!(result.read_bytes, 0);
+        assert_eq!(result.memory_usage, 0);
+        assert_eq!(result.result_rows, 42);
+    }
+}
