@@ -86,3 +86,83 @@ fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
         sc.admin || (direct_gitlab_org_member && reporter_or_above)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use compiler::SecurityContext;
+    use ontology::Ontology;
+    use pipeline::QueryPipelineContext;
+    use std::sync::Arc;
+
+    fn make_ctx(security_context: Option<SecurityContext>) -> QueryPipelineContext {
+        QueryPipelineContext {
+            query_json: String::new(),
+            compiled: None,
+            ontology: Arc::new(Ontology::default()),
+            security_context,
+            server_extensions: Default::default(),
+            phases: Default::default(),
+        }
+    }
+
+    #[test]
+    fn no_security_context_denies_debug_sql() {
+        let ctx = make_ctx(None);
+        assert!(!can_see_debug_sql(&ctx));
+    }
+
+    #[test]
+    fn external_user_denied() {
+        let sc = SecurityContext::new(1, vec!["1/12345/".into()])
+            .unwrap()
+            .with_role(false, Some(20));
+        let ctx = make_ctx(Some(sc));
+        assert!(!can_see_debug_sql(&ctx));
+    }
+
+    #[test]
+    fn gitlab_org_subgroup_member_denied() {
+        let sc = SecurityContext::new(1, vec!["1/9970/555/".into()])
+            .unwrap()
+            .with_role(false, Some(20));
+        let ctx = make_ctx(Some(sc));
+        assert!(!can_see_debug_sql(&ctx));
+    }
+
+    #[test]
+    fn gitlab_org_direct_member_without_access_level_denied() {
+        let sc = SecurityContext::new(1, vec!["1/9970/".into()])
+            .unwrap()
+            .with_role(false, None);
+        let ctx = make_ctx(Some(sc));
+        assert!(!can_see_debug_sql(&ctx));
+    }
+
+    #[test]
+    fn gitlab_org_direct_member_guest_denied() {
+        let sc = SecurityContext::new(1, vec!["1/9970/".into()])
+            .unwrap()
+            .with_role(false, Some(10));
+        let ctx = make_ctx(Some(sc));
+        assert!(!can_see_debug_sql(&ctx));
+    }
+
+    #[test]
+    fn gitlab_org_direct_member_reporter_allowed() {
+        let sc = SecurityContext::new(1, vec!["1/9970/".into()])
+            .unwrap()
+            .with_role(false, Some(20));
+        let ctx = make_ctx(Some(sc));
+        assert!(can_see_debug_sql(&ctx));
+    }
+
+    #[test]
+    fn admin_always_allowed() {
+        let sc = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_role(true, None);
+        let ctx = make_ctx(Some(sc));
+        assert!(can_see_debug_sql(&ctx));
+    }
+}
