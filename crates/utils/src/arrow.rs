@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayBuilder, ArrayRef, BooleanArray, Float64Array, Int16Array, Int32Array, Int64Array,
-    Int64Builder, Int8Array, LargeStringArray, ListArray, PrimitiveArray, StringArray,
+    Array, ArrayBuilder, ArrayRef, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array,
+    Int64Array, Int64Builder, LargeStringArray, ListArray, PrimitiveArray, StringArray,
     StringBuilder, StructArray, TimestampMicrosecondArray, TimestampMillisecondArray,
-    TimestampNanosecondArray, TimestampSecondArray, UInt16Array, UInt32Array, UInt64Array,
-    UInt8Array,
+    TimestampNanosecondArray, TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array,
+    UInt64Array,
 };
 use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -295,6 +295,7 @@ pub struct ColumnSpec {
     pub nullable: bool,
 }
 
+#[derive(Debug)]
 enum Col {
     Str(StringBuilder, bool),
     Int(Int64Builder, bool),
@@ -325,35 +326,61 @@ impl Col {
 
 /// A mutable handle to a single column builder. Returned by [`BatchBuilder::col`].
 ///
-/// Panics if you call the wrong push variant for the column type (e.g.
-/// `push_str` on an `Int` column). This is a programming error.
+/// Returns `Err` if you call the wrong push variant for the column type.
 pub struct ColRef<'a> {
     name: &'a str,
     col: &'a mut Col,
 }
 
+type BatchResult<T> = std::result::Result<T, arrow::error::ArrowError>;
+
+fn batch_err(msg: impl Into<String>) -> arrow::error::ArrowError {
+    arrow::error::ArrowError::InvalidArgumentError(msg.into())
+}
+
 impl ColRef<'_> {
-    pub fn push_str(&mut self, v: impl AsRef<str>) {
+    pub fn push_str(&mut self, v: impl AsRef<str>) -> BatchResult<()> {
         match &mut *self.col {
-            Col::Str(b, _) => b.append_value(v),
-            other => panic!("push_str on {} column '{}'", other.kind(), self.name),
+            Col::Str(b, _) => {
+                b.append_value(v);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_str on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
         }
     }
 
-    pub fn push_int(&mut self, v: i64) {
+    pub fn push_int(&mut self, v: i64) -> BatchResult<()> {
         match &mut *self.col {
-            Col::Int(b, _) => b.append_value(v),
-            other => panic!("push_int on {} column '{}'", other.kind(), self.name),
+            Col::Int(b, _) => {
+                b.append_value(v);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_int on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
         }
     }
 
-    pub fn push_opt_str<S: AsRef<str>>(&mut self, v: Option<S>) {
+    pub fn push_opt_str<S: AsRef<str>>(&mut self, v: Option<S>) -> BatchResult<()> {
         match &mut *self.col {
-            Col::Str(b, _) => match v {
-                Some(s) => b.append_value(s),
-                None => b.append_null(),
-            },
-            other => panic!("push_opt_str on {} column '{}'", other.kind(), self.name),
+            Col::Str(b, _) => {
+                match v {
+                    Some(s) => b.append_value(s),
+                    None => b.append_null(),
+                }
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_opt_str on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
         }
     }
 }
@@ -372,13 +399,15 @@ impl ColRef<'_> {
 ///     ColumnSpec { name: "path".into(), col_type: ColumnType::Str, nullable: false },
 ///     ColumnSpec { name: "name".into(), col_type: ColumnType::Str, nullable: false },
 /// ];
-/// let batch = BatchBuilder::new(&specs, nodes.len())
+/// let batch = BatchBuilder::new(&specs, nodes.len())?
 ///     .build(&nodes, |n, b| {
-///         b.col("id").push_int(n.id);
-///         b.col("path").push_str(&n.path);
-///         b.col("name").push_str(&n.name);
+///         b.col("id")?.push_int(n.id)?;
+///         b.col("path")?.push_str(&n.path)?;
+///         b.col("name")?.push_str(&n.name)?;
+///         Ok(())
 ///     })?;
 /// ```
+#[derive(Debug)]
 pub struct BatchBuilder {
     names: Vec<String>,
     cols: Vec<Col>,
@@ -387,19 +416,15 @@ pub struct BatchBuilder {
 
 impl BatchBuilder {
     /// Create a builder from column specs, pre-allocating for `cap` rows.
-    ///
-    /// Panics if any column name appears more than once.
-    pub fn new(specs: &[ColumnSpec], cap: usize) -> Self {
+    pub fn new(specs: &[ColumnSpec], cap: usize) -> BatchResult<Self> {
         let mut names = Vec::with_capacity(specs.len());
         let mut cols = Vec::with_capacity(specs.len());
         let mut index = HashMap::with_capacity(specs.len());
 
         for spec in specs {
-            assert!(
-                !index.contains_key(&spec.name),
-                "duplicate column name '{}'",
-                spec.name
-            );
+            if index.contains_key(&spec.name) {
+                return Err(batch_err(format!("duplicate column name '{}'", spec.name)));
+            }
             let col = match spec.col_type {
                 ColumnType::Int => Col::Int(Int64Builder::with_capacity(cap), spec.nullable),
                 ColumnType::Str => {
@@ -411,44 +436,46 @@ impl BatchBuilder {
             cols.push(col);
         }
 
-        Self { names, cols, index }
+        Ok(Self { names, cols, index })
     }
 
-    /// Get a mutable column handle by name. Panics if the column doesn't exist.
-    pub fn col(&mut self, name: &str) -> ColRef<'_> {
-        let idx = *self
-            .index
-            .get(name)
-            .unwrap_or_else(|| panic!("column '{name}' not found; available: {:?}", self.names));
-        ColRef {
+    /// Get a mutable column handle by name.
+    pub fn col(&mut self, name: &str) -> BatchResult<ColRef<'_>> {
+        let idx = *self.index.get(name).ok_or_else(|| {
+            batch_err(format!(
+                "column '{name}' not found; available: {:?}",
+                self.names
+            ))
+        })?;
+        Ok(ColRef {
             name: &self.names[idx],
             col: &mut self.cols[idx],
-        }
+        })
     }
 
     /// Iterate over items, fill columns via the closure, and produce a
     /// RecordBatch.
     ///
     /// Every call to `fill` must push exactly one value to each column.
-    /// Panics if column lengths are inconsistent after iteration.
     pub fn build<T>(
         mut self,
         items: &[T],
-        fill: impl Fn(&T, &mut Self),
-    ) -> std::result::Result<RecordBatch, arrow::error::ArrowError> {
+        fill: impl Fn(&T, &mut Self) -> BatchResult<()>,
+    ) -> BatchResult<RecordBatch> {
         for item in items {
-            fill(item, &mut self);
+            fill(item, &mut self)?;
         }
 
         // Validate all columns have the same length.
         if let Some(expected) = self.cols.first().map(Col::len) {
             for (i, col) in self.cols.iter().enumerate().skip(1) {
                 let actual = col.len();
-                assert_eq!(
-                    actual, expected,
-                    "column '{}' has {} rows but '{}' has {}",
-                    self.names[i], actual, self.names[0], expected,
-                );
+                if actual != expected {
+                    return Err(batch_err(format!(
+                        "column '{}' has {} rows but '{}' has {}",
+                        self.names[i], actual, self.names[0], expected,
+                    )));
+                }
             }
         }
 
@@ -878,5 +905,182 @@ mod tests {
     fn array_value_to_string_null_returns_none() {
         let arr = Int64Array::from(vec![Option::<i64>::None]);
         assert_eq!(ArrowUtils::array_value_to_string(&arr, 0), None);
+    }
+
+    // ── BatchBuilder tests ──────────────────────────────────────────
+
+    fn test_specs() -> Vec<ColumnSpec> {
+        vec![
+            ColumnSpec {
+                name: "id".into(),
+                col_type: ColumnType::Int,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "name".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+        ]
+    }
+
+    #[test]
+    fn batch_builder_produces_correct_schema() {
+        let batch = BatchBuilder::new(&test_specs(), 2)
+            .unwrap()
+            .build(&[(1i64, "alice"), (2, "bob")], |item, b| {
+                b.col("id")?.push_int(item.0)?;
+                b.col("name")?.push_str(item.1)?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(batch.num_rows(), 2);
+        assert_eq!(batch.num_columns(), 2);
+        let schema = batch.schema();
+        let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert_eq!(names, vec!["id", "name"]);
+    }
+
+    #[test]
+    fn batch_builder_empty_items() {
+        let items: Vec<(i64, &str)> = vec![];
+        let batch = BatchBuilder::new(&test_specs(), 0)
+            .unwrap()
+            .build(&items, |item, b| {
+                b.col("id")?.push_int(item.0)?;
+                b.col("name")?.push_str(item.1)?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(batch.num_rows(), 0);
+    }
+
+    #[test]
+    fn batch_builder_nullable_column() {
+        let specs = vec![ColumnSpec {
+            name: "val".into(),
+            col_type: ColumnType::Str,
+            nullable: true,
+        }];
+        let batch = BatchBuilder::new(&specs, 2)
+            .unwrap()
+            .build(&[Some("hello"), None], |item, b| {
+                b.col("val")?.push_opt_str(*item)?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(batch.num_rows(), 2);
+        assert!(batch.schema().field(0).is_nullable());
+    }
+
+    #[test]
+    fn batch_builder_duplicate_column_name_errors() {
+        let specs = vec![
+            ColumnSpec {
+                name: "x".into(),
+                col_type: ColumnType::Int,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "x".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+        ];
+        let err = BatchBuilder::new(&specs, 0).unwrap_err();
+        assert!(err.to_string().contains("duplicate column name 'x'"));
+    }
+
+    #[test]
+    fn batch_builder_unknown_column_errors() {
+        let items = vec![1i64];
+        let err = BatchBuilder::new(&test_specs(), 1)
+            .unwrap()
+            .build(&items, |_, b| {
+                b.col("nonexistent")?.push_int(1)?;
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("column 'nonexistent' not found"));
+    }
+
+    #[test]
+    fn batch_builder_type_mismatch_push_str_on_int() {
+        let items = vec![1i64];
+        let err = BatchBuilder::new(&test_specs(), 1)
+            .unwrap()
+            .build(&items, |_, b| {
+                b.col("id")?.push_str("oops")?;
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("push_str on Int column 'id'"));
+    }
+
+    #[test]
+    fn batch_builder_type_mismatch_push_int_on_str() {
+        let items = vec![1i64];
+        let err = BatchBuilder::new(&test_specs(), 1)
+            .unwrap()
+            .build(&items, |_, b| {
+                b.col("name")?.push_int(42)?;
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("push_int on Str column 'name'"));
+    }
+
+    #[test]
+    fn batch_builder_column_length_mismatch_errors() {
+        let items = vec![1i64, 2];
+        let err = BatchBuilder::new(&test_specs(), 2)
+            .unwrap()
+            .build(&items, |item, b| {
+                b.col("id")?.push_int(*item)?;
+                // deliberately skip "name" on second row
+                if *item == 1 {
+                    b.col("name")?.push_str("alice")?;
+                }
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("has 1 rows but"));
+    }
+
+    #[test]
+    fn batch_builder_preserves_column_order() {
+        let specs = vec![
+            ColumnSpec {
+                name: "c".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "a".into(),
+                col_type: ColumnType::Int,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "b".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+        ];
+        let batch = BatchBuilder::new(&specs, 1)
+            .unwrap()
+            .build(&[()], |_, b| {
+                b.col("c")?.push_str("x")?;
+                b.col("a")?.push_int(1)?;
+                b.col("b")?.push_str("y")?;
+                Ok(())
+            })
+            .unwrap();
+
+        let schema = batch.schema();
+        let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert_eq!(names, vec!["c", "a", "b"]);
     }
 }
