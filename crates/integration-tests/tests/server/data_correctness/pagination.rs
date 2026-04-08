@@ -581,25 +581,15 @@ pub(super) async fn cursor_path_finding_is_deterministic(ctx: &TestContext) {
 
     let pids1 = resp1.path_ids();
     let pids2 = resp2.path_ids();
-    assert_eq!(
-        pids1.len(),
-        pids2.len(),
-        "same query should return same path count"
-    );
 
-    // Compare the destination nodes of each path. path_ids() returns a
-    // HashSet whose iteration order is non-deterministic, so sort both
-    // destination lists before comparing.
-    let mut dests1: Vec<i64> = pids1
+    let dests1: Vec<i64> = pids1
         .iter()
         .map(|&pid| resp1.path(pid).last().unwrap().to_id)
         .collect();
-    dests1.sort_unstable();
-    let mut dests2: Vec<i64> = pids2
+    let dests2: Vec<i64> = pids2
         .iter()
         .map(|&pid| resp2.path(pid).last().unwrap().to_id)
         .collect();
-    dests2.sort_unstable();
 
     assert_eq!(
         dests1, dests2,

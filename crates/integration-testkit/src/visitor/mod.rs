@@ -326,18 +326,20 @@ impl ResponseView {
             .collect()
     }
 
-    /// Return the set of distinct path_ids present in edges.
+    /// Return the distinct path_ids present in edges, in first-seen order.
     ///
     /// Tests should use this to discover which paths exist, then call
     /// [`path`] for each one explicitly.
     /// Satisfies [`Requirement::PathFinding`].
-    pub fn path_ids(&self) -> MustInspect<HashSet<usize>> {
+    pub fn path_ids(&self) -> MustInspect<Vec<usize>> {
         self.tracker.satisfy(Requirement::PathFinding);
+        let mut seen = HashSet::new();
         let ids = self
             .response
             .edges
             .iter()
             .filter_map(|e| e.path_id)
+            .filter(|id| seen.insert(*id))
             .collect();
         MustInspect::new(ids, "path_ids()")
     }
@@ -993,7 +995,7 @@ pub(crate) mod tests {
             pagination: None,
         };
         let view = ResponseView::new(resp);
-        assert_eq!(view.path_ids(), HashSet::from([0, 2]));
+        assert_eq!(*view.path_ids(), vec![0, 2]);
     }
 
     #[test]
