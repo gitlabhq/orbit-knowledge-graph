@@ -334,32 +334,34 @@ impl ColRef<'_> {
     }
 }
 
-/// Generic Arrow RecordBatch builder with an envelope of fixed columns
-/// (id, project_id, branch, _version) wrapping caller-defined columns.
+/// Schema-driven Arrow RecordBatch builder.
 ///
-/// Schema is driven by a `&[ColumnSpec]` -- callers provide extraction
-/// logic via a fill closure that references columns by name.
+/// All columns are declared via `&[ColumnSpec]`. The builder manages typed
+/// column builders and produces a RecordBatch. No opinions about which
+/// columns exist or their order -- the caller controls the full schema.
 ///
 /// ```ignore
-/// use gkg_utils::arrow::{NodeBatch, ColumnSpec, ColumnType};
+/// use gkg_utils::arrow::{BatchBuilder, ColumnSpec, ColumnType};
 ///
 /// let specs = vec![
+///     ColumnSpec { name: "id".into(), col_type: ColumnType::Int, nullable: false },
 ///     ColumnSpec { name: "path".into(), col_type: ColumnType::Str, nullable: false },
 ///     ColumnSpec { name: "name".into(), col_type: ColumnType::Str, nullable: false },
 /// ];
-/// let batch = NodeBatch::new(&specs, nodes.len())
-///     .build(&nodes, project_id, "main", |n| n.id, |n, b| {
+/// let batch = BatchBuilder::new(&specs, nodes.len())
+///     .build(&nodes, |n, b| {
+///         b.col("id").push_int(n.id);
 ///         b.col("path").push_str(&n.path);
 ///         b.col("name").push_str(&n.name);
 ///     })?;
 /// ```
-pub struct NodeBatch {
+pub struct BatchBuilder {
     names: Vec<String>,
     cols: Vec<Col>,
     index: HashMap<String, usize>,
 }
 
-impl NodeBatch {
+impl BatchBuilder {
     /// Create a builder from column specs, pre-allocating for `cap` rows.
     pub fn new(specs: &[ColumnSpec], cap: usize) -> Self {
         let mut names = Vec::with_capacity(specs.len());
@@ -390,52 +392,26 @@ impl NodeBatch {
         ColRef(&mut self.cols[*idx])
     }
 
-    /// Iterate over nodes, fill columns via the closure, and produce a
-    /// RecordBatch with envelope: `id, project_id, branch, <columns>, _version`.
-    pub fn build<N>(
+    /// Iterate over items, fill columns via the closure, and produce a
+    /// RecordBatch. Every call to `fill` must push exactly one value to
+    /// each column.
+    pub fn build<T>(
         mut self,
-        nodes: &[N],
-        project_id: i64,
-        branch: &str,
-        id_fn: fn(&N) -> Option<i64>,
-        fill: impl Fn(&N, &mut Self),
+        items: &[T],
+        fill: impl Fn(&T, &mut Self),
     ) -> std::result::Result<RecordBatch, arrow::error::ArrowError> {
-        let cap = nodes.len();
-        let mut id = Int64Builder::with_capacity(cap);
-        let mut pid = Int64Builder::with_capacity(cap);
-        let mut br = StringBuilder::with_capacity(cap, cap * branch.len());
-        let mut ver = Int64Builder::with_capacity(cap);
-
-        for node in nodes {
-            let Some(node_id) = id_fn(node) else {
-                continue;
-            };
-            id.append_value(node_id);
-            pid.append_value(project_id);
-            br.append_value(branch);
-            ver.append_value(0);
-            fill(node, &mut self);
+        for item in items {
+            fill(item, &mut self);
         }
 
-        let mut fields = vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("project_id", DataType::Int64, false),
-            Field::new("branch", DataType::Utf8, false),
-        ];
-        let mut columns: Vec<ArrayRef> = vec![
-            Arc::new(id.finish()),
-            Arc::new(pid.finish()),
-            Arc::new(br.finish()),
-        ];
+        let mut fields = Vec::with_capacity(self.names.len());
+        let mut columns: Vec<ArrayRef> = Vec::with_capacity(self.cols.len());
 
         for (name, col) in self.names.into_iter().zip(self.cols) {
             let (dtype, nullable, array) = col.finish();
             fields.push(Field::new(name, dtype, nullable));
             columns.push(array);
         }
-
-        fields.push(Field::new("_version", DataType::Int64, false));
-        columns.push(Arc::new(ver.finish()));
 
         RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)
     }
