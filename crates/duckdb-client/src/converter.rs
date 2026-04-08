@@ -184,7 +184,6 @@ fn convert_edges(graph_data: &GraphData, ontology: &Ontology) -> Result<RecordBa
             b.col("relationship_kind")?.push_str(rel_kind)?;
             b.col("target_id")?.push_int(tgt_id)?;
             b.col("target_kind")?.push_str(tgt_kind)?;
-            b.col("_version")?.push_int(0)?;
             Ok(())
         },
     )?)
