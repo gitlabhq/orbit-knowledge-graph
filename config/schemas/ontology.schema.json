@@ -372,6 +372,33 @@
           "items": { "type": "string" },
           "description": "Entity names (e.g. 'User') excluded from traversal-path security filters. Resolved to physical table names at load time. These are entities whose visibility is determined through relationships rather than direct path hierarchy."
         },
+        "local": {
+          "type": "object",
+          "description": "Configuration for entities that participate in the local DuckDB graph (CLI indexing).",
+          "properties": {
+            "entities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Entity name (must reference a declared node)."
+                  },
+                  "exclude_properties": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Property names excluded from the local table for this entity (e.g. server-only columns like 'traversal_path')."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "Entities indexed locally, with per-entity property exclusions."
+            }
+          },
+          "additionalProperties": false
+        },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."

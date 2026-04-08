@@ -260,5 +260,20 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             .push(node.destination_table.clone());
     }
 
+    // Validate and store local entity settings.
+    if let Some(local) = schema.settings.local {
+        for entry in local.entities {
+            if !ontology.nodes.contains_key(&entry.name) {
+                return Err(OntologyError::Validation(format!(
+                    "local.entities: unknown entity '{}'",
+                    entry.name
+                )));
+            }
+            ontology
+                .local_entities
+                .insert(entry.name, entry.exclude_properties);
+        }
+    }
+
     Ok(ontology)
 }

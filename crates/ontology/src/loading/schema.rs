@@ -35,7 +35,22 @@ pub(super) struct SettingsYaml {
     pub internal_column_prefix: String,
     #[serde(default)]
     pub skip_security_filter_for_entities: Vec<String>,
+    #[serde(default)]
+    pub local: Option<LocalSettingsYaml>,
     pub etl: EtlSettingsYaml,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct LocalSettingsYaml {
+    #[serde(default)]
+    pub entities: Vec<LocalEntityYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct LocalEntityYaml {
+    pub name: String,
+    #[serde(default)]
+    pub exclude_properties: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
