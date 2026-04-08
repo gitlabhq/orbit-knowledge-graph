@@ -1837,4 +1837,20 @@ properties:
             ]
         );
     }
+
+    #[test]
+    fn local_exclude_properties_validated_against_fields() {
+        // Verify the real ontology passes validation (all exclude_properties
+        // reference actual fields). If someone adds a typo, this catches it.
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        for entity_name in ontology.local_entity_names() {
+            let fields = ontology
+                .local_entity_fields(entity_name)
+                .expect("local entity should have fields");
+            assert!(
+                !fields.is_empty(),
+                "local entity '{entity_name}' should have at least one field after exclusions"
+            );
+        }
+    }
 }
