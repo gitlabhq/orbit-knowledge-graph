@@ -38,12 +38,6 @@ pub struct QueryConfig {
     /// ClickHouse `query_cache_ttl` in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_cache_ttl: Option<u32>,
-
-    /// ClickHouse `query_cache_share_between_users`. When true, cached
-    /// results are shared across ClickHouse users. Required in
-    /// multi-pod deployments where pods may connect as different users.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub query_cache_share_between_users: Option<bool>,
 }
 
 impl QueryConfig {
@@ -54,9 +48,6 @@ impl QueryConfig {
             max_execution_time: overrides.max_execution_time.or(self.max_execution_time),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
-            query_cache_share_between_users: overrides
-                .query_cache_share_between_users
-                .or(self.query_cache_share_between_users),
         }
     }
 
@@ -171,19 +162,16 @@ mod tests {
             max_execution_time: Some(30),
             use_query_cache: Some(false),
             query_cache_ttl: Some(60),
-            query_cache_share_between_users: Some(false),
         };
         let over = QueryConfig {
             max_execution_time: Some(120),
             use_query_cache: None,
             query_cache_ttl: None,
-            query_cache_share_between_users: Some(true),
         };
         let merged = base.merge(&over);
         assert_eq!(merged.max_execution_time, Some(120));
         assert_eq!(merged.use_query_cache, Some(false));
         assert_eq!(merged.query_cache_ttl, Some(60));
-        assert_eq!(merged.query_cache_share_between_users, Some(true));
     }
 
     #[test]
@@ -192,17 +180,12 @@ mod tests {
             max_execution_time: Some(30),
             use_query_cache: Some(true),
             query_cache_ttl: None,
-            query_cache_share_between_users: Some(true),
         };
         let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(settings.len(), 3);
+        assert_eq!(settings.len(), 2);
         assert_eq!(settings[0], ("max_execution_time".into(), "30".into()));
-        assert_eq!(
-            settings[1],
-            ("query_cache_share_between_users".into(), "1".into())
-        );
-        assert_eq!(settings[2], ("use_query_cache".into(), "1".into()));
+        assert_eq!(settings[1], ("use_query_cache".into(), "1".into()));
         Ok(())
     }
 
@@ -228,7 +211,6 @@ mod tests {
                 max_execution_time: Some(30),
                 use_query_cache: Some(false),
                 query_cache_ttl: Some(60),
-                query_cache_share_between_users: None,
             },
             overrides,
         };
