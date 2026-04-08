@@ -232,11 +232,8 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                 .delete_all_data()
                 .context("failed to clear existing data")?;
 
-            client.insert_arrow("gl_directory", local_data.directories)?;
-            client.insert_arrow("gl_file", local_data.files)?;
-            client.insert_arrow("gl_definition", local_data.definitions)?;
-            client.insert_arrow("gl_imported_symbol", local_data.imported_symbols)?;
-            client.insert_arrow("gl_edge", local_data.edges)?;
+            duckdb_client::DuckDbClient::insert_graph(&db, local_data)
+                .context("failed to insert graph data")?;
 
             Some(db.display().to_string())
         } else {

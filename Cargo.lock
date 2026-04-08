@@ -2408,6 +2408,7 @@ name = "duckdb-client"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "code-graph",
  "duckdb",
  "gkg-utils",
  "serde_json",
@@ -4799,6 +4800,7 @@ dependencies = [
  "clap",
  "code-graph",
  "dirs",
+ "duckdb-client",
  "dunce",
  "fs4",
  "gitalisk-core",
