@@ -285,7 +285,7 @@ impl HydrationStage {
         let mut query = client.query(&compiled.base.sql);
         if let Some(ref pid) = profiling_id {
             let log_comment = format!("gkg;hydration;profiling_id={pid}");
-            query = query.with_option("log_comment", log_comment);
+            query = query.with_setting("log_comment", log_comment);
         }
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
