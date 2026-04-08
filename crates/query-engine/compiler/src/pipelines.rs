@@ -82,6 +82,7 @@ pub struct DuckDbState {
     pub json: Option<String>,
     pub input: Option<Input>,
     pub node: Option<Node>,
+    pub result_ctx: Option<ResultContext>,
     pub output: Option<CompiledQueryContext>,
 }
 
@@ -165,11 +166,13 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
 
 /// Local DuckDB compilation pipeline.
 ///
-/// Skips security, check, enforce, and optimize — those are ClickHouse/multi-tenant
-/// concerns. Emits DuckDB-dialect SQL via [`DuckDbCodegenPass`].
+/// Skips security, check, deduplicate, and optimize — those are
+/// ClickHouse/multi-tenant concerns. Enforce runs to build the
+/// ResultContext (node/edge column metadata) needed by formatters.
+/// Emits DuckDB-dialect SQL via [`DuckDbCodegenPass`].
 ///
 /// ```text
-/// JSON → Validate → Normalize → Lower → DuckDbCodegen
+/// JSON → Validate → Normalize → Lower → Enforce → DuckDbCodegen
 /// ```
 pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
     Pipeline::builder()
@@ -177,6 +180,7 @@ pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
         .seal(SealJson)
         .pass(NormalizePass)
         .pass(LowerPass)
+        .pass(EnforcePass)
         .pass(DuckDbCodegenPass)
         .build()
 }
