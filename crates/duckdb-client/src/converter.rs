@@ -111,43 +111,27 @@ pub fn convert_graph_data(
             Ok(())
         })?,
 
-        edges: convert_edges(graph_data)?,
+        edges: convert_edges(graph_data, ontology)?,
     })
 }
 
-fn convert_edges(graph_data: &GraphData) -> Result<RecordBatch> {
-    let specs = [
-        ColumnSpec {
-            name: "source_id".into(),
-            col_type: ColumnType::Int,
+fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
+    ontology
+        .local_edge_columns()
+        .iter()
+        .map(|c| ColumnSpec {
+            name: c.name.clone(),
+            col_type: match c.data_type {
+                OntDataType::Int => ColumnType::Int,
+                _ => ColumnType::Str,
+            },
             nullable: false,
-        },
-        ColumnSpec {
-            name: "source_kind".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "relationship_kind".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "target_id".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "target_kind".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "_version".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-    ];
+        })
+        .collect()
+}
+
+fn convert_edges(graph_data: &GraphData, ontology: &Ontology) -> Result<RecordBatch> {
+    let specs = edge_specs(ontology);
 
     // Pre-resolve node IDs so the fill closure only sees valid edges.
     let resolved: Vec<_> = graph_data
