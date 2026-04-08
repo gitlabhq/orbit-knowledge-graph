@@ -290,23 +290,28 @@ impl HydrationStage {
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
-        let batches = query
-            .fetch_arrow()
+        let (batches, summary) = query
+            .fetch_arrow_with_summary()
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))?;
         let elapsed = start.elapsed();
         let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
+
+        let stats = super::execution::apply_summary(
+            QueryExecutionStats {
+                result_rows,
+                elapsed_ns: elapsed.as_nanos() as u64,
+                ..Default::default()
+            },
+            summary.as_ref(),
+        );
 
         let mut execution = QueryExecution {
             label: "hydration:dynamic".into(),
             rendered_sql,
             query_id: String::new(),
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-            stats: QueryExecutionStats {
-                result_rows,
-                elapsed_ns: elapsed.as_nanos() as u64,
-                ..Default::default()
-            },
+            stats,
             explain_plan: None,
             explain_pipeline: None,
             query_log: None,
