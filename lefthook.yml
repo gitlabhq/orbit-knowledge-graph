@@ -26,3 +26,6 @@ pre-commit:
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
+    - name: schema-version
+      run: ./scripts/check-schema-version.sh
+      glob: "config/graph.sql"
