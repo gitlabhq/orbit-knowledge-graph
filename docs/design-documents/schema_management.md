@@ -106,6 +106,14 @@ For the initial rollout, schema changes use a drop-and-recreate strategy:
 
 This is acceptable during early rollout when the data can be fully re-indexed from the datalake.
 
+**Re-indexing after reset**: No new re-indexing machinery is needed. The existing dispatch pipeline handles the post-reset state naturally because re-enabling a namespace is indistinguishable from enabling it for the first time:
+
+- `NamespaceDispatcher` and `GlobalDispatcher` fire on their normal schedule. With empty `checkpoint` and graph tables, the handlers start from watermark epoch-zero and pick up all datalake rows.
+- `NamespaceCodeBackfillDispatcher` consumes CDC insert events for the re-enabled namespaces and dispatches `CodeIndexingTaskRequest` per project.
+- `NamespaceDeletionScheduler` starts from epoch-zero with an empty `namespace_deletion_schedule` table and rebuilds deletion schedules organically.
+
+See the [V0 schema reset runbook](../dev/runbooks/v0_schema_reset.md) for the step-by-step procedure and troubleshooting guide.
+
 ### ALTER TABLE
 
 For additive, non-breaking changes like `ADD COLUMN`, `ALTER TABLE` is a metadata-only operation in ClickHouse — nearly instantaneous and non-blocking.

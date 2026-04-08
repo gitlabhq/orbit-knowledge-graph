@@ -10,3 +10,4 @@ mod nats_tls;
 mod schema_version;
 mod sdlc;
 mod table_cleanup;
+mod v0_reindex;
