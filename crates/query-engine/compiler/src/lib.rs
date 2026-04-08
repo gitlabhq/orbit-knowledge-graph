@@ -88,7 +88,7 @@ pub use passes::normalize::{build_entity_auth, normalize};
 pub use passes::optimize::optimize;
 pub use passes::security::apply_security_context;
 pub use passes::validate::Validator;
-pub use types::SecurityContext;
+pub use types::{AccessLevel, SecurityContext};
 
 use metrics::CountErr;
 use std::sync::Arc;
