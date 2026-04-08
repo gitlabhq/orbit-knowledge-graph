@@ -25,7 +25,7 @@ settings:
         - {name: target_kind, type: string}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User]
-  local:
+  local_db:
     entities:
       - name: Directory
         exclude_properties: [traversal_path, commit_sha]

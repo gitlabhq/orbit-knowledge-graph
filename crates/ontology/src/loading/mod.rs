@@ -260,12 +260,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             .push(node.destination_table.clone());
     }
 
-    // Validate and store local entity settings.
-    if let Some(local) = schema.settings.local {
-        for entry in local.entities {
+    // Validate and store local_db entity settings.
+    if let Some(local_db) = schema.settings.local_db {
+        for entry in local_db.entities {
             let node = ontology.nodes.get(&entry.name).ok_or_else(|| {
                 OntologyError::Validation(format!(
-                    "local.entities: unknown entity '{}'",
+                    "local_db.entities: unknown entity '{}'",
                     entry.name
                 ))
             })?;
@@ -276,7 +276,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             for prop in &entry.exclude_properties {
                 if !field_names.contains(prop.as_str()) {
                     return Err(OntologyError::Validation(format!(
-                        "local.entities: exclude_properties entry '{}' \
+                        "local_db.entities: exclude_properties entry '{}' \
                          is not a declared property of '{}'",
                         prop, entry.name
                     )));
@@ -288,13 +288,13 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(entry.name, entry.exclude_properties);
         }
 
-        if let Some(edge_table) = local.edge_table {
+        if let Some(edge_table) = local_db.edge_table {
             // Validate no duplicate column names.
             let mut seen = std::collections::HashSet::new();
             for col in &edge_table.columns {
                 if !seen.insert(&col.name) {
                     return Err(OntologyError::Validation(format!(
-                        "local.edge_table: duplicate column name '{}'",
+                        "local_db.edge_table: duplicate column name '{}'",
                         col.name
                     )));
                 }
