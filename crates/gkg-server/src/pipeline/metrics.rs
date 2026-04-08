@@ -186,9 +186,15 @@ impl PipelineObserver for OTelPipelineObserver {
     }
 
     fn query_executed(&mut self, label: &str, read_rows: u64, read_bytes: u64, memory: i64) {
+        let static_label: &'static str = match label {
+            "base" => "base",
+            "hydration:static" => "hydration:static",
+            "hydration:dynamic" => "hydration:dynamic",
+            _ => "other",
+        };
         let attrs = [
             KeyValue::new("query_type", self.query_type),
-            KeyValue::new("label", label.to_string()),
+            KeyValue::new("label", static_label),
         ];
         METRICS.ch_read_rows.add(read_rows, &attrs);
         METRICS.ch_read_bytes.add(read_bytes, &attrs);

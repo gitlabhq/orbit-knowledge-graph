@@ -61,6 +61,7 @@ Integration tests need Docker: `mise test:integration`. Correctness subset: `mis
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
 | Helm charts | `helm/gkg/` (vendored via vendir), `helm/local/` (dev Prometheus + Grafana) |
+| Local Grafana dashboards | `helm/local/dashboards/` |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
@@ -89,7 +90,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `code-graph/parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
 | `code-graph/linker` | Builds in-memory property graphs from parsed code |
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`) and Arrow extraction utilities |
-| `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QueryProfiler` for per-query stats |
+| `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `siphon-proto` | Protobuf types for CDC replication events |
 | `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |

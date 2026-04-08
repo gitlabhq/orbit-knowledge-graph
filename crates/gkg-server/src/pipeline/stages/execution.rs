@@ -176,7 +176,7 @@ pub(crate) fn apply_summary(
             stats.read_bytes = s.read_bytes().unwrap_or(0);
         }
         if stats.memory_usage == 0 {
-            stats.memory_usage = s.memory_usage().unwrap_or(0) as i64;
+            stats.memory_usage = i64::try_from(s.memory_usage().unwrap_or(0)).unwrap_or(i64::MAX);
         }
     }
     stats
