@@ -372,7 +372,7 @@
           "items": { "type": "string" },
           "description": "Entity names (e.g. 'User') excluded from traversal-path security filters. Resolved to physical table names at load time. These are entities whose visibility is determined through relationships rather than direct path hierarchy."
         },
-        "local": {
+        "local_db": {
           "type": "object",
           "description": "Configuration for entities that participate in the local DuckDB graph (CLI indexing).",
           "properties": {

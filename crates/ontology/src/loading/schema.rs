@@ -36,7 +36,7 @@ pub(super) struct SettingsYaml {
     #[serde(default)]
     pub skip_security_filter_for_entities: Vec<String>,
     #[serde(default)]
-    pub local: Option<LocalSettingsYaml>,
+    pub local_db: Option<LocalSettingsYaml>,
     pub etl: EtlSettingsYaml,
 }
 
