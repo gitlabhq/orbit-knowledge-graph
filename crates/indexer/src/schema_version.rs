@@ -2,19 +2,32 @@
 //!
 //! Embeds a schema version in the GKG binary and persists it in ClickHouse.
 //! A periodic background task detects mismatches and, when no namespaces are
-//! enabled, triggers the downstream reset flow (Issue 2).
+//! enabled, triggers a drop-and-recreate reset of all GKG-owned tables.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
+use opentelemetry::KeyValue;
 use opentelemetry::global;
-use opentelemetry::metrics::Gauge;
+use opentelemetry::metrics::{Counter, Gauge};
 use thiserror::Error;
 use tracing::{info, warn};
+
+use crate::locking::LockService;
 
 /// Manually bumped whenever `config/graph.sql` changes.
 /// Any MR that modifies `graph.sql` must also bump this constant.
 pub const SCHEMA_VERSION: u64 = 1;
+
+/// Lock key used to coordinate concurrent reset attempts across pods.
+const SCHEMA_RESET_LOCK_KEY: &str = "schema_reset";
+
+/// TTL for the schema reset NATS KV lock.
+const SCHEMA_RESET_LOCK_TTL: Duration = Duration::from_secs(120);
+
+/// The embedded DDL for all GKG-owned tables.
+pub(crate) const GRAPH_SCHEMA_SQL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph.sql"));
 
 const CREATE_VERSION_TABLE: &str = "\
 CREATE TABLE IF NOT EXISTS gkg_schema_version (
@@ -162,16 +175,134 @@ pub async fn check_version(
     Ok(CheckOutcome::ResetReady)
 }
 
+/// Extracts GKG-owned table names from the embedded `graph.sql` DDL.
+///
+/// Parses `CREATE TABLE IF NOT EXISTS <name>` statements and returns the
+/// table names. `gkg_schema_version` is excluded — it must never be dropped.
+pub fn parse_gkg_table_names(schema_sql: &str) -> Vec<String> {
+    let mut tables = Vec::new();
+    for line in schema_sql.lines() {
+        let trimmed = line.trim();
+        let upper = trimmed.to_ascii_uppercase();
+        if upper.starts_with("CREATE TABLE IF NOT EXISTS ") {
+            let rest = &trimmed["CREATE TABLE IF NOT EXISTS ".len()..];
+            let name = rest
+                .split(|c: char| c.is_whitespace() || c == '(')
+                .next()
+                .unwrap_or("")
+                .trim_matches('`')
+                .trim();
+            if !name.is_empty() && name != "gkg_schema_version" {
+                tables.push(name.to_string());
+            }
+        }
+    }
+    tables
+}
+
+/// Drop-and-recreate outcome.
+#[derive(Debug, PartialEq)]
+pub enum ResetOutcome {
+    /// Reset completed successfully; new schema version was recorded.
+    Success,
+    /// Another pod holds the reset lock; skipped this cycle.
+    LockNotAcquired,
+}
+
+/// Drops all GKG-owned tables and recreates them from `graph.sql`.
+///
+/// Steps:
+/// 1. Parse table names from the embedded DDL
+/// 2. Drop each table with `DROP TABLE IF EXISTS … SYNC`
+/// 3. Re-execute every statement in `graph.sql`
+/// 4. Write the new schema version
+///
+/// `gkg_schema_version` is never dropped.
+pub async fn schema_reset(
+    graph: &ArrowClickHouseClient,
+    new_version: u64,
+) -> Result<(), SchemaVersionError> {
+    let tables = parse_gkg_table_names(GRAPH_SCHEMA_SQL);
+
+    warn!(
+        table_count = tables.len(),
+        new_version, "schema reset: dropping GKG-owned tables"
+    );
+
+    for table in &tables {
+        info!(table, "dropping table");
+        graph
+            .execute(&format!("DROP TABLE IF EXISTS `{table}` SYNC"))
+            .await?;
+    }
+
+    info!("schema reset: recreating tables from graph.sql");
+    for statement in GRAPH_SCHEMA_SQL.split(';') {
+        let statement = statement.trim();
+        if statement.is_empty() {
+            continue;
+        }
+        graph.execute(statement).await?;
+    }
+
+    write_schema_version(graph, new_version).await?;
+    info!(version = new_version, "schema version recorded after reset");
+
+    Ok(())
+}
+
+/// Attempts to acquire the NATS lock and run [`schema_reset`].
+///
+/// Returns [`ResetOutcome::LockNotAcquired`] when another pod already holds
+/// the lock, allowing the caller to skip this cycle gracefully.
+pub async fn try_schema_reset(
+    graph: &ArrowClickHouseClient,
+    lock_service: &dyn LockService,
+    new_version: u64,
+    reset_counter: &Counter<u64>,
+) -> Result<ResetOutcome, SchemaVersionError> {
+    match lock_service
+        .try_acquire(SCHEMA_RESET_LOCK_KEY, SCHEMA_RESET_LOCK_TTL)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            info!("schema reset lock held by another pod — skipping this cycle");
+            return Ok(ResetOutcome::LockNotAcquired);
+        }
+        Err(e) => {
+            warn!(error = %e, "failed to acquire schema reset lock — skipping reset");
+            return Ok(ResetOutcome::LockNotAcquired);
+        }
+    }
+
+    let result = schema_reset(graph, new_version).await;
+
+    let _ = lock_service.release(SCHEMA_RESET_LOCK_KEY).await;
+
+    match result {
+        Ok(()) => {
+            reset_counter.add(1, &[KeyValue::new("result", "success")]);
+            Ok(ResetOutcome::Success)
+        }
+        Err(e) => {
+            reset_counter.add(1, &[KeyValue::new("result", "failure")]);
+            Err(e)
+        }
+    }
+}
+
 /// Runs the schema version check loop as a background task.
 ///
 /// This task:
 /// 1. Creates the `gkg_schema_version` table if needed
 /// 2. Periodically checks for version mismatches
-/// 3. When a mismatch is detected with zero enabled namespaces, logs
-///    that a reset is ready (actual reset is implemented in Issue 2)
+/// 3. When a mismatch is detected with zero enabled namespaces, acquires
+///    a NATS KV lock and executes the drop-and-recreate reset
 pub async fn run_check_loop(
     graph: ArrowClickHouseClient,
     datalake: ArrowClickHouseClient,
+    lock_service: Arc<dyn LockService>,
     interval: Duration,
     shutdown: tokio_util::sync::CancellationToken,
 ) {
@@ -183,6 +314,10 @@ pub async fn run_check_loop(
     let check_loop_active_gauge = meter
         .u64_gauge("gkg.schema.version.check_loop_active")
         .with_description("1 while the schema version check loop is running, 0 after it exits")
+        .build();
+    let reset_counter = meter
+        .u64_counter("gkg.schema.reset.total")
+        .with_description("Total schema reset attempts, labeled by result")
         .build();
 
     if let Err(e) = ensure_version_table(&graph).await {
@@ -216,13 +351,30 @@ pub async fn run_check_loop(
                 );
             }
             Ok(CheckOutcome::ResetReady) => {
-                // TODO(#427): move write_schema_version to after the actual table reset
-                info!("schema reset ready — actual reset will be implemented in Issue 2");
-                if let Err(e) = write_schema_version(&graph, SCHEMA_VERSION).await {
-                    warn!(error = %e, "failed to write schema version after reset");
-                } else {
-                    info!(version = SCHEMA_VERSION, "schema version recorded");
-                    mismatch_gauge.record(0, &[]);
+                warn!(
+                    "schema version mismatch with zero enabled namespaces — beginning schema reset"
+                );
+                match try_schema_reset(
+                    &graph,
+                    lock_service.as_ref(),
+                    SCHEMA_VERSION,
+                    &reset_counter,
+                )
+                .await
+                {
+                    Ok(ResetOutcome::Success) => {
+                        info!(
+                            version = SCHEMA_VERSION,
+                            "schema reset completed successfully"
+                        );
+                        mismatch_gauge.record(0, &[]);
+                    }
+                    Ok(ResetOutcome::LockNotAcquired) => {
+                        info!("schema reset skipped — lock held by another pod");
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "schema reset failed — will retry on next cycle");
+                    }
                 }
             }
             Err(e) => {
@@ -259,6 +411,50 @@ mod tests {
         assert!(
             READ_VERSION.contains("FINAL"),
             "version query must use FINAL for ReplacingMergeTree"
+        );
+    }
+
+    #[test]
+    fn parse_gkg_table_names_extracts_all_tables() {
+        let names = parse_gkg_table_names(GRAPH_SCHEMA_SQL);
+        assert!(
+            names.contains(&"checkpoint".to_string()),
+            "must include checkpoint"
+        );
+        assert!(
+            names.contains(&"namespace_deletion_schedule".to_string()),
+            "must include namespace_deletion_schedule"
+        );
+        assert!(
+            names.contains(&"gl_user".to_string()),
+            "must include gl_user"
+        );
+        assert!(
+            names.contains(&"gl_edge".to_string()),
+            "must include gl_edge"
+        );
+        assert!(
+            names.contains(&"code_indexing_checkpoint".to_string()),
+            "must include code_indexing_checkpoint"
+        );
+    }
+
+    #[test]
+    fn parse_gkg_table_names_excludes_version_table() {
+        let names = parse_gkg_table_names(GRAPH_SCHEMA_SQL);
+        assert!(
+            !names.contains(&"gkg_schema_version".to_string()),
+            "gkg_schema_version must never appear in the drop set"
+        );
+    }
+
+    #[test]
+    fn parse_gkg_table_names_no_siphon_tables() {
+        let names = parse_gkg_table_names(GRAPH_SCHEMA_SQL);
+        let siphon_tables: Vec<_> = names.iter().filter(|n| n.starts_with("siphon_")).collect();
+        assert!(
+            siphon_tables.is_empty(),
+            "siphon tables must not appear in the drop set: {siphon_tables:?}"
         );
     }
 }

@@ -53,7 +53,7 @@ The version check runs as a periodic background task in Indexer mode (configurab
 3. If they match: nothing to do (lightweight no-op — one SELECT)
 4. If mismatch: count enabled namespaces in the datalake
 5. If namespaces still enabled: log warning, continue running normally
-6. If zero enabled namespaces: trigger schema reset (Issue 2)
+6. If zero enabled namespaces: execute the drop-and-recreate schema reset
 
 **Operational workflows:**
 
@@ -61,10 +61,34 @@ The version check runs as a periodic background task in Indexer mode (configurab
 - **Disable first, deploy later**: When the new binary starts, the first check cycle sees mismatch + zero namespaces → immediate reset.
 - **Fresh install**: No rows in `gkg_schema_version` → treated as mismatch. Fresh install has zero enabled namespaces → reset triggers immediately. For a fresh install this is equivalent to applying `graph.sql` (all `CREATE TABLE IF NOT EXISTS` are no-ops or first creates).
 
+### Drop-and-recreate reset
+
+When the check loop finds mismatch + zero enabled namespaces, it executes a reset:
+
+1. **Acquire lock**: Try to acquire the `schema_reset` key in the `indexing_locks` NATS KV bucket (120 s TTL). If another pod holds the lock, skip this cycle — the next check will re-examine and resume normally once the version matches.
+2. **Drop GKG-owned tables**: Execute `DROP TABLE IF EXISTS … SYNC` for every table parsed from the embedded `config/graph.sql`. The `SYNC` suffix waits for completion before proceeding.
+3. **Recreate tables**: Re-execute every statement in `config/graph.sql` (all `CREATE TABLE IF NOT EXISTS` — idempotent).
+4. **Record version**: Insert the new `SCHEMA_VERSION` into `gkg_schema_version`.
+5. **Release lock**.
+
+**Table classification:**
+
+- **GKG-owned** (droppable): all tables defined in `config/graph.sql` — `gl_*`, `checkpoint`, `code_indexing_checkpoint`, `namespace_deletion_schedule`
+- **Excluded from drop**: `gkg_schema_version` — never dropped; survives resets
+- **External** (never touched): `siphon_*` tables are not in `graph.sql` and are never dropped
+
+Table names are parsed from the embedded `GRAPH_SCHEMA_SQL` constant at runtime, so the drop set stays automatically in sync with `graph.sql` without any hardcoded list.
+
+**Concurrency safety:** `DROP TABLE IF EXISTS` and `CREATE TABLE IF NOT EXISTS` are both idempotent in ClickHouse. The NATS lock reduces redundant work during rolling deploys but is not required for correctness.
+
+**Error handling:** If any step fails, the lock is released and the error is logged. The next detection cycle retries the full reset.
+
 ### Observability
 
 - **Metric**: `gkg.schema.version.mismatch` gauge — 1 when mismatch detected, 0 otherwise
-- **Logging**: `warn` each check cycle while mismatch persists and namespaces are enabled; `info` when mismatch is detected and when reset is triggered
+- **Metric**: `gkg.schema.version.check_loop_active` gauge — 1 while the check loop is running, 0 after it exits
+- **Metric**: `gkg.schema.reset.total` counter — incremented on each reset attempt, labeled `result=success|failure`
+- **Logging**: `warn` each check cycle while mismatch persists and namespaces are enabled; `warn` when reset begins; `info` when reset completes and version is recorded
 
 ## Schema Evolution and Migrations
 

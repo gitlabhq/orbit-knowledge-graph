@@ -60,8 +60,8 @@ use gkg_server_config::{
 };
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
-use locking::INDEXING_LOCKS_BUCKET;
-use nats::{KvBucketConfig, NatsBroker};
+use locking::{INDEXING_LOCKS_BUCKET, NatsLockService};
+use nats::{KvBucketConfig, NatsBroker, NatsServicesImpl};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -176,6 +176,9 @@ pub async fn run(
         gitlab_client,
     };
 
+    let schema_nats_services = Arc::new(NatsServicesImpl::new(broker.clone()));
+    let schema_lock_service = Arc::new(NatsLockService::new(schema_nats_services));
+
     let engine = Arc::new(
         EngineBuilder::new(broker, registry, destination)
             .metrics(metrics)
@@ -196,6 +199,7 @@ pub async fn run(
     let schema_check_handle = tokio::spawn(schema_version::run_check_loop(
         schema_check_graph,
         schema_check_datalake,
+        schema_lock_service,
         schema_check_interval,
         schema_check_shutdown,
     ));
