@@ -113,7 +113,7 @@ enum Commands {
         json: Option<String>,
 
         /// Traversal paths for security context (e.g., "1/2/3/"). Org ID is parsed from the first segment.
-        #[arg(long, short, required = true, num_args = 1..)]
+        #[arg(long, short, required_unless_present = "local", num_args = 1..)]
         traversal_paths: Vec<String>,
 
         /// Path to ontology directory (default: config/ontology)
@@ -123,6 +123,11 @@ enum Commands {
         /// Output format: pretty (default) or json
         #[arg(long, default_value = "pretty")]
         format: OutputFormat,
+
+        /// Run against the local DuckDB graph (~/.orbit/graph.duckdb)
+        /// instead of compiling for ClickHouse.
+        #[arg(long)]
+        local: bool,
     },
 }
 
@@ -162,7 +167,14 @@ async fn main() -> Result<()> {
             traversal_paths,
             ontology,
             format,
-        } => run_query(file, json, traversal_paths, ontology, format),
+            local,
+        } => {
+            if local {
+                run_local_query(file, json, ontology, format)
+            } else {
+                run_query(file, json, traversal_paths, ontology, format)
+            }
+        }
     }
 }
 
@@ -372,6 +384,119 @@ struct QueryError {
 enum QueryOutput {
     Success(QueryResult),
     Error(QueryError),
+}
+
+fn run_local_query(
+    file: Option<PathBuf>,
+    json_input: Option<String>,
+    ontology_path: Option<PathBuf>,
+    format: OutputFormat,
+) -> Result<()> {
+    let json_str = match (file, json_input) {
+        (Some(path), None) => std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read file: {}", path.display()))?,
+        (None, Some(json)) => json,
+        (None, None) => anyhow::bail!("either FILE or --json must be provided"),
+        (Some(_), Some(_)) => unreachable!("clap prevents this"),
+    };
+
+    let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
+    let ontology = Ontology::load_from_dir(&ontology_dir)
+        .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
+
+    let store = workspace::IndexStore::open_default()?;
+    let db_path = store.db_path();
+    if !db_path.exists() {
+        anyhow::bail!(
+            "no local graph found at {}. Run `orbit index` first.",
+            db_path.display()
+        );
+    }
+    let client =
+        duckdb_client::DuckDbClient::open(&db_path).context("failed to open local DuckDB graph")?;
+
+    // Detect single vs multi-query: if the JSON has a "query_type" key,
+    // it's a single query. Otherwise treat it as a keyed map of queries.
+    let value: Value = serde_json::from_str(&json_str).context("failed to parse JSON input")?;
+    let queries: Vec<(String, Value)> = if value.get("query_type").is_some() {
+        vec![("query".to_string(), value)]
+    } else {
+        let map: HashMap<String, Value> =
+            serde_json::from_value(value).context("expected a JSON object")?;
+        let mut sorted: Vec<_> = map.into_iter().collect();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        sorted
+    };
+
+    for (i, (label, input)) in queries.iter().enumerate() {
+        if i > 0 {
+            println!("\n{}", "=".repeat(80));
+        }
+
+        let input_json = serde_json::to_string(input).context("failed to serialize input")?;
+        match query_engine::compiler::compile_local(&input_json, &ontology) {
+            Ok(result) => {
+                let rendered_sql = result.base.render();
+
+                match format {
+                    OutputFormat::Json => {
+                        let output = serde_json::json!({
+                            "label": label,
+                            "sql": rendered_sql,
+                        });
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                    }
+                    OutputFormat::Pretty => {
+                        println!("\n### {}\n", label);
+                        println!("**SQL:**\n```sql\n{}\n```\n", rendered_sql);
+                    }
+                }
+
+                // Execute against DuckDB.
+                match client.query_arrow(&rendered_sql) {
+                    Ok(batches) => {
+                        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+                        println!("**Results:** {} rows\n", total_rows);
+                        for batch in &batches {
+                            let schema = batch.schema();
+                            let col_names: Vec<&str> =
+                                schema.fields().iter().map(|f| f.name().as_str()).collect();
+                            println!("| {} |", col_names.join(" | "));
+                            println!(
+                                "| {} |",
+                                col_names
+                                    .iter()
+                                    .map(|_| "---")
+                                    .collect::<Vec<_>>()
+                                    .join(" | ")
+                            );
+                            for row in 0..batch.num_rows() {
+                                let vals: Vec<String> = (0..batch.num_columns())
+                                    .map(|col| {
+                                        gkg_utils::arrow::ArrowUtils::array_value_to_string(
+                                            batch.column(col).as_ref(),
+                                            row,
+                                        )
+                                        .unwrap_or_else(|| "NULL".to_string())
+                                    })
+                                    .collect();
+                                println!("| {} |", vals.join(" | "));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("**Execution error:** {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                println!("\n### {} [ERROR]\n", label);
+                println!("**Error:** {e}");
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn run_query(

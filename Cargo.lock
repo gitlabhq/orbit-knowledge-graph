@@ -4806,6 +4806,7 @@ dependencies = [
  "dunce",
  "fs4",
  "gitalisk-core",
+ "gkg-utils",
  "ontology",
  "query-engine",
  "serde",
