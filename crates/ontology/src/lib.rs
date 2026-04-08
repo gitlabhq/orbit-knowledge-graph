@@ -108,6 +108,11 @@ pub struct Ontology {
     pub(crate) etl_settings: EtlSettings,
     pub(crate) internal_column_prefix: String,
     pub(crate) skip_security_filter_for_tables: Vec<String>,
+    /// Local entity configs keyed by entity name. Each entry lists
+    /// properties to exclude from the local DuckDB table.
+    pub(crate) local_entities: BTreeMap<String, Vec<String>>,
+    /// Local edge table columns, if declared.
+    pub(crate) local_edge_columns: Vec<EdgeColumn>,
 }
 
 impl Default for Ontology {
@@ -152,6 +157,8 @@ impl Ontology {
             },
             internal_column_prefix: "_gkg_".to_string(),
             skip_security_filter_for_tables: Vec::new(),
+            local_entities: BTreeMap::new(),
+            local_edge_columns: Vec::new(),
         }
     }
 
@@ -555,6 +562,38 @@ impl Ontology {
     #[must_use]
     pub fn skip_security_filter_tables(&self) -> &[String] {
         &self.skip_security_filter_for_tables
+    }
+
+    /// Entity names that participate in the local DuckDB graph.
+    #[must_use]
+    pub fn local_entity_names(&self) -> Vec<&str> {
+        self.local_entities.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Returns the fields for a local entity, filtered to exclude virtual
+    /// fields and properties listed in the entity's `exclude_properties`.
+    ///
+    /// Returns `None` if the entity is not in `local_entities`.
+    #[must_use]
+    pub fn local_entity_fields(&self, entity_name: &str) -> Option<Vec<&Field>> {
+        let exclude = self.local_entities.get(entity_name)?;
+        let node = self
+            .nodes
+            .get(entity_name)
+            .expect("local entity must exist in nodes");
+        Some(
+            node.fields
+                .iter()
+                .filter(|f| !matches!(f.source, FieldSource::Virtual(_)))
+                .filter(|f| !exclude.iter().any(|p| p == &f.name))
+                .collect(),
+        )
+    }
+
+    /// Column definitions for the local edge table, if declared.
+    #[must_use]
+    pub fn local_edge_columns(&self) -> &[EdgeColumn] {
+        &self.local_edge_columns
     }
 
     /// Default ORDER BY / dedup key columns for node tables.
@@ -1730,5 +1769,88 @@ properties:
             .with_fields("User", [("name", DataType::String)])
             .modify_field("User", "bogus", |_| {});
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn local_entities_loaded_from_ontology() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let local = ontology.local_entity_names();
+        assert!(local.contains(&"Directory"));
+        assert!(local.contains(&"File"));
+        assert!(local.contains(&"Definition"));
+        assert!(local.contains(&"ImportedSymbol"));
+        assert!(!local.contains(&"User"));
+    }
+
+    #[test]
+    fn local_entity_fields_excludes_per_entity_properties() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let fields = ontology
+            .local_entity_fields("Directory")
+            .expect("Directory is a local entity");
+        let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+
+        // Included: regular fields and envelope fields (not excluded in YAML)
+        assert!(names.contains(&"id"));
+        assert!(names.contains(&"project_id"));
+        assert!(names.contains(&"branch"));
+        assert!(names.contains(&"path"));
+        assert!(names.contains(&"name"));
+        // Excluded: listed in exclude_properties for this entity
+        assert!(!names.contains(&"traversal_path"));
+        assert!(!names.contains(&"commit_sha"));
+    }
+
+    #[test]
+    fn local_entity_fields_excludes_virtual_fields() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let fields = ontology
+            .local_entity_fields("Definition")
+            .expect("Definition is a local entity");
+        let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+
+        assert!(names.contains(&"fqn"));
+        assert!(!names.contains(&"content"), "virtual field");
+    }
+
+    #[test]
+    fn local_entity_fields_returns_none_for_non_local() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        assert!(ontology.local_entity_fields("User").is_none());
+    }
+
+    #[test]
+    fn local_edge_columns_loaded_from_ontology() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let cols = ontology.local_edge_columns();
+        assert!(!cols.is_empty());
+        let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "source_id",
+                "source_kind",
+                "relationship_kind",
+                "target_id",
+                "target_kind",
+                "_version"
+            ]
+        );
+    }
+
+    #[test]
+    fn local_exclude_properties_validated_against_fields() {
+        // Verify the real ontology passes validation (all exclude_properties
+        // reference actual fields). If someone adds a typo, this catches it.
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        for entity_name in ontology.local_entity_names() {
+            let fields = ontology
+                .local_entity_fields(entity_name)
+                .expect("local entity should have fields");
+            assert!(
+                !fields.is_empty(),
+                "local entity '{entity_name}' should have at least one field after exclusions"
+            );
+        }
     }
 }
