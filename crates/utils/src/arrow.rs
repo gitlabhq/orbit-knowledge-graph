@@ -1,14 +1,15 @@
-//! Arrow array → ColumnValue conversion utilities.
+//! Arrow array utilities: extraction helpers and RecordBatch builder.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use arrow::array::{
-    Array, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
-    LargeStringArray, ListArray, PrimitiveArray, StringArray, StructArray,
-    TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+    Array, ArrayRef, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+    Int64Builder, LargeStringArray, ListArray, PrimitiveArray, StringArray, StringBuilder,
+    StructArray, TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
     TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
-use arrow::datatypes::ArrowPrimitiveType;
+use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
 #[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
@@ -273,6 +274,170 @@ impl ArrowUtils {
         }
 
         ColumnValue::Null
+    }
+}
+
+// ── RecordBatch builder ──────────────────────────────────────────────────────
+
+/// Column type for [`NodeBatch`] builder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnType {
+    Str,
+    Int,
+}
+
+/// Column definition for [`NodeBatch`] builder.
+#[derive(Debug, Clone)]
+pub struct ColumnSpec {
+    pub name: String,
+    pub col_type: ColumnType,
+    pub nullable: bool,
+}
+
+enum Col {
+    Str(StringBuilder, bool),
+    Int(Int64Builder, bool),
+}
+
+impl Col {
+    fn finish(self) -> (DataType, bool, ArrayRef) {
+        match self {
+            Self::Str(mut b, nullable) => (DataType::Utf8, nullable, Arc::new(b.finish())),
+            Self::Int(mut b, nullable) => (DataType::Int64, nullable, Arc::new(b.finish())),
+        }
+    }
+}
+
+/// A mutable handle to a single column builder. Returned by [`NodeBatch::col`].
+pub struct ColRef<'a>(&'a mut Col);
+
+impl ColRef<'_> {
+    pub fn push_str(&mut self, v: impl AsRef<str>) {
+        if let Col::Str(b, _) = self.0 {
+            b.append_value(v);
+        }
+    }
+
+    pub fn push_int(&mut self, v: i64) {
+        if let Col::Int(b, _) = self.0 {
+            b.append_value(v);
+        }
+    }
+
+    pub fn push_opt_str<S: AsRef<str>>(&mut self, v: Option<S>) {
+        if let Col::Str(b, _) = self.0 {
+            match v {
+                Some(s) => b.append_value(s),
+                None => b.append_null(),
+            }
+        }
+    }
+}
+
+/// Generic Arrow RecordBatch builder with an envelope of fixed columns
+/// (id, project_id, branch, _version) wrapping caller-defined columns.
+///
+/// Schema is driven by a `&[ColumnSpec]` -- callers provide extraction
+/// logic via a fill closure that references columns by name.
+///
+/// ```ignore
+/// use gkg_utils::arrow::{NodeBatch, ColumnSpec, ColumnType};
+///
+/// let specs = vec![
+///     ColumnSpec { name: "path".into(), col_type: ColumnType::Str, nullable: false },
+///     ColumnSpec { name: "name".into(), col_type: ColumnType::Str, nullable: false },
+/// ];
+/// let batch = NodeBatch::new(&specs, nodes.len())
+///     .build(&nodes, project_id, "main", |n| n.id, |n, b| {
+///         b.col("path").push_str(&n.path);
+///         b.col("name").push_str(&n.name);
+///     })?;
+/// ```
+pub struct NodeBatch {
+    names: Vec<String>,
+    cols: Vec<Col>,
+    index: HashMap<String, usize>,
+}
+
+impl NodeBatch {
+    /// Create a builder from column specs, pre-allocating for `cap` rows.
+    pub fn new(specs: &[ColumnSpec], cap: usize) -> Self {
+        let mut names = Vec::with_capacity(specs.len());
+        let mut cols = Vec::with_capacity(specs.len());
+        let mut index = HashMap::with_capacity(specs.len());
+
+        for spec in specs {
+            let col = match spec.col_type {
+                ColumnType::Int => Col::Int(Int64Builder::with_capacity(cap), spec.nullable),
+                ColumnType::Str => {
+                    Col::Str(StringBuilder::with_capacity(cap, cap * 32), spec.nullable)
+                }
+            };
+            index.insert(spec.name.clone(), names.len());
+            names.push(spec.name.clone());
+            cols.push(col);
+        }
+
+        Self { names, cols, index }
+    }
+
+    /// Get a mutable column handle by name. Panics if the column doesn't exist.
+    pub fn col(&mut self, name: &str) -> ColRef<'_> {
+        let idx = self
+            .index
+            .get(name)
+            .unwrap_or_else(|| panic!("column '{name}' not found; available: {:?}", self.names));
+        ColRef(&mut self.cols[*idx])
+    }
+
+    /// Iterate over nodes, fill columns via the closure, and produce a
+    /// RecordBatch with envelope: `id, project_id, branch, <columns>, _version`.
+    pub fn build<N>(
+        mut self,
+        nodes: &[N],
+        project_id: i64,
+        branch: &str,
+        id_fn: fn(&N) -> Option<i64>,
+        fill: impl Fn(&N, &mut Self),
+    ) -> std::result::Result<RecordBatch, arrow::error::ArrowError> {
+        let cap = nodes.len();
+        let mut id = Int64Builder::with_capacity(cap);
+        let mut pid = Int64Builder::with_capacity(cap);
+        let mut br = StringBuilder::with_capacity(cap, cap * branch.len());
+        let mut ver = Int64Builder::with_capacity(cap);
+
+        for node in nodes {
+            let Some(node_id) = id_fn(node) else {
+                continue;
+            };
+            id.append_value(node_id);
+            pid.append_value(project_id);
+            br.append_value(branch);
+            ver.append_value(0);
+            fill(node, &mut self);
+        }
+
+        let mut fields = vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("project_id", DataType::Int64, false),
+            Field::new("branch", DataType::Utf8, false),
+        ];
+        let mut columns: Vec<ArrayRef> = vec![
+            Arc::new(id.finish()),
+            Arc::new(pid.finish()),
+            Arc::new(br.finish()),
+        ];
+
+        for (name, col) in self.names.into_iter().zip(self.cols) {
+            let (dtype, nullable, array) = col.finish();
+            fields.push(Field::new(name, dtype, nullable));
+            columns.push(array);
+        }
+
+        fields.push(Field::new("_version", DataType::Int64, false));
+        columns.push(Arc::new(ver.finish()));
+
+        RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)
     }
 }
 
