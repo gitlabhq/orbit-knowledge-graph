@@ -1,7 +1,14 @@
 use std::sync::Arc;
 
+use serde_json::json;
+
 use crate::types::{HydrationOutput, PaginationMeta, PipelineOutput, QueryExecutionLog};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
+
+/// Traversal path prefix for the GitLab org namespace. Users whose
+/// security context includes a path starting with this prefix get
+/// compiled SQL in the response for debugging.
+const GITLAB_ORG_PATH_PREFIX: &str = "1/9970/";
 
 #[derive(Clone)]
 pub struct OutputStage;
@@ -20,6 +27,17 @@ impl PipelineStage for OutputStage {
         })?;
 
         let compiled = ctx.compiled()?;
+
+        let raw_query_strings = if is_gitlab_org(ctx) {
+            let debug_json = json!({
+                "base": compiled.base.sql,
+                "base_rendered": compiled.base.render(),
+                "hydration": input.hydration_queries,
+            });
+            vec![debug_json.to_string()]
+        } else {
+            vec![]
+        };
 
         let execution_log = ctx
             .phases
@@ -42,7 +60,7 @@ impl PipelineStage for OutputStage {
             row_count: query_result.authorized_count(),
             redacted_count: input.redacted_count,
             query_type: compiled.query_type.to_string(),
-            raw_query_strings: vec![],
+            raw_query_strings,
             compiled: Arc::clone(compiled),
             query_result,
             result_context: input.result_context.clone(),
@@ -50,4 +68,12 @@ impl PipelineStage for OutputStage {
             pagination,
         })
     }
+}
+
+fn is_gitlab_org(ctx: &QueryPipelineContext) -> bool {
+    ctx.security_context.as_ref().is_some_and(|sc| {
+        sc.traversal_paths
+            .iter()
+            .any(|p| p.starts_with(GITLAB_ORG_PATH_PREFIX))
+    })
 }
