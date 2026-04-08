@@ -227,14 +227,28 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                 duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", &ontology)
                     .context("failed to convert graph data to Arrow")?;
 
-            let db = store.db_path(&key);
+            let db = store.db_path();
             let client = duckdb_client::DuckDbClient::open(&db).context("failed to open DuckDB")?;
             client
                 .initialize_schema()
                 .context("failed to create schema")?;
+            let node_tables: Vec<String> = ontology
+                .local_entity_names()
+                .iter()
+                .map(|name| {
+                    ontology
+                        .get_node(name)
+                        .expect("local entity must exist")
+                        .destination_table
+                        .clone()
+                })
+                .collect();
+            let edge_table = ontology
+                .local_edge_table_name()
+                .context("local_db.edge_table.name must be configured")?;
             client
-                .delete_all_data()
-                .context("failed to clear existing data")?;
+                .delete_project(project_id, &node_tables, edge_table)
+                .context("failed to clear existing project data")?;
 
             client
                 .insert_graph(local_data)

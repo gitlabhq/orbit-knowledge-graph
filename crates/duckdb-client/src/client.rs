@@ -68,11 +68,46 @@ impl DuckDbClient {
 
     /// Deletes all data across all tables. In local mode each DB file is
     /// one project, so a full truncate is the correct reset before re-indexing.
+    /// Delete all data from all code graph tables.
     pub fn delete_all_data(&self) -> Result<()> {
         for table in CODE_GRAPH_TABLES {
             self.conn
                 .execute(&format!("DELETE FROM {table}"), params![])?;
         }
+        Ok(())
+    }
+
+    /// Delete data for a specific project across all tables.
+    /// Node tables are scoped by `project_id`; the edge table is scoped
+    /// by source_id matching any node ID for this project.
+    /// Edges are deleted first while node IDs are still queryable.
+    pub fn delete_project(
+        &self,
+        project_id: i64,
+        node_tables: &[String],
+        edge_table: &str,
+    ) -> Result<()> {
+        // Delete edges first (while node IDs are still in the tables).
+        let subqueries: Vec<String> = node_tables
+            .iter()
+            .map(|t| format!("SELECT id FROM {t} WHERE project_id = ?1"))
+            .collect();
+        if !subqueries.is_empty() {
+            let union = subqueries.join(" UNION ");
+            self.conn.execute(
+                &format!("DELETE FROM {edge_table} WHERE source_id IN ({union})"),
+                params![project_id],
+            )?;
+        }
+
+        // Then delete node tables.
+        for table in node_tables {
+            self.conn.execute(
+                &format!("DELETE FROM {table} WHERE project_id = ?1"),
+                params![project_id],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -221,14 +256,14 @@ mod tests {
         client
             .conn
             .execute(
-                "INSERT INTO gl_file (id, project_id, branch, path, name, _version) VALUES (1, 42, 'main', 'a.rs', 'a.rs', 0)",
+                "INSERT INTO gl_file (id, project_id, branch, path, name) VALUES (1, 42, 'main', 'a.rs', 'a.rs')",
                 [],
             )
             .unwrap();
         client
             .conn
             .execute(
-                "INSERT INTO gl_file (id, project_id, branch, path, name, _version) VALUES (2, 99, 'main', 'b.rs', 'b.rs', 0)",
+                "INSERT INTO gl_file (id, project_id, branch, path, name) VALUES (2, 99, 'main', 'b.rs', 'b.rs')",
                 [],
             )
             .unwrap();
