@@ -50,6 +50,7 @@ pub(super) struct LocalSettingsYaml {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct LocalEdgeTableYaml {
+    pub name: String,
     pub columns: Vec<EdgeColumnYaml>,
 }
 

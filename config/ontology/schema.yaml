@@ -36,6 +36,7 @@ settings:
       - name: ImportedSymbol
         exclude_properties: [traversal_path, commit_sha]
     edge_table:
+      name: gl_edge
       columns:
         - {name: source_id, type: int64}
         - {name: source_kind, type: string}
