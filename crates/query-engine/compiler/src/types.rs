@@ -8,6 +8,30 @@ use regex::Regex;
 static TRAVERSAL_PATH_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
 
+/// GitLab access levels as sent in the JWT `min_access_level` field.
+/// Values match `Gitlab::Access` constants in Rails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AccessLevel {
+    Guest = 10,
+    Reporter = 20,
+    Developer = 30,
+    Maintainer = 40,
+    Owner = 50,
+}
+
+impl AccessLevel {
+    pub fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            10 => Some(Self::Guest),
+            20 => Some(Self::Reporter),
+            30 => Some(Self::Developer),
+            40 => Some(Self::Maintainer),
+            50 => Some(Self::Owner),
+            _ => None,
+        }
+    }
+}
+
 /// Security context for request-level isolation.
 ///
 /// Contains the org ID and traversal paths used to scope queries to
@@ -18,7 +42,7 @@ pub struct SecurityContext {
     pub org_id: i64,
     pub traversal_paths: Vec<String>,
     pub admin: bool,
-    pub min_access_level: Option<u32>,
+    pub access_level: Option<AccessLevel>,
 }
 
 impl SecurityContext {
@@ -29,7 +53,7 @@ impl SecurityContext {
     /// - Each segment fits in i64
     /// - The first segment of each path equals org_id
     ///
-    /// `admin` and `min_access_level` default to `false` / `None`.
+    /// `admin` and `access_level` default to `false` / `None`.
     /// Use [`with_role`](Self::with_role) to set them from JWT claims.
     pub fn new(org_id: i64, traversal_paths: Vec<String>) -> Result<Self> {
         for path in &traversal_paths {
@@ -39,13 +63,13 @@ impl SecurityContext {
             org_id,
             traversal_paths,
             admin: false,
-            min_access_level: None,
+            access_level: None,
         })
     }
 
     pub fn with_role(mut self, admin: bool, min_access_level: Option<u32>) -> Self {
         self.admin = admin;
-        self.min_access_level = min_access_level;
+        self.access_level = min_access_level.and_then(AccessLevel::from_u32);
         self
     }
 
