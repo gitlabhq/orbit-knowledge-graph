@@ -236,7 +236,8 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                 .delete_all_data()
                 .context("failed to clear existing data")?;
 
-            duckdb_client::DuckDbClient::insert_graph(&db, local_data)
+            client
+                .insert_graph(local_data)
                 .context("failed to insert graph data")?;
 
             Some(db.display().to_string())

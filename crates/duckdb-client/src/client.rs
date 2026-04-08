@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::thread;
 
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
@@ -77,34 +76,20 @@ impl DuckDbClient {
         Ok(())
     }
 
-    /// Insert all graph data concurrently. Each table gets its own connection
-    /// and Appender, running in parallel threads. DuckDB supports concurrent
-    /// inserts from multiple connections to the same file.
+    /// Insert all graph data into DuckDB.
     ///
     /// Table names come from `LocalGraphData.tables`, which are derived from
     /// the ontology during conversion.
-    pub fn insert_graph(path: &Path, data: LocalGraphData) -> Result<()> {
-        thread::scope(|s| {
-            let handles: Vec<_> = data
-                .tables
-                .into_iter()
-                .filter(|(_, batch)| batch.num_rows() > 0)
-                .map(|(table, batch)| {
-                    s.spawn(move || -> Result<()> {
-                        let conn = duckdb::Connection::open(path)?;
-                        let mut appender = conn.appender(&table)?;
-                        appender.append_record_batch(batch)?;
-                        appender.flush()?;
-                        Ok(())
-                    })
-                })
-                .collect();
-
-            for handle in handles {
-                handle.join().expect("insert thread panicked")?;
+    pub fn insert_graph(&self, data: LocalGraphData) -> Result<()> {
+        for (table, batch) in data.tables {
+            if batch.num_rows() == 0 {
+                continue;
             }
-            Ok(())
-        })
+            let mut appender = self.conn.appender(&table)?;
+            appender.append_record_batch(batch)?;
+            appender.flush()?;
+        }
+        Ok(())
     }
 }
 
