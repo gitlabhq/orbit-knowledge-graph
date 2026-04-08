@@ -36,19 +36,19 @@ impl ArrowClickHouseClient {
             .with_url(url)
             .with_database(database)
             .with_user(username)
-            .with_option("output_format_arrow_string_as_string", "1")
-            .with_option("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
-            .with_option("join_algorithm", "hash")
-            .with_option("query_plan_join_swap_table", "true")
-            .with_option("use_query_condition_cache", "true")
-            .with_option("join_use_nulls", "0");
+            .with_setting("output_format_arrow_string_as_string", "1")
+            .with_setting("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
+            .with_setting("join_algorithm", "hash")
+            .with_setting("query_plan_join_swap_table", "true")
+            .with_setting("use_query_condition_cache", "true")
+            .with_setting("join_use_nulls", "0");
 
         if let Some(password) = password {
             client = client.with_password(password);
         }
 
         for (k, v) in query_settings {
-            client = client.with_option(k, v);
+            client = client.with_setting(k, v);
         }
 
         Self {
@@ -225,8 +225,8 @@ impl ArrowQuery {
         self
     }
 
-    pub fn with_option(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.inner = self.inner.with_option(name, value);
+    pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.inner = self.inner.with_setting(name, value);
         self
     }
 
@@ -297,7 +297,7 @@ impl ArrowQuery {
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
         self.inner = self
             .inner
-            .with_option("max_block_size", max_block_size.to_string());
+            .with_setting("max_block_size", max_block_size.to_string());
 
         let cursor = self
             .inner
