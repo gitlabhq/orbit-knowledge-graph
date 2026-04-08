@@ -6,7 +6,7 @@ use rust_embed::Embed;
 use serde::Deserialize;
 use std::path::Path;
 
-use crate::entities::DomainInfo;
+use crate::entities::{DomainInfo, EdgeColumn};
 use crate::{Ontology, OntologyError};
 
 pub(crate) use edge::EdgeYaml;
@@ -272,6 +272,16 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             ontology
                 .local_entities
                 .insert(entry.name, entry.exclude_properties);
+        }
+        if let Some(edge_table) = local.edge_table {
+            ontology.local_edge_columns = edge_table
+                .columns
+                .into_iter()
+                .map(|c| EdgeColumn {
+                    name: c.name,
+                    data_type: c.data_type,
+                })
+                .collect();
         }
     }
 
