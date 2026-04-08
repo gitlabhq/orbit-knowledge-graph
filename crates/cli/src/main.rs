@@ -6,10 +6,12 @@ use code_graph::linker::indexer::{IndexingConfig, RepositoryIndexer, RepositoryI
 use code_graph::linker::loading::DirectoryFileSource;
 use ontology::Ontology;
 use query_engine::compiler::SecurityContext;
+use query_engine::formatters::{self, ResultFormatter};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -453,62 +455,27 @@ fn run_local_query(
         match query_engine::compiler::compile_local(&input_json, &ontology) {
             Ok(compiled) => {
                 let rendered_sql = compiled.base.render();
-                let result_ctx = compiled.base.result_context;
+                let compiled = Arc::new(compiled);
 
                 match client.query_arrow(&rendered_sql) {
                     Ok(batches) => {
-                        let qr = types::QueryResult::from_batches(&batches, &result_ctx);
-                        let rows: Vec<Value> = qr
-                            .rows()
-                            .iter()
-                            .map(|row| formatters::row_to_json(row, &result_ctx))
-                            .collect();
+                        let output = query_engine::shared::PipelineOutput::from_batches(
+                            &batches,
+                            Arc::clone(&compiled),
+                        );
 
                         match mode {
                             LocalOutputMode::Raw => {
-                                let output = serde_json::json!({
-                                    "label": label,
-                                    "rows": rows,
-                                    "total": rows.len(),
-                                });
-                                println!("{}", serde_json::to_string(&output)?);
+                                let formatted = formatters::GraphFormatter.format(&output);
+                                println!("{}", serde_json::to_string(&formatted)?);
                             }
                             LocalOutputMode::Llm => {
                                 if i > 0 {
                                     println!();
                                 }
                                 println!("### {}\n", label);
-                                if rows.is_empty() {
-                                    println!("No results.");
-                                } else {
-                                    // Build markdown table from JSON rows.
-                                    let first = rows[0].as_object().unwrap();
-                                    let cols: Vec<&String> = first.keys().collect();
-                                    println!(
-                                        "| {} |",
-                                        cols.iter()
-                                            .map(|c| c.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join(" | ")
-                                    );
-                                    println!(
-                                        "| {} |",
-                                        cols.iter().map(|_| "---").collect::<Vec<_>>().join(" | ")
-                                    );
-                                    for row in &rows {
-                                        let obj = row.as_object().unwrap();
-                                        let vals: Vec<String> = cols
-                                            .iter()
-                                            .map(|c| match obj.get(*c) {
-                                                Some(Value::String(s)) => s.clone(),
-                                                Some(Value::Null) | None => "NULL".to_string(),
-                                                Some(v) => v.to_string(),
-                                            })
-                                            .collect();
-                                        println!("| {} |", vals.join(" | "));
-                                    }
-                                    println!("\n{} rows", rows.len());
-                                }
+                                let formatted = formatters::GoonFormatter.format(&output);
+                                println!("{}", serde_json::to_string_pretty(&formatted)?);
                             }
                         }
                     }

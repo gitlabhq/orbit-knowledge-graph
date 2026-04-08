@@ -237,14 +237,14 @@ pub struct DuckDbCodegenPass;
 impl<E, S> CompilerPass<E, S> for DuckDbCodegenPass
 where
     E: PipelineEnv,
-    S: PipelineState + HasNode + HasInput + HasOutput,
+    S: PipelineState + HasNode + HasInput + HasResultCtx + HasOutput,
 {
     const NAME: &'static str = "duckdb_codegen";
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let result_context = state.take_result_ctx()?;
         let node = state.node()?;
         let input = state.input()?;
-        let result_context = enforce::ResultContext::new().with_query_type(input.query_type);
         let base = codegen::duckdb::codegen(node, result_context)?;
         let query_type = input.query_type;
         let input = input.clone();

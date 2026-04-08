@@ -80,6 +80,30 @@ pub struct PipelineOutput {
     pub pagination: Option<PaginationMeta>,
 }
 
+impl PipelineOutput {
+    /// Construct a `PipelineOutput` directly from Arrow RecordBatches
+    /// and a compiled query context. Skips authorization, redaction,
+    /// and hydration -- suitable for local/trusted execution.
+    pub fn from_batches(batches: &[RecordBatch], compiled: Arc<CompiledQueryContext>) -> Self {
+        let result_context = compiled.base.result_context.clone();
+        let query_result = QueryResult::from_batches(batches, &result_context);
+        let row_count = query_result.authorized_count();
+        let query_type = compiled.query_type.to_string();
+
+        Self {
+            query_result,
+            result_context,
+            compiled,
+            query_type,
+            raw_query_strings: vec![],
+            row_count,
+            redacted_count: 0,
+            execution_log: vec![],
+            pagination: None,
+        }
+    }
+}
+
 /// Pagination metadata returned when the query includes a cursor.
 pub struct PaginationMeta {
     /// Whether more authorized rows exist beyond the current page.

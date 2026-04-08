@@ -13,11 +13,8 @@ workspace = true
 [dependencies]
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
-formatters = { path = "../query-engine/formatters" }
-gkg-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
-types = { path = "../query-engine/types" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
