@@ -880,6 +880,7 @@ mod tests {
             max_execution_time: None,
             use_query_cache: Some(true),
             query_cache_ttl: Some(60),
+            query_cache_share_between_users: Some(true),
         };
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), cfg).unwrap();
         assert!(
@@ -888,6 +889,11 @@ mod tests {
             result.sql,
         );
         assert!(result.sql.contains("use_query_cache = 1"), "{}", result.sql);
+        assert!(
+            result.sql.contains("query_cache_share_between_users = 1"),
+            "{}",
+            result.sql
+        );
         assert!(
             result.sql.contains("query_cache_ttl = 60"),
             "{}",
