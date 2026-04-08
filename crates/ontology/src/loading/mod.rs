@@ -300,6 +300,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 }
             }
 
+            ontology.local_edge_table_name = Some(edge_table.name);
             ontology.local_edge_columns = edge_table
                 .columns
                 .into_iter()

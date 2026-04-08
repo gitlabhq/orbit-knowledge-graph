@@ -399,8 +399,12 @@
             "edge_table": {
               "type": "object",
               "description": "Edge table schema for the local DuckDB graph.",
-              "required": ["columns"],
+              "required": ["name", "columns"],
               "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Table name for the local edge table."
+                },
                 "columns": {
                   "type": "array",
                   "items": {
