@@ -25,6 +25,16 @@ settings:
         - {name: target_kind, type: string}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User]
+  local:
+    entities:
+      - name: Directory
+        exclude_properties: [traversal_path, commit_sha]
+      - name: File
+        exclude_properties: [traversal_path, commit_sha]
+      - name: Definition
+        exclude_properties: [traversal_path, commit_sha]
+      - name: ImportedSymbol
+        exclude_properties: [traversal_path, commit_sha]
   etl:
     default_watermark: _siphon_replicated_at
     default_deleted: _siphon_deleted
