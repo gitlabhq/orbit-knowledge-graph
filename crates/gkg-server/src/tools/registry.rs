@@ -25,12 +25,32 @@ impl ToolRegistry {
                                 explore neighborhoods, find paths, or aggregate data. \
                                 Use get_graph_schema to discover available entity types and relationships.";
 
+        let examples = "\
+Examples:\n\
+\n\
+Search -- find entities matching filters:\n\
+{\"query_type\": \"search\", \"node\": {\"id\": \"mr\", \"entity\": \"MergeRequest\", \
+\"filters\": {\"state\": {\"op\": \"eq\", \"value\": \"merged\"}}}, \"limit\": 10}\n\
+\n\
+Traversal -- follow relationships between entities:\n\
+{\"query_type\": \"traversal\", \"nodes\": [{\"id\": \"u\", \"entity\": \"User\", \
+\"node_ids\": [123]}, {\"id\": \"p\", \"entity\": \"Project\"}], \
+\"relationships\": [{\"type\": \"MEMBER_OF\", \"from\": \"u\", \"to\": \"p\"}], \"limit\": 10}\n\
+\n\
+Aggregation -- count, sum, or average with grouping:\n\
+{\"query_type\": \"aggregation\", \"nodes\": [{\"id\": \"mr\", \"entity\": \"MergeRequest\"}], \
+\"aggregations\": [{\"function\": \"count\", \"target\": \"mr\", \"group_by\": \"mr\", \
+\"property\": \"state\", \"alias\": \"count\"}], \"limit\": 10}\n\
+\n\
+Every node requires an \"id\" (variable name) and \"entity\" (type from get_graph_schema). \
+Filters use operator syntax: {\"field\": {\"op\": \"eq\", \"value\": \"...\"}}";
+
         let description = match condensed_query_schema() {
             Ok(schema) => format!(
-                "{}\n\nQuery DSL Schema:\n<toon>\n{}\n</toon>",
-                base_description, schema
+                "{}\n\n{}\n\nQuery DSL Schema:\n<toon>\n{}\n</toon>",
+                base_description, examples, schema
             ),
-            Err(_) => base_description.to_string(),
+            Err(_) => format!("{}\n\n{}", base_description, examples),
         };
 
         ToolDefinition {
