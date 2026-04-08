@@ -53,13 +53,18 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
         .await
         .is_ok_and(|r| r.is_ok());
 
-    // Any HTTP response from GitLab proves connectivity -- Ok, NotFound,
-    // and Unauthorized all mean "reachable". Only network-level failures
-    // (timeout, connection refused, DNS errors) count as unhealthy.
+    // Checks both connectivity AND auth. A 401 means the JWT secret is
+    // wrong or expired -- that's unhealthy, not just "unreachable".
+    // Only Ok and NotFound count as healthy (matches indexer behavior).
     let gitlab_healthy = match &state.gitlab_client {
         Some(client) => timeout(HEALTH_CHECK_TIMEOUT, client.project_info(1))
             .await
-            .is_ok_and(|r| !matches!(r, Err(gitlab_client::GitlabClientError::Request(_)))),
+            .is_ok_and(|r| {
+                matches!(
+                    r,
+                    Ok(_) | Err(gitlab_client::GitlabClientError::NotFound(_))
+                )
+            }),
         None => true,
     };
 
