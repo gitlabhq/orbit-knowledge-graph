@@ -80,23 +80,19 @@ impl DuckDbClient {
     /// Insert all graph data concurrently. Each table gets its own connection
     /// and Appender, running in parallel threads. DuckDB supports concurrent
     /// inserts from multiple connections to the same file.
+    ///
+    /// Table names come from `LocalGraphData.tables`, which are derived from
+    /// the ontology during conversion.
     pub fn insert_graph(path: &Path, data: LocalGraphData) -> Result<()> {
-        let inserts: Vec<(&str, RecordBatch)> = vec![
-            ("gl_directory", data.directories),
-            ("gl_file", data.files),
-            ("gl_definition", data.definitions),
-            ("gl_imported_symbol", data.imported_symbols),
-            ("gl_edge", data.edges),
-        ];
-
         thread::scope(|s| {
-            let handles: Vec<_> = inserts
+            let handles: Vec<_> = data
+                .tables
                 .into_iter()
                 .filter(|(_, batch)| batch.num_rows() > 0)
                 .map(|(table, batch)| {
                     s.spawn(move || -> Result<()> {
                         let conn = duckdb::Connection::open(path)?;
-                        let mut appender = conn.appender(table)?;
+                        let mut appender = conn.appender(&table)?;
                         appender.append_record_batch(batch)?;
                         appender.flush()?;
                         Ok(())

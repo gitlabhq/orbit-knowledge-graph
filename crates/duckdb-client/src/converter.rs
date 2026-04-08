@@ -5,12 +5,9 @@ use ontology::{DataType as OntDataType, Ontology};
 
 use crate::error::Result;
 
+/// All converted graph data as `(table_name, batch)` pairs, ready for insert.
 pub struct LocalGraphData {
-    pub directories: RecordBatch,
-    pub files: RecordBatch,
-    pub definitions: RecordBatch,
-    pub imported_symbols: RecordBatch,
-    pub edges: RecordBatch,
+    pub tables: Vec<(String, RecordBatch)>,
 }
 
 /// Map ontology fields to BatchBuilder column specs.
@@ -30,91 +27,6 @@ fn entity_specs(ontology: &Ontology, entity: &str) -> Vec<ColumnSpec> {
         .collect()
 }
 
-pub fn convert_graph_data(
-    graph_data: &GraphData,
-    project_id: i64,
-    branch: &str,
-    ontology: &Ontology,
-) -> Result<LocalGraphData> {
-    let dir_nodes = &graph_data.directory_nodes;
-    let file_nodes = &graph_data.file_nodes;
-    let def_nodes = &graph_data.definition_nodes;
-    let imp_nodes = &graph_data.imported_symbol_nodes;
-
-    Ok(LocalGraphData {
-        directories: BatchBuilder::new(&entity_specs(ontology, "Directory"), dir_nodes.len())?
-            .build(dir_nodes, |n, b| {
-                let Some(id) = n.id else { return Ok(()) };
-                b.col("id")?.push_int(id)?;
-                b.col("project_id")?.push_int(project_id)?;
-                b.col("branch")?.push_str(branch)?;
-                b.col("path")?.push_str(&n.path)?;
-                b.col("name")?.push_str(&n.name)?;
-                Ok(())
-            })?,
-
-        files: BatchBuilder::new(&entity_specs(ontology, "File"), file_nodes.len())?.build(
-            file_nodes,
-            |n, b| {
-                let Some(id) = n.id else { return Ok(()) };
-                b.col("id")?.push_int(id)?;
-                b.col("project_id")?.push_int(project_id)?;
-                b.col("branch")?.push_str(branch)?;
-                b.col("path")?.push_str(&n.path)?;
-                b.col("name")?.push_str(&n.name)?;
-                b.col("extension")?.push_str(&n.extension)?;
-                b.col("language")?.push_str(&n.language)?;
-                Ok(())
-            },
-        )?,
-
-        definitions: BatchBuilder::new(&entity_specs(ontology, "Definition"), def_nodes.len())?
-            .build(def_nodes, |n, b| {
-                let Some(id) = n.id else { return Ok(()) };
-                b.col("id")?.push_int(id)?;
-                b.col("project_id")?.push_int(project_id)?;
-                b.col("branch")?.push_str(branch)?;
-                b.col("file_path")?.push_str(n.file_path.as_ref())?;
-                b.col("fqn")?.push_str(n.fqn.to_string())?;
-                b.col("name")?.push_str(n.fqn.name())?;
-                b.col("definition_type")?
-                    .push_str(n.definition_type.as_str())?;
-                b.col("start_line")?.push_int(n.range.start.line as i64)?;
-                b.col("end_line")?.push_int(n.range.end.line as i64)?;
-                b.col("start_byte")?
-                    .push_int(n.range.byte_offset.0 as i64)?;
-                b.col("end_byte")?.push_int(n.range.byte_offset.1 as i64)?;
-                Ok(())
-            })?,
-
-        imported_symbols: BatchBuilder::new(
-            &entity_specs(ontology, "ImportedSymbol"),
-            imp_nodes.len(),
-        )?
-        .build(imp_nodes, |n, b| {
-            let Some(id) = n.id else { return Ok(()) };
-            b.col("id")?.push_int(id)?;
-            b.col("project_id")?.push_int(project_id)?;
-            b.col("branch")?.push_str(branch)?;
-            b.col("file_path")?.push_str(&n.location.file_path)?;
-            b.col("import_type")?.push_str(n.import_type.as_str())?;
-            b.col("import_path")?.push_str(&n.import_path)?;
-            b.col("identifier_name")?
-                .push_opt_str(n.identifier.as_ref().map(|i| &i.name))?;
-            b.col("identifier_alias")?
-                .push_opt_str(n.identifier.as_ref().and_then(|i| i.alias.as_ref()))?;
-            b.col("start_line")?
-                .push_int(n.location.start_line as i64)?;
-            b.col("end_line")?.push_int(n.location.end_line as i64)?;
-            b.col("start_byte")?.push_int(n.location.start_byte)?;
-            b.col("end_byte")?.push_int(n.location.end_byte)?;
-            Ok(())
-        })?,
-
-        edges: convert_edges(graph_data, ontology)?,
-    })
-}
-
 fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
     ontology
         .local_edge_columns()
@@ -130,10 +42,123 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         .collect()
 }
 
+pub fn convert_graph_data(
+    graph_data: &GraphData,
+    project_id: i64,
+    branch: &str,
+    ontology: &Ontology,
+) -> Result<LocalGraphData> {
+    let mut tables = Vec::new();
+
+    // Convert each local entity using its ontology-derived schema.
+    // The entity name dispatches to the right GraphData field and fill closure.
+    for entity_name in ontology.local_entity_names() {
+        let dest_table = ontology
+            .get_node(entity_name)
+            .expect("local entity must exist in nodes")
+            .destination_table
+            .clone();
+
+        let batch = match entity_name {
+            "Directory" => convert_entity(
+                &entity_specs(ontology, entity_name),
+                &graph_data.directory_nodes,
+                |n, b| {
+                    let Some(id) = n.id else { return Ok(()) };
+                    b.col("id")?.push_int(id)?;
+                    b.col("project_id")?.push_int(project_id)?;
+                    b.col("branch")?.push_str(branch)?;
+                    b.col("path")?.push_str(&n.path)?;
+                    b.col("name")?.push_str(&n.name)?;
+                    Ok(())
+                },
+            )?,
+            "File" => convert_entity(
+                &entity_specs(ontology, entity_name),
+                &graph_data.file_nodes,
+                |n, b| {
+                    let Some(id) = n.id else { return Ok(()) };
+                    b.col("id")?.push_int(id)?;
+                    b.col("project_id")?.push_int(project_id)?;
+                    b.col("branch")?.push_str(branch)?;
+                    b.col("path")?.push_str(&n.path)?;
+                    b.col("name")?.push_str(&n.name)?;
+                    b.col("extension")?.push_str(&n.extension)?;
+                    b.col("language")?.push_str(&n.language)?;
+                    Ok(())
+                },
+            )?,
+            "Definition" => convert_entity(
+                &entity_specs(ontology, entity_name),
+                &graph_data.definition_nodes,
+                |n, b| {
+                    let Some(id) = n.id else { return Ok(()) };
+                    b.col("id")?.push_int(id)?;
+                    b.col("project_id")?.push_int(project_id)?;
+                    b.col("branch")?.push_str(branch)?;
+                    b.col("file_path")?.push_str(n.file_path.as_ref())?;
+                    b.col("fqn")?.push_str(n.fqn.to_string())?;
+                    b.col("name")?.push_str(n.fqn.name())?;
+                    b.col("definition_type")?
+                        .push_str(n.definition_type.as_str())?;
+                    b.col("start_line")?.push_int(n.range.start.line as i64)?;
+                    b.col("end_line")?.push_int(n.range.end.line as i64)?;
+                    b.col("start_byte")?
+                        .push_int(n.range.byte_offset.0 as i64)?;
+                    b.col("end_byte")?.push_int(n.range.byte_offset.1 as i64)?;
+                    Ok(())
+                },
+            )?,
+            "ImportedSymbol" => convert_entity(
+                &entity_specs(ontology, entity_name),
+                &graph_data.imported_symbol_nodes,
+                |n, b| {
+                    let Some(id) = n.id else { return Ok(()) };
+                    b.col("id")?.push_int(id)?;
+                    b.col("project_id")?.push_int(project_id)?;
+                    b.col("branch")?.push_str(branch)?;
+                    b.col("file_path")?.push_str(&n.location.file_path)?;
+                    b.col("import_type")?.push_str(n.import_type.as_str())?;
+                    b.col("import_path")?.push_str(&n.import_path)?;
+                    b.col("identifier_name")?
+                        .push_opt_str(n.identifier.as_ref().map(|i| &i.name))?;
+                    b.col("identifier_alias")?
+                        .push_opt_str(n.identifier.as_ref().and_then(|i| i.alias.as_ref()))?;
+                    b.col("start_line")?
+                        .push_int(n.location.start_line as i64)?;
+                    b.col("end_line")?.push_int(n.location.end_line as i64)?;
+                    b.col("start_byte")?.push_int(n.location.start_byte)?;
+                    b.col("end_byte")?.push_int(n.location.end_byte)?;
+                    Ok(())
+                },
+            )?,
+            other => panic!("no converter registered for local entity '{other}'"),
+        };
+
+        tables.push((dest_table, batch));
+    }
+
+    // Edge table.
+    let edge_table = ontology
+        .local_edge_table_name()
+        .expect("local_db.edge_table.name must be configured")
+        .to_string();
+    tables.push((edge_table, convert_edges(graph_data, ontology)?));
+
+    Ok(LocalGraphData { tables })
+}
+
+fn convert_entity<N>(
+    specs: &[ColumnSpec],
+    nodes: &[N],
+    fill: impl Fn(&N, &mut BatchBuilder) -> std::result::Result<(), arrow::error::ArrowError>,
+) -> Result<RecordBatch> {
+    Ok(BatchBuilder::new(specs, nodes.len())?.build(nodes, fill)?)
+}
+
 fn convert_edges(graph_data: &GraphData, ontology: &Ontology) -> Result<RecordBatch> {
     let specs = edge_specs(ontology);
 
-    // Pre-resolve node IDs so the fill closure only sees valid edges.
     let resolved: Vec<_> = graph_data
         .relationships
         .iter()
@@ -189,6 +214,10 @@ mod tests {
             .expect("failed to load ontology")
     }
 
+    fn find_table<'a>(data: &'a LocalGraphData, name: &str) -> Option<&'a RecordBatch> {
+        data.tables.iter().find(|(t, _)| t == name).map(|(_, b)| b)
+    }
+
     #[test]
     fn empty_graph_produces_zero_row_batches() {
         let graph = GraphData {
@@ -200,31 +229,35 @@ mod tests {
         };
 
         let result = convert_graph_data(&graph, 1, "main", &test_ontology()).unwrap();
-        assert_eq!(result.directories.num_rows(), 0);
-        assert_eq!(result.files.num_rows(), 0);
-        assert_eq!(result.definitions.num_rows(), 0);
-        assert_eq!(result.imported_symbols.num_rows(), 0);
-        assert_eq!(result.edges.num_rows(), 0);
+        for (table, batch) in &result.tables {
+            assert_eq!(batch.num_rows(), 0, "{table} should have 0 rows");
+        }
     }
 
     #[test]
-    fn nodes_without_ids_are_skipped() {
+    fn tables_match_ontology_entities_plus_edges() {
+        let ont = test_ontology();
         let graph = GraphData {
-            directory_nodes: vec![DirectoryNode {
-                id: None,
-                path: "src".into(),
-                absolute_path: "/repo/src".into(),
-                repository_name: "repo".into(),
-                name: "src".into(),
-            }],
+            directory_nodes: vec![],
             file_nodes: vec![],
             definition_nodes: vec![],
             imported_symbol_nodes: vec![],
             relationships: vec![],
         };
 
-        let result = convert_graph_data(&graph, 1, "main", &test_ontology()).unwrap();
-        assert_eq!(result.directories.num_rows(), 0);
+        let result = convert_graph_data(&graph, 1, "main", &ont).unwrap();
+        let table_names: Vec<&str> = result.tables.iter().map(|(t, _)| t.as_str()).collect();
+
+        // Every local entity's destination table should be present.
+        for entity_name in ont.local_entity_names() {
+            let dest = &ont.get_node(entity_name).unwrap().destination_table;
+            assert!(
+                table_names.contains(&dest.as_str()),
+                "missing table for {entity_name}: {dest}"
+            );
+        }
+        // Edge table should be present.
+        assert!(table_names.contains(&ont.local_edge_table_name().unwrap()));
     }
 
     #[test]
@@ -245,9 +278,10 @@ mod tests {
         };
 
         let result = convert_graph_data(&graph, 100, "main", &ont).unwrap();
-        assert_eq!(result.directories.num_rows(), 1);
+        let batch = find_table(&result, "gl_directory").expect("gl_directory table");
+        assert_eq!(batch.num_rows(), 1);
 
-        let schema = result.directories.schema();
+        let schema = batch.schema();
         let col_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert!(col_names.contains(&"id"));
         assert!(col_names.contains(&"project_id"));
@@ -278,12 +312,34 @@ mod tests {
         };
 
         let result = convert_graph_data(&graph, 100, "main", &ont).unwrap();
-        assert_eq!(result.files.num_rows(), 1);
+        let batch = find_table(&result, "gl_file").expect("gl_file table");
+        assert_eq!(batch.num_rows(), 1);
 
-        let schema = result.files.schema();
+        let schema = batch.schema();
         let col_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert!(col_names.contains(&"path"));
         assert!(col_names.contains(&"extension"));
         assert!(col_names.contains(&"language"));
+    }
+
+    #[test]
+    fn nodes_without_ids_are_skipped() {
+        let graph = GraphData {
+            directory_nodes: vec![DirectoryNode {
+                id: None,
+                path: "src".into(),
+                absolute_path: "/repo/src".into(),
+                repository_name: "repo".into(),
+                name: "src".into(),
+            }],
+            file_nodes: vec![],
+            definition_nodes: vec![],
+            imported_symbol_nodes: vec![],
+            relationships: vec![],
+        };
+
+        let result = convert_graph_data(&graph, 1, "main", &test_ontology()).unwrap();
+        let batch = find_table(&result, "gl_directory").expect("gl_directory table");
+        assert_eq!(batch.num_rows(), 0);
     }
 }
