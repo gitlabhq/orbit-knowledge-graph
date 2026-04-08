@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 
@@ -21,7 +22,7 @@ pub(crate) struct NodeYaml {
     label: String,
     destination_table: String,
     #[serde(default)]
-    properties: BTreeMap<String, PropertyYaml>,
+    properties: IndexMap<String, PropertyYaml>,
     #[serde(default)]
     default_columns: Vec<String>,
     #[serde(default)]
