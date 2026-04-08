@@ -71,7 +71,7 @@ impl PipelineStage for OutputStage {
 }
 
 /// Debug SQL output is available to direct members of the top-level GitLab
-/// org group (traversal path exactly `1/9970/`) and instance admins.
+/// org group (traversal path exactly `1/9970/`, Reporter+) and instance admins.
 /// Sub-group or project-only members don't qualify -- this prevents
 /// external contributors invited to a single project from seeing compiled SQL.
 fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
@@ -80,6 +80,9 @@ fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
             .traversal_paths
             .iter()
             .any(|p| p == GITLAB_ORG_PATH_PREFIX);
-        sc.admin || direct_gitlab_org_member
+        let reporter_or_above = sc
+            .access_level
+            .is_some_and(|level| level >= compiler::AccessLevel::Reporter);
+        sc.admin || (direct_gitlab_org_member && reporter_or_above)
     })
 }
