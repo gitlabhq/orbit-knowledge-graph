@@ -123,7 +123,7 @@ async fn execute_query(
 ) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), PipelineError> {
     let mut query = client.query(&prepared.sql);
     for (k, v) in &prepared.http_settings {
-        query = query.with_option(k, v);
+        query = query.with_setting(k, v);
     }
     for (key, param) in prepared.params.iter() {
         query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);

@@ -91,7 +91,7 @@ impl PipelineStage for ProfilerExecutor {
 
         let mut query = client
             .query(&compiled.base.sql)
-            .with_option("log_comment", &log_comment);
+            .with_setting("log_comment", &log_comment);
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
