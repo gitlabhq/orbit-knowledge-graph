@@ -296,6 +296,7 @@ impl EngineConfiguration {
 #[schemars(deny_unknown_fields)]
 pub struct SchemaVersionCheckConfig {
     /// Interval in seconds between schema version checks. Defaults to 30.
+    /// Clamped to at least 1 second.
     #[serde(default = "SchemaVersionCheckConfig::default_interval_secs")]
     pub interval_secs: u64,
 }
@@ -306,7 +307,7 @@ impl SchemaVersionCheckConfig {
     }
 
     pub fn interval(&self) -> Duration {
-        Duration::from_secs(self.interval_secs)
+        Duration::from_secs(self.interval_secs.max(1))
     }
 }
 

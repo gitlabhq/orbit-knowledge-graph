@@ -201,9 +201,7 @@ pub async fn run_check_loop(
                 );
             }
             Ok(CheckOutcome::ResetReady) => {
-                // Issue 2 will implement the actual reset here.
-                // For now, log and write the version after "reset" (which for fresh
-                // installs means the schema was just applied via graph.sql).
+                // TODO(#427): move write_schema_version to after the actual table reset
                 info!("schema reset ready — actual reset will be implemented in Issue 2");
                 if let Err(e) = write_schema_version(&graph, SCHEMA_VERSION).await {
                     warn!(error = %e, "failed to write schema version after reset");

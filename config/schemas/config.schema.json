@@ -1074,7 +1074,7 @@
       "type": "object",
       "properties": {
         "interval_secs": {
-          "description": "Interval in seconds between schema version checks. Defaults to 30.",
+          "description": "Interval in seconds between schema version checks. Defaults to 30.\nClamped to at least 1 second.",
           "type": "integer",
           "format": "uint64",
           "default": 30,
