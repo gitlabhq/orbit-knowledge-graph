@@ -136,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
                 gitlab: config.gitlab_client_config(),
                 schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
+                schema_version_check: config.schema_version_check.clone(),
             };
             indexer::run(&indexer_config, ontology, shutdown)
                 .await

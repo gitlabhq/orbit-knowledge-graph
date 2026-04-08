@@ -291,6 +291,33 @@ impl EngineConfiguration {
     }
 }
 
+/// Schema version check configuration for the indexer.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SchemaVersionCheckConfig {
+    /// Interval in seconds between schema version checks. Defaults to 30.
+    #[serde(default = "SchemaVersionCheckConfig::default_interval_secs")]
+    pub interval_secs: u64,
+}
+
+impl SchemaVersionCheckConfig {
+    fn default_interval_secs() -> u64 {
+        30
+    }
+
+    pub fn interval(&self) -> Duration {
+        Duration::from_secs(self.interval_secs)
+    }
+}
+
+impl Default for SchemaVersionCheckConfig {
+    fn default() -> Self {
+        Self {
+            interval_secs: Self::default_interval_secs(),
+        }
+    }
+}
+
 /// Top-level schedule configuration.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]

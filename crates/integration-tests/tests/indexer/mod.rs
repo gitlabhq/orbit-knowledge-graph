@@ -7,5 +7,6 @@ mod health;
 mod namespace_deletion;
 mod nats;
 mod nats_tls;
+mod schema_version;
 mod sdlc;
 mod table_cleanup;

@@ -143,6 +143,18 @@ generate-config-schema:
       - config/schemas/config.schema.json
     expire_in: 24 hours
 
+schema-version-check:
+  stage: lint
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine/git:latest
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  script:
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
+    - ./scripts/check-schema-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
 fmt-check:
   stage: lint
   extends:

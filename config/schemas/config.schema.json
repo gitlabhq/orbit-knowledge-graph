@@ -203,6 +203,12 @@
         }
       }
     },
+    "schema_version_check": {
+      "$ref": "#/$defs/SchemaVersionCheckConfig",
+      "default": {
+        "interval_secs": 30
+      }
+    },
     "tls": {
       "$ref": "#/$defs/TlsConfig",
       "default": {
@@ -1059,6 +1065,20 @@
           "default": {
             "interval_secs": 86400
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SchemaVersionCheckConfig": {
+      "description": "Schema version check configuration for the indexer.",
+      "type": "object",
+      "properties": {
+        "interval_secs": {
+          "description": "Interval in seconds between schema version checks. Defaults to 30.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
         }
       },
       "additionalProperties": false

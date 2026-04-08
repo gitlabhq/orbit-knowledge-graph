@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::clickhouse::ClickHouseConfiguration;
-use crate::engine::{EngineConfiguration, ScheduleConfig};
+use crate::engine::{EngineConfiguration, ScheduleConfig, SchemaVersionCheckConfig};
 use crate::gitlab::{GitlabClientConfiguration, GitlabConfig};
 use crate::grpc::GrpcConfig;
 use crate::health_check::HealthCheckConfig;
@@ -70,6 +70,8 @@ pub struct AppConfig {
     pub query: QuerySettings,
     #[serde(default)]
     pub grpc: GrpcConfig,
+    #[serde(default)]
+    pub schema_version_check: SchemaVersionCheckConfig,
 }
 
 impl AppConfig {

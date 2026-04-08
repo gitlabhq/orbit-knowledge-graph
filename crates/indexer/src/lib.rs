@@ -39,6 +39,7 @@ pub mod metrics;
 pub mod modules;
 pub mod nats;
 pub mod scheduler;
+pub mod schema_version;
 pub mod topic;
 pub mod types;
 pub mod worker_pool;
@@ -55,7 +56,7 @@ use engine::EngineBuilder;
 use gitlab_client::GitlabClient;
 use gkg_server_config::{
     ClickHouseConfiguration, EngineConfiguration, GitlabClientConfiguration, NatsConfiguration,
-    ScheduleConfig,
+    ScheduleConfig, SchemaVersionCheckConfig,
 };
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
@@ -85,6 +86,8 @@ pub struct IndexerConfig {
     pub schedule: ScheduleConfig,
     #[serde(default = "default_health_bind_address")]
     pub health_bind_address: SocketAddr,
+    #[serde(default)]
+    pub schema_version_check: SchemaVersionCheckConfig,
 }
 
 impl Default for IndexerConfig {
@@ -97,6 +100,7 @@ impl Default for IndexerConfig {
             gitlab: None,
             schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
+            schema_version_check: SchemaVersionCheckConfig::default(),
         }
     }
 }
@@ -178,12 +182,23 @@ pub async fn run(
             .build(),
     );
 
+    let schema_check_shutdown = shutdown.clone();
+
     let engine_handle = engine.clone();
     let shutdown_task = tokio::spawn(async move {
         shutdown.cancelled().await;
         info!("received shutdown signal");
         engine_handle.stop();
     });
+    let schema_check_graph = config.graph.build_client();
+    let schema_check_datalake = config.datalake.build_client();
+    let schema_check_interval = config.schema_version_check.interval();
+    let schema_check_handle = tokio::spawn(schema_version::run_check_loop(
+        schema_check_graph,
+        schema_check_datalake,
+        schema_check_interval,
+        schema_check_shutdown,
+    ));
 
     info!("indexer started");
     let result = tokio::select! {
@@ -196,6 +211,7 @@ pub async fn run(
         }
     };
 
+    schema_check_handle.abort();
     shutdown_task.abort();
 
     info!("indexer stopped");

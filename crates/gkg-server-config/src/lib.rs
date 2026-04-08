@@ -26,7 +26,7 @@ pub use engine::{
     GlobalHandlerConfig, HandlerConfiguration, HandlersConfiguration,
     NamespaceCodeBackfillDispatcherConfig, NamespaceDeletionHandlerConfig,
     NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, NamespaceHandlerConfig,
-    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
+    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration, SchemaVersionCheckConfig,
     SiphonCodeIndexingTaskDispatcherConfig, TableCleanupConfig,
 };
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
