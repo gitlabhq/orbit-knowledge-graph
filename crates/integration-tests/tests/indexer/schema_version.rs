@@ -128,7 +128,11 @@ async fn check_version_mismatch_waiting_with_enabled_namespaces() {
         .expect("check_version should succeed");
 
     match outcome {
-        indexer::schema_version::CheckOutcome::MismatchWaiting { enabled_count } => {
+        indexer::schema_version::CheckOutcome::MismatchWaiting {
+            persisted,
+            enabled_count,
+        } => {
+            assert_eq!(persisted, Some(999), "should report the persisted version");
             assert!(
                 enabled_count > 0,
                 "should have at least one enabled namespace"
@@ -136,4 +140,35 @@ async fn check_version_mismatch_waiting_with_enabled_namespaces() {
         }
         other => panic!("expected MismatchWaiting, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn check_version_old_version_zero_namespaces_is_reset_ready() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+
+    let graph = ctx.create_client();
+    let datalake = ctx.create_client();
+
+    indexer::schema_version::ensure_version_table(&graph)
+        .await
+        .expect("ensure_version_table should succeed");
+
+    // Simulate a previous install with an older schema version.
+    indexer::schema_version::write_schema_version(&graph, 0)
+        .await
+        .expect("write_schema_version should succeed");
+
+    let meter = opentelemetry::global::meter("test");
+    let gauge = meter.u64_gauge("test.mismatch").build();
+
+    // Old version persisted + zero enabled namespaces = ResetReady.
+    let outcome = indexer::schema_version::check_version(&graph, &datalake, &gauge)
+        .await
+        .expect("check_version should succeed");
+
+    assert_eq!(
+        outcome,
+        indexer::schema_version::CheckOutcome::ResetReady,
+        "old persisted version with zero namespaces should be ResetReady"
+    );
 }

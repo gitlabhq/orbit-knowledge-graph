@@ -51,7 +51,10 @@ pub enum CheckOutcome {
     /// Schema is current — nothing to do.
     Current,
     /// Mismatch detected but namespaces are still enabled.
-    MismatchWaiting { enabled_count: u64 },
+    MismatchWaiting {
+        persisted: Option<u64>,
+        enabled_count: u64,
+    },
     /// Mismatch with zero enabled namespaces — reset should be triggered.
     ResetReady,
 }
@@ -145,13 +148,10 @@ pub async fn check_version(
     let enabled_count = count_enabled_namespaces(datalake).await?;
 
     if enabled_count > 0 {
-        warn!(
-            persisted = ?persisted,
-            embedded = SCHEMA_VERSION,
+        return Ok(CheckOutcome::MismatchWaiting {
+            persisted,
             enabled_count,
-            "schema version mismatch, but namespaces are still enabled — waiting"
-        );
-        return Ok(CheckOutcome::MismatchWaiting { enabled_count });
+        });
     }
 
     info!(
@@ -180,11 +180,21 @@ pub async fn run_check_loop(
         .u64_gauge("gkg.schema.version.mismatch")
         .with_description("1 when a schema version mismatch is detected, 0 otherwise")
         .build();
+    let check_loop_active_gauge = meter
+        .u64_gauge("gkg.schema.version.check_loop_active")
+        .with_description("1 while the schema version check loop is running, 0 after it exits")
+        .build();
 
     if let Err(e) = ensure_version_table(&graph).await {
-        warn!(error = %e, "failed to create gkg_schema_version table");
+        // Silent return is intentional: ClickHouse connectivity issues surface
+        // through other probes (health check, query failures). Starting the loop
+        // without the version table would cause repeated noisy errors with no
+        // recovery path, so we exit early and let the process restart instead.
+        warn!(error = %e, "failed to create gkg_schema_version table; check loop will not start");
         return;
     }
+
+    check_loop_active_gauge.record(1, &[]);
 
     info!(
         interval_secs = interval.as_secs(),
@@ -194,8 +204,13 @@ pub async fn run_check_loop(
     loop {
         match check_version(&graph, &datalake, &mismatch_gauge).await {
             Ok(CheckOutcome::Current) => {}
-            Ok(CheckOutcome::MismatchWaiting { enabled_count }) => {
+            Ok(CheckOutcome::MismatchWaiting {
+                persisted,
+                enabled_count,
+            }) => {
                 warn!(
+                    persisted = ?persisted,
+                    embedded = SCHEMA_VERSION,
                     enabled_count,
                     "schema version mismatch — disable all namespaces to proceed with schema reset"
                 );
@@ -223,6 +238,8 @@ pub async fn run_check_loop(
             }
         }
     }
+
+    check_loop_active_gauge.record(0, &[]);
 }
 
 #[cfg(test)]
