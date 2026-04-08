@@ -1842,8 +1842,7 @@ properties:
                 "source_kind",
                 "relationship_kind",
                 "target_id",
-                "target_kind",
-                "_version"
+                "target_kind"
             ]
         );
     }
