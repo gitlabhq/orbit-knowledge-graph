@@ -111,6 +111,8 @@ pub struct Ontology {
     /// Local entity configs keyed by entity name. Each entry lists
     /// properties to exclude from the local DuckDB table.
     pub(crate) local_entities: BTreeMap<String, Vec<String>>,
+    /// Local edge table name, if declared.
+    pub(crate) local_edge_table_name: Option<String>,
     /// Local edge table columns, if declared.
     pub(crate) local_edge_columns: Vec<EdgeColumn>,
 }
@@ -158,6 +160,7 @@ impl Ontology {
             internal_column_prefix: "_gkg_".to_string(),
             skip_security_filter_for_tables: Vec::new(),
             local_entities: BTreeMap::new(),
+            local_edge_table_name: None,
             local_edge_columns: Vec::new(),
         }
     }
@@ -588,6 +591,12 @@ impl Ontology {
                 .filter(|f| !exclude.iter().any(|p| p == &f.name))
                 .collect(),
         )
+    }
+
+    /// Name of the local edge table, if declared.
+    #[must_use]
+    pub fn local_edge_table_name(&self) -> Option<&str> {
+        self.local_edge_table_name.as_deref()
     }
 
     /// Column definitions for the local edge table, if declared.
@@ -1820,8 +1829,9 @@ properties:
     }
 
     #[test]
-    fn local_edge_columns_loaded_from_ontology() {
+    fn local_edge_table_loaded_from_ontology() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        assert_eq!(ontology.local_edge_table_name(), Some("gl_edge"));
         let cols = ontology.local_edge_columns();
         assert!(!cols.is_empty());
         let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
