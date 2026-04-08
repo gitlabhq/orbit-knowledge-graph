@@ -59,9 +59,12 @@ pub struct QueryPipelineContext {
 
 impl QueryPipelineContext {
     pub fn compiled(&self) -> Result<&Arc<CompiledQueryContext>, PipelineError> {
-        self.compiled.as_ref().ok_or_else(|| {
-            PipelineError::Compile("compiled query context not yet available".into())
-        })
+        self.compiled
+            .as_ref()
+            .ok_or_else(|| PipelineError::Compile {
+                message: "compiled query context not yet available".into(),
+                client_safe: false,
+            })
     }
 
     pub fn security_context(&self) -> Result<&SecurityContext, PipelineError> {

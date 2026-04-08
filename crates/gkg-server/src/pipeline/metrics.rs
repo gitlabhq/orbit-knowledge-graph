@@ -127,7 +127,7 @@ impl QueryPipelineMetrics {
 fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {
     match err {
         PipelineError::Security(_) => Some((&METRICS.security_rejected, "security")),
-        PipelineError::Compile(_) => None,
+        PipelineError::Compile { .. } => None,
         PipelineError::Execution(_) => Some((&METRICS.execution_failed, "execution")),
         PipelineError::Authorization(_) => Some((&METRICS.authorization_failed, "authorization")),
         PipelineError::ContentResolution(_) => {

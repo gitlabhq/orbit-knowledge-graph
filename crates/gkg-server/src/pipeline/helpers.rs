@@ -66,17 +66,24 @@ pub async fn send_query_error(
 
 /// Sanitize error messages before sending to clients.
 ///
-/// Compilation and validation errors are safe to return (they describe
-/// user input problems). Execution and internal errors may contain
-/// ClickHouse table names, SQL fragments, or infrastructure details —
-/// replace with a generic message and let server-side logs capture the
-/// full error.
+/// Only user-input validation errors are returned verbatim (parse errors,
+/// schema violations, reference errors, pagination errors, depth/limit
+/// exceeded). These are identified by the `Display` prefix that
+/// `QueryError` adds via thiserror.
+///
+/// All other errors (lowering, enforcement, codegen, ontology, execution,
+/// authorization, etc.) may contain ClickHouse table names, column names,
+/// SQL fragments, or infrastructure details. These are replaced with a
+/// generic message; server-side logs capture the full error.
 fn sanitize_error_message(error: &PipelineError) -> String {
     match error {
-        PipelineError::Compile(msg) | PipelineError::Security(msg) => msg.clone(),
-        PipelineError::Execution(_) => {
-            "Query execution failed. Please retry or contact support.".to_string()
-        }
+        PipelineError::Compile {
+            message,
+            client_safe: true,
+        } => message.clone(),
+        PipelineError::Compile { .. } => "Query compilation failed.".to_string(),
+        PipelineError::Security(_) => "Security context error.".to_string(),
+        PipelineError::Execution(_) => "Query execution failed.".to_string(),
         PipelineError::Authorization(_) => "Authorization failed.".to_string(),
         PipelineError::ContentResolution(_) => {
             "An internal error occurred during content resolution.".to_string()

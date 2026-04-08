@@ -49,4 +49,20 @@ pub enum QueryError {
     Ontology(#[from] OntologyError),
 }
 
+impl QueryError {
+    /// Whether this error only contains user-input validation details
+    /// and is safe to include verbatim in client-facing responses.
+    pub fn is_client_safe(&self) -> bool {
+        matches!(
+            self,
+            Self::Parse(_)
+                | Self::Validation(_)
+                | Self::ReferenceError(_)
+                | Self::PaginationError(_)
+                | Self::DepthExceeded(_)
+                | Self::LimitExceeded(_)
+        )
+    }
+}
+
 pub type Result<T> = std::result::Result<T, QueryError>;
