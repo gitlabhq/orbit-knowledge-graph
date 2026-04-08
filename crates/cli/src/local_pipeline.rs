@@ -20,7 +20,8 @@ use query_engine::pipeline::{
     QueryPipelineContext, TypeMap,
 };
 use query_engine::shared::{
-    ExecutionOutput, ExtractionOutput, ExtractionStage, PaginationMeta, PipelineOutput,
+    ExecutionOutput, ExtractionOutput, ExtractionStage, HydrationOutput, PaginationMeta,
+    PipelineOutput,
 };
 
 /// Execute a query against the local DuckDB graph.
@@ -52,6 +53,8 @@ pub fn run(
                 .then(&DuckDbExecutor)
                 .await?
                 .then(&ExtractionStage)
+                .await?
+                .then(&LocalHydration)
                 .await?
                 .then(&LocalOutput)
                 .await?
@@ -132,12 +135,39 @@ impl PipelineStage for DuckDbExecutor {
     }
 }
 
-/// Build PipelineOutput from extraction results. No authorization,
-/// redaction, or hydration -- all rows are trusted.
+/// No-op hydration stage. Passes through the extraction output as a
+/// `HydrationOutput` without fetching any properties. A future local
+/// resolver will populate node properties here.
+struct LocalHydration;
+
+impl PipelineStage for LocalHydration {
+    type Input = ExtractionOutput;
+    type Output = HydrationOutput;
+
+    async fn execute(
+        &self,
+        ctx: &mut QueryPipelineContext,
+        _obs: &mut dyn PipelineObserver,
+    ) -> std::result::Result<HydrationOutput, PipelineError> {
+        let input = ctx.phases.get::<ExtractionOutput>().ok_or_else(|| {
+            PipelineError::Execution("ExtractionOutput not found in phases".into())
+        })?;
+
+        Ok(HydrationOutput {
+            query_result: input.query_result.clone(),
+            result_context: input.query_result.ctx().clone(),
+            redacted_count: 0,
+            hydration_queries: vec![],
+        })
+    }
+}
+
+/// Build PipelineOutput from hydration results.
+/// All rows are trusted -- no authorization or redaction.
 struct LocalOutput;
 
 impl PipelineStage for LocalOutput {
-    type Input = ExtractionOutput;
+    type Input = HydrationOutput;
     type Output = PipelineOutput;
 
     async fn execute(
@@ -145,8 +175,8 @@ impl PipelineStage for LocalOutput {
         ctx: &mut QueryPipelineContext,
         _obs: &mut dyn PipelineObserver,
     ) -> std::result::Result<PipelineOutput, PipelineError> {
-        let input = ctx.phases.get::<ExtractionOutput>().ok_or_else(|| {
-            PipelineError::Execution("ExtractionOutput not found in phases".into())
+        let input = ctx.phases.get::<HydrationOutput>().ok_or_else(|| {
+            PipelineError::Execution("HydrationOutput not found in phases".into())
         })?;
 
         let compiled = ctx.compiled()?;
@@ -168,7 +198,7 @@ impl PipelineStage for LocalOutput {
             raw_query_strings: vec![],
             compiled: Arc::clone(compiled),
             query_result,
-            result_context: input.query_result.ctx().clone(),
+            result_context: input.result_context.clone(),
             execution_log: vec![],
             pagination,
         })
