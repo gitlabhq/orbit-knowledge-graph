@@ -220,8 +220,12 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             let project_id = project_id_from_path(&key);
             graph_data.assign_node_ids(project_id, "HEAD");
 
-            let local_data = duckdb_client::convert_graph_data(graph_data, project_id, "HEAD")
-                .context("failed to convert graph data to Arrow")?;
+            let ontology_dir = std::path::PathBuf::from(env!("ONTOLOGY_DIR"));
+            let ontology =
+                Ontology::load_from_dir(&ontology_dir).context("failed to load ontology")?;
+            let local_data =
+                duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", &ontology)
+                    .context("failed to convert graph data to Arrow")?;
 
             let db = store.db_path(&key);
             let client = duckdb_client::DuckDbClient::open(&db).context("failed to open DuckDB")?;

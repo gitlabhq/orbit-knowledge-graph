@@ -14,6 +14,7 @@ duckdb = { workspace = true }
 arrow = { workspace = true }
 code-graph = { path = "../code-graph" }
 gkg-utils = { path = "../utils" }
+ontology = { path = "../ontology" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
