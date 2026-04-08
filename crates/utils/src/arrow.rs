@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayRef, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
-    Int64Builder, LargeStringArray, ListArray, PrimitiveArray, StringArray, StringBuilder,
-    StructArray, TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-    TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+    Array, ArrayBuilder, ArrayRef, BooleanArray, Float64Array, Int16Array, Int32Array, Int64Array,
+    Int64Builder, Int8Array, LargeStringArray, ListArray, PrimitiveArray, StringArray,
+    StringBuilder, StructArray, TimestampMicrosecondArray, TimestampMillisecondArray,
+    TimestampNanosecondArray, TimestampSecondArray, UInt16Array, UInt32Array, UInt64Array,
+    UInt8Array,
 };
 use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -300,6 +301,20 @@ enum Col {
 }
 
 impl Col {
+    fn len(&self) -> usize {
+        match self {
+            Self::Str(b, _) => b.len(),
+            Self::Int(b, _) => b.len(),
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Str(..) => "Str",
+            Self::Int(..) => "Int",
+        }
+    }
+
     fn finish(self) -> (DataType, bool, ArrayRef) {
         match self {
             Self::Str(mut b, nullable) => (DataType::Utf8, nullable, Arc::new(b.finish())),
@@ -308,28 +323,37 @@ impl Col {
     }
 }
 
-/// A mutable handle to a single column builder. Returned by [`NodeBatch::col`].
-pub struct ColRef<'a>(&'a mut Col);
+/// A mutable handle to a single column builder. Returned by [`BatchBuilder::col`].
+///
+/// Panics if you call the wrong push variant for the column type (e.g.
+/// `push_str` on an `Int` column). This is a programming error.
+pub struct ColRef<'a> {
+    name: &'a str,
+    col: &'a mut Col,
+}
 
 impl ColRef<'_> {
     pub fn push_str(&mut self, v: impl AsRef<str>) {
-        if let Col::Str(b, _) = self.0 {
-            b.append_value(v);
+        match &mut *self.col {
+            Col::Str(b, _) => b.append_value(v),
+            other => panic!("push_str on {} column '{}'", other.kind(), self.name),
         }
     }
 
     pub fn push_int(&mut self, v: i64) {
-        if let Col::Int(b, _) = self.0 {
-            b.append_value(v);
+        match &mut *self.col {
+            Col::Int(b, _) => b.append_value(v),
+            other => panic!("push_int on {} column '{}'", other.kind(), self.name),
         }
     }
 
     pub fn push_opt_str<S: AsRef<str>>(&mut self, v: Option<S>) {
-        if let Col::Str(b, _) = self.0 {
-            match v {
+        match &mut *self.col {
+            Col::Str(b, _) => match v {
                 Some(s) => b.append_value(s),
                 None => b.append_null(),
-            }
+            },
+            other => panic!("push_opt_str on {} column '{}'", other.kind(), self.name),
         }
     }
 }
@@ -363,12 +387,19 @@ pub struct BatchBuilder {
 
 impl BatchBuilder {
     /// Create a builder from column specs, pre-allocating for `cap` rows.
+    ///
+    /// Panics if any column name appears more than once.
     pub fn new(specs: &[ColumnSpec], cap: usize) -> Self {
         let mut names = Vec::with_capacity(specs.len());
         let mut cols = Vec::with_capacity(specs.len());
         let mut index = HashMap::with_capacity(specs.len());
 
         for spec in specs {
+            assert!(
+                !index.contains_key(&spec.name),
+                "duplicate column name '{}'",
+                spec.name
+            );
             let col = match spec.col_type {
                 ColumnType::Int => Col::Int(Int64Builder::with_capacity(cap), spec.nullable),
                 ColumnType::Str => {
@@ -385,16 +416,21 @@ impl BatchBuilder {
 
     /// Get a mutable column handle by name. Panics if the column doesn't exist.
     pub fn col(&mut self, name: &str) -> ColRef<'_> {
-        let idx = self
+        let idx = *self
             .index
             .get(name)
             .unwrap_or_else(|| panic!("column '{name}' not found; available: {:?}", self.names));
-        ColRef(&mut self.cols[*idx])
+        ColRef {
+            name: &self.names[idx],
+            col: &mut self.cols[idx],
+        }
     }
 
     /// Iterate over items, fill columns via the closure, and produce a
-    /// RecordBatch. Every call to `fill` must push exactly one value to
-    /// each column.
+    /// RecordBatch.
+    ///
+    /// Every call to `fill` must push exactly one value to each column.
+    /// Panics if column lengths are inconsistent after iteration.
     pub fn build<T>(
         mut self,
         items: &[T],
@@ -402,6 +438,18 @@ impl BatchBuilder {
     ) -> std::result::Result<RecordBatch, arrow::error::ArrowError> {
         for item in items {
             fill(item, &mut self);
+        }
+
+        // Validate all columns have the same length.
+        if let Some(expected) = self.cols.first().map(Col::len) {
+            for (i, col) in self.cols.iter().enumerate().skip(1) {
+                let actual = col.len();
+                assert_eq!(
+                    actual, expected,
+                    "column '{}' has {} rows but '{}' has {}",
+                    self.names[i], actual, self.names[0], expected,
+                );
+            }
         }
 
         let mut fields = Vec::with_capacity(self.names.len());
