@@ -76,7 +76,7 @@ impl DuckDbClient {
         Ok(())
     }
 
-    /// Insert all graph data into DuckDB.
+    /// Insert all graph data into DuckDB sequentially.
     ///
     /// Table names come from `LocalGraphData.tables`, which are derived from
     /// the ontology during conversion.
