@@ -28,7 +28,7 @@ impl PipelineStage for OutputStage {
 
         let compiled = ctx.compiled()?;
 
-        let raw_query_strings = if is_gitlab_org(ctx) {
+        let raw_query_strings = if can_see_debug_sql(ctx) {
             let debug_json = json!({
                 "base": compiled.base.sql,
                 "base_rendered": compiled.base.render(),
@@ -70,10 +70,14 @@ impl PipelineStage for OutputStage {
     }
 }
 
-fn is_gitlab_org(ctx: &QueryPipelineContext) -> bool {
+/// Debug SQL output is available to GitLab org members (Developer+) and admins.
+fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
     ctx.security_context.as_ref().is_some_and(|sc| {
-        sc.traversal_paths
+        let in_gitlab_org = sc
+            .traversal_paths
             .iter()
-            .any(|p| p.starts_with(GITLAB_ORG_PATH_PREFIX))
+            .any(|p| p.starts_with(GITLAB_ORG_PATH_PREFIX));
+        let developer_or_above = sc.min_access_level.is_some_and(|level| level >= 30);
+        sc.admin || (in_gitlab_org && developer_or_above)
     })
 }

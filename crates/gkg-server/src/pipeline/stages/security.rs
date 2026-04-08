@@ -21,7 +21,9 @@ impl SecurityStage {
         } else {
             claims.group_traversal_ids.clone()
         };
-        SecurityContext::new(org_id, traversal_paths).map_err(|e| SecurityError(e.to_string()))
+        SecurityContext::new(org_id, traversal_paths)
+            .map(|sc| sc.with_role(claims.admin, claims.min_access_level))
+            .map_err(|e| SecurityError(e.to_string()))
     }
 }
 

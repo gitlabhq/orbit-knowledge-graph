@@ -11,11 +11,14 @@ static TRAVERSAL_PATH_REGEX: Lazy<Regex> =
 /// Security context for request-level isolation.
 ///
 /// Contains the org ID and traversal paths used to scope queries to
-/// a specific organization's data.
+/// a specific organization's data, plus optional role metadata from
+/// the JWT claims for access-gated features (e.g. debug output).
 #[derive(Debug, Clone)]
 pub struct SecurityContext {
     pub org_id: i64,
     pub traversal_paths: Vec<String>,
+    pub admin: bool,
+    pub min_access_level: Option<u32>,
 }
 
 impl SecurityContext {
@@ -25,6 +28,9 @@ impl SecurityContext {
     /// - Each path matches the format `int/int/.../`
     /// - Each segment fits in i64
     /// - The first segment of each path equals org_id
+    ///
+    /// `admin` and `min_access_level` default to `false` / `None`.
+    /// Use [`with_role`](Self::with_role) to set them from JWT claims.
     pub fn new(org_id: i64, traversal_paths: Vec<String>) -> Result<Self> {
         for path in &traversal_paths {
             Self::validate_traversal_path(path, org_id)?;
@@ -32,7 +38,15 @@ impl SecurityContext {
         Ok(Self {
             org_id,
             traversal_paths,
+            admin: false,
+            min_access_level: None,
         })
+    }
+
+    pub fn with_role(mut self, admin: bool, min_access_level: Option<u32>) -> Self {
+        self.admin = admin;
+        self.min_access_level = min_access_level;
+        self
     }
 
     fn validate_traversal_path(path: &str, org_id: i64) -> Result<()> {
