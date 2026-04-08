@@ -185,3 +185,36 @@ async fn pipeline_observer_records_query_metrics() {
 
     provider.shutdown().unwrap();
 }
+
+#[tokio::test]
+async fn pipeline_observer_records_ch_resource_metrics() {
+    let (provider, exporter) = setup_meter_provider();
+
+    let mut obs = OTelPipelineObserver::start();
+    obs.set_query_type("traverse");
+    obs.compiled(Duration::from_millis(1));
+    obs.executed(Duration::from_millis(20), 1);
+    obs.query_executed("base", 5000, 128_000, 4_000_000);
+    obs.query_executed("hydration:static", 200, 8_000, 500_000);
+    obs.finish(10, 0);
+
+    sleep(Duration::from_millis(150)).await;
+    provider.force_flush().unwrap();
+
+    let metrics = exporter.get_finished_metrics().unwrap();
+
+    assert!(
+        find_metric(&metrics, "gkg.query.pipeline.ch.read_rows").is_some(),
+        "gkg.query.pipeline.ch.read_rows should be recorded"
+    );
+    assert!(
+        find_metric(&metrics, "gkg.query.pipeline.ch.read_bytes").is_some(),
+        "gkg.query.pipeline.ch.read_bytes should be recorded"
+    );
+    assert!(
+        find_metric(&metrics, "gkg.query.pipeline.ch.memory_usage").is_some(),
+        "gkg.query.pipeline.ch.memory_usage should be recorded"
+    );
+
+    provider.shutdown().unwrap();
+}
