@@ -950,6 +950,13 @@
           "format": "uint64",
           "minimum": 0
         },
+        "query_cache_share_between_users": {
+          "description": "ClickHouse `query_cache_share_between_users`. When true, cached\nresults are shared across ClickHouse users. Required in\nmulti-pod deployments where pods may connect as different users.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "query_cache_ttl": {
           "description": "ClickHouse `query_cache_ttl` in seconds.",
           "type": [

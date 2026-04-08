@@ -489,6 +489,14 @@ fn cursor_pagination_validation() {
         "cursor query should enable CH query cache: {}",
         result.base.sql
     );
+    assert!(
+        result
+            .base
+            .sql
+            .contains("query_cache_share_between_users = 1"),
+        "cursor query should share cache between users: {}",
+        result.base.sql
+    );
 
     // offset + page_size > limit rejected
     let err = compile(

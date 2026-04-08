@@ -16,6 +16,9 @@ pub fn resolve(query_type: &str, has_cursor: bool) -> QueryConfig {
         // cache so that subsequent pages hit the same cached result. This
         // overrides even an explicit `use_query_cache: false` in YAML.
         cfg.use_query_cache = Some(true);
+        // Share cache across ClickHouse users so all pods hit the same
+        // cached result regardless of which CH user they connect as.
+        cfg.query_cache_share_between_users = Some(true);
     }
 
     cfg
@@ -35,6 +38,7 @@ mod tests {
     fn resolve_enables_cache_for_cursor() {
         let cfg = resolve("search", true);
         assert_eq!(cfg.use_query_cache, Some(true));
+        assert_eq!(cfg.query_cache_share_between_users, Some(true));
     }
 
     #[test]
