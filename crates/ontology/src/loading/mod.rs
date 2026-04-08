@@ -6,7 +6,7 @@ use rust_embed::Embed;
 use serde::Deserialize;
 use std::path::Path;
 
-use crate::entities::DomainInfo;
+use crate::entities::{DomainInfo, EdgeColumn};
 use crate::{Ontology, OntologyError};
 
 pub(crate) use edge::EdgeYaml;
@@ -263,15 +263,51 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     // Validate and store local entity settings.
     if let Some(local) = schema.settings.local {
         for entry in local.entities {
-            if !ontology.nodes.contains_key(&entry.name) {
-                return Err(OntologyError::Validation(format!(
+            let node = ontology.nodes.get(&entry.name).ok_or_else(|| {
+                OntologyError::Validation(format!(
                     "local.entities: unknown entity '{}'",
                     entry.name
-                )));
+                ))
+            })?;
+
+            // Validate exclude_properties reference actual fields.
+            let field_names: std::collections::HashSet<&str> =
+                node.fields.iter().map(|f| f.name.as_str()).collect();
+            for prop in &entry.exclude_properties {
+                if !field_names.contains(prop.as_str()) {
+                    return Err(OntologyError::Validation(format!(
+                        "local.entities: exclude_properties entry '{}' \
+                         is not a declared property of '{}'",
+                        prop, entry.name
+                    )));
+                }
             }
+
             ontology
                 .local_entities
                 .insert(entry.name, entry.exclude_properties);
+        }
+
+        if let Some(edge_table) = local.edge_table {
+            // Validate no duplicate column names.
+            let mut seen = std::collections::HashSet::new();
+            for col in &edge_table.columns {
+                if !seen.insert(&col.name) {
+                    return Err(OntologyError::Validation(format!(
+                        "local.edge_table: duplicate column name '{}'",
+                        col.name
+                    )));
+                }
+            }
+
+            ontology.local_edge_columns = edge_table
+                .columns
+                .into_iter()
+                .map(|c| EdgeColumn {
+                    name: c.name,
+                    data_type: c.data_type,
+                })
+                .collect();
         }
     }
 

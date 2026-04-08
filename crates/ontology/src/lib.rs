@@ -111,6 +111,8 @@ pub struct Ontology {
     /// Local entity configs keyed by entity name. Each entry lists
     /// properties to exclude from the local DuckDB table.
     pub(crate) local_entities: BTreeMap<String, Vec<String>>,
+    /// Local edge table columns, if declared.
+    pub(crate) local_edge_columns: Vec<EdgeColumn>,
 }
 
 impl Default for Ontology {
@@ -156,6 +158,7 @@ impl Ontology {
             internal_column_prefix: "_gkg_".to_string(),
             skip_security_filter_for_tables: Vec::new(),
             local_entities: BTreeMap::new(),
+            local_edge_columns: Vec::new(),
         }
     }
 
@@ -585,6 +588,12 @@ impl Ontology {
                 .filter(|f| !exclude.iter().any(|p| p == &f.name))
                 .collect(),
         )
+    }
+
+    /// Column definitions for the local edge table, if declared.
+    #[must_use]
+    pub fn local_edge_columns(&self) -> &[EdgeColumn] {
+        &self.local_edge_columns
     }
 
     /// Default ORDER BY / dedup key columns for node tables.
@@ -1808,5 +1817,40 @@ properties:
     fn local_entity_fields_returns_none_for_non_local() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
         assert!(ontology.local_entity_fields("User").is_none());
+    }
+
+    #[test]
+    fn local_edge_columns_loaded_from_ontology() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let cols = ontology.local_edge_columns();
+        assert!(!cols.is_empty());
+        let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "source_id",
+                "source_kind",
+                "relationship_kind",
+                "target_id",
+                "target_kind",
+                "_version"
+            ]
+        );
+    }
+
+    #[test]
+    fn local_exclude_properties_validated_against_fields() {
+        // Verify the real ontology passes validation (all exclude_properties
+        // reference actual fields). If someone adds a typo, this catches it.
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        for entity_name in ontology.local_entity_names() {
+            let fields = ontology
+                .local_entity_fields(entity_name)
+                .expect("local entity should have fields");
+            assert!(
+                !fields.is_empty(),
+                "local entity '{entity_name}' should have at least one field after exclusions"
+            );
+        }
     }
 }

@@ -44,6 +44,13 @@ pub(super) struct SettingsYaml {
 pub(super) struct LocalSettingsYaml {
     #[serde(default)]
     pub entities: Vec<LocalEntityYaml>,
+    #[serde(default)]
+    pub edge_table: Option<LocalEdgeTableYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct LocalEdgeTableYaml {
+    pub columns: Vec<EdgeColumnYaml>,
 }
 
 #[derive(Debug, Deserialize)]

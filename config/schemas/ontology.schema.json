@@ -395,6 +395,34 @@
                 "additionalProperties": false
               },
               "description": "Entities indexed locally, with per-entity property exclusions."
+            },
+            "edge_table": {
+              "type": "object",
+              "description": "Edge table schema for the local DuckDB graph.",
+              "required": ["columns"],
+              "properties": {
+                "columns": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "type"],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "Column name."
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["string", "int64", "float64", "boolean", "date", "datetime"],
+                        "description": "Column data type."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "description": "Columns in the local edge table, in order."
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
