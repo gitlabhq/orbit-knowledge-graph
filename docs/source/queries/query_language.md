@@ -53,7 +53,7 @@ The type of query to run:
 |---------------|---------------------------------------------------------------|
 | `search`      | Find nodes that match filters.                                |
 | `traversal`   | Start from one or more nodes and follow relationships.        |
-| `aggregation` | Search nodes and group the results. |
+| `aggregation` | Search nodes and group the results.                           |
 | `path_finding`| Find paths between nodes.                                     |
 | `neighbors`   | Find nodes directly connected to a starting node.             |
 
@@ -77,19 +77,17 @@ Find all users who have authored open merge requests and return up to 10 results
 
 ## `node`
 
-A single node selector. Use with `search` and `neighbors` queries.
-
-A node selector specifies which graph nodes to match:
+A single graph node. Use with `search` and `neighbors` queries.
 
 | Field         | Required    | Type             | Description                                                                                                                        |
 |---------------|-------------|------------------|------------------------------------------------------------------------------------------------------------------------------------|
-| `id`          | {{< yes >}} | `string`         | Variable identifier for this node. Use `id` to reference a node in the `relationships` and `aggregations` fields.                 |
-| `entity`      | {{< yes >}}  | `string`         | Node type to match. For example, `User`, `Project`, `MergeRequest`.                                                               |
-| `columns`     | {{< no >}}  | `string`/`array` | Properties to return. Use `"*"` for all columns, or an array of property names. Default: `id`.                                    |
+| `id`          | {{< yes >}} | `string`         | Variable identifier for this node. Use `id` to reference a node in the `relationships` and `aggregations` fields.                  |
+| `entity`      | {{< yes >}} | `string`         | Node type to match. For example, `User`, `Project`, `MergeRequest`.                                                                |
+| `columns`     | {{< no >}}  | `string`/`array` | Properties to return. Use `"*"` for all columns, or an array of property names. Default: `id`.                                     |
 | `filters`     | {{< no >}}  | `object`         | Property conditions a node must satisfy.                                                                                           |
 | `node_ids`    | {{< no >}}  | `array`          | Match only nodes with these IDs. Maximum 500 IDs.                                                                                  |
-| `id_range`    | {{< no >}}  | `object`         | Match nodes within an inclusive ID range, using `start` and `end`.                                                                |
-| `id_property` | {{< no >}}  | `string`         | The property to use as the node identifier. Default: `id`.                                                                        |
+| `id_range`    | {{< no >}}  | `object`         | Match nodes within an inclusive ID range, using `start` and `end`.                                                                 |
+| `id_property` | {{< no >}}  | `string`         | The property to use as the node identifier. Default: `id`.                                                                         |
 
 Example:
 
@@ -112,9 +110,12 @@ Search for users whose username starts with `admin` and return their username an
 
 ## `nodes`
 
-An array of node selectors. Use with `traversal`, `aggregation`, and `path_finding` queries.
+An array of graph nodes. Use with `traversal`, `aggregation`, and `path_finding` queries.
 
-Each node selector uses the same fields as [`node`](#node).
+For `traversal` queries, you must specify at least two nodes. For all other queries, you must specify at least one node.
+You can't specify more than five nodes in one query.
+
+Each node uses the same fields as [`node`](#node).
 
 Example:
 
@@ -136,7 +137,7 @@ Find all users who have authored merged merge requests and return up to 25 resul
 
 ## `relationships`
 
-An array of relationships that connect node types.
+An array of relationships.
 
 | Field       | Required    | Type             | Description                                                                                      |
 |-------------|-------------|------------------|--------------------------------------------------------------------------------------------------|
@@ -209,7 +210,7 @@ Path finding configuration. Required when `query_type` is `path_finding`.
 | `type`      | {{< yes >}} | `string`  | Path type. One of: `shortest`, `all_shortest`, `any`.                 |
 | `from`      | {{< yes >}} | `string`  | The `id` of the start node selector.                                  |
 | `to`        | {{< yes >}} | `string`  | The `id` of the end node selector.                                    |
-| `max_depth` | {{< yes >}}  | `integer` | Maximum path depth. Range: `1`-`3`.                                       |
+| `max_depth` | {{< yes >}} | `integer` | Maximum path depth. Range: `1`-`3`.                                   |
 | `rel_types` | {{< no >}}  | `array`   | Relationship types to traverse. If omitted, all types are considered. |
 
 Supported path types:
