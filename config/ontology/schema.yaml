@@ -101,8 +101,8 @@ edges:
   IN_PROJECT: edges/in_project.yaml
   REVIEWER: edges/reviewer.yaml
   ASSIGNED: edges/assigned.yaml
-  MERGED_BY: edges/merged_by.yaml
-  CLOSED_BY: edges/closed_by.yaml
+  MERGED: edges/merged.yaml
+  CLOSED: edges/closed.yaml
   APPROVED: edges/approved.yaml
   HAS_FILE: edges/has_file.yaml
   HAS_STAGE: edges/has_stage.yaml
@@ -112,9 +112,9 @@ edges:
   DETECTED_BY: edges/detected_by.yaml
   HAS_IDENTIFIER: edges/has_identifier.yaml
   DETECTED_IN: edges/detected_in.yaml
-  RESOLVED_BY: edges/resolved_by.yaml
-  CONFIRMED_BY: edges/confirmed_by.yaml
-  DISMISSED_BY: edges/dismissed_by.yaml
+  RESOLVED: edges/resolved.yaml
+  CONFIRMED: edges/confirmed.yaml
+  DISMISSED: edges/dismissed.yaml
   FIXES: edges/fixes.yaml
   IN_GROUP: edges/in_group.yaml
   IN_MILESTONE: edges/in_milestone.yaml

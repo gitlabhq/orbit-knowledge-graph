@@ -118,9 +118,9 @@ The following relationships are available by default:
 | `ASSIGNED`         | `User`                     | `MergeRequest`               |
 |                    | `User`                     | `WorkItem`                   |
 | `REVIEWER`         | `User`                     | `MergeRequest`               |
-| `MERGED_BY`        | `User`                     | `MergeRequest`               |
+| `MERGED`           | `User`                     | `MergeRequest`               |
 | `APPROVED`         | `User`                     | `MergeRequest`               |
-| `CLOSED_BY`        | `User`                     | `WorkItem`                   |
+| `CLOSED`           | `User`                     | `WorkItem`                   |
 | `CREATOR`          | `User`                     | `Project`                    |
 | `OWNER`            | `User`                     | `Group`                      |
 | `MEMBER_OF`        | `User`                     | `Group`                      |
@@ -173,9 +173,9 @@ The following relationships are available by default:
 | `DETECTED_IN`      | `Finding`                  | `Pipeline`                   |
 | `OCCURRENCE`       | `VulnerabilityOccurrence`  | `Vulnerability`              |
 | `SCANS`            | `VulnerabilityScanner`     | `Project`                    |
-| `CONFIRMED_BY`     | `User`                     | `Vulnerability`              |
-| `RESOLVED_BY`      | `User`                     | `Vulnerability`              |
-| `DISMISSED_BY`     | `User`                     | `Vulnerability`              |
+| `CONFIRMED`        | `User`                     | `Vulnerability`              |
+| `RESOLVED`         | `User`                     | `Vulnerability`              |
+| `DISMISSED`        | `User`                     | `Vulnerability`              |
 | `FIXES`            | `MergeRequest`             | `Vulnerability`              |
 | `CLOSES`           | `MergeRequest`             | `WorkItem`                   |
 | `RELATED_TO`       | `WorkItem`                 | `WorkItem`                   |

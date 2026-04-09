@@ -252,12 +252,9 @@ pub async fn processes_vulnerability_with_user_edges(ctx: &TestContext) {
     assert_node_count(ctx, "gl_vulnerability", 3).await;
 
     assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "Vulnerability", "1/100/", 3).await;
-    assert_edges_have_traversal_path(ctx, "CONFIRMED_BY", "User", "Vulnerability", "1/100/", 1)
-        .await;
-    assert_edges_have_traversal_path(ctx, "RESOLVED_BY", "User", "Vulnerability", "1/100/", 1)
-        .await;
-    assert_edges_have_traversal_path(ctx, "DISMISSED_BY", "User", "Vulnerability", "1/100/", 1)
-        .await;
+    assert_edges_have_traversal_path(ctx, "CONFIRMED", "User", "Vulnerability", "1/100/", 1).await;
+    assert_edges_have_traversal_path(ctx, "RESOLVED", "User", "Vulnerability", "1/100/", 1).await;
+    assert_edges_have_traversal_path(ctx, "DISMISSED", "User", "Vulnerability", "1/100/", 1).await;
 }
 
 pub async fn processes_vulnerability_finding_edge(ctx: &TestContext) {

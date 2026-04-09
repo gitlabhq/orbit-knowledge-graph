@@ -1,0 +1,6 @@
+description: User who dismissed a vulnerability
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Vulnerability, id: id }
+    description: "User dismissed a vulnerability."
