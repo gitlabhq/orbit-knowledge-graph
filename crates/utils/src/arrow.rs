@@ -499,20 +499,12 @@ impl BatchBuilder {
 
 // ── AsRecordBatch trait ──────────────────────────────────────────────────────
 
-/// Context passed to [`AsRecordBatch::write_row`] for values that come from
-/// the indexing pipeline rather than the node struct itself.
-pub struct RowContext<'a> {
-    pub project_id: i64,
-    pub branch: &'a str,
-    pub commit_sha: &'a str,
-}
-
 /// Types that can serialize a slice of themselves into an Arrow
 /// [`RecordBatch`] via [`BatchBuilder`].
 ///
-/// Implementors write their fields into whichever columns the caller
-/// provides via `specs`. This keeps the schema owned by the ontology
-/// rather than hardcoded in the domain types.
+/// The `Ctx` type parameter carries pipeline-level values (e.g.
+/// project ID, branch) that aren't part of the domain struct.
+/// Defaults to `()` for types that don't need external context.
 ///
 /// Nodes without assigned IDs should return `false` from
 /// [`should_include`](Self::should_include) and will be filtered out
@@ -522,7 +514,7 @@ pub struct RowContext<'a> {
 /// let specs = ontology.local_entity_specs("File");
 /// let batch = FileNode::to_record_batch(&nodes, &specs, &ctx)?;
 /// ```
-pub trait AsRecordBatch: Sized {
+pub trait AsRecordBatch<Ctx = ()>: Sized {
     /// Whether this item should be included in the batch.
     /// Default: always include.
     fn should_include(&self) -> bool {
@@ -532,7 +524,7 @@ pub trait AsRecordBatch: Sized {
     /// Write one row into `builder`. Must push exactly one value to
     /// every column declared in the specs that were used to create the
     /// builder. Returns `Err` if a referenced column is missing.
-    fn write_row(&self, builder: &mut BatchBuilder, ctx: &RowContext<'_>) -> BatchResult<()>;
+    fn write_row(&self, builder: &mut BatchBuilder, ctx: &Ctx) -> BatchResult<()>;
 
     /// Build a [`RecordBatch`] from a slice of items using the given
     /// column specs, filtering out any where
@@ -540,7 +532,7 @@ pub trait AsRecordBatch: Sized {
     fn to_record_batch(
         items: &[Self],
         specs: &[ColumnSpec],
-        ctx: &RowContext<'_>,
+        ctx: &Ctx,
     ) -> BatchResult<RecordBatch> {
         let included: Vec<&Self> = items.iter().filter(|i| i.should_include()).collect();
         BatchBuilder::new(specs, included.len())?.build(&included, |item, b| {
