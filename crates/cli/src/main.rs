@@ -208,10 +208,31 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
     let ontology = Ontology::load_from_dir(&ontology_dir).context("failed to load ontology")?;
 
     let db_path = store.db_path();
-    let client = duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
-    client
-        .initialize_schema()
-        .context("failed to create schema")?;
+
+    // Ensure schema exists, then drop the connection so we don't hold
+    // the write lock during parsing.
+    {
+        let client =
+            duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
+        client
+            .initialize_schema()
+            .context("failed to create schema")?;
+    }
+
+    let node_tables: Vec<String> = ontology
+        .local_entity_names()
+        .iter()
+        .map(|name| {
+            ontology
+                .get_node(name)
+                .expect("local entity must exist")
+                .destination_table
+                .clone()
+        })
+        .collect();
+    let edge_table = ontology
+        .local_edge_table_name()
+        .context("local_db.edge_table.name must be configured")?;
 
     let config = IndexingConfig {
         worker_threads: threads,
@@ -223,10 +244,6 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         let key = repo_path.to_string_lossy().to_string();
         let project_id = workspace::project_id_from_path(&key);
 
-        client
-            .upsert_manifest(&key, project_id, "indexing", None)
-            .context("failed to update manifest")?;
-
         info!("Indexing repository at: {}", key);
 
         let repo_name = repo_path
@@ -234,15 +251,18 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "repository".to_string());
 
+        // Parse and build graph -- no DB connection held.
         let file_source = DirectoryFileSource::new(key.clone());
         let indexer = RepositoryIndexer::new(repo_name.clone(), key.clone());
 
         let mut result = match indexer.index_files(file_source, &config).await {
             Ok(r) => r,
             Err(e) => {
-                client
-                    .upsert_manifest(&key, project_id, "error", Some(&e.to_string()))
-                    .ok();
+                if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path) {
+                    client
+                        .upsert_manifest(&key, project_id, "error", Some(&e.to_string()))
+                        .ok();
+                }
                 anyhow::bail!("{e}");
             }
         };
@@ -254,32 +274,22 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                 duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", &ontology)
                     .context("failed to convert graph data to Arrow")?;
 
-            let node_tables: Vec<String> = ontology
-                .local_entity_names()
-                .iter()
-                .map(|name| {
-                    ontology
-                        .get_node(name)
-                        .expect("local entity must exist")
-                        .destination_table
-                        .clone()
-                })
-                .collect();
-            let edge_table = ontology
-                .local_edge_table_name()
-                .context("local_db.edge_table.name must be configured")?;
+            // Acquire write connection only for the actual writes.
+            let client = duckdb_client::DuckDbClient::open(&db_path)
+                .context("failed to open DuckDB for writing")?;
+            client
+                .upsert_manifest(&key, project_id, "indexing", None)
+                .context("failed to update manifest")?;
             client
                 .delete_project(project_id, &node_tables, edge_table)
                 .context("failed to clear existing project data")?;
-
             client
                 .insert_graph(local_data)
                 .context("failed to insert graph data")?;
+            client
+                .upsert_manifest(&key, project_id, "indexed", None)
+                .context("failed to update manifest")?;
         }
-
-        client
-            .upsert_manifest(&key, project_id, "indexed", None)
-            .context("failed to update manifest")?;
 
         let mut output = build_index_output(&repo_name, &key, &result, show_stats);
         output.database_path = Some(db_path.display().to_string());
