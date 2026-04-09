@@ -80,8 +80,8 @@ graph TD
 
     WorkItem -- IN_PROJECT --> Project
     WorkItem -- IN_GROUP --> Group
-    MergeRequest -- APPROVED_BY --> User
-    MergeRequest -- REVIEWER --> User
+    User -- APPROVED_BY --> MergeRequest
+    User -- REVIEWER --> MergeRequest
 ```
 
 ### Implemented Relationship Types
@@ -101,8 +101,8 @@ graph TD
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
 | `TRIGGERED`                         | `Pipeline`     | `MergeRequest`, `Branch` | A pipeline was triggered for a merge request or a branch push.                                  |
 | `CLOSED_BY`                         | `User`         | `WorkItem`     | A user closed a work item.                                                                              |
-| `APPROVED_BY`                       | `MergeRequest` | `User`         | A merge request was approved by a user.                                                                 |
-| `REVIEWER`                          | `MergeRequest` | `User`         | A merge request has a user as reviewer.                                                                 |
+| `APPROVED_BY`                       | `User`         | `MergeRequest` | A user approved a merge request.                                                                        |
+| `REVIEWER`                          | `User`         | `MergeRequest` | A user is a reviewer of a merge request.                                                                |
 | `HAS_JOB`                           | `Pipeline`     | `Job`          | A pipeline contains jobs.                                                                               |
 | `HAS_STAGE`                         | `Pipeline`     | `Stage`        | A pipeline contains stages.                                                                             |
 | `HAS_NOTE`                          | `MergeRequest`, `WorkItem` | `Note` | An entity has notes attached.                                                          |
