@@ -51,17 +51,26 @@ impl DuckDbClient {
         unreachable!()
     }
 
-    /// Open a DuckDB database for read-only access. Multiple readers
-    /// can coexist with each other and with a single writer.
+    /// Open a DuckDB database for read-only access. Retries briefly
+    /// (50ms intervals, ~250ms total) if a writer holds the lock.
     pub fn open_read_only(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
         }
-        let config = duckdb::Config::default()
-            .access_mode(duckdb::AccessMode::ReadOnly)
-            .map_err(|e| DuckDbError::Schema(e.to_string()))?;
-        let conn = duckdb::Connection::open_with_flags(path, config)?;
-        Ok(Self { conn })
+
+        for attempt in 0..=5 {
+            let config = duckdb::Config::default()
+                .access_mode(duckdb::AccessMode::ReadOnly)
+                .map_err(|e| DuckDbError::Schema(e.to_string()))?;
+            match duckdb::Connection::open_with_flags(path, config) {
+                Ok(conn) => return Ok(Self { conn }),
+                Err(e) if attempt < 5 && is_lock_error(&e) => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        unreachable!()
     }
 
     #[cfg(test)]
