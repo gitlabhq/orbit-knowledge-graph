@@ -175,19 +175,13 @@ async fn main() -> Result<()> {
             ontology,
             raw,
         } => {
-            let results = run_local_query(json, ontology)?;
-            for (i, (label, output)) in results.iter().enumerate() {
-                if raw {
-                    let formatted = formatters::GraphFormatter.format(output);
-                    println!("{}", serde_json::to_string(&formatted)?);
-                } else {
-                    if i > 0 {
-                        println!();
-                    }
-                    println!("### {}\n", label);
-                    let formatted = formatters::GoonFormatter.format(output);
-                    println!("{}", serde_json::to_string_pretty(&formatted)?);
-                }
+            let output = run_local_query(json, ontology)?;
+            if raw {
+                let formatted = formatters::GraphFormatter.format(&output);
+                println!("{}", serde_json::to_string(&formatted)?);
+            } else {
+                let formatted = formatters::GoonFormatter.format(&output);
+                println!("{}", serde_json::to_string_pretty(&formatted)?);
             }
             Ok(())
         }
@@ -395,50 +389,28 @@ struct QueryResult {
     rendered_sql: String,
 }
 
-#[derive(Serialize)]
-struct QueryError {
-    label: String,
-    input: Value,
-    error: String,
-}
-
-#[derive(Serialize)]
-#[serde(untagged)]
-enum QueryOutput {
-    Success(QueryResult),
-    Error(QueryError),
-}
-
-/// Parse query JSON, load the ontology, and return the parsed queries
-/// as `(label, value)` pairs. Supports a single query (with
-/// `"query_type"`) or a keyed map of queries.
+/// Parse a single query JSON and load the ontology.
 fn parse_query_input(
     json_input: &str,
     ontology_path: Option<PathBuf>,
-) -> Result<(Vec<(String, Value)>, Ontology)> {
+) -> Result<(Value, Ontology)> {
     let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
     let ontology = Ontology::load_from_dir(&ontology_dir)
         .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
 
     let value: Value = serde_json::from_str(json_input).context("failed to parse JSON input")?;
-    let queries = if value.get("query_type").is_some() {
-        vec![("query".to_string(), value)]
-    } else {
-        let map: HashMap<String, Value> =
-            serde_json::from_value(value).context("expected a JSON object")?;
-        let mut sorted: Vec<_> = map.into_iter().collect();
-        sorted.sort_by(|a, b| a.0.cmp(&b.0));
-        sorted
-    };
+    if value.get("query_type").is_none() {
+        anyhow::bail!("JSON must contain a \"query_type\" field");
+    }
 
-    Ok((queries, ontology))
+    Ok((value, ontology))
 }
 
 fn run_local_query(
     json_input: String,
     ontology_path: Option<PathBuf>,
-) -> Result<Vec<(String, query_engine::shared::PipelineOutput)>> {
-    let (queries, ontology) = parse_query_input(&json_input, ontology_path)?;
+) -> Result<query_engine::shared::PipelineOutput> {
+    let (_, ontology) = parse_query_input(&json_input, ontology_path)?;
     let ontology = Arc::new(ontology);
 
     let store = workspace::IndexStore::open_default()?;
@@ -451,20 +423,7 @@ fn run_local_query(
     }
     let repo_roots = store.repo_roots().context("failed to read repo roots")?;
 
-    let mut results = Vec::new();
-    for (label, input) in &queries {
-        let input_json = serde_json::to_string(input).context("failed to serialize input")?;
-        let output = local_pipeline::run(
-            &input_json,
-            Arc::clone(&ontology),
-            &db_path,
-            repo_roots.clone(),
-        )
-        .with_context(|| format!("query '{label}' failed"))?;
-        results.push((label.clone(), output));
-    }
-
-    Ok(results)
+    local_pipeline::run(&json_input, ontology, &db_path, repo_roots).context("query failed")
 }
 
 fn run_compile(
@@ -474,7 +433,7 @@ fn run_compile(
     format: OutputFormat,
     local: bool,
 ) -> Result<()> {
-    let (queries, ontology) = parse_query_input(&json_input, ontology_path)?;
+    let (input, ontology) = parse_query_input(&json_input, ontology_path)?;
 
     let security_ctx = if local {
         None
@@ -494,78 +453,46 @@ fn run_compile(
         )
     };
 
-    let mut results: Vec<QueryOutput> = Vec::with_capacity(queries.len());
+    let compile_result = if local {
+        query_engine::compiler::compile_local(&json_input, &ontology)
+    } else {
+        query_engine::compiler::compile(&json_input, &ontology, security_ctx.as_ref().unwrap())
+    };
 
-    for (label, input) in queries {
-        let input_json = serde_json::to_string(&input).context("failed to serialize input")?;
+    match compile_result {
+        Ok(result) => {
+            let rendered_sql = result.base.render();
+            let output = QueryResult {
+                label: "query".to_string(),
+                input,
+                sql: result.base.sql,
+                params: result
+                    .base
+                    .params
+                    .into_iter()
+                    .map(|(k, v)| (k, v.value))
+                    .collect(),
+                rendered_sql,
+            };
 
-        let compile_result = if local {
-            query_engine::compiler::compile_local(&input_json, &ontology)
-        } else {
-            query_engine::compiler::compile(&input_json, &ontology, security_ctx.as_ref().unwrap())
-        };
-
-        match compile_result {
-            Ok(result) => {
-                let rendered_sql = result.base.render();
-                results.push(QueryOutput::Success(QueryResult {
-                    label,
-                    input,
-                    sql: result.base.sql,
-                    params: result
-                        .base
-                        .params
-                        .into_iter()
-                        .map(|(k, v)| (k, v.value))
-                        .collect(),
-                    rendered_sql,
-                }));
-            }
-            Err(e) => {
-                results.push(QueryOutput::Error(QueryError {
-                    label,
-                    input,
-                    error: e.to_string(),
-                }));
-            }
-        }
-    }
-
-    match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&results)?);
-        }
-        OutputFormat::Pretty => {
-            for (i, result) in results.iter().enumerate() {
-                if i > 0 {
-                    println!("\n{}", "=".repeat(80));
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
                 }
-                match result {
-                    QueryOutput::Success(r) => {
-                        println!("\n### {}\n", r.label);
+                OutputFormat::Pretty => {
+                    println!("**SQL:**\n```sql\n{}\n```\n", output.sql);
+                    if !output.params.is_empty() {
                         println!(
-                            "**Input:**\n```json\n{}\n```\n",
-                            serde_json::to_string_pretty(&r.input)?
+                            "**Params:**\n```json\n{}\n```\n",
+                            serde_json::to_string_pretty(&output.params)?
                         );
-                        println!("**SQL:**\n```sql\n{}\n```\n", r.sql);
-                        if !r.params.is_empty() {
-                            println!(
-                                "**Params:**\n```json\n{}\n```\n",
-                                serde_json::to_string_pretty(&r.params)?
-                            );
-                        }
-                        println!("**Rendered SQL:**\n```sql\n{}\n```", r.rendered_sql);
                     }
-                    QueryOutput::Error(e) => {
-                        println!("\n### {} [ERROR]\n", e.label);
-                        println!(
-                            "**Input:**\n```json\n{}\n```\n",
-                            serde_json::to_string_pretty(&e.input)?
-                        );
-                        println!("**Error:** {}", e.error);
-                    }
+                    println!("**Rendered SQL:**\n```sql\n{}\n```", output.rendered_sql);
                 }
             }
+        }
+        Err(e) => {
+            anyhow::bail!("compilation failed: {e}");
         }
     }
 
