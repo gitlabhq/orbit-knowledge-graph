@@ -28,13 +28,13 @@ settings:
   local_db:
     entities:
       - name: Directory
-        exclude_properties: [traversal_path, commit_sha]
+        exclude_properties: [traversal_path]
       - name: File
-        exclude_properties: [traversal_path, commit_sha]
+        exclude_properties: [traversal_path]
       - name: Definition
-        exclude_properties: [traversal_path, commit_sha]
+        exclude_properties: [traversal_path]
       - name: ImportedSymbol
-        exclude_properties: [traversal_path, commit_sha]
+        exclude_properties: [traversal_path]
     edge_table:
       name: gl_edge
       columns:

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use duckdb_client::DuckDbClient;
+use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
 use serde_json::json;
 use strum::{AsRefStr, Display};
@@ -77,24 +78,76 @@ pub fn set_status(
     project_id: i64,
     status: RepoStatus,
     error_message: Option<&str>,
+    git: Option<&GitInfo>,
 ) -> Result<()> {
+    let parent = git.map(|g| g.parent_repo_path.to_string_lossy().to_string());
+    let branch = git.map(|g| g.branch.as_str());
+    let commit = git.map(|g| g.commit_sha.as_str());
+
     client
         .execute(
-            "INSERT INTO _orbit_manifest (repo_path, project_id, status, error_message, last_indexed_at)
-             VALUES (?1, ?2, ?3::repo_status, ?4, CASE WHEN ?3 = 'indexed' THEN now() ELSE NULL END)
+            "INSERT INTO _orbit_manifest (repo_path, project_id, parent_repo_path, branch, commit_sha, status, error_message, last_indexed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6::repo_status, ?7, CASE WHEN ?6 = 'indexed' THEN now() ELSE NULL END)
              ON CONFLICT (repo_path) DO UPDATE SET
-                 status = ?3::repo_status,
-                 error_message = ?4,
-                 last_indexed_at = CASE WHEN ?3 = 'indexed' THEN now() ELSE last_indexed_at END",
+                 parent_repo_path = COALESCE(?3, parent_repo_path),
+                 branch = COALESCE(?4, branch),
+                 commit_sha = COALESCE(?5, commit_sha),
+                 status = ?6::repo_status,
+                 error_message = ?7,
+                 last_indexed_at = CASE WHEN ?6 = 'indexed' THEN now() ELSE last_indexed_at END",
             &[
                 json!(repo_path),
                 json!(project_id),
+                parent.map_or(serde_json::Value::Null, |s| json!(s)),
+                branch.map_or(serde_json::Value::Null, |s| json!(s)),
+                commit.map_or(serde_json::Value::Null, |s| json!(s)),
                 json!(status.as_ref()),
                 error_message.map_or(serde_json::Value::Null, |s| json!(s)),
             ],
         )
         .context("failed to upsert manifest")?;
     Ok(())
+}
+
+/// Git metadata for an indexed repository.
+pub struct GitInfo {
+    /// Canonical repo path.
+    pub repo_path: PathBuf,
+    /// Deterministic project ID derived from `repo_path`.
+    pub project_id: i64,
+    pub branch: String,
+    pub commit_sha: String,
+    /// For worktrees, the parent repo's canonical path. For regular
+    /// repos, same as `repo_path`.
+    pub parent_repo_path: PathBuf,
+}
+
+/// Resolve git metadata (branch, commit, parent repo) for a repo path.
+pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
+    let canonical = dunce::canonicalize(repo_path)
+        .with_context(|| format!("failed to canonicalize {}", repo_path.display()))?;
+    let path_str = canonical.to_string_lossy().to_string();
+    let project_id = project_id_from_path(&path_str);
+
+    let repo = CoreGitaliskRepository::new(path_str, canonical.to_string_lossy().to_string());
+
+    let branch = repo
+        .get_current_branch()
+        .context("failed to get current branch")?;
+    let commit_sha = repo
+        .get_current_commit_hash()
+        .context("failed to get current commit hash")?;
+    let parent_repo_path = repo
+        .parent_repo_path()
+        .context("failed to resolve parent repo path")?;
+
+    Ok(GitInfo {
+        repo_path: canonical,
+        project_id,
+        branch,
+        commit_sha,
+        parent_repo_path,
+    })
 }
 
 /// Deterministic project ID from canonical path. Mask clears the sign bit

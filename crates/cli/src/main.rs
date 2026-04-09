@@ -12,7 +12,7 @@ use query_engine::formatters::{self, ResultFormatter};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -225,11 +225,16 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
     };
 
     for repo_path in &repos {
-        let key = repo_path.to_string_lossy().to_string();
-        let project_id = workspace::project_id_from_path(&key);
+        let git = workspace::git_info(repo_path).context("failed to resolve git metadata")?;
+        let key = git.repo_path.to_string_lossy().to_string();
         let db_path = store.db_path();
 
-        info!("Indexing repository at: {}", key);
+        info!(
+            "Indexing repository at: {} (branch: {}, commit: {})",
+            key,
+            git.branch,
+            &git.commit_sha[..8]
+        );
 
         // Mark as indexing before we start parsing.
         {
@@ -238,15 +243,17 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             workspace::set_status(
                 &client,
                 &key,
-                project_id,
+                git.project_id,
                 workspace::RepoStatus::Indexing,
                 None,
+                Some(&git),
             )?;
         }
 
-        match index_repo(repo_path, &config, &store, &ontology).await {
+        match index_repo(&git, &config, &store, &ontology).await {
             Ok(result) => {
-                let repo_name = repo_path
+                let repo_name = git
+                    .repo_path
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "repository".to_string());
@@ -259,9 +266,10 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                     && let Err(manifest_err) = workspace::set_status(
                         &client,
                         &key,
-                        project_id,
+                        git.project_id,
                         workspace::RepoStatus::Error,
                         Some(&e.to_string()),
+                        None,
                     )
                 {
                     tracing::warn!("failed to record error status in manifest: {manifest_err}");
@@ -275,14 +283,14 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
 }
 
 async fn index_repo(
-    repo_path: &Path,
+    git: &workspace::GitInfo,
     config: &IndexingConfig,
     store: &workspace::Workspace,
     ontology: &Ontology,
 ) -> Result<RepositoryIndexingResult> {
-    let key = repo_path.to_string_lossy().to_string();
-    let project_id = workspace::project_id_from_path(&key);
-    let repo_name = repo_path
+    let key = git.repo_path.to_string_lossy().to_string();
+    let repo_name = git
+        .repo_path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "repository".to_string());
@@ -296,11 +304,16 @@ async fn index_repo(
         .context("indexing failed")?;
 
     if let Some(ref mut graph_data) = result.graph_data {
-        graph_data.assign_node_ids(project_id, "HEAD");
+        graph_data.assign_node_ids(git.project_id, &git.branch);
 
-        let local_data =
-            duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", ontology)
-                .context("failed to convert graph data to Arrow")?;
+        let local_data = duckdb_client::convert_graph_data(
+            graph_data,
+            git.project_id,
+            &git.branch,
+            &git.commit_sha,
+            ontology,
+        )
+        .context("failed to convert graph data to Arrow")?;
 
         let db_path = store.db_path();
         let client = duckdb_client::DuckDbClient::open(&db_path)
@@ -322,7 +335,7 @@ async fn index_repo(
             .context("local_db.edge_table.name must be configured")?;
 
         client
-            .delete_project(project_id, &node_tables, edge_table)
+            .delete_project(git.project_id, &node_tables, edge_table)
             .context("failed to clear existing project data")?;
         client
             .insert_graph(local_data)
@@ -330,9 +343,10 @@ async fn index_repo(
         workspace::set_status(
             &client,
             &key,
-            project_id,
+            git.project_id,
             workspace::RepoStatus::Indexed,
             None,
+            Some(git),
         )?;
     }
 

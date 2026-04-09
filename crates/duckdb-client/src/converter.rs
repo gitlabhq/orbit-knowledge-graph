@@ -48,9 +48,14 @@ pub fn convert_graph_data(
     graph_data: &GraphData,
     project_id: i64,
     branch: &str,
+    commit_sha: &str,
     ontology: &Ontology,
 ) -> Result<LocalGraphData> {
-    let ctx = RowContext { project_id, branch };
+    let ctx = RowContext {
+        project_id,
+        branch,
+        commit_sha,
+    };
     let mut tables = Vec::new();
 
     for entity_name in ontology.local_entity_names() {
@@ -114,7 +119,7 @@ mod tests {
             relationships: vec![],
         };
 
-        let result = convert_graph_data(&graph, 1, "main", &test_ontology()).unwrap();
+        let result = convert_graph_data(&graph, 1, "main", "abc123def", &test_ontology()).unwrap();
         for (table, batch) in &result.tables {
             assert_eq!(batch.num_rows(), 0, "{table} should have 0 rows");
         }
@@ -131,7 +136,7 @@ mod tests {
             relationships: vec![],
         };
 
-        let result = convert_graph_data(&graph, 1, "main", &ont).unwrap();
+        let result = convert_graph_data(&graph, 1, "main", "abc123def", &ont).unwrap();
         let table_names: Vec<&str> = result.tables.iter().map(|(t, _)| t.as_str()).collect();
 
         for entity_name in ont.local_entity_names() {
@@ -161,7 +166,7 @@ mod tests {
             relationships: vec![],
         };
 
-        let result = convert_graph_data(&graph, 100, "main", &ont).unwrap();
+        let result = convert_graph_data(&graph, 100, "main", "abc123def", &ont).unwrap();
         let batch = find_table(&result, "gl_directory").expect("gl_directory table");
         assert_eq!(batch.num_rows(), 1);
 
@@ -173,7 +178,7 @@ mod tests {
         assert!(col_names.contains(&"path"));
         assert!(col_names.contains(&"name"));
         assert!(!col_names.contains(&"traversal_path"));
-        assert!(!col_names.contains(&"commit_sha"));
+        assert!(col_names.contains(&"commit_sha"));
     }
 
     #[test]
@@ -195,7 +200,7 @@ mod tests {
             relationships: vec![],
         };
 
-        let result = convert_graph_data(&graph, 100, "main", &ont).unwrap();
+        let result = convert_graph_data(&graph, 100, "main", "abc123def", &ont).unwrap();
         let batch = find_table(&result, "gl_file").expect("gl_file table");
         assert_eq!(batch.num_rows(), 1);
 
@@ -222,7 +227,7 @@ mod tests {
             relationships: vec![],
         };
 
-        let result = convert_graph_data(&graph, 1, "main", &test_ontology()).unwrap();
+        let result = convert_graph_data(&graph, 1, "main", "abc123def", &test_ontology()).unwrap();
         let batch = find_table(&result, "gl_directory").expect("gl_directory table");
         assert_eq!(batch.num_rows(), 0);
     }
