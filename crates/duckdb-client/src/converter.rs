@@ -1,8 +1,9 @@
 use arrow::record_batch::RecordBatch;
 use code_graph::linker::analysis::types::{
     DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode, ResolvedEdge,
+    RowContext,
 };
-use gkg_utils::arrow::{AsRecordBatch, ColumnSpec, ColumnType, RowContext};
+use gkg_utils::arrow::{AsRecordBatch, ColumnSpec, ColumnType};
 use ontology::{DataType as OntDataType, Ontology};
 
 use crate::error::Result;
