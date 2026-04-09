@@ -196,7 +196,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
-    let store = workspace::IndexStore::open_default()?;
+    let store = workspace::Workspace::open_default()?;
     let repos = store.resolve_repos(&path)?;
 
     if repos.is_empty() {
@@ -258,15 +258,12 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         let mut result = match indexer.index_files(file_source, &config).await {
             Ok(r) => r,
             Err(e) => {
-                if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path)
-                    && let Err(manifest_err) = workspace::upsert_manifest(
-                        &client,
-                        &key,
-                        project_id,
-                        workspace::RepoStatus::Error,
-                        Some(&e.to_string()),
-                    )
-                {
+                if let Err(manifest_err) = store.set_status(
+                    &key,
+                    project_id,
+                    workspace::RepoStatus::Error,
+                    Some(&e.to_string()),
+                ) {
                     tracing::warn!("failed to record error status in manifest: {manifest_err}");
                 }
                 anyhow::bail!("{e}");
@@ -283,7 +280,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             // Acquire write connection only for the actual writes.
             let client = duckdb_client::DuckDbClient::open(&db_path)
                 .context("failed to open DuckDB for writing")?;
-            workspace::upsert_manifest(
+            workspace::set_status_on(
                 &client,
                 &key,
                 project_id,
@@ -296,7 +293,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             client
                 .insert_graph(local_data)
                 .context("failed to insert graph data")?;
-            workspace::upsert_manifest(
+            workspace::set_status_on(
                 &client,
                 &key,
                 project_id,
@@ -425,7 +422,7 @@ fn run_local_query(
     let (_, ontology) = parse_query_input(&json_input, ontology_path)?;
     let ontology = Arc::new(ontology);
 
-    let store = workspace::IndexStore::open_default()?;
+    let store = workspace::Workspace::open_default()?;
     let db_path = store.db_path();
     if !db_path.exists() {
         anyhow::bail!(
@@ -434,9 +431,7 @@ fn run_local_query(
         );
     }
 
-    let client =
-        duckdb_client::DuckDbClient::open_read_only(&db_path).context("failed to open DuckDB")?;
-    let repo_roots = workspace::repo_roots(&client)?;
+    let repo_roots = store.repo_roots()?;
 
     local_pipeline::run(&json_input, ontology, &db_path, repo_roots).context("query failed")
 }

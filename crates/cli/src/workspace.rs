@@ -15,12 +15,13 @@ pub enum RepoStatus {
     Error,
 }
 
-/// Manages `~/.orbit/` — DuckDB graph file, repo discovery, and manifest.
-pub struct IndexStore {
+/// Manages the `~/.orbit/` workspace — graph database, repo discovery,
+/// and manifest.
+pub struct Workspace {
     root: PathBuf,
 }
 
-impl IndexStore {
+impl Workspace {
     pub fn open_default() -> Result<Self> {
         let home = dirs::home_dir().context("Could not determine home directory")?;
         Self::open(home.join(".orbit"))
@@ -46,12 +47,39 @@ impl IndexStore {
             Ok(discover_repos(&canonical))
         }
     }
+
+    /// Insert or update a repo in the manifest table.
+    /// Opens a short-lived RW connection.
+    pub fn set_status(
+        &self,
+        repo_path: &str,
+        project_id: i64,
+        status: RepoStatus,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        let client =
+            DuckDbClient::open(&self.db_path()).context("failed to open DuckDB for manifest")?;
+        set_status_on(&client, repo_path, project_id, status, error_message)
+    }
+
+    /// Return canonical paths of all indexed repos.
+    pub fn repo_roots(&self) -> Result<Vec<PathBuf>> {
+        let client = DuckDbClient::open_read_only(&self.db_path())
+            .context("failed to open DuckDB for manifest read")?;
+        let paths = client
+            .query_strings(
+                "SELECT repo_path FROM _orbit_manifest WHERE status = 'indexed'",
+                &[],
+            )
+            .context("failed to query repo roots")?;
+        Ok(paths.into_iter().map(PathBuf::from).collect())
+    }
 }
 
-// ── Manifest operations ─────────────────────────────────────────────────────
-
-/// Insert or update a repo in the manifest table.
-pub fn upsert_manifest(
+/// Update manifest status using an existing client connection.
+/// Use this when you already hold an open RW connection to avoid
+/// opening a second one (which would corrupt the database).
+pub fn set_status_on(
     client: &DuckDbClient,
     repo_path: &str,
     project_id: i64,
@@ -75,17 +103,6 @@ pub fn upsert_manifest(
         )
         .context("failed to upsert manifest")?;
     Ok(())
-}
-
-/// Return canonical paths of all indexed repos.
-pub fn repo_roots(client: &DuckDbClient) -> Result<Vec<PathBuf>> {
-    let paths = client
-        .query_strings(
-            "SELECT repo_path FROM _orbit_manifest WHERE status = 'indexed'",
-            &[],
-        )
-        .context("failed to query repo roots")?;
-    Ok(paths.into_iter().map(PathBuf::from).collect())
 }
 
 /// Deterministic project ID from canonical path. Mask clears the sign bit
@@ -147,7 +164,7 @@ mod tests {
     #[test]
     fn test_resolve_single_repo() {
         let temp = tempfile::TempDir::new().unwrap();
-        let store = IndexStore::open(temp.path().join("orbit")).unwrap();
+        let store = Workspace::open(temp.path().join("orbit")).unwrap();
 
         let repo = temp.path().join("my-repo");
         init_repo(&repo);
@@ -159,7 +176,7 @@ mod tests {
     #[test]
     fn test_resolve_workspace() {
         let temp = tempfile::TempDir::new().unwrap();
-        let store = IndexStore::open(temp.path().join("orbit")).unwrap();
+        let store = Workspace::open(temp.path().join("orbit")).unwrap();
 
         let workspace = temp.path().join("workspace");
         init_repo(&workspace.join("repo-a"));
