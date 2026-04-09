@@ -1,3 +1,45 @@
+## [0.23.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.22.0...v0.23.0) (2026-04-09)
+
+### Features
+
+* add GitLab connectivity probe to webserver /ready endpoint ([322c34d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/322c34d3d92251ce78c7658ea1d748e84c6dcc4f)) by Michael Usachenko
+* **cli:** local DuckDB query pipeline with proper stage architecture ([bfe7497](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bfe74970d5688570a056a4e8689aba86ffd86217)) by Michael Usachenko
+* **cli:** local filesystem content resolver for virtual columns ([074a3db](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/074a3db351e422b790995f4ef531648a04cf2e6c)) by Michael Usachenko
+* **cli:** local hydration with DuckDB execution ([7f2ba99](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7f2ba99fc3d2fbeee516a7a496870f4e55354e00)) by Michael Usachenko
+* **cli:** persist graph index to DuckDB ([97b9212](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/97b9212798631433fc22af7e7fb1318dcc587638)) by Michael Angelo Rivera
+* **code-graph:** add as-record-batch trait for code graph node types ([ede7fe2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ede7fe278306c73aa4a1ee35563091e1c762c890)) by Michael Usachenko
+* **ontology:** add local_entities and local_exclude_properties settings ([dd18dae](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dd18daedf265cdc16dec0d719de7b76748e1bc27)) by Michael Usachenko
+* **ontology:** add name field to local_db edge table config ([b544b52](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b544b52aa5bb3a00c35d04b4f0a6b5881097f939)) by Michael Usachenko
+* **query-engine:** duckDB pipeline with enforce pass and PipelineOutput::from_batches ([d584979](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d584979c258c988cd4b1d2279242be2ad4775795)) by Michael Usachenko
+* **server:** query stats from X-ClickHouse-Summary + query pipeline dashboard ([9408e27](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9408e273077b4d867caa5ef0185b9e8212ae641f)) by Michael Usachenko
+* **utils:** generic NodeBatch builder for Arrow RecordBatch construction ([ff96956](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ff96956cb60cbe666c296f6792cbcf26f5e3d44e)) by Michael Usachenko
+
+### Fixes
+
+* **ci:** gate canonical-only jobs for security fork support ([7d6ce1b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7d6ce1b21e75b6cdcdaaa9a09d494b6811d39822)) by Michael Angelo Rivera
+* **ci:** set git remote URL with Vault token ([7ab6bd4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7ab6bd4ad704f51af886fe5c92195cb2b40f68e1)) by Bohdan Parkhomchuk
+* **compiler:** add path tie-breaker to path finding ORDER BY ([22179b0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/22179b064919faa28ee68606b549cf1301da2885)) by Michael Usachenko
+* **compiler:** deterministic cursor ordering and path finding entity filter ([62a24a4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/62a24a48ab680281b390561a35dd265248961924)) by Michael Usachenko
+* deterministic path finding cursor ordering leading to flaky tests ([6c16c45](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6c16c459bc4b1d18ded309fe65eb844fe54b860d)) by Michael Usachenko
+* **indexer:** use batch() instead of fetch() for filtered consumers ([14a2810](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/14a2810a3c32e4ec41149f2ad1baa630975eb024)) by Bohdan Parkhomchuk
+* **ontology:** standardize APPROVED_BY edge to User-is-source direction ([164ca52](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/164ca5290ea9aeb19089a87f8f06531d6bdad068)) by Lyle Kozloff
+* require GitLab client config at server startup ([36390fa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/36390faf9181d8f57fb861ebf0275b5861dd8064)) by Michael Usachenko
+* **server:** sanitize error messages and stop leaking compiled SQL ([ea35c44](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ea35c44d2970cc023d3ea9eeceb169f0de3d3e15)) by Michael Usachenko
+* **tests:** run dedup tests in forked databases for isolation ([91c7925](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/91c79250e54ce59be844490c55fefe94b86769db)) by Michael Usachenko
+* **test:** stabilize flaky cursor pagination determinism test ([0f0377d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0f0377df0c8ce297b7508ea246093a24c47870a8)) by Dmitry Gruzd
+* virtual column resolution for all query types ([e4fa2e6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e4fa2e6121155d44b0948e7d0b7c8c41529fd5f7)) by Michael Usachenko
+
+### Other
+
+* **adr:** add workhorse query pattern (ADR 008) ([d2e77a0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d2e77a08c8e35ebf530a8577980320af57d7d2f1)) by Michael Angelo Rivera
+* **cli:** write lock retry, read-only queries, manifest in DuckDB ([7fca313](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7fca313b592921d9b35e504a29fc76beaf038571)) by Michael Usachenko
+* **compiler:** add query_cache_share_between_users setting ([a741cac](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a741cacece56f0a5aa65682e5cbd837885db7e9c)) by Michael Usachenko
+* data sources documentation ([05d162c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/05d162c24c470a637ead40e5473e15f2cb51d257)) by Phillip Wells
+* **deps:** bump clickhouse crate from 0.14 to 0.15 ([2a0beb4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2a0beb4113f3bb7fe7fba4a5464b6eaceece1450)) by Michael Usachenko
+* fix minor typos in design docs ([10d67c0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/10d67c026acb0974920c113ed43b08908baf14cb)) by Bob Singh
+* **mise:** add vendir and yq ([5936da8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5936da8323aaf6ac5dcccb1d58670678f72f3b29)) by Bohdan Parkhomchuk
+* **testing:** integration tests for GitalyContentService::resolve_batch ([f0eec8d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f0eec8dd357b3e9f275f1ef1ea5f5b7318980266)) by Michael Usachenko
+
 ## [0.22.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.21.0...v0.22.0) (2026-04-07)
 
 ### Features
