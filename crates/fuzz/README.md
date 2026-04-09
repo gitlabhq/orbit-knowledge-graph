@@ -26,6 +26,7 @@ Or directly with cargo-bolero:
 cargo bolero +nightly test fuzz_compile -p gkg-fuzz
 cargo bolero +nightly test fuzz_ruby -p gkg-fuzz
 ```
+
 If toolchain is already defaulted to nightly, you can ommit the `+nightly`
 
 ## Future work
