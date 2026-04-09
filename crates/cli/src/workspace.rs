@@ -129,7 +129,7 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     let path_str = canonical.to_string_lossy().to_string();
     let project_id = project_id_from_path(&path_str);
 
-    let repo = CoreGitaliskRepository::new(path_str, canonical.to_string_lossy().to_string());
+    let repo = CoreGitaliskRepository::new(path_str.clone(), path_str);
 
     let branch = repo
         .get_current_branch()

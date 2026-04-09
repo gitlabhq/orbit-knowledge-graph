@@ -233,7 +233,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             "Indexing repository at: {} (branch: {}, commit: {})",
             key,
             git.branch,
-            &git.commit_sha[..8]
+            git.commit_sha.get(..8).unwrap_or(&git.commit_sha)
         );
 
         // Mark as indexing before we start parsing.
