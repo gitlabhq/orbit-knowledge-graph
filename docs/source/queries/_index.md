@@ -62,13 +62,11 @@ For example:
 
 ```json
 {
-  "query": {
-    "query_type": "search",
-    "node": {
-      "id": "u",
-      "entity": "User",
-      "filters": { "username": "sidneyjones" }
-    }
+  "query_type": "search",
+  "node": {
+    "id": "u",
+    "entity": "User",
+    "filters": { "username": "sidneyjones" }
   }
 }
 ```

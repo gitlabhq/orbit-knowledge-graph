@@ -37,6 +37,7 @@ Queries support the following fields:
 | [`neighbors`](#neighbors)               | {{< no >}}   | `object`  |
 | [`limit`](#limit)                       | {{< no >}}   | `integer` |
 | [`order_by`](#order_by)                 | {{< no >}}   | `object`  |
+| [`cursor`](#cursor)                     | {{< no >}}   | `object`  |
 | [`aggregation_sort`](#aggregation_sort) | {{< no >}}   | `object`  |
 | [`options`](#options)                   | {{< no >}}   | `object`  |
 
@@ -313,6 +314,35 @@ Retrieve merge requests and their authors. Return results sorted by `updated_at`
   ],
   "order_by": {"node": "mr", "property": "updated_at", "direction": "DESC"},
   "limit": 25
+}
+```
+
+## `cursor`
+
+Options for paginating query results.
+
+| Field       | Required     | Type      | Description                                                                                                 |
+|-------------|--------------|-----------|-------------------------------------------------------------------------------------------------------------|
+| `offset`    | {{< yes >}}  | `integer` | 0-based offset into the authorized result set. Range: `0`-`999`.                                            |
+| `page_size` | {{< yes >}}  | `integer` | Number of rows to return starting at `offset`. Range: `1`-`100`. `offset + page_size` must not exceed `limit`. |
+
+Example:
+
+Return usernames for up to 20 users at a time, starting at the 21st user.
+
+```json
+{
+  "query_type": "search",
+  "node": {
+    "id": "u",
+    "entity": "User",
+    "columns": ["username"]
+  },
+  "limit": 100,
+  "cursor": {
+    "offset": 20,
+    "page_size": 20
+  }
 }
 ```
 
