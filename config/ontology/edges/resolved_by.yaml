@@ -1,6 +1,8 @@
+# config/ontology/edges/resolved_by.yaml
+
 description: User who resolved a vulnerability
 
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Vulnerability, id: id }
-    description: "User resolved a vulnerability."
+    description: "User resolved vulnerability."

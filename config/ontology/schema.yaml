@@ -112,9 +112,9 @@ edges:
   DETECTED_BY: edges/detected_by.yaml
   HAS_IDENTIFIER: edges/has_identifier.yaml
   DETECTED_IN: edges/detected_in.yaml
-  RESOLVED: edges/resolved.yaml
-  CONFIRMED: edges/confirmed.yaml
-  DISMISSED: edges/dismissed.yaml
+  RESOLVED_BY: edges/resolved_by.yaml
+  CONFIRMED_BY: edges/confirmed_by.yaml
+  DISMISSED_BY: edges/dismissed_by.yaml
   FIXES: edges/fixes.yaml
   IN_GROUP: edges/in_group.yaml
   IN_MILESTONE: edges/in_milestone.yaml

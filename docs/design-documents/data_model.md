@@ -106,9 +106,9 @@ graph TD
 | `MERGED`                            | `User`         | `MergeRequest` | A user merged a merge request.                                                                          |
 | `APPROVED`                          | `User`         | `MergeRequest` | A user approved a merge request.                                                                        |
 | `REVIEWER`                          | `User`         | `MergeRequest` | A user is a reviewer of a merge request.                                                                |
-| `CONFIRMED`                         | `User`         | `Vulnerability`| A user confirmed a vulnerability.                                                                       |
-| `DISMISSED`                         | `User`         | `Vulnerability`| A user dismissed a vulnerability.                                                                       |
-| `RESOLVED`                          | `User`         | `Vulnerability`| A user resolved a vulnerability.                                                                        |
+| `CONFIRMED_BY`                      | `User`         | `Vulnerability`| A user confirmed a vulnerability.                                                                       |
+| `DISMISSED_BY`                      | `User`         | `Vulnerability`| A user dismissed a vulnerability.                                                                       |
+| `RESOLVED_BY`                       | `User`         | `Vulnerability`| A user resolved a vulnerability.                                                                        |
 | `HAS_JOB`                           | `Pipeline`     | `Job`          | A pipeline contains jobs.                                                                               |
 | `HAS_STAGE`                         | `Pipeline`     | `Stage`        | A pipeline contains stages.                                                                             |
 | `HAS_NOTE`                          | `MergeRequest`, `WorkItem` | `Note` | An entity has notes attached.                                                          |

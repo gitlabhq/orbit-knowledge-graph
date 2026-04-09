@@ -356,7 +356,7 @@ Expanded nodes include their properties (with types and nullability) and their o
 - name: User
   props: [id:int64, username:string, email:string, is_admin:boolean, user_type:enum]
   out: [AUTHORED, CONTAINS, MEMBER_OF, OWNER, ...]
-  in: [ASSIGNED, CONFIRMED, CREATOR, DISMISSED, ...]
+  in: [ASSIGNED, CONFIRMED_BY, CREATOR, DISMISSED_BY, ...]
 ```
 
 ## Compilation Security

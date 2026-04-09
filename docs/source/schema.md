@@ -173,9 +173,9 @@ The following relationships are available by default:
 | `DETECTED_IN`      | `Finding`                  | `Pipeline`                   |
 | `OCCURRENCE`       | `VulnerabilityOccurrence`  | `Vulnerability`              |
 | `SCANS`            | `VulnerabilityScanner`     | `Project`                    |
-| `CONFIRMED`        | `User`                     | `Vulnerability`              |
-| `RESOLVED`         | `User`                     | `Vulnerability`              |
-| `DISMISSED`        | `User`                     | `Vulnerability`              |
+| `CONFIRMED_BY`     | `User`                     | `Vulnerability`              |
+| `RESOLVED_BY`      | `User`                     | `Vulnerability`              |
+| `DISMISSED_BY`     | `User`                     | `Vulnerability`              |
 | `FIXES`            | `MergeRequest`             | `Vulnerability`              |
 | `CLOSES`           | `MergeRequest`             | `WorkItem`                   |
 | `RELATED_TO`       | `WorkItem`                 | `WorkItem`                   |
