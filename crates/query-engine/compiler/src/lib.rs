@@ -161,9 +161,11 @@ pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQu
 ///
 /// Uses the local hydration pipeline (Lower → Enforce → DuckDbCodegen).
 /// No validation, normalization, security, or recursive hydration.
+/// The ontology is needed because Lower/Enforce may consult entity
+/// metadata for table resolution and column aliasing.
 #[must_use = "the compiled query context should be used"]
-pub fn compile_local_input(input: Input) -> Result<CompiledQueryContext> {
-    let env = LocalEnv::new(Arc::new(Ontology::new()));
+pub fn compile_local_input(input: Input, ontology: &Ontology) -> Result<CompiledQueryContext> {
+    let env = LocalEnv::new(Arc::new(ontology.clone()));
     let state = DuckDbState::from_input(input);
     let pipeline = pipelines::duckdb_hydration().seal();
     pipeline.execute(state, &env)?.into_output().count_err()

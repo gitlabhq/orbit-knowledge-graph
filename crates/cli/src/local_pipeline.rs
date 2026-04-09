@@ -170,7 +170,8 @@ impl PipelineStage for LocalHydration {
             HydrationPlan::Static(templates) => {
                 let (nodes, total_ids) =
                     hydration_helpers::build_static_nodes(templates, &query_result);
-                let (props, debug) = execute_local_hydration(&db_path, nodes, total_ids)?;
+                let (props, debug) =
+                    execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids)?;
                 hydration_queries.extend(debug);
                 hydration_helpers::merge_static_properties(&mut query_result, &props, templates);
             }
@@ -178,7 +179,8 @@ impl PipelineStage for LocalHydration {
                 let refs = hydration_helpers::extract_dynamic_refs(&query_result);
                 let (nodes, total_ids) =
                     hydration_helpers::build_dynamic_nodes(entity_specs, &refs);
-                let (props, debug) = execute_local_hydration(&db_path, nodes, total_ids)?;
+                let (props, debug) =
+                    execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids)?;
                 hydration_queries.extend(debug);
                 hydration_helpers::merge_dynamic_properties(&mut query_result, &props);
             }
@@ -246,6 +248,7 @@ fn get_db_path(ctx: &QueryPipelineContext) -> std::result::Result<PathBuf, Pipel
 /// Compile and execute a hydration query against the local DuckDB.
 fn execute_local_hydration(
     db_path: &std::path::Path,
+    ontology: &Ontology,
     nodes: Vec<query_engine::compiler::InputNode>,
     total_ids: usize,
 ) -> std::result::Result<(hydration_helpers::PropertyMap, Vec<DebugQuery>), PipelineError> {
@@ -255,7 +258,7 @@ fn execute_local_hydration(
 
     let input = hydration_helpers::build_hydration_input(nodes, total_ids);
 
-    let compiled = compile_local_input(input).map_err(|e| PipelineError::Compile {
+    let compiled = compile_local_input(input, ontology).map_err(|e| PipelineError::Compile {
         client_safe: e.is_client_safe(),
         message: e.to_string(),
     })?;

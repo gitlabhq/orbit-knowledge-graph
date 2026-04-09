@@ -115,11 +115,12 @@ pub fn build_dynamic_nodes(
 }
 
 /// Build the hydration `Input` from collected nodes.
+/// Caps limit at `u32::MAX` to prevent truncation.
 pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
     Input {
         query_type: QueryType::Hydration,
         nodes,
-        limit: total_ids as u32,
+        limit: total_ids.min(u32::MAX as usize) as u32,
         ..Input::default()
     }
 }

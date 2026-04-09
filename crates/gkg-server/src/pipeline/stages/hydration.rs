@@ -4,9 +4,7 @@ use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::ProfilingConfig;
-use query_engine::compiler::{
-    HydrationPlan, Input, InputNode, QueryType, VirtualColumnRequest, compile_input,
-};
+use query_engine::compiler::{HydrationPlan, InputNode, VirtualColumnRequest, compile_input};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -153,12 +151,7 @@ impl HydrationStage {
             .cloned()
             .unwrap_or_default();
 
-        let hydration_input = Input {
-            query_type: QueryType::Hydration,
-            nodes,
-            limit: total_ids as u32,
-            ..Input::default()
-        };
+        let hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
 
         let compiled = compile_input(hydration_input, ctx.security_context()?).map_err(|e| {
             PipelineError::Compile {
