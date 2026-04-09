@@ -162,6 +162,50 @@ impl DuckDbClient {
         }
         Ok(())
     }
+
+    // ── Manifest operations ─────────────────────────────────────────
+
+    /// Insert or update a repo in the manifest.
+    pub fn upsert_manifest(
+        &self,
+        repo_path: &str,
+        project_id: i64,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO _orbit_manifest (repo_path, project_id, status, error_message, last_indexed_at)
+             VALUES (?1, ?2, ?3::repo_status, ?4, CASE WHEN ?3 = 'indexed' THEN now() ELSE NULL END)
+             ON CONFLICT (repo_path) DO UPDATE SET
+                 status = ?3::repo_status,
+                 error_message = ?4,
+                 last_indexed_at = CASE WHEN ?3 = 'indexed' THEN now() ELSE last_indexed_at END",
+            params![repo_path, project_id, status, error_message],
+        )?;
+        Ok(())
+    }
+
+    /// Return canonical paths of all indexed repos.
+    pub fn repo_roots(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT repo_path FROM _orbit_manifest WHERE status = 'indexed'")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut paths = Vec::new();
+        for row in rows {
+            paths.push(row?);
+        }
+        Ok(paths)
+    }
+
+    /// Look up a project_id by repo path, if it exists.
+    pub fn get_project_id(&self, repo_path: &str) -> Result<Option<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT project_id FROM _orbit_manifest WHERE repo_path = ?1")?;
+        let mut rows = stmt.query_map(params![repo_path], |row| row.get::<_, i64>(0))?;
+        Ok(rows.next().transpose()?)
+    }
 }
 
 #[cfg(test)]
