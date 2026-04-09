@@ -1,64 +1,24 @@
 #!/usr/bin/env bash
 #
 # Worktree and branch/commit tracking test.
-# Outputs JSON: {"pass": N, "fail": N, "tests": [...]}
-#
-# Creates a temp repo with worktrees, indexes them, and validates
-# branch tracking, commit SHAs, content resolution, and unique IDs.
-#
-# Usage: ./scripts/cli-test-worktree.sh <orbit-binary>
-
-set -euo pipefail
+# Usage: cli-test-worktree.sh <orbit-binary>
 
 ORBIT="$1"
 
-export DYLD_LIBRARY_PATH="${ORBIT_LIB_PATH:-}"
-export LD_LIBRARY_PATH="${ORBIT_LIB_PATH:-}"
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
 
-TESTS="[]"
-add() {
-    local name="$1" ok="$2" detail="${3:-}"
-    TESTS=$(echo "$TESTS" | jq --arg n "$name" --argjson ok "$ok" --arg d "$detail" \
-        '. + [{"name": $n, "ok": $ok, "detail": $d}]')
-}
-
-export ORBIT_DATA_DIR="$TMP/orbit"
-
+# ── Setup: repo with two worktrees ───────────────────────────────
 REPO="$TMP/my-project"
 WT_FEAT="$TMP/my-project-feature"
 WT_FIX="$TMP/my-project-fix"
 
-# Setup: repo with two worktrees
-mkdir -p "$REPO/src"
-cd "$REPO"
-git init -q
-git config user.email "test@test.com"
-git config user.name "Test"
-
-cat > src/main.py << 'PY'
-def hello():
-    print("hello")
-
-class App:
-    def run(self):
-        hello()
-PY
-
-cat > src/utils.py << 'PY'
-import os
-
-def read_file(path):
-    return open(path).read()
-PY
-
-git add -A && git commit -q -m "initial"
-MAIN_SHA=$(git rev-parse HEAD)
-MAIN_BRANCH=$(git symbolic-ref --short HEAD)
+init_test_repo "$REPO"
+MAIN_SHA=$(cd "$REPO" && git rev-parse HEAD)
+MAIN_BRANCH=$(cd "$REPO" && git symbolic-ref --short HEAD)
 
 # Feature worktree: adds tests.py
-git worktree add -q -b feature/tests "$WT_FEAT"
+cd "$REPO" && git worktree add -q -b feature/tests "$WT_FEAT"
 cat > "$WT_FEAT/src/tests.py" << 'PY'
 def test_hello():
     pass
@@ -66,9 +26,8 @@ PY
 cd "$WT_FEAT" && git add -A && git commit -q -m "add tests"
 FEAT_SHA=$(git rev-parse HEAD)
 
-# Fix worktree: modifies utils.py (branched from initial commit)
-cd "$REPO"
-git worktree add -q -b fix/utils "$WT_FIX" "$MAIN_SHA" 2>/dev/null
+# Fix worktree: modifies utils.py (from initial commit, no tests.py)
+cd "$REPO" && git worktree add -q -b fix/utils "$WT_FIX" "$MAIN_SHA" 2>/dev/null
 cat > "$WT_FIX/src/utils.py" << 'PY'
 def patched():
     return True
@@ -78,83 +37,59 @@ FIX_SHA=$(git rev-parse HEAD)
 
 cd "$TMP"
 
-# 1. Index all three
+# ── 1. Index all three ───────────────────────────────────────────
 for r in "$REPO" "$WT_FEAT" "$WT_FIX"; do
     name=$(basename "$r")
-    if "$ORBIT" index "$r" > /dev/null 2>&1; then
-        add "index_$name" true
-    else
-        add "index_$name" false "indexing failed"
-    fi
+    "$ORBIT" index "$r" > /dev/null 2>&1 \
+        && add "index_$name" true \
+        || add "index_$name" false "indexing failed"
 done
 
-# 2. Branch tracking
-RESULT=$("$ORBIT" query --raw '{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","branch"]},"limit":20}' 2>/dev/null)
+# ── 2. Branch tracking ──────────────────────────────────────────
+"$ORBIT" query --raw '{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","branch"]},"limit":20}' \
+    > "$TMP/files.json" 2>/dev/null
+
 for branch in "$MAIN_BRANCH" "feature/tests" "fix/utils"; do
-    count=$(echo "$RESULT" | jq --arg b "$branch" '[.nodes[] | select(.branch == $b)] | length')
-    if [ "$count" -gt 0 ]; then
-        add "branch_$branch" true "$count files"
-    else
-        add "branch_$branch" false "not found"
-    fi
+    c=$(count_nodes "$TMP/files.json" "n.branch = '$branch'")
+    [ "$c" -gt 0 ] && add "branch_$branch" true "$c files" \
+                    || add "branch_$branch" false "not found"
 done
 
-# 3. Commit SHA tracking
-SHA_RESULT=$("$ORBIT" query --raw '{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","commit_sha"]},"limit":20}' 2>/dev/null)
+# ── 3. Commit SHA tracking ──────────────────────────────────────
+"$ORBIT" query --raw '{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","commit_sha"]},"limit":20}' \
+    > "$TMP/shas.json" 2>/dev/null
+
 for sha in "$MAIN_SHA" "$FEAT_SHA" "$FIX_SHA"; do
-    short="${sha:0:8}"
-    if echo "$SHA_RESULT" | jq -e --arg s "$sha" '.nodes[] | select(.commit_sha == $s)' > /dev/null 2>&1; then
-        add "commit_$short" true
-    else
-        add "commit_$short" false "not found"
-    fi
+    c=$(count_nodes "$TMP/shas.json" "n.commit_sha = '$sha'")
+    [ "$c" -gt 0 ] && add "commit_${sha:0:8}" true \
+                    || add "commit_${sha:0:8}" false "not found"
 done
 
-# 4. Branch-specific files
-tests_count=$(echo "$RESULT" | jq '[.nodes[] | select(.name == "tests.py")] | length')
-if [ "$tests_count" -eq 1 ]; then
-    add "branch_specific_file" true "tests.py on feature only"
-else
-    add "branch_specific_file" false "tests.py count: $tests_count"
-fi
+# ── 4. Branch-specific files ────────────────────────────────────
+tests_count=$(count_nodes "$TMP/files.json" "n.name = 'tests.py'")
+[ "$tests_count" -eq 1 ] && add "branch_specific_file" true "tests.py on feature only" \
+                          || add "branch_specific_file" false "tests.py count: $tests_count"
 
-# 5. Unique IDs per branch
-unique_main_ids=$(echo "$RESULT" | jq '[.nodes[] | select(.name == "main.py") | .id] | unique | length')
-total_main_ids=$(echo "$RESULT" | jq '[.nodes[] | select(.name == "main.py")] | length')
-if [ "$unique_main_ids" -eq "$total_main_ids" ] && [ "$total_main_ids" -eq 3 ]; then
-    add "unique_ids" true "3 unique IDs for main.py"
-else
-    add "unique_ids" false "$unique_main_ids unique of $total_main_ids"
-fi
+# ── 5. Unique IDs per branch ────────────────────────────────────
+main_count=$(count_nodes "$TMP/files.json" "n.name = 'main.py'")
+[ "$main_count" -eq 3 ] && add "unique_ids" true "3 main.py across 3 branches" \
+                         || add "unique_ids" false "main.py count: $main_count"
 
-# 6. Content resolves from correct worktree
-CONTENT=$("$ORBIT" query --raw '{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","branch","content"]},"limit":20}' 2>/dev/null)
+# ── 6. Content resolution ───────────────────────────────────────
+"$ORBIT" query --raw '{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","branch","content"]},"limit":20}' \
+    > "$TMP/content.json" 2>/dev/null
 
-fix_has_patched=$(echo "$CONTENT" | jq '[.nodes[] | select(.name == "utils.py" and .branch == "fix/utils" and (.content | contains("patched")))] | length')
-feat_has_test=$(echo "$CONTENT" | jq '[.nodes[] | select(.name == "tests.py" and (.content | contains("test_hello")))] | length')
+fix_ok=$(count_nodes "$TMP/content.json" "n.name = 'utils.py' AND n.branch = 'fix/utils' AND contains(n.content, 'patched')")
+feat_ok=$(count_nodes "$TMP/content.json" "n.name = 'tests.py' AND contains(n.content, 'test_hello')")
 
-if [ "$fix_has_patched" -eq 1 ]; then
-    add "content_fix_branch" true
-else
-    add "content_fix_branch" false "patched not found in fix branch"
-fi
-if [ "$feat_has_test" -eq 1 ]; then
-    add "content_feat_branch" true
-else
-    add "content_feat_branch" false "test_hello not found in feature branch"
-fi
+[ "$fix_ok" -gt 0 ]  && add "content_fix_branch" true  || add "content_fix_branch" false "patched not found"
+[ "$feat_ok" -gt 0 ] && add "content_feat_branch" true || add "content_feat_branch" false "test_hello not found"
 
-# 7. Traversal works
-TRAV=$("$ORBIT" query --raw '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["id","name"]},{"id":"d","entity":"Definition","columns":["id","name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":10}' 2>/dev/null)
-edge_count=$(echo "$TRAV" | jq '.edges | length')
-if [ "$edge_count" -gt 0 ]; then
-    add "traversal" true "$edge_count edges"
-else
-    add "traversal" false "no edges"
-fi
+# ── 7. Traversal ────────────────────────────────────────────────
+"$ORBIT" query --raw '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["id","name"]},{"id":"d","entity":"Definition","columns":["id","name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":10}' \
+    > "$TMP/trav.json" 2>/dev/null
 
-# Output
-pass=$(echo "$TESTS" | jq '[.[] | select(.ok)] | length')
-fail=$(echo "$TESTS" | jq '[.[] | select(.ok | not)] | length')
-jq -n --argjson p "$pass" --argjson f "$fail" --argjson t "$TESTS" \
-    '{"pass": $p, "fail": $f, "tests": $t}'
+ec=$(count_edges "$TMP/trav.json")
+[ "$ec" -gt 0 ] && add "traversal" true "$ec edges" || add "traversal" false "no edges"
+
+emit_results
