@@ -157,6 +157,6 @@ etl:
       array_field: user_id
     approvals:
       to: User
-      as: APPROVED_BY
+      as: APPROVED
       direction: incoming
       array_field: user_id
