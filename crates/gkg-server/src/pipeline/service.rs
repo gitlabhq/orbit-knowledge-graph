@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use crate::auth::Claims;
-use crate::content::ColumnResolverRegistry;
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::ProfilingConfig;
 use ontology::Ontology;
+use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
