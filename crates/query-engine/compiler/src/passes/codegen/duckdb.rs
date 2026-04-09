@@ -192,6 +192,18 @@ impl Context {
             return format!("CASE WHEN {cond} THEN {then} ELSE {else_} END");
         }
 
+        // toString(x) → CAST(x AS VARCHAR)
+        if name == "toString" && args.len() == 1 {
+            let inner = self.emit_expr(&args[0]);
+            return format!("CAST({inner} AS VARCHAR)");
+        }
+
+        // toJSONString(x) → just emit x (the inner map() is already
+        // rewritten to json_object() which returns a JSON string).
+        if name == "toJSONString" && args.len() == 1 {
+            return self.emit_expr(&args[0]);
+        }
+
         let duckdb_name = match name {
             "startsWith" => "starts_with",
             "has" => "list_contains",
@@ -199,6 +211,8 @@ impl Context {
             "arrayConcat" => "list_concat",
             "arrayReverse" => "list_reverse",
             "arrayResize" => "list_resize",
+            // ClickHouse map(k1,v1,k2,v2) → DuckDB json_object(k1,v1,k2,v2)
+            "map" => "json_object",
             "tuple" => "row",
             other => other,
         };

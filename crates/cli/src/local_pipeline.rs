@@ -311,14 +311,27 @@ fn get_registry<'a>(
 }
 
 /// Compile and execute a hydration query against the local DuckDB.
+///
+/// Filters each node's columns to only those present in the local schema
+/// (the ontology's `local_db.exclude_properties` may drop columns like
+/// `commit_sha` that the server has but DuckDB doesn't).
 fn execute_local_hydration(
     db_path: &std::path::Path,
     ontology: &Ontology,
-    nodes: Vec<query_engine::compiler::InputNode>,
+    mut nodes: Vec<query_engine::compiler::InputNode>,
     total_ids: usize,
 ) -> std::result::Result<(hydration_helpers::PropertyMap, Vec<DebugQuery>), PipelineError> {
     if nodes.is_empty() {
         return Ok((Default::default(), Vec::new()));
+    }
+
+    for node in &mut nodes {
+        if let (Some(entity), Some(query_engine::compiler::ColumnSelection::List(cols))) =
+            (&node.entity, &mut node.columns)
+            && let Some(local_fields) = ontology.local_entity_fields(entity)
+        {
+            cols.retain(|c| local_fields.iter().any(|f| f.name == *c));
+        }
     }
 
     let input = hydration_helpers::build_hydration_input(nodes, total_ids);

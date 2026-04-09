@@ -425,8 +425,10 @@ fn run_local_query(
     };
 
     let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
-    let ontology = Ontology::load_from_dir(&ontology_dir)
-        .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
+    let ontology = Arc::new(
+        Ontology::load_from_dir(&ontology_dir)
+            .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?,
+    );
 
     let store = workspace::IndexStore::open_default()?;
     let db_path = store.db_path();
@@ -436,8 +438,7 @@ fn run_local_query(
             db_path.display()
         );
     }
-    let client =
-        duckdb_client::DuckDbClient::open(&db_path).context("failed to open local DuckDB graph")?;
+    let repo_roots = store.repo_roots().context("failed to read repo roots")?;
 
     // Detect single vs multi-query: if the JSON has a "query_type" key,
     // it's a single query. Otherwise treat it as a keyed map of queries.
@@ -454,40 +455,28 @@ fn run_local_query(
 
     for (i, (label, input)) in queries.iter().enumerate() {
         let input_json = serde_json::to_string(input).context("failed to serialize input")?;
-        match query_engine::compiler::compile_local(&input_json, &ontology) {
-            Ok(compiled) => {
-                let rendered_sql = compiled.base.render();
-                let compiled = Arc::new(compiled);
-
-                match client.query_arrow(&rendered_sql) {
-                    Ok(batches) => {
-                        let output = query_engine::shared::PipelineOutput::from_batches(
-                            &batches,
-                            Arc::clone(&compiled),
-                        );
-
-                        match mode {
-                            LocalOutputMode::Raw => {
-                                let formatted = formatters::GraphFormatter.format(&output);
-                                println!("{}", serde_json::to_string(&formatted)?);
-                            }
-                            LocalOutputMode::Llm => {
-                                if i > 0 {
-                                    println!();
-                                }
-                                println!("### {}\n", label);
-                                let formatted = formatters::GoonFormatter.format(&output);
-                                println!("{}", serde_json::to_string_pretty(&formatted)?);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Execution error for '{label}': {e}");
-                    }
+        match local_pipeline::run(
+            &input_json,
+            Arc::clone(&ontology),
+            &db_path,
+            repo_roots.clone(),
+        ) {
+            Ok(output) => match mode {
+                LocalOutputMode::Raw => {
+                    let formatted = formatters::GraphFormatter.format(&output);
+                    println!("{}", serde_json::to_string(&formatted)?);
                 }
-            }
+                LocalOutputMode::Llm => {
+                    if i > 0 {
+                        println!();
+                    }
+                    println!("### {}\n", label);
+                    let formatted = formatters::GoonFormatter.format(&output);
+                    println!("{}", serde_json::to_string_pretty(&formatted)?);
+                }
+            },
             Err(e) => {
-                eprintln!("Compilation error for '{label}': {e}");
+                eprintln!("Error for '{label}': {e}");
             }
         }
     }

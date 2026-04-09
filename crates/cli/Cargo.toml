@@ -15,6 +15,7 @@ arrow = { workspace = true }
 async-trait = { workspace = true }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
+gkg-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 gitalisk-core = { workspace = true }

@@ -144,7 +144,6 @@ mod tests {
             Field::new("name", DataType::Utf8, false),
             Field::new("extension", DataType::Utf8, true),
             Field::new("language", DataType::Utf8, true),
-            Field::new("_version", DataType::Int64, false),
         ]))
     }
 
@@ -160,7 +159,6 @@ mod tests {
                 Arc::new(StringArray::from(names.to_vec())),
                 Arc::new(StringArray::from(vec![Some("rs"); n])),
                 Arc::new(StringArray::from(vec![Some("Rust"); n])),
-                Arc::new(Int64Array::from(vec![0; n])),
             ],
         )
         .unwrap()
@@ -174,8 +172,8 @@ mod tests {
         client
             .conn
             .execute(
-                "INSERT INTO gl_file (id, project_id, branch, path, name, extension, language, _version) \
-                 VALUES (1, 42, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust', 0)",
+                "INSERT INTO gl_file (id, project_id, branch, path, name, extension, language) \
+                 VALUES (1, 42, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust')",
                 [],
             )
             .unwrap();
@@ -291,7 +289,7 @@ mod tests {
         client
             .conn
             .execute(
-                "INSERT INTO gl_directory (id, project_id, branch, path, name, _version) VALUES (1, 1, 'main', 'src', 'src', 0)",
+                "INSERT INTO gl_directory (id, project_id, branch, path, name) VALUES (1, 1, 'main', 'src', 'src')",
                 [],
             )
             .unwrap();
