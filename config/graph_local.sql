@@ -6,6 +6,18 @@
 --   - No traversal_path — local mode has no multi-tenant namespace scoping
 --   - No _version or _deleted columns — local mode does full delete-and-reinsert
 
+-- Manifest: tracks indexed repos and maps repo paths to project IDs.
+-- Replaces the JSON manifest file and advisory lock.
+CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed', 'error');
+
+CREATE TABLE IF NOT EXISTS _orbit_manifest (
+    repo_path VARCHAR PRIMARY KEY,
+    project_id BIGINT NOT NULL,
+    status repo_status NOT NULL DEFAULT 'pending',
+    last_indexed_at TIMESTAMP,
+    error_message VARCHAR
+);
+
 CREATE TABLE IF NOT EXISTS gl_directory (
     id BIGINT NOT NULL,
     project_id BIGINT NOT NULL,
