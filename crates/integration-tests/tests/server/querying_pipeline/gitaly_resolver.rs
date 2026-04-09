@@ -14,17 +14,17 @@ use gitaly_protos::proto::ListBlobsResponse;
 use gitaly_protos::proto::list_blobs_response::Blob as BlobChunk;
 use gitlab_client::GitlabClient;
 use gkg_server::content::gitaly::GitalyContentService;
-use gkg_server::content::{ColumnResolver, ResolverContext};
 use gkg_utils::arrow::ColumnValue;
 use prost::Message;
 use query_engine::compiler::SecurityContext;
+use query_engine::shared::content::{ColumnResolver, ResolverContext};
 use tokio::net::TcpListener;
 
 type PropertyRow = HashMap<String, ColumnValue>;
 
 fn resolver_ctx() -> ResolverContext {
     ResolverContext {
-        security_context: SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+        security_context: Some(SecurityContext::new(1, vec!["1/".into()]).unwrap()),
     }
 }
 

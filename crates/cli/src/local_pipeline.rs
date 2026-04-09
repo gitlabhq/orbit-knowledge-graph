@@ -1,12 +1,13 @@
 //! Local DuckDB query pipeline.
 //!
 //! ```text
-//! LocalCompilation → DuckDbExecution → Extraction → LocalHydration → LocalOutput
+//! LocalCompilation -> DuckDbExecution -> Extraction -> LocalHydration -> LocalOutput
 //! ```
 //!
 //! No security, authorization, or redaction. Hydration fetches node
-//! properties from the same DuckDB database. Virtual column resolution
-//! (e.g. file content from filesystem) is not yet implemented.
+//! properties from the same DuckDB database. Virtual columns (e.g. file
+//! `content`) are resolved from the local filesystem via
+//! [`LocalContentService`](crate::content::LocalContentService).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,21 +22,31 @@ use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
 };
+use query_engine::shared::content::{
+    ColumnResolverRegistry, EntityVirtualColumns, ResolverContext, resolve_virtual_columns,
+};
 use query_engine::shared::hydration as hydration_helpers;
 use query_engine::shared::{
     DebugQuery, ExecutionOutput, ExtractionOutput, ExtractionStage, HydrationOutput,
     PaginationMeta, PipelineOutput,
 };
 
+use crate::content;
+
 /// Execute a query against the local DuckDB graph.
+///
+/// `repo_roots` are the filesystem paths to indexed repositories, used
+/// to resolve virtual columns (file content) from disk.
 #[allow(dead_code)]
 pub fn run(
     query_json: &str,
     ontology: Arc<Ontology>,
     db_path: &std::path::Path,
+    repo_roots: Vec<PathBuf>,
 ) -> Result<PipelineOutput> {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(PathBuf::from(db_path));
+    server_extensions.insert(content::local_resolver_registry(repo_roots));
 
     let mut ctx = QueryPipelineContext {
         query_json: query_json.to_string(),
@@ -77,7 +88,7 @@ pub fn run(
     result.map_err(|e| anyhow::anyhow!("pipeline error: {e}"))
 }
 
-// ── Stages ───────────────────────────────────────────────────────────────────
+// -- Stages -------------------------------------------------------------------
 
 struct LocalCompilation;
 
@@ -142,7 +153,8 @@ impl PipelineStage for DuckDbExecutor {
     }
 }
 
-/// Hydration stage that fetches node properties from the local DuckDB.
+/// Hydration stage that fetches node properties from the local DuckDB
+/// and resolves virtual columns from the filesystem.
 struct LocalHydration;
 
 impl PipelineStage for LocalHydration {
@@ -165,23 +177,59 @@ impl PipelineStage for LocalHydration {
         let result_context = input.query_result.ctx().clone();
         let mut hydration_queries = Vec::new();
 
+        let resolver_ctx = ResolverContext::default();
+
         match &compiled.hydration {
             HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
                 let (nodes, total_ids) =
                     hydration_helpers::build_static_nodes(templates, &query_result);
-                let (props, debug) =
+                let (mut props, debug) =
                     execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids)?;
                 hydration_queries.extend(debug);
+
+                let entity_virtuals: Vec<EntityVirtualColumns<'_>> = templates
+                    .iter()
+                    .map(|t| (t.entity_type.as_str(), t.virtual_columns.as_slice()))
+                    .collect();
+                if let Some(registry) = get_registry(ctx, &entity_virtuals)? {
+                    resolve_virtual_columns(registry, &resolver_ctx, &entity_virtuals, &mut props)
+                        .await?;
+                }
+
+                hydration_helpers::strip_injected_columns(
+                    &mut props,
+                    templates
+                        .iter()
+                        .map(|t| (t.entity_type.as_str(), &t.injected_columns)),
+                );
+
                 hydration_helpers::merge_static_properties(&mut query_result, &props, templates);
             }
             HydrationPlan::Dynamic(entity_specs) => {
                 let refs = hydration_helpers::extract_dynamic_refs(&query_result);
                 let (nodes, total_ids) =
                     hydration_helpers::build_dynamic_nodes(entity_specs, &refs);
-                let (props, debug) =
+                let (mut props, debug) =
                     execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids)?;
                 hydration_queries.extend(debug);
+
+                let entity_virtuals: Vec<EntityVirtualColumns<'_>> = entity_specs
+                    .iter()
+                    .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
+                    .collect();
+                if let Some(registry) = get_registry(ctx, &entity_virtuals)? {
+                    resolve_virtual_columns(registry, &resolver_ctx, &entity_virtuals, &mut props)
+                        .await?;
+                }
+
+                hydration_helpers::strip_injected_columns(
+                    &mut props,
+                    entity_specs
+                        .iter()
+                        .map(|s| (s.entity_type.as_str(), &s.injected_columns)),
+                );
+
                 hydration_helpers::merge_dynamic_properties(&mut query_result, &props);
             }
         }
@@ -236,13 +284,30 @@ impl PipelineStage for LocalOutput {
     }
 }
 
-// ── Hydration helpers ────────────────────────────────────────────────────────
+// -- Helpers ------------------------------------------------------------------
 
 fn get_db_path(ctx: &QueryPipelineContext) -> std::result::Result<PathBuf, PipelineError> {
     ctx.server_extensions
         .get::<PathBuf>()
         .cloned()
         .ok_or_else(|| PipelineError::Execution("DuckDB path not found".into()))
+}
+
+/// Returns the registry if virtual columns need resolving.
+/// Errors if virtual columns are requested but no registry is available.
+/// Returns `Ok(None)` when there's nothing to resolve.
+fn get_registry<'a>(
+    ctx: &'a QueryPipelineContext,
+    entity_virtuals: &[EntityVirtualColumns<'_>],
+) -> std::result::Result<Option<&'a ColumnResolverRegistry>, PipelineError> {
+    let has_work = entity_virtuals.iter().any(|(_, vc)| !vc.is_empty());
+    match ctx.server_extensions.get::<ColumnResolverRegistry>() {
+        Some(r) => Ok(Some(r)),
+        None if has_work => Err(PipelineError::ContentResolution(
+            "virtual columns requested but no ColumnResolverRegistry available".into(),
+        )),
+        None => Ok(None),
+    }
 }
 
 /// Compile and execute a hydration query against the local DuckDB.

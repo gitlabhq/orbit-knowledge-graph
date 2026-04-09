@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use gkg_utils::arrow::ColumnValue;
 use query_engine::pipeline::PipelineError;
-
-use gkg_server::content::{ColumnResolver, PropertyRow, ResolverContext};
+use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 
 /// Mock resolver that echoes the lookup name back as the resolved value.
 pub struct MockColumnResolver;
@@ -27,7 +26,6 @@ impl ColumnResolver for MockColumnResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_engine::compiler::SecurityContext;
 
     #[tokio::test]
     async fn mock_resolver_echoes_lookup() {
@@ -35,9 +33,7 @@ mod tests {
         let props = HashMap::new();
         let rows: Vec<&PropertyRow> = vec![&props, &props];
 
-        let rctx = ResolverContext {
-            security_context: SecurityContext::new(1, vec!["1/2/".into()]).unwrap(),
-        };
+        let rctx = ResolverContext::default();
         let results = svc
             .resolve_batch("blob_content", &rows, &rctx)
             .await

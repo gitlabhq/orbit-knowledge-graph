@@ -4798,6 +4798,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
+ "async-trait",
  "chrono",
  "clap",
  "code-graph",
@@ -6689,7 +6690,9 @@ name = "shared"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "async-trait",
  "compiler",
+ "futures",
  "gkg-utils",
  "ontology",
  "pipeline",
