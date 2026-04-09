@@ -163,6 +163,33 @@ impl ConsolidatedRelationship {
     }
 }
 
+/// A fully resolved edge with concrete node IDs and ontology kind strings.
+/// Produced by [`GraphData::resolve_edges`].
+#[derive(Debug, Clone)]
+pub struct ResolvedEdge {
+    pub source_id: i64,
+    pub source_kind: &'static str,
+    pub relationship_kind: String,
+    pub target_id: i64,
+    pub target_kind: &'static str,
+}
+
+impl gkg_utils::arrow::AsRecordBatch for ResolvedEdge {
+    fn write_row(
+        &self,
+        b: &mut gkg_utils::arrow::BatchBuilder,
+        _ctx: &gkg_utils::arrow::RowContext<'_>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        b.col("source_id")?.push_int(self.source_id)?;
+        b.col("source_kind")?.push_str(self.source_kind)?;
+        b.col("relationship_kind")?
+            .push_str(&self.relationship_kind)?;
+        b.col("target_id")?.push_int(self.target_id)?;
+        b.col("target_kind")?.push_str(self.target_kind)?;
+        Ok(())
+    }
+}
+
 pub fn rels_by_kind(
     relationships: &[ConsolidatedRelationship],
     kind: RelationshipKind,
@@ -353,6 +380,38 @@ impl GraphData {
             }
         }
     }
+
+    /// Resolve all relationships into [`ResolvedEdge`]s with concrete
+    /// node IDs. Must be called after [`assign_node_ids`](Self::assign_node_ids).
+    /// Relationships with unresolved endpoints are silently dropped.
+    pub fn resolve_edges(&self) -> Vec<ResolvedEdge> {
+        self.relationships
+            .iter()
+            .filter_map(|rel| {
+                let (src_kind, tgt_kind) = rel.kind.source_target_kinds();
+                let src_id = self.lookup_node_id(src_kind, rel.source_id)?;
+                let tgt_id = self.lookup_node_id(tgt_kind, rel.target_id)?;
+                Some(ResolvedEdge {
+                    source_id: src_id,
+                    source_kind: src_kind,
+                    relationship_kind: rel.relationship_type.edge_kind().to_string(),
+                    target_id: tgt_id,
+                    target_kind: tgt_kind,
+                })
+            })
+            .collect()
+    }
+
+    fn lookup_node_id(&self, kind: &str, index: Option<u32>) -> Option<i64> {
+        let index = index? as usize;
+        match kind {
+            "Directory" => self.directory_nodes.get(index).and_then(|n| n.id),
+            "File" => self.file_nodes.get(index).and_then(|n| n.id),
+            "Definition" => self.definition_nodes.get(index).and_then(|n| n.id),
+            "ImportedSymbol" => self.imported_symbol_nodes.get(index).and_then(|n| n.id),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -373,6 +432,28 @@ impl DirectoryNode {
     }
 }
 
+impl gkg_utils::arrow::AsRecordBatch for DirectoryNode {
+    fn should_include(&self) -> bool {
+        self.id.is_some()
+    }
+
+    fn write_row(
+        &self,
+        b: &mut gkg_utils::arrow::BatchBuilder,
+        ctx: &gkg_utils::arrow::RowContext<'_>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        let id = self
+            .id
+            .ok_or_else(|| gkg_utils::arrow::missing_id("DirectoryNode"))?;
+        b.col("id")?.push_int(id)?;
+        b.col("project_id")?.push_int(ctx.project_id)?;
+        b.col("branch")?.push_str(ctx.branch)?;
+        b.col("path")?.push_str(&self.path)?;
+        b.col("name")?.push_str(&self.name)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileNode {
     #[serde(skip)]
@@ -390,6 +471,30 @@ impl FileNode {
         let id = compute_id(&[&project_id.to_string(), branch, "file", &self.path]);
         self.id = Some(id);
         id
+    }
+}
+
+impl gkg_utils::arrow::AsRecordBatch for FileNode {
+    fn should_include(&self) -> bool {
+        self.id.is_some()
+    }
+
+    fn write_row(
+        &self,
+        b: &mut gkg_utils::arrow::BatchBuilder,
+        ctx: &gkg_utils::arrow::RowContext<'_>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        let id = self
+            .id
+            .ok_or_else(|| gkg_utils::arrow::missing_id("FileNode"))?;
+        b.col("id")?.push_int(id)?;
+        b.col("project_id")?.push_int(ctx.project_id)?;
+        b.col("branch")?.push_str(ctx.branch)?;
+        b.col("path")?.push_str(&self.path)?;
+        b.col("name")?.push_str(&self.name)?;
+        b.col("extension")?.push_str(&self.extension)?;
+        b.col("language")?.push_str(&self.language)?;
+        Ok(())
     }
 }
 
@@ -522,6 +627,38 @@ impl DefinitionNode {
     }
 }
 
+impl gkg_utils::arrow::AsRecordBatch for DefinitionNode {
+    fn should_include(&self) -> bool {
+        self.id.is_some()
+    }
+
+    fn write_row(
+        &self,
+        b: &mut gkg_utils::arrow::BatchBuilder,
+        ctx: &gkg_utils::arrow::RowContext<'_>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        let id = self
+            .id
+            .ok_or_else(|| gkg_utils::arrow::missing_id("DefinitionNode"))?;
+        b.col("id")?.push_int(id)?;
+        b.col("project_id")?.push_int(ctx.project_id)?;
+        b.col("branch")?.push_str(ctx.branch)?;
+        b.col("file_path")?.push_str(self.file_path.as_ref())?;
+        b.col("fqn")?.push_str(self.fqn.to_string())?;
+        b.col("name")?.push_str(self.fqn.name())?;
+        b.col("definition_type")?
+            .push_str(self.definition_type.as_str())?;
+        b.col("start_line")?
+            .push_int(self.range.start.line as i64)?;
+        b.col("end_line")?.push_int(self.range.end.line as i64)?;
+        b.col("start_byte")?
+            .push_int(self.range.byte_offset.0 as i64)?;
+        b.col("end_byte")?
+            .push_int(self.range.byte_offset.1 as i64)?;
+        Ok(())
+    }
+}
+
 /// Represents a single location where an imported symbol is found
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub struct ImportedSymbolLocation {
@@ -624,6 +761,38 @@ impl ImportedSymbolNode {
         ]);
         self.id = Some(id);
         id
+    }
+}
+
+impl gkg_utils::arrow::AsRecordBatch for ImportedSymbolNode {
+    fn should_include(&self) -> bool {
+        self.id.is_some()
+    }
+
+    fn write_row(
+        &self,
+        b: &mut gkg_utils::arrow::BatchBuilder,
+        ctx: &gkg_utils::arrow::RowContext<'_>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        let id = self
+            .id
+            .ok_or_else(|| gkg_utils::arrow::missing_id("ImportedSymbolNode"))?;
+        b.col("id")?.push_int(id)?;
+        b.col("project_id")?.push_int(ctx.project_id)?;
+        b.col("branch")?.push_str(ctx.branch)?;
+        b.col("file_path")?.push_str(&self.location.file_path)?;
+        b.col("import_type")?.push_str(self.import_type.as_str())?;
+        b.col("import_path")?.push_str(&self.import_path)?;
+        b.col("identifier_name")?
+            .push_opt_str(self.identifier.as_ref().map(|i| &i.name))?;
+        b.col("identifier_alias")?
+            .push_opt_str(self.identifier.as_ref().and_then(|i| i.alias.as_ref()))?;
+        b.col("start_line")?
+            .push_int(self.location.start_line as i64)?;
+        b.col("end_line")?.push_int(self.location.end_line as i64)?;
+        b.col("start_byte")?.push_int(self.location.start_byte)?;
+        b.col("end_byte")?.push_int(self.location.end_byte)?;
+        Ok(())
     }
 }
 
