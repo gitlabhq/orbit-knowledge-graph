@@ -1,33 +1,18 @@
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use duckdb_client::DuckDbClient;
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
 use serde_json::json;
+use strum::{AsRefStr, Display};
 
 /// Repo indexing status, stored as a DuckDB `repo_status` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, AsRefStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum RepoStatus {
     Indexing,
     Indexed,
     Error,
-}
-
-impl fmt::Display for RepoStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl RepoStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Indexing => "indexing",
-            Self::Indexed => "indexed",
-            Self::Error => "error",
-        }
-    }
 }
 
 /// Manages `~/.orbit/` — DuckDB graph file, repo discovery, and manifest.
@@ -84,7 +69,7 @@ pub fn upsert_manifest(
             &[
                 json!(repo_path),
                 json!(project_id),
-                json!(status.as_str()),
+                json!(status.as_ref()),
                 error_message.map_or(serde_json::Value::Null, |s| json!(s)),
             ],
         )
