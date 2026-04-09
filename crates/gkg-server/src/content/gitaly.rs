@@ -8,7 +8,7 @@ use indexer::modules::code::repository::blob_stream::BlobStream;
 use query_engine::pipeline::PipelineError;
 use tracing::{debug, warn};
 
-use super::{ColumnResolver, PropertyRow, ResolverContext};
+use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 
 /// Gitaly-specific parameters extracted from a hydrated entity row.
 ///

@@ -1,3 +1,4 @@
+mod content;
 mod local_pipeline;
 mod workspace;
 

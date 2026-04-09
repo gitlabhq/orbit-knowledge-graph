@@ -2,9 +2,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::content::ColumnResolverRegistry;
 use gkg_server_config::ClickHouseConfiguration;
 use ontology::Ontology;
+use query_engine::shared::content::ColumnResolverRegistry;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::ServerTlsConfig;
 use tracing::info;

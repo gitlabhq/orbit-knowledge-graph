@@ -16,8 +16,7 @@ use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 use pipeline::PipelineError;
 use types::QueryResult;
 
-/// Hydrated properties keyed by (entity_type, id).
-pub type PropertyMap = HashMap<(String, i64), HashMap<String, ColumnValue>>;
+pub use crate::content::PropertyMap;
 
 /// Collect entity primary keys from authorized rows for static hydration.
 ///

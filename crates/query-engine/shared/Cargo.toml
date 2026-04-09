@@ -6,6 +6,8 @@ license = "MIT"
 
 [dependencies]
 arrow = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
 gkg-utils = { path = "../../utils" }
 ontology = { path = "../../ontology" }
 pipeline = { path = "../pipeline" }
