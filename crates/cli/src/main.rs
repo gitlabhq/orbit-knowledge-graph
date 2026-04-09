@@ -102,11 +102,7 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-    /// Execute query engine on JSON payloads and output SQL
-    ///
-    /// Takes a JSON object where each key is a query description and each value
-    /// is a query payload for the query engine. Outputs the label, input JSON,
-    /// and generated SQL for each query.
+    /// Query the local DuckDB graph (~/.orbit/graph.duckdb)
     Query {
         /// Path to JSON file containing queries, or use --json for inline JSON
         #[arg(value_name = "FILE")]
@@ -116,8 +112,29 @@ enum Commands {
         #[arg(long, conflicts_with = "file")]
         json: Option<String>,
 
+        /// Path to ontology directory (default: config/ontology)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+
+        /// Output raw JSON graph (default is LLM-friendly text)
+        #[arg(long)]
+        raw: bool,
+    },
+    /// Compile a query to SQL without executing it
+    ///
+    /// Takes a JSON object where each key is a query label and each value
+    /// is a query payload. Outputs the compiled SQL for each query.
+    Compile {
+        /// Path to JSON file containing queries, or use --json for inline JSON
+        #[arg(value_name = "FILE")]
+        file: Option<PathBuf>,
+
+        /// Inline JSON payload (alternative to file path)
+        #[arg(long, conflicts_with = "file")]
+        json: Option<String>,
+
         /// Traversal paths for security context (e.g., "1/2/3/"). Org ID is parsed from the first segment.
-        #[arg(long, short, required_unless_present = "local", num_args = 1..)]
+        #[arg(long, short, num_args = 1..)]
         traversal_paths: Vec<String>,
 
         /// Path to ontology directory (default: config/ontology)
@@ -128,18 +145,9 @@ enum Commands {
         #[arg(long, default_value = "pretty")]
         format: OutputFormat,
 
-        /// Run against the local DuckDB graph (~/.orbit/graph.duckdb)
-        /// instead of compiling for ClickHouse.
+        /// Compile for local DuckDB instead of ClickHouse
         #[arg(long)]
         local: bool,
-
-        /// Output raw JSON rows (machine-optimized, one JSON array per query).
-        #[arg(long, conflicts_with = "llm")]
-        raw: bool,
-
-        /// Output LLM-friendly markdown tables (default for --local).
-        #[arg(long, conflicts_with = "raw")]
-        llm: bool,
     },
 }
 
@@ -176,24 +184,24 @@ async fn main() -> Result<()> {
         Commands::Query {
             file,
             json,
+            ontology,
+            raw,
+        } => {
+            let mode = if raw {
+                LocalOutputMode::Raw
+            } else {
+                LocalOutputMode::Llm
+            };
+            run_local_query(file, json, ontology, mode)
+        }
+        Commands::Compile {
+            file,
+            json,
             traversal_paths,
             ontology,
             format,
             local,
-            raw,
-            llm: _,
-        } => {
-            if local {
-                let output_mode = if raw {
-                    LocalOutputMode::Raw
-                } else {
-                    LocalOutputMode::Llm
-                };
-                run_local_query(file, json, ontology, output_mode)
-            } else {
-                run_query(file, json, traversal_paths, ontology, format)
-            }
-        }
+        } => run_compile(file, json, traversal_paths, ontology, format, local),
     }
 }
 
@@ -484,12 +492,13 @@ fn run_local_query(
     Ok(())
 }
 
-fn run_query(
+fn run_compile(
     file: Option<PathBuf>,
     json_input: Option<String>,
     traversal_paths: Vec<String>,
     ontology_path: Option<PathBuf>,
     format: OutputFormat,
+    local: bool,
 ) -> Result<()> {
     let json_str = match (file, json_input) {
         (Some(path), None) => std::fs::read_to_string(&path)
@@ -499,37 +508,52 @@ fn run_query(
         (Some(_), Some(_)) => unreachable!("clap prevents this"),
     };
 
-    // Parse org_id from first segment of first traversal path
-    let first_path = traversal_paths
-        .first()
-        .context("at least one traversal path is required")?;
-    let org_id: i64 = first_path
-        .split('/')
-        .next()
-        .context("traversal path is empty")?
-        .parse()
-        .context("first segment of traversal path must be a valid org ID")?;
-
-    let security_ctx = SecurityContext::new(org_id, traversal_paths)
-        .map_err(|e| anyhow::anyhow!("invalid security context: {}", e))?;
-
-    let queries: HashMap<String, Value> = serde_json::from_str(&json_str)
-        .context("failed to parse JSON as object with string keys")?;
-
     let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
-
     let ontology = Ontology::load_from_dir(&ontology_dir)
         .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
 
+    let security_ctx = if local {
+        None
+    } else {
+        let first_path = traversal_paths
+            .first()
+            .context("--traversal-paths required for server compilation")?;
+        let org_id: i64 = first_path
+            .split('/')
+            .next()
+            .context("traversal path is empty")?
+            .parse()
+            .context("first segment of traversal path must be a valid org ID")?;
+        Some(
+            SecurityContext::new(org_id, traversal_paths)
+                .map_err(|e| anyhow::anyhow!("invalid security context: {}", e))?,
+        )
+    };
+
+    // Support both single query (has "query_type") and multi-query (keyed map).
+    let value: Value = serde_json::from_str(&json_str).context("failed to parse JSON input")?;
+    let queries: Vec<(String, Value)> = if value.get("query_type").is_some() {
+        vec![("query".to_string(), value)]
+    } else {
+        let map: HashMap<String, Value> =
+            serde_json::from_value(value).context("expected a JSON object")?;
+        let mut sorted: Vec<_> = map.into_iter().collect();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        sorted
+    };
+
     let mut results: Vec<QueryOutput> = Vec::with_capacity(queries.len());
 
-    let mut sorted_queries: Vec<_> = queries.into_iter().collect();
-    sorted_queries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    for (label, input) in sorted_queries {
+    for (label, input) in queries {
         let input_json = serde_json::to_string(&input).context("failed to serialize input")?;
 
-        match query_engine::compiler::compile(&input_json, &ontology, &security_ctx) {
+        let compile_result = if local {
+            query_engine::compiler::compile_local(&input_json, &ontology)
+        } else {
+            query_engine::compiler::compile(&input_json, &ontology, security_ctx.as_ref().unwrap())
+        };
+
+        match compile_result {
             Ok(result) => {
                 let rendered_sql = result.base.render();
                 results.push(QueryOutput::Success(QueryResult {
