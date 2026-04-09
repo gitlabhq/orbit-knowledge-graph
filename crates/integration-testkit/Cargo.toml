@@ -13,6 +13,7 @@ gkg-server = { path = "../gkg-server" }
 query-engine = { path = "../query-engine" }
 rustls = { workspace = true }
 sqlparser = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 testcontainers = { workspace = true }
 tokio = { workspace = true }

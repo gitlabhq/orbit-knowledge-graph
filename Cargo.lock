@@ -3692,6 +3692,7 @@ dependencies = [
  "gkg-utils",
  "query-engine",
  "rustls",
+ "serde",
  "serde_json",
  "sqlparser",
  "testcontainers",
