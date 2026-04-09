@@ -1,8 +1,12 @@
 variables:
   CANONICAL_PROJECT_ID: "77960826"
+  DEP_PROXY: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/
 
 workflow:
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      variables:
+        DEP_PROXY: ""
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
@@ -95,7 +99,7 @@ stages:
 
 agent-file-sync-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: ${DEP_PROXY}alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -106,7 +110,7 @@ agent-file-sync-check:
 
 mr-title-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/oven/bun:1.3-alpine
+  image: ${DEP_PROXY}oven/bun:1.3-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -317,7 +321,7 @@ integration-test:
   tags:
     - saas-linux-large-amd64
   services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:dind
+      - name: ${DEP_PROXY}docker:dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -326,14 +330,17 @@ integration-test:
   needs: []
   before_script:
     - !reference [.sccache-template, before_script]
-    - echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
     - |
-      docker pull ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 &
-      docker pull ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/nats:2.11-alpine &
+      if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "${DEP_PROXY}" ]; then
+        echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
+      fi
+    - |
+      docker pull ${DEP_PROXY}clickhouse/clickhouse-server:25.12 &
+      docker pull ${DEP_PROXY}nats:2.11-alpine &
       wait
     - |
-      docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
-      docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/nats:2.11-alpine nats:2.11-alpine
+      docker tag ${DEP_PROXY}clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
+      docker tag ${DEP_PROXY}nats:2.11-alpine nats:2.11-alpine
   script:
     - cargo nextest run --profile ci --all-features --test containers
     - sccache --show-stats || true
@@ -342,10 +349,10 @@ integration-test:
 
 .docker-build:
   stage: build
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  image: ${DEP_PROXY}docker:29
   needs: []
   services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29-dind
+    - name: ${DEP_PROXY}docker:29-dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -372,7 +379,7 @@ docker-build-arm64:
 
 docker-manifest:
   stage: build
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  image: ${DEP_PROXY}docker:29
   tags:
     - saas-linux-medium-amd64
   needs:
@@ -391,12 +398,12 @@ docker-manifest:
 
 docker-build-mr:
   stage: build
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  image: ${DEP_PROXY}docker:29
   tags:
     - saas-linux-large-amd64
   needs: []
   services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29-dind
+    - name: ${DEP_PROXY}docker:29-dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -473,7 +480,7 @@ publish-proto-gem:
 
 semantic-release:
   stage: release
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/node:22
+  image: ${DEP_PROXY}node:22
   tags:
     - saas-linux-medium-amd64
   id_tokens:
