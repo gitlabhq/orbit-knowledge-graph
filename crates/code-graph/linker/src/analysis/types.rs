@@ -448,6 +448,7 @@ impl gkg_utils::arrow::AsRecordBatch for DirectoryNode {
         b.col("id")?.push_int(id)?;
         b.col("project_id")?.push_int(ctx.project_id)?;
         b.col("branch")?.push_str(ctx.branch)?;
+        b.col("commit_sha")?.push_str(ctx.commit_sha)?;
         b.col("path")?.push_str(&self.path)?;
         b.col("name")?.push_str(&self.name)?;
         Ok(())
@@ -490,6 +491,7 @@ impl gkg_utils::arrow::AsRecordBatch for FileNode {
         b.col("id")?.push_int(id)?;
         b.col("project_id")?.push_int(ctx.project_id)?;
         b.col("branch")?.push_str(ctx.branch)?;
+        b.col("commit_sha")?.push_str(ctx.commit_sha)?;
         b.col("path")?.push_str(&self.path)?;
         b.col("name")?.push_str(&self.name)?;
         b.col("extension")?.push_str(&self.extension)?;
@@ -643,6 +645,7 @@ impl gkg_utils::arrow::AsRecordBatch for DefinitionNode {
         b.col("id")?.push_int(id)?;
         b.col("project_id")?.push_int(ctx.project_id)?;
         b.col("branch")?.push_str(ctx.branch)?;
+        b.col("commit_sha")?.push_str(ctx.commit_sha)?;
         b.col("file_path")?.push_str(self.file_path.as_ref())?;
         b.col("fqn")?.push_str(self.fqn.to_string())?;
         b.col("name")?.push_str(self.fqn.name())?;
@@ -780,6 +783,7 @@ impl gkg_utils::arrow::AsRecordBatch for ImportedSymbolNode {
         b.col("id")?.push_int(id)?;
         b.col("project_id")?.push_int(ctx.project_id)?;
         b.col("branch")?.push_str(ctx.branch)?;
+        b.col("commit_sha")?.push_str(ctx.commit_sha)?;
         b.col("file_path")?.push_str(&self.location.file_path)?;
         b.col("import_type")?.push_str(self.import_type.as_str())?;
         b.col("import_path")?.push_str(&self.import_path)?;

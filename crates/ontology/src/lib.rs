@@ -1807,7 +1807,8 @@ properties:
         assert!(names.contains(&"name"));
         // Excluded: listed in exclude_properties for this entity
         assert!(!names.contains(&"traversal_path"));
-        assert!(!names.contains(&"commit_sha"));
+        // commit_sha is now included in local schema
+        assert!(names.contains(&"commit_sha"));
     }
 
     #[test]
