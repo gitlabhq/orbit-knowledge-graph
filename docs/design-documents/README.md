@@ -172,7 +172,7 @@ This makes property graphs a far more flexible and schema-tolerant choice for bo
 
 #### 5. Open Cypher (GQL) and Property Graphs are now Standard
 
-The Knowledge Graph service is intentionally aligned with Open Cypher (GQL) and, most importantly, with Property Graphs, which are now standardized by [SQL 2023’s ISO/IEC 9075-16:2023)](https://www.iso.org/standard/79473.html) . Cypher-like patterns are the de facto standard for property-graph databases and Knowledge Graphs (Neo4j, Memgraph, Kùzu). By adopting it, we inherit a well-understood, declarative language for expressing complex traversals, aggregations, and pattern matching over graph data—operations required to fully leverage GitLab’s SDLC and code metaata.
+The Knowledge Graph service is intentionally aligned with Open Cypher (GQL) and, most importantly, with Property Graphs, which are now standardized by [SQL 2023’s ISO/IEC 9075-16:2023)](https://www.iso.org/standard/79473.html). Cypher-like patterns are the de facto standard for property-graph databases and Knowledge Graphs (Neo4j, Memgraph, Kùzu). By adopting it, we inherit a well-understood, declarative language for expressing complex traversals, aggregations, and pattern matching over graph data—operations required to fully leverage GitLab’s SDLC and code metadata.
 
 > You can read more about how we will enable all LLMs to query under the [querying](./querying) documentation.
 
