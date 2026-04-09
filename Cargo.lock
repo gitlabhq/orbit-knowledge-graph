@@ -4800,6 +4800,7 @@ dependencies = [
  "clap",
  "code-graph",
  "dirs",
+ "duckdb-client",
  "dunce",
  "fs4",
  "gitalisk-core",
