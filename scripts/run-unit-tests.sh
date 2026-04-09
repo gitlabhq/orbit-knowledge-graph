@@ -18,7 +18,7 @@ NON_DOCKER_TESTS=$(
   jq -r '.packages[]
     | select(.name == "integration-tests")
     | .targets[]
-    | select((.kind | index("test")) and .name != "containers")
+    | select((.kind | index("test")) and .name != "containers" and .name != "cli")
     | .name'
 )
 

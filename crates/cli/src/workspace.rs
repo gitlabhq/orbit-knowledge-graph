@@ -25,8 +25,13 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn open_default() -> Result<Self> {
-        let home = dirs::home_dir().context("Could not determine home directory")?;
-        Self::open(home.join(".orbit"))
+        let root = if let Ok(dir) = std::env::var("ORBIT_DATA_DIR") {
+            PathBuf::from(dir)
+        } else {
+            let home = dirs::home_dir().context("Could not determine home directory")?;
+            home.join(".orbit")
+        };
+        Self::open(root)
     }
 
     pub fn open(root: PathBuf) -> Result<Self> {

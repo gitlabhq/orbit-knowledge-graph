@@ -3714,6 +3714,7 @@ dependencies = [
  "compiler",
  "flate2",
  "futures",
+ "gitalisk-core",
  "gitaly-protos",
  "gitlab-client",
  "gkg-server",
