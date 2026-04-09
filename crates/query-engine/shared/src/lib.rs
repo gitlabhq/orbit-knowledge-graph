@@ -1,3 +1,4 @@
+pub mod content;
 pub mod hydration;
 pub mod stages;
 mod types;

@@ -4,23 +4,20 @@ use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::ProfilingConfig;
-use query_engine::compiler::{HydrationPlan, InputNode, VirtualColumnRequest, compile_input};
+use query_engine::compiler::{HydrationPlan, InputNode, compile_input};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
 use query_engine::shared::RedactionOutput;
+use query_engine::shared::content::{
+    ColumnResolverRegistry, EntityVirtualColumns, PropertyMap, ResolverContext,
+    resolve_virtual_columns,
+};
 use query_engine::shared::hydration as hydration_helpers;
 use query_engine::shared::{
     DebugQuery, HydrationOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
 };
-
-use crate::content::{ColumnResolverRegistry, PropertyRow, ResolverContext};
-
-type PropertyMap = HashMap<(String, i64), PropertyRow>;
-
-/// Entity type paired with the virtual columns that need remote resolution.
-type EntityVirtualColumns<'a> = (&'a str, &'a [VirtualColumnRequest]);
 
 #[derive(Clone)]
 pub struct HydrationStage;
@@ -32,18 +29,12 @@ impl HydrationStage {
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }
 
-    /// Resolve virtual columns via [`ColumnResolverRegistry`] from server
-    /// extensions. Returns `ContentResolution` error if absent.
-    pub async fn resolve_virtual_columns(
+    /// Build a [`ResolverContext`] and call the shared resolution loop.
+    async fn resolve(
         ctx: &QueryPipelineContext,
         entity_virtual_columns: &[EntityVirtualColumns<'_>],
         property_map: &mut PropertyMap,
     ) -> Result<(), PipelineError> {
-        let has_work = entity_virtual_columns.iter().any(|(_, vc)| !vc.is_empty());
-        if !has_work {
-            return Ok(());
-        }
-
         let registry = ctx
             .server_extensions
             .get::<ColumnResolverRegistry>()
@@ -54,83 +45,16 @@ impl HydrationStage {
             })?;
 
         let resolver_ctx = ResolverContext {
-            security_context: ctx.security_context()?.clone(),
+            security_context: Some(ctx.security_context()?.clone()),
         };
-        let max_batch = registry.max_batch_size();
 
-        for &(entity_type, virtual_columns) in entity_virtual_columns {
-            let valid_keys: Vec<(String, i64)> = property_map
-                .keys()
-                .filter(|(etype, _)| etype == entity_type)
-                .cloned()
-                .collect();
-
-            if valid_keys.is_empty() {
-                continue;
-            }
-
-            if valid_keys.len() > max_batch {
-                return Err(PipelineError::ContentResolution(format!(
-                    "column resolver batch size {} exceeds limit {max_batch}",
-                    valid_keys.len(),
-                )));
-            }
-
-            // Look up services eagerly so we fail fast on missing registrations.
-            let service_lookups: Vec<_> = virtual_columns
-                .iter()
-                .map(|vcr| {
-                    let service = registry.get(&vcr.service).ok_or_else(|| {
-                        PipelineError::ContentResolution(format!(
-                            "no virtual service registered for '{}'",
-                            vcr.service,
-                        ))
-                    })?;
-                    Ok((vcr, Arc::clone(service)))
-                })
-                .collect::<Result<Vec<_>, PipelineError>>()?;
-
-            // Build prop_refs once — shared by all concurrent futures,
-            // dropped after try_join_all returns.
-            let prop_refs: Vec<&PropertyRow> = valid_keys
-                .iter()
-                .map(|k| property_map.get(k).expect("key validated above"))
-                .collect();
-
-            // Resolve all virtual columns for this entity type concurrently.
-            let futures = service_lookups.iter().map(|(vcr, service)| {
-                let prop_refs = &prop_refs;
-                let resolver_ctx = &resolver_ctx;
-                async move {
-                    let results = service
-                        .resolve_batch(&vcr.lookup, prop_refs, resolver_ctx)
-                        .await?;
-                    if results.len() != prop_refs.len() {
-                        return Err(PipelineError::ContentResolution(format!(
-                            "service '{}' returned {} results for {} rows",
-                            vcr.service,
-                            results.len(),
-                            prop_refs.len(),
-                        )));
-                    }
-                    Ok(results)
-                }
-            });
-            let all_results = futures::future::try_join_all(futures).await?;
-
-            // Merge all resolved values into the property map.
-            for ((vcr, _), results) in service_lookups.iter().zip(all_results) {
-                for (i, value) in results.into_iter().enumerate() {
-                    if let Some(value) = value
-                        && let Some(props) = property_map.get_mut(&valid_keys[i])
-                    {
-                        props.insert(vcr.column_name.clone(), value);
-                    }
-                }
-            }
-        }
-
-        Ok(())
+        resolve_virtual_columns(
+            registry,
+            &resolver_ctx,
+            entity_virtual_columns,
+            property_map,
+        )
+        .await
     }
 
     /// Compile a `QueryType::Hydration` input and execute the single UNION ALL
@@ -274,7 +198,7 @@ impl PipelineStage for HydrationStage {
                     .iter()
                     .map(|t| (t.entity_type.as_str(), t.virtual_columns.as_slice()))
                     .collect();
-                Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
+                Self::resolve(ctx, &entity_virtuals, &mut property_map).await?;
 
                 hydration_helpers::strip_injected_columns(
                     &mut property_map,
@@ -318,7 +242,7 @@ impl PipelineStage for HydrationStage {
                         .iter()
                         .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
                         .collect();
-                    Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
+                    Self::resolve(ctx, &entity_virtuals, &mut property_map).await?;
 
                     hydration_helpers::strip_injected_columns(
                         &mut property_map,
