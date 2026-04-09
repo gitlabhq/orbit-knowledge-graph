@@ -3726,6 +3726,7 @@ dependencies = [
  "gitlab-client",
  "gkg-server",
  "gkg-server-config",
+ "gkg-utils",
  "health-check",
  "indexer",
  "integration-testkit",
