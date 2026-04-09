@@ -12,7 +12,7 @@ use query_engine::formatters::{self, ResultFormatter};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -259,17 +259,31 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             )?;
         }
 
-        let repo_name = repo_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "repository".to_string());
-
-        // Parse and build graph -- no DB connection held.
-        let file_source = DirectoryFileSource::new(key.clone());
-        let indexer = RepositoryIndexer::new(repo_name.clone(), key.clone());
-
-        let mut result = match indexer.index_files(file_source, &config).await {
-            Ok(r) => r,
+        match index_repo(
+            repo_path,
+            &key,
+            project_id,
+            &config,
+            &ontology,
+            &db_path,
+            &node_tables,
+            edge_table,
+        )
+        .await
+        {
+            Ok(result) => {
+                let mut output = build_index_output(
+                    &repo_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "repository".to_string()),
+                    &key,
+                    &result,
+                    show_stats,
+                );
+                output.database_path = Some(db_path.display().to_string());
+                info!("{}", serde_json::to_string_pretty(&output)?);
+            }
             Err(e) => {
                 if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path)
                     && let Err(manifest_err) = workspace::set_status(
@@ -284,39 +298,61 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                 }
                 anyhow::bail!("{e}");
             }
-        };
-
-        if let Some(ref mut graph_data) = result.graph_data {
-            graph_data.assign_node_ids(project_id, "HEAD");
-
-            let local_data =
-                duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", &ontology)
-                    .context("failed to convert graph data to Arrow")?;
-
-            // Acquire write connection only for the actual writes.
-            let client = duckdb_client::DuckDbClient::open(&db_path)
-                .context("failed to open DuckDB for writing")?;
-            client
-                .delete_project(project_id, &node_tables, edge_table)
-                .context("failed to clear existing project data")?;
-            client
-                .insert_graph(local_data)
-                .context("failed to insert graph data")?;
-            workspace::set_status(
-                &client,
-                &key,
-                project_id,
-                workspace::RepoStatus::Indexed,
-                None,
-            )?;
         }
-
-        let mut output = build_index_output(&repo_name, &key, &result, show_stats);
-        output.database_path = Some(db_path.display().to_string());
-        info!("{}", serde_json::to_string_pretty(&output)?);
     }
 
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn index_repo(
+    repo_path: &Path,
+    key: &str,
+    project_id: i64,
+    config: &IndexingConfig,
+    ontology: &Ontology,
+    db_path: &Path,
+    node_tables: &[String],
+    edge_table: &str,
+) -> Result<RepositoryIndexingResult> {
+    let repo_name = repo_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "repository".to_string());
+
+    let file_source = DirectoryFileSource::new(key.to_string());
+    let indexer = RepositoryIndexer::new(repo_name, key.to_string());
+
+    let mut result = indexer
+        .index_files(file_source, config)
+        .await
+        .context("indexing failed")?;
+
+    if let Some(ref mut graph_data) = result.graph_data {
+        graph_data.assign_node_ids(project_id, "HEAD");
+
+        let local_data =
+            duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", ontology)
+                .context("failed to convert graph data to Arrow")?;
+
+        let client = duckdb_client::DuckDbClient::open(db_path)
+            .context("failed to open DuckDB for writing")?;
+        client
+            .delete_project(project_id, node_tables, edge_table)
+            .context("failed to clear existing project data")?;
+        client
+            .insert_graph(local_data)
+            .context("failed to insert graph data")?;
+        workspace::set_status(
+            &client,
+            key,
+            project_id,
+            workspace::RepoStatus::Indexed,
+            None,
+        )?;
+    }
+
+    Ok(result)
 }
 
 fn build_index_output(
