@@ -134,7 +134,7 @@ impl PipelineStage for DuckDbExecutor {
         let params = duckdb_client::to_sql_params(&compiled.base.params_in_order());
 
         let t = Instant::now();
-        let client = DuckDbClient::open(&db_path).map_err(|e| {
+        let client = DuckDbClient::open_read_only(&db_path).map_err(|e| {
             let err = PipelineError::Execution(e.to_string());
             obs.record_error(&err);
             err
@@ -349,8 +349,8 @@ fn execute_local_hydration(
     };
 
     let params = duckdb_client::to_sql_params(&compiled.base.params_in_order());
-    let client =
-        DuckDbClient::open(db_path).map_err(|e| PipelineError::Execution(e.to_string()))?;
+    let client = DuckDbClient::open_read_only(db_path)
+        .map_err(|e| PipelineError::Execution(e.to_string()))?;
     let batches = client
         .query_arrow_params(&compiled.base.sql, &params)
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
