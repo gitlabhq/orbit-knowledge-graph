@@ -30,6 +30,14 @@ use parser_core::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Context for [`AsRecordBatch`](gkg_utils::arrow::AsRecordBatch)
+/// implementations on code graph node types.
+pub struct RowContext<'a> {
+    pub project_id: i64,
+    pub branch: &'a str,
+    pub commit_sha: &'a str,
+}
+
 // TODO: Use a more robust id generator: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/60
 fn compute_id(components: &[&str]) -> i64 {
     let mut hasher = FxHasher::default();
@@ -174,11 +182,11 @@ pub struct ResolvedEdge {
     pub target_kind: &'static str,
 }
 
-impl gkg_utils::arrow::AsRecordBatch for ResolvedEdge {
+impl gkg_utils::arrow::AsRecordBatch<RowContext<'_>> for ResolvedEdge {
     fn write_row(
         &self,
         b: &mut gkg_utils::arrow::BatchBuilder,
-        _ctx: &gkg_utils::arrow::RowContext<'_>,
+        _ctx: &RowContext<'_>,
     ) -> Result<(), arrow::error::ArrowError> {
         b.col("source_id")?.push_int(self.source_id)?;
         b.col("source_kind")?.push_str(self.source_kind)?;
@@ -432,7 +440,7 @@ impl DirectoryNode {
     }
 }
 
-impl gkg_utils::arrow::AsRecordBatch for DirectoryNode {
+impl gkg_utils::arrow::AsRecordBatch<RowContext<'_>> for DirectoryNode {
     fn should_include(&self) -> bool {
         self.id.is_some()
     }
@@ -440,7 +448,7 @@ impl gkg_utils::arrow::AsRecordBatch for DirectoryNode {
     fn write_row(
         &self,
         b: &mut gkg_utils::arrow::BatchBuilder,
-        ctx: &gkg_utils::arrow::RowContext<'_>,
+        ctx: &RowContext<'_>,
     ) -> Result<(), arrow::error::ArrowError> {
         let id = self
             .id
@@ -475,7 +483,7 @@ impl FileNode {
     }
 }
 
-impl gkg_utils::arrow::AsRecordBatch for FileNode {
+impl gkg_utils::arrow::AsRecordBatch<RowContext<'_>> for FileNode {
     fn should_include(&self) -> bool {
         self.id.is_some()
     }
@@ -483,7 +491,7 @@ impl gkg_utils::arrow::AsRecordBatch for FileNode {
     fn write_row(
         &self,
         b: &mut gkg_utils::arrow::BatchBuilder,
-        ctx: &gkg_utils::arrow::RowContext<'_>,
+        ctx: &RowContext<'_>,
     ) -> Result<(), arrow::error::ArrowError> {
         let id = self
             .id
@@ -629,7 +637,7 @@ impl DefinitionNode {
     }
 }
 
-impl gkg_utils::arrow::AsRecordBatch for DefinitionNode {
+impl gkg_utils::arrow::AsRecordBatch<RowContext<'_>> for DefinitionNode {
     fn should_include(&self) -> bool {
         self.id.is_some()
     }
@@ -637,7 +645,7 @@ impl gkg_utils::arrow::AsRecordBatch for DefinitionNode {
     fn write_row(
         &self,
         b: &mut gkg_utils::arrow::BatchBuilder,
-        ctx: &gkg_utils::arrow::RowContext<'_>,
+        ctx: &RowContext<'_>,
     ) -> Result<(), arrow::error::ArrowError> {
         let id = self
             .id
@@ -767,7 +775,7 @@ impl ImportedSymbolNode {
     }
 }
 
-impl gkg_utils::arrow::AsRecordBatch for ImportedSymbolNode {
+impl gkg_utils::arrow::AsRecordBatch<RowContext<'_>> for ImportedSymbolNode {
     fn should_include(&self) -> bool {
         self.id.is_some()
     }
@@ -775,7 +783,7 @@ impl gkg_utils::arrow::AsRecordBatch for ImportedSymbolNode {
     fn write_row(
         &self,
         b: &mut gkg_utils::arrow::BatchBuilder,
-        ctx: &gkg_utils::arrow::RowContext<'_>,
+        ctx: &RowContext<'_>,
     ) -> Result<(), arrow::error::ArrowError> {
         let id = self
             .id
