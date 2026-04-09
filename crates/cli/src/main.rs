@@ -187,12 +187,21 @@ async fn main() -> Result<()> {
             ontology,
             raw,
         } => {
-            let mode = if raw {
-                LocalOutputMode::Raw
-            } else {
-                LocalOutputMode::Llm
-            };
-            run_local_query(file, json, ontology, mode)
+            let results = run_local_query(file, json, ontology)?;
+            for (i, (label, output)) in results.iter().enumerate() {
+                if raw {
+                    let formatted = formatters::GraphFormatter.format(output);
+                    println!("{}", serde_json::to_string(&formatted)?);
+                } else {
+                    if i > 0 {
+                        println!();
+                    }
+                    println!("### {}\n", label);
+                    let formatted = formatters::GoonFormatter.format(output);
+                    println!("{}", serde_json::to_string_pretty(&formatted)?);
+                }
+            }
+            Ok(())
         }
         Commands::Compile {
             file,
@@ -413,17 +422,11 @@ enum QueryOutput {
     Error(QueryError),
 }
 
-enum LocalOutputMode {
-    Raw,
-    Llm,
-}
-
 fn run_local_query(
     file: Option<PathBuf>,
     json_input: Option<String>,
     ontology_path: Option<PathBuf>,
-    mode: LocalOutputMode,
-) -> Result<()> {
+) -> Result<Vec<(String, query_engine::shared::PipelineOutput)>> {
     let json_str = match (file, json_input) {
         (Some(path), None) => std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read file: {}", path.display()))?,
@@ -448,8 +451,6 @@ fn run_local_query(
     }
     let repo_roots = store.repo_roots().context("failed to read repo roots")?;
 
-    // Detect single vs multi-query: if the JSON has a "query_type" key,
-    // it's a single query. Otherwise treat it as a keyed map of queries.
     let value: Value = serde_json::from_str(&json_str).context("failed to parse JSON input")?;
     let queries: Vec<(String, Value)> = if value.get("query_type").is_some() {
         vec![("query".to_string(), value)]
@@ -461,35 +462,20 @@ fn run_local_query(
         sorted
     };
 
-    for (i, (label, input)) in queries.iter().enumerate() {
+    let mut results = Vec::new();
+    for (label, input) in &queries {
         let input_json = serde_json::to_string(input).context("failed to serialize input")?;
-        match local_pipeline::run(
+        let output = local_pipeline::run(
             &input_json,
             Arc::clone(&ontology),
             &db_path,
             repo_roots.clone(),
-        ) {
-            Ok(output) => match mode {
-                LocalOutputMode::Raw => {
-                    let formatted = formatters::GraphFormatter.format(&output);
-                    println!("{}", serde_json::to_string(&formatted)?);
-                }
-                LocalOutputMode::Llm => {
-                    if i > 0 {
-                        println!();
-                    }
-                    println!("### {}\n", label);
-                    let formatted = formatters::GoonFormatter.format(&output);
-                    println!("{}", serde_json::to_string_pretty(&formatted)?);
-                }
-            },
-            Err(e) => {
-                eprintln!("Error for '{label}': {e}");
-            }
-        }
+        )
+        .with_context(|| format!("query '{label}' failed"))?;
+        results.push((label.clone(), output));
     }
 
-    Ok(())
+    Ok(results)
 }
 
 fn run_compile(
