@@ -157,5 +157,17 @@ pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQu
     pipeline.execute(state, &env)?.into_output().count_err()
 }
 
+/// Compile a pre-built Input into DuckDB-dialect SQL for local hydration.
+///
+/// Uses the local hydration pipeline (Lower → Enforce → DuckDbCodegen).
+/// No validation, normalization, security, or recursive hydration.
+#[must_use = "the compiled query context should be used"]
+pub fn compile_local_input(input: Input) -> Result<CompiledQueryContext> {
+    let env = LocalEnv::new(Arc::new(Ontology::new()));
+    let state = DuckDbState::from_input(input);
+    let pipeline = pipelines::duckdb_hydration().seal();
+    pipeline.execute(state, &env)?.into_output().count_err()
+}
+
 // Pipeline presets are in `pipelines.rs`.
 // Tests are in `tests/compiler_tests.rs` and `tests/ontology_tests.rs`.

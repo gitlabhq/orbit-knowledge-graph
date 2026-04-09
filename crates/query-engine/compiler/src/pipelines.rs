@@ -83,6 +83,7 @@ pub struct DuckDbState {
     pub input: Option<Input>,
     pub node: Option<Node>,
     pub result_ctx: Option<ResultContext>,
+    pub hydration_plan: Option<HydrationPlan>,
     pub output: Option<CompiledQueryContext>,
 }
 
@@ -164,15 +165,33 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
         .build()
 }
 
+/// Local DuckDB hydration compilation pipeline.
+///
+/// Compiles a programmatically-built hydration Input into DuckDB SQL.
+/// No validate/normalize (input is pre-built), no security, no
+/// hydrate-plan (prevents recursive hydration).
+///
+/// ```text
+/// Input → Lower → Enforce → DuckDbCodegen
+/// ```
+pub fn duckdb_hydration() -> Pipeline<LocalEnv, DuckDbState> {
+    Pipeline::builder()
+        .pass(LowerPass)
+        .pass(EnforcePass)
+        .pass(DuckDbCodegenPass)
+        .build()
+}
+
 /// Local DuckDB compilation pipeline.
 ///
 /// Skips security, check, deduplicate, and optimize — those are
-/// ClickHouse/multi-tenant concerns. Enforce runs to build the
-/// ResultContext (node/edge column metadata) needed by formatters.
+/// ClickHouse/multi-tenant concerns. Enforce builds the ResultContext
+/// (node/edge column metadata) needed by formatters. HydratePlan
+/// generates a hydration plan for the local execution pipeline.
 /// Emits DuckDB-dialect SQL via [`DuckDbCodegenPass`].
 ///
 /// ```text
-/// JSON → Validate → Normalize → Lower → Enforce → DuckDbCodegen
+/// JSON → Validate → Normalize → Lower → Enforce → HydratePlan → DuckDbCodegen
 /// ```
 pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
     Pipeline::builder()
@@ -181,6 +200,7 @@ pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
         .pass(NormalizePass)
         .pass(LowerPass)
         .pass(EnforcePass)
+        .pass(HydratePlanPass)
         .pass(DuckDbCodegenPass)
         .build()
 }

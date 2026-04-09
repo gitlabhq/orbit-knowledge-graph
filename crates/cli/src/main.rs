@@ -1,3 +1,4 @@
+mod local_pipeline;
 mod workspace;
 
 use anyhow::{Context, Result};
