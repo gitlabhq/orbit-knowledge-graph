@@ -474,9 +474,9 @@ fn run_local_query(
         );
     }
 
-    let repo_roots = store.repo_roots()?;
+    let project_roots = store.project_roots()?;
 
-    local_pipeline::run(&json_input, ontology, &db_path, repo_roots).context("query failed")
+    local_pipeline::run(&json_input, ontology, &db_path, project_roots).context("query failed")
 }
 
 fn run_compile(

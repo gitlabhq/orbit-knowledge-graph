@@ -35,18 +35,17 @@ use crate::content;
 
 /// Execute a query against the local DuckDB graph.
 ///
-/// `repo_roots` are the filesystem paths to indexed repositories, used
-/// to resolve virtual columns (file content) from disk.
-#[allow(dead_code)]
+/// `project_roots` maps project_id to repo root path, used to resolve
+/// virtual columns (file content) from disk.
 pub fn run(
     query_json: &str,
     ontology: Arc<Ontology>,
     db_path: &std::path::Path,
-    repo_roots: Vec<PathBuf>,
+    project_roots: std::collections::HashMap<i64, PathBuf>,
 ) -> Result<PipelineOutput> {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(PathBuf::from(db_path));
-    server_extensions.insert(content::local_resolver_registry(repo_roots));
+    server_extensions.insert(content::local_resolver_registry(project_roots));
 
     let mut ctx = QueryPipelineContext {
         query_json: query_json.to_string(),
