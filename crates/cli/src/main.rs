@@ -246,6 +246,19 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
 
         info!("Indexing repository at: {}", key);
 
+        // Mark as indexing before we start parsing.
+        {
+            let client =
+                duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
+            workspace::set_status(
+                &client,
+                &key,
+                project_id,
+                workspace::RepoStatus::Indexing,
+                None,
+            )?;
+        }
+
         let repo_name = repo_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -283,13 +296,6 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             // Acquire write connection only for the actual writes.
             let client = duckdb_client::DuckDbClient::open(&db_path)
                 .context("failed to open DuckDB for writing")?;
-            workspace::set_status(
-                &client,
-                &key,
-                project_id,
-                workspace::RepoStatus::Indexing,
-                None,
-            )?;
             client
                 .delete_project(project_id, &node_tables, edge_table)
                 .context("failed to clear existing project data")?;
