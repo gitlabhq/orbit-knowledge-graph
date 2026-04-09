@@ -14,6 +14,8 @@ test-utils = []
 
 [dependencies]
 parser-core = { path = "../parser" }
+gkg-utils = { path = "../../utils" }
+arrow = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
 num_cpus = { workspace = true }
