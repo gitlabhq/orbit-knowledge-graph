@@ -422,11 +422,13 @@ enum QueryOutput {
     Error(QueryError),
 }
 
-fn run_local_query(
+/// Parse query JSON from a file or inline string, load the ontology,
+/// and return the parsed queries as `(label, value)` pairs.
+fn parse_query_input(
     file: Option<PathBuf>,
     json_input: Option<String>,
     ontology_path: Option<PathBuf>,
-) -> Result<Vec<(String, query_engine::shared::PipelineOutput)>> {
+) -> Result<(Vec<(String, Value)>, Ontology)> {
     let json_str = match (file, json_input) {
         (Some(path), None) => std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read file: {}", path.display()))?,
@@ -436,10 +438,30 @@ fn run_local_query(
     };
 
     let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
-    let ontology = Arc::new(
-        Ontology::load_from_dir(&ontology_dir)
-            .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?,
-    );
+    let ontology = Ontology::load_from_dir(&ontology_dir)
+        .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
+
+    let value: Value = serde_json::from_str(&json_str).context("failed to parse JSON input")?;
+    let queries = if value.get("query_type").is_some() {
+        vec![("query".to_string(), value)]
+    } else {
+        let map: HashMap<String, Value> =
+            serde_json::from_value(value).context("expected a JSON object")?;
+        let mut sorted: Vec<_> = map.into_iter().collect();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        sorted
+    };
+
+    Ok((queries, ontology))
+}
+
+fn run_local_query(
+    file: Option<PathBuf>,
+    json_input: Option<String>,
+    ontology_path: Option<PathBuf>,
+) -> Result<Vec<(String, query_engine::shared::PipelineOutput)>> {
+    let (queries, ontology) = parse_query_input(file, json_input, ontology_path)?;
+    let ontology = Arc::new(ontology);
 
     let store = workspace::IndexStore::open_default()?;
     let db_path = store.db_path();
@@ -450,17 +472,6 @@ fn run_local_query(
         );
     }
     let repo_roots = store.repo_roots().context("failed to read repo roots")?;
-
-    let value: Value = serde_json::from_str(&json_str).context("failed to parse JSON input")?;
-    let queries: Vec<(String, Value)> = if value.get("query_type").is_some() {
-        vec![("query".to_string(), value)]
-    } else {
-        let map: HashMap<String, Value> =
-            serde_json::from_value(value).context("expected a JSON object")?;
-        let mut sorted: Vec<_> = map.into_iter().collect();
-        sorted.sort_by(|a, b| a.0.cmp(&b.0));
-        sorted
-    };
 
     let mut results = Vec::new();
     for (label, input) in &queries {
@@ -486,17 +497,7 @@ fn run_compile(
     format: OutputFormat,
     local: bool,
 ) -> Result<()> {
-    let json_str = match (file, json_input) {
-        (Some(path), None) => std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read file: {}", path.display()))?,
-        (None, Some(json)) => json,
-        (None, None) => anyhow::bail!("either FILE or --json must be provided"),
-        (Some(_), Some(_)) => unreachable!("clap prevents this"),
-    };
-
-    let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
-    let ontology = Ontology::load_from_dir(&ontology_dir)
-        .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
+    let (queries, ontology) = parse_query_input(file, json_input, ontology_path)?;
 
     let security_ctx = if local {
         None
@@ -514,18 +515,6 @@ fn run_compile(
             SecurityContext::new(org_id, traversal_paths)
                 .map_err(|e| anyhow::anyhow!("invalid security context: {}", e))?,
         )
-    };
-
-    // Support both single query (has "query_type") and multi-query (keyed map).
-    let value: Value = serde_json::from_str(&json_str).context("failed to parse JSON input")?;
-    let queries: Vec<(String, Value)> = if value.get("query_type").is_some() {
-        vec![("query".to_string(), value)]
-    } else {
-        let map: HashMap<String, Value> =
-            serde_json::from_value(value).context("expected a JSON object")?;
-        let mut sorted: Vec<_> = map.into_iter().collect();
-        sorted.sort_by(|a, b| a.0.cmp(&b.0));
-        sorted
     };
 
     let mut results: Vec<QueryOutput> = Vec::with_capacity(queries.len());
