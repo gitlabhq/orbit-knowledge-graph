@@ -4,8 +4,9 @@
 //! LocalCompilation → DuckDbExecution → Extraction → LocalHydration → LocalOutput
 //! ```
 //!
-//! No security, authorization, redaction, or hydration (hydration is a
-//! no-op pass-through until a local resolver is implemented).
+//! No security, authorization, or redaction. Hydration fetches node
+//! properties from the same DuckDB database. Virtual column resolution
+//! (e.g. file content from filesystem) is not yet implemented.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,20 +16,18 @@ use anyhow::Result;
 use ontology::Ontology;
 
 use duckdb_client::DuckDbClient;
-use query_engine::compiler::compile_local;
+use query_engine::compiler::{HydrationPlan, compile_local, compile_local_input};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
 };
+use query_engine::shared::hydration as hydration_helpers;
 use query_engine::shared::{
-    ExecutionOutput, ExtractionOutput, ExtractionStage, HydrationOutput, PaginationMeta,
-    PipelineOutput,
+    DebugQuery, ExecutionOutput, ExtractionOutput, ExtractionStage, HydrationOutput,
+    PaginationMeta, PipelineOutput,
 };
 
 /// Execute a query against the local DuckDB graph.
-///
-/// Builds a single-threaded tokio runtime internally if one isn't
-/// running, or uses `block_in_place` if called from an existing runtime.
 #[allow(dead_code)]
 pub fn run(
     query_json: &str,
@@ -65,7 +64,6 @@ pub fn run(
             .ok_or_else(|| PipelineError::custom("pipeline did not produce output"))
     };
 
-    // Support both "called from tokio context" and "called standalone".
     let result = if let Ok(handle) = tokio::runtime::Handle::try_current() {
         tokio::task::block_in_place(|| handle.block_on(run_pipeline))
     } else {
@@ -81,7 +79,6 @@ pub fn run(
 
 // ── Stages ───────────────────────────────────────────────────────────────────
 
-/// Compile JSON DSL to DuckDB SQL (no security context).
 struct LocalCompilation;
 
 impl PipelineStage for LocalCompilation {
@@ -94,7 +91,6 @@ impl PipelineStage for LocalCompilation {
         obs: &mut dyn PipelineObserver,
     ) -> std::result::Result<(), PipelineError> {
         let t = Instant::now();
-
         let compiled = compile_local(&ctx.query_json, &ctx.ontology)
             .map_err(|e| PipelineError::Compile {
                 client_safe: e.is_client_safe(),
@@ -105,16 +101,11 @@ impl PipelineStage for LocalCompilation {
         let query_type: &str = compiled.query_type.into();
         obs.set_query_type(query_type);
         obs.compiled(t.elapsed());
-
         ctx.compiled = Some(Arc::new(compiled));
         Ok(())
     }
 }
 
-/// Execute compiled SQL against a local DuckDB database.
-/// Opens a connection from the path stored in server_extensions.
-/// DuckDB operations are synchronous -- the async boundary is handled
-/// by the caller via `block_in_place`.
 struct DuckDbExecutor;
 
 impl PipelineStage for DuckDbExecutor {
@@ -126,12 +117,7 @@ impl PipelineStage for DuckDbExecutor {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> std::result::Result<ExecutionOutput, PipelineError> {
-        let db_path = ctx
-            .server_extensions
-            .get::<PathBuf>()
-            .ok_or_else(|| PipelineError::Execution("DuckDB path not found".into()))?
-            .clone();
-
+        let db_path = get_db_path(ctx)?;
         let compiled = ctx.compiled()?;
         let rendered_sql = compiled.base.render();
         let result_context = compiled.base.result_context.clone();
@@ -156,9 +142,7 @@ impl PipelineStage for DuckDbExecutor {
     }
 }
 
-/// No-op hydration stage. Passes through the extraction output as a
-/// `HydrationOutput` without fetching any properties. A future local
-/// resolver will populate node properties here.
+/// Hydration stage that fetches node properties from the local DuckDB.
 struct LocalHydration;
 
 impl PipelineStage for LocalHydration {
@@ -174,17 +158,43 @@ impl PipelineStage for LocalHydration {
             PipelineError::Execution("ExtractionOutput not found in phases".into())
         })?;
 
+        let compiled = ctx.compiled()?;
+        let db_path = get_db_path(ctx)?;
+
+        let mut query_result = input.query_result.clone();
+        let result_context = input.query_result.ctx().clone();
+        let mut hydration_queries = Vec::new();
+
+        match &compiled.hydration {
+            HydrationPlan::None => {}
+            HydrationPlan::Static(templates) => {
+                let (nodes, total_ids) =
+                    hydration_helpers::build_static_nodes(templates, &query_result);
+                let (props, debug) =
+                    execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids)?;
+                hydration_queries.extend(debug);
+                hydration_helpers::merge_static_properties(&mut query_result, &props, templates);
+            }
+            HydrationPlan::Dynamic(entity_specs) => {
+                let refs = hydration_helpers::extract_dynamic_refs(&query_result);
+                let (nodes, total_ids) =
+                    hydration_helpers::build_dynamic_nodes(entity_specs, &refs);
+                let (props, debug) =
+                    execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids)?;
+                hydration_queries.extend(debug);
+                hydration_helpers::merge_dynamic_properties(&mut query_result, &props);
+            }
+        }
+
         Ok(HydrationOutput {
-            query_result: input.query_result.clone(),
-            result_context: input.query_result.ctx().clone(),
+            query_result,
+            result_context,
             redacted_count: 0,
-            hydration_queries: vec![],
+            hydration_queries,
         })
     }
 }
 
-/// Build PipelineOutput from hydration results.
-/// All rows are trusted -- no authorization or redaction.
 struct LocalOutput;
 
 impl PipelineStage for LocalOutput {
@@ -224,4 +234,47 @@ impl PipelineStage for LocalOutput {
             pagination,
         })
     }
+}
+
+// ── Hydration helpers ────────────────────────────────────────────────────────
+
+fn get_db_path(ctx: &QueryPipelineContext) -> std::result::Result<PathBuf, PipelineError> {
+    ctx.server_extensions
+        .get::<PathBuf>()
+        .cloned()
+        .ok_or_else(|| PipelineError::Execution("DuckDB path not found".into()))
+}
+
+/// Compile and execute a hydration query against the local DuckDB.
+fn execute_local_hydration(
+    db_path: &std::path::Path,
+    ontology: &Ontology,
+    nodes: Vec<query_engine::compiler::InputNode>,
+    total_ids: usize,
+) -> std::result::Result<(hydration_helpers::PropertyMap, Vec<DebugQuery>), PipelineError> {
+    if nodes.is_empty() {
+        return Ok((Default::default(), Vec::new()));
+    }
+
+    let input = hydration_helpers::build_hydration_input(nodes, total_ids);
+
+    let compiled = compile_local_input(input, ontology).map_err(|e| PipelineError::Compile {
+        client_safe: e.is_client_safe(),
+        message: e.to_string(),
+    })?;
+
+    let rendered_sql = compiled.base.render();
+    let debug = DebugQuery {
+        sql: compiled.base.sql.clone(),
+        rendered: rendered_sql.clone(),
+    };
+
+    let client =
+        DuckDbClient::open(db_path).map_err(|e| PipelineError::Execution(e.to_string()))?;
+    let batches = client
+        .query_arrow(&rendered_sql)
+        .map_err(|e| PipelineError::Execution(e.to_string()))?;
+
+    let props = hydration_helpers::parse_hydration_batches(&batches)?;
+    Ok((props, vec![debug]))
 }

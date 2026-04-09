@@ -165,6 +165,23 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
         .build()
 }
 
+/// Local DuckDB hydration compilation pipeline.
+///
+/// Compiles a programmatically-built hydration Input into DuckDB SQL.
+/// No validate/normalize (input is pre-built), no security, no
+/// hydrate-plan (prevents recursive hydration).
+///
+/// ```text
+/// Input → Lower → Enforce → DuckDbCodegen
+/// ```
+pub fn duckdb_hydration() -> Pipeline<LocalEnv, DuckDbState> {
+    Pipeline::builder()
+        .pass(LowerPass)
+        .pass(EnforcePass)
+        .pass(DuckDbCodegenPass)
+        .build()
+}
+
 /// Local DuckDB compilation pipeline.
 ///
 /// Skips security, check, deduplicate, and optimize — those are
