@@ -321,7 +321,7 @@ integration-test:
   tags:
     - saas-linux-large-amd64
   services:
-      - name: ${DEP_PROXY}docker:dind
+    - name: ${DEP_PROXY}docker:dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
