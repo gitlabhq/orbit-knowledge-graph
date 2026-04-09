@@ -83,7 +83,7 @@ A node selector specifies which graph nodes to match:
 | Field         | Required    | Type             | Description                                                                                                                        |
 |---------------|-------------|------------------|------------------------------------------------------------------------------------------------------------------------------------|
 | `id`          | {{< yes >}} | `string`         | Variable identifier for this node. Use `id` to reference a node in the `relationships` and `aggregations` fields.                 |
-| `entity`      | {{< no >}}  | `string`         | Node type to match. For example, `User`, `Project`, `MergeRequest`.                                                               |
+| `entity`      | {{< yes >}}  | `string`         | Node type to match. For example, `User`, `Project`, `MergeRequest`.                                                               |
 | `columns`     | {{< no >}}  | `string`/`array` | Properties to return. Use `"*"` for all columns, or an array of property names. Default: `id`.                                    |
 | `filters`     | {{< no >}}  | `object`         | Property conditions a node must satisfy.                                                                                           |
 | `node_ids`    | {{< no >}}  | `array`          | Match only nodes with these IDs. Maximum 500 IDs.                                                                                  |
@@ -208,7 +208,7 @@ Path finding configuration. Required when `query_type` is `path_finding`.
 | `type`      | {{< yes >}} | `string`  | Path type. One of: `shortest`, `all_shortest`, `any`.                 |
 | `from`      | {{< yes >}} | `string`  | The `id` of the start node selector.                                  |
 | `to`        | {{< yes >}} | `string`  | The `id` of the end node selector.                                    |
-| `max_depth` | {{< no >}}  | `integer` | Maximum path depth. Range: `1`-`3`.                                       |
+| `max_depth` | {{< yes >}}  | `integer` | Maximum path depth. Range: `1`-`3`.                                       |
 | `rel_types` | {{< no >}}  | `array`   | Relationship types to traverse. If omitted, all types are considered. |
 
 Supported path types:
