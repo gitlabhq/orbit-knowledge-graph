@@ -119,7 +119,7 @@ The following relationships are available by default:
 |                    | `User`                     | `WorkItem`                   |
 | `REVIEWER`         | `User`                     | `MergeRequest`               |
 | `MERGED_BY`        | `User`                     | `MergeRequest`               |
-| `APPROVED_BY`      | `User`                     | `MergeRequest`               |
+| `APPROVED`         | `User`                     | `MergeRequest`               |
 | `CLOSED_BY`        | `User`                     | `WorkItem`                   |
 | `CREATOR`          | `User`                     | `Project`                    |
 | `OWNER`            | `User`                     | `Group`                      |
