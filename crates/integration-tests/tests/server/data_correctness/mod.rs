@@ -48,6 +48,7 @@ async fn data_correctness() {
         traversal::traversal_user_group_returns_correct_pairs_and_edges,
         traversal::traversal_three_hop_returns_all_user_group_project_paths,
         traversal::traversal_user_authored_mr_returns_correct_edges,
+        traversal::traversal_user_approved_mr_returns_correct_edges,
         traversal::traversal_redaction_removes_unauthorized_data,
         traversal::traversal_with_order_by,
         traversal::traversal_variable_length_reaches_depth_2,

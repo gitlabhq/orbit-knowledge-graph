@@ -121,6 +121,36 @@ pub(super) async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestC
     });
 }
 
+pub(super) async fn traversal_user_approved_mr_returns_correct_edges(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+            ],
+            "relationships": [{"type": "APPROVED", "from": "u", "to": "mr"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    resp.assert_referential_integrity();
+
+    resp.assert_edge_set("APPROVED", &[(2, 2000), (3, 2000), (1, 2002)]);
+
+    resp.assert_node("User", 2, |n| n.prop_str("username") == Some("bob"));
+    resp.assert_node("MergeRequest", 2000, |n| {
+        n.prop_str("title") == Some("Add feature A") && n.prop_str("state") == Some("opened")
+    });
+    resp.assert_node("MergeRequest", 2002, |n| {
+        n.prop_str("title") == Some("Refactor C") && n.prop_str("state") == Some("merged")
+    });
+}
+
 pub(super) async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1]);
