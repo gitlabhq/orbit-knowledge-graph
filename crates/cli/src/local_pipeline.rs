@@ -130,8 +130,8 @@ impl PipelineStage for DuckDbExecutor {
     ) -> std::result::Result<ExecutionOutput, PipelineError> {
         let db_path = get_db_path(ctx)?;
         let compiled = ctx.compiled()?;
-        let rendered_sql = compiled.base.render();
         let result_context = compiled.base.result_context.clone();
+        let params = duckdb_client::to_sql_params(&compiled.base.params_in_order());
 
         let t = Instant::now();
         let client = DuckDbClient::open(&db_path).map_err(|e| {
@@ -139,11 +139,13 @@ impl PipelineStage for DuckDbExecutor {
             obs.record_error(&err);
             err
         })?;
-        let batches = client.query_arrow(&rendered_sql).map_err(|e| {
-            let err = PipelineError::Execution(e.to_string());
-            obs.record_error(&err);
-            err
-        })?;
+        let batches = client
+            .query_arrow_params(&compiled.base.sql, &params)
+            .map_err(|e| {
+                let err = PipelineError::Execution(e.to_string());
+                obs.record_error(&err);
+                err
+            })?;
         obs.executed(t.elapsed(), batches.len());
 
         Ok(ExecutionOutput {
@@ -341,16 +343,16 @@ fn execute_local_hydration(
         message: e.to_string(),
     })?;
 
-    let rendered_sql = compiled.base.render();
     let debug = DebugQuery {
         sql: compiled.base.sql.clone(),
-        rendered: rendered_sql.clone(),
+        rendered: compiled.base.render(),
     };
 
+    let params = duckdb_client::to_sql_params(&compiled.base.params_in_order());
     let client =
         DuckDbClient::open(db_path).map_err(|e| PipelineError::Execution(e.to_string()))?;
     let batches = client
-        .query_arrow(&rendered_sql)
+        .query_arrow_params(&compiled.base.sql, &params)
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
     let props = hydration_helpers::parse_hydration_batches(&batches)?;
