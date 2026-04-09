@@ -2,28 +2,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::datatypes::Int64Type;
-use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::ProfilingConfig;
-use query_engine::compiler::{
-    ColumnSelection, DynamicEntityColumns, HydrationPlan, HydrationTemplate, Input, InputNode,
-    QueryType, VirtualColumnRequest, compile_input,
-};
-
-use gkg_utils::arrow::{ArrowUtils, ColumnValue};
-use query_engine::types::QueryResult;
+use query_engine::compiler::{HydrationPlan, InputNode, VirtualColumnRequest, compile_input};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
 use query_engine::shared::RedactionOutput;
+use query_engine::shared::hydration as hydration_helpers;
 use query_engine::shared::{
     DebugQuery, HydrationOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
-};
-
-use query_engine::compiler::constants::{
-    HYDRATION_NODE_ALIAS, MAX_DYNAMIC_HYDRATION_RESULTS, primary_key_column, redaction_id_column,
 };
 
 use crate::content::{ColumnResolverRegistry, PropertyRow, ResolverContext};
@@ -144,103 +133,6 @@ impl HydrationStage {
         Ok(())
     }
 
-    /// Remove columns that were injected as dependencies for virtual column
-    /// resolvers but not explicitly requested by the user.
-    fn strip_injected_columns<'a>(
-        property_map: &mut PropertyMap,
-        specs: impl Iterator<Item = (&'a str, &'a Vec<String>)>,
-    ) {
-        for (entity_type, injected) in specs {
-            if injected.is_empty() {
-                continue;
-            }
-            for ((et, _), props) in property_map.iter_mut() {
-                if et == entity_type {
-                    for col in injected {
-                        props.remove(col);
-                    }
-                }
-            }
-        }
-    }
-
-    async fn hydrate_static(
-        ctx: &QueryPipelineContext,
-        templates: &[HydrationTemplate],
-        query_result: &QueryResult,
-    ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let mut nodes = Vec::new();
-        let mut total_ids: usize = 0;
-
-        for template in templates {
-            if template.columns.is_empty() {
-                continue;
-            }
-
-            let ids = Self::collect_static_ids(query_result, template);
-            if ids.is_empty() {
-                continue;
-            }
-
-            total_ids += ids.len();
-            nodes.push(InputNode {
-                id: HYDRATION_NODE_ALIAS.to_string(),
-                entity: Some(template.entity_type.clone()),
-                table: Some(template.destination_table.clone()),
-                columns: Some(ColumnSelection::List(template.columns.clone())),
-                node_ids: ids,
-                ..InputNode::default()
-            });
-        }
-
-        Self::execute_hydration(ctx, nodes, total_ids).await
-    }
-
-    /// Dynamic hydration: builds an `Input` with one node per
-    /// discovered entity type using pre-resolved column specs from the
-    /// compilation plan. No ontology lookups at runtime.
-    async fn hydrate_dynamic(
-        ctx: &QueryPipelineContext,
-        entity_specs: &[DynamicEntityColumns],
-        refs: &HashMap<String, Vec<i64>>,
-    ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        let mut nodes = Vec::new();
-        let mut total_ids: usize = 0;
-
-        for (entity_type, ids) in refs {
-            if ids.is_empty() {
-                continue;
-            }
-
-            let spec = match entity_specs.iter().find(|s| s.entity_type == *entity_type) {
-                Some(s) => s,
-                None => continue,
-            };
-
-            if spec.columns.is_empty() {
-                continue;
-            }
-
-            let capped_ids: Vec<i64> = ids
-                .iter()
-                .copied()
-                .take(MAX_DYNAMIC_HYDRATION_RESULTS)
-                .collect();
-            total_ids += capped_ids.len();
-
-            nodes.push(InputNode {
-                id: HYDRATION_NODE_ALIAS.to_string(),
-                entity: Some(entity_type.clone()),
-                table: Some(spec.destination_table.clone()),
-                columns: Some(ColumnSelection::List(spec.columns.clone())),
-                node_ids: capped_ids,
-                ..InputNode::default()
-            });
-        }
-
-        Self::execute_hydration(ctx, nodes, total_ids).await
-    }
-
     /// Compile a `QueryType::Hydration` input and execute the single UNION ALL
     /// query against ClickHouse. Shared by both static and dynamic hydration.
     async fn execute_hydration(
@@ -259,12 +151,7 @@ impl HydrationStage {
             .cloned()
             .unwrap_or_default();
 
-        let hydration_input = Input {
-            query_type: QueryType::Hydration,
-            nodes,
-            limit: total_ids as u32,
-            ..Input::default()
-        };
+        let hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
 
         let compiled = compile_input(hydration_input, ctx.security_context()?).map_err(|e| {
             PipelineError::Compile {
@@ -336,138 +223,8 @@ impl HydrationStage {
             }
         }
 
-        let props = Self::parse_dynamic_batches(&batches)?;
+        let props = hydration_helpers::parse_hydration_batches(&batches)?;
         Ok((props, vec![debug], vec![execution]))
-    }
-
-    fn parse_dynamic_batches(batches: &[RecordBatch]) -> Result<PropertyMap, PipelineError> {
-        let alias = HYDRATION_NODE_ALIAS;
-        let entity_type_col = format!("{alias}_entity_type");
-        let props_col = format!("{alias}_props");
-        let id_col = format!("{alias}_id");
-
-        let mut result = HashMap::new();
-
-        for batch in batches {
-            for row_idx in 0..batch.num_rows() {
-                let Some(id) = ArrowUtils::get_column::<Int64Type>(batch, &id_col, row_idx) else {
-                    continue;
-                };
-
-                let row_data = ArrowUtils::extract_row(batch, row_idx);
-
-                let entity_type = row_data
-                    .iter()
-                    .find(|(name, _)| name.as_str() == entity_type_col)
-                    .and_then(|(_, v)| v.as_string().cloned());
-
-                let Some(entity_type) = entity_type else {
-                    continue;
-                };
-
-                let props: HashMap<String, ColumnValue> = row_data
-                    .iter()
-                    .find(|(name, _)| name.as_str() == props_col)
-                    .and_then(|(_, v)| v.as_string())
-                    .and_then(|json_str| {
-                        serde_json::from_str::<HashMap<String, serde_json::Value>>(json_str).ok()
-                    })
-                    .map(|m| {
-                        m.into_iter()
-                            .filter_map(|(k, v)| {
-                                let cv = ColumnValue::from(v);
-                                if cv == ColumnValue::Null {
-                                    None
-                                } else {
-                                    Some((k, cv))
-                                }
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                result.insert((entity_type, id), props);
-            }
-        }
-
-        Ok(result)
-    }
-
-    /// Collect the entity primary keys from authorized rows for hydration lookups.
-    ///
-    /// Entities with indirect authorization (e.g. File → `project_id`) emit a
-    /// separate `_gkg_{alias}_pk` column holding the row's own ID. Entities
-    /// where PK == auth ID (e.g. User, Project) only emit `_gkg_{alias}_id`.
-    /// We try the PK column first, falling back to the redaction ID column.
-    fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
-        let pk_col = primary_key_column(&template.node_alias);
-        let id_col = redaction_id_column(&template.node_alias);
-        let mut ids: Vec<i64> = result
-            .authorized_rows()
-            .filter_map(|row| {
-                row.get_column_i64(&pk_col)
-                    .or_else(|| row.get_column_i64(&id_col))
-            })
-            .collect();
-        ids.sort_unstable();
-        ids.dedup();
-        ids
-    }
-
-    fn merge_static_properties(
-        result: &mut QueryResult,
-        property_map: &PropertyMap,
-        templates: &[HydrationTemplate],
-    ) {
-        for row in result.authorized_rows_mut() {
-            for template in templates {
-                let pk_col = primary_key_column(&template.node_alias);
-                let id_col = redaction_id_column(&template.node_alias);
-                let id = row
-                    .get_column_i64(&pk_col)
-                    .or_else(|| row.get_column_i64(&id_col));
-                if let Some(id) = id
-                    && let Some(props) = property_map.get(&(template.entity_type.clone(), id))
-                {
-                    for (key, value) in props {
-                        // Prefix with the node alias so entity_properties("u", ..)
-                        // finds "u_username" when the hydration returned "username".
-                        let col_name = format!("{}_{key}", template.node_alias);
-                        row.set_column(col_name, value.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    fn extract_dynamic_refs(result: &QueryResult) -> HashMap<String, Vec<i64>> {
-        let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
-
-        for row in result.authorized_rows() {
-            for node_ref in row.dynamic_nodes() {
-                refs.entry(node_ref.entity_type.clone())
-                    .or_default()
-                    .push(node_ref.id);
-            }
-        }
-
-        for ids in refs.values_mut() {
-            ids.sort_unstable();
-            ids.dedup();
-        }
-
-        refs
-    }
-
-    fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap) {
-        for row in result.authorized_rows_mut() {
-            for node_ref in row.dynamic_nodes_mut() {
-                if let Some(props) = property_map.get(&(node_ref.entity_type.clone(), node_ref.id))
-                {
-                    node_ref.properties = props.clone();
-                }
-            }
-        }
     }
 }
 
@@ -493,8 +250,10 @@ impl PipelineStage for HydrationStage {
         match &hydration_plan {
             HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
+                let (nodes, ids_count) =
+                    hydration_helpers::hydrate_static(templates, &query_result)?;
                 let (property_map, debug, executions) =
-                    Self::hydrate_static(ctx, templates, &query_result)
+                    Self::execute_hydration(ctx, nodes, ids_count)
                         .await
                         .inspect_err(|e| obs.record_error(e))?;
                 hydration_queries = debug;
@@ -517,7 +276,7 @@ impl PipelineStage for HydrationStage {
                     .collect();
                 Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
 
-                Self::strip_injected_columns(
+                hydration_helpers::strip_injected_columns(
                     &mut property_map,
                     templates
                         .iter()
@@ -525,14 +284,20 @@ impl PipelineStage for HydrationStage {
                 );
 
                 if !property_map.is_empty() {
-                    Self::merge_static_properties(&mut query_result, &property_map, templates);
+                    hydration_helpers::merge_static_properties(
+                        &mut query_result,
+                        &property_map,
+                        templates,
+                    );
                 }
             }
             HydrationPlan::Dynamic(entity_specs) => {
-                let refs = Self::extract_dynamic_refs(&query_result);
+                let refs = hydration_helpers::extract_dynamic_refs(&query_result);
                 if !refs.is_empty() {
+                    let (nodes, ids_count) =
+                        hydration_helpers::hydrate_dynamic(entity_specs, &refs)?;
                     let (property_map, debug, executions) =
-                        Self::hydrate_dynamic(ctx, entity_specs, &refs)
+                        Self::execute_hydration(ctx, nodes, ids_count)
                             .await
                             .inspect_err(|e| obs.record_error(e))?;
                     hydration_queries = debug;
@@ -555,14 +320,14 @@ impl PipelineStage for HydrationStage {
                         .collect();
                     Self::resolve_virtual_columns(ctx, &entity_virtuals, &mut property_map).await?;
 
-                    Self::strip_injected_columns(
+                    hydration_helpers::strip_injected_columns(
                         &mut property_map,
                         entity_specs
                             .iter()
                             .map(|s| (s.entity_type.as_str(), &s.injected_columns)),
                     );
 
-                    Self::merge_dynamic_properties(&mut query_result, &property_map);
+                    hydration_helpers::merge_dynamic_properties(&mut query_result, &property_map);
                 }
             }
         }
