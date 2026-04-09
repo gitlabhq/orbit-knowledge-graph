@@ -504,6 +504,7 @@ impl BatchBuilder {
 pub struct RowContext<'a> {
     pub project_id: i64,
     pub branch: &'a str,
+    pub commit_sha: &'a str,
 }
 
 /// Types that can serialize a slice of themselves into an Arrow

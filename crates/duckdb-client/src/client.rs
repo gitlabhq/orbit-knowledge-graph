@@ -227,6 +227,7 @@ mod tests {
             Field::new("id", DataType::Int64, false),
             Field::new("project_id", DataType::Int64, false),
             Field::new("branch", DataType::Utf8, false),
+            Field::new("commit_sha", DataType::Utf8, false),
             Field::new("path", DataType::Utf8, false),
             Field::new("name", DataType::Utf8, false),
             Field::new("extension", DataType::Utf8, true),
@@ -242,6 +243,7 @@ mod tests {
                 Arc::new(Int64Array::from(ids.to_vec())),
                 Arc::new(Int64Array::from(vec![42; n])),
                 Arc::new(StringArray::from(vec!["main"; n])),
+                Arc::new(StringArray::from(vec!["abc123"; n])),
                 Arc::new(StringArray::from(names.to_vec())),
                 Arc::new(StringArray::from(names.to_vec())),
                 Arc::new(StringArray::from(vec![Some("rs"); n])),
@@ -259,8 +261,8 @@ mod tests {
         client
             .conn
             .execute(
-                "INSERT INTO gl_file (id, project_id, branch, path, name, extension, language) \
-                 VALUES (1, 42, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust')",
+                "INSERT INTO gl_file (id, project_id, branch, commit_sha, path, name, extension, language) \
+                 VALUES (1, 42, 'main', 'abc123', 'src/lib.rs', 'lib.rs', 'rs', 'Rust')",
                 [],
             )
             .unwrap();
@@ -341,14 +343,14 @@ mod tests {
         client
             .conn
             .execute(
-                "INSERT INTO gl_file (id, project_id, branch, path, name) VALUES (1, 42, 'main', 'a.rs', 'a.rs')",
+                "INSERT INTO gl_file (id, project_id, branch, commit_sha, path, name) VALUES (1, 42, 'main', 'abc', 'a.rs', 'a.rs')",
                 [],
             )
             .unwrap();
         client
             .conn
             .execute(
-                "INSERT INTO gl_file (id, project_id, branch, path, name) VALUES (2, 99, 'main', 'b.rs', 'b.rs')",
+                "INSERT INTO gl_file (id, project_id, branch, commit_sha, path, name) VALUES (2, 99, 'main', 'abc', 'b.rs', 'b.rs')",
                 [],
             )
             .unwrap();
@@ -376,7 +378,7 @@ mod tests {
         client
             .conn
             .execute(
-                "INSERT INTO gl_directory (id, project_id, branch, path, name) VALUES (1, 1, 'main', 'src', 'src')",
+                "INSERT INTO gl_directory (id, project_id, branch, commit_sha, path, name) VALUES (1, 1, 'main', 'abc', 'src', 'src')",
                 [],
             )
             .unwrap();

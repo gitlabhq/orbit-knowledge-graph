@@ -13,6 +13,9 @@ CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed',
 CREATE TABLE IF NOT EXISTS _orbit_manifest (
     repo_path VARCHAR PRIMARY KEY,
     project_id BIGINT NOT NULL,
+    parent_repo_path VARCHAR,
+    branch VARCHAR,
+    commit_sha VARCHAR,
     status repo_status NOT NULL DEFAULT 'pending',
     last_indexed_at TIMESTAMP,
     error_message VARCHAR
@@ -22,6 +25,7 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     id BIGINT NOT NULL,
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
+    commit_sha VARCHAR NOT NULL,
     path VARCHAR NOT NULL,
     name VARCHAR NOT NULL
 );
@@ -30,6 +34,7 @@ CREATE TABLE IF NOT EXISTS gl_file (
     id BIGINT NOT NULL,
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
+    commit_sha VARCHAR NOT NULL,
     path VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
     extension VARCHAR NOT NULL DEFAULT '',
@@ -40,6 +45,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     id BIGINT NOT NULL,
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
+    commit_sha VARCHAR NOT NULL,
     file_path VARCHAR NOT NULL,
     fqn VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
@@ -54,6 +60,7 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     id BIGINT NOT NULL,
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
+    commit_sha VARCHAR NOT NULL,
     file_path VARCHAR NOT NULL,
     import_type VARCHAR NOT NULL,
     import_path VARCHAR NOT NULL,
