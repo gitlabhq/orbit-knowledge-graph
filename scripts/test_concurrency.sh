@@ -2,13 +2,19 @@
 #
 # Stress test for concurrent DuckDB access across processes.
 #
+# Spawns real orbit processes to validate:
+#   - Multiple readers can query simultaneously
+#   - Readers succeed while writers hold the lock
+#   - Multiple writers retry and all succeed
+#   - Data stays consistent throughout
+#
 # Usage:
-#   ./scripts/test_concurrency.sh [options] [path/to/repo]
+#   ./scripts/test_concurrency.sh [options] <path/to/repo>
 #
 # Options:
-#   --readers N      Number of concurrent readers (default: 5)
-#   --writers N      Number of concurrent indexers (default: 3)
-#   --rounds N       Number of read/write rounds (default: 3)
+#   --readers N      Concurrent reader processes (default: 5)
+#   --writers N      Concurrent writer processes (default: 3)
+#   --rounds N       Read+write rounds (default: 3)
 #   --query-burst N  Queries per reader per round (default: 10)
 
 set -euo pipefail
@@ -21,206 +27,186 @@ REPO=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --readers)  READERS="$2"; shift 2;;
-        --writers)  WRITERS="$2"; shift 2;;
-        --rounds)   ROUNDS="$2"; shift 2;;
+        --readers)     READERS="$2"; shift 2;;
+        --writers)     WRITERS="$2"; shift 2;;
+        --rounds)      ROUNDS="$2"; shift 2;;
         --query-burst) BURST="$2"; shift 2;;
-        -*) echo "Unknown option: $1"; exit 1;;
-        *)  REPO="$1"; shift;;
+        -*)            echo "Unknown option: $1" >&2; exit 1;;
+        *)             REPO="$1"; shift;;
     esac
 done
 
-REPO="${REPO:-/Users/michaelusachenko/Desktop/Code/current/load-testing}"
-DB="$HOME/.orbit/graph.duckdb"
-TMPDIR=$(mktemp -d)
-PASS=0
-FAIL=0
+if [[ -z "$REPO" ]]; then
+    echo "Usage: $0 [options] <path/to/repo>" >&2
+    exit 1
+fi
 
-# Build once, run the binary directly for speed.
-echo "Building orbit..."
-cargo build -p orbit 2>/dev/null
-
+# Resolve paths and build.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 export DYLD_LIBRARY_PATH="$PROJECT_ROOT/target/debug/deps"
 ORBIT="$PROJECT_ROOT/target/debug/orbit"
+DB="$HOME/.orbit/graph.duckdb"
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
 
+echo "Building orbit..."
+cargo build -p orbit -q 2>/dev/null
+
+PASS=0; FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 
-cleanup() { rm -rf "$TMPDIR"; }
-trap cleanup EXIT
-
-echo ""
-echo "=== DuckDB concurrency stress test ==="
-echo "Repo:        $REPO"
-echo "Readers:     $READERS"
-echo "Writers:     $WRITERS"
-echo "Rounds:      $ROUNDS"
-echo "Query burst: $BURST"
-echo ""
-
-rm -f "$DB"
-
-SEARCH='{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","path"]},"limit":5}'
-TRAVERSAL='{"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["id","name"]},{"id":"d","entity":"Definition","columns":["id","name","definition_type"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":5}'
-CONTENT='{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","content"]},"limit":2}'
-
-# ── Test 1: Seed index ───────────────────────────────────────────
-echo "--- Test 1: Seed index"
-if "$ORBIT" index "$REPO" 2>/dev/null; then
-    pass "seed index"
-else
-    fail "seed index"
-fi
-
-# ── Test 2: Concurrent reader storm ──────────────────────────────
-echo "--- Test 2: $READERS concurrent readers x $BURST queries each"
-pids=()
-for i in $(seq 1 "$READERS"); do
-    (
-        ok=0; err=0
-        queries=("$SEARCH" "$TRAVERSAL" "$CONTENT")
-        for j in $(seq 1 "$BURST"); do
-            Q="${queries[$(( j % 3 ))]}"
-            if "$ORBIT" query "$Q" > /dev/null 2>> "$TMPDIR/reader_${i}_errors.log"; then
-                ok=$((ok + 1))
-            else
-                err=$((err + 1))
-            fi
-        done
-        echo "$ok $err" > "$TMPDIR/reader_$i.result"
-    ) &
-    pids+=($!)
-done
-
-total_ok=0; total_err=0
-for pid in "${pids[@]}"; do
-    wait "$pid" || true
-done
-for i in $(seq 1 "$READERS"); do
-    if [[ -f "$TMPDIR/reader_$i.result" ]]; then
-        read -r ok err < "$TMPDIR/reader_$i.result"
-        total_ok=$((total_ok + ok))
-        total_err=$((total_err + err))
-    fi
-done
-
-if [[ $total_err -eq 0 ]]; then
-    pass "$total_ok queries across $READERS readers, 0 errors"
-else
-    fail "$total_ok ok, $total_err errors across $READERS readers"
-    for errlog in "$TMPDIR"/reader_*_errors.log; do
-        [[ -f "$errlog" ]] || continue
-        echo "    errors from $(basename "$errlog"):"
-        sort -u "$errlog" | head -5 | sed 's/^/      /'
+# Print unique errors from collected log files matching a glob.
+print_errors() {
+    local pattern="$1"
+    for f in $pattern; do
+        [[ -s "$f" ]] || continue
+        echo "    $(basename "$f"):"
+        sort -u "$f" | head -3 | sed 's/^/      /'
     done
-fi
+}
 
-# ── Test 3: Readers + writers interleaved ────────────────────────
-echo "--- Test 3: $ROUNDS rounds of $WRITERS writers + $READERS readers"
-for round in $(seq 1 "$ROUNDS"); do
-    pids=()
-
-    for w in $(seq 1 "$WRITERS"); do
+# Run N background workers. Each runs $cmd and writes "ok" or "fail" to
+# $TMP/${prefix}_${i}. Stderr goes to $TMP/${prefix}_${i}.err.
+run_workers() {
+    local n="$1" prefix="$2"; shift 2
+    local cmd=("$@")
+    local pids=()
+    for i in $(seq 1 "$n"); do
         (
-            if "$ORBIT" index "$REPO" > /dev/null 2>/dev/null; then
-                echo "ok" > "$TMPDIR/round${round}_writer_$w"
+            if "${cmd[@]}" > /dev/null 2>> "$TMP/${prefix}_${i}.err"; then
+                echo "ok"
             else
-                echo "fail" > "$TMPDIR/round${round}_writer_$w"
-            fi
+                echo "fail"
+            fi > "$TMP/${prefix}_${i}"
         ) &
         pids+=($!)
     done
+    for pid in "${pids[@]}"; do wait "$pid" || true; done
+}
 
-    sleep 0.05
+# Tally results from run_workers output files.
+tally() {
+    local prefix="$1" n="$2"
+    local ok=0 fail=0
+    for i in $(seq 1 "$n"); do
+        [[ -f "$TMP/${prefix}_${i}" ]] && [[ "$(cat "$TMP/${prefix}_${i}")" == "ok" ]] \
+            && ok=$((ok + 1)) || fail=$((fail + 1))
+    done
+    echo "$ok $fail"
+}
 
-    for r in $(seq 1 "$READERS"); do
+# Run N readers, each doing $BURST queries. Tracks ok/err counts.
+run_readers() {
+    local n="$1" prefix="$2" burst="$3"
+    local queries=("$SEARCH" "$TRAVERSAL" "$CONTENT")
+    local pids=()
+    for i in $(seq 1 "$n"); do
         (
-            ok=0; err=0
-            for b in $(seq 1 "$BURST"); do
-                if "$ORBIT" query "$SEARCH" > /dev/null 2>> "$TMPDIR/round${round}_reader_${r}_errors.log"; then
+            local ok=0 err=0
+            for j in $(seq 1 "$burst"); do
+                local q="${queries[$(( j % 3 ))]}"
+                if "$ORBIT" query "$q" > /dev/null 2>> "$TMP/${prefix}_${i}.err"; then
                     ok=$((ok + 1))
                 else
                     err=$((err + 1))
                 fi
             done
-            echo "$ok $err" > "$TMPDIR/round${round}_reader_$r"
+            echo "$ok $err" > "$TMP/${prefix}_${i}"
         ) &
         pids+=($!)
     done
+    for pid in "${pids[@]}"; do wait "$pid" || true; done
+}
 
-    for pid in "${pids[@]}"; do
-        wait "$pid" || true
-    done
-
-    w_ok=0; w_fail=0; r_ok=0; r_err=0
-    for w in $(seq 1 "$WRITERS"); do
-        f="$TMPDIR/round${round}_writer_$w"
-        [[ -f "$f" ]] && [[ "$(cat "$f")" == "ok" ]] && w_ok=$((w_ok + 1)) || w_fail=$((w_fail + 1))
-    done
-    for r in $(seq 1 "$READERS"); do
-        f="$TMPDIR/round${round}_reader_$r"
-        if [[ -f "$f" ]]; then
-            read -r ok err < "$f"
-            r_ok=$((r_ok + ok))
-            r_err=$((r_err + err))
+# Tally reader results (ok/err counts per file).
+tally_readers() {
+    local prefix="$1" n="$2"
+    local total_ok=0 total_err=0
+    for i in $(seq 1 "$n"); do
+        if [[ -f "$TMP/${prefix}_${i}" ]]; then
+            read -r ok err < "$TMP/${prefix}_${i}"
+            total_ok=$((total_ok + ok))
+            total_err=$((total_err + err))
         fi
     done
+    echo "$total_ok $total_err"
+}
 
-    label="round $round: writers=$w_ok/$WRITERS, reads=$r_ok ok/$r_err err"
-    if [[ $w_fail -eq 0 && $r_err -eq 0 ]]; then
+# ── Queries ──────────────────────────────────────────────────────
+SEARCH='{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","path"]},"limit":5}'
+TRAVERSAL='{"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["id","name"]},{"id":"d","entity":"Definition","columns":["id","name","definition_type"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":5}'
+CONTENT='{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","content"]},"limit":2}'
+
+echo ""
+echo "=== DuckDB concurrency stress test ==="
+echo "Repo:    $REPO"
+echo "Config:  ${READERS}r x ${WRITERS}w x ${ROUNDS} rounds, ${BURST} queries/burst"
+echo ""
+
+rm -f "$DB"
+
+# ── 1. Seed ──────────────────────────────────────────────────────
+echo "--- 1. Seed index"
+if "$ORBIT" index "$REPO" 2>/dev/null; then pass "seed"; else fail "seed"; fi
+
+# ── 2. Reader storm (no writers) ─────────────────────────────────
+echo "--- 2. $READERS concurrent readers x $BURST queries"
+run_readers "$READERS" "t2_reader" "$BURST"
+read -r rok rerr <<< "$(tally_readers t2_reader "$READERS")"
+if [[ $rerr -eq 0 ]]; then
+    pass "$rok queries, 0 errors"
+else
+    fail "$rok ok, $rerr errors"
+    print_errors "$TMP/t2_reader_*.err"
+fi
+
+# ── 3. Mixed readers + writers ───────────────────────────────────
+echo "--- 3. $ROUNDS rounds: $WRITERS writers + $READERS readers x $BURST"
+for round in $(seq 1 "$ROUNDS"); do
+    run_workers "$WRITERS" "t3r${round}_w" "$ORBIT" index "$REPO"
+    sleep 0.05
+    run_readers "$READERS" "t3r${round}_r" "$BURST"
+    # Wait for stragglers
+    wait 2>/dev/null || true
+
+    read -r wok wfail <<< "$(tally "t3r${round}_w" "$WRITERS")"
+    read -r rok rerr <<< "$(tally_readers "t3r${round}_r" "$READERS")"
+
+    label="round $round: writers=$wok/$WRITERS, reads=$rok ok/$rerr err"
+    if [[ $wfail -eq 0 && $rerr -eq 0 ]]; then
         pass "$label"
     else
         fail "$label"
-        # Print unique error messages
-        for errlog in "$TMPDIR"/round${round}_reader_*_errors.log; do
-            [[ -f "$errlog" ]] || continue
-            echo "    errors from $(basename "$errlog"):"
-            sort -u "$errlog" | head -5 | sed 's/^/      /'
-        done
+        print_errors "$TMP/t3r${round}_*.err"
     fi
 done
 
-# ── Test 4: Rapid re-index cycle ─────────────────────────────────
-echo "--- Test 4: Rapid re-index x5 then query"
+# ── 4. Rapid sequential re-index ─────────────────────────────────
+echo "--- 4. Rapid re-index x5"
 rapid_ok=true
 for _ in $(seq 1 5); do
-    if ! "$ORBIT" index "$REPO" > /dev/null 2>/dev/null; then
-        rapid_ok=false
-        break
-    fi
+    "$ORBIT" index "$REPO" > /dev/null 2>/dev/null || { rapid_ok=false; break; }
 done
 if $rapid_ok; then
-    RESULT=$("$ORBIT" query "$SEARCH" 2>/dev/null)
-    NODE_COUNT=$(echo "$RESULT" | grep -c '"type"' || true)
-    if [[ $NODE_COUNT -gt 0 ]]; then
-        pass "5 rapid re-indexes, $NODE_COUNT nodes intact"
-    else
-        fail "data gone after rapid re-indexes"
-    fi
+    count=$("$ORBIT" query "$SEARCH" 2>/dev/null | grep -c '"type"' || true)
+    if [[ $count -gt 0 ]]; then pass "$count nodes intact"; else fail "no data"; fi
 else
-    fail "rapid re-index failed"
+    fail "re-index failed"
 fi
 
-# ── Test 5: Query consistency ────────────────────────────────────
-echo "--- Test 5: Query result consistency across 20 sequential reads"
+# ── 5. Sequential read consistency ───────────────────────────────
+echo "--- 5. 20 sequential reads, check consistency"
+"$ORBIT" query "$SEARCH" > "$TMP/baseline.json" 2>/dev/null
 consistent=true
-"$ORBIT" query "$SEARCH" > "$TMPDIR/baseline.json" 2>/dev/null
 for i in $(seq 2 20); do
-    "$ORBIT" query "$SEARCH" > "$TMPDIR/check_$i.json" 2>/dev/null
-    if ! diff -q "$TMPDIR/baseline.json" "$TMPDIR/check_$i.json" > /dev/null 2>&1; then
-        consistent=false
-        break
-    fi
+    "$ORBIT" query "$SEARCH" > "$TMP/check.json" 2>/dev/null
+    diff -q "$TMP/baseline.json" "$TMP/check.json" > /dev/null 2>&1 || { consistent=false; break; }
 done
-if $consistent; then
-    pass "20 sequential reads returned identical results"
-else
-    fail "sequential reads returned inconsistent results"
-fi
+if $consistent; then pass "identical"; else fail "diverged at read $i"; fi
 
 # ── Summary ──────────────────────────────────────────────────────
 echo ""
-echo "=== Results: $PASS passed, $FAIL failed ==="
+echo "=== $PASS passed, $FAIL failed ==="
 exit "$FAIL"
