@@ -52,13 +52,21 @@ impl Workspace {
     pub fn repo_roots(&self) -> Result<Vec<PathBuf>> {
         let client = DuckDbClient::open_read_only(&self.db_path())
             .context("failed to open DuckDB for manifest read")?;
-        let paths = client
-            .query_strings(
-                "SELECT repo_path FROM _orbit_manifest WHERE status = 'indexed'",
-                &[],
-            )
+        let batches = client
+            .query_arrow("SELECT repo_path FROM _orbit_manifest WHERE status = 'indexed'")
             .context("failed to query repo roots")?;
-        Ok(paths.into_iter().map(PathBuf::from).collect())
+
+        let mut paths = Vec::new();
+        for batch in &batches {
+            for row in 0..batch.num_rows() {
+                if let Some(path) =
+                    gkg_utils::arrow::ArrowUtils::get_column_string(batch, "repo_path", row)
+                {
+                    paths.push(PathBuf::from(path));
+                }
+            }
+        }
+        Ok(paths)
     }
 }
 

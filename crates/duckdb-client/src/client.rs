@@ -181,20 +181,6 @@ impl DuckDbClient {
             .conn
             .execute(sql, duckdb::params_from_iter(boxed.iter()))?)
     }
-
-    /// Query a single column of strings from a SQL statement.
-    pub fn query_strings(&self, sql: &str, params: &[serde_json::Value]) -> Result<Vec<String>> {
-        let boxed = json_params_to_sql(params);
-        let mut stmt = self.conn.prepare(sql)?;
-        let rows = stmt.query_map(duckdb::params_from_iter(boxed.iter()), |row| {
-            row.get::<_, String>(0)
-        })?;
-        let mut result = Vec::new();
-        for row in rows {
-            result.push(row?);
-        }
-        Ok(result)
-    }
 }
 
 fn json_params_to_sql(params: &[serde_json::Value]) -> Vec<Box<dyn duckdb::ToSql>> {
