@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 arrow = { workspace = true }
+async-trait = { workspace = true }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
 gkg-utils = { path = "../utils" }

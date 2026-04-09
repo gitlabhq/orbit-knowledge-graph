@@ -171,7 +171,7 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
-    let mut registry = content::ColumnResolverRegistry::new();
+    let mut registry = query_engine::shared::content::ColumnResolverRegistry::new();
     registry.register(
         "gitaly",
         Arc::new(content::gitaly::GitalyContentService::new(

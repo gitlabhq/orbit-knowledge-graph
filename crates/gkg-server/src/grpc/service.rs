@@ -1,10 +1,10 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::content::ColumnResolverRegistry;
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server_config::ClickHouseConfiguration;
 use ontology::Ontology;
+use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
