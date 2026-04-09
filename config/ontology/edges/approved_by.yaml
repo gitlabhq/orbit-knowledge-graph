@@ -1,6 +1,0 @@
-description: User who approved a merge request
-
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: User, id: id }
-    description: "Merge request was approved by user."

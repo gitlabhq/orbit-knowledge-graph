@@ -4798,6 +4798,7 @@ name = "orbit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow",
  "chrono",
  "clap",
  "code-graph",
@@ -4806,6 +4807,7 @@ dependencies = [
  "dunce",
  "fs4",
  "gitalisk-core",
+ "gkg-utils",
  "ontology",
  "query-engine",
  "serde",
@@ -6690,6 +6692,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "compiler",
+ "gkg-utils",
  "ontology",
  "pipeline",
  "serde",
