@@ -528,9 +528,9 @@ pub trait AsRecordBatch: Sized {
         true
     }
 
-    /// Write one row into `builder`. Must push exactly one value per
-    /// column present in the builder. Columns that don't apply to this
-    /// type can be silently skipped if missing from the builder.
+    /// Write one row into `builder`. Must push exactly one value to
+    /// every column declared in the specs that were used to create the
+    /// builder. Returns `Err` if a referenced column is missing.
     fn write_row(&self, builder: &mut BatchBuilder, ctx: &RowContext<'_>) -> BatchResult<()>;
 
     /// Build a [`RecordBatch`] from a slice of items using the given
