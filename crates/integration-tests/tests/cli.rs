@@ -53,7 +53,7 @@ fn lib_path() -> PathBuf {
 
 fn run_script(script: &str, extra_args: &[&str]) -> TestResult {
     let root = project_root();
-    let script_path = root.join("scripts").join(script);
+    let script_path = root.join("crates/integration-tests/cli").join(script);
     assert!(
         script_path.exists(),
         "script not found: {}",
