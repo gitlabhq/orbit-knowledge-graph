@@ -117,19 +117,22 @@ The following relationships are available by default:
 |                    | `User`                     | `WorkItem`                   |
 | `ASSIGNED`         | `User`                     | `MergeRequest`               |
 |                    | `User`                     | `WorkItem`                   |
-| `REVIEWER`         | `MergeRequest`             | `User`                       |
-| `MERGED_BY`        | `MergeRequest`             | `User`                       |
+| `REVIEWER`         | `User`             | `MergeRequest`                       |
+| `MERGED_BY`        | `User`             | `MergeRequest`                       |
 | `CREATOR`          | `User`                     | `Project`                    |
 | `OWNER`            | `User`                     | `Group`                      |
 | `MEMBER_OF`        | `User`                     | `Group`                      |
 |                    | `User`                     | `Project`                    |
-| `CONTAINS`         | `Directory`                | `Directory`                  |
+| `CONTAINS`         | `Branch`                   | `Directory`                  |
+|                    | `Directory`                | `Directory`                  |
 |                    | `Directory`                | `File`                       |
 |                    | `Group`                    | `Group`                      |
 |                    | `Group`                    | `Project`                    |
 |                    | `User`                     | `Project`                    |
 |                    | `WorkItem`                 | `WorkItem`                   |
-| `IN_PROJECT`       | `Finding`                  | `Project`                    |
+| `IN_PROJECT`       | `Branch`                  | `Project`                    |
+|                    | `Finding`                  | `Project`                    |
+
 |                    | `Job`                      | `Project`                    |
 |                    | `Label`                    | `Project`                    |
 |                    | `MergeRequest`             | `Project`                    |
@@ -167,7 +170,7 @@ The following relationships are available by default:
 | `DETECTED_BY`      | `Finding`                  | `VulnerabilityScanner`       |
 |                    | `VulnerabilityOccurrence`  | `VulnerabilityScanner`       |
 | `DETECTED_IN`      | `Finding`                  | `Pipeline`                   |
-| `OCCURRENCE_OF`    | `VulnerabilityOccurrence`  | `Vulnerability`              |
+| `OCCURRENCE`    | `VulnerabilityOccurrence`  | `Vulnerability`              |
 | `SCANS`            | `VulnerabilityScanner`     | `Project`                    |
 | `CONFIRMED_BY`     | `User`                     | `Vulnerability`              |
 | `RESOLVED_BY`      | `User`                     | `Vulnerability`              |
