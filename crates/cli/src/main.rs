@@ -104,13 +104,9 @@ enum Commands {
     },
     /// Query the local DuckDB graph (~/.orbit/graph.duckdb)
     Query {
-        /// Path to JSON file containing queries, or use --json for inline JSON
-        #[arg(value_name = "FILE")]
-        file: Option<PathBuf>,
-
-        /// Inline JSON payload (alternative to file path)
-        #[arg(long, conflicts_with = "file")]
-        json: Option<String>,
+        /// JSON query payload
+        #[arg(value_name = "JSON")]
+        json: String,
 
         /// Path to ontology directory (default: config/ontology)
         #[arg(long, short)]
@@ -121,17 +117,10 @@ enum Commands {
         raw: bool,
     },
     /// Compile a query to SQL without executing it
-    ///
-    /// Takes a JSON object where each key is a query label and each value
-    /// is a query payload. Outputs the compiled SQL for each query.
     Compile {
-        /// Path to JSON file containing queries, or use --json for inline JSON
-        #[arg(value_name = "FILE")]
-        file: Option<PathBuf>,
-
-        /// Inline JSON payload (alternative to file path)
-        #[arg(long, conflicts_with = "file")]
-        json: Option<String>,
+        /// JSON query payload
+        #[arg(value_name = "JSON")]
+        json: String,
 
         /// Traversal paths for security context (e.g., "1/2/3/"). Org ID is parsed from the first segment.
         #[arg(long, short, num_args = 1..)]
@@ -182,12 +171,11 @@ async fn main() -> Result<()> {
             run_index(path, threads, stats).await
         }
         Commands::Query {
-            file,
             json,
             ontology,
             raw,
         } => {
-            let results = run_local_query(file, json, ontology)?;
+            let results = run_local_query(json, ontology)?;
             for (i, (label, output)) in results.iter().enumerate() {
                 if raw {
                     let formatted = formatters::GraphFormatter.format(output);
@@ -204,13 +192,12 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Commands::Compile {
-            file,
             json,
             traversal_paths,
             ontology,
             format,
             local,
-        } => run_compile(file, json, traversal_paths, ontology, format, local),
+        } => run_compile(json, traversal_paths, ontology, format, local),
     }
 }
 
@@ -422,26 +409,18 @@ enum QueryOutput {
     Error(QueryError),
 }
 
-/// Parse query JSON from a file or inline string, load the ontology,
-/// and return the parsed queries as `(label, value)` pairs.
+/// Parse query JSON, load the ontology, and return the parsed queries
+/// as `(label, value)` pairs. Supports a single query (with
+/// `"query_type"`) or a keyed map of queries.
 fn parse_query_input(
-    file: Option<PathBuf>,
-    json_input: Option<String>,
+    json_input: &str,
     ontology_path: Option<PathBuf>,
 ) -> Result<(Vec<(String, Value)>, Ontology)> {
-    let json_str = match (file, json_input) {
-        (Some(path), None) => std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read file: {}", path.display()))?,
-        (None, Some(json)) => json,
-        (None, None) => anyhow::bail!("either FILE or --json must be provided"),
-        (Some(_), Some(_)) => unreachable!("clap prevents this"),
-    };
-
     let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
     let ontology = Ontology::load_from_dir(&ontology_dir)
         .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
 
-    let value: Value = serde_json::from_str(&json_str).context("failed to parse JSON input")?;
+    let value: Value = serde_json::from_str(json_input).context("failed to parse JSON input")?;
     let queries = if value.get("query_type").is_some() {
         vec![("query".to_string(), value)]
     } else {
@@ -456,11 +435,10 @@ fn parse_query_input(
 }
 
 fn run_local_query(
-    file: Option<PathBuf>,
-    json_input: Option<String>,
+    json_input: String,
     ontology_path: Option<PathBuf>,
 ) -> Result<Vec<(String, query_engine::shared::PipelineOutput)>> {
-    let (queries, ontology) = parse_query_input(file, json_input, ontology_path)?;
+    let (queries, ontology) = parse_query_input(&json_input, ontology_path)?;
     let ontology = Arc::new(ontology);
 
     let store = workspace::IndexStore::open_default()?;
@@ -490,14 +468,13 @@ fn run_local_query(
 }
 
 fn run_compile(
-    file: Option<PathBuf>,
-    json_input: Option<String>,
+    json_input: String,
     traversal_paths: Vec<String>,
     ontology_path: Option<PathBuf>,
     format: OutputFormat,
     local: bool,
 ) -> Result<()> {
-    let (queries, ontology) = parse_query_input(file, json_input, ontology_path)?;
+    let (queries, ontology) = parse_query_input(&json_input, ontology_path)?;
 
     let security_ctx = if local {
         None
