@@ -117,8 +117,10 @@ The following relationships are available by default:
 |                    | `User`                     | `WorkItem`                   |
 | `ASSIGNED`         | `User`                     | `MergeRequest`               |
 |                    | `User`                     | `WorkItem`                   |
-| `REVIEWER`         | `User`             | `MergeRequest`                       |
-| `MERGED_BY`        | `User`             | `MergeRequest`                       |
+| `REVIEWER`         | `User`                     | `MergeRequest`               |
+| `MERGED_BY`        | `User`                     | `MergeRequest`               |
+| `APPROVED_BY`      | `User`                     | `MergeRequest`               |
+| `CLOSED_BY`        | `User`                     | `WorkItem`                   |
 | `CREATOR`          | `User`                     | `Project`                    |
 | `OWNER`            | `User`                     | `Group`                      |
 | `MEMBER_OF`        | `User`                     | `Group`                      |
@@ -130,9 +132,8 @@ The following relationships are available by default:
 |                    | `Group`                    | `Project`                    |
 |                    | `User`                     | `Project`                    |
 |                    | `WorkItem`                 | `WorkItem`                   |
-| `IN_PROJECT`       | `Branch`                  | `Project`                    |
+| `IN_PROJECT`       | `Branch`                   | `Project`                    |
 |                    | `Finding`                  | `Project`                    |
-
 |                    | `Job`                      | `Project`                    |
 |                    | `Label`                    | `Project`                    |
 |                    | `MergeRequest`             | `Project`                    |
@@ -170,7 +171,7 @@ The following relationships are available by default:
 | `DETECTED_BY`      | `Finding`                  | `VulnerabilityScanner`       |
 |                    | `VulnerabilityOccurrence`  | `VulnerabilityScanner`       |
 | `DETECTED_IN`      | `Finding`                  | `Pipeline`                   |
-| `OCCURRENCE`    | `VulnerabilityOccurrence`  | `Vulnerability`              |
+| `OCCURRENCE`       | `VulnerabilityOccurrence`  | `Vulnerability`              |
 | `SCANS`            | `VulnerabilityScanner`     | `Project`                    |
 | `CONFIRMED_BY`     | `User`                     | `Vulnerability`              |
 | `RESOLVED_BY`      | `User`                     | `Vulnerability`              |
