@@ -338,6 +338,11 @@ fn batch_err(msg: impl Into<String>) -> arrow::error::ArrowError {
     arrow::error::ArrowError::InvalidArgumentError(msg.into())
 }
 
+/// Error for nodes without assigned IDs passed to [`AsRecordBatch::write_row`].
+pub fn missing_id(node_type: &str) -> arrow::error::ArrowError {
+    batch_err(format!("{} has no assigned ID", node_type))
+}
+
 impl ColRef<'_> {
     pub fn push_str(&mut self, v: impl AsRef<str>) -> BatchResult<()> {
         match &mut *self.col {
@@ -489,6 +494,58 @@ impl BatchBuilder {
         }
 
         RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)
+    }
+}
+
+// ── AsRecordBatch trait ──────────────────────────────────────────────────────
+
+/// Context passed to [`AsRecordBatch::write_row`] for values that come from
+/// the indexing pipeline rather than the node struct itself.
+pub struct RowContext<'a> {
+    pub project_id: i64,
+    pub branch: &'a str,
+}
+
+/// Types that can serialize a slice of themselves into an Arrow
+/// [`RecordBatch`] via [`BatchBuilder`].
+///
+/// Implementors write their fields into whichever columns the caller
+/// provides via `specs`. This keeps the schema owned by the ontology
+/// rather than hardcoded in the domain types.
+///
+/// Nodes without assigned IDs should return `false` from
+/// [`should_include`](Self::should_include) and will be filtered out
+/// before building the batch.
+///
+/// ```ignore
+/// let specs = ontology.local_entity_specs("File");
+/// let batch = FileNode::to_record_batch(&nodes, &specs, &ctx)?;
+/// ```
+pub trait AsRecordBatch: Sized {
+    /// Whether this item should be included in the batch.
+    /// Default: always include.
+    fn should_include(&self) -> bool {
+        true
+    }
+
+    /// Write one row into `builder`. Must push exactly one value per
+    /// column present in the builder. Columns that don't apply to this
+    /// type can be silently skipped if missing from the builder.
+    fn write_row(&self, builder: &mut BatchBuilder, ctx: &RowContext<'_>) -> BatchResult<()>;
+
+    /// Build a [`RecordBatch`] from a slice of items using the given
+    /// column specs, filtering out any where
+    /// [`should_include`](Self::should_include) returns `false`.
+    fn to_record_batch(
+        items: &[Self],
+        specs: &[ColumnSpec],
+        ctx: &RowContext<'_>,
+    ) -> BatchResult<RecordBatch> {
+        let included: Vec<&Self> = items.iter().filter(|i| i.should_include()).collect();
+        BatchBuilder::new(specs, included.len())?.build(&included, |item, b| {
+            item.write_row(b, ctx)?;
+            Ok(())
+        })
     }
 }
 
