@@ -8,7 +8,6 @@
 //! properties from the same DuckDB database. Virtual column resolution
 //! (e.g. file content from filesystem) is not yet implemented.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -17,23 +16,16 @@ use anyhow::Result;
 use ontology::Ontology;
 
 use duckdb_client::DuckDbClient;
-use query_engine::compiler::{
-    self, ColumnSelection, HydrationPlan, Input, InputNode, QueryType, compile_local,
-    compile_local_input,
-};
+use query_engine::compiler::{HydrationPlan, compile_local, compile_local_input};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
 };
+use query_engine::shared::hydration as hydration_helpers;
 use query_engine::shared::{
     DebugQuery, ExecutionOutput, ExtractionOutput, ExtractionStage, HydrationOutput,
     PaginationMeta, PipelineOutput,
 };
-use query_engine::types::QueryResult;
-
-const HYDRATION_NODE_ALIAS: &str = "h";
-
-type PropertyMap = HashMap<(String, i64), HashMap<String, gkg_utils::arrow::ColumnValue>>;
 
 /// Execute a query against the local DuckDB graph.
 #[allow(dead_code)]
@@ -176,15 +168,19 @@ impl PipelineStage for LocalHydration {
         match &compiled.hydration {
             HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
-                let (props, debug) = hydrate_static(&db_path, templates, &query_result)?;
+                let (nodes, total_ids) =
+                    hydration_helpers::build_static_nodes(templates, &query_result);
+                let (props, debug) = execute_local_hydration(&db_path, nodes, total_ids)?;
                 hydration_queries.extend(debug);
-                merge_static_properties(&mut query_result, &props, templates);
+                hydration_helpers::merge_static_properties(&mut query_result, &props, templates);
             }
             HydrationPlan::Dynamic(entity_specs) => {
-                let refs = extract_dynamic_refs(&query_result);
-                let (props, debug) = hydrate_dynamic(&db_path, entity_specs, &refs)?;
+                let refs = hydration_helpers::extract_dynamic_refs(&query_result);
+                let (nodes, total_ids) =
+                    hydration_helpers::build_dynamic_nodes(entity_specs, &refs);
+                let (props, debug) = execute_local_hydration(&db_path, nodes, total_ids)?;
                 hydration_queries.extend(debug);
-                merge_dynamic_properties(&mut query_result, &props);
+                hydration_helpers::merge_dynamic_properties(&mut query_result, &props);
             }
         }
 
@@ -247,82 +243,19 @@ fn get_db_path(ctx: &QueryPipelineContext) -> std::result::Result<PathBuf, Pipel
         .ok_or_else(|| PipelineError::Execution("DuckDB path not found".into()))
 }
 
-fn hydrate_static(
+/// Compile and execute a hydration query against the local DuckDB.
+fn execute_local_hydration(
     db_path: &std::path::Path,
-    templates: &[compiler::HydrationTemplate],
-    query_result: &QueryResult,
-) -> std::result::Result<(PropertyMap, Vec<DebugQuery>), PipelineError> {
-    let mut nodes = Vec::new();
-    let mut total_ids: usize = 0;
-
-    for template in templates {
-        if template.columns.is_empty() {
-            continue;
-        }
-        let ids = collect_static_ids(query_result, template);
-        if ids.is_empty() {
-            continue;
-        }
-        total_ids += ids.len();
-        nodes.push(InputNode {
-            id: HYDRATION_NODE_ALIAS.to_string(),
-            entity: Some(template.entity_type.clone()),
-            table: Some(template.destination_table.clone()),
-            columns: Some(ColumnSelection::List(template.columns.clone())),
-            node_ids: ids,
-            ..InputNode::default()
-        });
-    }
-
-    execute_hydration(db_path, nodes, total_ids)
-}
-
-fn hydrate_dynamic(
-    db_path: &std::path::Path,
-    entity_specs: &[compiler::DynamicEntityColumns],
-    refs: &HashMap<String, Vec<i64>>,
-) -> std::result::Result<(PropertyMap, Vec<DebugQuery>), PipelineError> {
-    let mut nodes = Vec::new();
-    let mut total_ids: usize = 0;
-
-    for (entity_type, ids) in refs {
-        let Some(spec) = entity_specs.iter().find(|s| s.entity_type == *entity_type) else {
-            continue;
-        };
-        if spec.columns.is_empty() || ids.is_empty() {
-            continue;
-        }
-        total_ids += ids.len();
-        nodes.push(InputNode {
-            id: HYDRATION_NODE_ALIAS.to_string(),
-            entity: Some(entity_type.clone()),
-            table: Some(spec.destination_table.clone()),
-            columns: Some(ColumnSelection::List(spec.columns.clone())),
-            node_ids: ids.clone(),
-            ..InputNode::default()
-        });
-    }
-
-    execute_hydration(db_path, nodes, total_ids)
-}
-
-fn execute_hydration(
-    db_path: &std::path::Path,
-    nodes: Vec<InputNode>,
+    nodes: Vec<query_engine::compiler::InputNode>,
     total_ids: usize,
-) -> std::result::Result<(PropertyMap, Vec<DebugQuery>), PipelineError> {
+) -> std::result::Result<(hydration_helpers::PropertyMap, Vec<DebugQuery>), PipelineError> {
     if nodes.is_empty() {
-        return Ok((HashMap::new(), Vec::new()));
+        return Ok((Default::default(), Vec::new()));
     }
 
-    let hydration_input = Input {
-        query_type: QueryType::Hydration,
-        nodes,
-        limit: total_ids as u32,
-        ..Input::default()
-    };
+    let input = hydration_helpers::build_hydration_input(nodes, total_ids);
 
-    let compiled = compile_local_input(hydration_input).map_err(|e| PipelineError::Compile {
+    let compiled = compile_local_input(input).map_err(|e| PipelineError::Compile {
         client_safe: e.is_client_safe(),
         message: e.to_string(),
     })?;
@@ -339,115 +272,6 @@ fn execute_hydration(
         .query_arrow(&rendered_sql)
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
-    let props = parse_hydration_batches(&batches)?;
+    let props = hydration_helpers::parse_hydration_batches(&batches)?;
     Ok((props, vec![debug]))
-}
-
-fn parse_hydration_batches(
-    batches: &[arrow::record_batch::RecordBatch],
-) -> std::result::Result<PropertyMap, PipelineError> {
-    use gkg_utils::arrow::ArrowUtils;
-
-    let id_col = format!("{HYDRATION_NODE_ALIAS}_id");
-    let type_col = format!("{HYDRATION_NODE_ALIAS}_entity_type");
-    let props_col = format!("{HYDRATION_NODE_ALIAS}_props");
-
-    let mut map: PropertyMap = HashMap::new();
-
-    for batch in batches {
-        for row in 0..batch.num_rows() {
-            let Some(id_str) = ArrowUtils::get_column_string(batch, &id_col, row) else {
-                continue;
-            };
-            let Ok(id) = id_str.parse::<i64>() else {
-                continue;
-            };
-            let Some(entity_type) = ArrowUtils::get_column_string(batch, &type_col, row) else {
-                continue;
-            };
-            let Some(props_json) = ArrowUtils::get_column_string(batch, &props_col, row) else {
-                continue;
-            };
-            let Ok(serde_json::Value::Object(obj)) =
-                serde_json::from_str::<serde_json::Value>(&props_json)
-            else {
-                continue;
-            };
-
-            let props: HashMap<String, gkg_utils::arrow::ColumnValue> = obj
-                .into_iter()
-                .map(|(k, v)| (k, gkg_utils::arrow::ColumnValue::from(v)))
-                .collect();
-            map.insert((entity_type, id), props);
-        }
-    }
-
-    Ok(map)
-}
-
-fn collect_static_ids(
-    query_result: &QueryResult,
-    template: &compiler::HydrationTemplate,
-) -> Vec<i64> {
-    let pk_col = format!("_gkg_{}_pk", template.node_alias);
-    let mut ids = Vec::new();
-    for row in query_result.authorized_rows() {
-        if let Some(val) = row.get(&pk_col)
-            && let Some(id) = val.coerce::<i64>()
-            && !ids.contains(&id)
-        {
-            ids.push(id);
-        }
-    }
-    ids
-}
-
-fn extract_dynamic_refs(query_result: &QueryResult) -> HashMap<String, Vec<i64>> {
-    let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
-    for row in query_result.authorized_rows() {
-        for node_ref in row.dynamic_nodes() {
-            let ids = refs.entry(node_ref.entity_type.clone()).or_default();
-            if !ids.contains(&node_ref.id) {
-                ids.push(node_ref.id);
-            }
-        }
-    }
-    refs
-}
-
-fn merge_static_properties(
-    query_result: &mut QueryResult,
-    props: &PropertyMap,
-    templates: &[compiler::HydrationTemplate],
-) {
-    for row in query_result.authorized_rows_mut() {
-        for template in templates {
-            let pk_col = format!("_gkg_{}_pk", template.node_alias);
-            let Some(pk_val) = row.get(&pk_col) else {
-                continue;
-            };
-            let Some(pk) = pk_val.coerce::<i64>() else {
-                continue;
-            };
-            if let Some(entity_props) = props.get(&(template.entity_type.clone(), pk)) {
-                for (col_name, value) in entity_props {
-                    let prefixed = format!("{}_{col_name}", template.node_alias);
-                    row.set_column(prefixed, value.clone());
-                }
-            }
-        }
-    }
-}
-
-fn merge_dynamic_properties(query_result: &mut QueryResult, props: &PropertyMap) {
-    for row in query_result.authorized_rows_mut() {
-        for node_ref in row.dynamic_nodes_mut() {
-            let key = (node_ref.entity_type.clone(), node_ref.id);
-            if let Some(entity_props) = props.get(&key) {
-                for (col_name, value) in entity_props {
-                    node_ref.properties.insert(col_name.clone(), value.clone());
-                }
-            }
-        }
-    }
 }
