@@ -130,8 +130,8 @@ impl PipelineStage for DuckDbExecutor {
     ) -> std::result::Result<ExecutionOutput, PipelineError> {
         let db_path = get_db_path(ctx)?;
         let compiled = ctx.compiled()?;
-        let rendered_sql = compiled.base.render();
         let result_context = compiled.base.result_context.clone();
+        let params = duckdb_client::to_sql_params(&compiled.base.params_in_order());
 
         let t = Instant::now();
         let client = DuckDbClient::open(&db_path).map_err(|e| {
@@ -139,11 +139,13 @@ impl PipelineStage for DuckDbExecutor {
             obs.record_error(&err);
             err
         })?;
-        let batches = client.query_arrow(&rendered_sql).map_err(|e| {
-            let err = PipelineError::Execution(e.to_string());
-            obs.record_error(&err);
-            err
-        })?;
+        let batches = client
+            .query_arrow_params(&compiled.base.sql, &params)
+            .map_err(|e| {
+                let err = PipelineError::Execution(e.to_string());
+                obs.record_error(&err);
+                err
+            })?;
         obs.executed(t.elapsed(), batches.len());
 
         Ok(ExecutionOutput {
@@ -311,14 +313,27 @@ fn get_registry<'a>(
 }
 
 /// Compile and execute a hydration query against the local DuckDB.
+///
+/// Filters each node's columns to only those present in the local schema
+/// (the ontology's `local_db.exclude_properties` may drop columns like
+/// `commit_sha` that the server has but DuckDB doesn't).
 fn execute_local_hydration(
     db_path: &std::path::Path,
     ontology: &Ontology,
-    nodes: Vec<query_engine::compiler::InputNode>,
+    mut nodes: Vec<query_engine::compiler::InputNode>,
     total_ids: usize,
 ) -> std::result::Result<(hydration_helpers::PropertyMap, Vec<DebugQuery>), PipelineError> {
     if nodes.is_empty() {
         return Ok((Default::default(), Vec::new()));
+    }
+
+    for node in &mut nodes {
+        if let (Some(entity), Some(query_engine::compiler::ColumnSelection::List(cols))) =
+            (&node.entity, &mut node.columns)
+            && let Some(local_fields) = ontology.local_entity_fields(entity)
+        {
+            cols.retain(|c| local_fields.iter().any(|f| f.name == *c));
+        }
     }
 
     let input = hydration_helpers::build_hydration_input(nodes, total_ids);
@@ -328,16 +343,16 @@ fn execute_local_hydration(
         message: e.to_string(),
     })?;
 
-    let rendered_sql = compiled.base.render();
     let debug = DebugQuery {
         sql: compiled.base.sql.clone(),
-        rendered: rendered_sql.clone(),
+        rendered: compiled.base.render(),
     };
 
+    let params = duckdb_client::to_sql_params(&compiled.base.params_in_order());
     let client =
         DuckDbClient::open(db_path).map_err(|e| PipelineError::Execution(e.to_string()))?;
     let batches = client
-        .query_arrow(&rendered_sql)
+        .query_arrow_params(&compiled.base.sql, &params)
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
     let props = hydration_helpers::parse_hydration_batches(&batches)?;

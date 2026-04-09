@@ -3,34 +3,29 @@
 -- Mirrors the code-indexing subset of graph.sql (ClickHouse).
 -- Differences:
 --   - No ENGINE, CODEC, PROJECTION, INDEX, or SETTINGS clauses
---   - _version is BIGINT (not DateTime64) — local mode uses a simple counter
---   - No _deleted column — local mode does full delete-and-reinsert
+--   - No traversal_path — local mode has no multi-tenant namespace scoping
+--   - No _version or _deleted columns — local mode does full delete-and-reinsert
 
 CREATE TABLE IF NOT EXISTS gl_directory (
     id BIGINT NOT NULL,
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     path VARCHAR NOT NULL,
-    name VARCHAR NOT NULL,
-    _version BIGINT NOT NULL DEFAULT 0
+    name VARCHAR NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS gl_file (
     id BIGINT NOT NULL,
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     path VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
     extension VARCHAR NOT NULL DEFAULT '',
-    language VARCHAR NOT NULL DEFAULT '',
-    _version BIGINT NOT NULL DEFAULT 0
+    language VARCHAR NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS gl_definition (
     id BIGINT NOT NULL,
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     file_path VARCHAR NOT NULL,
@@ -40,13 +35,11 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     start_line BIGINT NOT NULL,
     end_line BIGINT NOT NULL,
     start_byte BIGINT NOT NULL,
-    end_byte BIGINT NOT NULL,
-    _version BIGINT NOT NULL DEFAULT 0
+    end_byte BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     id BIGINT NOT NULL,
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     file_path VARCHAR NOT NULL,
@@ -57,16 +50,13 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     start_line BIGINT NOT NULL,
     end_line BIGINT NOT NULL,
     start_byte BIGINT NOT NULL,
-    end_byte BIGINT NOT NULL,
-    _version BIGINT NOT NULL DEFAULT 0
+    end_byte BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS gl_edge (
-    traversal_path VARCHAR NOT NULL DEFAULT '0/',
     source_id BIGINT NOT NULL,
     source_kind VARCHAR NOT NULL,
     relationship_kind VARCHAR NOT NULL,
     target_id BIGINT NOT NULL,
-    target_kind VARCHAR NOT NULL,
-    _version BIGINT NOT NULL DEFAULT 0
+    target_kind VARCHAR NOT NULL
 );

@@ -8,10 +8,12 @@ use code_graph::linker::indexer::{IndexingConfig, RepositoryIndexer, RepositoryI
 use code_graph::linker::loading::DirectoryFileSource;
 use ontology::Ontology;
 use query_engine::compiler::SecurityContext;
+use query_engine::formatters::{self, ResultFormatter};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -29,6 +31,8 @@ struct IndexOutput {
     time_seconds: f64,
     graph: GraphStats,
     processing: ProcessingStats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    database_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     detailed: Option<DetailedStats>,
 }
@@ -98,22 +102,28 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-    /// Execute query engine on JSON payloads and output SQL
-    ///
-    /// Takes a JSON object where each key is a query description and each value
-    /// is a query payload for the query engine. Outputs the label, input JSON,
-    /// and generated SQL for each query.
+    /// Query the local DuckDB graph (~/.orbit/graph.duckdb)
     Query {
-        /// Path to JSON file containing queries, or use --json for inline JSON
-        #[arg(value_name = "FILE")]
-        file: Option<PathBuf>,
+        /// JSON query payload
+        #[arg(value_name = "JSON")]
+        json: String,
 
-        /// Inline JSON payload (alternative to file path)
-        #[arg(long, conflicts_with = "file")]
-        json: Option<String>,
+        /// Path to ontology directory (default: config/ontology)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+
+        /// Output raw JSON graph (default is LLM-friendly text)
+        #[arg(long)]
+        raw: bool,
+    },
+    /// Compile a query to SQL without executing it
+    Compile {
+        /// JSON query payload
+        #[arg(value_name = "JSON")]
+        json: String,
 
         /// Traversal paths for security context (e.g., "1/2/3/"). Org ID is parsed from the first segment.
-        #[arg(long, short, required = true, num_args = 1..)]
+        #[arg(long, short, num_args = 1..)]
         traversal_paths: Vec<String>,
 
         /// Path to ontology directory (default: config/ontology)
@@ -123,6 +133,10 @@ enum Commands {
         /// Output format: pretty (default) or json
         #[arg(long, default_value = "pretty")]
         format: OutputFormat,
+
+        /// Compile for local DuckDB instead of ClickHouse
+        #[arg(long)]
+        local: bool,
     },
 }
 
@@ -157,13 +171,37 @@ async fn main() -> Result<()> {
             run_index(path, threads, stats).await
         }
         Commands::Query {
-            file,
+            json,
+            ontology,
+            raw,
+        } => {
+            let output = run_local_query(json, ontology)?;
+            if raw {
+                let formatted = formatters::GraphFormatter.format(&output);
+                println!("{}", serde_json::to_string(&formatted)?);
+            } else {
+                let formatted = formatters::GoonFormatter.format(&output);
+                println!("{}", serde_json::to_string_pretty(&formatted)?);
+            }
+            Ok(())
+        }
+        Commands::Compile {
             json,
             traversal_paths,
             ontology,
             format,
-        } => run_query(file, json, traversal_paths, ontology, format),
+            local,
+        } => run_compile(json, traversal_paths, ontology, format, local),
     }
+}
+
+/// Deterministic project ID from canonical path. Mask clears the sign bit
+/// so the result is always a positive i64 (required by the query DSL validator).
+fn project_id_from_path(path: &str) -> i64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
 async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
@@ -174,6 +212,9 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         info!("No git repositories found in {}", path.display());
         return Ok(());
     }
+
+    let ontology_dir = std::path::PathBuf::from(env!("ONTOLOGY_DIR"));
+    let ontology = Ontology::load_from_dir(&ontology_dir).context("failed to load ontology")?;
 
     let config = IndexingConfig {
         worker_threads: threads,
@@ -197,13 +238,8 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         let file_source = DirectoryFileSource::new(key.clone());
         let indexer = RepositoryIndexer::new(repo_name.clone(), key.clone());
 
-        let result = match indexer.index_files(file_source, &config).await {
-            Ok(r) => {
-                store
-                    .set_status(&key, workspace::Status::Indexed, None)
-                    .await?;
-                r
-            }
+        let mut result = match indexer.index_files(file_source, &config).await {
+            Ok(r) => r,
             Err(e) => {
                 store
                     .set_status(&key, workspace::Status::Error, Some(e.to_string()))
@@ -212,7 +248,52 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             }
         };
 
-        let output = build_index_output(&repo_name, &key, &result, show_stats);
+        let db_path = if let Some(ref mut graph_data) = result.graph_data {
+            let project_id = project_id_from_path(&key);
+            graph_data.assign_node_ids(project_id, "HEAD");
+
+            let local_data =
+                duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", &ontology)
+                    .context("failed to convert graph data to Arrow")?;
+
+            let db = store.db_path();
+            let client = duckdb_client::DuckDbClient::open(&db).context("failed to open DuckDB")?;
+            client
+                .initialize_schema()
+                .context("failed to create schema")?;
+            let node_tables: Vec<String> = ontology
+                .local_entity_names()
+                .iter()
+                .map(|name| {
+                    ontology
+                        .get_node(name)
+                        .expect("local entity must exist")
+                        .destination_table
+                        .clone()
+                })
+                .collect();
+            let edge_table = ontology
+                .local_edge_table_name()
+                .context("local_db.edge_table.name must be configured")?;
+            client
+                .delete_project(project_id, &node_tables, edge_table)
+                .context("failed to clear existing project data")?;
+
+            client
+                .insert_graph(local_data)
+                .context("failed to insert graph data")?;
+
+            Some(db.display().to_string())
+        } else {
+            None
+        };
+
+        store
+            .set_status(&key, workspace::Status::Indexed, None)
+            .await?;
+
+        let mut output = build_index_output(&repo_name, &key, &result, show_stats);
+        output.database_path = db_path;
         info!("{}", serde_json::to_string_pretty(&output)?);
     }
 
@@ -294,139 +375,122 @@ fn build_index_output(
             skipped_files: result.skipped_files.len(),
             errored_files: result.errored_files.len(),
         },
+        database_path: None,
         detailed,
     }
 }
 
 #[derive(Serialize)]
-struct QueryResult {
-    label: String,
+struct CompileResult {
     input: Value,
     sql: String,
     params: HashMap<String, Value>,
     rendered_sql: String,
 }
 
-#[derive(Serialize)]
-struct QueryError {
-    label: String,
-    input: Value,
-    error: String,
-}
-
-#[derive(Serialize)]
-#[serde(untagged)]
-enum QueryOutput {
-    Success(QueryResult),
-    Error(QueryError),
-}
-
-fn run_query(
-    file: Option<PathBuf>,
-    json_input: Option<String>,
-    traversal_paths: Vec<String>,
+/// Parse a single query JSON and load the ontology.
+fn parse_query_input(
+    json_input: &str,
     ontology_path: Option<PathBuf>,
-    format: OutputFormat,
-) -> Result<()> {
-    let json_str = match (file, json_input) {
-        (Some(path), None) => std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read file: {}", path.display()))?,
-        (None, Some(json)) => json,
-        (None, None) => anyhow::bail!("either FILE or --json must be provided"),
-        (Some(_), Some(_)) => unreachable!("clap prevents this"),
-    };
-
-    // Parse org_id from first segment of first traversal path
-    let first_path = traversal_paths
-        .first()
-        .context("at least one traversal path is required")?;
-    let org_id: i64 = first_path
-        .split('/')
-        .next()
-        .context("traversal path is empty")?
-        .parse()
-        .context("first segment of traversal path must be a valid org ID")?;
-
-    let security_ctx = SecurityContext::new(org_id, traversal_paths)
-        .map_err(|e| anyhow::anyhow!("invalid security context: {}", e))?;
-
-    let queries: HashMap<String, Value> = serde_json::from_str(&json_str)
-        .context("failed to parse JSON as object with string keys")?;
-
+) -> Result<(Value, Ontology)> {
     let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
-
     let ontology = Ontology::load_from_dir(&ontology_dir)
         .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
 
-    let mut results: Vec<QueryOutput> = Vec::with_capacity(queries.len());
-
-    let mut sorted_queries: Vec<_> = queries.into_iter().collect();
-    sorted_queries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    for (label, input) in sorted_queries {
-        let input_json = serde_json::to_string(&input).context("failed to serialize input")?;
-
-        match query_engine::compiler::compile(&input_json, &ontology, &security_ctx) {
-            Ok(result) => {
-                let rendered_sql = result.base.render();
-                results.push(QueryOutput::Success(QueryResult {
-                    label,
-                    input,
-                    sql: result.base.sql,
-                    params: result
-                        .base
-                        .params
-                        .into_iter()
-                        .map(|(k, v)| (k, v.value))
-                        .collect(),
-                    rendered_sql,
-                }));
-            }
-            Err(e) => {
-                results.push(QueryOutput::Error(QueryError {
-                    label,
-                    input,
-                    error: e.to_string(),
-                }));
-            }
-        }
+    let value: Value = serde_json::from_str(json_input).context("failed to parse JSON input")?;
+    if value.get("query_type").is_none() {
+        anyhow::bail!("JSON must contain a \"query_type\" field");
     }
 
-    match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&results)?);
-        }
-        OutputFormat::Pretty => {
-            for (i, result) in results.iter().enumerate() {
-                if i > 0 {
-                    println!("\n{}", "=".repeat(80));
+    Ok((value, ontology))
+}
+
+fn run_local_query(
+    json_input: String,
+    ontology_path: Option<PathBuf>,
+) -> Result<query_engine::shared::PipelineOutput> {
+    let (_, ontology) = parse_query_input(&json_input, ontology_path)?;
+    let ontology = Arc::new(ontology);
+
+    let store = workspace::IndexStore::open_default()?;
+    let db_path = store.db_path();
+    if !db_path.exists() {
+        anyhow::bail!(
+            "no local graph found at {}. Run `orbit index` first.",
+            db_path.display()
+        );
+    }
+    let repo_roots = store.repo_roots().context("failed to read repo roots")?;
+
+    local_pipeline::run(&json_input, ontology, &db_path, repo_roots).context("query failed")
+}
+
+fn run_compile(
+    json_input: String,
+    traversal_paths: Vec<String>,
+    ontology_path: Option<PathBuf>,
+    format: OutputFormat,
+    local: bool,
+) -> Result<()> {
+    let (input, ontology) = parse_query_input(&json_input, ontology_path)?;
+
+    let security_ctx = if local {
+        None
+    } else {
+        let first_path = traversal_paths
+            .first()
+            .context("--traversal-paths required for server compilation")?;
+        let org_id: i64 = first_path
+            .split('/')
+            .next()
+            .context("traversal path is empty")?
+            .parse()
+            .context("first segment of traversal path must be a valid org ID")?;
+        Some(
+            SecurityContext::new(org_id, traversal_paths)
+                .map_err(|e| anyhow::anyhow!("invalid security context: {}", e))?,
+        )
+    };
+
+    let compile_result = if local {
+        query_engine::compiler::compile_local(&json_input, &ontology)
+    } else {
+        query_engine::compiler::compile(&json_input, &ontology, security_ctx.as_ref().unwrap())
+    };
+
+    match compile_result {
+        Ok(result) => {
+            let rendered_sql = result.base.render();
+            let output = CompileResult {
+                input,
+                sql: result.base.sql,
+                params: result
+                    .base
+                    .params
+                    .into_iter()
+                    .map(|(k, v)| (k, v.value))
+                    .collect(),
+                rendered_sql,
+            };
+
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
                 }
-                match result {
-                    QueryOutput::Success(r) => {
-                        println!("\n### {}\n", r.label);
+                OutputFormat::Pretty => {
+                    println!("**SQL:**\n```sql\n{}\n```\n", output.sql);
+                    if !output.params.is_empty() {
                         println!(
-                            "**Input:**\n```json\n{}\n```\n",
-                            serde_json::to_string_pretty(&r.input)?
+                            "**Params:**\n```json\n{}\n```\n",
+                            serde_json::to_string_pretty(&output.params)?
                         );
-                        println!("**SQL:**\n```sql\n{}\n```\n", r.sql);
-                        if !r.params.is_empty() {
-                            println!(
-                                "**Params:**\n```json\n{}\n```\n",
-                                serde_json::to_string_pretty(&r.params)?
-                            );
-                        }
-                        println!("**Rendered SQL:**\n```sql\n{}\n```", r.rendered_sql);
                     }
-                    QueryOutput::Error(e) => {
-                        println!("\n### {} [ERROR]\n", e.label);
-                        println!(
-                            "**Input:**\n```json\n{}\n```\n",
-                            serde_json::to_string_pretty(&e.input)?
-                        );
-                        println!("**Error:** {}", e.error);
-                    }
+                    println!("**Rendered SQL:**\n```sql\n{}\n```", output.rendered_sql);
                 }
             }
+        }
+        Err(e) => {
+            anyhow::bail!("compilation failed: {e}");
         }
     }
 

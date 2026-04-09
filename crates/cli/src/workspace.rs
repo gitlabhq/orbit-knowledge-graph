@@ -116,6 +116,24 @@ impl IndexStore {
         Ok(repo_paths)
     }
 
+    /// Return canonical paths of all indexed repos from the manifest.
+    pub fn repo_roots(&self) -> Result<Vec<PathBuf>> {
+        let data = match std::fs::read_to_string(&self.manifest_path) {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+            Err(e) => return Err(e.into()),
+        };
+        let manifest: Manifest = serde_json::from_str(&data)?;
+        Ok(manifest.projects.into_keys().map(PathBuf::from).collect())
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        self.indexes_dir
+            .parent()
+            .unwrap_or(&self.indexes_dir)
+            .join("graph.duckdb")
+    }
+
     pub async fn set_status(
         &self,
         repo_path: &str,
