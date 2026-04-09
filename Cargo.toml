@@ -44,8 +44,6 @@ ulid = "1.1"
 clap = { version = "4.5.57", features = ["derive", "env"] }
 dirs = "6"
 dunce = "1.0.5"
-fs4 = { version = "0.13", features = ["tokio"] }
-typed-path = "0.12"
 async-trait = "0.1.89"
 bytes = "1.11.0"
 flate2 = "1.1.9"

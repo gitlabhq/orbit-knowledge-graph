@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
@@ -7,17 +8,69 @@ use crate::converter::LocalGraphData;
 use crate::error::{DuckDbError, Result};
 use crate::schema::{CODE_GRAPH_TABLES, SCHEMA_DDL};
 
+const MAX_OPEN_RETRIES: u32 = 10;
+const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
+
 pub struct DuckDbClient {
     conn: duckdb::Connection,
 }
 
+/// Check whether a DuckDB error is a file-lock contention error.
+///
+/// DuckDB emits `IO Error: Could not set lock on file` when another
+/// process holds the write lock. The Rust crate surfaces this as a
+/// generic `duckdb::Error` with the message embedded.
+fn is_lock_error(e: &duckdb::Error) -> bool {
+    let msg = e.to_string().to_ascii_lowercase();
+    msg.contains("could not set lock") || msg.contains("lock on file")
+}
+
 impl DuckDbClient {
+    /// Open a DuckDB database for read-write access, retrying with
+    /// exponential backoff (capped at 5s per attempt, ~26s total) if
+    /// another process holds the write lock.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
         }
-        let conn = duckdb::Connection::open(path)?;
-        Ok(Self { conn })
+
+        let mut backoff = INITIAL_BACKOFF;
+        for attempt in 0..=MAX_OPEN_RETRIES {
+            let config = duckdb::Config::default()
+                .access_mode(duckdb::AccessMode::ReadWrite)
+                .map_err(|e| DuckDbError::Schema(e.to_string()))?;
+            match duckdb::Connection::open_with_flags(path, config) {
+                Ok(conn) => return Ok(Self { conn }),
+                Err(e) if attempt < MAX_OPEN_RETRIES && is_lock_error(&e) => {
+                    std::thread::sleep(backoff);
+                    backoff = (backoff * 2).min(Duration::from_secs(5));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        unreachable!()
+    }
+
+    /// Open a DuckDB database for read-only access. Retries briefly
+    /// (50ms intervals, ~250ms total) if a writer holds the lock.
+    pub fn open_read_only(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
+        }
+
+        for attempt in 0..=5 {
+            let config = duckdb::Config::default()
+                .access_mode(duckdb::AccessMode::ReadOnly)
+                .map_err(|e| DuckDbError::Schema(e.to_string()))?;
+            match duckdb::Connection::open_with_flags(path, config) {
+                Ok(conn) => return Ok(Self { conn }),
+                Err(e) if attempt < 5 && is_lock_error(&e) => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        unreachable!()
     }
 
     #[cfg(test)]
@@ -126,6 +179,40 @@ impl DuckDbClient {
         }
         Ok(())
     }
+
+    /// Execute a SQL statement with positional parameters.
+    ///
+    /// Params are `serde_json::Value`s converted to DuckDB types:
+    /// strings, integers, floats, bools, and nulls.
+    pub fn execute(&self, sql: &str, params: &[serde_json::Value]) -> Result<usize> {
+        let boxed = json_params_to_sql(params);
+        Ok(self
+            .conn
+            .execute(sql, duckdb::params_from_iter(boxed.iter()))?)
+    }
+}
+
+fn json_params_to_sql(params: &[serde_json::Value]) -> Vec<Box<dyn duckdb::ToSql>> {
+    params
+        .iter()
+        .map(|v| -> Box<dyn duckdb::ToSql> {
+            match v {
+                serde_json::Value::String(s) => Box::new(s.clone()),
+                serde_json::Value::Number(n) => {
+                    if let Some(i) = n.as_i64() {
+                        Box::new(i)
+                    } else if let Some(f) = n.as_f64() {
+                        Box::new(f)
+                    } else {
+                        Box::new(n.to_string())
+                    }
+                }
+                serde_json::Value::Bool(b) => Box::new(*b),
+                serde_json::Value::Null => Box::new(Option::<String>::None),
+                other => Box::new(other.to_string()),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

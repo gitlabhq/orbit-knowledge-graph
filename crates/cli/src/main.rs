@@ -12,7 +12,7 @@ use query_engine::formatters::{self, ResultFormatter};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -195,18 +195,9 @@ async fn main() -> Result<()> {
     }
 }
 
-/// Deterministic project ID from canonical path. Mask clears the sign bit
-/// so the result is always a positive i64 (required by the query DSL validator).
-fn project_id_from_path(path: &str) -> i64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut hasher);
-    (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
-}
-
 async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
-    let store = workspace::IndexStore::open_default()?;
-    let repos = store.resolve_repos(&path).await?;
+    let store = workspace::Workspace::open_default()?;
+    let repos = store.resolve_repos(&path)?;
 
     if repos.is_empty() {
         info!("No git repositories found in {}", path.display());
@@ -216,6 +207,17 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
     let ontology_dir = std::path::PathBuf::from(env!("ONTOLOGY_DIR"));
     let ontology = Ontology::load_from_dir(&ontology_dir).context("failed to load ontology")?;
 
+    // Ensure schema exists, then drop the connection so we don't hold
+    // the write lock during parsing.
+    {
+        let db_path = store.db_path();
+        let client =
+            duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
+        client
+            .initialize_schema()
+            .context("failed to create schema")?;
+    }
+
     let config = IndexingConfig {
         worker_threads: threads,
         max_file_size: 5_000_000,
@@ -224,80 +226,117 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
 
     for repo_path in &repos {
         let key = repo_path.to_string_lossy().to_string();
-        store
-            .set_status(&key, workspace::Status::Indexing, None)
-            .await?;
+        let project_id = workspace::project_id_from_path(&key);
+        let db_path = store.db_path();
 
         info!("Indexing repository at: {}", key);
 
-        let repo_name = repo_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "repository".to_string());
+        // Mark as indexing before we start parsing.
+        {
+            let client =
+                duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
+            workspace::set_status(
+                &client,
+                &key,
+                project_id,
+                workspace::RepoStatus::Indexing,
+                None,
+            )?;
+        }
 
-        let file_source = DirectoryFileSource::new(key.clone());
-        let indexer = RepositoryIndexer::new(repo_name.clone(), key.clone());
-
-        let mut result = match indexer.index_files(file_source, &config).await {
-            Ok(r) => r,
+        match index_repo(repo_path, &config, &store, &ontology).await {
+            Ok(result) => {
+                let repo_name = repo_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "repository".to_string());
+                let mut output = build_index_output(&repo_name, &key, &result, show_stats);
+                output.database_path = Some(db_path.display().to_string());
+                info!("{}", serde_json::to_string_pretty(&output)?);
+            }
             Err(e) => {
-                store
-                    .set_status(&key, workspace::Status::Error, Some(e.to_string()))
-                    .await?;
+                if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path)
+                    && let Err(manifest_err) = workspace::set_status(
+                        &client,
+                        &key,
+                        project_id,
+                        workspace::RepoStatus::Error,
+                        Some(&e.to_string()),
+                    )
+                {
+                    tracing::warn!("failed to record error status in manifest: {manifest_err}");
+                }
                 anyhow::bail!("{e}");
             }
-        };
-
-        let db_path = if let Some(ref mut graph_data) = result.graph_data {
-            let project_id = project_id_from_path(&key);
-            graph_data.assign_node_ids(project_id, "HEAD");
-
-            let local_data =
-                duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", &ontology)
-                    .context("failed to convert graph data to Arrow")?;
-
-            let db = store.db_path();
-            let client = duckdb_client::DuckDbClient::open(&db).context("failed to open DuckDB")?;
-            client
-                .initialize_schema()
-                .context("failed to create schema")?;
-            let node_tables: Vec<String> = ontology
-                .local_entity_names()
-                .iter()
-                .map(|name| {
-                    ontology
-                        .get_node(name)
-                        .expect("local entity must exist")
-                        .destination_table
-                        .clone()
-                })
-                .collect();
-            let edge_table = ontology
-                .local_edge_table_name()
-                .context("local_db.edge_table.name must be configured")?;
-            client
-                .delete_project(project_id, &node_tables, edge_table)
-                .context("failed to clear existing project data")?;
-
-            client
-                .insert_graph(local_data)
-                .context("failed to insert graph data")?;
-
-            Some(db.display().to_string())
-        } else {
-            None
-        };
-
-        store
-            .set_status(&key, workspace::Status::Indexed, None)
-            .await?;
-
-        let mut output = build_index_output(&repo_name, &key, &result, show_stats);
-        output.database_path = db_path;
-        info!("{}", serde_json::to_string_pretty(&output)?);
+        }
     }
 
     Ok(())
+}
+
+async fn index_repo(
+    repo_path: &Path,
+    config: &IndexingConfig,
+    store: &workspace::Workspace,
+    ontology: &Ontology,
+) -> Result<RepositoryIndexingResult> {
+    let key = repo_path.to_string_lossy().to_string();
+    let project_id = workspace::project_id_from_path(&key);
+    let repo_name = repo_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "repository".to_string());
+
+    let file_source = DirectoryFileSource::new(key.clone());
+    let indexer = RepositoryIndexer::new(repo_name, key.clone());
+
+    let mut result = indexer
+        .index_files(file_source, config)
+        .await
+        .context("indexing failed")?;
+
+    if let Some(ref mut graph_data) = result.graph_data {
+        graph_data.assign_node_ids(project_id, "HEAD");
+
+        let local_data =
+            duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", ontology)
+                .context("failed to convert graph data to Arrow")?;
+
+        let db_path = store.db_path();
+        let client = duckdb_client::DuckDbClient::open(&db_path)
+            .context("failed to open DuckDB for writing")?;
+
+        let node_tables: Vec<String> = ontology
+            .local_entity_names()
+            .iter()
+            .map(|name| {
+                ontology
+                    .get_node(name)
+                    .expect("local entity must exist")
+                    .destination_table
+                    .clone()
+            })
+            .collect();
+        let edge_table = ontology
+            .local_edge_table_name()
+            .context("local_db.edge_table.name must be configured")?;
+
+        client
+            .delete_project(project_id, &node_tables, edge_table)
+            .context("failed to clear existing project data")?;
+        client
+            .insert_graph(local_data)
+            .context("failed to insert graph data")?;
+        workspace::set_status(
+            &client,
+            &key,
+            project_id,
+            workspace::RepoStatus::Indexed,
+            None,
+        )?;
+    }
+
+    Ok(result)
 }
 
 fn build_index_output(
@@ -412,7 +451,7 @@ fn run_local_query(
     let (_, ontology) = parse_query_input(&json_input, ontology_path)?;
     let ontology = Arc::new(ontology);
 
-    let store = workspace::IndexStore::open_default()?;
+    let store = workspace::Workspace::open_default()?;
     let db_path = store.db_path();
     if !db_path.exists() {
         anyhow::bail!(
@@ -420,7 +459,8 @@ fn run_local_query(
             db_path.display()
         );
     }
-    let repo_roots = store.repo_roots().context("failed to read repo roots")?;
+
+    let repo_roots = store.repo_roots()?;
 
     local_pipeline::run(&json_input, ontology, &db_path, repo_roots).context("query failed")
 }

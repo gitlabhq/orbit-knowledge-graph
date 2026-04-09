@@ -2785,17 +2785,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fs4"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4"
-dependencies = [
- "rustix",
- "tokio",
- "windows-sys 0.59.0",
-]
-
-[[package]]
 name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4802,24 +4791,22 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
- "chrono",
  "clap",
  "code-graph",
  "dirs",
  "duckdb-client",
  "dunce",
- "fs4",
  "gitalisk-core",
  "gkg-utils",
  "ontology",
  "query-engine",
  "serde",
  "serde_json",
+ "strum 0.28.0",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "typed-path",
 ]
 
 [[package]]
@@ -8032,12 +8019,6 @@ name = "twox-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
-
-[[package]]
-name = "typed-path"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
 
 [[package]]
 name = "typenum"
