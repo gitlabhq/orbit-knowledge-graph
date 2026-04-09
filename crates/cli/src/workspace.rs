@@ -48,20 +48,6 @@ impl Workspace {
         }
     }
 
-    /// Insert or update a repo in the manifest table.
-    /// Opens a short-lived RW connection.
-    pub fn set_status(
-        &self,
-        repo_path: &str,
-        project_id: i64,
-        status: RepoStatus,
-        error_message: Option<&str>,
-    ) -> Result<()> {
-        let client =
-            DuckDbClient::open(&self.db_path()).context("failed to open DuckDB for manifest")?;
-        set_status_on(&client, repo_path, project_id, status, error_message)
-    }
-
     /// Return canonical paths of all indexed repos.
     pub fn repo_roots(&self) -> Result<Vec<PathBuf>> {
         let client = DuckDbClient::open_read_only(&self.db_path())
@@ -76,10 +62,8 @@ impl Workspace {
     }
 }
 
-/// Update manifest status using an existing client connection.
-/// Use this when you already hold an open RW connection to avoid
-/// opening a second one (which would corrupt the database).
-pub fn set_status_on(
+/// Update manifest status on the given client connection.
+pub fn set_status(
     client: &DuckDbClient,
     repo_path: &str,
     project_id: i64,
