@@ -12,18 +12,19 @@ pub(super) async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext
     )
     .await;
 
-    resp.assert_node_count(8);
+    resp.assert_node_count(9);
     resp.assert_referential_integrity();
 
     resp.assert_node_ids("User", &[1]);
     resp.assert_node_ids("Group", &[100, 102]);
-    resp.assert_node_ids("MergeRequest", &[2000, 2001]);
+    resp.assert_node_ids("MergeRequest", &[2000, 2001, 2002]);
     resp.assert_node_ids("Note", &[3000]);
     resp.assert_node_ids("WorkItem", &[4000, 4002]);
 
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 1, "Group", 102, "MEMBER_OF");
     resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+    resp.assert_edge_exists("User", 1, "MergeRequest", 2002, "APPROVED");
     resp.assert_edge_exists("User", 1, "Note", 3000, "AUTHORED");
     resp.assert_edge_exists("User", 1, "WorkItem", 4000, "AUTHORED");
     resp.assert_edge_exists("User", 1, "WorkItem", 4002, "AUTHORED");
@@ -111,13 +112,15 @@ pub(super) async fn neighbors_mixed_entity_types(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_count(7);
+    resp.assert_node_count(9);
     resp.assert_referential_integrity();
-    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("User", &[1, 2, 3]);
     resp.assert_node_ids("Note", &[3000, 3002, 3003]);
     resp.assert_node_ids("MergeRequestDiff", &[5000, 5001]);
 
     resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+    resp.assert_edge_exists("User", 2, "MergeRequest", 2000, "APPROVED");
+    resp.assert_edge_exists("User", 3, "MergeRequest", 2000, "APPROVED");
     resp.assert_edge_exists("MergeRequest", 2000, "Note", 3000, "HAS_NOTE");
     resp.assert_edge_exists("MergeRequest", 2000, "Note", 3002, "HAS_NOTE");
     resp.assert_edge_exists("MergeRequest", 2000, "Note", 3003, "HAS_NOTE");

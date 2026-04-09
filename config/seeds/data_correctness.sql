@@ -82,6 +82,10 @@
 --     4002 Write unit tests      (opened, task,     not confidential, no weight, path 1/101/)
 --     4003 Q1 Objective          (opened, epic,     not confidential, weight 13, path 1/102/)
 --
+--   APPROVED edges:
+--     User 2 -> MR 2000, User 3 -> MR 2000
+--     User 1 -> MR 2002
+--
 --   WorkItem edges:
 --     AUTHORED:      User 1 -> WI 4000, User 2 -> WI 4001, User 1 -> WI 4002, User 3 -> WI 4003
 --     IN_GROUP:      WI 4000 -> Group 100, WI 4001 -> Group 100, WI 4002 -> Group 101, WI 4003 -> Group 102
@@ -195,3 +199,8 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/', 4000, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
     ('1/100/', 4001, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
     ('1/100/', 2, 'User', 'CLOSED_BY', 4001, 'WorkItem');
+
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('1/100/1000/', 2, 'User', 'APPROVED', 2000, 'MergeRequest'),
+    ('1/100/1000/', 3, 'User', 'APPROVED', 2000, 'MergeRequest'),
+    ('1/101/1001/', 1, 'User', 'APPROVED', 2002, 'MergeRequest');
