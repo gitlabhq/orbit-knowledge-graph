@@ -177,7 +177,6 @@ impl PipelineStage for LocalHydration {
         let result_context = input.query_result.ctx().clone();
         let mut hydration_queries = Vec::new();
 
-        let registry = ctx.server_extensions.get::<ColumnResolverRegistry>();
         let resolver_ctx = ResolverContext::default();
 
         match &compiled.hydration {
@@ -189,11 +188,11 @@ impl PipelineStage for LocalHydration {
                     execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids)?;
                 hydration_queries.extend(debug);
 
-                if let Some(registry) = registry {
-                    let entity_virtuals: Vec<EntityVirtualColumns<'_>> = templates
-                        .iter()
-                        .map(|t| (t.entity_type.as_str(), t.virtual_columns.as_slice()))
-                        .collect();
+                let entity_virtuals: Vec<EntityVirtualColumns<'_>> = templates
+                    .iter()
+                    .map(|t| (t.entity_type.as_str(), t.virtual_columns.as_slice()))
+                    .collect();
+                if let Some(registry) = get_registry(ctx, &entity_virtuals)? {
                     resolve_virtual_columns(registry, &resolver_ctx, &entity_virtuals, &mut props)
                         .await?;
                 }
@@ -215,11 +214,11 @@ impl PipelineStage for LocalHydration {
                     execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids)?;
                 hydration_queries.extend(debug);
 
-                if let Some(registry) = registry {
-                    let entity_virtuals: Vec<EntityVirtualColumns<'_>> = entity_specs
-                        .iter()
-                        .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
-                        .collect();
+                let entity_virtuals: Vec<EntityVirtualColumns<'_>> = entity_specs
+                    .iter()
+                    .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
+                    .collect();
+                if let Some(registry) = get_registry(ctx, &entity_virtuals)? {
                     resolve_virtual_columns(registry, &resolver_ctx, &entity_virtuals, &mut props)
                         .await?;
                 }
@@ -292,6 +291,23 @@ fn get_db_path(ctx: &QueryPipelineContext) -> std::result::Result<PathBuf, Pipel
         .get::<PathBuf>()
         .cloned()
         .ok_or_else(|| PipelineError::Execution("DuckDB path not found".into()))
+}
+
+/// Returns the registry if virtual columns need resolving.
+/// Errors if virtual columns are requested but no registry is available.
+/// Returns `Ok(None)` when there's nothing to resolve.
+fn get_registry<'a>(
+    ctx: &'a QueryPipelineContext,
+    entity_virtuals: &[EntityVirtualColumns<'_>],
+) -> std::result::Result<Option<&'a ColumnResolverRegistry>, PipelineError> {
+    let has_work = entity_virtuals.iter().any(|(_, vc)| !vc.is_empty());
+    match ctx.server_extensions.get::<ColumnResolverRegistry>() {
+        Some(r) => Ok(Some(r)),
+        None if has_work => Err(PipelineError::ContentResolution(
+            "virtual columns requested but no ColumnResolverRegistry available".into(),
+        )),
+        None => Ok(None),
+    }
 }
 
 /// Compile and execute a hydration query against the local DuckDB.

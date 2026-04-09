@@ -3,7 +3,7 @@
 //! Replaces Gitaly in local mode: reads file content directly from disk
 //! using the repo root paths passed at construction time.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use gkg_utils::arrow::ColumnValue;
@@ -57,12 +57,30 @@ fn resolve_row(props: &PropertyRow, roots: &[PathBuf]) -> Option<ColumnValue> {
     ))
 }
 
-/// Try each root until we find the file. Returns `None` if not found or
-/// not valid UTF-8.
+/// Try each root until we find the file. Returns `None` if the path is
+/// absolute, escapes the root via `..`, or the file can't be read as UTF-8.
 fn read_from_roots(roots: &[PathBuf], relative_path: &str) -> Option<String> {
+    let rel = Path::new(relative_path);
+    if rel.is_absolute() {
+        return None;
+    }
+
     for root in roots {
-        let full = root.join(relative_path);
-        if let Ok(content) = std::fs::read_to_string(&full) {
+        let full = root.join(rel);
+
+        // Canonicalize to resolve any `..` segments, then verify the
+        // resolved path is still inside the root.
+        let Ok(canonical) = full.canonicalize() else {
+            continue;
+        };
+        let Ok(canonical_root) = root.canonicalize() else {
+            continue;
+        };
+        if !canonical.starts_with(&canonical_root) {
+            continue;
+        }
+
+        if let Ok(content) = std::fs::read_to_string(&canonical) {
             return Some(content);
         }
     }
@@ -133,7 +151,6 @@ mod tests {
     #[test]
     fn resolve_row_from_path() {
         let dir = tempfile::TempDir::new().unwrap();
-        std::fs::write(dir.path().join("src").join("lib.rs").as_path(), "").ok();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/lib.rs"), "fn main() {}").unwrap();
 
@@ -170,6 +187,36 @@ mod tests {
     fn resolve_row_missing_path_prop() {
         let props = HashMap::new();
         let result = resolve_row(&props, &[PathBuf::from("/tmp")]);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn rejects_absolute_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("secret.txt"), "oh no").unwrap();
+
+        let abs = dir.path().join("secret.txt");
+        let mut props = HashMap::new();
+        props.insert(
+            "path".into(),
+            ColumnValue::String(abs.to_string_lossy().into()),
+        );
+
+        let result = resolve_row(&props, &[dir.path().to_path_buf()]);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let inner = dir.path().join("repo");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(dir.path().join("secret.txt"), "oh no").unwrap();
+
+        let mut props = HashMap::new();
+        props.insert("path".into(), ColumnValue::String("../secret.txt".into()));
+
+        let result = resolve_row(&props, std::slice::from_ref(&inner));
         assert_eq!(result, None);
     }
 

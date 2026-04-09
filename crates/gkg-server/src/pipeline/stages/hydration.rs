@@ -35,14 +35,16 @@ impl HydrationStage {
         entity_virtual_columns: &[EntityVirtualColumns<'_>],
         property_map: &mut PropertyMap,
     ) -> Result<(), PipelineError> {
-        let registry = ctx
-            .server_extensions
-            .get::<ColumnResolverRegistry>()
-            .ok_or_else(|| {
-                PipelineError::ContentResolution(
+        let has_work = entity_virtual_columns.iter().any(|(_, vc)| !vc.is_empty());
+        let registry = match ctx.server_extensions.get::<ColumnResolverRegistry>() {
+            Some(r) => r,
+            None if has_work => {
+                return Err(PipelineError::ContentResolution(
                     "virtual columns requested but no ColumnResolverRegistry available".into(),
-                )
-            })?;
+                ));
+            }
+            None => return Ok(()),
+        };
 
         let resolver_ctx = ResolverContext {
             security_context: Some(ctx.security_context()?.clone()),
