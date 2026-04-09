@@ -237,12 +237,15 @@ pub struct DuckDbCodegenPass;
 impl<E, S> CompilerPass<E, S> for DuckDbCodegenPass
 where
     E: PipelineEnv,
-    S: PipelineState + HasNode + HasInput + HasResultCtx + HasOutput,
+    S: PipelineState + HasNode + HasInput + HasResultCtx + HasHydrationPlan + HasOutput,
 {
     const NAME: &'static str = "duckdb_codegen";
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
         let result_context = state.take_result_ctx()?;
+        let hydration = state
+            .take_hydration_plan()
+            .unwrap_or(hydrate::HydrationPlan::None);
         let node = state.node()?;
         let input = state.input()?;
         let base = codegen::duckdb::codegen(node, result_context)?;
@@ -251,7 +254,7 @@ where
         state.set_output(codegen::CompiledQueryContext {
             query_type,
             base,
-            hydration: hydrate::HydrationPlan::None,
+            hydration,
             input,
         });
         Ok(())
