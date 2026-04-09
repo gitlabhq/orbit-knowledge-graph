@@ -15,9 +15,14 @@ pub struct DuckDbClient {
     conn: duckdb::Connection,
 }
 
+/// Check whether a DuckDB error is a file-lock contention error.
+///
+/// DuckDB emits `IO Error: Could not set lock on file` when another
+/// process holds the write lock. The Rust crate surfaces this as a
+/// generic `duckdb::Error` with the message embedded.
 fn is_lock_error(e: &duckdb::Error) -> bool {
-    let msg = e.to_string();
-    msg.contains("lock") || msg.contains("locked")
+    let msg = e.to_string().to_ascii_lowercase();
+    msg.contains("could not set lock") || msg.contains("lock on file")
 }
 
 impl DuckDbClient {
@@ -49,6 +54,9 @@ impl DuckDbClient {
     /// Open a DuckDB database for read-only access. Multiple readers
     /// can coexist with each other and with a single writer.
     pub fn open_read_only(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
+        }
         let config = duckdb::Config::default()
             .access_mode(duckdb::AccessMode::ReadOnly)
             .map_err(|e| DuckDbError::Schema(e.to_string()))?;
@@ -163,49 +171,53 @@ impl DuckDbClient {
         Ok(())
     }
 
-    // ── Manifest operations ─────────────────────────────────────────
-
-    /// Insert or update a repo in the manifest.
-    pub fn upsert_manifest(
-        &self,
-        repo_path: &str,
-        project_id: i64,
-        status: &str,
-        error_message: Option<&str>,
-    ) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO _orbit_manifest (repo_path, project_id, status, error_message, last_indexed_at)
-             VALUES (?1, ?2, ?3::repo_status, ?4, CASE WHEN ?3 = 'indexed' THEN now() ELSE NULL END)
-             ON CONFLICT (repo_path) DO UPDATE SET
-                 status = ?3::repo_status,
-                 error_message = ?4,
-                 last_indexed_at = CASE WHEN ?3 = 'indexed' THEN now() ELSE last_indexed_at END",
-            params![repo_path, project_id, status, error_message],
-        )?;
-        Ok(())
+    /// Execute a SQL statement with positional parameters.
+    ///
+    /// Params are `serde_json::Value`s converted to DuckDB types:
+    /// strings, integers, floats, bools, and nulls.
+    pub fn execute(&self, sql: &str, params: &[serde_json::Value]) -> Result<usize> {
+        let boxed = json_params_to_sql(params);
+        Ok(self
+            .conn
+            .execute(sql, duckdb::params_from_iter(boxed.iter()))?)
     }
 
-    /// Return canonical paths of all indexed repos.
-    pub fn repo_roots(&self) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT repo_path FROM _orbit_manifest WHERE status = 'indexed'")?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        let mut paths = Vec::new();
+    /// Query a single column of strings from a SQL statement.
+    pub fn query_strings(&self, sql: &str, params: &[serde_json::Value]) -> Result<Vec<String>> {
+        let boxed = json_params_to_sql(params);
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(duckdb::params_from_iter(boxed.iter()), |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut result = Vec::new();
         for row in rows {
-            paths.push(row?);
+            result.push(row?);
         }
-        Ok(paths)
+        Ok(result)
     }
+}
 
-    /// Look up a project_id by repo path, if it exists.
-    pub fn get_project_id(&self, repo_path: &str) -> Result<Option<i64>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT project_id FROM _orbit_manifest WHERE repo_path = ?1")?;
-        let mut rows = stmt.query_map(params![repo_path], |row| row.get::<_, i64>(0))?;
-        Ok(rows.next().transpose()?)
-    }
+fn json_params_to_sql(params: &[serde_json::Value]) -> Vec<Box<dyn duckdb::ToSql>> {
+    params
+        .iter()
+        .map(|v| -> Box<dyn duckdb::ToSql> {
+            match v {
+                serde_json::Value::String(s) => Box::new(s.clone()),
+                serde_json::Value::Number(n) => {
+                    if let Some(i) = n.as_i64() {
+                        Box::new(i)
+                    } else if let Some(f) = n.as_f64() {
+                        Box::new(f)
+                    } else {
+                        Box::new(n.to_string())
+                    }
+                }
+                serde_json::Value::Bool(b) => Box::new(*b),
+                serde_json::Value::Null => Box::new(Option::<String>::None),
+                other => Box::new(other.to_string()),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

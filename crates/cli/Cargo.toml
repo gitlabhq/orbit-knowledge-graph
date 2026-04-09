@@ -26,7 +26,6 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
-typed-path = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

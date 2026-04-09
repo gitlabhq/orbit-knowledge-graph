@@ -1,9 +1,36 @@
-use anyhow::{Context, Result};
-use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
+use std::fmt;
 use std::path::{Path, PathBuf};
-use typed_path::Utf8TypedPath;
 
-/// Manages `~/.orbit/` — DuckDB graph file and repo discovery.
+use anyhow::{Context, Result};
+use duckdb_client::DuckDbClient;
+use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
+use serde_json::json;
+
+/// Repo indexing status, stored as a DuckDB `repo_status` enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepoStatus {
+    Indexing,
+    Indexed,
+    Error,
+}
+
+impl fmt::Display for RepoStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl RepoStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Indexing => "indexing",
+            Self::Indexed => "indexed",
+            Self::Error => "error",
+        }
+    }
+}
+
+/// Manages `~/.orbit/` — DuckDB graph file, repo discovery, and manifest.
 pub struct IndexStore {
     root: PathBuf,
 }
@@ -36,6 +63,46 @@ impl IndexStore {
     }
 }
 
+// ── Manifest operations ─────────────────────────────────────────────────────
+
+/// Insert or update a repo in the manifest table.
+pub fn upsert_manifest(
+    client: &DuckDbClient,
+    repo_path: &str,
+    project_id: i64,
+    status: RepoStatus,
+    error_message: Option<&str>,
+) -> Result<()> {
+    client
+        .execute(
+            "INSERT INTO _orbit_manifest (repo_path, project_id, status, error_message, last_indexed_at)
+             VALUES (?1, ?2, ?3::repo_status, ?4, CASE WHEN ?3 = 'indexed' THEN now() ELSE NULL END)
+             ON CONFLICT (repo_path) DO UPDATE SET
+                 status = ?3::repo_status,
+                 error_message = ?4,
+                 last_indexed_at = CASE WHEN ?3 = 'indexed' THEN now() ELSE last_indexed_at END",
+            &[
+                json!(repo_path),
+                json!(project_id),
+                json!(status.as_str()),
+                error_message.map_or(serde_json::Value::Null, |s| json!(s)),
+            ],
+        )
+        .context("failed to upsert manifest")?;
+    Ok(())
+}
+
+/// Return canonical paths of all indexed repos.
+pub fn repo_roots(client: &DuckDbClient) -> Result<Vec<PathBuf>> {
+    let paths = client
+        .query_strings(
+            "SELECT repo_path FROM _orbit_manifest WHERE status = 'indexed'",
+            &[],
+        )
+        .context("failed to query repo roots")?;
+    Ok(paths.into_iter().map(PathBuf::from).collect())
+}
+
 /// Deterministic project ID from canonical path. Mask clears the sign bit
 /// so the result is always a positive i64.
 pub fn project_id_from_path(path: &str) -> i64 {
@@ -44,6 +111,8 @@ pub fn project_id_from_path(path: &str) -> i64 {
     path.hash(&mut hasher);
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn is_git_repo(path: &Path) -> bool {
     let git = path.join(".git");
@@ -61,41 +130,6 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Splits a path into components via `typed_path` (auto-detects Unix/Windows),
-/// percent-encodes each component, then joins with `-`.
-///
-/// `/Users/alice/my-repo`    → `Users-alice-my%2Drepo`
-/// `/Users/alice/my project` → `Users-alice-my%20project`
-/// `C:\Users\alice\src`      → `C-Users-alice-src`
-#[allow(dead_code)]
-fn path_to_dir_name(path: &Path) -> String {
-    let s = path.to_string_lossy();
-    Utf8TypedPath::derive(&s)
-        .components()
-        .filter(|c| !c.is_root() && !c.is_current() && !c.is_parent())
-        .map(|c| encode_component(c.as_str().trim_end_matches(':')))
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
-#[allow(dead_code)]
-fn encode_component(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' => out.push(byte as char),
-            _ => {
-                out.push('%');
-                out.push(char::from(HEX[byte as usize >> 4]));
-                out.push(char::from(HEX[byte as usize & 0xf]));
-            }
-        }
-    }
-    out
-}
-
-const HEX: &[u8; 16] = b"0123456789ABCDEF";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,31 +142,6 @@ mod tests {
             .current_dir(path)
             .output()
             .unwrap();
-    }
-
-    #[test]
-    fn test_path_to_dir_name() {
-        assert_eq!(
-            path_to_dir_name(Path::new("/Users/alice/src/frontend")),
-            "Users-alice-src-frontend"
-        );
-        assert_eq!(
-            path_to_dir_name(Path::new("/Users/alice/my-repo")),
-            "Users-alice-my%2Drepo"
-        );
-        assert_eq!(
-            path_to_dir_name(Path::new("/Users/alice/my project")),
-            "Users-alice-my%20project"
-        );
-        assert_eq!(
-            path_to_dir_name(Path::new("C:\\Users\\alice\\src")),
-            "C-Users-alice-src"
-        );
-        assert_eq!(path_to_dir_name(Path::new("/tmp/a@b#c")), "tmp-a%40b%23c");
-        assert_eq!(
-            path_to_dir_name(Path::new("/tmp/100%done")),
-            "tmp-100%25done"
-        );
     }
 
     #[test]

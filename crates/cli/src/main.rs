@@ -258,10 +258,16 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         let mut result = match indexer.index_files(file_source, &config).await {
             Ok(r) => r,
             Err(e) => {
-                if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path) {
-                    client
-                        .upsert_manifest(&key, project_id, "error", Some(&e.to_string()))
-                        .ok();
+                if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path)
+                    && let Err(manifest_err) = workspace::upsert_manifest(
+                        &client,
+                        &key,
+                        project_id,
+                        workspace::RepoStatus::Error,
+                        Some(&e.to_string()),
+                    )
+                {
+                    tracing::warn!("failed to record error status in manifest: {manifest_err}");
                 }
                 anyhow::bail!("{e}");
             }
@@ -277,18 +283,26 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             // Acquire write connection only for the actual writes.
             let client = duckdb_client::DuckDbClient::open(&db_path)
                 .context("failed to open DuckDB for writing")?;
-            client
-                .upsert_manifest(&key, project_id, "indexing", None)
-                .context("failed to update manifest")?;
+            workspace::upsert_manifest(
+                &client,
+                &key,
+                project_id,
+                workspace::RepoStatus::Indexing,
+                None,
+            )?;
             client
                 .delete_project(project_id, &node_tables, edge_table)
                 .context("failed to clear existing project data")?;
             client
                 .insert_graph(local_data)
                 .context("failed to insert graph data")?;
-            client
-                .upsert_manifest(&key, project_id, "indexed", None)
-                .context("failed to update manifest")?;
+            workspace::upsert_manifest(
+                &client,
+                &key,
+                project_id,
+                workspace::RepoStatus::Indexed,
+                None,
+            )?;
         }
 
         let mut output = build_index_output(&repo_name, &key, &result, show_stats);
@@ -422,12 +436,7 @@ fn run_local_query(
 
     let client =
         duckdb_client::DuckDbClient::open_read_only(&db_path).context("failed to open DuckDB")?;
-    let repo_roots: Vec<PathBuf> = client
-        .repo_roots()
-        .context("failed to read repo roots")?
-        .into_iter()
-        .map(PathBuf::from)
-        .collect();
+    let repo_roots = workspace::repo_roots(&client)?;
 
     local_pipeline::run(&json_input, ontology, &db_path, repo_roots).context("query failed")
 }
