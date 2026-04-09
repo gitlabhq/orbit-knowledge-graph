@@ -213,6 +213,9 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         return Ok(());
     }
 
+    let ontology_dir = std::path::PathBuf::from(env!("ONTOLOGY_DIR"));
+    let ontology = Ontology::load_from_dir(&ontology_dir).context("failed to load ontology")?;
+
     let config = IndexingConfig {
         worker_threads: threads,
         max_file_size: 5_000_000,
@@ -249,9 +252,6 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             let project_id = project_id_from_path(&key);
             graph_data.assign_node_ids(project_id, "HEAD");
 
-            let ontology_dir = std::path::PathBuf::from(env!("ONTOLOGY_DIR"));
-            let ontology =
-                Ontology::load_from_dir(&ontology_dir).context("failed to load ontology")?;
             let local_data =
                 duckdb_client::convert_graph_data(graph_data, project_id, "HEAD", &ontology)
                     .context("failed to convert graph data to Arrow")?;
@@ -381,8 +381,7 @@ fn build_index_output(
 }
 
 #[derive(Serialize)]
-struct QueryResult {
-    label: String,
+struct CompileResult {
     input: Value,
     sql: String,
     params: HashMap<String, Value>,
@@ -462,8 +461,7 @@ fn run_compile(
     match compile_result {
         Ok(result) => {
             let rendered_sql = result.base.render();
-            let output = QueryResult {
-                label: "query".to_string(),
+            let output = CompileResult {
                 input,
                 sql: result.base.sql,
                 params: result
