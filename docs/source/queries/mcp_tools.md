@@ -25,7 +25,7 @@ title: Orbit MCP tools
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-## `execute_query`
+## `query_graph`
 
 Query the knowledge graph and return matching nodes, relationships, and aggregations.
 

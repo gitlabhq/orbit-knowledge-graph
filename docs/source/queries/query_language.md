@@ -137,7 +137,7 @@ Find all users who have authored merged merge requests and return up to 25 resul
 
 ## `relationships`
 
-An array of relationships.
+An array of relationships. Required when `query_type` is `traversal`.
 
 | Field       | Required    | Type             | Description                                                                                      |
 |-------------|-------------|------------------|--------------------------------------------------------------------------------------------------|
