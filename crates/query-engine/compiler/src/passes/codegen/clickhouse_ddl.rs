@@ -4,6 +4,22 @@
 
 use crate::ast::ddl::{Codec, ColumnType, CreateTable, IndexType, ProjectionDef};
 
+/// ClickHouse reserved words that must be backtick-quoted when used as column identifiers.
+/// This is a conservative list of words that cause parse ambiguity in CREATE TABLE DDL.
+const RESERVED_WORDS: &[&str] = &[
+    "when", "order", "table", "database", "select", "from", "where", "group", "having", "limit",
+];
+
+/// Backtick-quotes an identifier if it is a ClickHouse reserved word.
+fn quote_ident(name: &str) -> String {
+    let bare = name.trim_matches('`');
+    if RESERVED_WORDS.contains(&bare.to_lowercase().as_str()) {
+        format!("`{bare}`")
+    } else {
+        bare.to_string()
+    }
+}
+
 fn emit_column_type(ct: &ColumnType) -> String {
     match ct {
         ColumnType::Int64 => "Int64".into(),
@@ -38,7 +54,7 @@ fn emit_index_type(it: &IndexType) -> String {
     match it {
         IndexType::MinMax => "minmax".into(),
         IndexType::Set(n) => format!("set({n})"),
-        IndexType::BloomFilter(rate) => format!("bloom_filter({rate})"),
+        IndexType::BloomFilter(rate) => format!("bloom_filter({rate:.2})"),
     }
 }
 
@@ -52,7 +68,7 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     for col in &table.columns {
         let mut col_parts = vec![format!(
             "    {} {}",
-            col.name,
+            quote_ident(&col.name),
             emit_column_type(&col.data_type)
         )];
         if let Some(default) = &col.default {
@@ -68,8 +84,8 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     for idx in &table.indexes {
         body_items.push(format!(
             "    INDEX {} {} TYPE {} GRANULARITY {}",
-            idx.name,
-            idx.expression,
+            quote_ident(&idx.name),
+            quote_ident(&idx.expression),
             emit_index_type(&idx.index_type),
             idx.granularity
         ));
@@ -94,7 +110,12 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     ));
 
     // ORDER BY [PRIMARY KEY]
-    if !table.order_by.is_empty() {
+    // MergeTree-family engines require ORDER BY. Emit `ORDER BY tuple()` as fallback.
+    if table.order_by.is_empty() {
+        if table.engine.name.contains("MergeTree") {
+            parts.push("ORDER BY tuple()".into());
+        }
+    } else {
         let order_by = format!("ORDER BY ({})", table.order_by.join(", "));
         if let Some(pk) = &table.primary_key {
             let pk_str = format!("PRIMARY KEY ({})", pk.join(", "));
@@ -127,6 +148,10 @@ pub fn emit_create_table(table: &CreateTable) -> String {
 fn emit_projection(proj: &ProjectionDef) -> String {
     match proj {
         ProjectionDef::Reorder { name, order_by } => {
+            assert!(
+                !order_by.is_empty(),
+                "Reorder projection '{name}' has empty order_by"
+            );
             let order = if order_by.len() == 1 {
                 order_by[0].clone()
             } else {
@@ -313,5 +338,80 @@ mod tests {
         let sql = emit_create_table(&table);
         assert!(sql.contains("vis LowCardinality(Nullable(String))"));
         assert!(sql.contains("ENGINE = MergeTree"));
+    }
+
+    #[test]
+    fn emit_reserved_word_column_gets_quoted() {
+        let table = CreateTable {
+            name: "test".into(),
+            columns: vec![ColumnDef::new("when", ColumnType::String)],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "MergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec!["id".into()],
+            primary_key: None,
+            settings: vec![],
+        };
+
+        let sql = emit_create_table(&table);
+        assert!(
+            sql.contains("`when` String"),
+            "reserved word should be backtick-quoted: {sql}"
+        );
+    }
+
+    #[test]
+    fn emit_empty_order_by_with_mergetree_emits_tuple() {
+        let table = CreateTable {
+            name: "test".into(),
+            columns: vec![ColumnDef::new("id", ColumnType::Int64)],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "MergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec![],
+            primary_key: None,
+            settings: vec![],
+        };
+
+        let sql = emit_create_table(&table);
+        assert!(
+            sql.contains("ORDER BY tuple()"),
+            "empty ORDER BY with MergeTree should emit tuple(): {sql}"
+        );
+    }
+
+    #[test]
+    fn emit_bloom_filter_stable_precision() {
+        let idx = IndexDef {
+            name: "idx_id".into(),
+            expression: "id".into(),
+            index_type: IndexType::BloomFilter(0.01),
+            granularity: 1,
+        };
+        let table = CreateTable {
+            name: "test".into(),
+            columns: vec![ColumnDef::new("id", ColumnType::Int64)],
+            indexes: vec![idx],
+            projections: vec![],
+            engine: Engine {
+                name: "MergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec!["id".into()],
+            primary_key: None,
+            settings: vec![],
+        };
+
+        let sql = emit_create_table(&table);
+        assert!(
+            sql.contains("bloom_filter(0.01)"),
+            "bloom_filter precision should be stable: {sql}"
+        );
     }
 }

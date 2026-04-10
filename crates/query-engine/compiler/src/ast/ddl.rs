@@ -39,6 +39,7 @@ pub enum ColumnType {
     String,
     Date32,
     /// Timestamp with sub-second precision and optional timezone.
+    /// Precision must be 0–9 for ClickHouse (`DateTime64`).
     Timestamp {
         precision: u8,
         timezone: Option<String>,
