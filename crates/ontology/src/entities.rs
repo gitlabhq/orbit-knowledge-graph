@@ -36,6 +36,9 @@ pub struct NodeStorage {
     /// When true, engine is `ReplacingMergeTree(_version)` instead of
     /// `ReplacingMergeTree(_version, _deleted)`.
     pub version_only_engine: bool,
+    /// When set, emit `PRIMARY KEY (...)` in the DDL. When absent, ClickHouse
+    /// defaults PRIMARY KEY to ORDER BY.
+    pub primary_key: Option<Vec<String>>,
     /// Columns in exact DDL order. Does NOT include `_version`/`_deleted`
     /// (system columns are appended automatically).
     pub columns: Vec<StorageColumn>,

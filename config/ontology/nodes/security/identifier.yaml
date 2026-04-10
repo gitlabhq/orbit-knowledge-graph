@@ -77,12 +77,17 @@ etl:
       direction: outgoing
 
 storage:
+  primary_key: [traversal_path, id]
   columns:
-    external_type:
-      default: "''"
-    external_id:
-      default: "''"
-    name:
-      default: "''"
-    traversal_path:
-      default: "'0/'"
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: external_type, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: external_id, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: url, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}

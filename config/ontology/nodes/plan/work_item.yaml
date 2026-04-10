@@ -154,10 +154,26 @@ etl:
       array_field: label_id
 
 storage:
+  primary_key: [traversal_path, id]
   columns:
-    title:
-      default: "''"
-    description:
-      codec: ["zstd(3)"]
-    traversal_path:
-      default: "'0/'"
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: work_item_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: confidential, type: "Bool", default: "false"}
+    - {name: due_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: start_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: weight, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_state, column: state, type: "set(10)", granularity: 2}
+    - {name: idx_work_item_type, column: work_item_type, type: "set(10)", granularity: 2}
+    - {name: idx_confidential, column: confidential, type: "minmax", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}

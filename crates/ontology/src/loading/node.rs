@@ -129,6 +129,8 @@ struct NodeStorageYaml {
     #[serde(default)]
     version_only_engine: bool,
     #[serde(default)]
+    primary_key: Option<Vec<String>>,
+    #[serde(default)]
     columns: Vec<StorageColumnYaml>,
     #[serde(default)]
     indexes: Vec<StorageIndexYaml>,
@@ -423,6 +425,7 @@ impl EtlYaml {
 fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
     NodeStorage {
         version_only_engine: yaml.version_only_engine,
+        primary_key: yaml.primary_key,
         columns: yaml
             .columns
             .into_iter()

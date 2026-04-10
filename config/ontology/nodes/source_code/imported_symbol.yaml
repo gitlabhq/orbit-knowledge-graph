@@ -106,17 +106,21 @@ properties:
 storage:
   version_only_engine: true
   columns:
-    commit_sha:
-      default: "''"
-    file_path:
-      codec: ["zstd(3)"]
-    import_path:
-      codec: ["zstd(3)"]
-    start_line:
-      codec: ["zstd(1)"]
-    end_line:
-      codec: ["zstd(1)"]
-    start_byte:
-      codec: ["zstd(1)"]
-    end_byte:
-      codec: ["zstd(1)"]
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: file_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: import_type, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: import_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: identifier_name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: identifier_alias, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: start_line, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: end_line, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: start_byte, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: end_byte, type: "Int64", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}
