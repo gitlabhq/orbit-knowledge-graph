@@ -11,6 +11,7 @@ use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use gkg_server_config::AppConfig;
+use indexer::schema_version;
 use indexer::{DispatcherConfig, IndexerConfig};
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
@@ -63,6 +64,11 @@ async fn main() -> anyhow::Result<()> {
 
     let result = match args.mode {
         Mode::DispatchIndexing => {
+            config.schema.validate()?;
+            let graph = config.graph.build_client();
+            info!("initializing schema version table");
+            schema_version::init(&graph).await?;
+
             let dispatcher_config = DispatcherConfig {
                 nats: config.nats.clone(),
                 graph: config.graph.clone(),
@@ -84,12 +90,19 @@ async fn main() -> anyhow::Result<()> {
                 gitlab: config.gitlab_client_config(),
                 schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
+                schema: config.schema.clone(),
             };
             indexer::run(&indexer_config, ontology, shutdown)
                 .await
                 .map_err(Into::into)
         }
-        Mode::Webserver => run_webserver(&config, ontology).await,
+        Mode::Webserver => {
+            config.schema.validate()?;
+            let graph = config.graph.build_client();
+            info!("initializing schema version table");
+            schema_version::init(&graph).await?;
+            run_webserver(&config, ontology).await
+        }
     };
 
     signal_task.abort();

@@ -207,6 +207,12 @@
         }
       }
     },
+    "schema": {
+      "$ref": "#/$defs/SchemaConfig",
+      "default": {
+        "max_retained_versions": 2
+      }
+    },
     "tls": {
       "$ref": "#/$defs/TlsConfig",
       "default": {
@@ -1055,6 +1061,20 @@
           "default": {
             "cron": "0 0 3 * * *"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SchemaConfig": {
+      "description": "Schema configuration: version retention and related settings.",
+      "type": "object",
+      "properties": {
+        "max_retained_versions": {
+          "description": "Number of schema version table-sets to retain.\n\nAfter migrating to version N, the indexer keeps the N active tables plus\nthe N-1 rollback target. Must be at least 2.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 2,
+          "minimum": 0
         }
       },
       "additionalProperties": false
