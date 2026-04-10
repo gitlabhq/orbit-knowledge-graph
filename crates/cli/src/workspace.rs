@@ -38,15 +38,16 @@ impl Workspace {
         self.root.join("graph.duckdb")
     }
 
-    /// Discover git repos in a directory. If the path itself is a git
-    /// repo, returns just that. Returns canonical paths.
+    /// Discover git repos in a directory, including nested repos when
+    /// the path itself is a git repo. Returns canonical paths.
     pub fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let canonical = dunce::canonicalize(path)?;
 
-        if is_git_repo(&canonical) {
+        let discovered = discover_repos(&canonical);
+        if discovered.is_empty() && is_git_repo(&canonical) {
             Ok(vec![canonical])
         } else {
-            Ok(discover_repos(&canonical))
+            Ok(discovered)
         }
     }
 
@@ -237,5 +238,25 @@ mod tests {
 
         let repos = store.resolve_repos(&workspace).unwrap();
         assert_eq!(repos.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_workspace_that_is_also_a_git_repo() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let store = Workspace::open(temp.path().join("orbit")).unwrap();
+
+        let workspace = temp.path().join("workspace");
+        init_repo(&workspace);
+        init_repo(&workspace.join("nested-a"));
+        init_repo(&workspace.join("nested-b"));
+
+        let repos = store.resolve_repos(&workspace).unwrap();
+        // Should find the root repo AND both nested repos.
+        assert!(
+            repos.len() >= 3,
+            "expected at least 3 repos, got {}: {:?}",
+            repos.len(),
+            repos
+        );
     }
 }

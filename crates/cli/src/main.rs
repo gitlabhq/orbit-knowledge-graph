@@ -224,8 +224,17 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         respect_gitignore: true,
     };
 
+    let mut failed = 0usize;
+
     for repo_path in &repos {
-        let git = workspace::git_info(repo_path).context("failed to resolve git metadata")?;
+        let git = match workspace::git_info(repo_path) {
+            Ok(g) => g,
+            Err(e) => {
+                tracing::error!("skipping {}: {e:#}", repo_path.display());
+                failed += 1;
+                continue;
+            }
+        };
         let key = git.repo_path.to_string_lossy().to_string();
         let db_path = store.db_path();
 
@@ -262,6 +271,8 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                 info!("{}", serde_json::to_string_pretty(&output)?);
             }
             Err(e) => {
+                tracing::error!("failed to index {key}: {e:#}");
+                failed += 1;
                 if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path)
                     && let Err(manifest_err) = workspace::set_status(
                         &client,
@@ -274,11 +285,13 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                 {
                     tracing::warn!("failed to record error status in manifest: {manifest_err}");
                 }
-                anyhow::bail!("{e}");
             }
         }
     }
 
+    if failed > 0 {
+        anyhow::bail!("{failed} of {} repositories failed to index", repos.len());
+    }
     Ok(())
 }
 
