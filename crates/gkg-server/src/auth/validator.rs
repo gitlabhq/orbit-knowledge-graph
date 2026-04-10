@@ -51,7 +51,7 @@ impl JwtValidator {
             .map(|data| data.claims)
             .map_err(|e| match e.kind() {
                 jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::TokenExpired,
-                _ => AuthError::InvalidToken,
+                _ => AuthError::InvalidToken(e.to_string()),
             })
     }
 }
@@ -93,6 +93,45 @@ mod tests {
 
         let result = validator.validate(&token);
         assert!(result.is_ok(), "expected valid token, got: {result:?}");
-        assert_eq!(result.unwrap().username, "testuser");
+        let validated = result.unwrap();
+        assert_eq!(validated.username, "testuser");
+        assert_eq!(validated.source_type, "rest");
+    }
+
+    #[test]
+    fn rejects_token_missing_source_type() {
+        let raw_secret = b"test-secret-that-is-at-least-32-bytes-long";
+        let base64_secret = STANDARD.encode(raw_secret);
+        let validator = JwtValidator::new(&base64_secret, 0).unwrap();
+
+        let now = chrono::Utc::now().timestamp();
+        let payload = serde_json::json!({
+            "sub": "user:1",
+            "iss": EXPECTED_ISSUER,
+            "aud": EXPECTED_AUDIENCE,
+            "iat": now,
+            "exp": now + 3600,
+            "user_id": 1,
+            "username": "testuser",
+            "admin": false
+        });
+
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &payload,
+            &EncodingKey::from_secret(raw_secret),
+        )
+        .unwrap();
+
+        let result = validator.validate(&token);
+        assert!(
+            result.is_err(),
+            "expected rejection for missing source_type"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("source_type"),
+            "error should mention source_type, got: {err}"
+        );
     }
 }
