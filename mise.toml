@@ -61,6 +61,30 @@ description = "Fuzz the query compiler with structured JSON query generation"
 run = "cargo +nightly bolero test fuzz_ruby -p gkg-fuzz"
 description = "Fuzz the Ruby code parser"
 
+[tasks."fuzz:python"]
+run = "cargo +nightly bolero test fuzz_python -p gkg-fuzz"
+description = "Fuzz the Python code parser"
+
+[tasks."fuzz:typescript"]
+run = "cargo +nightly bolero test fuzz_typescript -p gkg-fuzz"
+description = "Fuzz the TypeScript/JavaScript code parser"
+
+[tasks."fuzz:java"]
+run = "cargo +nightly bolero test fuzz_java -p gkg-fuzz"
+description = "Fuzz the Java code parser"
+
+[tasks."fuzz:kotlin"]
+run = "cargo +nightly bolero test fuzz_kotlin -p gkg-fuzz"
+description = "Fuzz the Kotlin code parser"
+
+[tasks."fuzz:csharp"]
+run = "cargo +nightly bolero test fuzz_csharp -p gkg-fuzz"
+description = "Fuzz the C# code parser"
+
+[tasks."fuzz:rust-parser"]
+run = "cargo +nightly bolero test fuzz_rust_parser -p gkg-fuzz"
+description = "Fuzz the Rust code parser"
+
 [tasks.build]
 run = "cargo build --release"
 description = "Build the crates"

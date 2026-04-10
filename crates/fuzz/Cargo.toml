@@ -27,6 +27,36 @@ name = "fuzz_ruby"
 path = "tests/fuzz_ruby/fuzz_target.rs"
 harness = false
 
+[[test]]
+name = "fuzz_python"
+path = "tests/fuzz_python/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_typescript"
+path = "tests/fuzz_typescript/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_java"
+path = "tests/fuzz_java/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_kotlin"
+path = "tests/fuzz_kotlin/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_csharp"
+path = "tests/fuzz_csharp/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_rust_parser"
+path = "tests/fuzz_rust_parser/fuzz_target.rs"
+harness = false
+
 # Override workspace lint: bolero's libfuzzer harness requires unsafe glue.
 [lints.rust]
 unsafe_code = "allow"
