@@ -11,12 +11,13 @@ const RESERVED_WORDS: &[&str] = &[
 ];
 
 /// Backtick-quotes an identifier if it is a ClickHouse reserved word.
+/// Escapes any embedded backticks by doubling them (```` → `````````).
 fn quote_ident(name: &str) -> String {
-    let bare = name.trim_matches('`');
+    let bare = name.trim_matches('`').replace('`', "``");
     if RESERVED_WORDS.contains(&bare.to_lowercase().as_str()) {
         format!("`{bare}`")
     } else {
-        bare.to_string()
+        bare
     }
 }
 
@@ -30,7 +31,10 @@ fn emit_column_type(ct: &ColumnType) -> String {
         ColumnType::Timestamp {
             precision,
             timezone: Some(tz),
-        } => format!("DateTime64({precision}, '{tz}')"),
+        } => {
+            let safe_tz = tz.replace('\'', "\\'");
+            format!("DateTime64({precision}, '{safe_tz}')")
+        }
         ColumnType::Timestamp {
             precision,
             timezone: None,
