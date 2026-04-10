@@ -1,34 +1,26 @@
 #!/usr/bin/env bash
 # Worktree and branch/commit tracking test.
+# Usage: cli-test-worktree.sh <orbit> <repo> <wt-feat> <wt-fix> <main-branch> <main-sha> <feat-sha> <fix-sha>
 ORBIT="$1"
+REPO="$2"
+WT_FEAT="$3"
+WT_FIX="$4"
+MAIN_BRANCH="$5"
+MAIN_SHA="$6"
+FEAT_SHA="$7"
+FIX_SHA="$8"
+FEAT_BRANCH="feature/tests"
+FIX_BRANCH="fix/utils"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
-
-REPO="$TMP/my-project" WT_FEAT="$TMP/wt-feat" WT_FIX="$TMP/wt-fix"
-FEAT_BRANCH="feature/tests" FIX_BRANCH="fix/utils"
-
-# Setup
-init_test_repo "$REPO"
-MAIN_SHA=$(cd "$REPO" && git rev-parse HEAD)
-MAIN_BRANCH=$(cd "$REPO" && git symbolic-ref --short HEAD)
-
-add_worktree "$REPO" "$FEAT_BRANCH" "$WT_FEAT"
-echo 'def test_hello(): pass' > "$WT_FEAT/src/tests.py"
-cd "$WT_FEAT" && git add -A && git commit -q -m "add tests"
-FEAT_SHA=$(git rev-parse HEAD)
-
-add_worktree "$REPO" "$FIX_BRANCH" "$WT_FIX" "$MAIN_SHA"
-echo 'def patched(): return True' > "$WT_FIX/src/utils.py"
-cd "$WT_FIX" && git add -A && git commit -q -m "patch utils"
-FIX_SHA=$(git rev-parse HEAD)
-cd "$TMP"
 
 # Index & query
 index_repos "$REPO" "$WT_FEAT" "$WT_FIX"
 orbit_query "$Q_FILES" "$TMP/f.json"
 orbit_query "$Q_TRAVERSAL" "$TMP/t.json"
 
-# Assert -- generate expectations SQL, run in one shot
+# Assert
 cat > "$TMP/expect.sql" << SQL
 WITH nodes AS (SELECT unnest(nodes) AS n FROM read_json('$TMP/f.json')),
 c AS (SELECT

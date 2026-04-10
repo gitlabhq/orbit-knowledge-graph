@@ -76,36 +76,4 @@ run_concurrent_writers() {
     else echo "none"; fi
 }
 
-add_worktree() {
-    local repo="$1" branch="$2" wt="$3" base="${4:-}"
-    if [ -n "$base" ]; then
-        cd "$repo" && git worktree add -q -b "$branch" "$wt" "$base" 2>/dev/null
-    else
-        cd "$repo" && git worktree add -q -b "$branch" "$wt"
-    fi
-}
 
-init_test_repo() {
-    local repo="$1"
-    mkdir -p "$repo/src"
-    cat > "$repo/src/main.py" << 'PY'
-def hello():
-    print("hello")
-
-class App:
-    def run(self):
-        hello()
-PY
-    cat > "$repo/src/utils.py" << 'PY'
-import os
-
-def read_file(path):
-    return open(path).read()
-PY
-    cd "$repo"
-    git init -q
-    git config user.email "test@test.com"
-    git config user.name "Test"
-    git add -A && git commit -q -m "initial"
-    cd - > /dev/null
-}
