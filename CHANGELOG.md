@@ -1,3 +1,18 @@
+## [0.25.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.24.0...v0.25.0) (2026-04-10)
+
+### Features
+
+* add mise dev task for GDK-connected local development ([44be42c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/44be42c108dc2557f94fa966be2e7f9dc9862076)) by Dmitry Gruzd
+* **auth:** accept source_type JWT claim and trace it ([a533e0e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a533e0ee40e8de4e03941f5feb431907bebeaf84)) by Michael Angelo Rivera
+* **indexer:** dispatcher health endpoints ([f3e92f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f3e92f98e39a2c1e17afdb4ce914a2bb9cebea69)) by Bohdan Parkhomchuk
+* **schema:** add node_edge_counts projection to gl_edge ([ade976c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ade976c860751ee6d2b5cf8192361eb9587ba64a)) by Michael Usachenko
+
+### Other
+
+* **deps:** update rust crate async-nats to 0.47.0 ([81f5b6e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/81f5b6ec0c078fe44c64d5b9f8df83486ab42a70)) by GitLab Renovate Bot
+* **deps:** update rust crate indexmap to v2.13.1 ([74ff087](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/74ff08773fefc231bb6a399be95f94cf748e2a92)) by GitLab Renovate Bot
+* **deps:** update rust crate uuid to v1.23.0 ([6fbd6b3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6fbd6b32ace69509f408d488bbeb1ad5903bd9e2)) by GitLab Renovate Bot
+
 ## [0.24.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.23.0...v0.24.0) (2026-04-10)
 
 ### Features
