@@ -97,7 +97,10 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
 
 // ── Repo helpers ────────────────────────────────────────────────
 
-/// Create a git repo at a specific path with Python files.
+/// Create a git repo at a specific path with given files.
+/// Use this when the repo must be at a controlled location (e.g.
+/// nested inside another repo). For standalone repos, prefer
+/// [`create_test_repo`] which uses gitalisk's `LocalGitRepository`.
 pub fn init_repo_at(path: &Path, files: &[(&str, &str)]) {
     std::fs::create_dir_all(path).unwrap();
     for (name, content) in files {
