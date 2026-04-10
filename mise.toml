@@ -42,6 +42,7 @@ protoc = "34.1"
 jq = "1.7"
 vendir = "0.45.2"
 yq = "4.52.5"
+hyperfine = "1.20.0"
 
 [tasks."hooks:install"]
 run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
@@ -134,6 +135,23 @@ usage = '''
 arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
+
+[tasks."bench:download-repos"]
+run = "gitlab-xtasks benchmark download-repos --config code-indexing-benchmark.yaml"
+description = "Download benchmark repositories"
+
+[tasks."bench:run"]
+depends = ["bench:download-repos"]
+run = "cargo build --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
+description = "Run code indexing benchmark"
+
+[tasks."bench:list-repos"]
+run = "gitlab-xtasks benchmark list-repos --config code-indexing-benchmark.yaml"
+description = "List benchmark repositories"
+
+[tasks."bench:list-groups"]
+run = "gitlab-xtasks benchmark list-groups --config code-indexing-benchmark.yaml"
+description = "List benchmark repo groups"
 
 [tasks."proto:go"]
 run = "scripts/proto-go.sh generate"

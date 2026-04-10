@@ -35,6 +35,7 @@ stages:
   - docs
   - security
   - test
+  - benchmark
   - ai
   - build
   - publish
@@ -367,6 +368,145 @@ integration-test:
   script:
     - cargo nextest run --profile ci --all-features --test containers
     - sccache --show-stats || true
+
+# Benchmark Stage
+#
+# Runs code indexing benchmarks when indexing crates change.
+# Repos are auto-downloaded by gitlab-xtasks from the benchmark config.
+
+.code-indexing-benchmark-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - crates/cli/**/*
+        - crates/code-graph/**/*
+        - crates/ontology/**/*
+        - crates/duckdb-client/**/*
+        - crates/utils/**/*
+        - config/ontology/**/*
+        - code-indexing-benchmark.yaml
+
+code-indexing-benchmark-build:
+  stage: benchmark
+  needs: []
+  allow_failure: true
+  extends:
+    - .job-template
+    - .sccache-template
+    - .code-indexing-benchmark-rules
+  interruptible: true
+  tags:
+    - saas-linux-large-amd64
+  script:
+    - cargo build --bin orbit --release --features duckdb-client/bundled
+  artifacts:
+    paths:
+      - target/release/orbit
+    expire_in: 1 day
+
+.code-indexing-benchmark-template:
+  stage: benchmark
+  needs:
+    - code-indexing-benchmark-build
+  allow_failure: true
+  extends:
+    - .code-indexing-benchmark-rules
+  interruptible: true
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    BENCHMARK_GITLAB_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
+      token: $VAULT_ID_TOKEN
+  cache:
+    key:
+      files:
+        - code-indexing-benchmark.yaml
+      prefix: "benchmark-repos-${GROUP}"
+    paths:
+      - temp/
+  script:
+    - |
+      GROUP_FLAG=""
+      if [[ -n "$GROUP" ]]; then
+        GROUP_FLAG="--group $GROUP"
+      fi
+
+      OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${GROUP:-all}.json"
+      gitlab-xtasks benchmark hyperfine \
+        --config code-indexing-benchmark.yaml \
+        --architecture "$ARCH" \
+        --scenario "$SCENARIO" \
+        --output-file "$OUTPUT_FILE" \
+        $GROUP_FLAG
+  artifacts:
+    paths:
+      - gkg-benchmark-*.json
+    expire_in: 3 weeks
+
+code-indexing-benchmark-linux:
+  extends:
+    - .job-template
+    - .code-indexing-benchmark-template
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: "linux-x86_64"
+  parallel:
+    matrix:
+      - SCENARIO: [gkg_index_4_threads]
+        GROUP: [ruby, typescript, java]
+
+code-indexing-benchmark-analyze:
+  stage: benchmark
+  needs:
+    - code-indexing-benchmark-linux
+  allow_failure: true
+  extends:
+    - .job-template
+    - .code-indexing-benchmark-rules
+  interruptible: true
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    BENCHMARK_GITLAB_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
+      token: $VAULT_ID_TOKEN
+  script:
+    - |
+      gitlab-xtasks benchmark analyze \
+        --pattern "gkg-benchmark-*.json" \
+        --output-format markdown \
+        --pipeline-url "$CI_PIPELINE_URL" \
+        --job-url "$CI_JOB_URL" \
+        --branch "$CI_COMMIT_REF_NAME" \
+        --output-file gkg-benchmark-results.md
+
+      gitlab-xtasks benchmark analyze \
+        --pattern "gkg-benchmark-*.json" \
+        --output-format json \
+        --pipeline-url "$CI_PIPELINE_URL" \
+        --job-url "$CI_JOB_URL" \
+        --branch "$CI_COMMIT_REF_NAME" \
+        --output-file gkg-benchmark-results.json
+
+      if [[ -n "$CI_MERGE_REQUEST_IID" ]]; then
+        gitlab-xtasks comment post \
+          --type add-or-edit \
+          --unique-id "code-indexing-benchmark-comment" \
+          --token "$BENCHMARK_GITLAB_TOKEN" \
+          --file-path gkg-benchmark-results.md
+      fi
+  artifacts:
+    paths:
+      - gkg-benchmark-results.md
+      - gkg-benchmark-results.json
+      - gkg-benchmark-*.json
+    expire_in: 1 week
 
 # Build Stage
 
