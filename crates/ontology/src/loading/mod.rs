@@ -366,5 +366,53 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
+    // Validate storage columns match declared properties.
+    validate_storage_columns(&ontology)?;
+
     Ok(ontology)
+}
+
+/// Checks that every node's storage columns correspond 1:1 with its
+/// non-virtual properties. Catches drift between the logical schema
+/// (properties) and physical schema (storage).
+fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for node in ontology.nodes() {
+        if node.storage.columns.is_empty() {
+            continue;
+        }
+
+        let property_names: Vec<&str> = node
+            .fields
+            .iter()
+            .filter(|f| !f.is_virtual())
+            .map(|f| f.name.as_str())
+            .collect();
+
+        let storage_names: Vec<String> = node
+            .storage
+            .columns
+            .iter()
+            .map(|c| c.name.trim_matches('`').to_string())
+            .collect();
+
+        for storage_col in &storage_names {
+            if !property_names.contains(&storage_col.as_str()) {
+                return Err(OntologyError::Validation(format!(
+                    "{}: storage column '{}' has no matching property",
+                    node.name, storage_col
+                )));
+            }
+        }
+
+        for prop in &property_names {
+            if !storage_names.iter().any(|s| s == prop) {
+                return Err(OntologyError::Validation(format!(
+                    "{}: property '{}' has no matching storage column",
+                    node.name, prop
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }
