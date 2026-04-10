@@ -509,4 +509,25 @@ mod integration_tests {
             "ResolveTypeFailingOnNestedChild.Child.GrandChild.greet should call ResolveTypeFailingOnNestedChild.GrandChild.greet"
         );
     }
+
+    /// Verifies that a file with 1000+ chained .append() calls on a `var`
+    /// binding (no explicit type) is indexed without stack overflow.
+    /// This exercises the resolve_expression <-> resolve_identifier_type
+    /// mutual recursion path that caused crashes on elasticsearch.
+    #[traced_test]
+    #[tokio::test]
+    async fn test_java_deep_initializer_chain_does_not_stack_overflow() {
+        let setup = setup_java_reference_pipeline().await;
+
+        let has_deep_initializer_file = setup
+            .graph_data
+            .file_nodes
+            .iter()
+            .any(|f| f.path.contains("DeepInitializerChain"));
+
+        assert!(
+            has_deep_initializer_file,
+            "DeepInitializerChain.java should be indexed without stack overflow"
+        );
+    }
 }
