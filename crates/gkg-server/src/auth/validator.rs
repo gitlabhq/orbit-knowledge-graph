@@ -81,6 +81,7 @@ mod tests {
             organization_id: None,
             min_access_level: None,
             group_traversal_ids: vec![],
+            source_type: "rest".into(),
         };
 
         let token = encode(

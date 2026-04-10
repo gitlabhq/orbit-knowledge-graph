@@ -72,6 +72,7 @@ mod tests {
             organization_id,
             min_access_level: Some(20),
             group_traversal_ids,
+            source_type: "rest".into(),
         }
     }
 
