@@ -60,7 +60,13 @@ use gkg_server_config::{
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
 use locking::INDEXING_LOCKS_BUCKET;
+use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
+use modules::namespace_deletion::{
+    ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
+};
+use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use nats::{KvBucketConfig, NatsBroker};
+use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -116,6 +122,29 @@ pub enum IndexerError {
     HandlerInit(#[from] HandlerInitError),
 
     #[error("Health server failed: {0}")]
+    Health(#[from] std::io::Error),
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct DispatcherConfig {
+    #[serde(default)]
+    pub nats: NatsConfiguration,
+    #[serde(default)]
+    pub graph: ClickHouseConfiguration,
+    #[serde(default)]
+    pub datalake: ClickHouseConfiguration,
+    #[serde(default)]
+    pub schedule: ScheduleConfig,
+    #[serde(default = "default_health_bind_address")]
+    pub health_bind_address: SocketAddr,
+}
+
+#[derive(Debug, Error)]
+pub enum DispatcherError {
+    #[error("scheduler error: {0}")]
+    Scheduler(#[from] scheduler::SchedulerError),
+
+    #[error("health server failed: {0}")]
     Health(#[from] std::io::Error),
 }
 
@@ -200,4 +229,83 @@ pub async fn run(
 
     info!("indexer stopped");
     result
+}
+
+/// Runs the dispatcher (scheduled task loops + health server) until shutdown.
+pub async fn run_dispatcher(
+    config: &DispatcherConfig,
+    ontology: &ontology::Ontology,
+    shutdown: CancellationToken,
+) -> Result<(), DispatcherError> {
+    let services = scheduler::connect(&config.nats).await?;
+    let graph = config.graph.build_client();
+    let datalake = config.datalake.build_client();
+    let metrics = ScheduledTaskMetrics::new();
+    let lock_service = services.lock_service.clone();
+
+    let deletion_graph = Arc::new(config.graph.build_client());
+    let deletion_datalake = Arc::new(config.datalake.build_client());
+    let deletion_store: Arc<dyn NamespaceDeletionStore> =
+        Arc::new(ClickHouseNamespaceDeletionStore::new(
+            deletion_datalake,
+            Arc::clone(&deletion_graph),
+            ontology,
+        ));
+    let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
+
+    let health_state = HealthState {
+        nats_client: services.nats_client.clone(),
+        graph_client: config.graph.build_client(),
+        datalake_client: config.datalake.build_client(),
+        gitlab_client: None,
+    };
+
+    let tasks: Vec<Box<dyn ScheduledTask>> = vec![
+        Box::new(GlobalDispatcher::new(
+            services.nats.clone(),
+            metrics.clone(),
+            config.schedule.tasks.global.clone(),
+        )),
+        Box::new(NamespaceDispatcher::new(
+            services.nats.clone(),
+            datalake,
+            metrics.clone(),
+            config.schedule.tasks.namespace.clone(),
+        )),
+        Box::new(SiphonCodeIndexingTaskDispatcher::new(
+            services.nats.clone(),
+            metrics.clone(),
+            config.schedule.tasks.code_indexing_task.clone(),
+        )),
+        Box::new(NamespaceCodeBackfillDispatcher::new(
+            services.nats.clone(),
+            config.datalake.build_client(),
+            metrics.clone(),
+            config.schedule.tasks.namespace_code_backfill.clone(),
+        )),
+        Box::new(TableCleanup::new(
+            graph,
+            metrics.clone(),
+            config.schedule.tasks.table_cleanup.clone(),
+        )),
+        Box::new(NamespaceDeletionScheduler::new(
+            deletion_store,
+            checkpoint_store,
+            services.nats.clone(),
+            metrics,
+            config.schedule.tasks.namespace_deletion.clone(),
+        )),
+    ];
+
+    tokio::select! {
+        result = scheduler::run_loop(tasks, lock_service, shutdown) => {
+            result.map_err(DispatcherError::from)
+        }
+        result = run_health_server(config.health_bind_address, health_state) => {
+            let error = result.err().unwrap_or_else(|| std::io::Error::other(
+                "dispatcher health server exited unexpectedly",
+            ));
+            Err(DispatcherError::Health(error))
+        }
+    }
 }

@@ -31,6 +31,10 @@ fn default_indexer_health_bind_address() -> SocketAddr {
     "0.0.0.0:4202".parse().unwrap()
 }
 
+fn default_dispatcher_health_bind_address() -> SocketAddr {
+    "0.0.0.0:4203".parse().unwrap()
+}
+
 fn default_jwt_clock_skew_secs() -> u64 {
     60
 }
@@ -62,6 +66,8 @@ pub struct AppConfig {
     pub health_check: HealthCheckConfig,
     #[serde(default = "default_indexer_health_bind_address")]
     pub indexer_health_bind_address: SocketAddr,
+    #[serde(default = "default_dispatcher_health_bind_address")]
+    pub dispatcher_health_bind_address: SocketAddr,
     #[serde(default)]
     pub metrics: MetricsConfig,
     #[serde(default)]
