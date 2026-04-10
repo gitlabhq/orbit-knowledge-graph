@@ -66,6 +66,37 @@ orbit_query() {
     "$ORBIT" query --raw "$1" > "$2" 2>/dev/null
 }
 
+# Run N concurrent orbit queries, wait for all, check results are identical.
+# Usage: run_concurrent_queries <query-json> <n> <prefix>
+# Returns: "true" if all succeeded and returned identical results, "false" otherwise.
+run_concurrent_queries() {
+    local query="$1" n="$2" prefix="$3"
+    local pids=()
+    for i in $(seq 1 "$n"); do
+        orbit_query "$query" "$TMP/${prefix}$i.json" &
+        pids+=($!)
+    done
+    local all_ok=true
+    for pid in "${pids[@]}"; do wait "$pid" || all_ok=false; done
+
+    local files=()
+    for i in $(seq 1 "$n"); do files+=("$TMP/${prefix}$i.json"); done
+
+    $all_ok && all_identical "${files[@]}" || echo "false"
+}
+
+# Run N sequential orbit queries and check all results are identical.
+# Usage: run_sequential_queries <query-json> <n> <prefix>
+run_sequential_queries() {
+    local query="$1" n="$2" prefix="$3"
+    local files=()
+    for i in $(seq 1 "$n"); do
+        orbit_query "$query" "$TMP/${prefix}$i.json"
+        files+=("$TMP/${prefix}$i.json")
+    done
+    all_identical "${files[@]}"
+}
+
 # Check if all files have identical content.
 # Usage: all_identical <file1> <file2> [file3...]
 all_identical() {
@@ -73,6 +104,22 @@ all_identical() {
         SELECT count(DISTINCT content) = 1
         FROM read_text([$(printf "'%s'," "$@" | sed 's/,$//')])
     " 2>/dev/null
+}
+
+# Run concurrent orbit index processes, return "both"/"one"/"none".
+# Usage: run_concurrent_writers <repo-path> <n>
+run_concurrent_writers() {
+    local repo="$1" n="$2"
+    local pids=() ok=0
+    for _ in $(seq 1 "$n"); do
+        "$ORBIT" index "$repo" > /dev/null 2>&1 &
+        pids+=($!)
+    done
+    for pid in "${pids[@]}"; do wait "$pid" && ok=$((ok + 1)) || true; done
+    if [ "$ok" -eq "$n" ]; then echo "all"
+    elif [ "$ok" -gt 0 ];  then echo "some"
+    else                        echo "none"
+    fi
 }
 
 # Create a minimal git repo with Python files for testing.
