@@ -347,13 +347,6 @@ mod tests {
         Ontology::load_embedded().expect("embedded ontology must load")
     }
 
-    fn find_table<'a>(tables: &'a [CreateTable], name: &str) -> &'a CreateTable {
-        tables.iter().find(|t| t.name == name).unwrap_or_else(|| {
-            let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
-            panic!("table '{name}' not found in: {names:?}");
-        })
-    }
-
     #[test]
     fn generates_tables() {
         let tables = generate_graph_tables(&ontology());

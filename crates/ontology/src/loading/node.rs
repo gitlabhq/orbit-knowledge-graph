@@ -436,7 +436,11 @@ fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
                 codec: col.codec,
             })
             .collect(),
-        indexes: yaml.indexes.into_iter().map(convert_storage_index).collect(),
+        indexes: yaml
+            .indexes
+            .into_iter()
+            .map(convert_storage_index)
+            .collect(),
         projections: yaml
             .projections
             .into_iter()
