@@ -93,16 +93,22 @@ pub fn emit_create_table(table: &CreateTable) -> String {
         engine_args,
     ));
 
-    // ORDER BY
-    if table.order_by.len() == 1 {
-        parts.push(format!("ORDER BY ({})", table.order_by[0]));
-    } else if !table.order_by.is_empty() {
-        parts.push(format!("ORDER BY ({})", table.order_by.join(", ")));
-    }
-
-    // PRIMARY KEY (only when different from ORDER BY)
-    if let Some(pk) = &table.primary_key {
-        parts.push(format!("PRIMARY KEY ({})", pk.join(", ")));
+    // ORDER BY [PRIMARY KEY]
+    if !table.order_by.is_empty() {
+        let order_by = format!("ORDER BY ({})", table.order_by.join(", "));
+        if let Some(pk) = &table.primary_key {
+            let pk_str = format!("PRIMARY KEY ({})", pk.join(", "));
+            if pk == &table.order_by {
+                // Same value: emit on one line (matches graph.sql convention)
+                parts.push(format!("{order_by} {pk_str}"));
+            } else {
+                // Different values: emit on separate lines
+                parts.push(order_by);
+                parts.push(pk_str);
+            }
+        } else {
+            parts.push(order_by);
+        }
     }
 
     // SETTINGS
@@ -121,10 +127,12 @@ pub fn emit_create_table(table: &CreateTable) -> String {
 fn emit_projection(proj: &ProjectionDef) -> String {
     match proj {
         ProjectionDef::Reorder { name, order_by } => {
-            format!(
-                "    PROJECTION {name} (SELECT * ORDER BY ({}))",
-                order_by.join(", ")
-            )
+            let order = if order_by.len() == 1 {
+                order_by[0].clone()
+            } else {
+                format!("({})", order_by.join(", "))
+            };
+            format!("    PROJECTION {name} (SELECT * ORDER BY {order})")
         }
         ProjectionDef::Aggregate {
             name,
@@ -222,7 +230,7 @@ mod tests {
 
         let sql = emit_create_table(&table);
         assert!(sql.contains("INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1"));
-        assert!(sql.contains("PROJECTION by_id (SELECT * ORDER BY (id))"));
+        assert!(sql.contains("PROJECTION by_id (SELECT * ORDER BY id)"));
         assert!(sql.contains("ORDER BY (traversal_path, id)"));
         assert!(sql.contains("PRIMARY KEY (traversal_path, id)"));
         assert!(sql.contains("index_granularity = 2048"));
