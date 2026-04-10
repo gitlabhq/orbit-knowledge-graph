@@ -167,10 +167,88 @@ The metric `gkg_schema_migration_total` (counter) tracks migration phase outcome
 | `phase` | `acquire_lock`, `drain`, `create_tables`, `mark_migrating`, `complete` |
 | `result` | `success`, `failure`, `skipped` |
 
-### Subsequent migration steps
+## Migration completion detection
 
-- **Issue #441** (query compiler): Switch Webserver reads to the new table-set.
-- **Issue #442** (cleanup): Drop old table-sets beyond `max_retained_versions`.
+After the indexer creates new-prefix tables and marks a version as `migrating`, the dispatcher's
+normal namespace poll cycle re-indexes all enabled namespaces into the new tables. A scheduled
+task (`MigrationCompletionChecker`) running in `DispatchIndexing` mode periodically checks
+whether the migration is complete.
+
+Implemented in `crates/indexer/src/migration_completion.rs`.
+
+### Completion criteria
+
+The checker compares checkpoint state in the new-prefix tables against the set of enabled
+namespaces from the datalake:
+
+1. **SDLC namespaces** — count distinct namespace IDs with checkpoint entries (keys matching
+   `ns.<id>.*`) in the `vN_checkpoint` table, compared against the count of enabled namespaces
+   in `siphon_knowledge_graph_enabled_namespaces`.
+
+When all enabled namespaces have at least one checkpoint entry in the new-prefix table, the
+migration is considered complete.
+
+### Status transitions on completion
+
+When completion is detected:
+
+1. All previously `active` versions are marked `retired`.
+2. The `migrating` version is marked `active`.
+3. The `gkg_schema_migration_completed_total` counter is incremented.
+
+Webserver pods must be restarted after the version transitions to pick up the new active prefix.
+
+### Automatic cleanup via retention window
+
+After completion detection, the checker enforces the `max_retained_versions` setting (default: 2).
+Versions outside this window with status `retired` are cleaned up:
+
+```text
+Example with max_retained_versions=2, after migrating to v2:
+  v2 → active  (keep)
+  v1 → retired (keep — within window, rollback target)
+  v0 → retired (OUTSIDE window → drop tables, mark "dropped")
+```
+
+Cleanup logic:
+
+1. Read all versions from `gkg_schema_version` ordered by version descending.
+2. Filter to non-dropped entries; keep the top `max_retained_versions`.
+3. For each entry outside the window with status `retired`:
+   a. Execute `DROP TABLE IF EXISTS <prefix><table>` for each graph table.
+   b. Mark the version as `dropped` in `gkg_schema_version`.
+
+### Safety guarantees
+
+- Only tables for versions with status `retired` are dropped — never `active` or `migrating`.
+- `DROP TABLE IF EXISTS` is idempotent — safe to retry on partial failures.
+- The cleanup runs under the `schema_migration` NATS KV lock — no concurrent cleanup attempts.
+- `DROP TABLE` uses async drop (no `SYNC` keyword) since table names are monotonically
+  versioned and will never be reused.
+- Within the retention window (default 2), the previous version's tables always exist for
+  rollback.
+
+### Configuration
+
+The migration completion checker runs every 5 minutes by default:
+
+```yaml
+schedule:
+  tasks:
+    migration_completion:
+      cron: "0 */5 * * * *"
+```
+
+### Observability
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `gkg_schema_migration_completed_total` | counter | — | Successful migration completions |
+| `gkg_schema_cleanup_total` | counter | `version`, `result` | Table cleanup operations per version (`success` or `failure`) |
+
+Table drop operations are logged at `info` level with the version and table name.
+
+---
 
 Breaking schema changes (column type changes, table restructuring) use new prefixed tables rather
 than `ALTER TABLE`, avoiding ClickHouse data rewrites and table locks.

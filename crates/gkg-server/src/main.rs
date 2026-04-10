@@ -74,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
                 graph: config.graph.clone(),
                 datalake: config.datalake.clone(),
                 schedule: config.schedule.clone(),
+                schema: config.schema.clone(),
                 health_bind_address: config.dispatcher_health_bind_address,
             };
             indexer::run_dispatcher(&dispatcher_config, &ontology, shutdown)
