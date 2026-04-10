@@ -255,6 +255,7 @@ Example: `info,gkg_server=debug,gkg_indexer=trace`
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `indexer_health_bind_address` | `0.0.0.0:4202` | Health check server address for Indexer mode |
+| `dispatcher_health_bind_address` | `0.0.0.0:4203` | Health check server address for DispatchIndexing mode |
 
 ## Tuning guide
 

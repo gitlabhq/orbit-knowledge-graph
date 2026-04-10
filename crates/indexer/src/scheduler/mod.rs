@@ -57,6 +57,7 @@ pub enum SchedulerError {
 pub struct SchedulerServices {
     pub nats: Arc<dyn NatsServices>,
     pub lock_service: Arc<dyn LockService>,
+    pub nats_client: async_nats::Client,
 }
 
 pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerServices, SchedulerError> {
@@ -68,10 +69,15 @@ pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerService
         )
         .await?;
 
+    let nats_client = broker.nats_client().clone();
     let nats: Arc<dyn NatsServices> = Arc::new(NatsServicesImpl::new(broker));
     let lock_service: Arc<dyn LockService> = Arc::new(NatsLockService::new(Arc::clone(&nats)));
 
-    Ok(SchedulerServices { nats, lock_service })
+    Ok(SchedulerServices {
+        nats,
+        lock_service,
+        nats_client,
+    })
 }
 
 /// Runs all tasks in independent loops until `shutdown` is cancelled.

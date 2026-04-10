@@ -24,6 +24,10 @@
         "username": "default"
       }
     },
+    "dispatcher_health_bind_address": {
+      "type": "string",
+      "default": "0.0.0.0:4203"
+    },
     "engine": {
       "$ref": "#/$defs/EngineConfiguration",
       "default": {

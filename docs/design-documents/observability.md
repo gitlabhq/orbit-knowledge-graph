@@ -2,7 +2,7 @@
 
 ## Summary
 
-This document covers how we monitor the Knowledge Graph services (Indexer and Web Service): metrics, logs, tracing, health checks, and what operators need to do for self-managed deployments.
+This document covers how we monitor the Knowledge Graph services (Indexer, Dispatcher, and Web Service): metrics, logs, tracing, health checks, and what operators need to do for self-managed deployments.
 
 ## How Observability Works Today (GitLab.com)
 
@@ -217,7 +217,7 @@ Services are instrumented with OpenTelemetry for distributed tracing. A single r
 
 ### Health Checks
 
-Services expose `/health` for liveness and readiness probes. Traffic is only routed to healthy instances.
+The Indexer and Dispatcher expose `/live` and `/ready` endpoints on dedicated health ports (default 4202 and 4203 respectively). The `/ready` probe checks downstream dependencies (NATS, ClickHouse graph, ClickHouse datalake) and returns HTTP 503 when any are unreachable. Traffic is only routed to healthy instances.
 
 ## Self-Managed Instances
 
@@ -228,7 +228,7 @@ Interface contracts (what we provide):
 - **Metrics**: Each service exposes a Prometheus-compatible `/metrics` endpoint for service-level KPIs; we also expose gauges for graph database disk usage where applicable. CPU and host/container resource utilization are expected to be collected via standard exporters alongside our service metrics.
 - **Logs**: All services emit structured JSON to `stdout`/`stderr` using the schema defined in [Logging Structure and Format](#logging-structure-and-format) (including `correlation_id`).
 - **Tracing**: Services are instrumented with OpenTelemetry, allowing operators to configure an OTLP exporter (gRPC/HTTP) to a customer-managed collector or backend.
-- **Health**: Liveness and readiness `/health` endpoints for orchestration and local SLOs.
+- **Health**: Liveness (`/live`) and readiness (`/ready`) endpoints on dedicated health ports for orchestration and local SLOs.
 
 Operator responsibilities:
 
