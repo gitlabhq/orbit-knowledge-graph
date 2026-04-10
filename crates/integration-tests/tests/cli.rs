@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use integration_testkit::cli::{
-    create_test_repo, edge_count, git, nodes, nodes_where, orbit_cmd, orbit_index, orbit_query,
-    sorted_node_ids,
+    create_test_repo, edge_count, git, init_repo_at, nodes, nodes_where, orbit_cmd, orbit_index,
+    orbit_query, sorted_node_ids,
 };
 use serde_json::Value;
 
@@ -224,4 +224,112 @@ fn sequential_read_consistency() {
             sorted_node_ids(&orbit_query(&q("files_simple"), data_dir.path()))
         );
     }
+}
+
+// ── Nested repos ────────────────────────────────────────────────
+
+#[test]
+fn nested_repos_indexed_separately() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+
+    let parent = workspace.path().join("parent");
+    init_repo_at(&parent, &[("src/app.py", "def app(): pass\n")]);
+
+    let nested = parent.join("libs/utils");
+    init_repo_at(&nested, &[("src/helper.py", "def helper(): pass\n")]);
+
+    let dd = data_dir.path();
+    assert!(orbit_index(&parent, dd));
+    assert!(orbit_index(&nested, dd));
+
+    let files = orbit_query(&q("files"), dd);
+
+    // Both repos indexed, files from each present
+    assert!(
+        !nodes_where(&files, "name", "app.py").is_empty(),
+        "parent repo file missing"
+    );
+    assert!(
+        !nodes_where(&files, "name", "helper.py").is_empty(),
+        "nested repo file missing"
+    );
+
+    // Different project IDs (different canonical paths)
+    let app_id = nodes_where(&files, "name", "app.py")[0]["id"]
+        .as_i64()
+        .unwrap();
+    let helper_id = nodes_where(&files, "name", "helper.py")[0]["id"]
+        .as_i64()
+        .unwrap();
+    assert_ne!(app_id, helper_id);
+}
+
+#[test]
+fn nested_repo_content_isolation() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+
+    let repo_a = workspace.path().join("repo-a");
+    init_repo_at(&repo_a, &[("src/main.py", "def version_a(): pass\n")]);
+
+    let repo_b = workspace.path().join("repo-b");
+    init_repo_at(&repo_b, &[("src/main.py", "def version_b(): pass\n")]);
+
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo_a, dd));
+    assert!(orbit_index(&repo_b, dd));
+
+    let files = orbit_query(&q("files"), dd);
+    let mains = nodes_where(&files, "name", "main.py");
+    assert_eq!(mains.len(), 2, "expected main.py from both repos");
+
+    // Content resolves from the correct repo
+    let contents: Vec<&str> = mains
+        .iter()
+        .map(|n| n["content"].as_str().unwrap())
+        .collect();
+    assert!(
+        contents.iter().any(|c| c.contains("version_a")),
+        "repo-a content missing"
+    );
+    assert!(
+        contents.iter().any(|c| c.contains("version_b")),
+        "repo-b content missing"
+    );
+}
+
+#[test]
+fn reindex_nested_doesnt_affect_parent() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+
+    let parent = workspace.path().join("parent");
+    init_repo_at(&parent, &[("src/app.py", "def app(): pass\n")]);
+
+    let nested = parent.join("libs/core");
+    init_repo_at(&nested, &[("src/core.py", "def core(): pass\n")]);
+
+    let dd = data_dir.path();
+    assert!(orbit_index(&parent, dd));
+    assert!(orbit_index(&nested, dd));
+
+    let before = nodes_where(&orbit_query(&q("files_simple"), dd), "name", "app.py").len();
+
+    // Re-index only the nested repo
+    std::fs::write(nested.join("src/extra.py"), "def extra(): pass\n").unwrap();
+    git(&nested, &["add", "-A"]);
+    git(&nested, &["commit", "-m", "add extra"]);
+    assert!(orbit_index(&nested, dd));
+
+    let files = orbit_query(&q("files_simple"), dd);
+    let after = nodes_where(&files, "name", "app.py").len();
+
+    // Parent repo data unchanged
+    assert_eq!(before, after, "parent files should not change");
+    // Nested repo has new file
+    assert!(
+        !nodes_where(&files, "name", "extra.py").is_empty(),
+        "new nested file missing"
+    );
 }

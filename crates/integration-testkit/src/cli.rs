@@ -97,6 +97,23 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
 
 // ── Repo helpers ────────────────────────────────────────────────
 
+/// Create a git repo at a specific path with Python files.
+pub fn init_repo_at(path: &Path, files: &[(&str, &str)]) {
+    std::fs::create_dir_all(path).unwrap();
+    for (name, content) in files {
+        let file_path = path.join(name);
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&file_path, content).unwrap();
+    }
+    git(path, &["init"]);
+    git(path, &["config", "user.email", "test@test.com"]);
+    git(path, &["config", "user.name", "Test"]);
+    git(path, &["add", "-A"]);
+    git(path, &["commit", "-m", "initial"]);
+}
+
 pub fn create_test_repo() -> gitalisk_core::repository::testing::local::LocalGitRepository {
     let mut repo = gitalisk_core::repository::testing::local::LocalGitRepository::new(None);
     repo.fs.create_file(
