@@ -195,13 +195,14 @@ mod tests {
             let sql = &statement.sql;
             let table = &statement.table;
 
+            let prefixed = prefixed_table_name(table, SCHEMA_VERSION);
             assert!(
-                sql.starts_with(&format!("INSERT INTO {table} (")),
-                "{table}: should start with INSERT INTO with column list: {sql}"
+                sql.starts_with(&format!("INSERT INTO {prefixed} (")),
+                "{table}: should start with INSERT INTO prefixed table: {sql}"
             );
             assert!(
-                sql.contains(&format!("FROM {table}")),
-                "{table}: should SELECT FROM same table: {sql}"
+                sql.contains(&format!("FROM {prefixed}")),
+                "{table}: should SELECT FROM same prefixed table: {sql}"
             );
             assert!(
                 sql.contains(", true, now64(6)"),

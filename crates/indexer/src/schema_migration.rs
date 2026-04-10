@@ -38,7 +38,7 @@ use crate::schema_version::{
 /// NATS KV key used to serialize schema migrations across pods.
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
 
-/// TTL for the migration lock. Refreshed periodically during long DDL runs.
+/// TTL for the migration lock. Set high enough to cover DDL execution across all graph tables.
 const MIGRATION_LOCK_TTL: Duration = Duration::from_secs(120);
 
 /// How long to wait between polling for an active lock held by another pod.
