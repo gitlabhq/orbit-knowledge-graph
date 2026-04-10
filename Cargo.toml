@@ -121,7 +121,7 @@ rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs",
 regex = "1.12.2"
 sqlparser = { version = "0.61.0", features = ["visitor"] }
 hex = "0.4.3"
-hmac = "0.12.1"
+hmac = "0.13.0"
 hyper-util = { version = "0.1", features = ["client", "tokio"] }
 prost = "0.14.3"
 prost-build = "0.14.3"
