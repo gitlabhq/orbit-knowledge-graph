@@ -34,31 +34,18 @@ add()         { db "INSERT INTO results VALUES ('$1', $2, '${3:-}')"; }
 orbit_query() { "$ORBIT" query --raw "$1" > "$2" 2>/dev/null; }
 emit_results(){ dbval "SELECT json FROM test_output"; }
 
-# ── Assertions (single DuckDB call each, using harness macros) ──
+# ── Assertions ───────────────────────────────────────────────────
+# All use orbit_nodes/orbit_edges/files_same macros from harness.sql.
 
-# Assert nodes matching a WHERE clause exist.
-assert_has() {
-    db "INSERT INTO results
-        SELECT '$1', c > 0, CASE WHEN c > 0 THEN c || ' matches' ELSE 'not found' END
-        FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$2') WHERE $3)"
-}
-
-# Assert exact node count.
-assert_count() {
-    db "INSERT INTO results
-        SELECT '$1', c = $4, CASE WHEN c = $4 THEN '${5:-}' ELSE 'expected $4, got ' || c END
-        FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$2') WHERE $3)"
-}
-
-# Assert edges exist.
-assert_edges() {
-    db "INSERT INTO results
-        SELECT '$1', c > 0, CASE WHEN c > 0 THEN c || ' edges' ELSE 'no edges' END
-        FROM (SELECT count(*)::INT AS c FROM orbit_edges('$2'))"
-}
-
-# Check all JSON files matching a glob have the same node IDs.
+assert_has()    { db "INSERT INTO results SELECT '$1', c > 0, CASE WHEN c > 0 THEN c || ' matches' ELSE 'not found' END FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$2') WHERE $3)"; }
+assert_count()  { db "INSERT INTO results SELECT '$1', c = $4, CASE WHEN c = $4 THEN '${5:-}' ELSE 'expected $4, got ' || c END FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$2') WHERE $3)"; }
+assert_edges()  { db "INSERT INTO results SELECT '$1', c > 0, CASE WHEN c > 0 THEN c || ' edges' ELSE 'no edges' END FROM (SELECT count(*)::INT AS c FROM orbit_edges('$2'))"; }
 all_identical() { dbval "SELECT ok FROM files_same('$1')"; }
+
+# Batch assertions: run a SQL file against the harness DB.
+# The SQL file can use orbit_nodes(), orbit_edges(), getvariable(), etc.
+# Usage: run_assertions <sql-file>
+run_assertions() { db ".read $1"; }
 
 # ── Concurrency helpers ─────────────────────────────────────────
 
