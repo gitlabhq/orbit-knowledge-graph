@@ -98,6 +98,18 @@ The indexer emits metrics under five OpenTelemetry meters: `gkg_etl` for the cor
 | `gkg.indexer.namespace_deletion.table.duration` | Histogram | s | `table` | Duration of a single table's soft-delete INSERT-SELECT |
 | `gkg.indexer.namespace_deletion.table.errors` | Counter | count | `table` | Total per-table deletion failures |
 
+*Indexing progress metrics (`gkg_indexer_progress`):*
+
+The indexing progress module writes entity counts and pipeline metadata to NATS KV after each non-zero-row ETL cycle. See [ADR 009](decisions/009_indexing_progress_nats_kv.md).
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.indexer.progress.count_query.duration` | Histogram | s | `namespace_id` | Duration of post-ETL count queries (UNION ALL + edge + cross-namespace) |
+| `gkg.indexer.progress.kv_write.duration` | Histogram | s | `namespace_id` | Duration of NATS KV writes for progress data |
+| `gkg.indexer.progress.kv_write.errors` | Counter | count | `namespace_id` | Non-fatal KV write failures |
+| `gkg.indexer.progress.kv_write.keys` | Counter | count | `namespace_id` | Number of KV keys written per cycle |
+| `gkg.indexer.progress.count_query.skipped` | Counter | count | `namespace_id` | Count queries skipped due to zero-row ETL run |
+
 **KG Web Service:**
 
 - **Query Health**: p50/p95 latency by tool (`find_nodes`, `traverse`, `explore`, `aggregate`), memory spikes, and rows/bytes read per query.

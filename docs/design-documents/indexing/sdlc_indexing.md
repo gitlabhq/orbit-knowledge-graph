@@ -204,57 +204,14 @@ SET last_indexed_at = {started_at}, result = 'success | error', ...
 WHERE id = '{namespace_id}';
 ```
 
-On top of that, we will keep a record of the indexing job in the Knowledge Graph ClickHouse database. Each time a job is completed, an entry will be created in the `knowledge_graph_indexing_jobs` table.
-
-```sql
--- ClickHouse
-CREATE TABLE knowledge_graph_indexing_job_events (
-    id UUID PRIMARY KEY,
-    namespace_id UUID NOT NULL,
-    type ENUM('initial', 'incremental') NOT NULL,
-    status ENUM('started', 'completed', 'error') NOT NULL DEFAULT 'started',
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    ...
-);
-
--- ClickHouse
--- Job started event
-INSERT INTO knowledge_graph_indexing_jobs (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'started', NOW());
-
--- Job completed event
-INSERT INTO knowledge_graph_indexing_jobs (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'completed', NOW());
-
--- Job error event
-INSERT INTO knowledge_graph_indexing_jobs (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'error', NOW());
-```
-
-**Note:** From time to time we will need to re-create the table to get rid of the bloat. This triggered by a dedicated cron job that will be run periodically.
+Indexing progress is tracked via NATS KV rather than a dedicated ClickHouse
+job events table. After each ETL cycle, the namespace handler writes entity
+counts and pipeline metadata to the `indexing_progress` KV bucket as a
+non-fatal side-effect. The webserver reads from this bucket to serve the
+`GetNamespaceOverview` gRPC endpoint. See
+[ADR 009](../decisions/009_indexing_progress_nats_kv.md) for the full design.
 
 **Handling errors**
-
-If the worker encounters a recoverable error, it should continue indexing the remaining data. The worker will update the database to reflect the error and the date of the last indexing alongside relevant metadata.
-
-```sql
--- ClickHouse
-UPDATE knowledge_graph_enabled_namespaces
-SET last_indexed_at = NOW(), result = 'partial_success', ...
-WHERE id = '{namespace_id}';
-
--- ClickHouse
-INSERT INTO knowledge_graph_indexing_job_events (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'completed', NOW());
-```
-
-If the worker encounters a non-recoverable error, it will update the database to reflect the error and the date of the last indexing alongside relevant metadata.
-
-```sql
--- ClickHouse
-UPDATE knowledge_graph_enabled_namespaces
-SET last_indexed_at = NOW(), result = 'error', ...
-WHERE id = '{namespace_id}';
-
--- ClickHouse
-INSERT INTO knowledge_graph_indexing_job_events (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'error', NOW());
-```
 
 If the worker fails unexpectedly, the unacked message will be redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the subscription's `dead_letter_on_exhaustion` setting: subscriptions with `dead_letter_on_exhaustion: true` (e.g. Siphon CDC) publish the message to the `GKG_DEAD_LETTERS` stream for inspection and replay, while subscriptions with `dead_letter_on_exhaustion: false` (internal dispatch, the default) term-ack the message since the next dispatch cycle will re-create the request. This leverages eventual consistency which is acceptable since we're not aiming for real-time consistency.
 

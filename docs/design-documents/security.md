@@ -378,3 +378,14 @@ For aggregation queries (counts, averages, etc.), the Reporter+ group-level acce
 - **Query Shape Restrictions**: The query planner may restrict certain aggregation patterns to prevent information leakage through timing attacks or result patterns.
 
 This approach aligns with the existing GitLab Analytics products, which use the same Reporter+ group-level access model for aggregations.
+
+### Non-query unary RPCs
+
+Unary RPCs that return aggregate or metadata responses (`GetNamespaceOverview`, `GetGraphStats`) follow the same Layers 1 and 2 pattern without the redaction exchange:
+
+1. The request carries a `traversal_path` identifying the scope.
+2. The handler calls `authorize_traversal_path(&claims, &req.traversal_path)`, which verifies that the requested path is a prefix of at least one entry in the JWT's `group_traversal_ids`.
+3. For admin users, any path under `{organization_id}/` is permitted.
+4. No redaction exchange is needed since these endpoints return counts and status, not individual resources.
+
+See [ADR 009](design-documents/decisions/009_indexing_progress_nats_kv.md) for the `GetNamespaceOverview` endpoint that reads indexing progress from NATS KV.

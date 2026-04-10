@@ -22,12 +22,16 @@ indexing last complete for a project. Today the only options are reading logs,
 querying ClickHouse directly, or parsing checkpoint table internals.
 
 We need an endpoint on the GKG webserver that Rails can proxy to expose
-indexing progress. This endpoint serves three audiences:
+indexing progress. This endpoint serves four audiences:
 
 1. **Namespace admins** checking rollout status after enabling Knowledge Graph.
 2. **GitLab Rails** proxying progress to configuration UI pages.
 3. **E2E test harnesses** polling for indexing completion before executing query
    assertions against the full GKG stack.
+4. **Developer observability.** Developers enabling Knowledge Graph have no
+   feedback loop today. They enable it, wait, and get nothing until they try a
+   query. This endpoint closes that gap by surfacing what has been indexed and
+   whether the system is healthy.
 
 The previous design (issue #175) proposed deriving all state at query time from
 ClickHouse checkpoint and graph tables. This ADR replaces that approach with a
@@ -88,7 +92,11 @@ locking is needed.
 
 - History: 1 (only latest value needed)
 - No TTL (entries persist until explicitly deleted by namespace deletion handler)
-- Max value size: default (1MB, values are ~2-4KB)
+- Max value size: per-value default (-1, inherits server `max_payload` of 1MB).
+  This is a **per-value** limit, not per-bucket. `MaxBytes` (total bucket
+  storage) is a separate config that defaults to unlimited. Values are ~1-2KB
+  for `counts` and `meta` keys, ~7-15KB for `code` keys with 50-100 branches.
+  Even extreme cases (500 branches) produce ~72KB, well under the 1MB ceiling.
 
 ### Key schema
 
@@ -98,10 +106,10 @@ wildcard matching (`*` for one token, `>` for one-or-more).
 
 | Key pattern | Example | Writer | Purpose |
 |---|---|---|---|
-| `sdlc.<tp_dots>` | `sdlc.1.9970` | SDLC namespace handler | Pre-aggregated node + edge counts for subtree |
-| `sdlc.<tp_dots>` | `sdlc.1.9970.55154808` | SDLC namespace handler | Same, scoped to subgroup subtree |
-| `code.<project_id>` | `code.12345` | Code indexing handler | Per-project code graph status + counts |
-| `meta.<namespace_id>` | `meta.9970` | SDLC namespace handler | Pipeline run metadata and watermarks |
+| `counts.<tp_dots>` | `counts.1.9970` | SDLC namespace handler | Pre-aggregated SDLC + code node + edge counts for subtree |
+| `counts.<tp_dots>` | `counts.1.9970.55154808` | SDLC namespace handler | Same, scoped to subgroup subtree |
+| `code.<project_id>` | `code.12345` | Code indexing handler | Per-project code graph with per-branch breakdown |
+| `meta.<namespace_id>` | `meta.9970` | SDLC namespace handler | Pipeline lifecycle state and operational metadata |
 
 Where `<tp_dots>` is the traversal path with `/` replaced by `.` and trailing
 slash removed. Example: traversal path `1/9970/55154808/` becomes key token
@@ -109,7 +117,10 @@ slash removed. Example: traversal path `1/9970/55154808/` becomes key token
 
 ### Value schemas
 
-#### SDLC progress (`sdlc.<tp_dots>`)
+#### Entity counts (`counts.<tp_dots>`)
+
+Contains pre-aggregated subtree counts for **all** entity types: SDLC nodes,
+code nodes, and edges. This gives a complete picture at any hierarchy level.
 
 ```json
 {
@@ -120,22 +131,41 @@ slash removed. Example: traversal path `1/9970/55154808/` becomes key token
     "MergeRequest": 3400,
     "WorkItem": 800,
     "Pipeline": 5000,
-    "Vulnerability": 200
+    "Vulnerability": 200,
+    "File": 15000,
+    "Definition": 42000,
+    "ImportedSymbol": 9500,
+    "Directory": 800,
+    "Branch": 150
   },
   "edges": {
     "AUTHORED": 3000,
     "ASSIGNED_TO": 1200,
-    "CONTAINS": 550,
-    "DEFINES": 2000
+    "CONTAINS": 5550,
+    "DEFINES": 42000,
+    "IMPORTS": 9500,
+    "CALLS": 8000,
+    "CLOSES": 200,
+    "RELATED_TO": 150
   }
 }
 ```
 
 Node keys are ontology entity names. Edge keys are ontology edge type names.
 Both are driven by the ontology at runtime so new types appear automatically.
-At ~14 node types and ~40 edge types with int64 counts, values are ~2KB.
+The ontology currently defines 24 node types and 40 edge types. At ~30 bytes
+per entry in compact JSON, values are ~2KB.
+
+Edge counts include cross-namespace edges (see
+[Cross-namespace edge counting](#cross-namespace-edge-counting) below).
 
 #### Code progress (`code.<project_id>`)
+
+Per-project code graph detail with **per-branch breakdown**. Since code tables
+are keyed by `(traversal_path, project_id, branch)` and the indexing pipeline
+processes one branch at a time, counts are naturally per-branch. This structure
+supports multi-branch indexing (the current default-branch-only behavior and
+future multi-branch indexing).
 
 ```json
 {
@@ -144,37 +174,43 @@ At ~14 node types and ~40 edge types with int64 counts, values are ~2KB.
   "branches": {
     "main": {
       "commit": "abc123def",
-      "indexed_at": "2026-04-10T11:30:00Z"
+      "indexed_at": "2026-04-10T11:30:00Z",
+      "nodes": {
+        "Branch": 1,
+        "File": 500,
+        "Directory": 50,
+        "Definition": 2000,
+        "ImportedSymbol": 1500
+      },
+      "edges": {
+        "CONTAINS": 550,
+        "DEFINES": 2000,
+        "IMPORTS": 1500,
+        "CALLS": 800
+      }
     }
-  },
-  "nodes": {
-    "Branch": 1,
-    "File": 500,
-    "Directory": 50,
-    "Definition": 2000,
-    "ImportedSymbol": 1500
-  },
-  "edges": {
-    "CONTAINS": 550,
-    "DEFINES": 2000,
-    "IMPORTS": 1500,
-    "CALLS": 800
   }
 }
 ```
 
-The `traversal_path` field is embedded for authorization: the webserver checks
-the requesting user's access prefixes before returning data.
+The `traversal_path` field is embedded so the webserver can check the
+requesting user's access prefixes before returning data.
 
 #### Pipeline metadata (`meta.<namespace_id>`)
 
+Tracks pipeline lifecycle and operational state.
+
 ```json
 {
-  "state": "indexing",
-  "enabled_at": "2026-04-09T10:00:00Z",
+  "state": "idle",
+  "initial_backfill_done": true,
   "updated_at": "2026-04-10T12:00:00Z",
   "sdlc": {
     "last_completed_at": "2026-04-10T11:55:00Z",
+    "last_started_at": "2026-04-10T11:50:00Z",
+    "last_duration_ms": 300,
+    "cycle_count": 47,
+    "last_error": null,
     "watermarks": {
       "Project": "2026-04-10T11:55:00Z",
       "MergeRequest": "2026-04-10T11:50:00Z"
@@ -193,14 +229,41 @@ the requesting user's access prefixes before returning data.
 }
 ```
 
-**State values:**
+### State machine
+
+The state model uses two independent axes:
+
+**Axis 1: Lifecycle flag (monotonic, set once)**
+
+`initial_backfill_done: false` transitions to `true` when all SDLC plans
+complete their first full pass. It never reverts. This is the stable signal
+that E2E tests and UI poll for.
+
+**Axis 2: Operational state (reflects current activity)**
 
 | State | Meaning |
 |---|---|
-| `pending` | Namespace enabled but no indexer has picked it up yet |
-| `backfilling` | First ETL cycle in progress (watermark started from epoch) |
-| `indexing` | Incremental indexing (at least one full pass completed) |
-| `completed` | All SDLC plans have completed at least one full pass |
+| `pending` | Namespace enabled, no indexer has started processing yet |
+| `indexing` | ETL cycle in progress (plans are running) |
+| `idle` | ETL cycle finished, all plans completed, waiting for next dispatch |
+
+State transitions:
+
+```
+                     first dispatch
+  pending ──────────────────────────────> indexing
+                                            │
+                                            │ all plans complete
+                                            v
+                                          idle ──────> indexing (next dispatch)
+                                            │               │
+                                            │               │ all plans complete
+                                            └───────────────┘
+```
+
+On the first cycle where all plans complete and `initial_backfill_done` is
+false, the flag is set to true. On every subsequent cycle, the flag remains
+true and the state oscillates between `indexing` and `idle`.
 
 **Plan status derivation** (same logic as current checkpoint state machine):
 
@@ -210,7 +273,14 @@ the requesting user's access prefixes before returning data.
 | Checkpoint with `cursor_values IS NOT NULL` | `in_progress` |
 | Checkpoint with `cursor_values IS NULL` | `completed` |
 
-### Hierarchy and aggregation strategy
+**Why not a `completed` state?** An earlier version of this design used
+`completed` as a state after the first full pass, transitioning to `indexing`
+on the next cycle. This creates a race: if the indexer starts a second cycle
+before a polling consumer observes `completed`, the consumer never sees it.
+The `initial_backfill_done` flag solves this by being monotonic and always
+observable regardless of polling timing.
+
+### Hierarchy and aggregation
 
 #### Problem
 
@@ -223,42 +293,59 @@ indexer processes the entire top-level namespace in one ETL run.
 After each SDLC ETL run for namespace N, the indexer computes entity counts at
 every group-level prefix in the hierarchy, then writes one KV entry per prefix.
 
-**Write flow:**
+The API accepts a `traversal_path` at any depth. A request for the top-level
+namespace `1/9970/` reads key `counts.1.9970`. A request for a subgroup reads
+`counts.1.9970.55154808`. A request for a specific project namespace reads
+`counts.1.9970.55154808.95754906`. Each key contains the pre-aggregated
+subtree total for all entities at or below that prefix.
 
-1. Run one COUNT query per entity type, grouped by full `traversal_path`:
+**Write flow (post-ETL):**
+
+1. Run one `UNION ALL` count query across all entity tables, grouped by full
+   `traversal_path`:
 
    ```sql
-   SELECT traversal_path, count() AS cnt
-   FROM gl_project FINAL
+   SELECT 'Project' AS entity, traversal_path, count() AS cnt
+   FROM gl_project
    WHERE startsWith(traversal_path, {tp:String}) AND NOT _deleted
    GROUP BY traversal_path
+   UNION ALL
+   SELECT 'MergeRequest' AS entity, traversal_path, count() AS cnt
+   FROM gl_merge_request
+   WHERE startsWith(traversal_path, {tp:String}) AND NOT _deleted
+   GROUP BY traversal_path
+   UNION ALL
+   -- ... all 24 node types (SDLC + code tables)
    ```
 
-2. Run one COUNT query for edges, grouped by `traversal_path` and `edge_type`:
+2. Run one count query for edges:
 
    ```sql
-   SELECT traversal_path, edge_type, count() AS cnt
-   FROM gl_edge FINAL
+   SELECT traversal_path, relationship_kind, count() AS cnt
+   FROM gl_edge
    WHERE startsWith(traversal_path, {tp:String}) AND NOT _deleted
-   GROUP BY traversal_path, edge_type
+   GROUP BY traversal_path, relationship_kind
    ```
 
-3. In-memory rollup: for each row, split the traversal path and accumulate
+3. Run cross-namespace edge queries (see
+   [below](#cross-namespace-edge-counting)).
+
+4. In-memory rollup: for each row, split the traversal path and accumulate
    counts at every ancestor prefix:
 
    ```
-   Row: traversal_path="1/9970/100/200/", count=45 (MergeRequest)
+   Row: traversal_path="1/9970/100/200/", entity="MergeRequest", count=45
    Adds 45 to:
      prefix "1.9970.100.200"   (leaf)
      prefix "1.9970.100"       (parent group)
      prefix "1.9970"           (top-level group)
    ```
 
-4. Write one KV entry per distinct prefix with aggregated subtree counts.
+5. Write one KV entry per distinct prefix with aggregated subtree counts.
 
-This is E+1 ClickHouse queries (one per entity type, one for edges) plus
-in-memory aggregation per ETL cycle. For a namespace with G groups, that
-produces G KV puts. Typically G < 100.
+This is 2 ClickHouse queries (one `UNION ALL` for nodes, one for edges) plus
+cross-namespace edge queries, plus in-memory aggregation per ETL cycle. For a
+namespace with G groups, that produces G KV puts. Typically G < 100.
 
 **Read flow (webserver):**
 
@@ -267,65 +354,140 @@ aggregation on the read path.
 
 | Scenario | Operation |
 |---|---|
-| User has access to `1/9970/` | Read `sdlc.1.9970` |
-| User has access to `1/9970/55154808/` only | Read `sdlc.1.9970.55154808` |
-| User has access to `1/9970/200/` and `1/9970/300/` but not `1/9970/` | Read both keys, sum client-side |
+| Top-level namespace `1/9970/` | Read `counts.1.9970` |
+| Subgroup `1/9970/55154808/` | Read `counts.1.9970.55154808` |
+| Project namespace `1/9970/55154808/95754906/` | Read `counts.1.9970.55154808.95754906` |
+| Disjoint access `1/9970/200/` + `1/9970/300/` | Read both keys, sum client-side |
 
-The third case is O(N) where N is the user's access prefix count, which is
+The disjoint case is O(N) where N is the user's access prefix count, which is
 typically < 5 after Rails' trie optimization.
+
+### Cross-namespace edge counting
+
+Most edges connect entities within the same namespace. The `gl_edge` table
+stores a single `traversal_path` per edge row, assigned from the source
+entity's namespace during ETL.
+
+A small number of edge types can cross namespaces:
+
+| Edge type | Scenario |
+|---|---|
+| `CLOSES` | MR in project A closes a WorkItem in project B |
+| `FIXES` | MR in project A fixes a Vulnerability in project B |
+| `RELATED_TO` | WorkItem in group X linked to WorkItem in group Y |
+
+For these edges, the edge row's `traversal_path` reflects the source entity's
+namespace. A simple `startsWith(traversal_path, TP)` count picks up edges
+originating from the namespace but misses edges targeting entities in the
+namespace from elsewhere.
+
+**Dual-count approach:** count cross-namespace edges on both sides. After the
+regular edge count query, run targeted queries for the cross-namespace edge
+types using a join with the target entity table:
+
+```sql
+-- Cross-namespace edges targeting WorkItems in this namespace
+SELECT w.traversal_path, e.relationship_kind, count() AS cnt
+FROM gl_edge e
+INNER JOIN gl_work_item w ON e.target_id = w.id
+WHERE startsWith(w.traversal_path, {tp:String})
+  AND NOT w._deleted
+  AND NOT e._deleted
+  AND e.relationship_kind IN ('CLOSES', 'RELATED_TO')
+  AND NOT startsWith(e.traversal_path, {tp:String})
+GROUP BY w.traversal_path, e.relationship_kind
+```
+
+```sql
+-- Cross-namespace edges targeting Vulnerabilities in this namespace
+SELECT v.traversal_path, e.relationship_kind, count() AS cnt
+FROM gl_edge e
+INNER JOIN gl_vulnerability v ON e.target_id = v.id
+WHERE startsWith(v.traversal_path, {tp:String})
+  AND NOT v._deleted
+  AND NOT e._deleted
+  AND e.relationship_kind = 'FIXES'
+  AND NOT startsWith(e.traversal_path, {tp:String})
+GROUP BY v.traversal_path, e.relationship_kind
+```
+
+The `by_target` projection on `gl_edge` (ordered by `target_id`) enables
+efficient joins on `target_id`. These queries only run for the ~3
+cross-namespace edge types and only after non-zero-row ETL runs.
+
+The resulting counts are merged into the `counts.<tp>` values alongside the
+regular edge counts. A single edge may appear in both the source and target
+namespace's counts. This is intentional: each namespace's count reflects
+"edges involving entities in my namespace."
 
 ### Project-level code lookups
 
 The `code.<project_id>` key provides O(1) lookup by project ID. The webserver
 receives a project ID, reads the key, checks the embedded `traversal_path`
-against the user's access, and returns.
+against the user's access, and returns the per-branch breakdown.
 
-### Edge count tracking
+### Performance
 
-Edges are tracked at two levels:
+Post-ETL count queries add latency to the SDLC handler. Three optimizations
+keep this acceptable:
 
-1. **Namespace level** (in `sdlc.<tp>` values): all edge types from `gl_edge`,
-   covering both SDLC and code edges. Updated each SDLC ETL cycle.
-2. **Project level** (in `code.<project_id>` values): code-specific edge counts
-   (CONTAINS, DEFINES, IMPORTS, CALLS). Updated on each code indexing run.
+#### Skip counts when ETL processed zero rows
 
-The SDLC handler's post-ETL edge count query naturally picks up code edges
-since they share `gl_edge`. Between SDLC runs, newly indexed code edges are
-reflected in the project-level key immediately but appear in namespace-level
-counts on the next SDLC cycle. This eventual consistency is acceptable for a
-progress indicator.
+The pipeline already tracks `total_rows` per plan. If all plans processed zero
+rows (the common case for incremental indexing with no changes), skip the count
+queries entirely. The existing KV values are already up-to-date.
 
-### Handling indexing states
+This eliminates the count overhead in the vast majority of handler invocations.
 
-#### Initial backfill (namespace enabled for the first time)
+#### Drop FINAL from count queries
 
-1. `NamespaceDispatcher` publishes the first `NamespaceIndexingRequest`.
-2. Before the indexer picks it up, the dispatcher writes `meta.<ns_id>` with
-   `state: "pending"`.
-3. When the SDLC handler starts processing, it updates `meta.<ns_id>` to
-   `state: "backfilling"` (detected by watermark starting from epoch).
-4. After each plan completes its first full pass, the handler updates the
-   plan status in `meta.<ns_id>`.
-5. After all plans complete one full pass, state transitions to `"completed"`.
-6. On subsequent runs, state is `"indexing"` (incremental).
+The existing `GetGraphStats` endpoint already runs count queries without
+`FINAL`. Between background merges, counts may include un-merged old versions,
+producing a slight overcount. With
+`allow_experimental_replacing_merge_with_cleanup = 1` the background merger
+actively cleans up, so drift is small. For a progress indicator, approximate
+counts are acceptable.
 
-#### Code backfill dependency
+#### Batch into a single UNION ALL query
 
-Code indexing depends on the Project plan completing first (the
-`NamespaceCodeBackfillDispatcher` needs `project_namespace_traversal_paths`
-to be populated). The `meta` key's `code.projects_total` starts at 0 and is
-updated once the Project plan completes and the dispatcher resolves all
-projects.
+Instead of N separate round-trips to ClickHouse, emit a single `UNION ALL`
+query for all entity types. This mirrors how `GetGraphStats` works today.
+ClickHouse can parallelize the subqueries internally.
 
-#### Namespace deletion
+#### Impact analysis
 
-When a namespace is disabled, the `NamespaceDeletionHandler` already cleans up
-graph data after 30 days. It should also delete all KV keys for the namespace:
+With all three optimizations:
 
-- `meta.<ns_id>`
-- All `sdlc.<tp_dots>` keys matching the namespace's traversal path prefix
-- All `code.<project_id>` keys for projects under the namespace (resolved from
-  `code_indexing_checkpoint`)
+- **Zero-row incremental runs (common case):** no count overhead at all.
+- **Runs with changed data:** one `UNION ALL` node query + one edge query +
+  2 cross-namespace join queries. Estimated ~50-200ms total without `FINAL`,
+  well within the 300s handler `ack_wait` timeout.
+- **Checkpoint advancement:** `save_completed` happens per-plan before
+  counts. Count query failures do not affect watermark progression.
+
+Count queries run after all plans complete. Count query failures are logged
+as warnings but do not fail the handler. Progress reporting is best-effort.
+
+### NATS key scaling
+
+With pre-aggregation at every group level, the key count per bucket is:
+
+| Component | Keys per namespace | Example (100 namespaces) |
+|---|---|---|
+| `counts.<tp>` | 1 per distinct group-level prefix | ~10,000 |
+| `code.<project_id>` | 1 per indexed project | ~20,000 |
+| `meta.<ns_id>` | 1 per enabled namespace | ~100 |
+| **Total** | | **~30,000** |
+
+NATS JetStream stores KV entries as messages in a stream. 30K small messages
+(1-15KB each) is trivial -- NATS is designed for millions of messages.
+Total storage: ~150-500MB.
+
+**No iteration on the hot path.** Reads are O(1) by exact key. Writes target
+specific keys. The only time key enumeration occurs is during namespace
+deletion, which is infrequent. The deletion handler constructs key names from
+known data (traversal path prefixes from graph tables, project IDs from
+`code_indexing_checkpoint`) rather than scanning all keys.
 
 ### Staleness
 
@@ -336,9 +498,8 @@ checkpoint state, the source of truth is the `checkpoint` table.
 
 | Data | Staleness bound | Why |
 |---|---|---|
-| SDLC node/edge counts | One ETL interval (configurable, typically minutes) | Updated after each SDLC handler run |
+| Node/edge counts | One ETL interval (typically minutes) | Updated after each non-zero-row SDLC handler run |
 | Code project counts | Updated on each code indexing run | Event-driven, near-real-time |
-| Namespace-level code edge counts | One SDLC ETL interval | SDLC handler's edge query includes code edges |
 | Plan statuses | One ETL interval | Derived from checkpoints post-ETL |
 
 **Failure modes:**
@@ -351,6 +512,22 @@ checkpoint state, the source of truth is the `checkpoint` table.
 
 KV write failures must not fail the ETL pipeline. Progress reporting is
 best-effort; the indexer's primary job is writing graph data to ClickHouse.
+
+#### KV recovery
+
+After a full KV loss, the indexer reconstructs state automatically on the next
+ETL cycle. The handler reads checkpoints from ClickHouse (which survived the
+NATS loss) and derives state:
+
+- All checkpoint rows have non-epoch watermarks with no cursors:
+  `state = "idle"`, `initial_backfill_done = true`
+- Some rows missing or have cursors:
+  `state = "indexing"`, `initial_backfill_done = false`
+- No checkpoint rows at all:
+  `state = "pending"`, `initial_backfill_done = false`
+
+No special startup-time reconstruction logic is needed. Between KV loss and
+the next ETL cycle, the webserver returns "not found" for progress queries.
 
 **Freshness indicator:**
 
@@ -368,92 +545,158 @@ webserver + ClickHouse + NATS) runs alongside Rails.
 1. Test setup: enable a namespace, insert seed data into datalake tables.
 2. Trigger: indexer's `DispatchIndexing` mode picks up the namespace and
    dispatches work.
-3. Poll: test harness calls `GetNamespaceIndexingProgress` in a loop.
-4. Assert: when `state == "completed"` and all plan statuses are `"completed"`,
-   the test proceeds to execute query assertions.
+3. Poll: test harness calls `GetNamespaceOverview` in a loop.
+4. Assert: when `initial_backfill_done == true` and `state == "idle"`, the
+   test proceeds to execute query assertions.
 
-**Why NATS KV makes this testable:**
+**Why this works reliably:**
 
-- **No ClickHouse on the read path.** The webserver reads from NATS KV, which
-  is already a required dependency. No additional ClickHouse client or query
-  knowledge is needed in the webserver for progress.
-- **Deterministic state transitions.** The `meta` key's state field follows a
-  clear `pending -> backfilling -> completed -> indexing` progression. Tests
-  can assert on specific transitions.
-- **Mockable at the trait boundary.** The existing `NatsServices` trait already
-  supports `kv_get`, `kv_put`, `kv_keys`. A `MockNatsServices` with in-memory
-  state is sufficient for unit testing the progress read path without NATS.
-- **Isolated per namespace.** Each namespace's progress is in its own keys.
-  Concurrent test runs against different namespaces do not interfere.
+- `initial_backfill_done` is a **monotonic flag**. Once set, it cannot be
+  missed regardless of polling frequency. Unlike the previous `completed`
+  state, there is no race between the indexer's next cycle and the test's poll.
+- Reads hit NATS KV, not ClickHouse. No polling load on the database.
+- The existing `NatsServices` trait with `kv_get`, `kv_put`, `kv_keys`
+  supports `MockNatsServices` for unit testing the read path without NATS.
+- Each namespace's progress is in its own keys. Concurrent test runs against
+  different namespaces do not interfere.
 
-**What the test harness needs to check for "indexing complete":**
+**Complete "indexing done" check:**
 
 ```
-meta.<ns_id>.state == "completed"
-AND all meta.<ns_id>.sdlc.plans.* == "completed"
+meta.<ns_id>.initial_backfill_done == true
+AND meta.<ns_id>.state == "idle"
 AND meta.<ns_id>.code.projects_indexed == meta.<ns_id>.code.projects_total
 ```
 
 ### gRPC endpoint
 
-The endpoint is `GetNamespaceIndexingProgress`, added to the existing gRPC
-service in `gkg.proto`. It reads from NATS KV only, no ClickHouse.
+A single endpoint, `GetNamespaceOverview`, replaces the existing
+`GetGraphStats` endpoint. `GetGraphStats` currently has no callers in Rails
+(the `GrpcClient` does not wrap it, no REST endpoint exists, and the frontend
+`fetchGraphStats()` has no backend wired). It can be removed.
 
 ```protobuf
-rpc GetNamespaceIndexingProgress(GetNamespaceIndexingProgressRequest)
-    returns (GetNamespaceIndexingProgressResponse);
+rpc GetNamespaceOverview(GetNamespaceOverviewRequest)
+    returns (GetNamespaceOverviewResponse);
 
-message GetNamespaceIndexingProgressRequest {
+message GetNamespaceOverviewRequest {
+  // Traversal path prefix (e.g., "1/9970/", "1/9970/55154808/").
+  // Controls the scope: top-level namespace, subgroup, or project.
   string traversal_path = 1;
+
+  // When true, entity counts come from live ClickHouse queries
+  // instead of NATS KV. Slower but exact. Default: false.
+  bool exact_counts = 2;
 }
 
-message GetNamespaceIndexingProgressResponse {
+message GetNamespaceOverviewResponse {
+  // Operational state: "pending", "indexing", "idle".
+  // Empty when exact_counts=true (state lives only in KV).
   string state = 1;
+
+  // When the KV cache was last written.
   string updated_at = 2;
-  repeated ProgressDomain domains = 3;
-  CodeProgress code = 4;
+
+  // Entity counts grouped by ontology domain.
+  repeated OverviewDomain domains = 3;
+
+  // Edge counts by relationship type.
+  map<string, int64> edge_counts = 4;
+
+  // SDLC pipeline progress (only from KV, not exact_counts).
+  SdlcProgress sdlc = 5;
+
+  // Code indexing overview.
+  CodeOverview code = 6;
+
+  // True when KV data is older than a staleness threshold.
+  bool stale = 7;
+
+  // True after all SDLC plans have completed at least one full pass.
+  bool initial_backfill_done = 8;
 }
 
-message ProgressDomain {
+message OverviewDomain {
   string name = 1;
-  repeated ProgressItem items = 2;
+  repeated OverviewItem items = 2;
 }
 
-message ProgressItem {
+message OverviewItem {
   string name = 1;
   int64 count = 2;
+  // Plan status: "pending", "in_progress", "completed".
+  // Empty when exact_counts=true or for code entities.
   string status = 3;
 }
 
-message CodeProgress {
-  int32 projects_indexed = 1;
-  int32 projects_total = 2;
-  repeated CodeProjectProgress projects = 3;
+message SdlcProgress {
+  string last_completed_at = 1;
+  string last_started_at = 2;
+  int64 last_duration_ms = 3;
+  int64 cycle_count = 4;
+  string last_error = 5;
+  map<string, string> watermarks = 6;
 }
 
-message CodeProjectProgress {
+message CodeOverview {
+  int32 projects_indexed = 1;
+  int32 projects_total = 2;
+  string last_indexed_at = 3;
+  repeated ProjectCodeOverview projects = 4;
+}
+
+message ProjectCodeOverview {
   int64 project_id = 1;
-  string branch = 2;
-  string commit = 3;
-  string indexed_at = 4;
-  map<string, int64> node_counts = 5;
-  map<string, int64> edge_counts = 6;
+  string traversal_path = 2;
+  string updated_at = 3;
+  map<string, BranchCodeStats> branches = 4;
+}
+
+message BranchCodeStats {
+  string commit = 1;
+  string indexed_at = 2;
+  map<string, int64> node_counts = 3;
+  map<string, int64> edge_counts = 4;
 }
 ```
 
-The response shape is ontology-driven: `ProgressDomain` mirrors the existing
-`GraphStatsDomain` grouping from `GetGraphStats`. Domain and entity names are
-derived from the ontology at runtime.
+The response shape is ontology-driven: `OverviewDomain` mirrors the existing
+`GraphStatsDomain` grouping. Domain and entity names are derived from the
+ontology at runtime.
 
-### Relationship to `GetGraphStats`
+When `exact_counts = false` (default), the endpoint reads from NATS KV.
+When `exact_counts = true`, it runs live ClickHouse count queries (the same
+`UNION ALL` approach as the current `GetGraphStats`). The response shape is
+identical either way; only the `state`, `sdlc`, `code`, and
+`initial_backfill_done` fields are empty when using exact counts since those
+are KV-only concepts.
 
-`GetGraphStats` continues to exist as the authoritative, ClickHouse-backed
-entity count endpoint. It works at any traversal path depth and returns exact
-counts. `GetNamespaceIndexingProgress` is the lightweight, NATS KV-backed
-progress endpoint focused on indexing lifecycle and status.
+### Access control
 
-They share the same domain grouping (ontology-driven) but serve different
-purposes and have different consistency guarantees.
+The endpoint follows the same authorization pattern as the existing
+`GetGraphStats`:
+
+1. Extract JWT claims from the `Authorization: Bearer` header.
+2. Call `authorize_traversal_path(&claims, &req.traversal_path)`, which
+   checks that the requested path starts with an entry in the JWT's
+   `group_traversal_ids`.
+3. Return data scoped to the authorized traversal path.
+
+No redaction exchange is needed. The endpoint returns aggregate counts and
+status, not individual resources. This is consistent with the security doc's
+note that "aggregations rely on Layers 1 and 2" (org filter + traversal ID
+prefix).
+
+### Namespace deletion
+
+When a namespace is disabled, the `NamespaceDeletionHandler` already cleans up
+graph data after 30 days. It should also delete all progress KV keys:
+
+- `meta.<ns_id>`
+- All `counts.<tp_dots>` keys matching the namespace's traversal path prefix
+  (constructed from known hierarchy, not by scanning all keys)
+- All `code.<project_id>` keys for projects under the namespace (resolved from
+  `code_indexing_checkpoint`)
 
 ## Why not the alternatives
 
@@ -467,7 +710,7 @@ computation to the write side where the indexer already has all the context.
 ### ClickHouse materialized status table
 
 A dedicated `indexing_status` table updated by handlers on each ETL run.
-Rejected because `ReplacingMergeTree` has no atomic increment -- concurrent
+Rejected because `ReplacingMergeTree` has no atomic increment. Concurrent
 handlers writing to the same table create version conflicts. NATS KV avoids
 this because each namespace's keys are written by a single handler instance
 (the namespace handler holds the NATS work-queue message).
@@ -486,6 +729,14 @@ lifecycle management, monitoring per bucket, and NATS resource consumption
 proportional to enabled namespaces. A single bucket with key prefixes is
 simpler.
 
+### Ignore cross-namespace edges
+
+Count edges only by the source entity's traversal path. This undercounts edges
+for target namespaces. The cross-namespace edge types (`CLOSES`, `FIXES`,
+`RELATED_TO`) can represent a significant number of relationships, and users
+expect "edges in my namespace" to include both directions. The dual-count
+approach adds 2 join queries per ETL cycle, which is acceptable.
+
 ## Consequences
 
 ### What improves
@@ -494,27 +745,35 @@ simpler.
   15+ ClickHouse queries with `FINAL`.
 - **Separation of concerns.** The webserver does not need to understand
   checkpoint key formats, cursor semantics, or watermark interpretation.
-- **Backfill visibility.** The `meta` key explicitly tracks indexing state
-  (`pending`, `backfilling`, `completed`) which cannot be derived from
-  checkpoints alone without datalake queries.
-- **E2E testability.** A clear "indexing complete" signal enables automated
-  test harnesses to poll and proceed deterministically.
+- **Backfill visibility.** The `initial_backfill_done` flag and `state` field
+  provide explicit lifecycle tracking without datalake queries.
+- **E2E testability.** A monotonic `initial_backfill_done` flag enables
+  reliable polling without race conditions.
 - **Hierarchy-aware.** Pre-aggregated counts at every group level support
-  users who only have access to a subtree.
+  lookups at top-level namespace, subgroup, or project scope.
+- **Developer observability.** Developers get direct feedback on indexing
+  status through the UI without needing infrastructure access.
+- **Unified endpoint.** One RPC (`GetNamespaceOverview`) replaces two
+  (`GetGraphStats` + `GetNamespaceIndexingProgress`), with an `exact_counts`
+  flag for the rare case that precise ClickHouse counts are needed.
+- **Complete entity coverage.** Namespace-level counts include both SDLC and
+  code entities, giving a full picture without needing separate lookups.
 
 ### What gets harder
 
-- **Additional write path.** The indexer now writes to both ClickHouse and
+- **Additional write path.** The indexer writes to both ClickHouse and
   NATS KV after each ETL cycle. KV write failures must be non-fatal to avoid
   blocking indexing.
 - **Eventual consistency.** KV values are stale by up to one ETL interval.
-  Consumers must tolerate this (the `updated_at` field helps).
+  Consumers must tolerate this (the `updated_at` field and `stale` flag help).
+- **Cross-namespace edge complexity.** Dual-counting cross-namespace edges
+  adds 2 join queries per ETL cycle and means the same edge appears in two
+  namespace counts. This is correct but requires clear documentation.
 - **KV bucket lifecycle.** The namespace deletion handler must clean up
-  progress keys alongside graph data. Missed cleanup leaves orphaned keys
-  (non-critical but messy).
+  progress keys alongside graph data.
 - **NATS dependency on read path.** The webserver needs a NATS client
-  connection for progress reads, adding NATS as a runtime dependency for the
-  webserver mode (it currently only needs ClickHouse and gRPC to Rails).
+  connection for progress reads. The architecture README already shows this
+  connection but the code has not implemented it until now.
 
 ## References
 
@@ -523,9 +782,12 @@ simpler.
 - [SDLC indexing design](../indexing/sdlc_indexing.md)
 - [Code indexing design](../indexing/code_indexing.md)
 - [Namespace deletion design](../indexing/namespace_deletion.md)
+- [Security design](../security.md)
+- [Observability design](../observability.md)
 - [gRPC service definition](../../../crates/gkg-server/proto/gkg.proto)
 - [Checkpoint store](../../../crates/indexer/src/checkpoint.rs)
 - [Code checkpoint store](../../../crates/indexer/src/modules/code/checkpoint_store.rs)
 - [NATS KV types](../../../crates/indexer/src/nats/kv_types.rs)
 - [NatsServices trait](../../../crates/indexer/src/nats/services.rs)
 - [Graph stats service](../../../crates/gkg-server/src/graph_stats/mod.rs)
+- [gl_edge table schema](../../../config/graph.sql)

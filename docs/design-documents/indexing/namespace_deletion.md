@@ -44,7 +44,9 @@ The handler follows these steps:
 
 4. **Soft-delete checkpoints.** Once all graph data has been marked deleted, the handler removes the SDLC checkpoints (keyed by namespace position, e.g. `ns.42.Project`) and the code indexing checkpoints (keyed by traversal path prefix). This prevents stale checkpoints from interfering if the namespace is later re-enabled and re-indexed from scratch.
 
-5. **Mark deletion complete.** The handler soft-deletes the `namespace_deletion_schedule` entry so the scheduler does not dispatch it again.
+5. **Delete NATS KV progress keys.** The handler deletes all indexing progress keys for the namespace from the `indexing_progress` KV bucket: the `meta.<ns_id>` key, all `counts.<tp_dots>` keys matching the namespace's traversal path prefix (constructed from known hierarchy data), and all `code.<project_id>` keys for projects under the namespace (resolved from `code_indexing_checkpoint`). See [ADR 009](../decisions/009_indexing_progress_nats_kv.md) for the KV key schema.
+
+6. **Mark deletion complete.** The handler soft-deletes the `namespace_deletion_schedule` entry so the scheduler does not dispatch it again.
 
 ```sql
 -- Soft-delete pattern for graph tables (generated per table from the ontology)
