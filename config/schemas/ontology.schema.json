@@ -773,13 +773,28 @@
       "type": "object",
       "description": "A column as it appears in CREATE TABLE DDL.",
       "properties": {
-        "name": { "type": "string", "pattern": "^`?[a-zA-Z_][a-zA-Z0-9_]*`?$", "description": "Column name (valid SQL identifier)." },
-        "type": { "type": "string", "description": "Exact ClickHouse type (e.g. Int64, Nullable(String), LowCardinality(String))." },
-        "default": { "type": "string", "description": "DEFAULT expression. Emitted as raw SQL — must be trusted input." },
+        "name": {
+          "type": "string",
+          "pattern": "^`?[a-z_][a-z0-9_]*`?$",
+          "description": "Column name. Lowercase with underscores. Backtick-quoted for reserved words."
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\().*$",
+          "description": "Exact ClickHouse type. Must start with a known type name."
+        },
+        "default": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_()',./_ ]+$",
+          "description": "DEFAULT expression. Only literals, function calls, and quoted strings allowed."
+        },
         "codec": {
           "type": "array",
-          "items": { "type": "string" },
-          "description": "CODEC chain (e.g. [\"Delta(8)\", \"ZSTD(1)\"])."
+          "items": {
+            "type": "string",
+            "pattern": "^(ZSTD\\([0-9]+\\)|Delta\\([0-9]+\\)|LZ4)$",
+            "description": "Codec. Must be ZSTD(N), Delta(N), or LZ4."
+          }
         }
       },
       "required": ["name", "type"],
@@ -790,9 +805,21 @@
       "type": "object",
       "description": "A skip index definition.",
       "properties": {
-        "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$", "description": "Index name (valid SQL identifier)." },
-        "column": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$", "description": "Column name (valid SQL identifier)." },
-        "type": { "type": "string", "description": "Index type (e.g. minmax, set(10), bloom_filter(0.01))." },
+        "name": {
+          "type": "string",
+          "pattern": "^idx_[a-z_][a-z0-9_]*$",
+          "description": "Index name. Must start with idx_."
+        },
+        "column": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "description": "Column name. Lowercase with underscores."
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\))$",
+          "description": "Index type. Must be minmax, set(N), or bloom_filter(N.NN)."
+        },
         "granularity": { "type": "integer", "minimum": 1, "default": 1 }
       },
       "required": ["name", "column", "type", "granularity"],
@@ -804,20 +831,36 @@
       "description": "A materialized projection.",
       "properties": {
         "type": { "type": "string", "enum": ["reorder", "aggregate"] },
-        "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$", "description": "Projection name (valid SQL identifier)." },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "description": "Projection name. Lowercase with underscores."
+        },
         "order_by": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Column name. Lowercase with underscores."
+          },
           "description": "ORDER BY columns (for reorder projections)."
         },
         "select": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_()., ]*$",
+            "description": "SELECT expression. Column names and aggregate functions only."
+          },
           "description": "SELECT expressions (for aggregate projections)."
         },
         "group_by": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Column name. Lowercase with underscores."
+          },
           "description": "GROUP BY columns (for aggregate projections)."
         }
       },
