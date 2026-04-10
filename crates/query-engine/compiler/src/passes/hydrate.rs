@@ -293,6 +293,7 @@ mod tests {
             redaction: None,
             style: Default::default(),
             has_traversal_path: false,
+            storage: Default::default(),
         }
     }
 

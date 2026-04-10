@@ -13,6 +13,94 @@ pub struct EdgeColumn {
     pub data_type: DataType,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Storage metadata — ClickHouse-specific DDL hints
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Per-column storage overrides. Only fields that deviate from auto-derived
+/// defaults need to be specified.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ColumnStorage {
+    /// Override the auto-derived codec chain (e.g. `["zstd(3)"]`).
+    pub codec: Option<Vec<String>>,
+    /// Override the column DEFAULT expression (e.g. `"'0/'"`, `"now64(6)"`).
+    pub default: Option<String>,
+    /// Force a storage type wrapper (e.g. `"low_cardinality"`) when the
+    /// auto-derived type from the ontology `DataType` isn't sufficient.
+    pub storage_type: Option<String>,
+}
+
+/// Table-level storage configuration for a node entity.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NodeStorage {
+    /// When true, engine is `ReplacingMergeTree(_version)` instead of
+    /// `ReplacingMergeTree(_version, _deleted)`.
+    pub version_only_engine: bool,
+    /// Per-column overrides, keyed by column name.
+    pub columns: std::collections::BTreeMap<String, ColumnStorage>,
+    /// Additional indexes beyond auto-generated ones.
+    pub indexes: Vec<StorageIndex>,
+    /// Additional projections beyond auto-generated ones.
+    pub projections: Vec<StorageProjection>,
+}
+
+/// An index definition from storage metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageIndex {
+    pub name: String,
+    pub column: String,
+    /// e.g. `"minmax"`, `"set(10)"`, `"bloom_filter(0.01)"`
+    pub index_type: String,
+    pub granularity: u32,
+}
+
+/// A projection definition from storage metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageProjection {
+    Reorder {
+        name: String,
+        order_by: Vec<String>,
+    },
+    Aggregate {
+        name: String,
+        select: Vec<String>,
+        group_by: Vec<String>,
+    },
+}
+
+/// Storage config for edge tables (in schema.yaml).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EdgeTableStorage {
+    pub index_granularity: Option<u32>,
+    pub primary_key: Option<Vec<String>>,
+    pub indexes: Vec<StorageIndex>,
+    pub projections: Vec<StorageProjection>,
+    pub columns: std::collections::BTreeMap<String, ColumnStorage>,
+}
+
+/// A non-ontology auxiliary table definition (checkpoint, etc.).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuxiliaryTable {
+    pub name: String,
+    pub columns: Vec<AuxiliaryColumn>,
+    pub order_by: Vec<String>,
+    /// When true, engine is `ReplacingMergeTree(_version)` without `_deleted`.
+    pub version_only_engine: bool,
+    /// Override version column type (e.g. `"uint64"` for code_indexing_checkpoint).
+    pub version_type: Option<String>,
+    pub projections: Vec<StorageProjection>,
+}
+
+/// A column in an auxiliary table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuxiliaryColumn {
+    pub name: String,
+    pub data_type: DataType,
+    pub nullable: bool,
+    pub codec: Option<Vec<String>>,
+    pub default: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainInfo {
     pub name: String,
@@ -104,6 +192,8 @@ pub struct NodeEntity {
     /// Whether this entity's table has a `traversal_path` column.
     /// Derived from the declared fields during ontology loading.
     pub has_traversal_path: bool,
+    /// ClickHouse-specific storage metadata for DDL generation.
+    pub storage: NodeStorage,
 }
 
 impl Default for NodeEntity {
@@ -122,6 +212,7 @@ impl Default for NodeEntity {
             redaction: None,
             style: NodeStyle::default(),
             has_traversal_path: false,
+            storage: NodeStorage::default(),
         }
     }
 }

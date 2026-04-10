@@ -93,6 +93,36 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .edge_tables
         .into_iter()
         .map(|(name, cfg)| {
+            let storage = cfg.storage.map(|s| {
+                crate::entities::EdgeTableStorage {
+                    index_granularity: s.index_granularity,
+                    primary_key: s.primary_key,
+                    indexes: s
+                        .indexes
+                        .into_iter()
+                        .map(node::convert_storage_index)
+                        .collect(),
+                    projections: s
+                        .projections
+                        .into_iter()
+                        .map(node::convert_storage_projection)
+                        .collect(),
+                    columns: s
+                        .columns
+                        .into_iter()
+                        .map(|(name, col)| {
+                            (
+                                name,
+                                crate::entities::ColumnStorage {
+                                    codec: col.codec,
+                                    default: col.default,
+                                    storage_type: None,
+                                },
+                            )
+                        })
+                        .collect(),
+                }
+            });
             let config = crate::EdgeTableConfig {
                 sort_key: cfg.sort_key,
                 columns: cfg
@@ -103,6 +133,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                         data_type: c.data_type,
                     })
                     .collect(),
+                storage: storage.unwrap_or_default(),
             };
             (name, config)
         })
@@ -311,6 +342,35 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .collect();
         }
     }
+
+    // Load auxiliary tables.
+    ontology.auxiliary_tables = schema
+        .settings
+        .auxiliary_tables
+        .into_iter()
+        .map(|t| crate::entities::AuxiliaryTable {
+            name: t.name,
+            columns: t
+                .columns
+                .into_iter()
+                .map(|c| crate::entities::AuxiliaryColumn {
+                    name: c.name,
+                    data_type: c.data_type,
+                    nullable: c.nullable,
+                    codec: c.codec,
+                    default: c.default,
+                })
+                .collect(),
+            order_by: t.order_by,
+            version_only_engine: t.version_only_engine,
+            version_type: t.version_type,
+            projections: t
+                .projections
+                .into_iter()
+                .map(node::convert_storage_projection)
+                .collect(),
+        })
+        .collect();
 
     Ok(ontology)
 }

@@ -1,4 +1,5 @@
 use crate::entities::DataType;
+use crate::loading::node::{StorageIndexYaml, StorageProjectionYaml};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -24,6 +25,30 @@ pub(super) struct EdgeColumnYaml {
 pub(super) struct EdgeTableYaml {
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumnYaml>,
+    #[serde(default)]
+    pub storage: Option<EdgeTableStorageYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct EdgeTableStorageYaml {
+    #[serde(default)]
+    pub index_granularity: Option<u32>,
+    #[serde(default)]
+    pub primary_key: Option<Vec<String>>,
+    #[serde(default)]
+    pub indexes: Vec<StorageIndexYaml>,
+    #[serde(default)]
+    pub projections: Vec<StorageProjectionYaml>,
+    #[serde(default)]
+    pub columns: BTreeMap<String, EdgeColumnStorageYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct EdgeColumnStorageYaml {
+    #[serde(default)]
+    pub codec: Option<Vec<String>>,
+    #[serde(default)]
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +63,21 @@ pub(super) struct SettingsYaml {
     #[serde(default)]
     pub local_db: Option<LocalSettingsYaml>,
     pub etl: EtlSettingsYaml,
+    #[serde(default)]
+    pub auxiliary_tables: Vec<AuxiliaryTableYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct AuxiliaryTableYaml {
+    pub name: String,
+    pub columns: Vec<AuxiliaryColumnYaml>,
+    pub order_by: Vec<String>,
+    #[serde(default)]
+    pub version_only_engine: bool,
+    #[serde(default)]
+    pub version_type: Option<String>,
+    #[serde(default)]
+    pub projections: Vec<StorageProjectionYaml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +99,19 @@ pub(super) struct LocalEntityYaml {
     pub name: String,
     #[serde(default)]
     pub exclude_properties: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct AuxiliaryColumnYaml {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub data_type: DataType,
+    #[serde(default)]
+    pub nullable: bool,
+    #[serde(default)]
+    pub codec: Option<Vec<String>>,
+    #[serde(default)]
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
