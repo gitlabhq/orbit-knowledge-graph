@@ -75,13 +75,14 @@ type ExecuteQueryStream =
 impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
     for KnowledgeGraphServiceImpl
 {
-    #[instrument(skip(self, request), fields(user_id))]
+    #[instrument(skip(self, request), fields(user_id, source_type))]
     async fn list_tools(
         &self,
         request: Request<ListToolsRequest>,
     ) -> Result<Response<ListToolsResponse>, Status> {
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
 
         info!("Listing tools for user");
 
@@ -99,13 +100,14 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     type ExecuteQueryStream = ExecuteQueryStream;
 
-    #[instrument(skip(self, request), fields(user_id))]
+    #[instrument(skip(self, request), fields(user_id, source_type))]
     async fn execute_query(
         &self,
         request: Request<Streaming<ExecuteQueryMessage>>,
     ) -> Result<Response<Self::ExecuteQueryStream>, Status> {
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
 
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
@@ -184,13 +186,14 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
-    #[instrument(skip(self, request), fields(user_id))]
+    #[instrument(skip(self, request), fields(user_id, source_type))]
     async fn get_graph_schema(
         &self,
         request: Request<GetGraphSchemaRequest>,
     ) -> Result<Response<GetGraphSchemaResponse>, Status> {
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching graph schema for user");
@@ -213,13 +216,14 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(response))
     }
 
-    #[instrument(skip(self, request), fields(user_id))]
+    #[instrument(skip(self, request), fields(user_id, source_type))]
     async fn get_cluster_health(
         &self,
         request: Request<GetClusterHealthRequest>,
     ) -> Result<Response<GetClusterHealthResponse>, Status> {
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching cluster health for user");
@@ -228,13 +232,14 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(response))
     }
 
-    #[instrument(skip(self, request), fields(user_id))]
+    #[instrument(skip(self, request), fields(user_id, source_type))]
     async fn get_graph_stats(
         &self,
         request: Request<GetGraphStatsRequest>,
     ) -> Result<Response<GetGraphStatsResponse>, Status> {
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
 
         let req = request.get_ref();
         authorize_traversal_path(&claims, &req.traversal_path)?;
@@ -689,6 +694,7 @@ mod tests {
             organization_id: Some(1),
             min_access_level: None,
             group_traversal_ids: vec![],
+            source_type: "rest".into(),
         }
     }
 

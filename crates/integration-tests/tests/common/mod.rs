@@ -45,6 +45,7 @@ impl DummyClaims for gkg_server::auth::Claims {
             organization_id: Some(1),
             min_access_level: Some(20),
             group_traversal_ids: vec!["1/".into()],
+            source_type: "rest".into(),
         }
     }
 }
