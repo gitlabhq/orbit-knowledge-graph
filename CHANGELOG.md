@@ -1,3 +1,20 @@
+## [0.24.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.23.0...v0.24.0) (2026-04-10)
+
+### Features
+
+* **indexer:** loop-based dispatcher with cron scheduling ([4ce265f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4ce265fbd4a9185c7c020a9f395cde930da8630a)) by Bohdan Parkhomchuk
+* **orbit-cli:** branch, commit SHA, and worktree tracking in local code indexer ([fa718d4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fa718d457d8edaee1419119890ff82636580e33e)) by Michael Usachenko
+
+### Fixes
+
+* make AsRecordBatch generic over context type ([58c4fe9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/58c4fe9eeb984b12289cf70bc3cb931bf0d4571c)) by Michael Usachenko
+* **orbit-cli:** discover nested repos when workspace root is a git repo ([0cd62c2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0cd62c2a1016a2ebc14402748fe2e0d5d7ebfe2e)) by Michael Angelo Rivera
+
+### Other
+
+* bump rust to 1.94.0 ([f2c75a6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f2c75a63d1a47512ccb5cb6901ee02771c09daf4)) by michaelusa
+* **cli:** code indexing cli integration tests ([692b83b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/692b83b39022d438b82dbf1ce79da4fcdaf9b1c4)) by Michael Usachenko
+
 ## [0.23.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.22.0...v0.23.0) (2026-04-09)
 
 ### Features
