@@ -27,9 +27,9 @@ pub use constants::{
     NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 pub use entities::{
-    AuxiliaryColumn, AuxiliaryTable, ColumnStorage, DataType, DomainInfo, EdgeColumn, EdgeEndpoint,
+    AuxiliaryColumn, AuxiliaryTable, DataType, DomainInfo, EdgeColumn, EdgeEndpoint,
     EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field,
-    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, StorageIndex,
+    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, StorageColumn, StorageIndex,
     StorageProjection, VirtualSource,
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};

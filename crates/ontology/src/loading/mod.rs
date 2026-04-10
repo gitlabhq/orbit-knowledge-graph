@@ -97,6 +97,16 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 crate::entities::EdgeTableStorage {
                     index_granularity: s.index_granularity,
                     primary_key: s.primary_key,
+                    columns: s
+                        .columns
+                        .into_iter()
+                        .map(|col| crate::entities::StorageColumn {
+                            name: col.name,
+                            ch_type: col.ch_type,
+                            default: col.default,
+                            codec: col.codec,
+                        })
+                        .collect(),
                     indexes: s
                         .indexes
                         .into_iter()
@@ -106,20 +116,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                         .projections
                         .into_iter()
                         .map(node::convert_storage_projection)
-                        .collect(),
-                    columns: s
-                        .columns
-                        .into_iter()
-                        .map(|(name, col)| {
-                            (
-                                name,
-                                crate::entities::ColumnStorage {
-                                    codec: col.codec,
-                                    default: col.default,
-                                    storage_type: None,
-                                },
-                            )
-                        })
                         .collect(),
                 }
             });

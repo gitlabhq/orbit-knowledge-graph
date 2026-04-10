@@ -14,33 +14,34 @@ pub struct EdgeColumn {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Storage metadata — ClickHouse-specific DDL hints
+// Storage metadata — ClickHouse DDL definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Per-column storage overrides. Only fields that deviate from auto-derived
-/// defaults need to be specified.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ColumnStorage {
-    /// Override the auto-derived codec chain (e.g. `["zstd(3)"]`).
-    pub codec: Option<Vec<String>>,
-    /// Override the column DEFAULT expression (e.g. `"'0/'"`, `"now64(6)"`).
+/// A column as it appears in `CREATE TABLE` DDL. Fully explicit: the YAML
+/// specifies the exact ClickHouse type, codec, and default. No auto-derivation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageColumn {
+    pub name: String,
+    /// Exact ClickHouse type string, e.g. `"Int64"`, `"LowCardinality(String)"`,
+    /// `"Nullable(DateTime64(6, 'UTC'))"`.
+    pub ch_type: String,
     pub default: Option<String>,
-    /// Force a storage type wrapper (e.g. `"low_cardinality"`) when the
-    /// auto-derived type from the ontology `DataType` isn't sufficient.
-    pub storage_type: Option<String>,
+    pub codec: Option<Vec<String>>,
 }
 
-/// Table-level storage configuration for a node entity.
+/// Table-level storage configuration for a node entity. Fully explicit:
+/// columns are listed in DDL order, indexes and projections are complete.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NodeStorage {
     /// When true, engine is `ReplacingMergeTree(_version)` instead of
     /// `ReplacingMergeTree(_version, _deleted)`.
     pub version_only_engine: bool,
-    /// Per-column overrides, keyed by column name.
-    pub columns: std::collections::BTreeMap<String, ColumnStorage>,
-    /// Additional indexes beyond auto-generated ones.
+    /// Columns in exact DDL order. Does NOT include `_version`/`_deleted`
+    /// (system columns are appended automatically).
+    pub columns: Vec<StorageColumn>,
+    /// Complete list of indexes (no auto-generation).
     pub indexes: Vec<StorageIndex>,
-    /// Additional projections beyond auto-generated ones.
+    /// Complete list of projections (no auto-generation).
     pub projections: Vec<StorageProjection>,
 }
 
@@ -73,9 +74,9 @@ pub enum StorageProjection {
 pub struct EdgeTableStorage {
     pub index_granularity: Option<u32>,
     pub primary_key: Option<Vec<String>>,
+    pub columns: Vec<StorageColumn>,
     pub indexes: Vec<StorageIndex>,
     pub projections: Vec<StorageProjection>,
-    pub columns: std::collections::BTreeMap<String, ColumnStorage>,
 }
 
 /// A non-ontology auxiliary table definition (checkpoint, etc.).

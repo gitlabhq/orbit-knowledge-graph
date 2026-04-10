@@ -1,5 +1,5 @@
 use crate::entities::DataType;
-use crate::loading::node::{StorageIndexYaml, StorageProjectionYaml};
+use crate::loading::node::{StorageColumnYaml, StorageIndexYaml, StorageProjectionYaml};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -36,19 +36,11 @@ pub(super) struct EdgeTableStorageYaml {
     #[serde(default)]
     pub primary_key: Option<Vec<String>>,
     #[serde(default)]
+    pub columns: Vec<StorageColumnYaml>,
+    #[serde(default)]
     pub indexes: Vec<StorageIndexYaml>,
     #[serde(default)]
     pub projections: Vec<StorageProjectionYaml>,
-    #[serde(default)]
-    pub columns: BTreeMap<String, EdgeColumnStorageYaml>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct EdgeColumnStorageYaml {
-    #[serde(default)]
-    pub codec: Option<Vec<String>>,
-    #[serde(default)]
-    pub default: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

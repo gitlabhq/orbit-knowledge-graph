@@ -121,10 +121,12 @@ pub fn emit_create_table(table: &CreateTable) -> String {
 fn emit_projection(proj: &ProjectionDef) -> String {
     match proj {
         ProjectionDef::Reorder { name, order_by } => {
-            format!(
-                "    PROJECTION {name} (SELECT * ORDER BY ({}))",
-                order_by.join(", ")
-            )
+            let order = if order_by.len() == 1 {
+                order_by[0].clone()
+            } else {
+                format!("({})", order_by.join(", "))
+            };
+            format!("    PROJECTION {name} (SELECT * ORDER BY {order})")
         }
         ProjectionDef::Aggregate {
             name,

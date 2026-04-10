@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, HashSet};
 use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::entities::{
-    ColumnStorage, DataType, EnumType, Field, FieldSource, NodeEntity, NodeStorage, NodeStyle,
-    RedactionConfig, StorageIndex, StorageProjection, VirtualSource,
+    DataType, EnumType, Field, FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig,
+    StorageIndex, StorageProjection, VirtualSource,
 };
 use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -129,21 +129,23 @@ struct NodeStorageYaml {
     #[serde(default)]
     version_only_engine: bool,
     #[serde(default)]
-    columns: BTreeMap<String, ColumnStorageYaml>,
+    columns: Vec<StorageColumnYaml>,
     #[serde(default)]
     indexes: Vec<StorageIndexYaml>,
     #[serde(default)]
     projections: Vec<StorageProjectionYaml>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct ColumnStorageYaml {
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct StorageColumnYaml {
+    pub name: String,
+    /// Exact ClickHouse type, e.g. `"Int64"`, `"Nullable(String)"`, `"LowCardinality(String)"`.
+    #[serde(rename = "type")]
+    pub ch_type: String,
     #[serde(default)]
-    codec: Option<Vec<String>>,
+    pub default: Option<String>,
     #[serde(default)]
-    default: Option<String>,
-    #[serde(default)]
-    storage_type: Option<String>,
+    pub codec: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -424,15 +426,11 @@ fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
         columns: yaml
             .columns
             .into_iter()
-            .map(|(name, col)| {
-                (
-                    name,
-                    ColumnStorage {
-                        codec: col.codec,
-                        default: col.default,
-                        storage_type: col.storage_type,
-                    },
-                )
+            .map(|col| crate::entities::StorageColumn {
+                name: col.name,
+                ch_type: col.ch_type,
+                default: col.default,
+                codec: col.codec,
             })
             .collect(),
         indexes: yaml.indexes.into_iter().map(convert_storage_index).collect(),
