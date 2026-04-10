@@ -19,6 +19,7 @@ use indexer::modules::namespace_deletion::{
 };
 use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
+use indexer::schema_version;
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
@@ -71,7 +72,10 @@ async fn main() -> anyhow::Result<()> {
     let result = match args.mode {
         Mode::DispatchIndexing => {
             let services = indexer::scheduler::connect(&config.nats).await?;
+            config.schema.validate()?;
             let graph = config.graph.build_client();
+            info!("initializing schema version table");
+            schema_version::init(&graph).await?;
             let datalake = config.datalake.build_client();
             let metrics = ScheduledTaskMetrics::new();
             let lock_service = services.lock_service.clone();
@@ -136,12 +140,19 @@ async fn main() -> anyhow::Result<()> {
                 gitlab: config.gitlab_client_config(),
                 schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
+                schema: config.schema.clone(),
             };
             indexer::run(&indexer_config, ontology, shutdown)
                 .await
                 .map_err(Into::into)
         }
-        Mode::Webserver => run_webserver(&config, ontology).await,
+        Mode::Webserver => {
+            config.schema.validate()?;
+            let graph = config.graph.build_client();
+            info!("initializing schema version table");
+            schema_version::init(&graph).await?;
+            run_webserver(&config, ontology).await
+        }
     };
 
     signal_task.abort();

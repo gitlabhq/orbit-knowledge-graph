@@ -39,6 +39,7 @@ pub mod metrics;
 pub mod modules;
 pub mod nats;
 pub mod scheduler;
+pub mod schema_version;
 pub mod topic;
 pub mod types;
 pub mod worker_pool;
@@ -55,7 +56,7 @@ use engine::EngineBuilder;
 use gitlab_client::GitlabClient;
 use gkg_server_config::{
     ClickHouseConfiguration, EngineConfiguration, GitlabClientConfiguration, NatsConfiguration,
-    ScheduleConfig,
+    ScheduleConfig, SchemaConfig,
 };
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
@@ -85,6 +86,8 @@ pub struct IndexerConfig {
     pub schedule: ScheduleConfig,
     #[serde(default = "default_health_bind_address")]
     pub health_bind_address: SocketAddr,
+    #[serde(default)]
+    pub schema: SchemaConfig,
 }
 
 impl Default for IndexerConfig {
@@ -97,6 +100,7 @@ impl Default for IndexerConfig {
             gitlab: None,
             schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
+            schema: SchemaConfig::default(),
         }
     }
 }
@@ -117,6 +121,12 @@ pub enum IndexerError {
 
     #[error("Health server failed: {0}")]
     Health(#[from] std::io::Error),
+
+    #[error("Schema version error: {0}")]
+    SchemaVersion(#[from] schema_version::SchemaVersionError),
+
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(#[from] gkg_server_config::SchemaConfigError),
 }
 
 /// Runs the indexer until completion or until the token is cancelled.
@@ -125,6 +135,12 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
+    config.schema.validate()?;
+
+    let graph_client = config.graph.build_client();
+    info!(url = %config.graph.url, "initializing schema version table");
+    schema_version::init(&graph_client).await?;
+
     info!(url = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
 
