@@ -66,6 +66,15 @@ orbit_query() {
     "$ORBIT" query --raw "$1" > "$2" 2>/dev/null
 }
 
+# Check if all files have identical content.
+# Usage: all_identical <file1> <file2> [file3...]
+all_identical() {
+    duckdb -noheader -list -c "
+        SELECT count(DISTINCT content) = 1
+        FROM read_text([$(printf "'%s'," "$@" | sed 's/,$//')])
+    " 2>/dev/null
+}
+
 # Create a minimal git repo with Python files for testing.
 # Usage: init_test_repo <path>
 init_test_repo() {

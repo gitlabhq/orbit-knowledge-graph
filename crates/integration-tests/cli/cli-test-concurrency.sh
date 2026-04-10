@@ -26,8 +26,10 @@ done
 all_ok=true
 for pid in "${pids[@]}"; do wait "$pid" || all_ok=false; done
 
-if $all_ok && diff -q "$TMP/r1.json" "$TMP/r2.json" > /dev/null 2>&1 \
-           && diff -q "$TMP/r1.json" "$TMP/r3.json" > /dev/null 2>&1; then
+reader_files=()
+for i in $(seq 1 "$NUM_READERS"); do reader_files+=("$TMP/r$i.json"); done
+
+if $all_ok && [ "$(all_identical "${reader_files[@]}")" = "true" ]; then
     add "concurrent_readers" true "$NUM_READERS readers, identical results"
 else
     add "concurrent_readers" false "results differ or query failed"
@@ -61,12 +63,16 @@ count=$(count_nodes "$TMP/integrity.json" "true")
                     || add "data_integrity" false "no nodes"
 
 # 6. Sequential read consistency
-orbit_query "$Q_FILES" "$TMP/base.json"
-consistent=true
-for _ in $(seq 2 "$NUM_CONSISTENCY_READS"); do
-    orbit_query "$Q_FILES" "$TMP/cmp.json"
-    diff -q "$TMP/base.json" "$TMP/cmp.json" > /dev/null 2>&1 || { consistent=false; break; }
+for i in $(seq 1 "$NUM_CONSISTENCY_READS"); do
+    orbit_query "$Q_FILES" "$TMP/seq$i.json"
 done
-add "read_consistency" "$consistent" "$NUM_CONSISTENCY_READS reads"
+seq_files=()
+for i in $(seq 1 "$NUM_CONSISTENCY_READS"); do seq_files+=("$TMP/seq$i.json"); done
+
+if [ "$(all_identical "${seq_files[@]}")" = "true" ]; then
+    add "read_consistency" true "$NUM_CONSISTENCY_READS reads"
+else
+    add "read_consistency" false "results diverged"
+fi
 
 emit_results
