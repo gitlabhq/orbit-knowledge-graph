@@ -309,6 +309,17 @@ unit-test:
     - ./scripts/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
+cli-test:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - cargo build -p orbit
+    - cargo nextest run --profile ci --test cli --no-fail-fast
+    - sccache --show-stats || true
+
 integration-test:
   stage: test
   extends:

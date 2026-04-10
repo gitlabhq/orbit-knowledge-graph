@@ -1,4 +1,5 @@
 mod assertions;
+pub mod cli;
 mod context;
 pub mod mock_redaction;
 mod seed;

@@ -28,6 +28,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - `cargo fmt` (`fmt-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
 - Unit tests via nextest, includes compiler tests (`unit-test`)
+- CLI integration tests: concurrency, worktrees, content resolution (`cli-test`)
 - Integration tests with Docker testcontainers (`integration-test`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)

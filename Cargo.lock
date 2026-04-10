@@ -3687,6 +3687,7 @@ dependencies = [
  "arrow",
  "clickhouse-client",
  "futures",
+ "gitalisk-core",
  "gkg-server",
  "gkg-server-config",
  "gkg-utils",
