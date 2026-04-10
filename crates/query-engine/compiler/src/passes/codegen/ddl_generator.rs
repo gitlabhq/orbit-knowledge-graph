@@ -41,6 +41,11 @@ pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
 
 /// Converts a `StorageColumn` (explicit YAML) into a `ColumnDef` (DDL AST).
 /// The `ch_type` string is passed through as-is to the codegen layer.
+///
+/// SAFETY: `default` and `ch_type` are emitted as raw SQL in the DDL output.
+/// This is safe because the ontology YAML is developer-controlled configuration
+/// embedded at compile time -- not user input. If the trust boundary changes
+/// (e.g. dynamic schema from an API), these fields need validation.
 fn storage_col_to_def(col: &StorageColumn) -> ColumnDef {
     let col_type = parse_column_type(&col.ch_type);
     let mut def = ColumnDef::new(&col.name, col_type);
@@ -181,6 +186,10 @@ fn convert_index(idx: &StorageIndex) -> IndexDef {
     }
 }
 
+/// Converts ontology projection metadata into DDL AST.
+///
+/// SAFETY: `select` and `group_by` entries are emitted as raw SQL expressions.
+/// Same trust assumption as `storage_col_to_def` -- ontology YAML is developer-controlled.
 fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
     match proj {
         StorageProjection::Reorder { name, order_by } => ProjectionDef::Reorder {

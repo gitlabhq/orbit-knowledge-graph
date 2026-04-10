@@ -773,9 +773,9 @@
       "type": "object",
       "description": "A column as it appears in CREATE TABLE DDL.",
       "properties": {
-        "name": { "type": "string" },
+        "name": { "type": "string", "pattern": "^`?[a-zA-Z_][a-zA-Z0-9_]*`?$", "description": "Column name (valid SQL identifier)." },
         "type": { "type": "string", "description": "Exact ClickHouse type (e.g. Int64, Nullable(String), LowCardinality(String))." },
-        "default": { "type": "string", "description": "DEFAULT expression." },
+        "default": { "type": "string", "description": "DEFAULT expression. Emitted as raw SQL — must be trusted input." },
         "codec": {
           "type": "array",
           "items": { "type": "string" },
@@ -790,8 +790,8 @@
       "type": "object",
       "description": "A skip index definition.",
       "properties": {
-        "name": { "type": "string" },
-        "column": { "type": "string" },
+        "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$", "description": "Index name (valid SQL identifier)." },
+        "column": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$", "description": "Column name (valid SQL identifier)." },
         "type": { "type": "string", "description": "Index type (e.g. minmax, set(10), bloom_filter(0.01))." },
         "granularity": { "type": "integer", "minimum": 1, "default": 1 }
       },
@@ -804,7 +804,7 @@
       "description": "A materialized projection.",
       "properties": {
         "type": { "type": "string", "enum": ["reorder", "aggregate"] },
-        "name": { "type": "string" },
+        "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$", "description": "Projection name (valid SQL identifier)." },
         "order_by": {
           "type": "array",
           "items": { "type": "string" },
