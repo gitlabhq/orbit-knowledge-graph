@@ -179,14 +179,25 @@ Implemented in `crates/indexer/src/migration_completion.rs`.
 ### Completion criteria
 
 The checker compares checkpoint state in the new-prefix tables against the set of enabled
-namespaces from the datalake:
+namespaces from the datalake. Both SDLC and code indexing must be complete:
 
 1. **SDLC namespaces** — count distinct namespace IDs with checkpoint entries (keys matching
    `ns.<id>.*`) in the `vN_checkpoint` table, compared against the count of enabled namespaces
    in `siphon_knowledge_graph_enabled_namespaces`.
+2. **Code indexing namespaces** — count distinct namespace IDs (extracted from the
+   `traversal_path` column) in `vN_code_indexing_checkpoint`, compared against the same enabled
+   namespace count.
 
-When all enabled namespaces have at least one checkpoint entry in the new-prefix table, the
-migration is considered complete.
+When all enabled namespaces have checkpoint entries in both new-prefix tables, the migration is
+considered complete.
+
+#### Known trade-off: checkpoint-based validation
+
+Completion is checkpoint-based, not row-count-based. A checkpoint entry proves the indexing
+pipeline ran and committed for that scope, but does not validate that the output tables contain
+the expected number of rows. This is the standard pattern for CDC/ETL systems: silent data-loss
+bugs (e.g. an upstream source returning empty results) would not be caught by this check. Full
+data correctness validation is deferred to staging E2E tests.
 
 ### Status transitions on completion
 

@@ -36,12 +36,20 @@ const MIGRATION_LOCK_KEY: &str = "schema_migration";
 /// NATS KV lock TTL for the completion check.
 const LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// SQL to count distinct namespace prefixes in the new-prefix checkpoint table.
+/// SQL to count distinct namespace prefixes in the new-prefix SDLC checkpoint table.
 /// A completed namespace has at least one checkpoint key starting with `ns.`.
-const COUNT_CHECKPOINT_NAMESPACES: &str = "\
+const COUNT_SDLC_CHECKPOINT_NAMESPACES: &str = "\
 SELECT count(DISTINCT extractAll(key, '^ns\\.(\\d+)')[1]) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE key LIKE 'ns.%' AND _deleted = false";
+
+/// SQL to count distinct namespaces in the new-prefix code indexing checkpoint table.
+/// The `traversal_path` column has the form `org_id/namespace_id/...`. We extract the
+/// second path segment (the root namespace ID) and count distinct values.
+const COUNT_CODE_CHECKPOINT_NAMESPACES: &str = "\
+SELECT count(DISTINCT splitByChar('/', traversal_path)[2]) AS ns_count \
+FROM {table:Identifier} FINAL \
+WHERE _deleted = false AND traversal_path != ''";
 
 /// SQL to count enabled namespaces from the datalake.
 const COUNT_ENABLED_NAMESPACES: &str = "\
@@ -239,64 +247,67 @@ impl MigrationCompletionChecker {
         Ok(())
     }
 
-    /// Returns `true` if all enabled namespaces have checkpoint entries in the
-    /// new-prefix tables.
+    /// Returns `true` if all enabled namespaces have checkpoint entries in both
+    /// the new-prefix SDLC and code indexing checkpoint tables.
+    ///
+    /// Completion is checkpoint-based, not row-count-based. A checkpoint entry
+    /// means the indexing pipeline ran for that scope — it does not validate
+    /// that the output tables contain the expected number of rows. This is the
+    /// standard pattern for CDC/ETL systems: the checkpoint proves the pipeline
+    /// executed and committed, but silent data-loss bugs (e.g. an upstream
+    /// source returning empty results) would not be caught. Full data
+    /// correctness validation is deferred to staging E2E tests (issue #443).
     async fn is_migration_complete(&self, version: u32) -> Result<bool, String> {
         let prefix = table_prefix(version);
-        let checkpoint_table = format!("{prefix}checkpoint");
 
-        // Count namespaces that have been indexed into the new checkpoint table.
-        let indexed_count = self
-            .count_checkpoint_namespaces(&checkpoint_table)
-            .await
-            .map_err(|e| format!("count checkpoint namespaces: {e}"))?;
-
-        // Count enabled namespaces from the datalake.
+        // Count enabled namespaces from the datalake (the reference set).
         let enabled_count = self
             .count_enabled_namespaces()
             .await
             .map_err(|e| format!("count enabled namespaces: {e}"))?;
 
+        if enabled_count == 0 {
+            return Ok(true);
+        }
+
+        // SDLC completeness: namespaces with entries in the new checkpoint table.
+        let sdlc_table = format!("{prefix}checkpoint");
+        let sdlc_count = self
+            .count_table_namespaces(COUNT_SDLC_CHECKPOINT_NAMESPACES, &sdlc_table)
+            .await
+            .map_err(|e| format!("count SDLC checkpoint namespaces: {e}"))?;
+
+        // Code indexing completeness: namespaces with entries in the new
+        // code_indexing_checkpoint table.
+        let code_table = format!("{prefix}code_indexing_checkpoint");
+        let code_count = self
+            .count_table_namespaces(COUNT_CODE_CHECKPOINT_NAMESPACES, &code_table)
+            .await
+            .map_err(|e| format!("count code checkpoint namespaces: {e}"))?;
+
         info!(
             version,
-            indexed_namespaces = indexed_count,
+            sdlc_indexed_namespaces = sdlc_count,
+            code_indexed_namespaces = code_count,
             enabled_namespaces = enabled_count,
             "migration completion status"
         );
 
-        if enabled_count == 0 {
-            // No namespaces enabled — nothing to index.
-            return Ok(true);
-        }
-
-        // All enabled namespaces must have at least one checkpoint entry.
-        Ok(indexed_count >= enabled_count)
+        // Both SDLC and code indexing must cover all enabled namespaces.
+        Ok(sdlc_count >= enabled_count && code_count >= enabled_count)
     }
 
-    async fn count_checkpoint_namespaces(&self, table: &str) -> Result<u64, String> {
+    /// Counts distinct namespaces in a checkpoint table using the given query.
+    async fn count_table_namespaces(&self, query: &str, table: &str) -> Result<u64, String> {
         let batches = self
             .graph
-            .query(COUNT_CHECKPOINT_NAMESPACES)
+            .query(query)
             .param("table", table)
             .fetch_arrow()
             .await
             .map_err(|e| e.to_string())?;
 
-        for batch in &batches {
-            if batch.num_rows() == 0 {
-                continue;
-            }
-            let col = batch
-                .column_by_name("ns_count")
-                .ok_or_else(|| "missing ns_count column".to_string())?;
-            let col = col
-                .as_any()
-                .downcast_ref::<arrow::array::UInt64Array>()
-                .ok_or_else(|| "ns_count is not UInt64".to_string())?;
-            return Ok(col.value(0));
-        }
-
-        Ok(0)
+        extract_u64_scalar(&batches, "ns_count")
     }
 
     async fn count_enabled_namespaces(&self) -> Result<u64, String> {
@@ -306,21 +317,7 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| e.to_string())?;
 
-        for batch in &batches {
-            if batch.num_rows() == 0 {
-                continue;
-            }
-            let col = batch
-                .column_by_name("ns_count")
-                .ok_or_else(|| "missing ns_count column".to_string())?;
-            let col = col
-                .as_any()
-                .downcast_ref::<arrow::array::UInt64Array>()
-                .ok_or_else(|| "ns_count is not UInt64".to_string())?;
-            return Ok(col.value(0));
-        }
-
-        Ok(0)
+        extract_u64_scalar(&batches, "ns_count")
     }
 
     /// Drops tables for retired versions outside the retention window, then
@@ -407,6 +404,27 @@ impl MigrationCompletionChecker {
     }
 }
 
+/// Extracts a single `u64` value from a query result by column name.
+fn extract_u64_scalar(
+    batches: &[arrow::record_batch::RecordBatch],
+    column: &str,
+) -> Result<u64, String> {
+    for batch in batches {
+        if batch.num_rows() == 0 {
+            continue;
+        }
+        let col = batch
+            .column_by_name(column)
+            .ok_or_else(|| format!("missing {column} column"))?;
+        let col = col
+            .as_any()
+            .downcast_ref::<arrow::array::UInt64Array>()
+            .ok_or_else(|| format!("{column} is not UInt64"))?;
+        return Ok(col.value(0));
+    }
+    Ok(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -423,16 +441,37 @@ mod tests {
     }
 
     #[test]
-    fn count_checkpoint_query_uses_identifier_param() {
+    fn sdlc_checkpoint_query_uses_identifier_param() {
         assert!(
-            COUNT_CHECKPOINT_NAMESPACES.contains("{table:Identifier}"),
-            "checkpoint query must use Identifier param for table name"
+            COUNT_SDLC_CHECKPOINT_NAMESPACES.contains("{table:Identifier}"),
+            "SDLC checkpoint query must use Identifier param for table name"
         );
     }
 
     #[test]
-    fn count_checkpoint_query_filters_deleted() {
-        assert!(COUNT_CHECKPOINT_NAMESPACES.contains("_deleted = false"));
+    fn sdlc_checkpoint_query_filters_deleted() {
+        assert!(COUNT_SDLC_CHECKPOINT_NAMESPACES.contains("_deleted = false"));
+    }
+
+    #[test]
+    fn code_checkpoint_query_uses_identifier_param() {
+        assert!(
+            COUNT_CODE_CHECKPOINT_NAMESPACES.contains("{table:Identifier}"),
+            "code checkpoint query must use Identifier param for table name"
+        );
+    }
+
+    #[test]
+    fn code_checkpoint_query_filters_deleted() {
+        assert!(COUNT_CODE_CHECKPOINT_NAMESPACES.contains("_deleted = false"));
+    }
+
+    #[test]
+    fn code_checkpoint_query_extracts_namespace_from_traversal_path() {
+        assert!(
+            COUNT_CODE_CHECKPOINT_NAMESPACES.contains("splitByChar"),
+            "code checkpoint query must extract namespace ID from traversal_path"
+        );
     }
 
     #[test]
