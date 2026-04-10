@@ -1074,7 +1074,7 @@
           "type": "integer",
           "format": "uint32",
           "default": 2,
-          "minimum": 0
+          "minimum": 2
         }
       },
       "additionalProperties": false

@@ -16,6 +16,7 @@ pub struct SchemaConfig {
     /// After migrating to version N, the indexer keeps the N active tables plus
     /// the N-1 rollback target. Must be at least 2.
     #[serde(default = "default_max_retained_versions")]
+    #[schemars(range(min = 2))]
     pub max_retained_versions: u32,
 }
 

@@ -22,18 +22,24 @@ pub const SCHEMA_VERSION: u32 = {
 };
 
 /// Parses a `u32` from a byte slice containing an ASCII decimal integer
-/// optionally terminated by a newline. Panics at compile time on invalid input.
+/// optionally followed by trailing whitespace. Panics at compile time on
+/// invalid input, including digits after whitespace (e.g. `"1 2\n"`).
 const fn parse_u32_from_bytes(bytes: &[u8]) -> u32 {
     let mut i = 0;
     let mut value: u32 = 0;
     let mut found_digit = false;
+    let mut found_trailing_whitespace = false;
     while i < bytes.len() {
         let b = bytes[i];
         if b >= b'0' && b <= b'9' {
+            if found_trailing_whitespace {
+                panic!("config/SCHEMA_VERSION contains digits after whitespace");
+            }
             value = value * 10 + (b - b'0') as u32;
             found_digit = true;
-        } else if b == b'\n' || b == b'\r' || b == b' ' {
-            // Trailing whitespace is allowed.
+        } else if (b == b'\n' || b == b'\r' || b == b' ') && found_digit {
+            // Only trailing whitespace after digits is allowed.
+            found_trailing_whitespace = true;
         } else {
             panic!("config/SCHEMA_VERSION contains non-digit characters");
         }
