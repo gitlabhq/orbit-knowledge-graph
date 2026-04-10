@@ -7,6 +7,7 @@ GitLab Knowledge Graph (Orbit). Rust service that builds a property graph from G
 All tasks use mise. `mise build`, `mise test:fast`, `mise test:local`, `mise lint:code`, `mise server:start`, `mise server:dispatch`.
 Fix linting issues: `mise lint:code:fix`. Validate docs: `mise lint:docs`. Validate ontology: `mise ontology:validate`.
 Integration tests need Docker: `mise test:integration`. Correctness subset: `mise test:integration:server`.
+CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 **Worktrees:** after creating a git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
 
@@ -27,6 +28,7 @@ Integration tests need Docker: `mise test:integration`. Correctness subset: `mis
 - `cargo fmt` (`fmt-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
 - Unit tests via nextest, includes compiler tests (`unit-test`)
+- CLI integration tests: concurrency, worktrees, content resolution (`cli-integration-test`)
 - Integration tests with Docker testcontainers (`integration-test`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
@@ -51,6 +53,7 @@ Integration tests need Docker: `mise test:integration`. Correctness subset: `mis
 | Query response JSON schema | `crates/gkg-server/schemas/query_response.json` |
 | Query test fixtures | `fixtures/queries/` |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
+| Graph DDL (local DuckDB) | `config/graph_local.sql` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
 | Server config structure | `crates/gkg-server/src/config.rs` |
@@ -81,24 +84,25 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
 | `query-engine/types` | Type-safe result schema for redaction processing |
 | `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |
-| `query-engine/shared` | Shared pipeline stages (compilation, extraction, output) |
+| `query-engine/shared` | Shared pipeline stages (compilation, extraction, output), virtual column resolution (`ColumnResolver` trait, `ColumnResolverRegistry`, `resolve_virtual_columns`) |
 | `query-engine/formatters` | Result formatters (graph, raw row, goon) |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/` |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `code-graph` | Parent crate for code parsing and graph construction; re-exports `treesitter-visit`, `parser-core`, `code-graph-linker` |
 | `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper |
 | `code-graph/parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
-| `code-graph/linker` | Builds in-memory property graphs from parsed code |
-| `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`) and Arrow extraction utilities |
+| `code-graph/linker` | Builds in-memory property graphs from parsed code, `AsRecordBatch<RowContext>` impls for all node types, `ResolvedEdge` for edge serialization |
+| `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`), Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `siphon-proto` | Protobuf types for CDC replication events |
 | `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |
 | `health-check` | K8s readiness/liveness probes |
-| `cli` | Local `orbit index` and `orbit query` commands |
+| `cli` | Local `orbit index`, `orbit query`, and `orbit compile` commands; DuckDB pipeline with hydration + virtual column resolution from filesystem; workspace management (`Workspace`, `GitInfo`, manifest in DuckDB) |
+| `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
-| `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, and `ResponseView` assertion framework for integration tests |
-| `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness, graph formatting); depends on gkg-server, compiler, integration-testkit |
+| `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, CLI test harness (`cli` module) for CLI integration tests |
+| `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness, graph formatting) + cli (concurrency, worktrees); depends on gkg-server, compiler, integration-testkit |
 | `xtask` | Developer task runner (data generation, query evaluation, ClickHouse management) |
 
 ## Code quality

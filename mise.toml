@@ -31,6 +31,7 @@ DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 "tilt" = "0.36.1"
 "zig" = "0.15.2"
 clickhouse = "25.12"
+duckdb = "1.5.1"
 uv = "0.9.28"
 node = "24"
 vale = "3.13.0"
@@ -60,6 +61,10 @@ description = "Run unit + non-Docker integration tests with reduced debug info"
 [tasks."test:local"]
 run = "cargo nextest run --test local"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
+
+[tasks."test:cli"]
+run = "cargo build -p orbit && cargo nextest run --test cli --no-fail-fast"
+description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
 [tasks."test:integration"]
 run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0"
