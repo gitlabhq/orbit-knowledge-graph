@@ -138,6 +138,16 @@ enum Commands {
         #[arg(long)]
         local: bool,
     },
+    /// Generate ClickHouse DDL from the ontology
+    Schema {
+        /// Path to ontology directory (default: embedded)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+
+        /// Table prefix (e.g., "v1_" for schema version 1)
+        #[arg(long, short, default_value = "")]
+        prefix: String,
+    },
 }
 
 #[tokio::main]
@@ -192,7 +202,27 @@ async fn main() -> Result<()> {
             format,
             local,
         } => run_compile(json, traversal_paths, ontology, format, local),
+        Commands::Schema { ontology, prefix } => run_schema(ontology, prefix),
     }
+}
+
+fn run_schema(ontology_path: Option<PathBuf>, prefix: String) -> Result<()> {
+    let ont = match ontology_path {
+        Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
+        None => Ontology::load_embedded().context("failed to load embedded ontology")?,
+    };
+
+    let tables = query_engine::compiler::generate_graph_tables(&ont);
+    for table in &tables {
+        let table = if prefix.is_empty() {
+            table.clone()
+        } else {
+            table.clone().with_prefix(&prefix)
+        };
+        println!("{};\n", query_engine::compiler::emit_create_table(&table));
+    }
+
+    Ok(())
 }
 
 async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
