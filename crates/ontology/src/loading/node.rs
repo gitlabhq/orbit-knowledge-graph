@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, HashSet};
 use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::entities::{
-    DataType, EnumType, Field, FieldSource, NodeEntity, NodeStyle, RedactionConfig, VirtualSource,
+    DataType, EnumType, Field, FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig,
+    StorageIndex, StorageProjection, VirtualSource,
 };
 use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -33,6 +34,8 @@ pub(crate) struct NodeYaml {
     redaction: Option<RedactionConfig>,
     #[serde(default)]
     style: NodeStyle,
+    #[serde(default)]
+    storage: Option<NodeStorageYaml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -119,6 +122,59 @@ impl PropertyYaml {
     fn default_filterable() -> bool {
         true
     }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct NodeStorageYaml {
+    #[serde(default)]
+    version_only_engine: bool,
+    #[serde(default)]
+    primary_key: Option<Vec<String>>,
+    #[serde(default)]
+    columns: Vec<StorageColumnYaml>,
+    #[serde(default)]
+    indexes: Vec<StorageIndexYaml>,
+    #[serde(default)]
+    projections: Vec<StorageProjectionYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct StorageColumnYaml {
+    pub name: String,
+    /// Exact ClickHouse type, e.g. `"Int64"`, `"Nullable(String)"`, `"LowCardinality(String)"`.
+    #[serde(rename = "type")]
+    pub ch_type: String,
+    #[serde(default)]
+    pub default: Option<String>,
+    #[serde(default)]
+    pub codec: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct StorageIndexYaml {
+    pub name: String,
+    pub column: String,
+    #[serde(rename = "type")]
+    pub index_type: String,
+    #[serde(default = "default_granularity")]
+    pub granularity: u32,
+}
+
+fn default_granularity() -> u32 {
+    1
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+pub(crate) enum StorageProjectionYaml {
+    #[serde(rename = "reorder")]
+    Reorder { name: String, order_by: Vec<String> },
+    #[serde(rename = "aggregate")]
+    Aggregate {
+        name: String,
+        select: Vec<String>,
+        group_by: Vec<String>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -255,6 +311,8 @@ impl NodeYaml {
             .iter()
             .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
 
+        let storage = convert_node_storage(self.storage.unwrap_or_default());
+
         Ok(NodeEntity {
             name,
             domain: self.domain,
@@ -269,6 +327,7 @@ impl NodeYaml {
             redaction: self.redaction,
             style: self.style,
             has_traversal_path,
+            storage,
         })
     }
 }
@@ -360,6 +419,59 @@ impl EtlYaml {
                 edges: convert_edge_mappings(edges)?,
             }),
         }
+    }
+}
+
+fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
+    NodeStorage {
+        version_only_engine: yaml.version_only_engine,
+        primary_key: yaml.primary_key,
+        columns: yaml
+            .columns
+            .into_iter()
+            .map(|col| crate::entities::StorageColumn {
+                name: col.name,
+                ch_type: col.ch_type,
+                default: col.default,
+                codec: col.codec,
+            })
+            .collect(),
+        indexes: yaml
+            .indexes
+            .into_iter()
+            .map(convert_storage_index)
+            .collect(),
+        projections: yaml
+            .projections
+            .into_iter()
+            .map(convert_storage_projection)
+            .collect(),
+    }
+}
+
+pub(crate) fn convert_storage_index(yaml: StorageIndexYaml) -> StorageIndex {
+    StorageIndex {
+        name: yaml.name,
+        column: yaml.column,
+        index_type: yaml.index_type,
+        granularity: yaml.granularity,
+    }
+}
+
+pub(crate) fn convert_storage_projection(yaml: StorageProjectionYaml) -> StorageProjection {
+    match yaml {
+        StorageProjectionYaml::Reorder { name, order_by } => {
+            StorageProjection::Reorder { name, order_by }
+        }
+        StorageProjectionYaml::Aggregate {
+            name,
+            select,
+            group_by,
+        } => StorageProjection::Aggregate {
+            name,
+            select,
+            group_by,
+        },
     }
 }
 

@@ -93,6 +93,30 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .edge_tables
         .into_iter()
         .map(|(name, cfg)| {
+            let storage = cfg.storage.map(|s| crate::entities::EdgeTableStorage {
+                index_granularity: s.index_granularity,
+                primary_key: s.primary_key,
+                columns: s
+                    .columns
+                    .into_iter()
+                    .map(|col| crate::entities::StorageColumn {
+                        name: col.name,
+                        ch_type: col.ch_type,
+                        default: col.default,
+                        codec: col.codec,
+                    })
+                    .collect(),
+                indexes: s
+                    .indexes
+                    .into_iter()
+                    .map(node::convert_storage_index)
+                    .collect(),
+                projections: s
+                    .projections
+                    .into_iter()
+                    .map(node::convert_storage_projection)
+                    .collect(),
+            });
             let config = crate::EdgeTableConfig {
                 sort_key: cfg.sort_key,
                 columns: cfg
@@ -103,6 +127,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                         data_type: c.data_type,
                     })
                     .collect(),
+                storage: storage.unwrap_or_default(),
             };
             (name, config)
         })
@@ -312,5 +337,82 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
     }
 
+    // Load auxiliary tables.
+    ontology.auxiliary_tables = schema
+        .settings
+        .auxiliary_tables
+        .into_iter()
+        .map(|t| crate::entities::AuxiliaryTable {
+            name: t.name,
+            columns: t
+                .columns
+                .into_iter()
+                .map(|c| crate::entities::AuxiliaryColumn {
+                    name: c.name,
+                    data_type: c.data_type,
+                    nullable: c.nullable,
+                    codec: c.codec,
+                    default: c.default,
+                })
+                .collect(),
+            order_by: t.order_by,
+            version_only_engine: t.version_only_engine,
+            version_type: t.version_type,
+            projections: t
+                .projections
+                .into_iter()
+                .map(node::convert_storage_projection)
+                .collect(),
+        })
+        .collect();
+
+    // Validate storage columns match declared properties.
+    validate_storage_columns(&ontology)?;
+
     Ok(ontology)
+}
+
+/// Checks that every node's storage columns correspond 1:1 with its
+/// non-virtual properties. Catches drift between the logical schema
+/// (properties) and physical schema (storage).
+fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for node in ontology.nodes() {
+        if node.storage.columns.is_empty() {
+            continue;
+        }
+
+        let property_names: Vec<&str> = node
+            .fields
+            .iter()
+            .filter(|f| !f.is_virtual())
+            .map(|f| f.name.as_str())
+            .collect();
+
+        let storage_names: Vec<String> = node
+            .storage
+            .columns
+            .iter()
+            .map(|c| c.name.trim_matches('`').to_string())
+            .collect();
+
+        for storage_col in &storage_names {
+            if !property_names.contains(&storage_col.as_str()) {
+                return Err(OntologyError::Validation(format!(
+                    "{}: storage column '{}' has no matching property",
+                    node.name, storage_col
+                )));
+            }
+        }
+
+        for prop in &property_names {
+            if !storage_names.iter().any(|s| s == prop) {
+                return Err(OntologyError::Validation(format!(
+                    "{}: property '{}' has no matching storage column",
+                    node.name, prop
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }
