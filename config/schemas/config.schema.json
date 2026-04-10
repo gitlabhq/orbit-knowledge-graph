@@ -180,25 +180,25 @@
         "tasks": {
           "code-indexing-task": {
             "batch_size": 100,
-            "events_stream_name": "siphon_stream_main_db",
-            "interval_secs": null
+            "cron": null,
+            "events_stream_name": "siphon_stream_main_db"
           },
           "global": {
-            "interval_secs": null
+            "cron": null
           },
           "namespace": {
-            "interval_secs": null
+            "cron": null
           },
           "namespace-code-backfill": {
             "batch_size": 100,
-            "events_stream_name": "siphon_stream_main_db",
-            "interval_secs": null
+            "cron": null,
+            "events_stream_name": "siphon_stream_main_db"
           },
           "namespace-deletion": {
-            "interval_secs": 86400
+            "cron": "0 0 3 * * *"
           },
           "table-cleanup": {
-            "interval_secs": 86400
+            "cron": "0 0 3 * * *"
           }
         }
       }
@@ -371,18 +371,16 @@
       "additionalProperties": false
     },
     "GlobalDispatcherConfig": {
-      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
-        "interval_secs": {
-          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
           "type": [
-            "integer",
+            "string",
             "null"
           ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
+          "default": null
         }
       }
     },
@@ -595,7 +593,7 @@
       "additionalProperties": false
     },
     "NamespaceCodeBackfillDispatcherConfig": {
-      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
         "batch_size": {
@@ -604,19 +602,17 @@
           "default": 100,
           "minimum": 0
         },
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "events_stream_name": {
           "type": "string",
           "default": "siphon_stream_main_db"
-        },
-        "interval_secs": {
-          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
         }
       }
     },
@@ -655,34 +651,30 @@
       }
     },
     "NamespaceDeletionSchedulerConfig": {
-      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
-        "interval_secs": {
-          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
           "type": [
-            "integer",
+            "string",
             "null"
           ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
+          "default": null
         }
       }
     },
     "NamespaceDispatcherConfig": {
-      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
-        "interval_secs": {
-          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
           "type": [
-            "integer",
+            "string",
             "null"
           ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
+          "default": null
         }
       }
     },
@@ -991,25 +983,25 @@
           "default": {
             "code-indexing-task": {
               "batch_size": 100,
-              "events_stream_name": "siphon_stream_main_db",
-              "interval_secs": null
+              "cron": null,
+              "events_stream_name": "siphon_stream_main_db"
             },
             "global": {
-              "interval_secs": null
+              "cron": null
             },
             "namespace": {
-              "interval_secs": null
+              "cron": null
             },
             "namespace-code-backfill": {
               "batch_size": 100,
-              "events_stream_name": "siphon_stream_main_db",
-              "interval_secs": null
+              "cron": null,
+              "events_stream_name": "siphon_stream_main_db"
             },
             "namespace-deletion": {
-              "interval_secs": 86400
+              "cron": "0 0 3 * * *"
             },
             "table-cleanup": {
-              "interval_secs": 86400
+              "cron": "0 0 3 * * *"
             }
           }
         }
@@ -1024,47 +1016,47 @@
           "$ref": "#/$defs/SiphonCodeIndexingTaskDispatcherConfig",
           "default": {
             "batch_size": 100,
-            "events_stream_name": "siphon_stream_main_db",
-            "interval_secs": null
+            "cron": null,
+            "events_stream_name": "siphon_stream_main_db"
           }
         },
         "global": {
           "$ref": "#/$defs/GlobalDispatcherConfig",
           "default": {
-            "interval_secs": null
+            "cron": null
           }
         },
         "namespace": {
           "$ref": "#/$defs/NamespaceDispatcherConfig",
           "default": {
-            "interval_secs": null
+            "cron": null
           }
         },
         "namespace-code-backfill": {
           "$ref": "#/$defs/NamespaceCodeBackfillDispatcherConfig",
           "default": {
             "batch_size": 100,
-            "events_stream_name": "siphon_stream_main_db",
-            "interval_secs": null
+            "cron": null,
+            "events_stream_name": "siphon_stream_main_db"
           }
         },
         "namespace-deletion": {
           "$ref": "#/$defs/NamespaceDeletionSchedulerConfig",
           "default": {
-            "interval_secs": 86400
+            "cron": "0 0 3 * * *"
           }
         },
         "table-cleanup": {
           "$ref": "#/$defs/TableCleanupConfig",
           "default": {
-            "interval_secs": 86400
+            "cron": "0 0 3 * * *"
           }
         }
       },
       "additionalProperties": false
     },
     "SiphonCodeIndexingTaskDispatcherConfig": {
-      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
         "batch_size": {
@@ -1073,35 +1065,31 @@
           "default": 100,
           "minimum": 0
         },
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "events_stream_name": {
           "type": "string",
           "default": "siphon_stream_main_db"
-        },
-        "interval_secs": {
-          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
         }
       }
     },
     "TableCleanupConfig": {
-      "description": "Per-task schedule configuration (cadence interval).\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler loop reads it via `task.schedule()`.",
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
-        "interval_secs": {
-          "description": "Interval in seconds between task runs.\nWhen absent, the task runs every cycle.",
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
           "type": [
-            "integer",
+            "string",
             "null"
           ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
+          "default": null
         }
       }
     },

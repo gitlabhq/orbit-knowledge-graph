@@ -67,7 +67,19 @@ engine:
       max_attempts: 1  # re-dispatched daily, no need to retry
 
 schedule:
-  tasks: {}
+  tasks:
+    global:
+      cron: "0 */1 * * * *"           # every minute
+    namespace:
+      cron: "0 */1 * * * *"           # every minute
+    code-indexing-task:
+      cron: "0 */1 * * * *"           # every minute
+    namespace-code-backfill:
+      cron: "0 */1 * * * *"           # every minute
+    table-cleanup:
+      cron: "0 0 3 * * *"             # daily at 03:00 UTC
+    namespace-deletion:
+      cron: "0 0 3 * * *"             # daily at 03:00 UTC
 
 health_check:
   bind_address: "0.0.0.0:4201"

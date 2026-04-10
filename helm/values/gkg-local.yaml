@@ -52,7 +52,30 @@ indexer:
       memory: 512Mi
 
 dispatcher:
-  enabled: false
+  enabled: true
+  logLevel: "info,gkg_server=debug"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+schedule:
+  tasks:
+    global:
+      cron: "0 */1 * * * *"
+    namespace:
+      cron: "0 */1 * * * *"
+    code-indexing-task:
+      cron: "0 */1 * * * *"
+    namespace-code-backfill:
+      cron: "0 */1 * * * *"
+    table-cleanup:
+      cron: "0 0 3 * * *"
+    namespace-deletion:
+      cron: "0 0 3 * * *"
 
 healthCheck:
   enabled: true

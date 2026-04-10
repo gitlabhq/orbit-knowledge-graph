@@ -209,7 +209,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     ];
 
     let before = Utc::now();
-    indexer::scheduler::run(&tasks, &*lock_service)
+    indexer::scheduler::run_once(&tasks, &*lock_service)
         .await
         .unwrap();
     let after = Utc::now();

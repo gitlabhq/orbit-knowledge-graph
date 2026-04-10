@@ -122,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
                     config.schedule.tasks.namespace_deletion.clone(),
                 )),
             ];
-            indexer::scheduler::run(&tasks, &*lock_service)
+            indexer::scheduler::run_loop(tasks, lock_service, shutdown)
                 .await
                 .map_err(Into::into)
         }

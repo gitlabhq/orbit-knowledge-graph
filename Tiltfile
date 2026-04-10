@@ -112,6 +112,7 @@ k8s_yaml(helm(
 ))
 
 # Skip readiness checks for components that may take time to connect
+k8s_resource('gkg-dispatcher', pod_readiness='ignore')
 k8s_resource('gkg-indexer', pod_readiness='ignore')
 k8s_resource('gkg-webserver', pod_readiness='ignore', port_forwards=['8080:8080'])
 k8s_resource('gkg-health-check', pod_readiness='ignore', port_forwards=['4201:4201'])

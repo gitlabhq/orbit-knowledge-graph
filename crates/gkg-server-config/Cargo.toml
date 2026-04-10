@@ -4,7 +4,9 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+chrono = { workspace = true }
 config = { workspace = true }
+croner = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
