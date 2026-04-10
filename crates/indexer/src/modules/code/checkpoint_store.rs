@@ -3,12 +3,15 @@
 use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::schema_version::{SCHEMA_VERSION, prefixed_table_name};
 use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
 use gkg_utils::arrow::ArrowUtils;
 use thiserror::Error;
+
+const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 #[derive(Debug, Error)]
 pub enum CheckpointError {
@@ -113,21 +116,24 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
         project_id: i64,
         branch: &str,
     ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError> {
-        let query = r#"
+        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let query = format!(
+            r#"
             SELECT
                 argMax(last_task_id, _version) as last_task_id,
                 argMax(last_commit, _version) as last_commit,
                 argMax(indexed_at, _version) as indexed_at
-            FROM code_indexing_checkpoint
-            WHERE traversal_path = {traversal_path:String}
-              AND project_id = {project_id:Int64}
-              AND branch = {branch:String}
+            FROM {table}
+            WHERE traversal_path = {{traversal_path:String}}
+              AND project_id = {{project_id:Int64}}
+              AND branch = {{branch:String}}
             HAVING count() > 0
-        "#;
+        "#
+        );
 
         let batches = self
             .client
-            .query(query)
+            .query(&query)
             .param("traversal_path", traversal_path)
             .param("project_id", project_id)
             .param("branch", branch)
@@ -142,16 +148,17 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
         &self,
         checkpoint: &CodeIndexingCheckpoint,
     ) -> Result<(), CheckpointError> {
+        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_timestamp = checkpoint.indexed_at.format(TIMESTAMP_FORMAT).to_string();
 
         self.client
-            .query(
+            .query(&format!(
                 r#"
-                INSERT INTO code_indexing_checkpoint
+                INSERT INTO {table}
                 (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at)
-                VALUES ({traversal_path:String}, {project_id:Int64}, {branch:String}, {last_task_id:Int64}, {last_commit:Nullable(String)}, {indexed_at:String})
-            "#,
-            )
+                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:Nullable(String)}}, {{indexed_at:String}})
+            "#
+            ))
             .param("traversal_path", &checkpoint.traversal_path)
             .param("project_id", checkpoint.project_id)
             .param("branch", &checkpoint.branch)

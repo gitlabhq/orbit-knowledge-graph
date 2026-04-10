@@ -35,9 +35,21 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 - **Destination**: Provides BatchWriter or StreamWriter
 - **Event**: Type-safe message serialization
 
+### Schema migration
+
+Before the NATS engine starts, `schema_migration::run_if_needed()` compares the embedded
+`SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a NATS KV
+distributed lock, creates new-prefix ClickHouse tables (parsing DDL from embedded `graph.sql`),
+and marks the new version as `migrating`. All write paths (checkpoints, namespace deletion,
+ontology-driven tables) use `prefixed_table_name(table, SCHEMA_VERSION)` so they always target
+the current schema version's table-set.
+
 ### Entry point
 
-The `run()` function in `lib.rs` wires everything together: connects to NATS and ClickHouse, registers handlers via `sdlc::register_handlers()`, `code::register_handlers()`, and `namespace_deletion::register_handlers()`, builds the engine, and runs until shutdown.
+The `run()` function in `lib.rs` wires everything together: runs the migration orchestrator,
+connects to NATS and ClickHouse, registers handlers via `sdlc::register_handlers()`,
+`code::register_handlers()`, and `namespace_deletion::register_handlers()`, builds the engine,
+and runs until shutdown.
 
 `IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `configuration.rs` — no string-keyed lookups.
 

@@ -2,9 +2,12 @@ use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use crate::llqm_v1::ast::{Expr, Insert, InsertSelect, Op, Query, SelectExpr, TableRef};
 use crate::llqm_v1::codegen;
+use crate::schema_version::{prefixed_table_name, SCHEMA_VERSION};
 
 pub struct DeletionStatement {
+    /// Unprefixed table name, used for logging and test assertions.
     pub table: String,
+    /// Full SQL with the schema-version prefix applied to the table name.
     pub sql: String,
 }
 
@@ -13,12 +16,15 @@ pub struct DeletionStatement {
 ///
 /// For each namespaced node table and the shared edge table, generates:
 /// ```sql
-/// INSERT INTO {table}
+/// INSERT INTO {prefixed_table}
 /// SELECT {sort_key_columns..., true, now64(6)}
-/// FROM {table}
+/// FROM {prefixed_table}
 /// WHERE startsWith(traversal_path, {traversal_path:String})
 ///   AND _deleted = false
 /// ```
+///
+/// The table names are prefixed according to the embedded `SCHEMA_VERSION` so
+/// deletions target the same table-set the indexer is currently writing to.
 pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionStatement> {
     let mut statements = Vec::new();
 
@@ -33,7 +39,8 @@ pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionS
 
         let select = build_select_from_sort_key(sort_key);
         let columns = build_destination_columns(sort_key);
-        let statement = build_deletion_insert(&node.destination_table, columns, select);
+        let prefixed = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
+        let statement = build_deletion_insert(&node.destination_table, &prefixed, columns, select);
         statements.push(statement);
     }
 
@@ -41,7 +48,9 @@ pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionS
     let edge_sort_key = ontology.edge_sort_key();
     let edge_select = build_select_from_sort_key(edge_sort_key);
     let edge_columns = build_destination_columns(edge_sort_key);
-    let edge_statement = build_deletion_insert(edge_table, edge_columns, edge_select);
+    let prefixed_edge = prefixed_table_name(edge_table, *SCHEMA_VERSION);
+    let edge_statement =
+        build_deletion_insert(edge_table, &prefixed_edge, edge_columns, edge_select);
     statements.push(edge_statement);
 
     statements
@@ -65,7 +74,8 @@ fn build_destination_columns(sort_key: &[String]) -> Vec<String> {
 }
 
 fn build_deletion_insert(
-    table: &str,
+    unprefixed_table: &str,
+    prefixed_table: &str,
     destination_columns: Vec<String>,
     select: Vec<SelectExpr>,
 ) -> DeletionStatement {
@@ -86,12 +96,12 @@ fn build_deletion_insert(
 
     let insert_select = InsertSelect {
         insert: Insert {
-            table: table.to_string(),
+            table: prefixed_table.to_string(),
             columns: destination_columns,
         },
         query: Query {
             select,
-            from: TableRef::scan(table, None),
+            from: TableRef::scan(prefixed_table, None),
             where_clause,
             order_by: vec![],
             limit: None,
@@ -99,7 +109,7 @@ fn build_deletion_insert(
     };
 
     DeletionStatement {
-        table: table.to_string(),
+        table: unprefixed_table.to_string(),
         sql: codegen::emit_insert_select(&insert_select),
     }
 }

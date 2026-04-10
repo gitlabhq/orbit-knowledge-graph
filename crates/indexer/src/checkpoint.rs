@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::schema_version::{SCHEMA_VERSION, prefixed_table_name};
 use arrow::array::{Array, StringArray, TimestampMicrosecondArray};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
@@ -68,13 +69,14 @@ impl ClickHouseCheckpointStore {
         watermark: &DateTime<Utc>,
         cursor_values: &Option<Vec<String>>,
     ) -> Result<(), CheckpointError> {
+        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
         let cursor_json = serde_json::to_string(cursor_values)
             .map_err(|err| CheckpointError::Store(err.to_string()))?;
 
         self.client
             .query(&format!(
-                "INSERT INTO {CHECKPOINT_TABLE} (key, watermark, cursor_values) \
+                "INSERT INTO {table} (key, watermark, cursor_values) \
                  VALUES ({{key:String}}, {{watermark:String}}, {{cursor_values:String}})"
             ))
             .param("key", key)
@@ -91,12 +93,13 @@ impl ClickHouseCheckpointStore {
 #[async_trait]
 impl CheckpointStore for ClickHouseCheckpointStore {
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
+        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let batches = self
             .client
             .query(&format!(
                 "SELECT argMax(watermark, _version) AS watermark, \
                         argMax(cursor_values, _version) AS cursor_values \
-                 FROM {CHECKPOINT_TABLE} \
+                 FROM {table} \
                  WHERE key = {{key:String}}"
             ))
             .param("key", key)

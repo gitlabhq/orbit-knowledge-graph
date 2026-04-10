@@ -39,6 +39,7 @@ pub mod metrics;
 pub mod modules;
 pub mod nats;
 pub mod scheduler;
+pub mod schema_migration;
 pub mod schema_version;
 pub mod topic;
 pub mod types;
@@ -135,6 +136,9 @@ pub enum IndexerError {
     #[error("Schema version error: {0}")]
     SchemaVersion(#[from] schema_version::SchemaVersionError),
 
+    #[error("Schema migration error: {0}")]
+    SchemaMigration(#[from] schema_migration::MigrationError),
+
     #[error("Invalid configuration: {0}")]
     InvalidConfig(#[from] gkg_server_config::SchemaConfigError),
 }
@@ -180,6 +184,16 @@ pub async fn run(
     let per_message_ttl = KvBucketConfig::with_per_message_ttl();
     broker
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
+        .await?;
+
+    // Run the migration orchestrator before the engine starts consuming messages.
+    // This ensures no in-flight NATS messages exist during the drain phase.
+    let migration_metrics = schema_migration::MigrationMetrics::new();
+    let lock_service: Arc<dyn locking::LockService> = Arc::new(locking::NatsLockService::new(
+        Arc::new(nats::NatsServicesImpl::new(broker.clone())),
+    ));
+    info!("running schema migration check");
+    schema_migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
         .await?;
 
     let metrics = Arc::new(metrics::EngineMetrics::new());

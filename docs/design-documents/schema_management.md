@@ -3,8 +3,8 @@
 ## Overview
 
 The GitLab Knowledge Graph schema evolves over time as new entities and relationships are added.
-This document describes the implemented approach to schema version tracking and the planned
-zero-downtime migration strategy.
+This document describes the implemented approach to schema version tracking and the
+table-prefix-aware migration orchestrator.
 
 ## Schema Definition
 
@@ -83,16 +83,65 @@ feedback.
 Non-schema ontology changes (descriptions, comments) can bypass the check by adding
 `[skip schema-version-check]` to the MR description.
 
-## Zero-downtime migration strategy (V0.5 and beyond)
+## Zero-downtime migration orchestrator
 
-The current implementation lays the foundation for zero-downtime schema migrations using table
-prefixes. The planned migration flow (to be implemented in subsequent issues) is:
+When the indexer starts, it compares the embedded `SCHEMA_VERSION` with the active version in
+`gkg_schema_version`. If they differ, `schema_migration::run_if_needed()` runs the following
+flow **before** the NATS engine starts consuming messages:
 
-1. **Bump `config/SCHEMA_VERSION`** — CI enforces that schema-affecting changes are versioned.
-2. **Create new table-set** — Indexer creates `vN_*` tables alongside existing ones.
-3. **Dual-write** — Indexer writes to both the old and new table-sets during the migration window.
-4. **Webserver cutover** — Webserver switches reads to the new table-set.
-5. **Cleanup** — Old table-sets beyond `max_retained_versions` are dropped.
+### Migration flow
+
+1. **Acquire lock** — NATS KV `indexing_locks/schema_migration` (TTL-based). If another pod
+   holds the lock, wait up to 5 minutes; the other pod is handling the migration.
+
+2. **Re-check after lock** — Another pod may have completed the migration while this pod was
+   waiting. If the active version now matches, skip.
+
+3. **Drain** — The engine has not started; no in-flight NATS messages exist. This phase is a
+   no-op today and is reserved for future dual-write scenarios.
+
+4. **Create new-prefix tables** — Parse `config/graph.sql` (embedded via `include_str!`) and
+   execute `CREATE TABLE IF NOT EXISTS vN_<table>` for each graph table. The table list is
+   derived from the ontology (node + edge tables) plus the constant list in
+   `schema_version::NON_ONTOLOGY_GRAPH_TABLES` (`checkpoint`, `code_indexing_checkpoint`,
+   `namespace_deletion_schedule`). Control tables (`gkg_schema_version`) are not prefixed.
+
+5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
+   The Webserver cutover (tracked in issue #441) switches reads to the new table-set.
+
+6. **Release lock** — Allow other pods to proceed.
+
+After the orchestrator returns, the indexer starts normally and writes all data to the new-prefix
+tables. Because new-prefix checkpoints are empty, the dispatcher's normal namespace poll cycle
+re-dispatches backfill work automatically — no explicit trigger is needed.
+
+### Write path prefix enforcement
+
+All indexer write paths use `prefixed_table_name(table, SCHEMA_VERSION)` at query construction
+time:
+
+| Module | Tables prefixed |
+|--------|----------------|
+| `checkpoint.rs` | `checkpoint` |
+| `modules/code/checkpoint_store.rs` | `code_indexing_checkpoint` |
+| `modules/namespace_deletion/store.rs` | `checkpoint`, `code_indexing_checkpoint`, `namespace_deletion_schedule` |
+| `modules/namespace_deletion/lower.rs` | All ontology node and edge tables |
+
+Datalake tables (`siphon_*`) are never prefixed — only graph tables are.
+
+### Observability
+
+The metric `gkg_schema_migration_total` (counter) tracks migration phase outcomes:
+
+| Label | Values |
+|-------|--------|
+| `phase` | `acquire_lock`, `drain`, `create_tables`, `mark_migrating`, `complete` |
+| `result` | `success`, `failure`, `skipped` |
+
+### Subsequent migration steps
+
+- **Issue #441** (query compiler): Switch Webserver reads to the new table-set.
+- **Issue #442** (cleanup): Drop old table-sets beyond `max_retained_versions`.
 
 Breaking schema changes (column type changes, table restructuring) use new prefixed tables rather
 than `ALTER TABLE`, avoiding ClickHouse data rewrites and table locks.

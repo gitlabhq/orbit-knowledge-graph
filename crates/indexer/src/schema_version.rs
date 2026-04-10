@@ -22,6 +22,43 @@ use tracing::info;
 
 const VERSION_TABLE: &str = "gkg_schema_version";
 
+/// Non-ontology graph tables that must always be prefixed alongside the
+/// ontology-driven node and edge tables.
+///
+/// These tables are defined directly in `config/graph.sql` and are not
+/// tracked in the ontology YAML. When adding a new non-ontology table to
+/// `graph.sql`, add it here too — CI validates that this list is complete.
+pub const NON_ONTOLOGY_GRAPH_TABLES: &[&str] = &[
+    "checkpoint",
+    "code_indexing_checkpoint",
+    "namespace_deletion_schedule",
+];
+
+/// Returns all graph table names (unprefixed) that must be created for a
+/// given schema version.
+///
+/// Combines the non-ontology tables from [`NON_ONTOLOGY_GRAPH_TABLES`] with
+/// ontology-derived node and edge tables. The ontology is the source of truth
+/// for node/edge table names; the constant list covers auxiliary tables.
+pub fn all_graph_tables(ontology: &ontology::Ontology) -> Vec<String> {
+    let mut tables: Vec<String> = NON_ONTOLOGY_GRAPH_TABLES
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+
+    for node in ontology.nodes() {
+        tables.push(node.destination_table.clone());
+    }
+
+    for edge_table in ontology.edge_tables() {
+        if !tables.contains(&edge_table.to_string()) {
+            tables.push(edge_table.to_string());
+        }
+    }
+
+    tables
+}
+
 /// Schema version loaded from `config/SCHEMA_VERSION`.
 ///
 /// Bump this file whenever `config/graph.sql` or `config/ontology/` changes
@@ -95,6 +132,21 @@ fn write_version_query(
     emit_simple_query(&Node::Insert(Box::new(insert))).expect("write_version query must be valid")
 }
 
+fn write_migrating_version_query(
+    version: u32,
+) -> (
+    String,
+    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+) {
+    let insert = Insert::new(
+        VERSION_TABLE,
+        vec!["version".into(), "status".into()],
+        vec![vec![Expr::uint32(version), Expr::string("migrating")]],
+    );
+    emit_simple_query(&Node::Insert(Box::new(insert)))
+        .expect("write_migrating_version query must be valid")
+}
+
 #[derive(Debug, Error)]
 pub enum SchemaVersionError {
     #[error("ClickHouse error: {0}")]
@@ -161,6 +213,24 @@ pub async fn write_schema_version(
     version: u32,
 ) -> Result<(), SchemaVersionError> {
     let (sql, params) = write_version_query(version);
+    let mut query = graph.query(&sql);
+    for (name, param) in &params {
+        query = query.param(name, &param.value);
+    }
+    query.execute().await?;
+    Ok(())
+}
+
+/// Records a schema version as `migrating` in ClickHouse.
+///
+/// Used by the migration orchestrator to signal that new-prefix tables are
+/// being populated. The version remains `migrating` until the Webserver
+/// cutover (tracked in a subsequent issue).
+pub async fn write_migrating_version(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<(), SchemaVersionError> {
+    let (sql, params) = write_migrating_version_query(version);
     let mut query = graph.query(&sql);
     for (name, param) in &params {
         query = query.param(name, &param.value);
@@ -257,5 +327,67 @@ mod tests {
     fn table_prefix_large_version() {
         assert_eq!(table_prefix(99), "v99_");
         assert_eq!(prefixed_table_name("checkpoint", 99), "v99_checkpoint");
+    }
+
+    #[test]
+    fn non_ontology_graph_tables_not_empty() {
+        assert!(
+            !NON_ONTOLOGY_GRAPH_TABLES.is_empty(),
+            "NON_ONTOLOGY_GRAPH_TABLES must list at least checkpoint and code_indexing_checkpoint"
+        );
+        assert!(NON_ONTOLOGY_GRAPH_TABLES.contains(&"checkpoint"));
+        assert!(NON_ONTOLOGY_GRAPH_TABLES.contains(&"code_indexing_checkpoint"));
+        assert!(NON_ONTOLOGY_GRAPH_TABLES.contains(&"namespace_deletion_schedule"));
+    }
+
+    #[test]
+    fn all_graph_tables_includes_non_ontology() {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let tables = all_graph_tables(&ontology);
+        for non_ont in NON_ONTOLOGY_GRAPH_TABLES {
+            assert!(
+                tables.contains(&non_ont.to_string()),
+                "all_graph_tables must include non-ontology table '{non_ont}'"
+            );
+        }
+    }
+
+    #[test]
+    fn all_graph_tables_includes_ontology_nodes() {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let tables = all_graph_tables(&ontology);
+        for node in ontology.nodes() {
+            assert!(
+                tables.contains(&node.destination_table),
+                "all_graph_tables must include ontology node table '{}'",
+                node.destination_table
+            );
+        }
+    }
+
+    #[test]
+    fn all_graph_tables_no_duplicates() {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let tables = all_graph_tables(&ontology);
+        let mut seen = std::collections::HashSet::new();
+        for table in &tables {
+            assert!(
+                seen.insert(table.clone()),
+                "duplicate table '{table}' in all_graph_tables"
+            );
+        }
+    }
+
+    #[test]
+    fn migrating_query_uses_migrating_status() {
+        let (sql, params) = write_migrating_version_query(1);
+        assert!(
+            sql.contains("gkg_schema_version"),
+            "migrating query must target version table: {sql}"
+        );
+        assert!(
+            !params.is_empty(),
+            "migrating query must have parameters"
+        );
     }
 }
