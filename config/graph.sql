@@ -273,6 +273,11 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     PROJECTION agg_counts (
       SELECT relationship_kind, source_kind, target_id, traversal_path, count()
       GROUP BY relationship_kind, source_kind, target_id, traversal_path
+    ),
+    PROJECTION node_edge_counts (
+      SELECT traversal_path, source_kind, target_kind, relationship_kind,
+             uniq(source_id), uniq(target_id), count()
+      GROUP BY traversal_path, source_kind, target_kind, relationship_kind
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
