@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 compiler = { path = "../query-engine/compiler" }
 parser-core = { path = "../code-graph/parser" }
+indexer = { path = "../indexer" }
 bolero = "0.13.4"
 serde_json.workspace = true
 
@@ -55,6 +56,11 @@ harness = false
 [[test]]
 name = "fuzz_rust_parser"
 path = "tests/fuzz_rust_parser/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_indexer_messages"
+path = "tests/fuzz_indexer_messages/fuzz_target.rs"
 harness = false
 
 # Override workspace lint: bolero's libfuzzer harness requires unsafe glue.

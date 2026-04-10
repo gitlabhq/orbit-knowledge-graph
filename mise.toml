@@ -85,6 +85,10 @@ description = "Fuzz the C# code parser"
 run = "cargo +nightly bolero test fuzz_rust_parser -p gkg-fuzz"
 description = "Fuzz the Rust code parser"
 
+[tasks."fuzz:indexer-messages"]
+run = "cargo +nightly bolero test fuzz_indexer_messages -p gkg-fuzz"
+description = "Fuzz indexer message deserialization"
+
 [tasks.build]
 run = "cargo build --release"
 description = "Build the crates"
