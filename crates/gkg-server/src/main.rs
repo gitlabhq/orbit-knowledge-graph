@@ -11,14 +11,7 @@ use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use gkg_server_config::AppConfig;
-use indexer::IndexerConfig;
-use indexer::checkpoint::ClickHouseCheckpointStore;
-use indexer::modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
-use indexer::modules::namespace_deletion::{
-    ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
-};
-use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
-use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
+use indexer::{DispatcherConfig, IndexerConfig};
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
@@ -70,59 +63,14 @@ async fn main() -> anyhow::Result<()> {
 
     let result = match args.mode {
         Mode::DispatchIndexing => {
-            let services = indexer::scheduler::connect(&config.nats).await?;
-            let graph = config.graph.build_client();
-            let datalake = config.datalake.build_client();
-            let metrics = ScheduledTaskMetrics::new();
-            let lock_service = services.lock_service.clone();
-
-            let deletion_graph = Arc::new(config.graph.build_client());
-            let deletion_datalake = Arc::new(config.datalake.build_client());
-            let deletion_store: Arc<dyn NamespaceDeletionStore> =
-                Arc::new(ClickHouseNamespaceDeletionStore::new(
-                    deletion_datalake,
-                    Arc::clone(&deletion_graph),
-                    &ontology,
-                ));
-            let checkpoint_store = Arc::new(ClickHouseCheckpointStore::new(deletion_graph));
-
-            let tasks: Vec<Box<dyn ScheduledTask>> = vec![
-                Box::new(GlobalDispatcher::new(
-                    services.nats.clone(),
-                    metrics.clone(),
-                    config.schedule.tasks.global.clone(),
-                )),
-                Box::new(NamespaceDispatcher::new(
-                    services.nats.clone(),
-                    datalake,
-                    metrics.clone(),
-                    config.schedule.tasks.namespace.clone(),
-                )),
-                Box::new(SiphonCodeIndexingTaskDispatcher::new(
-                    services.nats.clone(),
-                    metrics.clone(),
-                    config.schedule.tasks.code_indexing_task.clone(),
-                )),
-                Box::new(NamespaceCodeBackfillDispatcher::new(
-                    services.nats.clone(),
-                    config.datalake.build_client(),
-                    metrics.clone(),
-                    config.schedule.tasks.namespace_code_backfill.clone(),
-                )),
-                Box::new(TableCleanup::new(
-                    graph,
-                    metrics.clone(),
-                    config.schedule.tasks.table_cleanup.clone(),
-                )),
-                Box::new(NamespaceDeletionScheduler::new(
-                    deletion_store,
-                    checkpoint_store,
-                    services.nats.clone(),
-                    metrics,
-                    config.schedule.tasks.namespace_deletion.clone(),
-                )),
-            ];
-            indexer::scheduler::run_loop(tasks, lock_service, shutdown)
+            let dispatcher_config = DispatcherConfig {
+                nats: config.nats.clone(),
+                graph: config.graph.clone(),
+                datalake: config.datalake.clone(),
+                schedule: config.schedule.clone(),
+                health_bind_address: config.dispatcher_health_bind_address,
+            };
+            indexer::run_dispatcher(&dispatcher_config, &ontology, shutdown)
                 .await
                 .map_err(Into::into)
         }
