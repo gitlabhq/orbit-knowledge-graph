@@ -10,9 +10,10 @@ pub fn extract_claims<T>(request: &Request<T>, validator: &JwtValidator) -> Resu
         .and_then(|s| s.strip_prefix("Bearer "))
         .ok_or_else(|| Status::unauthenticated("Missing or invalid authorization header"))?;
 
-    validator
-        .validate(token)
-        .map_err(|_| Status::unauthenticated("Invalid token"))
+    validator.validate(token).map_err(|e| {
+        tracing::warn!(error = %e, "JWT validation failed");
+        Status::unauthenticated(format!("JWT validation failed: {e}"))
+    })
 }
 
 #[cfg(test)]
@@ -67,6 +68,6 @@ mod tests {
 
         let status = result.unwrap_err();
         assert_eq!(status.code(), tonic::Code::Unauthenticated);
-        assert!(status.message().contains("Invalid token"));
+        assert!(status.message().contains("JWT validation failed"));
     }
 }
