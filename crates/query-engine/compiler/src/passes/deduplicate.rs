@@ -27,7 +27,9 @@ use ontology::Ontology;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, GL_TABLE_PREFIX, VERSION_COLUMN};
 
 fn is_node_table(table: &str, edge_tables: &HashSet<String>) -> bool {
-    table.starts_with(GL_TABLE_PREFIX) && !edge_tables.contains(table)
+    // edge_tables contains prefixed names (e.g. "v1_gl_edge") after normalize().
+    // Use contains() so that versioned tables like "v1_gl_user" are also matched.
+    table.contains(GL_TABLE_PREFIX) && !edge_tables.contains(table)
 }
 
 fn is_edge_table(table: &str, edge_tables: &HashSet<String>) -> bool {

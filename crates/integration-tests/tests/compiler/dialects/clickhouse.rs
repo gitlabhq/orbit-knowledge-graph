@@ -446,3 +446,44 @@ fn table_prefix_applied_consistently_across_query_types() {
         traversal_sql.raw
     );
 }
+
+#[test]
+fn table_prefix_applied_to_hydration_plan_destination_tables() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "p", "entity": "Project", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
+        "limit": 10
+    }"#;
+
+    let result_bare = compile(json, &test_ontology(), &test_ctx(), "").unwrap();
+    let result_prefixed = compile(json, &test_ontology(), &test_ctx(), "v1_").unwrap();
+
+    // With no prefix: destination tables are bare.
+    if let compiler::HydrationPlan::Static(templates) = &result_bare.hydration {
+        for t in templates {
+            assert!(
+                !t.destination_table.starts_with("v1_"),
+                "bare compile: destination_table should not be prefixed: {}",
+                t.destination_table
+            );
+        }
+    }
+
+    // With prefix: every destination table must be prefixed.
+    if let compiler::HydrationPlan::Static(templates) = &result_prefixed.hydration {
+        assert!(!templates.is_empty(), "expected hydration templates");
+        for t in templates {
+            assert!(
+                t.destination_table.starts_with("v1_"),
+                "prefixed compile: destination_table '{}' must start with 'v1_'",
+                t.destination_table
+            );
+        }
+    } else {
+        panic!("expected Static hydration plan for traversal query");
+    }
+}
