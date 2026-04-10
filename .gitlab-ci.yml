@@ -309,7 +309,7 @@ unit-test:
     - ./scripts/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
-cli-test:
+cli-integration-test:
   stage: test
   extends:
     - .test-template
