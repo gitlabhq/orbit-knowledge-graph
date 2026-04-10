@@ -81,3 +81,11 @@ properties:
       depends_on: [project_id, commit_sha, branch, path]
     nullable: true
     description: "Raw source text of the file. Resolved from Gitaly at query time."
+
+storage:
+  version_only_engine: true
+  columns:
+    commit_sha:
+      default: "''"
+    path:
+      codec: ["zstd(3)"]

@@ -49,5 +49,10 @@ properties:
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
+storage:
+  columns:
+    is_default:
+      default: "true"
+
 # Edge: Branch --IN_PROJECT--> Project (emitted by code indexing pipeline)
 

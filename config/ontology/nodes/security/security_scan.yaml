@@ -94,3 +94,8 @@ etl:
       to: Job
       as: RAN_BY
       direction: outgoing
+
+storage:
+  columns:
+    traversal_path:
+      default: "'0/'"

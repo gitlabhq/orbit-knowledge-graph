@@ -60,3 +60,11 @@ properties:
     source: name
     nullable: false
     description: "Name of the directory."
+
+storage:
+  version_only_engine: true
+  columns:
+    commit_sha:
+      default: "''"
+    path:
+      codec: ["zstd(3)"]

@@ -194,3 +194,12 @@ etl:
       to: User
       as: TRIGGERED
       direction: incoming
+
+storage:
+  columns:
+    traversal_path:
+      default: "'0/'"
+  indexes:
+    - {name: idx_retried, column: retried, type: minmax, granularity: 1}
+  projections:
+    - {type: reorder, name: by_status_id, order_by: [status, id]}

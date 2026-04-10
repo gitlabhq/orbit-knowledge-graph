@@ -75,3 +75,14 @@ etl:
       to: Project
       as: IN_PROJECT
       direction: outgoing
+
+storage:
+  columns:
+    external_type:
+      default: "''"
+    external_id:
+      default: "''"
+    name:
+      default: "''"
+    traversal_path:
+      default: "'0/'"

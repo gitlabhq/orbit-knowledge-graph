@@ -126,3 +126,14 @@ etl:
       as: HAS_NOTE
       direction: incoming
 
+storage:
+  columns:
+    note:
+      codec: ["zstd(3)"]
+    noteable_type:
+      default: "''"
+    traversal_path:
+      default: "'0/'"
+  indexes:
+    - {name: idx_confidential, column: confidential, type: minmax, granularity: 1}
+

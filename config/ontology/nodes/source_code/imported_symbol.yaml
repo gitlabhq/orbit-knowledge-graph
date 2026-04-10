@@ -102,3 +102,21 @@ properties:
     source: end_byte
     nullable: false
     description: "Ending byte offset of the import in the file."
+
+storage:
+  version_only_engine: true
+  columns:
+    commit_sha:
+      default: "''"
+    file_path:
+      codec: ["zstd(3)"]
+    import_path:
+      codec: ["zstd(3)"]
+    start_line:
+      codec: ["zstd(1)"]
+    end_line:
+      codec: ["zstd(1)"]
+    start_byte:
+      codec: ["zstd(1)"]
+    end_byte:
+      codec: ["zstd(1)"]

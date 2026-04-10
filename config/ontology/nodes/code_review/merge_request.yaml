@@ -160,3 +160,23 @@ etl:
       as: APPROVED
       direction: incoming
       array_field: user_id
+
+storage:
+  columns:
+    title:
+      default: "''"
+    description:
+      default: "''"
+      codec: ["zstd(3)"]
+    source_branch:
+      default: "''"
+    target_branch:
+      default: "''"
+    merge_status:
+      default: "'unchecked'"
+    traversal_path:
+      default: "'0/'"
+  indexes:
+    - {name: idx_discussion_locked, column: discussion_locked, type: minmax, granularity: 1}
+  projections:
+    - {type: reorder, name: by_state_id, order_by: [state, id]}

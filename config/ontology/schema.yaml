@@ -23,6 +23,32 @@ settings:
         - {name: source_kind, type: string}
         - {name: target_id, type: int64}
         - {name: target_kind, type: string}
+      storage:
+        index_granularity: 1024
+        primary_key: [traversal_path, source_id, relationship_kind]
+        indexes:
+          - {name: idx_relationship, column: relationship_kind, type: "set(50)", granularity: 2}
+        projections:
+          - type: reorder
+            name: by_source
+            order_by: [source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind]
+          - type: reorder
+            name: by_target
+            order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
+          - type: reorder
+            name: by_rel_source_kind
+            order_by: [relationship_kind, source_kind, source_id, target_id, traversal_path, target_kind]
+          - type: reorder
+            name: by_rel_target_kind
+            order_by: [relationship_kind, target_kind, target_id, source_id, traversal_path, source_kind]
+          - type: aggregate
+            name: agg_counts
+            select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
+            group_by: [relationship_kind, source_kind, target_id, traversal_path]
+          - type: aggregate
+            name: node_edge_counts
+            select: [traversal_path, source_kind, target_kind, relationship_kind, "uniq(source_id)", "uniq(target_id)", "count()"]
+            group_by: [traversal_path, source_kind, target_kind, relationship_kind]
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User]
   local_db:
@@ -43,6 +69,33 @@ settings:
         - {name: relationship_kind, type: string}
         - {name: target_id, type: int64}
         - {name: target_kind, type: string}
+  auxiliary_tables:
+    - name: checkpoint
+      columns:
+        - {name: key, type: string, codec: ["zstd(1)"]}
+        - {name: watermark, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+        - {name: cursor_values, type: string, default: "''", codec: ["zstd(1)"]}
+      order_by: [key]
+    - name: namespace_deletion_schedule
+      columns:
+        - {name: namespace_id, type: int64, codec: ["zstd(1)"]}
+        - {name: traversal_path, type: string, codec: ["zstd(1)"]}
+        - {name: scheduled_deletion_date, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+      order_by: [namespace_id, traversal_path]
+    - name: code_indexing_checkpoint
+      columns:
+        - {name: traversal_path, type: string, codec: ["zstd(1)"]}
+        - {name: project_id, type: int64, codec: ["zstd(1)"]}
+        - {name: branch, type: string, codec: ["zstd(1)"]}
+        - {name: last_task_id, type: int64, codec: ["zstd(1)"]}
+        - {name: last_commit, type: string, nullable: true, codec: ["zstd(1)"]}
+        - {name: indexed_at, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+      order_by: [traversal_path, project_id, branch]
+      version_type: uint64
+      projections:
+        - type: reorder
+          name: project_lookup
+          order_by: [project_id]
   etl:
     default_watermark: _siphon_replicated_at
     default_deleted: _siphon_deleted

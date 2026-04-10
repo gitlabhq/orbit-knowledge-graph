@@ -69,3 +69,14 @@ etl:
       to: Project
       as: SCANS
       direction: outgoing
+
+storage:
+  columns:
+    external_id:
+      default: "''"
+    name:
+      default: "''"
+    vendor:
+      default: "'GitLab'"
+    traversal_path:
+      default: "'0/'"

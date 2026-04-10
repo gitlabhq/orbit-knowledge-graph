@@ -105,3 +105,14 @@ etl:
       to: SecurityScan
       as: HAS_FINDING
       direction: incoming
+
+storage:
+  columns:
+    uuid:
+      default: "''"
+    description:
+      codec: ["zstd(3)"]
+    solution:
+      codec: ["zstd(3)"]
+    traversal_path:
+      default: "'0/'"

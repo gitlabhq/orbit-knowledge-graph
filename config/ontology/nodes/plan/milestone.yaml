@@ -91,3 +91,12 @@ etl:
       to: Group
       as: IN_GROUP
       direction: outgoing
+
+storage:
+  columns:
+    title:
+      default: "''"
+    description:
+      codec: ["zstd(3)"]
+    traversal_path:
+      default: "'0/'"

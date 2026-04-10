@@ -162,3 +162,10 @@ etl:
       to: MergeRequest
       as: TRIGGERED
       direction: incoming
+
+storage:
+  columns:
+    traversal_path:
+      default: "'0/'"
+  projections:
+    - {type: reorder, name: by_status_id, order_by: [status, id]}

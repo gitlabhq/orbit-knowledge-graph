@@ -110,3 +110,12 @@ etl:
       to: Group
       as: CONTAINS
       direction: incoming
+
+storage:
+  columns:
+    description:
+      codec: ["zstd(3)"]
+    full_path:
+      codec: ["zstd(3)"]
+    traversal_path:
+      default: "'0/'"

@@ -94,3 +94,10 @@ etl:
       to: MergeRequest
       as: HAS_DIFF
       direction: incoming
+
+storage:
+  columns:
+    merge_request_id:
+      codec: ["zstd(1)"]
+    traversal_path:
+      default: "'0/'"

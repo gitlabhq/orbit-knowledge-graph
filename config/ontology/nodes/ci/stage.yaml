@@ -89,3 +89,8 @@ etl:
       as: HAS_STAGE
       direction: incoming
 
+storage:
+  columns:
+    traversal_path:
+      default: "'0/'"
+

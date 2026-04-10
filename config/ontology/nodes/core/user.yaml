@@ -156,3 +156,20 @@ etl:
   type: table
   scope: global
   source: siphon_users
+
+storage:
+  columns:
+    username:
+      default: "''"
+    email:
+      default: "''"
+    name:
+      default: "''"
+    first_name:
+      default: "''"
+    last_name:
+      default: "''"
+    state:
+      default: "''"
+    user_type:
+      default: "''"

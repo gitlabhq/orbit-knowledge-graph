@@ -153,3 +153,20 @@ etl:
       to: Vulnerability
       as: OCCURRENCE_OF
       direction: outgoing
+
+storage:
+  columns:
+    uuid:
+      default: "''"
+    name:
+      default: "''"
+    description:
+      codec: ["zstd(3)"]
+    solution:
+      codec: ["zstd(3)"]
+    location:
+      codec: ["zstd(3)"]
+    location_fingerprint:
+      default: "''"
+    traversal_path:
+      default: "'0/'"

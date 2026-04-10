@@ -152,3 +152,12 @@ etl:
       as: HAS_LABEL
       direction: outgoing
       array_field: label_id
+
+storage:
+  columns:
+    title:
+      default: "''"
+    description:
+      codec: ["zstd(3)"]
+    traversal_path:
+      default: "'0/'"

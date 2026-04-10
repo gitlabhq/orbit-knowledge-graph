@@ -110,3 +110,19 @@ etl:
       to: MergeRequestDiff
       as: HAS_FILE
       direction: incoming
+
+storage:
+  columns:
+    merge_request_id:
+      codec: ["zstd(1)"]
+    merge_request_diff_id:
+      codec: ["zstd(1)"]
+    new_path:
+      codec: ["zstd(3)"]
+    old_path:
+      default: "''"
+      codec: ["zstd(3)"]
+    traversal_path:
+      default: "'0/'"
+  indexes:
+    - {name: idx_binary, column: binary, type: minmax, granularity: 1}

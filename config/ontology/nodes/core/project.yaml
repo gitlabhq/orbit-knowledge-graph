@@ -127,3 +127,16 @@ etl:
       to: Group
       as: CONTAINS
       direction: incoming
+
+storage:
+  columns:
+    description:
+      codec: ["zstd(3)"]
+    full_path:
+      codec: ["zstd(3)"]
+    star_count:
+      codec: ["zstd(1)"]
+    traversal_path:
+      default: "'0/'"
+  indexes:
+    - {name: idx_archived, column: archived, type: minmax, granularity: 1}
