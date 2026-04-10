@@ -152,6 +152,16 @@ impl ExpressionResolver {
         expression: &JavaExpression,
         resolutions: &mut Resolutions,
     ) -> Option<ResolvedType> {
+        let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+            error!(
+                remaining_stack,
+                expression_kind = expression.variant_name(),
+                "stack limit reached, aborting Java expression resolution"
+            );
+            return None;
+        }
+
         debug!(
             expression_kind = expression.variant_name(),
             "resolving Java expression"
