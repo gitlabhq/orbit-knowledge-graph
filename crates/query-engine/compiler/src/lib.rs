@@ -45,6 +45,7 @@ pub mod passes;
 pub mod pipeline;
 pub mod pipelines;
 
+pub use ast::ddl;
 pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
     EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX,
@@ -76,7 +77,8 @@ pub use pipelines::{
 // Re-export key types from pass modules.
 pub use passes::check::check_ast;
 pub use passes::codegen::{
-    CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect, codegen,
+    CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
+    clickhouse_ddl::emit_create_table, codegen,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use passes::hydrate::{
