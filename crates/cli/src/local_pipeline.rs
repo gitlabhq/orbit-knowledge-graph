@@ -52,6 +52,7 @@ pub fn run(
         compiled: None,
         ontology,
         security_context: None,
+        table_prefix: String::new(),
         server_extensions,
         phases: TypeMap::default(),
     };

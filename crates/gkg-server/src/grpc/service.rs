@@ -44,6 +44,7 @@ impl KnowledgeGraphServiceImpl {
         cluster_health: Arc<ClusterHealthChecker>,
         resolver_registry: Option<Arc<ColumnResolverRegistry>>,
         stream_timeout_secs: u64,
+        table_prefix: String,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
@@ -51,6 +52,7 @@ impl KnowledgeGraphServiceImpl {
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
+            table_prefix,
         );
         if let Some(registry) = resolver_registry {
             pipeline = pipeline.with_resolver_registry(registry);
@@ -442,6 +444,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let plan = service
@@ -470,6 +473,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -500,6 +504,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -536,6 +541,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("User");
@@ -560,6 +566,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
@@ -578,6 +585,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -607,6 +615,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -631,6 +640,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -659,6 +669,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let response =
@@ -764,6 +775,7 @@ mod tests {
             ClusterHealthChecker::default().into_arc(),
             None,
             60,
+            String::new(),
         );
 
         let response = service.build_structured_schema(&["*".to_string()]);

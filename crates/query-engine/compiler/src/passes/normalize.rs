@@ -58,33 +58,34 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
 /// Normalize validated input.
 ///
 /// Performs the following transformations:
-/// - Resolves entity names to ClickHouse table names
+/// - Resolves entity names to ClickHouse table names (with optional `table_prefix`)
 /// - Coerces filter values to match ontology field types (e.g., enum int → string)
 /// - Expands wildcard column selections ("*") to explicit column lists
-pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
+///
+/// `table_prefix` is prepended to every resolved node table name and edge table name.
+/// Pass `""` for no prefix (schema version 0, fresh install, or tests).
+pub fn normalize(mut input: Input, ontology: &Ontology, table_prefix: &str) -> Result<Input> {
     input.entity_auth = build_entity_auth(ontology);
     input.compiler.edge_tables = ontology
         .edge_tables()
         .into_iter()
-        .map(|s| s.to_string())
+        .map(|s| format!("{table_prefix}{s}"))
         .collect();
-    input.compiler.default_edge_table = ontology.edge_table().to_string();
+    input.compiler.default_edge_table = format!("{table_prefix}{}", ontology.edge_table());
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
             continue;
         };
 
-        node.table = Some(
+        node.table = Some(format!(
+            "{table_prefix}{}",
             ontology
                 .table_name(entity)
-                .map_err(|_| {
-                    QueryError::AllowlistRejected(format!(
-                        "entity '{entity}' passed schema validation but has no table mapping"
-                    ))
-                })?
-                .to_owned(),
-        );
+                .map_err(|_| QueryError::AllowlistRejected(format!(
+                    "entity '{entity}' passed schema validation but has no table mapping"
+                )))?
+        ));
 
         let node_entity = ontology.get_node(entity).ok_or_else(|| {
             QueryError::AllowlistRejected(format!(
@@ -190,7 +191,7 @@ mod tests {
     fn normalize_query(json: &str) -> Input {
         let input = parse_input(json).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        normalize(input, &ontology).unwrap()
+        normalize(input, &ontology, "").unwrap()
     }
 
     #[test]
@@ -358,7 +359,7 @@ mod tests {
             r#"{"query_type": "search", "node": {"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}}"#,
         ).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let err = normalize(input, &ontology).unwrap_err();
+        let err = normalize(input, &ontology, "").unwrap_err();
         assert!(
             matches!(err, QueryError::AllowlistRejected(_)),
             "unknown entity should be AllowlistRejected, got: {err}"

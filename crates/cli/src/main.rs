@@ -702,7 +702,7 @@ fn run_compile(
     let compile_result = if local {
         query_engine::compiler::compile_local(&json_input, &ontology)
     } else {
-        query_engine::compiler::compile(&json_input, &ontology, security_ctx.as_ref().unwrap())
+        query_engine::compiler::compile(&json_input, &ontology, security_ctx.as_ref().unwrap(), "")
     };
 
     match compile_result {

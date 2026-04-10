@@ -33,7 +33,7 @@ fn traversal_query() {
         "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &test_ontology(), &test_ctx(), "").unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_table("gl_edge"));
@@ -58,7 +58,7 @@ fn bool_filter_value_is_preserved() {
         "limit": 5
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &test_ontology(), &test_ctx(), "").unwrap();
     assert!(has_param_value(
         &result.base.params,
         &serde_json::Value::Bool(true)
@@ -78,7 +78,7 @@ fn aggregation_query() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &test_ontology(), &test_ctx(), "").unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_function("COUNT") || sql.has_function("countIf"));
@@ -96,7 +96,7 @@ fn path_finding_query() {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &test_ontology(), &test_ctx(), "").unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_cte("forward"), "should have forward CTE");
@@ -137,12 +137,15 @@ fn path_finding_depth_control() {
     }"#;
 
     let shallow_sql = ParsedSql::from_query(
-        &compile(shallow, &test_ontology(), &test_ctx())
+        &compile(shallow, &test_ontology(), &test_ctx(), "")
             .unwrap()
             .base,
     );
-    let deep_sql =
-        ParsedSql::from_query(&compile(deep, &test_ontology(), &test_ctx()).unwrap().base);
+    let deep_sql = ParsedSql::from_query(
+        &compile(deep, &test_ontology(), &test_ctx(), "")
+            .unwrap()
+            .base,
+    );
 
     assert!(
         shallow_sql.has_cte("forward"),
@@ -167,7 +170,7 @@ fn neighbors_query() {
         "neighbors": {"node": "u", "direction": "both"}
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &test_ontology(), &test_ctx(), "").unwrap();
     // Uses ClickHouse `IN [...]` array syntax for node_ids.
     let rendered = result.base.render();
 
@@ -200,7 +203,7 @@ fn filter_operators() {
         "limit": 30
     }"#;
 
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &test_ontology(), &test_ctx(), "").unwrap();
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
@@ -215,7 +218,7 @@ fn filter_operators() {
 
 #[test]
 fn invalid_json_rejected() {
-    assert!(compile("not valid json", &test_ontology(), &test_ctx()).is_err());
+    assert!(compile("not valid json", &test_ontology(), &test_ctx(), "").is_err());
 }
 
 #[test]
@@ -224,7 +227,8 @@ fn missing_required_fields_rejected() {
         compile(
             r#"{"query_type": "traversal"}"#,
             &test_ontology(),
-            &test_ctx()
+            &test_ctx(),
+            ""
         )
         .is_err()
     );
@@ -236,6 +240,7 @@ fn sql_injection_in_node_id() {
         r#"{"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --"}]}"#,
         &test_ontology(),
         &test_ctx(),
+        "",
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
@@ -251,6 +256,7 @@ fn sql_injection_in_relationship() {
         }"#,
         &test_ontology(),
         &test_ctx(),
+        "",
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
@@ -263,6 +269,7 @@ fn empty_node_id_rejected() {
             r#"{"query_type": "traversal", "nodes": [{"id": ""}]}"#,
             &test_ontology(),
             &test_ctx(),
+            "",
         )
         .is_err()
     );
@@ -274,6 +281,7 @@ fn id_starting_with_number_rejected() {
         r#"{"query_type": "traversal", "nodes": [{"id": "123abc"}]}"#,
         &test_ontology(),
         &test_ctx(),
+        "",
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
@@ -288,6 +296,7 @@ fn sql_injection_in_filter_property() {
         }"#,
         &test_ontology(),
         &test_ctx(),
+        "",
     )
     .unwrap_err();
     assert!(matches!(err, QueryError::Validation(_)));
@@ -309,6 +318,131 @@ fn valid_identifiers_produce_parseable_sql() {
             {"type": "MEMBER_OF", "from": "user_node", "to": "node123"}
         ]
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let result = compile(json, &test_ontology(), &test_ctx(), "").unwrap();
     ParsedSql::from_query(&result.base);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Table prefix injection
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn empty_prefix_uses_bare_table_names() {
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "columns": ["username"]},
+        "limit": 10
+    }"#;
+
+    let result = compile(json, &test_ontology(), &test_ctx(), "").unwrap();
+    let sql = ParsedSql::from_query(&result.base);
+
+    assert!(sql.has_table("gl_user"), "bare gl_user table expected");
+    assert!(
+        !sql.raw_contains("_gl_user"),
+        "no prefix should appear: {}",
+        sql.raw
+    );
+}
+
+#[test]
+fn table_prefix_applied_to_node_table() {
+    let json = r#"{
+        "query_type": "search",
+        "node": {"id": "u", "entity": "User", "columns": ["username"]},
+        "limit": 10
+    }"#;
+
+    let result = compile(json, &test_ontology(), &test_ctx(), "v1_").unwrap();
+    let sql = ParsedSql::from_query(&result.base);
+
+    assert!(
+        sql.has_table("v1_gl_user"),
+        "prefixed table v1_gl_user expected in: {}",
+        sql.raw
+    );
+    assert!(
+        !sql.raw_contains(" gl_user"),
+        "bare gl_user must not appear after prefixing: {}",
+        sql.raw
+    );
+}
+
+#[test]
+fn table_prefix_applied_to_edge_table_in_traversal() {
+    // Traversal queries are edge-centric: the edge table is the primary FROM
+    // table; node tables are only joined when node columns require it.
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "p", "entity": "Project", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
+        "limit": 10
+    }"#;
+
+    let result = compile(json, &test_ontology(), &test_ctx(), "v1_").unwrap();
+    let sql = ParsedSql::from_query(&result.base);
+
+    assert!(
+        sql.has_table("v1_gl_edge"),
+        "prefixed edge table v1_gl_edge expected in: {}",
+        sql.raw
+    );
+    // Node tables appear when columns are projected via JOIN; bare gl_edge
+    // should not appear since it is fully replaced by v1_gl_edge.
+    assert!(
+        !sql.raw_contains(" gl_edge"),
+        "bare gl_edge must not appear after prefixing: {}",
+        sql.raw
+    );
+}
+
+#[test]
+fn table_prefix_applied_consistently_across_query_types() {
+    let prefix = "migration_";
+
+    let search_json = r#"{
+        "query_type": "search",
+        "node": {"id": "g", "entity": "Group", "columns": ["name"]},
+        "limit": 5
+    }"#;
+    let traversal_json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "n", "entity": "Note", "columns": ["confidential"]}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+        "limit": 5
+    }"#;
+
+    let search_result = compile(search_json, &test_ontology(), &test_ctx(), prefix).unwrap();
+    let traversal_result = compile(traversal_json, &test_ontology(), &test_ctx(), prefix).unwrap();
+
+    let search_sql = ParsedSql::from_query(&search_result.base);
+    let traversal_sql = ParsedSql::from_query(&traversal_result.base);
+
+    assert!(
+        search_sql.has_table("migration_gl_group"),
+        "search: prefixed group table expected in: {}",
+        search_sql.raw
+    );
+    assert!(
+        traversal_sql.has_table("migration_gl_edge"),
+        "traversal: prefixed edge table expected in: {}",
+        traversal_sql.raw
+    );
+    // Bare unprefixed table names must not appear in output.
+    assert!(
+        !search_sql.raw_contains(" gl_group"),
+        "search: bare gl_group must not appear: {}",
+        search_sql.raw
+    );
+    assert!(
+        !traversal_sql.raw_contains(" gl_edge"),
+        "traversal: bare gl_edge must not appear: {}",
+        traversal_sql.raw
+    );
 }

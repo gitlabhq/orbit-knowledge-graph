@@ -23,6 +23,7 @@ use crate::types::SecurityContext;
 crate::define_env_capabilities! {
     pub ontology: Arc<Ontology>,
     pub security_ctx: SecurityContext,
+    pub table_prefix: String,
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -47,11 +48,13 @@ crate::define_state_capabilities! {
 pub struct SecureEnv {
     ontology: Arc<Ontology>,
     security_ctx: SecurityContext,
+    table_prefix: String,
 }
 
 #[derive(PipelineEnv)]
 pub struct LocalEnv {
     ontology: Arc<Ontology>,
+    table_prefix: String,
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -63,6 +63,32 @@ Version 0 uses no prefix for backward compatibility. Functions `table_prefix(ver
 Unprefixed names are stored in the ontology (the ontology validation enforces the `gl_` prefix
 convention). The prefix is applied at the call site when constructing ClickHouse queries.
 
+### Webserver prefix injection
+
+The webserver reads the active schema version once on startup (no hot-swap; a pod restart is
+required after a migration completes) and passes the derived prefix through the entire query
+pipeline:
+
+```text
+startup
+  → schema_version::init()           # creates gkg_schema_version if absent
+  → schema_version::read_active_version()   # reads active row; None → defaults to v0
+  → schema_version::table_prefix(version)   # "" for v0, "v1_" for v1, …
+  → GrpcServer::new(…, table_prefix)
+  → QueryPipelineService::new(…, table_prefix)
+  → QueryPipelineContext { table_prefix }   # shared across all pipeline stages
+  → CompilationStage calls compile(…, &ctx.table_prefix)
+  → normalize() prepends prefix to every node table name and edge table name
+  → lower() uses input.compiler.default_edge_table (already prefixed) instead of a
+    compile-time constant
+```
+
+Fresh installs (no `gkg_schema_version` row found) default to version 0 (empty prefix) so that
+unprefixed tables from before schema versioning was introduced continue to work.
+
+The query compiler does not access ClickHouse metadata to discover which tables exist — the prefix
+is injected top-down from the startup read and flows through without further I/O.
+
 ### Configuration
 
 ```yaml
