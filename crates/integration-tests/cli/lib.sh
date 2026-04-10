@@ -8,6 +8,13 @@ set -euo pipefail
 export DYLD_LIBRARY_PATH="${ORBIT_LIB_PATH:-}"
 export LD_LIBRARY_PATH="${ORBIT_LIB_PATH:-}"
 
+# ── Common queries ───────────────────────────────────────────────
+Q_FILES='{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","path"]},"limit":20}'
+Q_FILES_BRANCH='{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","branch"]},"limit":20}'
+Q_FILES_SHA='{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","commit_sha"]},"limit":20}'
+Q_FILES_CONTENT='{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","branch","content"]},"limit":20}'
+Q_TRAVERSAL='{"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["id","name"]},{"id":"d","entity":"Definition","columns":["id","name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":10}'
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -51,6 +58,12 @@ emit_results() {
             ) FROM results)
         )
     " 2>/dev/null
+}
+
+# Run an orbit query and write raw JSON output to a file.
+# Usage: orbit_query <query-json> <output-file>
+orbit_query() {
+    "$ORBIT" query --raw "$1" > "$2" 2>/dev/null
 }
 
 # Create a minimal git repo with Python files for testing.

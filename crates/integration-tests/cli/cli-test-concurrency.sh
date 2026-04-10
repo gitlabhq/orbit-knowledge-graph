@@ -9,19 +9,18 @@ REPO="$2"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
-SEARCH='{"query_type":"search","node":{"id":"f","entity":"File","columns":["id","name","path"]},"limit":5}'
+NUM_READERS=5
+NUM_CONSISTENCY_READS=10
 
 # 1. Seed
-if "$ORBIT" index "$REPO" > /dev/null 2>&1; then
-    add "seed_index" true
-else
-    add "seed_index" false "indexing failed"
-fi
+"$ORBIT" index "$REPO" > /dev/null 2>&1 \
+    && add "seed_index" true \
+    || add "seed_index" false "indexing failed"
 
-# 2. Five concurrent readers
+# 2. Concurrent readers
 pids=()
-for i in $(seq 1 5); do
-    "$ORBIT" query --raw "$SEARCH" > "$TMP/r$i.json" 2>"$TMP/r$i.err" &
+for i in $(seq 1 "$NUM_READERS"); do
+    orbit_query "$Q_FILES" "$TMP/r$i.json" &
     pids+=($!)
 done
 all_ok=true
@@ -29,9 +28,9 @@ for pid in "${pids[@]}"; do wait "$pid" || all_ok=false; done
 
 if $all_ok && diff -q "$TMP/r1.json" "$TMP/r2.json" > /dev/null 2>&1 \
            && diff -q "$TMP/r1.json" "$TMP/r3.json" > /dev/null 2>&1; then
-    add "concurrent_readers" true "5 readers, identical results"
+    add "concurrent_readers" true "$NUM_READERS readers, identical results"
 else
-    add "concurrent_readers" false "$(head -1 "$TMP"/r*.err 2>/dev/null)"
+    add "concurrent_readers" false "results differ or query failed"
 fi
 
 # 3. Reader during writer
@@ -39,9 +38,9 @@ fi
 IDX=$!
 sleep 0.05
 rw_ok=false
-"$ORBIT" query --raw "$SEARCH" > /dev/null 2>"$TMP/rw.err" && rw_ok=true
+orbit_query "$Q_FILES" /dev/null && rw_ok=true
 wait "$IDX" || true
-add "reader_during_writer" "$rw_ok" "$(cat "$TMP/rw.err" 2>/dev/null)"
+add "reader_during_writer" "$rw_ok"
 
 # 4. Two concurrent writers
 "$ORBIT" index "$REPO" > /dev/null 2>&1 & P1=$!
@@ -56,18 +55,18 @@ else                     add "concurrent_writers" false "both failed"
 fi
 
 # 5. Data integrity
-"$ORBIT" query --raw "$SEARCH" > "$TMP/integrity.json" 2>/dev/null
+orbit_query "$Q_FILES" "$TMP/integrity.json"
 count=$(count_nodes "$TMP/integrity.json" "true")
 [ "$count" -gt 0 ] && add "data_integrity" true "$count nodes" \
                     || add "data_integrity" false "no nodes"
 
 # 6. Sequential read consistency
-"$ORBIT" query --raw "$SEARCH" > "$TMP/base.json" 2>/dev/null
+orbit_query "$Q_FILES" "$TMP/base.json"
 consistent=true
-for _ in $(seq 2 10); do
-    "$ORBIT" query --raw "$SEARCH" > "$TMP/cmp.json" 2>/dev/null
+for _ in $(seq 2 "$NUM_CONSISTENCY_READS"); do
+    orbit_query "$Q_FILES" "$TMP/cmp.json"
     diff -q "$TMP/base.json" "$TMP/cmp.json" > /dev/null 2>&1 || { consistent=false; break; }
 done
-add "read_consistency" "$consistent" "10 reads"
+add "read_consistency" "$consistent" "$NUM_CONSISTENCY_READS reads"
 
 emit_results
