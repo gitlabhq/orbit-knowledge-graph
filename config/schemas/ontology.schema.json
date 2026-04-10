@@ -354,6 +354,18 @@
                   "additionalProperties": false
                 },
                 "minItems": 1
+              },
+              "storage": {
+                "type": "object",
+                "description": "ClickHouse DDL storage metadata for the edge table.",
+                "properties": {
+                  "index_granularity": { "type": "integer", "minimum": 1 },
+                  "primary_key": { "type": "array", "items": { "type": "string" } },
+                  "columns": { "type": "array", "items": { "$ref": "#/definitions/storageColumn" } },
+                  "indexes": { "type": "array", "items": { "$ref": "#/definitions/storageIndex" } },
+                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+                },
+                "additionalProperties": false
               }
             },
             "required": ["sort_key", "columns"],
@@ -430,6 +442,37 @@
             }
           },
           "additionalProperties": false
+        },
+        "auxiliary_tables": {
+          "type": "array",
+          "description": "Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "type": { "$ref": "#/definitions/propertyType" },
+                    "nullable": { "type": "boolean" },
+                    "codec": { "type": "array", "items": { "type": "string" } },
+                    "default": { "type": "string" }
+                  },
+                  "required": ["name", "type"],
+                  "additionalProperties": false
+                }
+              },
+              "order_by": { "type": "array", "items": { "type": "string" } },
+              "version_only_engine": { "type": "boolean" },
+              "version_type": { "type": "string" },
+              "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+            },
+            "required": ["name", "columns", "order_by"],
+            "additionalProperties": false
+          }
         },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
@@ -565,6 +608,10 @@
             { "$ref": "#/definitions/redactionConfig" }
           ],
           "description": "Redaction configuration for access control. Set to null if not yet configured."
+        },
+        "storage": {
+          "$ref": "#/definitions/nodeStorage",
+          "description": "ClickHouse DDL storage metadata. Columns, indexes, projections, and engine settings for DDL generation."
         }
       },
       "required": ["node_type", "domain", "description", "label", "destination_table", "default_columns", "style", "properties", "redaction"],
@@ -686,6 +733,95 @@
         "etl": { "$ref": "#/definitions/edgeEtlConfig" }
       },
       "required": ["description", "variants"],
+      "additionalProperties": false
+    },
+
+    "nodeStorage": {
+      "type": "object",
+      "description": "ClickHouse DDL storage metadata for a node table.",
+      "properties": {
+        "version_only_engine": {
+          "type": "boolean",
+          "description": "When true, engine is ReplacingMergeTree(_version) without _deleted.",
+          "default": false
+        },
+        "primary_key": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "PRIMARY KEY columns. When absent, ClickHouse defaults to ORDER BY."
+        },
+        "columns": {
+          "type": "array",
+          "description": "Columns in exact DDL order (excluding _version and _deleted).",
+          "items": { "$ref": "#/definitions/storageColumn" }
+        },
+        "indexes": {
+          "type": "array",
+          "description": "Skip indexes.",
+          "items": { "$ref": "#/definitions/storageIndex" }
+        },
+        "projections": {
+          "type": "array",
+          "description": "Materialized projections.",
+          "items": { "$ref": "#/definitions/storageProjection" }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "storageColumn": {
+      "type": "object",
+      "description": "A column as it appears in CREATE TABLE DDL.",
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "description": "Exact ClickHouse type (e.g. Int64, Nullable(String), LowCardinality(String))." },
+        "default": { "type": "string", "description": "DEFAULT expression." },
+        "codec": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "CODEC chain (e.g. [\"Delta(8)\", \"ZSTD(1)\"])."
+        }
+      },
+      "required": ["name", "type"],
+      "additionalProperties": false
+    },
+
+    "storageIndex": {
+      "type": "object",
+      "description": "A skip index definition.",
+      "properties": {
+        "name": { "type": "string" },
+        "column": { "type": "string" },
+        "type": { "type": "string", "description": "Index type (e.g. minmax, set(10), bloom_filter(0.01))." },
+        "granularity": { "type": "integer", "minimum": 1, "default": 1 }
+      },
+      "required": ["name", "column", "type", "granularity"],
+      "additionalProperties": false
+    },
+
+    "storageProjection": {
+      "type": "object",
+      "description": "A materialized projection.",
+      "properties": {
+        "type": { "type": "string", "enum": ["reorder", "aggregate"] },
+        "name": { "type": "string" },
+        "order_by": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "ORDER BY columns (for reorder projections)."
+        },
+        "select": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "SELECT expressions (for aggregate projections)."
+        },
+        "group_by": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "GROUP BY columns (for aggregate projections)."
+        }
+      },
+      "required": ["type", "name"],
       "additionalProperties": false
     }
   }
