@@ -75,6 +75,10 @@ fn default_health_bind_address() -> SocketAddr {
     "0.0.0.0:4202".parse().unwrap()
 }
 
+fn default_dispatcher_health_bind_address() -> SocketAddr {
+    "0.0.0.0:4203".parse().unwrap()
+}
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct IndexerConfig {
     #[serde(default)]
@@ -135,7 +139,7 @@ pub struct DispatcherConfig {
     pub datalake: ClickHouseConfiguration,
     #[serde(default)]
     pub schedule: ScheduleConfig,
-    #[serde(default = "default_health_bind_address")]
+    #[serde(default = "default_dispatcher_health_bind_address")]
     pub health_bind_address: SocketAddr,
 }
 
