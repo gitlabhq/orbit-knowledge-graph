@@ -302,10 +302,12 @@ pub async fn run_dispatcher(
     ];
 
     tokio::select! {
-        result = scheduler::run_loop(tasks, lock_service, shutdown) => {
+        result = scheduler::run_loop(tasks, lock_service, shutdown.clone()) => {
             result.map_err(DispatcherError::from)
         }
         result = run_health_server(config.health_bind_address, health_state) => {
+            // Health server died — cancel shutdown token so the scheduler drains gracefully
+            shutdown.cancel();
             let error = result.err().unwrap_or_else(|| std::io::Error::other(
                 "dispatcher health server exited unexpectedly",
             ));
