@@ -8,7 +8,13 @@ vendir sync
 
 echo "Applying patches..."
 
-cp patches/templates/*.yaml gkg/templates/
+cp patches/templates/*.yaml gkg/templates/ 2>/dev/null || true
+# Copy subdirectory patches (e.g. dispatcher/)
+find patches/templates -mindepth 2 -name '*.yaml' | while read -r f; do
+  rel="${f#patches/templates/}"
+  mkdir -p "gkg/templates/$(dirname "$rel")"
+  cp "$f" "gkg/templates/$rel"
+done
 echo "  Copied extra templates"
 
 yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' \

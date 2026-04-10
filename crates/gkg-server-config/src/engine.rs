@@ -1,8 +1,11 @@
 //! Engine, handler, and scheduler configuration types for the indexer.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
+use croner::Cron;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -44,22 +47,56 @@ impl HandlerConfiguration {
     }
 }
 
-/// Per-task schedule configuration (cadence interval).
+const DEFAULT_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Per-task schedule configuration.
 ///
 /// Each scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.
-/// The scheduler loop reads it via `task.schedule()`.
+/// The scheduler reads it via `task.schedule()`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ScheduleConfiguration {
-    /// Interval in seconds between task runs.
-    /// When absent, the task runs every cycle.
+    /// Cron expression with seconds field (6-field: `sec min hour dom mon dow`).
+    /// When absent, the task runs on a default 60-second interval.
     #[serde(default)]
-    pub interval_secs: Option<u64>,
+    pub cron: Option<String>,
 }
 
 impl ScheduleConfiguration {
-    pub fn interval(&self) -> Option<Duration> {
-        self.interval_secs.map(Duration::from_secs)
+    /// Duration until the next fire time after `now`.
+    /// Falls back to `DEFAULT_INTERVAL` when no cron expression is set.
+    pub fn next_delay(&self, now: DateTime<Utc>) -> Duration {
+        let Some(expr) = self.cron.as_deref() else {
+            return DEFAULT_INTERVAL;
+        };
+        let Ok(cron) = Cron::from_str(expr) else {
+            return DEFAULT_INTERVAL;
+        };
+        cron.find_next_occurrence(&now, false)
+            .ok()
+            .map(|next| {
+                let delta = next - now;
+                delta.to_std().unwrap_or(DEFAULT_INTERVAL)
+            })
+            .unwrap_or(DEFAULT_INTERVAL)
+    }
+
+    /// Approximate interval between consecutive firings (used as cadence lock TTL).
+    /// Falls back to `DEFAULT_INTERVAL` when no cron expression is set.
+    pub fn interval_hint(&self) -> Duration {
+        let Some(expr) = self.cron.as_deref() else {
+            return DEFAULT_INTERVAL;
+        };
+        let Ok(cron) = Cron::from_str(expr) else {
+            return DEFAULT_INTERVAL;
+        };
+        let now = Utc::now();
+        let first = cron.find_next_occurrence(&now, false).ok();
+        let second = first.and_then(|t| cron.find_next_occurrence(&t, false).ok());
+        match (first, second) {
+            (Some(a), Some(b)) => (b - a).to_std().unwrap_or(DEFAULT_INTERVAL),
+            _ => DEFAULT_INTERVAL,
+        }
     }
 }
 
@@ -208,7 +245,7 @@ impl Default for TableCleanupConfig {
     fn default() -> Self {
         Self {
             schedule: ScheduleConfiguration {
-                interval_secs: Some(86400),
+                cron: Some("0 0 3 * * *".into()),
             },
         }
     }
@@ -224,7 +261,7 @@ impl Default for NamespaceDeletionSchedulerConfig {
     fn default() -> Self {
         Self {
             schedule: ScheduleConfiguration {
-                interval_secs: Some(86400),
+                cron: Some("0 0 3 * * *".into()),
             },
         }
     }
