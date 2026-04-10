@@ -264,6 +264,78 @@ scripts/gkg-dev.sh status
 scripts/gkg-dev.sh stop
 ```
 
+## Alternative: quick start with mise
+
+If you prefer using the repository's existing `mise` task runner, an additive
+shortcut is also available:
+
+```shell
+mise run dev
+```
+
+This alternative is separate from the Tilt/Kubernetes workflow above. It starts
+lightweight native Rust processes directly on your host and connects them to the
+existing services in your GDK instance (for example NATS, ClickHouse, GitLab,
+and Gitaly), without using Tilt, Helm, Colima, or minikube.
+
+It starts all three GKG runtime modes in the foreground:
+
+- 1 webserver (HTTP + gRPC)
+- 1 indexer
+- 1 dispatcher (dispatch-indexing)
+
+`mise run dev` orchestrates these long-running processes directly via mise
+tasks, so you get mise's built-in prefixed output and Ctrl+C stops
+everything.
+
+Useful companion tasks:
+
+```shell
+mise run dev:check    # validate prerequisites
+mise run dev:setup    # create graph DB + apply schema
+mise run dev:status   # show derived config
+mise run dev:env      # print env vars
+```
+
+`mise run gdk` is also available as an alias for the same GDK-connected local
+development workflow.
+
+Port assignments and GDK connection settings can be overridden in a gitignored
+`.env` file. The only required input is `GDK_ROOT` (or `GDK_DIR` as an alias),
+and the script derives GDK service ports from `gdk.yml` automatically. Start from the checked-in template
+if you want to override only the GKG-local listen ports:
+
+```shell
+cp .env.example .env
+```
+
+For example, you can change the webserver and indexer ports if you want to run
+multiple isolated local clusters on the same machine. You do not need to copy
+GDK connection details into `.env`; those are parsed from `gdk.yml`.
+
+Prerequisites:
+
+- A working GDK with `nats`, `clickhouse`, and `siphon` enabled in `gdk.yml`
+- PostgreSQL `wal_level = logical` (required for Siphon CDC)
+- `mise` shell activation so that `cargo`, `ruby`, and `clickhouse` are on `PATH`
+- Run `mise run dev:check` to validate all prerequisites
+
+Typical usage:
+
+```shell
+export GDK_ROOT=~/workspace/gdk
+mise run dev
+```
+
+On the first run, `cargo` compiles the full workspace which takes several
+minutes. Subsequent runs use the cached build and start in seconds.
+
+`mise run dev:setup` creates the graph database (default `gkg-development`) and
+applies `config/graph.sql` to the configured ClickHouse instance.
+
+This lightweight path assumes NATS, ClickHouse, Siphon, PostgreSQL, and Gitaly
+come from GDK.
+
 See `.gkg-dev.conf.example` for all configuration options (K8s runtime,
 resource allocation, Tilt streaming mode).
 
