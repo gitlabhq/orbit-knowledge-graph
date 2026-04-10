@@ -2,6 +2,9 @@
 #
 # Shared helpers for CLI integration test scripts.
 # Source this at the top of each test script.
+#
+# Assertions are DuckDB macros in harness.sql. This file provides
+# process orchestration (indexing, concurrent spawning, etc).
 
 set -euo pipefail
 
@@ -18,37 +21,40 @@ Q_TRAVERSAL='{"query_type":"traversal","nodes":[{"id":"f","entity":"File","colum
 # ── DuckDB harness ───────────────────────────────────────────────
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-
 export ORBIT_DATA_DIR="$TMP/orbit"
 
 _DB="$TMP/harness.duckdb"
 duckdb "$_DB" ".read $SCRIPT_DIR/harness.sql" 2>/dev/null
 
-# Run SQL against the harness DB (has results table + macros).
 db()    { duckdb "$_DB" "$1" 2>/dev/null; }
 dbval() { duckdb -noheader -list "$_DB" "$1" 2>/dev/null; }
 
-# ── Primitives ───────────────────────────────────────────────────
+add()          { db "INSERT INTO results VALUES ('$1', $2, '${3:-}')"; }
+orbit_query()  { "$ORBIT" query --raw "$1" > "$2" 2>/dev/null; }
+emit_results() { dbval "SELECT json FROM test_output"; }
+all_identical(){ dbval "
+    WITH per_file AS (
+        SELECT filename, list_sort(list(n.id)) AS ids
+        FROM read_json('$1', filename=true), unnest(nodes) AS t(n)
+        GROUP BY filename
+    )
+    SELECT count(DISTINCT ids) = 1 FROM per_file"; }
 
-add()         { db "INSERT INTO results VALUES ('$1', $2, '${3:-}')"; }
-orbit_query() { "$ORBIT" query --raw "$1" > "$2" 2>/dev/null; }
-emit_results(){ dbval "SELECT json FROM test_output"; }
+# ── Process helpers ──────────────────────────────────────────────
 
-# ── Assertions ───────────────────────────────────────────────────
-# Use check_has/check_count/check_edges macros from harness.sql.
-
-assert_has()    { db "INSERT INTO results SELECT r.* FROM (SELECT check_has('$1', (SELECT count(*)::INT FROM orbit_nodes('$2') WHERE $3)) AS r)"; }
-assert_count()  { db "INSERT INTO results SELECT r.* FROM (SELECT check_count('$1', (SELECT count(*)::INT FROM orbit_nodes('$2') WHERE $3), $4, '${5:-}') AS r)"; }
-assert_edges()  { db "INSERT INTO results SELECT r.* FROM (SELECT check_edges('$1', (SELECT count(*)::INT FROM orbit_edges('$2'))) AS r)"; }
-all_identical() { dbval "SELECT ok FROM files_same('$1')"; }
-
-# ── Concurrency helpers ─────────────────────────────────────────
+index_repos() {
+    for r in "$@"; do
+        local name; name=$(basename "$r")
+        "$ORBIT" index "$r" > /dev/null 2>&1 \
+            && add "index_$name" true \
+            || add "index_$name" false "indexing failed"
+    done
+}
 
 run_concurrent_queries() {
     local query="$1" n="$2" prefix="$3" pids=()
     for i in $(seq 1 "$n"); do
-        orbit_query "$query" "$TMP/${prefix}${i}.json" &
-        pids+=($!)
+        orbit_query "$query" "$TMP/${prefix}${i}.json" & pids+=($!)
     done
     local ok=true
     for pid in "${pids[@]}"; do wait "$pid" || ok=false; done
@@ -68,17 +74,6 @@ run_concurrent_writers() {
     if [ "$ok" -eq "$n" ]; then echo "all"
     elif [ "$ok" -gt 0 ];  then echo "some"
     else echo "none"; fi
-}
-
-# ── Repo helpers ─────────────────────────────────────────────────
-
-index_repos() {
-    for r in "$@"; do
-        local name; name=$(basename "$r")
-        "$ORBIT" index "$r" > /dev/null 2>&1 \
-            && add "index_$name" true \
-            || add "index_$name" false "indexing failed"
-    done
 }
 
 add_worktree() {

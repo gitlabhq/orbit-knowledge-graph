@@ -1,7 +1,15 @@
 -- CLI test harness for DuckDB.
 -- Source with: duckdb <db> ".read harness.sql"
+--
+-- Test scripts compute counts with FILTER, pass them to check_*
+-- macros inside an unnest([...]) array, then INSERT into results.
+--
+-- Pattern:
+--   WITH nodes AS (SELECT unnest(nodes) AS n FROM read_json('<file>')),
+--   c AS (SELECT count(*) FILTER (WHERE ...) AS x, ... FROM nodes),
+--   checks AS (SELECT unnest([check_has('name', x), ...]) AS r FROM c)
+--   INSERT INTO results SELECT r.name, r.ok, r.detail FROM checks;
 
--- ── Results ─────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS results (
     name   TEXT NOT NULL,
     ok     BOOLEAN NOT NULL,
@@ -24,12 +32,7 @@ CREATE OR REPLACE MACRO files_same(pattern) AS TABLE
     )
     SELECT (count(DISTINCT ids) = 1) AS ok FROM per_file;
 
--- ── Assertion result constructors ───────────────────────────────
--- Return named structs matching the results table schema.
--- Usage: INSERT INTO results SELECT r.name, r.ok, r.detail FROM (
---            SELECT check_has('test', <count>) AS r
---            UNION ALL ...
---        );
+-- ── Check macros (return named structs) ─────────────────────────
 
 CREATE OR REPLACE MACRO check_has(test_name, cnt) AS {
     'name': test_name,
@@ -48,6 +51,18 @@ CREATE OR REPLACE MACRO check_edges(test_name, cnt) AS {
     'ok': cnt > 0,
     'detail': CASE WHEN cnt > 0 THEN cnt::TEXT || ' edges' ELSE 'no edges' END
 };
+
+CREATE OR REPLACE MACRO check_ok(test_name, is_ok, msg) AS {
+    'name': test_name,
+    'ok': is_ok,
+    'detail': msg
+};
+
+-- ── Record checks ───────────────────────────────────────────────
+-- Unnest an array of check structs into result rows.
+-- Usage: INSERT INTO results SELECT * FROM record([check_has(...), ...]);
+CREATE OR REPLACE MACRO record(checks) AS TABLE
+    SELECT r.name, r.ok, r.detail FROM unnest(checks) AS t(r);
 
 -- ── Output ──────────────────────────────────────────────────────
 
