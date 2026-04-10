@@ -7,13 +7,19 @@ publish = false
 [dependencies]
 compiler = { path = "../query-engine/compiler" }
 parser-core = { path = "../code-graph/parser" }
+bolero = "0.13.4"
+serde_json.workspace = true
 
 [dev-dependencies]
-bolero = "0.13.4"
 
 [[test]]
 name = "fuzz_compile"
 path = "tests/fuzz_compile/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_compile_structured"
+path = "tests/fuzz_compile_structured/fuzz_target.rs"
 harness = false
 
 [[test]]

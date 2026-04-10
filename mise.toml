@@ -53,6 +53,10 @@ description = "Install git hooks (lefthook + worktree support)"
 run = "cargo +nightly bolero test fuzz_compile -p gkg-fuzz"
 description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
 
+[tasks."fuzz:compile-structured"]
+run = "cargo +nightly bolero test fuzz_compile_structured -p gkg-fuzz"
+description = "Fuzz the query compiler with structured JSON query generation"
+
 [tasks."fuzz:ruby"]
 run = "cargo +nightly bolero test fuzz_ruby -p gkg-fuzz"
 description = "Fuzz the Ruby code parser"
