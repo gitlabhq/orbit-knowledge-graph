@@ -168,14 +168,14 @@ pub struct HydratePlanPass;
 
 impl<E, S> CompilerPass<E, S> for HydratePlanPass
 where
-    E: PipelineEnv + HasOntology,
+    E: PipelineEnv + HasOntology + HasTablePrefix,
     S: PipelineState + HasInput + HasHydrationPlan,
 {
     const NAME: &'static str = "hydrate_plan";
 
     fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let input = state.input()?;
-        let plan = hydrate::generate_hydration_plan(input, env.ontology());
+        let plan = hydrate::generate_hydration_plan(input, env.ontology(), env.table_prefix());
         state.set_hydration_plan(plan);
         Ok(())
     }

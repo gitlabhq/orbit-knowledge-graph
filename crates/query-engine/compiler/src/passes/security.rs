@@ -133,13 +133,16 @@ fn apply_security_to_from(table_ref: &mut TableRef, ctx: &SecurityContext) -> Re
 
 /// Determines if a table should have traversal path security filters applied.
 fn should_apply_security_filter(table: &str) -> bool {
-    // Only apply to actual node tables and edge table (GL_TABLE_PREFIX)
-    // This excludes CTEs like "path_cte" which don't have traversal_path
-    if !table.starts_with(GL_TABLE_PREFIX) {
-        return false;
-    }
-    // Skip tables for entities whose visibility is relationship-based
-    if skip_security_filter_tables().iter().any(|t| t == table) {
+    // Strip any schema-version prefix (e.g. "v1_") to get the bare table name.
+    // Bare table names start with GL_TABLE_PREFIX; prefixed ones contain it after
+    // the version segment. CTEs ("path_cte") never contain GL_TABLE_PREFIX.
+    let bare = match table.find(GL_TABLE_PREFIX) {
+        Some(idx) => &table[idx..],
+        None => return false,
+    };
+    // Skip tables for entities whose visibility is relationship-based.
+    // skip_security_filter_tables() holds bare names (e.g. "gl_namespace_link").
+    if skip_security_filter_tables().iter().any(|t| t == bare) {
         return false;
     }
     true
@@ -283,6 +286,18 @@ mod tests {
         assert!(!should_apply_security_filter("some_cte"));
         // Only gl_ prefixed tables should have security filters
         assert!(!should_apply_security_filter("nodes"));
+    }
+
+    #[test]
+    fn should_apply_security_filter_works_with_version_prefix() {
+        // Versioned tables (e.g. during migration) must still get security filters.
+        assert!(should_apply_security_filter("v1_gl_project"));
+        assert!(should_apply_security_filter("v1_gl_merge_request"));
+        assert!(should_apply_security_filter(&format!("v1_{EDGE_TABLE}")));
+        // Skipped tables must still be skipped even when prefixed.
+        assert!(!should_apply_security_filter("v1_gl_user"));
+        // Non-gl_ strings with a version-like prefix must not match.
+        assert!(!should_apply_security_filter("v1_path_cte"));
     }
 
     #[test]

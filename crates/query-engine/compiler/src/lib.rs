@@ -27,7 +27,7 @@
 //!     "limit": 10
 //! }"#;
 //!
-//! let result = compile(json, &ontology, &ctx).unwrap();
+//! let result = compile(json, &ontology, &ctx, "").unwrap();
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
