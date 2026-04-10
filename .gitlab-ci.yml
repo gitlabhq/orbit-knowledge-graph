@@ -541,8 +541,9 @@ code-indexing-benchmark-analyze:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-    - export GKG_VERSION="${CARGO_VERSION}-${DEV_PREFIX}+${CI_COMMIT_SHORT_SHA}"
+    - git fetch --tags
+    - BASE_VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1 | sed 's/^v//')
+    - export GKG_VERSION="${BASE_VERSION:-0.0.0}-${DEV_PREFIX}+${CI_COMMIT_SHORT_SHA}"
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-${ARCH}"
 
 docker-build-amd64:
