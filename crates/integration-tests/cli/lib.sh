@@ -122,6 +122,60 @@ run_concurrent_writers() {
     fi
 }
 
+# Index repos and record pass/fail for each.
+# Usage: index_repos <repo1> [repo2...]
+index_repos() {
+    for r in "$@"; do
+        local name
+        name=$(basename "$r")
+        "$ORBIT" index "$r" > /dev/null 2>&1 \
+            && add "index_$name" true \
+            || add "index_$name" false "indexing failed"
+    done
+}
+
+# Assert that a JSON result file has nodes matching a filter.
+# Usage: assert_has <test-name> <json-file> <sql-filter> [detail]
+assert_has() {
+    local name="$1" file="$2" filter="$3" detail="${4:-}"
+    local c
+    c=$(count_nodes "$file" "$filter")
+    [ "$c" -gt 0 ] && add "$name" true "${detail:-$c matches}" \
+                    || add "$name" false "not found"
+}
+
+# Assert node count equals expected.
+# Usage: assert_count <test-name> <json-file> <sql-filter> <expected> [detail]
+assert_count() {
+    local name="$1" file="$2" filter="$3" expected="$4" detail="${5:-}"
+    local c
+    c=$(count_nodes "$file" "$filter")
+    [ "$c" -eq "$expected" ] && add "$name" true "${detail:-$c matches}" \
+                             || add "$name" false "expected $expected, got $c"
+}
+
+# Assert content contains a substring for nodes matching a filter.
+# Usage: assert_content <test-name> <json-file> <sql-filter> <substring>
+assert_content() {
+    local name="$1" file="$2" filter="$3" substr="$4"
+    local c
+    c=$(count_nodes "$file" "$filter AND contains(n.content, '$substr')")
+    [ "$c" -gt 0 ] && add "$name" true \
+                    || add "$name" false "'$substr' not found"
+}
+
+# Create a git worktree, write files, and commit.
+# Usage: add_worktree <repo> <branch> <worktree-path> [base-ref]
+# Returns: sets WT_SHA to the new commit hash.
+add_worktree() {
+    local repo="$1" branch="$2" wt_path="$3" base="${4:-}"
+    if [ -n "$base" ]; then
+        cd "$repo" && git worktree add -q -b "$branch" "$wt_path" "$base" 2>/dev/null
+    else
+        cd "$repo" && git worktree add -q -b "$branch" "$wt_path"
+    fi
+}
+
 # Create a minimal git repo with Python files for testing.
 # Usage: init_test_repo <path>
 init_test_repo() {
