@@ -43,29 +43,21 @@ orbit_query "$Q_FILES" "$TMP/files.json"
 orbit_query "$Q_TRAVERSAL" "$TMP/trav.json"
 
 # ── Batch assertions via single DuckDB call ──────────────────────
+F="$TMP/files.json"
 db "
--- Branches exist
-INSERT INTO results SELECT 'branch_${MAIN_BRANCH}', c > 0, c || ' matches' FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.branch = '${MAIN_BRANCH}');
-INSERT INTO results SELECT 'branch_${FEAT_BRANCH}', c > 0, c || ' matches' FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.branch = '${FEAT_BRANCH}');
-INSERT INTO results SELECT 'branch_${FIX_BRANCH}', c > 0, c || ' matches' FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.branch = '${FIX_BRANCH}');
-
--- Commits tracked
-INSERT INTO results SELECT 'commit_${MAIN_SHA:0:8}', c > 0, c || ' matches' FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.commit_sha = '${MAIN_SHA}');
-INSERT INTO results SELECT 'commit_${FEAT_SHA:0:8}', c > 0, c || ' matches' FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.commit_sha = '${FEAT_SHA}');
-INSERT INTO results SELECT 'commit_${FIX_SHA:0:8}', c > 0, c || ' matches' FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.commit_sha = '${FIX_SHA}');
-
--- Branch-specific file
-INSERT INTO results SELECT 'branch_specific_file', c = 1, CASE WHEN c = 1 THEN 'tests.py on feature only' ELSE 'expected 1, got ' || c END FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.name = 'tests.py');
-
--- Unique IDs per branch
-INSERT INTO results SELECT 'unique_ids', c = 3, CASE WHEN c = 3 THEN '3 main.py across 3 branches' ELSE 'expected 3, got ' || c END FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.name = 'main.py');
-
--- Content resolution
-INSERT INTO results SELECT 'content_fix', c > 0, c || ' matches' FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.name = 'utils.py' AND n.branch = '${FIX_BRANCH}' AND contains(n.content, 'patched'));
-INSERT INTO results SELECT 'content_feat', c > 0, c || ' matches' FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$TMP/files.json') WHERE n.name = 'tests.py' AND contains(n.content, 'test_hello'));
-
--- Traversal
-INSERT INTO results SELECT 'traversal', c > 0, c || ' edges' FROM (SELECT count(*)::INT AS c FROM orbit_edges('$TMP/trav.json'));
+INSERT INTO results SELECT r.* FROM (
+    SELECT check_has('branch_${MAIN_BRANCH}', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.branch = '${MAIN_BRANCH}')) AS r
+    UNION ALL SELECT check_has('branch_${FEAT_BRANCH}', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.branch = '${FEAT_BRANCH}'))
+    UNION ALL SELECT check_has('branch_${FIX_BRANCH}', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.branch = '${FIX_BRANCH}'))
+    UNION ALL SELECT check_has('commit_${MAIN_SHA:0:8}', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.commit_sha = '${MAIN_SHA}'))
+    UNION ALL SELECT check_has('commit_${FEAT_SHA:0:8}', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.commit_sha = '${FEAT_SHA}'))
+    UNION ALL SELECT check_has('commit_${FIX_SHA:0:8}', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.commit_sha = '${FIX_SHA}'))
+    UNION ALL SELECT check_count('branch_specific_file', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.name = 'tests.py'), 1, 'tests.py on feature only')
+    UNION ALL SELECT check_count('unique_ids', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.name = 'main.py'), 3, '3 main.py across 3 branches')
+    UNION ALL SELECT check_has('content_fix', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.name = 'utils.py' AND n.branch = '${FIX_BRANCH}' AND contains(n.content, 'patched')))
+    UNION ALL SELECT check_has('content_feat', (SELECT count(*)::INT FROM orbit_nodes('$F') WHERE n.name = 'tests.py' AND contains(n.content, 'test_hello')))
+    UNION ALL SELECT check_edges('traversal', (SELECT count(*)::INT FROM orbit_edges('$TMP/trav.json')))
+);
 "
 
 emit_results

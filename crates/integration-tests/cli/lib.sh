@@ -35,17 +35,12 @@ orbit_query() { "$ORBIT" query --raw "$1" > "$2" 2>/dev/null; }
 emit_results(){ dbval "SELECT json FROM test_output"; }
 
 # ── Assertions ───────────────────────────────────────────────────
-# All use orbit_nodes/orbit_edges/files_same macros from harness.sql.
+# Use check_has/check_count/check_edges macros from harness.sql.
 
-assert_has()    { db "INSERT INTO results SELECT '$1', c > 0, CASE WHEN c > 0 THEN c || ' matches' ELSE 'not found' END FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$2') WHERE $3)"; }
-assert_count()  { db "INSERT INTO results SELECT '$1', c = $4, CASE WHEN c = $4 THEN '${5:-}' ELSE 'expected $4, got ' || c END FROM (SELECT count(*)::INT AS c FROM orbit_nodes('$2') WHERE $3)"; }
-assert_edges()  { db "INSERT INTO results SELECT '$1', c > 0, CASE WHEN c > 0 THEN c || ' edges' ELSE 'no edges' END FROM (SELECT count(*)::INT AS c FROM orbit_edges('$2'))"; }
+assert_has()    { db "INSERT INTO results SELECT r.* FROM (SELECT check_has('$1', (SELECT count(*)::INT FROM orbit_nodes('$2') WHERE $3)) AS r)"; }
+assert_count()  { db "INSERT INTO results SELECT r.* FROM (SELECT check_count('$1', (SELECT count(*)::INT FROM orbit_nodes('$2') WHERE $3), $4, '${5:-}') AS r)"; }
+assert_edges()  { db "INSERT INTO results SELECT r.* FROM (SELECT check_edges('$1', (SELECT count(*)::INT FROM orbit_edges('$2'))) AS r)"; }
 all_identical() { dbval "SELECT ok FROM files_same('$1')"; }
-
-# Batch assertions: run a SQL file against the harness DB.
-# The SQL file can use orbit_nodes(), orbit_edges(), getvariable(), etc.
-# Usage: run_assertions <sql-file>
-run_assertions() { db ".read $1"; }
 
 # ── Concurrency helpers ─────────────────────────────────────────
 
