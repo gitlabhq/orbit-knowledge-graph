@@ -1,10 +1,27 @@
 variables:
   CANONICAL_PROJECT_ID: "77960826"
+  SECURITY_PROJECT_ID: "80999258"
   DEP_PROXY: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/
+  DEV_PREFIX: "dev"
 
 workflow:
   rules:
-    # Non-canonical (forks)
+    # Security fork
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_TAG
+      variables:
+        DEP_PROXY: ""
+        DEV_PREFIX: "sec"
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      variables:
+        DEP_PROXY: ""
+        DEV_PREFIX: "sec"
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+      when: never
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        DEP_PROXY: ""
+        DEV_PREFIX: "sec"
+    # Non-canonical (other forks)
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG
       variables:
         DEP_PROXY: ""
@@ -524,7 +541,10 @@ code-indexing-benchmark-analyze:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-${ARCH}"
+    - git fetch --tags
+    - BASE_VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1 | sed 's/^v//')
+    - export GKG_VERSION="${BASE_VERSION:-0.0.0}-${DEV_PREFIX}+${CI_COMMIT_SHORT_SHA}"
+    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-${ARCH}"
 
 docker-build-amd64:
   extends: .docker-build
@@ -555,9 +575,10 @@ docker-manifest:
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - docker buildx imagetools create
-        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-amd64"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-arm64"
+        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}"
+        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64"
 
 docker-build-mr:
   stage: build
