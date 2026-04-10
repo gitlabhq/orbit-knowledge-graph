@@ -96,7 +96,7 @@ toml = "1.0.0"
 opentelemetry = { version = "0.31", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
-async-nats = { version = "0.46.0", features = ["server_2_11"] }
+async-nats = { version = "0.47.0", features = ["server_2_11"] }
 arrow-ipc = "58.0.0"
 clickhouse = { version = "0.15", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
 testcontainers = "0.27.1"
