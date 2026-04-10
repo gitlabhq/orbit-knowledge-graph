@@ -450,6 +450,7 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
         }"#,
         &ontology,
         &security_ctx,
+        "",
     );
 
     assert!(

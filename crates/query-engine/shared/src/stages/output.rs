@@ -103,6 +103,7 @@ mod tests {
             security_context,
             server_extensions: Default::default(),
             phases: Default::default(),
+            table_prefix: String::new(),
         }
     }
 

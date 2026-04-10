@@ -17,7 +17,7 @@ use crate::input::Input;
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
 use crate::pipelines::{
     HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasQueryConfig,
-    HasResultCtx, HasSecurityCtx,
+    HasResultCtx, HasSecurityCtx, HasTablePrefix,
 };
 
 pub struct ValidatePass;
@@ -46,14 +46,18 @@ pub struct NormalizePass;
 
 impl<E, S> CompilerPass<E, S> for NormalizePass
 where
-    E: PipelineEnv + HasOntology,
+    E: PipelineEnv + HasOntology + HasTablePrefix,
     S: PipelineState + HasInput,
 {
     const NAME: &'static str = "normalize";
 
     fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let input = state.take_input()?;
-        state.set_input(normalize::normalize(input, env.ontology())?);
+        state.set_input(normalize::normalize(
+            input,
+            env.ontology(),
+            env.table_prefix(),
+        )?);
         Ok(())
     }
 }

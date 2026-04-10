@@ -51,6 +51,9 @@ pub struct QueryPipelineContext {
     pub compiled: Option<Arc<CompiledQueryContext>>,
     pub ontology: Arc<Ontology>,
     pub security_context: Option<SecurityContext>,
+    /// Table prefix derived from the active schema version (e.g. `"v1_"`).
+    /// Empty string means no prefix (schema version 0 or fresh install).
+    pub table_prefix: String,
     /// Server-specific infrastructure (ClickHouse client, etc.)
     pub server_extensions: TypeMap,
     /// Inter-stage data flowing between pipeline stages.

@@ -40,6 +40,7 @@ impl ProfilerPipelineService {
             compiled: None,
             ontology: Arc::clone(&self.ontology),
             security_context: Some(security_ctx),
+            table_prefix: String::new(),
             server_extensions,
             phases: TypeMap::default(),
         };

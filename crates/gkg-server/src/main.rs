@@ -151,7 +151,12 @@ async fn main() -> anyhow::Result<()> {
             let graph = config.graph.build_client();
             info!("initializing schema version table");
             schema_version::init(&graph).await?;
-            run_webserver(&config, ontology).await
+            let active_version = schema_version::read_active_version(&graph)
+                .await?
+                .unwrap_or(0);
+            let prefix = schema_version::table_prefix(active_version);
+            info!(version = active_version, table_prefix = %prefix, "resolved active schema version");
+            run_webserver(&config, ontology, prefix).await
         }
     };
 
@@ -163,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
 async fn run_webserver(
     config: &AppConfig,
     ontology: Arc<ontology::Ontology>,
+    table_prefix: String,
 ) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
@@ -208,6 +214,7 @@ async fn run_webserver(
         tls_config,
         resolver_registry,
         config.grpc.clone(),
+        table_prefix,
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
