@@ -5,7 +5,7 @@
 //! per-column overrides come from the ontology's `storage` metadata.
 
 use ontology::{
-    AuxiliaryTable, DataType, EnumType, Field, NodeEntity, Ontology, StorageIndex,
+    AuxiliaryTable, ColumnStorage, DataType, Field, NodeEntity, Ontology, StorageIndex,
     StorageProjection,
 };
 
@@ -17,27 +17,20 @@ use crate::ast::ddl::*;
 
 /// Generates all graph table DDL from the ontology.
 ///
-/// Returns `CreateTable` AST nodes for:
-/// - All auxiliary (non-ontology) tables (checkpoint, etc.)
-/// - All node entity tables
-/// - All edge tables
-///
 /// Tables are returned unprefixed. Call `.with_prefix()` on each to apply
 /// a schema version prefix before codegen.
 pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
-    let mut tables = Vec::new();
+    let mut tables: Vec<CreateTable> = Vec::new();
 
     for aux in ontology.auxiliary_tables() {
         tables.push(build_auxiliary_table(aux));
     }
-
     for node in ontology.nodes() {
-        tables.push(build_node_table(node, ontology));
+        tables.push(build_node_table(node));
     }
-
-    for edge_table_name in ontology.edge_tables() {
-        if let Some(config) = ontology.edge_table_config(edge_table_name) {
-            tables.push(build_edge_table(edge_table_name, config));
+    for name in ontology.edge_tables() {
+        if let Some(config) = ontology.edge_table_config(name) {
+            tables.push(build_edge_table(name, config));
         }
     }
 
@@ -45,86 +38,105 @@ pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// System columns
+// Column building — shared across all table types
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn version_column() -> ColumnDef {
-    ColumnDef::new(
-        "_version",
-        ColumnType::Timestamp {
-            precision: 6,
-            timezone: Some("UTC".into()),
-        },
-    )
-    .with_default("now64(6)")
-    .with_codec(vec![Codec::ZSTD(1)])
+/// Builds a `ColumnDef` from a mapped type, applying codec and default
+/// overrides. If `override_codec` is provided it replaces the auto-derived
+/// codec; otherwise the default for the column type is used.
+fn build_column(
+    name: &str,
+    col_type: ColumnType,
+    override_codec: Option<&[String]>,
+    default: Option<&str>,
+) -> ColumnDef {
+    let codec = match override_codec {
+        Some(overrides) => Some(overrides.iter().map(|s| parse_codec(s)).collect()),
+        None => default_codec(&col_type),
+    };
+
+    let mut col = ColumnDef::new(name, col_type);
+    if let Some(c) = codec {
+        col = col.with_codec(c);
+    }
+    if let Some(d) = default {
+        col = col.with_default(d);
+    }
+    col
 }
 
-fn version_column_uint64() -> ColumnDef {
-    ColumnDef::new("_version", ColumnType::UInt64)
-}
-
-fn deleted_column() -> ColumnDef {
-    ColumnDef::new("_deleted", ColumnType::Bool).with_default("false")
+/// System columns appended to every table.
+fn system_columns(version_type_override: Option<&str>) -> [ColumnDef; 2] {
+    let version = match version_type_override {
+        Some("uint64") => ColumnDef::new("_version", ColumnType::UInt64),
+        _ => build_column(
+            "_version",
+            ColumnType::Timestamp {
+                precision: 6,
+                timezone: Some("UTC".into()),
+            },
+            None,
+            Some("now64(6)"),
+        ),
+    };
+    [
+        version,
+        ColumnDef::new("_deleted", ColumnType::Bool).with_default("false"),
+    ]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type mapping
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn map_column_type(
-    data_type: &DataType,
-    nullable: bool,
-    enum_type: &EnumType,
-    storage_type_override: Option<&str>,
-) -> ColumnType {
-    let base = match data_type {
+/// Maps an ontology `DataType` to a ClickHouse `ColumnType`.
+///
+/// Enum fields always produce `LowCardinality(...)` (with nullable inside if
+/// needed). Other types apply nullable at the outer level, and an optional
+/// `low_cardinality` storage override wraps the result.
+fn map_type(dt: &DataType, nullable: bool, storage_override: Option<&str>) -> ColumnType {
+    if matches!(dt, DataType::Enum) {
+        let inner = if nullable {
+            ColumnType::Nullable(Box::new(ColumnType::String))
+        } else {
+            ColumnType::String
+        };
+        return ColumnType::LowCardinality(Box::new(inner));
+    }
+
+    let base = match dt {
         DataType::String | DataType::Uuid => ColumnType::String,
         DataType::Int => ColumnType::Int64,
-        DataType::Float => ColumnType::String,
+        DataType::Float | DataType::Enum => ColumnType::String,
         DataType::Bool => ColumnType::Bool,
         DataType::DateTime => ColumnType::Timestamp {
             precision: 6,
             timezone: Some("UTC".into()),
         },
         DataType::Date => ColumnType::Date32,
-        DataType::Enum => match enum_type {
-            EnumType::String => ColumnType::LowCardinality(Box::new(if nullable {
-                ColumnType::Nullable(Box::new(ColumnType::String))
-            } else {
-                ColumnType::String
-            })),
-            EnumType::Int => ColumnType::LowCardinality(Box::new(if nullable {
-                ColumnType::Nullable(Box::new(ColumnType::String))
-            } else {
-                ColumnType::String
-            })),
-        },
     };
 
-    // For enums, LowCardinality(Nullable(...)) is already handled above
-    if matches!(data_type, DataType::Enum) {
-        return base;
-    }
+    wrap_type(base, nullable, storage_override == Some("low_cardinality"))
+}
 
-    // Apply low_cardinality override
-    let base = if storage_type_override == Some("low_cardinality") {
-        ColumnType::LowCardinality(Box::new(if nullable {
+/// Wraps a base type with `Nullable` and/or `LowCardinality`.
+fn wrap_type(base: ColumnType, nullable: bool, low_cardinality: bool) -> ColumnType {
+    if low_cardinality {
+        let inner = if nullable {
             ColumnType::Nullable(Box::new(base))
         } else {
             base
-        }))
+        };
+        ColumnType::LowCardinality(Box::new(inner))
     } else if nullable {
         ColumnType::Nullable(Box::new(base))
     } else {
         base
-    };
-
-    base
+    }
 }
 
-/// Auto-derive codec from column type. Returns None for types that don't
-/// benefit from codecs (Bool).
+/// Auto-derived codec for a column type. Returns `None` for types that don't
+/// benefit from codecs (Bool, UInt64).
 fn default_codec(col_type: &ColumnType) -> Option<Vec<Codec>> {
     match col_type {
         ColumnType::Int64 => Some(vec![Codec::Delta(8), Codec::ZSTD(1)]),
@@ -137,394 +149,104 @@ fn default_codec(col_type: &ColumnType) -> Option<Vec<Codec>> {
     }
 }
 
-/// Parse a codec string like `"zstd(3)"` or `"delta(8)"` into a `Codec`.
+// ─────────────────────────────────────────────────────────────────────────────
+// Parsing helpers (YAML string → AST enum)
+// ─────────────────────────────────────────────────────────────────────────────
+
 fn parse_codec(s: &str) -> Codec {
-    let lower = s.to_lowercase();
-    if lower == "lz4" {
-        return Codec::LZ4;
+    let s = s.to_lowercase();
+    match s.as_str() {
+        "lz4" => Codec::LZ4,
+        _ if s.starts_with("zstd(") => Codec::ZSTD(s[5..s.len() - 1].parse().unwrap_or(1)),
+        _ if s.starts_with("delta(") => Codec::Delta(s[6..s.len() - 1].parse().unwrap_or(8)),
+        _ => Codec::ZSTD(1),
     }
-    if let Some(inner) = lower
-        .strip_prefix("zstd(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        return Codec::ZSTD(inner.parse().unwrap_or(1));
-    }
-    if let Some(inner) = lower
-        .strip_prefix("delta(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        return Codec::Delta(inner.parse().unwrap_or(8));
-    }
-    Codec::ZSTD(1)
 }
 
-/// Parse an index type string like `"minmax"`, `"set(10)"`, `"bloom_filter(0.01)"`.
 fn parse_index_type(s: &str) -> IndexType {
-    let lower = s.to_lowercase();
-    if lower == "minmax" {
-        return IndexType::MinMax;
+    let s = s.to_lowercase();
+    match s.as_str() {
+        "minmax" => IndexType::MinMax,
+        _ if s.starts_with("set(") => IndexType::Set(s[4..s.len() - 1].parse().unwrap_or(10)),
+        _ if s.starts_with("bloom_filter(") => {
+            IndexType::BloomFilter(s[13..s.len() - 1].parse().unwrap_or(0.01))
+        }
+        _ => IndexType::MinMax,
     }
-    if let Some(inner) = lower.strip_prefix("set(").and_then(|s| s.strip_suffix(')')) {
-        return IndexType::Set(inner.parse().unwrap_or(10));
-    }
-    if let Some(inner) = lower
-        .strip_prefix("bloom_filter(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        return IndexType::BloomFilter(inner.parse().unwrap_or(0.01));
-    }
-    IndexType::MinMax
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Node table builder
+// Auto-generated indexes
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn build_node_table(node: &NodeEntity, ontology: &Ontology) -> CreateTable {
-    let mut columns = Vec::new();
-    let mut indexes = Vec::new();
-
-    for field in &node.fields {
-        if field.is_virtual() {
-            continue;
-        }
-
-        // Use field.name as the ClickHouse column name (not field.source,
-        // which is the datalake source column for ETL).
-        let col_name = &field.name;
-        let storage_override = node.storage.columns.get(col_name.as_str());
-
-        let col_type = map_column_type(
-            &field.data_type,
-            field.nullable,
-            &field.enum_type,
-            storage_override.and_then(|s| s.storage_type.as_deref()),
-        );
-
-        let codec = if let Some(override_codec) = storage_override.and_then(|s| s.codec.as_ref()) {
-            Some(override_codec.iter().map(|s| parse_codec(s)).collect())
-        } else {
-            default_codec(&col_type)
-        };
-
-        let default = storage_override.and_then(|s| s.default.clone());
-
-        let mut col = ColumnDef::new(col_name, col_type);
-        if let Some(c) = codec {
-            col = col.with_codec(c);
-        }
-        if let Some(d) = default {
-            col = col.with_default(d);
-        }
-
-        columns.push(col);
-
-        // Auto-generate indexes for boolean and enum fields
-        auto_index_for_field(field, col_name, &mut indexes);
-    }
-
-    // System columns
-    columns.push(version_column());
-    columns.push(deleted_column());
-
-    // Auto-generate id bloom index if the table has an id column
-    if node
-        .fields
-        .iter()
-        .any(|f| f.name == "id" && !f.is_virtual() && node.has_traversal_path)
-    {
-        indexes.push(IndexDef {
-            name: "idx_id".into(),
-            expression: "id".into(),
-            index_type: IndexType::BloomFilter(0.01),
-            granularity: 1,
-        });
-    }
-
-    // Additional indexes from storage metadata
-    for idx in &node.storage.indexes {
-        indexes.push(convert_storage_index(idx));
-    }
-
-    // Auto-generate by_id projection for namespaced tables
-    let mut projections: Vec<ProjectionDef> = Vec::new();
-    if node.has_traversal_path {
-        projections.push(ProjectionDef::Reorder {
-            name: "by_id".into(),
-            order_by: vec!["id".into()],
-        });
-    }
-
-    // Additional projections from storage metadata
-    for proj in &node.storage.projections {
-        projections.push(convert_storage_projection(proj));
-    }
-
-    let has_projections = !projections.is_empty();
-
-    let engine = if node.storage.version_only_engine {
-        Engine::replacing_merge_tree_version_only("_version")
-    } else {
-        Engine::replacing_merge_tree("_version", "_deleted")
-    };
-
-    let primary_key =
-        if node.sort_key != ontology.default_entity_sort_key() && node.sort_key.len() > 0 {
-            // Only emit PRIMARY KEY when it differs from ORDER BY or when there's
-            // no traversal_path (like gl_user where ORDER BY = PRIMARY KEY = (id))
-            if !node.has_traversal_path {
-                Some(node.sort_key.clone())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-    let mut settings = vec![TableSetting {
-        key: "allow_experimental_replacing_merge_with_cleanup".into(),
-        value: "1".into(),
-    }];
-
-    if has_projections || node.has_traversal_path {
-        settings.insert(
-            0,
-            TableSetting {
-                key: "index_granularity".into(),
-                value: "2048".into(),
-            },
-        );
-    }
-
-    if has_projections {
-        settings.insert(
-            1,
-            TableSetting {
-                key: "deduplicate_merge_projection_mode".into(),
-                value: "'rebuild'".into(),
-            },
-        );
-    }
-
-    CreateTable {
-        name: node.destination_table.clone(),
-        columns,
-        indexes,
-        projections,
-        engine,
-        order_by: node.sort_key.clone(),
-        primary_key,
-        settings,
-    }
-}
-
-fn auto_index_for_field(field: &Field, col_name: &str, indexes: &mut Vec<IndexDef>) {
+fn auto_indexes_for_field(field: &Field, col_name: &str) -> Option<IndexDef> {
     match field.data_type {
-        DataType::Bool if !field.nullable => {
-            indexes.push(IndexDef {
-                name: format!("idx_{col_name}"),
-                expression: col_name.into(),
-                index_type: IndexType::MinMax,
-                granularity: 1,
-            });
-        }
+        DataType::Bool if !field.nullable => Some(IndexDef {
+            name: format!("idx_{col_name}"),
+            expression: col_name.into(),
+            index_type: IndexType::MinMax,
+            granularity: 1,
+        }),
         DataType::Enum => {
             let cardinality = field
                 .enum_values
                 .as_ref()
                 .map(|v| v.len() as u32)
                 .unwrap_or(10);
-            indexes.push(IndexDef {
+            Some(IndexDef {
                 name: format!("idx_{col_name}"),
                 expression: col_name.into(),
                 index_type: IndexType::Set(cardinality),
                 granularity: 2,
-            });
+            })
         }
-        _ => {}
+        _ => None,
+    }
+}
+
+fn id_bloom_index() -> IndexDef {
+    IndexDef {
+        name: "idx_id".into(),
+        expression: "id".into(),
+        index_type: IndexType::BloomFilter(0.01),
+        granularity: 1,
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Edge table builder
+// Settings builder
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTable {
-    let mut columns = Vec::new();
+fn table_settings(index_granularity: Option<u32>, has_projections: bool) -> Vec<TableSetting> {
+    let mut s = Vec::new();
 
-    for col in &config.columns {
-        let col_name = &col.name;
-        let storage_override = config.storage.columns.get(col_name.as_str());
-
-        let is_kind_col = col_name.ends_with("_kind") || col_name == "relationship_kind";
-
-        let col_type = if is_kind_col {
-            ColumnType::LowCardinality(Box::new(ColumnType::String))
-        } else {
-            map_column_type(&col.data_type, false, &EnumType::String, None)
-        };
-
-        let codec = if let Some(override_codec) = storage_override.and_then(|s| s.codec.as_ref()) {
-            Some(override_codec.iter().map(|s| parse_codec(s)).collect())
-        } else {
-            default_codec(&col_type)
-        };
-
-        let default = storage_override
-            .and_then(|s| s.default.clone())
-            .or_else(|| {
-                if col_name == "traversal_path" {
-                    Some("'0/'".into())
-                } else {
-                    None
-                }
-            });
-
-        let mut col_def = ColumnDef::new(col_name, col_type);
-        if let Some(c) = codec {
-            col_def = col_def.with_codec(c);
-        }
-        if let Some(d) = default {
-            col_def = col_def.with_default(d);
-        }
-        columns.push(col_def);
-    }
-
-    // System columns
-    columns.push(version_column());
-    columns.push(deleted_column());
-
-    // Indexes from storage metadata
-    let indexes: Vec<IndexDef> = config
-        .storage
-        .indexes
-        .iter()
-        .map(convert_storage_index)
-        .collect();
-
-    // Projections from storage metadata
-    let projections: Vec<ProjectionDef> = config
-        .storage
-        .projections
-        .iter()
-        .map(convert_storage_projection)
-        .collect();
-
-    let index_granularity = config.storage.index_granularity.unwrap_or(1024);
-
-    let mut settings = vec![
-        TableSetting {
+    if let Some(g) = index_granularity {
+        s.push(TableSetting {
             key: "index_granularity".into(),
-            value: index_granularity.to_string(),
-        },
-        TableSetting {
-            key: "deduplicate_merge_projection_mode".into(),
-            value: "'rebuild'".into(),
-        },
-        TableSetting {
-            key: "allow_experimental_replacing_merge_with_cleanup".into(),
-            value: "1".into(),
-        },
-    ];
-
-    // Only include deduplicate setting if there are projections
-    if projections.is_empty() {
-        settings.retain(|s| s.key != "deduplicate_merge_projection_mode");
+            value: g.to_string(),
+        });
     }
-
-    CreateTable {
-        name: name.into(),
-        columns,
-        indexes,
-        projections,
-        engine: Engine::replacing_merge_tree("_version", "_deleted"),
-        order_by: config.sort_key.clone(),
-        primary_key: config.storage.primary_key.clone(),
-        settings,
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Auxiliary table builder
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
-    let mut columns: Vec<ColumnDef> = aux
-        .columns
-        .iter()
-        .map(|c| {
-            let col_type = map_column_type(&c.data_type, c.nullable, &EnumType::String, None);
-            let codec = if let Some(ref override_codec) = c.codec {
-                Some(override_codec.iter().map(|s| parse_codec(s)).collect())
-            } else {
-                default_codec(&col_type)
-            };
-            let mut col = ColumnDef::new(&c.name, col_type);
-            if let Some(codec) = codec {
-                col = col.with_codec(codec);
-            }
-            if let Some(ref d) = c.default {
-                col = col.with_default(d);
-            }
-            col
-        })
-        .collect();
-
-    // System columns
-    let ver = if aux.version_type.as_deref() == Some("uint64") {
-        version_column_uint64()
-    } else {
-        version_column()
-    };
-    columns.push(ver);
-    columns.push(deleted_column());
-
-    let engine = if aux.version_only_engine {
-        Engine::replacing_merge_tree_version_only("_version")
-    } else {
-        Engine::replacing_merge_tree("_version", "_deleted")
-    };
-
-    let projections: Vec<ProjectionDef> = aux
-        .projections
-        .iter()
-        .map(convert_storage_projection)
-        .collect();
-
-    let has_projections = !projections.is_empty();
-
-    let mut settings = vec![TableSetting {
-        key: "allow_experimental_replacing_merge_with_cleanup".into(),
-        value: "1".into(),
-    }];
 
     if has_projections {
-        settings.insert(
-            0,
-            TableSetting {
-                key: "deduplicate_merge_projection_mode".into(),
-                value: "'rebuild'".into(),
-            },
-        );
+        s.push(TableSetting {
+            key: "deduplicate_merge_projection_mode".into(),
+            value: "'rebuild'".into(),
+        });
     }
 
-    CreateTable {
-        name: aux.name.clone(),
-        columns,
-        indexes: vec![],
-        projections,
-        engine,
-        order_by: aux.order_by.clone(),
-        primary_key: None,
-        settings,
-    }
+    s.push(TableSetting {
+        key: "allow_experimental_replacing_merge_with_cleanup".into(),
+        value: "1".into(),
+    });
+
+    s
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Conversion helpers (ontology storage types → DDL AST types)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn convert_storage_index(idx: &StorageIndex) -> IndexDef {
+fn convert_index(idx: &StorageIndex) -> IndexDef {
     IndexDef {
         name: idx.name.clone(),
         expression: idx.column.clone(),
@@ -533,7 +255,7 @@ fn convert_storage_index(idx: &StorageIndex) -> IndexDef {
     }
 }
 
-fn convert_storage_projection(proj: &StorageProjection) -> ProjectionDef {
+fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
     match proj {
         StorageProjection::Reorder { name, order_by } => ProjectionDef::Reorder {
             name: name.clone(),
@@ -551,127 +273,282 @@ fn convert_storage_projection(proj: &StorageProjection) -> ProjectionDef {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Node table
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn build_node_table(node: &NodeEntity) -> CreateTable {
+    let empty = ColumnStorage::default();
+
+    let mut columns: Vec<ColumnDef> = node
+        .fields
+        .iter()
+        .filter(|f| !f.is_virtual())
+        .map(|field| {
+            let name = &field.name;
+            let sto = node.storage.columns.get(name.as_str()).unwrap_or(&empty);
+            let col_type = map_type(
+                &field.data_type,
+                field.nullable,
+                sto.storage_type.as_deref(),
+            );
+            build_column(name, col_type, sto.codec.as_deref(), sto.default.as_deref())
+        })
+        .collect();
+
+    let [ver, del] = system_columns(None);
+    columns.extend([ver, del]);
+
+    // Indexes: auto from field types + bloom on id for namespaced + storage overrides
+    let mut indexes: Vec<IndexDef> = node
+        .fields
+        .iter()
+        .filter(|f| !f.is_virtual())
+        .filter_map(|f| auto_indexes_for_field(f, &f.name))
+        .collect();
+
+    if node.has_traversal_path
+        && node
+            .fields
+            .iter()
+            .any(|f| f.name == "id" && !f.is_virtual())
+    {
+        indexes.push(id_bloom_index());
+    }
+
+    indexes.extend(node.storage.indexes.iter().map(convert_index));
+
+    // Projections: auto by_id for namespaced + storage overrides
+    let mut projections = Vec::new();
+    if node.has_traversal_path {
+        projections.push(ProjectionDef::Reorder {
+            name: "by_id".into(),
+            order_by: vec!["id".into()],
+        });
+    }
+    projections.extend(node.storage.projections.iter().map(convert_projection));
+
+    let engine = if node.storage.version_only_engine {
+        Engine::replacing_merge_tree_version_only("_version")
+    } else {
+        Engine::replacing_merge_tree("_version", "_deleted")
+    };
+
+    let granularity = if node.has_traversal_path || !projections.is_empty() {
+        Some(2048)
+    } else {
+        None
+    };
+
+    CreateTable {
+        name: node.destination_table.clone(),
+        columns,
+        indexes,
+        projections: projections.clone(),
+        engine,
+        order_by: node.sort_key.clone(),
+        primary_key: if !node.has_traversal_path {
+            Some(node.sort_key.clone())
+        } else {
+            None
+        },
+        settings: table_settings(granularity, !projections.is_empty()),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edge table
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTable {
+    let empty = ColumnStorage::default();
+
+    let mut columns: Vec<ColumnDef> = config
+        .columns
+        .iter()
+        .map(|col| {
+            let sto = config
+                .storage
+                .columns
+                .get(col.name.as_str())
+                .unwrap_or(&empty);
+            let is_kind = col.name.ends_with("_kind") || col.name == "relationship_kind";
+            let col_type = if is_kind {
+                ColumnType::LowCardinality(Box::new(ColumnType::String))
+            } else {
+                map_type(&col.data_type, false, None)
+            };
+            let default = sto.default.as_deref().or(if col.name == "traversal_path" {
+                Some("'0/'")
+            } else {
+                None
+            });
+            build_column(&col.name, col_type, sto.codec.as_deref(), default)
+        })
+        .collect();
+
+    let [ver, del] = system_columns(None);
+    columns.extend([ver, del]);
+
+    let indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
+    let projections: Vec<ProjectionDef> = config
+        .storage
+        .projections
+        .iter()
+        .map(convert_projection)
+        .collect();
+
+    CreateTable {
+        name: name.into(),
+        columns,
+        indexes,
+        projections: projections.clone(),
+        engine: Engine::replacing_merge_tree("_version", "_deleted"),
+        order_by: config.sort_key.clone(),
+        primary_key: config.storage.primary_key.clone(),
+        settings: table_settings(
+            Some(config.storage.index_granularity.unwrap_or(1024)),
+            !projections.is_empty(),
+        ),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auxiliary table
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
+    let mut columns: Vec<ColumnDef> = aux
+        .columns
+        .iter()
+        .map(|c| {
+            let col_type = map_type(&c.data_type, c.nullable, None);
+            build_column(&c.name, col_type, c.codec.as_deref(), c.default.as_deref())
+        })
+        .collect();
+
+    let [ver, del] = system_columns(aux.version_type.as_deref());
+    columns.extend([ver, del]);
+
+    let engine = if aux.version_only_engine {
+        Engine::replacing_merge_tree_version_only("_version")
+    } else {
+        Engine::replacing_merge_tree("_version", "_deleted")
+    };
+
+    let projections: Vec<ProjectionDef> = aux.projections.iter().map(convert_projection).collect();
+
+    CreateTable {
+        name: aux.name.clone(),
+        columns,
+        indexes: vec![],
+        projections: projections.clone(),
+        engine,
+        order_by: aux.order_by.clone(),
+        primary_key: None,
+        settings: table_settings(None, !projections.is_empty()),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn generate_from_embedded_ontology_produces_tables() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-        let tables = generate_graph_tables(&ontology);
-        assert!(
-            !tables.is_empty(),
-            "should generate at least one table from the embedded ontology"
-        );
+    fn ontology() -> Ontology {
+        Ontology::load_embedded().expect("embedded ontology must load")
+    }
 
+    fn find_table<'a>(tables: &'a [CreateTable], name: &str) -> &'a CreateTable {
+        tables.iter().find(|t| t.name == name).unwrap_or_else(|| {
+            let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+            panic!("table '{name}' not found in: {names:?}");
+        })
+    }
+
+    #[test]
+    fn generates_all_expected_tables() {
+        let tables = generate_graph_tables(&ontology());
         let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
 
-        // Node tables
-        assert!(names.contains(&"gl_user"), "missing gl_user: {names:?}");
-        assert!(
-            names.contains(&"gl_project"),
-            "missing gl_project: {names:?}"
-        );
-        assert!(
-            names.contains(&"gl_merge_request"),
-            "missing gl_merge_request: {names:?}"
-        );
-
-        // Edge table
-        assert!(names.contains(&"gl_edge"), "missing gl_edge: {names:?}");
+        for expected in ["gl_user", "gl_project", "gl_merge_request", "gl_edge"] {
+            assert!(names.contains(&expected), "missing {expected}: {names:?}");
+        }
     }
 
     #[test]
-    fn node_table_has_version_and_deleted_columns() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-        let tables = generate_graph_tables(&ontology);
-        let project = tables.iter().find(|t| t.name == "gl_project").unwrap();
-
-        let col_names: Vec<&str> = project.columns.iter().map(|c| c.name.as_str()).collect();
-        assert!(col_names.contains(&"_version"), "missing _version column");
-        assert!(col_names.contains(&"_deleted"), "missing _deleted column");
-    }
-
-    #[test]
-    fn user_table_has_no_traversal_path_in_sort_key() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-        let tables = generate_graph_tables(&ontology);
-        let user = tables.iter().find(|t| t.name == "gl_user").unwrap();
-
-        assert_eq!(user.order_by, vec!["id"]);
-    }
-
-    #[test]
-    fn namespaced_table_has_by_id_projection() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-        let tables = generate_graph_tables(&ontology);
-        let project = tables.iter().find(|t| t.name == "gl_project").unwrap();
-
-        let has_by_id = project.projections.iter().any(|p| match p {
-            ProjectionDef::Reorder { name, .. } => name == "by_id",
-            _ => false,
-        });
-        assert!(has_by_id, "namespaced table should have by_id projection");
-    }
-
-    #[test]
-    fn user_table_has_no_by_id_projection() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-        let tables = generate_graph_tables(&ontology);
-        let user = tables.iter().find(|t| t.name == "gl_user").unwrap();
-
-        // gl_user has ORDER BY (id) -- no traversal_path, so no by_id projection
-        assert!(
-            !user.projections.iter().any(|p| match p {
-                ProjectionDef::Reorder { name, .. } => name == "by_id",
-                _ => false,
-            }),
-            "gl_user should not have by_id projection (no traversal_path)"
-        );
-    }
-
-    #[test]
-    fn with_prefix_applies_to_all_tables() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-        let tables = generate_graph_tables(&ontology);
-
-        for table in &tables {
-            let prefixed = table.clone().with_prefix("v1_");
+    fn every_table_has_system_columns() {
+        for table in &generate_graph_tables(&ontology()) {
+            let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
             assert!(
-                prefixed.name.starts_with("v1_"),
-                "prefixed table should start with v1_: {}",
-                prefixed.name
+                cols.contains(&"_version"),
+                "{}: missing _version",
+                table.name
+            );
+            assert!(
+                cols.contains(&"_deleted"),
+                "{}: missing _deleted",
+                table.name
             );
         }
     }
 
     #[test]
-    fn enum_fields_become_low_cardinality() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-        let tables = generate_graph_tables(&ontology);
-        let user = tables.iter().find(|t| t.name == "gl_user").unwrap();
+    fn user_sort_key_is_id_only() {
+        let tables = generate_graph_tables(&ontology());
+        assert_eq!(find_table(&tables, "gl_user").order_by, vec!["id"]);
+    }
 
-        let state_col = user.columns.iter().find(|c| c.name == "state").unwrap();
+    #[test]
+    fn namespaced_tables_have_by_id_projection() {
+        let tables = generate_graph_tables(&ontology());
+        let project = find_table(&tables, "gl_project");
+        assert!(project
+            .projections
+            .iter()
+            .any(|p| matches!(p, ProjectionDef::Reorder { name, .. } if name == "by_id")));
+    }
+
+    #[test]
+    fn non_namespaced_tables_skip_by_id_projection() {
+        let tables = generate_graph_tables(&ontology());
+        let user = find_table(&tables, "gl_user");
+        assert!(!user
+            .projections
+            .iter()
+            .any(|p| matches!(p, ProjectionDef::Reorder { name, .. } if name == "by_id")));
+    }
+
+    #[test]
+    fn prefix_applies_to_all() {
+        for table in generate_graph_tables(&ontology()) {
+            let prefixed = table.with_prefix("v1_");
+            assert!(prefixed.name.starts_with("v1_"), "{}", prefixed.name);
+        }
+    }
+
+    #[test]
+    fn enum_fields_are_low_cardinality() {
+        let tables = generate_graph_tables(&ontology());
+        let user = find_table(&tables, "gl_user");
+        let state = user.columns.iter().find(|c| c.name == "state").unwrap();
         assert!(
-            matches!(state_col.data_type, ColumnType::LowCardinality(_)),
-            "enum field 'state' should be LowCardinality, got: {:?}",
-            state_col.data_type
+            matches!(state.data_type, ColumnType::LowCardinality(_)),
+            "{:?}",
+            state.data_type
         );
     }
 
     #[test]
     fn bool_fields_get_minmax_index() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-        let tables = generate_graph_tables(&ontology);
-        let user = tables.iter().find(|t| t.name == "gl_user").unwrap();
-
-        let has_admin_idx = user
+        let tables = generate_graph_tables(&ontology());
+        let user = find_table(&tables, "gl_user");
+        assert!(user
             .indexes
             .iter()
-            .any(|i| i.expression == "is_admin" && matches!(i.index_type, IndexType::MinMax));
-        assert!(
-            has_admin_idx,
-            "Bool field is_admin should have minmax index"
-        );
+            .any(|i| i.expression == "is_admin" && matches!(i.index_type, IndexType::MinMax)));
     }
 }
