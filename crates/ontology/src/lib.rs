@@ -27,9 +27,10 @@ pub use constants::{
     NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 pub use entities::{
-    DataType, DomainInfo, EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity,
-    EdgeSourceEtlConfig, EnumType, Field, FieldSource, NodeEntity, NodeStyle, RedactionConfig,
-    VirtualSource,
+    AuxiliaryColumn, AuxiliaryTable, DataType, DomainInfo, EdgeColumn, EdgeEndpoint,
+    EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field,
+    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, StorageColumn, StorageIndex,
+    StorageProjection, VirtualSource,
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -85,6 +86,8 @@ impl fmt::Display for OntologyError {
 pub struct EdgeTableConfig {
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumn>,
+    /// ClickHouse-specific storage metadata for DDL generation.
+    pub storage: EdgeTableStorage,
 }
 
 /// A loaded ontology containing all node and edge entities.
@@ -115,6 +118,8 @@ pub struct Ontology {
     pub(crate) local_edge_table_name: Option<String>,
     /// Local edge table columns, if declared.
     pub(crate) local_edge_columns: Vec<EdgeColumn>,
+    /// Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).
+    pub(crate) auxiliary_tables: Vec<AuxiliaryTable>,
 }
 
 impl Default for Ontology {
@@ -134,6 +139,7 @@ impl Ontology {
         let default_config = EdgeTableConfig {
             sort_key: default_sort_key,
             columns: Vec::new(),
+            storage: EdgeTableStorage::default(),
         };
         Self {
             schema_version: String::new(),
@@ -162,6 +168,7 @@ impl Ontology {
             local_entities: BTreeMap::new(),
             local_edge_table_name: None,
             local_edge_columns: Vec::new(),
+            auxiliary_tables: Vec::new(),
         }
     }
 
@@ -603,6 +610,12 @@ impl Ontology {
     #[must_use]
     pub fn local_edge_columns(&self) -> &[EdgeColumn] {
         &self.local_edge_columns
+    }
+
+    /// Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).
+    #[must_use]
+    pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
+        &self.auxiliary_tables
     }
 
     /// Default ORDER BY / dedup key columns for node tables.

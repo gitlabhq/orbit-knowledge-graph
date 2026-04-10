@@ -138,6 +138,20 @@ enum Commands {
         #[arg(long)]
         local: bool,
     },
+    /// Generate ClickHouse DDL from the ontology
+    Schema {
+        /// Path to ontology directory (default: embedded)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+
+        /// Table prefix (e.g., "v1_" for schema version 1)
+        #[arg(long, short, default_value = "")]
+        prefix: String,
+
+        /// Diff generated DDL against an existing .sql file
+        #[arg(long, short)]
+        diff: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -192,7 +206,173 @@ async fn main() -> Result<()> {
             format,
             local,
         } => run_compile(json, traversal_paths, ontology, format, local),
+        Commands::Schema {
+            ontology,
+            prefix,
+            diff,
+        } => run_schema(ontology, prefix, diff),
     }
+}
+
+fn run_schema(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>) -> Result<()> {
+    let ont = match ontology_path {
+        Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
+        None => Ontology::load_embedded().context("failed to load embedded ontology")?,
+    };
+
+    let tables = query_engine::compiler::generate_graph_tables(&ont);
+    let generated: Vec<String> = tables
+        .iter()
+        .map(|t| {
+            let t = if prefix.is_empty() {
+                t.clone()
+            } else {
+                t.clone().with_prefix(&prefix)
+            };
+            format!("{};\n", query_engine::compiler::emit_create_table(&t))
+        })
+        .collect();
+
+    match diff {
+        Some(path) => run_schema_diff(&generated, &path),
+        None => {
+            for stmt in &generated {
+                println!("{stmt}");
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Extracts `CREATE TABLE IF NOT EXISTS` statements from SQL, keyed by table name.
+/// Splits on top-level semicolons and extracts the table name from each statement.
+fn extract_tables_from_sql(sql: &str) -> std::collections::BTreeMap<String, String> {
+    let mut tables = std::collections::BTreeMap::new();
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut start = 0;
+
+    for (i, c) in sql.char_indices() {
+        match c {
+            '\'' if !in_string || (i > 0 && sql.as_bytes()[i - 1] != b'\\') => {
+                in_string = !in_string;
+            }
+            '(' if !in_string => depth += 1,
+            ')' if !in_string => depth -= 1,
+            ';' if !in_string && depth == 0 => {
+                let stmt = sql[start..=i].trim();
+                if let Some(name) = extract_create_table_name(stmt) {
+                    tables.insert(name, strip_leading_comments(stmt).to_string());
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+
+    tables
+}
+
+/// Strips leading SQL comments and blank lines from a statement.
+fn strip_leading_comments(stmt: &str) -> &str {
+    let mut start = 0;
+    for line in stmt.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("--") {
+            start += line.len() + 1; // +1 for newline
+        } else {
+            break;
+        }
+    }
+    if start >= stmt.len() {
+        stmt
+    } else {
+        &stmt[start..]
+    }
+}
+
+/// Extracts the table name from a `CREATE TABLE IF NOT EXISTS <name>` statement.
+fn extract_create_table_name(stmt: &str) -> Option<String> {
+    let upper = stmt.to_uppercase();
+    let marker = "CREATE TABLE IF NOT EXISTS ";
+    let pos = upper.find(marker)?;
+    let after = &stmt[pos + marker.len()..];
+    let name = after
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .next()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+fn run_schema_diff(generated_stmts: &[String], sql_path: &PathBuf) -> Result<()> {
+    let existing_sql = std::fs::read_to_string(sql_path)
+        .with_context(|| format!("failed to read {}", sql_path.display()))?;
+
+    let existing = extract_tables_from_sql(&existing_sql);
+    let generated_sql = generated_stmts.join("\n");
+    let generated = extract_tables_from_sql(&generated_sql);
+
+    let all_names: std::collections::BTreeSet<&str> = existing
+        .keys()
+        .chain(generated.keys())
+        .map(|s| s.as_str())
+        .collect();
+
+    let mut ok = 0u32;
+    let mut diffs = 0u32;
+    let mut missing = 0u32;
+    let mut extra = 0u32;
+
+    for name in &all_names {
+        // Skip control tables that aren't generated from ontology
+        if *name == "gkg_schema_version" {
+            continue;
+        }
+
+        match (existing.get(*name), generated.get(*name)) {
+            (Some(_), None) => {
+                eprintln!("MISSING from generated: {name}");
+                missing += 1;
+            }
+            (None, Some(_)) => {
+                eprintln!("EXTRA in generated: {name}");
+                extra += 1;
+            }
+            (Some(exp), Some(got)) => {
+                if exp.trim() == got.trim() {
+                    ok += 1;
+                } else {
+                    diffs += 1;
+                    eprintln!("DIFF: {name}");
+                    let exp_lines: Vec<&str> = exp.lines().collect();
+                    let got_lines: Vec<&str> = got.lines().collect();
+                    let max = exp_lines.len().max(got_lines.len());
+                    for i in 0..max {
+                        let e = exp_lines.get(i).map(|s| s.trim()).unwrap_or("<missing>");
+                        let g = got_lines.get(i).map(|s| s.trim()).unwrap_or("<missing>");
+                        if e != g {
+                            eprintln!("  L{i}: exp: {e}");
+                            eprintln!("  L{i}: got: {g}");
+                        }
+                    }
+                }
+            }
+            (None, None) => unreachable!(),
+        }
+    }
+
+    eprintln!();
+    eprintln!("{ok} OK, {diffs} DIFF, {missing} MISSING, {extra} EXTRA");
+
+    if diffs > 0 || missing > 0 || extra > 0 {
+        anyhow::bail!("DDL mismatch: {diffs} tables differ, {missing} missing, {extra} extra");
+    }
+
+    eprintln!("All tables match.");
+    Ok(())
 }
 
 async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {

@@ -354,6 +354,18 @@
                   "additionalProperties": false
                 },
                 "minItems": 1
+              },
+              "storage": {
+                "type": "object",
+                "description": "ClickHouse DDL storage metadata for the edge table.",
+                "properties": {
+                  "index_granularity": { "type": "integer", "minimum": 1 },
+                  "primary_key": { "type": "array", "items": { "type": "string" } },
+                  "columns": { "type": "array", "items": { "$ref": "#/definitions/storageColumn" } },
+                  "indexes": { "type": "array", "items": { "$ref": "#/definitions/storageIndex" } },
+                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+                },
+                "additionalProperties": false
               }
             },
             "required": ["sort_key", "columns"],
@@ -430,6 +442,37 @@
             }
           },
           "additionalProperties": false
+        },
+        "auxiliary_tables": {
+          "type": "array",
+          "description": "Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "type": { "$ref": "#/definitions/propertyType" },
+                    "nullable": { "type": "boolean" },
+                    "codec": { "type": "array", "items": { "type": "string" } },
+                    "default": { "type": "string" }
+                  },
+                  "required": ["name", "type"],
+                  "additionalProperties": false
+                }
+              },
+              "order_by": { "type": "array", "items": { "type": "string" } },
+              "version_only_engine": { "type": "boolean" },
+              "version_type": { "type": "string" },
+              "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+            },
+            "required": ["name", "columns", "order_by"],
+            "additionalProperties": false
+          }
         },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
@@ -565,6 +608,10 @@
             { "$ref": "#/definitions/redactionConfig" }
           ],
           "description": "Redaction configuration for access control. Set to null if not yet configured."
+        },
+        "storage": {
+          "$ref": "#/definitions/nodeStorage",
+          "description": "ClickHouse DDL storage metadata. Columns, indexes, projections, and engine settings for DDL generation."
         }
       },
       "required": ["node_type", "domain", "description", "label", "destination_table", "default_columns", "style", "properties", "redaction"],
@@ -686,6 +733,138 @@
         "etl": { "$ref": "#/definitions/edgeEtlConfig" }
       },
       "required": ["description", "variants"],
+      "additionalProperties": false
+    },
+
+    "nodeStorage": {
+      "type": "object",
+      "description": "ClickHouse DDL storage metadata for a node table.",
+      "properties": {
+        "version_only_engine": {
+          "type": "boolean",
+          "description": "When true, engine is ReplacingMergeTree(_version) without _deleted.",
+          "default": false
+        },
+        "primary_key": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "PRIMARY KEY columns. When absent, ClickHouse defaults to ORDER BY."
+        },
+        "columns": {
+          "type": "array",
+          "description": "Columns in exact DDL order (excluding _version and _deleted).",
+          "items": { "$ref": "#/definitions/storageColumn" }
+        },
+        "indexes": {
+          "type": "array",
+          "description": "Skip indexes.",
+          "items": { "$ref": "#/definitions/storageIndex" }
+        },
+        "projections": {
+          "type": "array",
+          "description": "Materialized projections.",
+          "items": { "$ref": "#/definitions/storageProjection" }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "storageColumn": {
+      "type": "object",
+      "description": "A column as it appears in CREATE TABLE DDL.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^`?[a-z_][a-z0-9_]*`?$",
+          "description": "Column name. Lowercase with underscores. Backtick-quoted for reserved words."
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\().*$",
+          "description": "Exact ClickHouse type. Must start with a known type name."
+        },
+        "default": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_()',./_ ]+$",
+          "description": "DEFAULT expression. Only literals, function calls, and quoted strings allowed."
+        },
+        "codec": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(ZSTD\\([0-9]+\\)|Delta\\([0-9]+\\)|LZ4)$",
+            "description": "Codec. Must be ZSTD(N), Delta(N), or LZ4."
+          }
+        }
+      },
+      "required": ["name", "type"],
+      "additionalProperties": false
+    },
+
+    "storageIndex": {
+      "type": "object",
+      "description": "A skip index definition.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^idx_[a-z_][a-z0-9_]*$",
+          "description": "Index name. Must start with idx_."
+        },
+        "column": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "description": "Column name. Lowercase with underscores."
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\))$",
+          "description": "Index type. Must be minmax, set(N), or bloom_filter(N.NN)."
+        },
+        "granularity": { "type": "integer", "minimum": 1, "default": 1 }
+      },
+      "required": ["name", "column", "type", "granularity"],
+      "additionalProperties": false
+    },
+
+    "storageProjection": {
+      "type": "object",
+      "description": "A materialized projection.",
+      "properties": {
+        "type": { "type": "string", "enum": ["reorder", "aggregate"] },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "description": "Projection name. Lowercase with underscores."
+        },
+        "order_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Column name. Lowercase with underscores."
+          },
+          "description": "ORDER BY columns (for reorder projections)."
+        },
+        "select": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_()., ]*$",
+            "description": "SELECT expression. Column names and aggregate functions only."
+          },
+          "description": "SELECT expressions (for aggregate projections)."
+        },
+        "group_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Column name. Lowercase with underscores."
+          },
+          "description": "GROUP BY columns (for aggregate projections)."
+        }
+      },
+      "required": ["type", "name"],
       "additionalProperties": false
     }
   }

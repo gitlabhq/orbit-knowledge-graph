@@ -78,7 +78,7 @@ pub use pipelines::{
 pub use passes::check::check_ast;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
-    clickhouse_ddl::emit_create_table, codegen,
+    clickhouse_ddl::emit_create_table, codegen, ddl_generator::generate_graph_tables,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use passes::hydrate::{

@@ -150,7 +150,7 @@ impl CreateTable {
 
     pub fn with_prefix(mut self, prefix: &str) -> Self {
         self.name = format!("{prefix}{}", self.name);
-        debug_assert!(
+        assert!(
             self.name
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '_'),

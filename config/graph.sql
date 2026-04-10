@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS gl_group (
     full_path Nullable(String) CODEC(ZSTD(3)),
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String default '0/' CODEC(ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS gl_project (
     archived Nullable(Bool),
     star_count Nullable(Int64) CODEC(ZSTD(1)),
     last_activity_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String default '0/' CODEC(ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_archived archived TYPE minmax GRANULARITY 1,
@@ -275,8 +275,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
       GROUP BY relationship_kind, source_kind, target_id, traversal_path
     ),
     PROJECTION node_edge_counts (
-      SELECT traversal_path, source_kind, target_kind, relationship_kind,
-             uniq(source_id), uniq(target_id), count()
+      SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), count()
       GROUP BY traversal_path, source_kind, target_kind, relationship_kind
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
