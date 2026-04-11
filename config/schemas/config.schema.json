@@ -108,13 +108,7 @@
       "$ref": "#/$defs/HealthCheckConfig",
       "default": {
         "bind_address": "0.0.0.0:4201",
-        "namespace": "default",
-        "services": [
-          "siphon-consumer",
-          "siphon-producer",
-          "gkg-indexer",
-          "nats"
-        ]
+        "targets": []
       }
     },
     "health_check_url": {
@@ -530,20 +524,11 @@
           "type": "string",
           "default": "0.0.0.0:4201"
         },
-        "namespace": {
-          "type": "string",
-          "default": "default"
-        },
-        "services": {
+        "targets": {
           "type": "array",
-          "default": [
-            "siphon-consumer",
-            "siphon-producer",
-            "gkg-indexer",
-            "nats"
-          ],
+          "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/NamespaceTarget"
           }
         }
       },
@@ -721,6 +706,33 @@
           "minimum": 0
         }
       }
+    },
+    "NamespaceTarget": {
+      "description": "A namespace with lists of deployments and/or statefulsets to monitor.",
+      "type": "object",
+      "properties": {
+        "deployments": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "statefulsets": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "namespace"
+      ]
     },
     "NatsConfiguration": {
       "description": "NATS connection settings.\n\nMatches siphon's QueuingConfig fields.",

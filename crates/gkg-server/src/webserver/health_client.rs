@@ -41,10 +41,11 @@ impl InfrastructureHealthClient {
                 HealthStatus {
                     status: health_check::Status::Unhealthy,
                     services: vec![],
-                    clickhouse: health_check::ComponentHealth {
+                    clickhouse: vec![health_check::ComponentHealth {
+                        name: "clickhouse".to_string(),
                         status: health_check::Status::Unhealthy,
                         error: Some(format!("Health-check service unreachable: {}", e)),
-                    },
+                    }],
                 }
             }
         }
@@ -73,10 +74,10 @@ mod tests {
         let status = client.check_or_unavailable().await;
 
         assert_eq!(status.status, health_check::Status::Unhealthy);
-        assert!(status.clickhouse.error.is_some());
+        assert_eq!(status.clickhouse.len(), 1);
+        assert!(status.clickhouse[0].error.is_some());
         assert!(
-            status
-                .clickhouse
+            status.clickhouse[0]
                 .error
                 .as_ref()
                 .unwrap()

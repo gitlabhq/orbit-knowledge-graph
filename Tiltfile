@@ -93,15 +93,9 @@ for f in listdir('helm/local/dashboards'):
 k8s_yaml(blob(dashboards_cm))
 k8s_yaml('helm/local/grafana.yaml')
 
-# Vendor helm chart: bootstrap on fresh clone, re-sync when config changes
+# Vendor helm chart on fresh clone only; re-sync manually with `helm/sync.sh`
 if not os.path.exists('helm/gkg/Chart.yaml'):
     local('helm/sync.sh')
-local_resource(
-    'helm-sync',
-    cmd='helm/sync.sh',
-    deps=['helm/vendir.yml', 'helm/vendir.lock.yml', 'helm/patches'],
-    labels=['setup'],
-)
 
 # Deploy gkg chart (vendored official chart + patches)
 k8s_yaml(helm(
@@ -114,7 +108,7 @@ k8s_yaml(helm(
 # Skip readiness checks for components that may take time to connect
 k8s_resource('gkg-dispatcher', pod_readiness='ignore')
 k8s_resource('gkg-indexer', pod_readiness='ignore')
-k8s_resource('gkg-webserver', pod_readiness='ignore', port_forwards=['8080:8080'])
+k8s_resource('gkg-webserver', pod_readiness='ignore', port_forwards=['8080:8080', '50054:50054'])
 k8s_resource('gkg-health-check', pod_readiness='ignore', port_forwards=['4201:4201'])
 k8s_resource('grafana', port_forwards=['3030:3000'])
 k8s_resource('prometheus', port_forwards=['9090:9090'])

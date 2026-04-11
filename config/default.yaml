@@ -83,12 +83,7 @@ schedule:
 
 health_check:
   bind_address: "0.0.0.0:4201"
-  namespace: default
-  services:
-    - siphon-consumer
-    - siphon-producer
-    - gkg-indexer
-    - nats
+  targets: []
 
 grpc:
   keepalive_interval_secs: 20
