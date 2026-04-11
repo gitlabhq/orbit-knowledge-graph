@@ -78,6 +78,11 @@ impl ClusterHealthChecker {
                     health_check::Status::Unhealthy => ClusterStatus::Unhealthy,
                 };
 
+                let kind = match s.kind {
+                    health_check::ResourceKind::Deployment => "Deployment",
+                    health_check::ResourceKind::StatefulSet => "StatefulSet",
+                };
+
                 ComponentHealth {
                     name: s.name,
                     status: component_status.into(),
@@ -85,27 +90,32 @@ impl ClusterHealthChecker {
                         ready: s.ready_replicas,
                         desired: s.desired_replicas,
                     }),
-                    metrics: HashMap::new(),
+                    metrics: HashMap::from([
+                        ("namespace".to_string(), s.namespace),
+                        ("kind".to_string(), kind.to_string()),
+                    ]),
                 }
             })
             .collect();
 
-        let clickhouse_status = match status.clickhouse.status {
-            health_check::Status::Healthy => ClusterStatus::Healthy,
-            health_check::Status::Unhealthy => ClusterStatus::Unhealthy,
-        };
+        for ch in status.clickhouse {
+            let ch_status = match ch.status {
+                health_check::Status::Healthy => ClusterStatus::Healthy,
+                health_check::Status::Unhealthy => ClusterStatus::Unhealthy,
+            };
 
-        let mut clickhouse_metrics = HashMap::new();
-        if let Some(error) = status.clickhouse.error {
-            clickhouse_metrics.insert("error".to_string(), error);
+            let mut metrics = HashMap::new();
+            if let Some(error) = ch.error {
+                metrics.insert("error".to_string(), error);
+            }
+
+            components.push(ComponentHealth {
+                name: ch.name,
+                status: ch_status.into(),
+                replicas: None,
+                metrics,
+            });
         }
-
-        components.push(ComponentHealth {
-            name: "clickhouse".to_string(),
-            status: clickhouse_status.into(),
-            replicas: None,
-            metrics: clickhouse_metrics,
-        });
 
         StructuredClusterHealth {
             status: cluster_status.into(),
@@ -216,7 +226,9 @@ impl Default for ClusterHealthChecker {
 mod tests {
     use super::*;
     use axum::{Json, Router, routing::get};
-    use health_check::{ComponentHealth as HcComponentHealth, HealthStatus, ServiceHealth, Status};
+    use health_check::{
+        ComponentHealth as HcComponentHealth, HealthStatus, ResourceKind, ServiceHealth, Status,
+    };
     use tokio::net::TcpListener;
 
     fn install_crypto_provider() {
@@ -244,21 +256,26 @@ mod tests {
             services: vec![
                 ServiceHealth {
                     name: "webserver".to_string(),
+                    namespace: "gkg".to_string(),
+                    kind: ResourceKind::Deployment,
                     status: Status::Healthy,
                     ready_replicas: 2,
                     desired_replicas: 2,
                 },
                 ServiceHealth {
                     name: "indexer".to_string(),
+                    namespace: "gkg".to_string(),
+                    kind: ResourceKind::Deployment,
                     status: Status::Healthy,
                     ready_replicas: 1,
                     desired_replicas: 1,
                 },
             ],
-            clickhouse: HcComponentHealth {
+            clickhouse: vec![HcComponentHealth {
+                name: "clickhouse".to_string(),
                 status: Status::Healthy,
                 error: None,
-            },
+            }],
         }
     }
 
@@ -267,14 +284,17 @@ mod tests {
             status: Status::Unhealthy,
             services: vec![ServiceHealth {
                 name: "indexer".to_string(),
+                namespace: "gkg".to_string(),
+                kind: ResourceKind::Deployment,
                 status: Status::Unhealthy,
                 ready_replicas: 0,
                 desired_replicas: 2,
             }],
-            clickhouse: HcComponentHealth {
+            clickhouse: vec![HcComponentHealth {
+                name: "clickhouse".to_string(),
                 status: Status::Healthy,
                 error: None,
-            },
+            }],
         }
     }
 

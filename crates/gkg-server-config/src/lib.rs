@@ -31,7 +31,7 @@ pub use engine::{
 };
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
 pub use grpc::GrpcConfig;
-pub use health_check::HealthCheckConfig;
+pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
 pub use query::{QueryConfig, QuerySettings};

@@ -80,9 +80,15 @@ schedule:
 healthCheck:
   enabled: true
   replicas: 1
-  services:
-    - gkg-indexer
-    - gkg-webserver
+  targets:
+    - namespace: ""  # defaults to release namespace
+      deployments:
+        - gkg-indexer
+        - gkg-webserver
+        - gkg-dispatcher
+    - namespace: nats
+      statefulsets:
+        - nats
   resources:
     requests:
       cpu: 50m
