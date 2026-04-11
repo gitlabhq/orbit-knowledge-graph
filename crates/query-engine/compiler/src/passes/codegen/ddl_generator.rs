@@ -18,17 +18,21 @@ use crate::ast::ddl::*;
 /// Tables are returned unprefixed. Call `.with_prefix()` on each to apply
 /// a schema version prefix before codegen.
 pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
+    generate_graph_tables_with_prefix(ontology, "")
+}
+
+pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> Vec<CreateTable> {
     let mut tables: Vec<CreateTable> = Vec::new();
 
     for aux in ontology.auxiliary_tables() {
-        tables.push(build_auxiliary_table(aux));
+        tables.push(build_auxiliary_table(aux).with_prefix(prefix));
     }
     for node in ontology.nodes() {
-        tables.push(build_node_table(node));
+        tables.push(build_node_table(node).with_prefix(prefix));
     }
     for name in ontology.edge_tables() {
         if let Some(config) = ontology.edge_table_config(name) {
-            tables.push(build_edge_table(name, config));
+            tables.push(build_edge_table(name, config).with_prefix(prefix));
         }
     }
 

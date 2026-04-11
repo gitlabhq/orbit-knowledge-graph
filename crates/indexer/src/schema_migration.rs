@@ -9,7 +9,7 @@
 //! 2. **Drain** — The engine has not started yet; no in-flight jobs exist.
 //!    This phase is a no-op today but is reserved for future dual-write scenarios.
 //! 3. **Create new-prefix tables** — Generate DDL from the ontology via
-//!    `generate_graph_tables()` with the new prefix applied to each table name.
+//!    `generate_graph_tables_with_prefix()` with the version prefix applied.
 //! 4. **Mark migrating** — Insert the new version with status `migrating` in
 //!    `gkg_schema_version`. The Webserver cutover (issue #441) switches reads.
 //! 5. **Release lock** — Allow other pods to detect the migration is done.
@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use query_engine::compiler::{emit_create_table, generate_graph_tables};
+use query_engine::compiler::{emit_create_table, generate_graph_tables_with_prefix};
 use thiserror::Error;
 use tracing::{info, warn};
 
@@ -218,36 +218,21 @@ async fn create_prefixed_tables(
     metrics: &MigrationMetrics,
 ) -> Result<(), MigrationError> {
     let new_prefix = table_prefix(*SCHEMA_VERSION);
-    let mut tables = generate_graph_tables(ontology);
-
-    for table in &mut tables {
-        table.name = format!("{new_prefix}{}", table.name);
-    }
-
-    let mut created = 0u32;
+    let tables = generate_graph_tables_with_prefix(ontology, &new_prefix);
 
     for table in &tables {
-        info!(
-            table = %table.name,
-            "creating new-prefix table"
-        );
-
-        let ddl = emit_create_table(table);
-        graph.execute(&ddl).await.map_err(|e| MigrationError::Ddl {
-            table: table.name.clone(),
-            reason: e.to_string(),
-        })?;
-
-        created += 1;
+        info!(table = %table.name, "creating table");
+        graph
+            .execute(&emit_create_table(table))
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: table.name.clone(),
+                reason: e.to_string(),
+            })?;
     }
 
-    info!(
-        created,
-        prefix = %new_prefix,
-        "new-prefix tables created"
-    );
+    info!(count = tables.len(), prefix = %new_prefix, "new-prefix tables created");
     metrics.record("create_tables", "success");
-
     Ok(())
 }
 
@@ -258,7 +243,7 @@ mod tests {
     #[test]
     fn generate_graph_tables_produces_ddl_for_all_ontology_tables() {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let tables = generate_graph_tables(&ontology);
+        let tables = generate_graph_tables_with_prefix(&ontology, "");
         assert!(
             !tables.is_empty(),
             "generate_graph_tables must produce at least one table"
@@ -276,7 +261,7 @@ mod tests {
     #[test]
     fn generate_graph_tables_includes_auxiliary_tables() {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let tables = generate_graph_tables(&ontology);
+        let tables = generate_graph_tables_with_prefix(&ontology, "");
         let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
         for expected in [
             "checkpoint",
@@ -293,11 +278,8 @@ mod tests {
     #[test]
     fn prefixed_tables_have_correct_names() {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let mut tables = generate_graph_tables(&ontology);
         let prefix = "v2_";
-        for table in &mut tables {
-            table.name = format!("{prefix}{}", table.name);
-        }
+        let tables = generate_graph_tables_with_prefix(&ontology, prefix);
         for table in &tables {
             assert!(
                 table.name.starts_with(prefix),
