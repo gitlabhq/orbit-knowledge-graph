@@ -87,7 +87,7 @@ healthCheck:
         - gkg-webserver
         - gkg-dispatcher
     - namespace: nats
-      statefulsets:
+      statefulSets:
         - nats
   resources:
     requests:
