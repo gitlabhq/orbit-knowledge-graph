@@ -18,7 +18,7 @@ use query_engine::compiler::emit_create_table;
 use query_engine::compiler::emit_simple_query;
 use query_engine::compiler::{Expr, Insert, Node, OrderExpr, Query, SelectExpr, TableRef};
 use thiserror::Error;
-use tracing::info;
+
 
 const VERSION_TABLE: &str = "gkg_schema_version";
 
@@ -202,23 +202,14 @@ pub async fn write_migrating_version(
     Ok(())
 }
 
-/// Ensures the `gkg_schema_version` table exists and, on a fresh install,
-/// records version 0 as active.
+/// Ensures the `gkg_schema_version` table exists.
 ///
 /// Called by all service modes (Indexer, Webserver, DispatchIndexing) at
-/// startup so the control table is always present.
+/// startup so the control table is always present. Fresh install handling
+/// (recording version + creating tables) is done by the migration
+/// orchestrator in `schema::migration::run_if_needed`.
 pub async fn init(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionError> {
     ensure_version_table(graph).await?;
-
-    let active = read_active_version(graph).await?;
-    if active.is_none() {
-        info!(
-            version = *SCHEMA_VERSION,
-            "fresh install — recording initial schema version"
-        );
-        write_schema_version(graph, *SCHEMA_VERSION).await?;
-    }
-
     Ok(())
 }
 
