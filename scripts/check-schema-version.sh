@@ -11,6 +11,10 @@ schema_files_changed() {
 }
 
 skip_requested() {
+    # SKIP_SCHEMA_VERSION_CHECK=1 works locally (lefthook) and in CI.
+    # [skip schema-version-check] in the MR description only works in CI
+    # where CI_MERGE_REQUEST_DESCRIPTION is set.
+    [[ "${SKIP_SCHEMA_VERSION_CHECK:-}" == "1" ]] && return 0
     local mr_desc
     mr_desc="${CI_MERGE_REQUEST_DESCRIPTION:-}"
     [[ "$mr_desc" == *"[skip schema-version-check]"* ]]
@@ -37,7 +41,8 @@ if schema_files_changed; then
         echo ""
         echo "If this change does not affect the ClickHouse schema (e.g. comments,"
         echo "formatting, or ontology description updates), add"
-        echo "[skip schema-version-check] to the MR description."
+        echo "[skip schema-version-check] to the MR description, or set"
+        echo "SKIP_SCHEMA_VERSION_CHECK=1 when running locally."
         exit 1
     fi
 else
