@@ -13,8 +13,14 @@ use std::sync::LazyLock;
 use arrow::datatypes::UInt32Type;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_utils::arrow::ArrowUtils;
+use query_engine::compiler::ast::ddl::{ColumnDef, ColumnType, CreateTable, Engine};
+use query_engine::compiler::emit_create_table;
+use query_engine::compiler::emit_simple_query;
+use query_engine::compiler::{Expr, Insert, Node, OrderExpr, Query, SelectExpr, TableRef};
 use thiserror::Error;
 use tracing::info;
+
+const VERSION_TABLE: &str = "gkg_schema_version";
 
 /// Schema version loaded from `config/SCHEMA_VERSION`.
 ///
@@ -28,19 +34,66 @@ pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| {
         .expect("config/SCHEMA_VERSION must contain a valid u32")
 });
 
-const CREATE_VERSION_TABLE: &str = "\
-CREATE TABLE IF NOT EXISTS gkg_schema_version (
-    version UInt32,
-    status Enum8('active' = 1, 'migrating' = 2, 'retired' = 3, 'dropped' = 4),
-    created_at DateTime DEFAULT now()
-) ENGINE = ReplacingMergeTree(created_at)
-ORDER BY version";
+fn version_table_ddl() -> CreateTable {
+    CreateTable {
+        name: VERSION_TABLE.into(),
+        columns: vec![
+            ColumnDef::new("version", ColumnType::UInt32),
+            ColumnDef::new(
+                "status",
+                ColumnType::Enum8(vec![
+                    ("active".into(), 1),
+                    ("migrating".into(), 2),
+                    ("retired".into(), 3),
+                    ("dropped".into(), 4),
+                ]),
+            ),
+            ColumnDef::new("created_at", ColumnType::DateTime).with_default("now()"),
+        ],
+        indexes: vec![],
+        projections: vec![],
+        engine: Engine::replacing_merge_tree_version_only("created_at"),
+        order_by: vec!["version".into()],
+        primary_key: None,
+        settings: vec![],
+    }
+}
 
-const READ_ACTIVE_VERSION: &str = "\
-SELECT version FROM gkg_schema_version FINAL WHERE status = 'active' ORDER BY created_at DESC LIMIT 1";
+fn read_active_version_query() -> (
+    String,
+    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+) {
+    let query = Query {
+        select: vec![SelectExpr {
+            expr: Expr::col("t", "version"),
+            alias: None,
+        }],
+        from: TableRef::scan_final(VERSION_TABLE, "t"),
+        where_clause: Some(Expr::eq(Expr::col("t", "status"), Expr::string("active"))),
+        order_by: vec![OrderExpr {
+            expr: Expr::col("t", "created_at"),
+            desc: true,
+        }],
+        limit: Some(1),
+        ..Query::default()
+    };
+    emit_simple_query(&Node::Query(Box::new(query)))
+        .expect("read_active_version query must be valid")
+}
 
-const WRITE_VERSION: &str = "\
-INSERT INTO gkg_schema_version (version, status) VALUES ({version:UInt32}, 'active')";
+fn write_version_query(
+    version: u32,
+) -> (
+    String,
+    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+) {
+    let insert = Insert::new(
+        VERSION_TABLE,
+        vec!["version".into(), "status".into()],
+        vec![vec![Expr::uint32(version), Expr::string("active")]],
+    );
+    emit_simple_query(&Node::Insert(Box::new(insert))).expect("write_version query must be valid")
+}
 
 #[derive(Debug, Error)]
 pub enum SchemaVersionError {
@@ -73,7 +126,8 @@ pub fn prefixed_table_name(table: &str, schema_version: u32) -> String {
 /// This table is never prefixed or dropped across schema versions — it is the
 /// single source of truth for which version is active.
 pub async fn ensure_version_table(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionError> {
-    graph.execute(CREATE_VERSION_TABLE).await?;
+    let ddl = emit_create_table(&version_table_ddl());
+    graph.execute(&ddl).await?;
     Ok(())
 }
 
@@ -84,7 +138,12 @@ pub async fn ensure_version_table(graph: &ArrowClickHouseClient) -> Result<(), S
 pub async fn read_active_version(
     graph: &ArrowClickHouseClient,
 ) -> Result<Option<u32>, SchemaVersionError> {
-    let batches = graph.query_arrow(READ_ACTIVE_VERSION).await?;
+    let (sql, params) = read_active_version_query();
+    let mut query = graph.query(&sql);
+    for (name, param) in &params {
+        query = query.param(name, &param.value);
+    }
+    let batches = query.fetch_arrow().await?;
 
     for batch in &batches {
         if batch.num_rows() == 0 {
@@ -101,11 +160,12 @@ pub async fn write_schema_version(
     graph: &ArrowClickHouseClient,
     version: u32,
 ) -> Result<(), SchemaVersionError> {
-    graph
-        .query(WRITE_VERSION)
-        .param("version", version)
-        .execute()
-        .await?;
+    let (sql, params) = write_version_query(version);
+    let mut query = graph.query(&sql);
+    for (name, param) in &params {
+        query = query.param(name, &param.value);
+    }
+    query.execute().await?;
     Ok(())
 }
 
@@ -170,16 +230,27 @@ mod tests {
 
     #[test]
     fn create_table_ddl_uses_replacing_merge_tree() {
-        assert!(CREATE_VERSION_TABLE.contains("ReplacingMergeTree"));
-        assert!(CREATE_VERSION_TABLE.contains("IF NOT EXISTS"));
+        let ddl = emit_create_table(&version_table_ddl());
+        assert!(ddl.contains("ReplacingMergeTree"));
+        assert!(ddl.contains("IF NOT EXISTS"));
+        assert!(ddl.contains("gkg_schema_version"));
+        assert!(ddl.contains("UInt32"));
+        assert!(ddl.contains("Enum8("));
+        assert!(ddl.contains("'active' = 1"));
+        assert!(ddl.contains("DateTime"));
+        assert!(ddl.contains("ORDER BY (version)"));
     }
 
     #[test]
     fn read_query_uses_final() {
+        let (sql, _params) = read_active_version_query();
         assert!(
-            READ_ACTIVE_VERSION.contains("FINAL"),
-            "version query must use FINAL for ReplacingMergeTree consistency"
+            sql.contains("FINAL"),
+            "version query must use FINAL for ReplacingMergeTree consistency: {sql}"
         );
+        assert!(sql.contains("gkg_schema_version"));
+        assert!(sql.contains("ORDER BY"));
+        assert!(sql.contains("LIMIT 1"));
     }
 
     #[test]

@@ -28,6 +28,7 @@ gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
 moka = { workspace = true }
 ontology = { path = "../ontology" }
+query-engine = { path = "../query-engine" }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
