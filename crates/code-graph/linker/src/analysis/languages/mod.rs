@@ -5,4 +5,3 @@ pub mod kotlin;
 pub mod python;
 pub mod ruby;
 pub mod rust;
-pub mod typescript;

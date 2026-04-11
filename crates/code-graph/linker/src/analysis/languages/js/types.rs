@@ -187,6 +187,11 @@ pub enum JsCallTarget {
         resolved_fqn: Option<String>,
         resolved_range: Option<Range>,
     },
+    ImportedCall {
+        local_name: String,
+        specifier: String,
+        imported_name: ImportedName,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

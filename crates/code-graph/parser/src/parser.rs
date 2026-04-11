@@ -205,12 +205,6 @@ define_languages! {
         names: ["python"],
         exclude_extensions: []
     },
-    TypeScript {
-        name: "typescript",
-        extensions: ["ts_legacy_unused"],
-        names: ["typescript_legacy"],
-        exclude_extensions: []
-    },
     Kotlin {
         name: "kotlin",
         extensions: ["kt", "kts"],
@@ -263,7 +257,6 @@ impl SupportedLanguage {
         match self {
             SupportedLanguage::Ruby => SupportLang::Ruby,
             SupportedLanguage::Python => SupportLang::Python,
-            SupportedLanguage::TypeScript => SupportLang::TypeScript,
             SupportedLanguage::Kotlin => SupportLang::Kotlin,
             SupportedLanguage::CSharp => SupportLang::CSharp,
             SupportedLanguage::Java => SupportLang::Java,
@@ -400,16 +393,10 @@ pub fn create_ruby_parser() -> crate::ruby::parser::RubyParser {
     crate::ruby::parser::RubyParser::new()
 }
 
-/// Create a specialized parser for TypeScript that uses swc instead of ast-grep
-pub fn create_typescript_parser() -> crate::typescript::parser::TypeScriptParser {
-    crate::typescript::parser::TypeScriptParser::new()
-}
-
 /// Create a parser based on the language type
 pub enum ParserType {
     TreeSitter(GenericParser),
     Ruby(crate::ruby::parser::RubyParser),
-    TypeScript(crate::typescript::parser::TypeScriptParser),
     /// JS/TS ecosystem files parsed by OXC in the linker, not parser-core.
     /// Parser-core is a pass-through for these.
     JsOxc(SupportedLanguage),
@@ -426,7 +413,6 @@ pub enum UnifiedParseResult<'a> {
         >,
     ),
     Ruby(ParseResult<'a, ruby_prism::ParseResult<'a>>),
-    TypeScript(ParseResult<'a, crate::typescript::types::TypeScriptSwcAst>),
     /// Placeholder for JS/TS files handled by OXC in the linker.
     JsOxc(SupportedLanguage),
 }
@@ -435,11 +421,9 @@ impl ParserType {
     pub fn for_language(language: SupportedLanguage) -> Self {
         match language {
             SupportedLanguage::Ruby => Self::Ruby(create_ruby_parser()),
-            // TypeScript now routes through OXC alongside Js/Vue/Svelte
-            SupportedLanguage::TypeScript
-            | SupportedLanguage::Js
-            | SupportedLanguage::Vue
-            | SupportedLanguage::Svelte => Self::JsOxc(language),
+            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
+                Self::JsOxc(language)
+            }
             _ => Self::TreeSitter(GenericParser::new(language)),
         }
     }
@@ -448,7 +432,6 @@ impl ParserType {
         match self {
             Self::TreeSitter(parser) => parser.language(),
             Self::Ruby(parser) => parser.language(),
-            Self::TypeScript(parser) => parser.language(),
             Self::JsOxc(lang) => *lang,
         }
     }
@@ -467,10 +450,6 @@ impl ParserType {
                 let result = parser.parse(code, file_path)?;
                 Ok(UnifiedParseResult::Ruby(result))
             }
-            Self::TypeScript(parser) => {
-                let result = parser.parse(code, file_path)?;
-                Ok(UnifiedParseResult::TypeScript(result))
-            }
             Self::JsOxc(lang) => Ok(UnifiedParseResult::JsOxc(*lang)),
         }
     }
@@ -481,7 +460,6 @@ impl<'a> UnifiedParseResult<'a> {
         match self {
             Self::TreeSitter(result) => result.language,
             Self::Ruby(result) => result.language,
-            Self::TypeScript(result) => result.language,
             Self::JsOxc(lang) => *lang,
         }
     }
@@ -490,7 +468,6 @@ impl<'a> UnifiedParseResult<'a> {
         match self {
             Self::TreeSitter(result) => result.file_path.as_deref(),
             Self::Ruby(result) => result.file_path.as_deref(),
-            Self::TypeScript(result) => result.file_path.as_deref(),
             Self::JsOxc(_) => None,
         }
     }
@@ -648,9 +625,6 @@ mod tests {
 
     #[test]
     fn test_exclude_extensions() {
-        let ts_excludes = SupportedLanguage::TypeScript.exclude_extensions();
-        assert!(ts_excludes.contains(&"min.js"));
-
         let js_excludes = SupportedLanguage::Js.exclude_extensions();
         assert!(js_excludes.contains(&"min.js"));
         assert!(js_excludes.contains(&"min.mjs"));
@@ -752,7 +726,7 @@ mod tests {
     fn test_get_supported_extensions() {
         let extensions = get_supported_extensions();
 
-        // 12 original + 6 Js (tsx,jsx,mjs,cjs,mts,cts) + 1 Vue + 1 Svelte = 20
+        // 4 Ruby + 1 Python + 2 Kotlin + 1 CSharp + 1 Java + 1 Rust + 8 Js + 1 Vue + 1 Svelte = 20
         assert_eq!(extensions.len(), 20);
 
         assert!(extensions.contains(&"rb"));
@@ -787,14 +761,6 @@ mod tests {
         assert_eq!(
             supported_language_from_str("python").unwrap(),
             SupportedLanguage::Python
-        );
-        assert_eq!(
-            supported_language_from_str("typescript").unwrap(),
-            SupportedLanguage::TypeScript
-        );
-        assert_eq!(
-            supported_language_from_str("javascript").unwrap(),
-            SupportedLanguage::TypeScript
         );
         assert_eq!(
             supported_language_from_str("kotlin").unwrap(),

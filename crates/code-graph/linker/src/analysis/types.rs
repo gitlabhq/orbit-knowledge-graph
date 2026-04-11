@@ -24,8 +24,6 @@ use parser_core::{
     },
     rust::fqn::rust_fqn_to_string,
     rust::types::{RustDefinitionType, RustFqn, RustImportType},
-    typescript::ast::typescript_fqn_to_string,
-    typescript::types::{TypeScriptDefinitionType, TypeScriptFqn, TypeScriptImportType},
     utils::{HasRange, Position, Range},
 };
 use serde::{Deserialize, Serialize};
@@ -516,7 +514,6 @@ pub enum DefinitionType {
     Kotlin(KotlinDefinitionType),
     Java(JavaDefinitionType),
     CSharp(CSharpDefinitionType),
-    TypeScript(TypeScriptDefinitionType),
     Rust(RustDefinitionType),
     /// JS/TS definition type as a static string (e.g. "Class", "Function", "Method")
     Js(&'static str),
@@ -531,7 +528,6 @@ impl DefinitionType {
             DefinitionType::Kotlin(kotlin_type) => kotlin_type.as_str(),
             DefinitionType::Java(java_type) => java_type.as_str(),
             DefinitionType::CSharp(csharp_type) => csharp_type.as_str(),
-            DefinitionType::TypeScript(typescript_type) => typescript_type.as_str(),
             DefinitionType::Rust(rust_type) => rust_type.as_str(),
             DefinitionType::Js(s) => s,
             DefinitionType::Unsupported() => "unsupported",
@@ -547,7 +543,6 @@ pub enum FqnType {
     Kotlin(KotlinFqn),
     Java(JavaFqn),
     CSharp(CSharpFqn),
-    TypeScript(TypeScriptFqn),
     Rust(RustFqn),
     /// JS/TS FQN as a flat string (e.g. "MyClass::myMethod").
     /// The name component is the last `::` segment.
@@ -570,9 +565,6 @@ impl std::fmt::Display for FqnType {
                     .collect::<Vec<_>>()
                     .join(".")
             ),
-            FqnType::TypeScript(typescript_type) => {
-                write!(f, "{}", typescript_fqn_to_string(typescript_type))
-            }
             FqnType::Rust(rust_type) => write!(f, "{}", rust_fqn_to_string(rust_type)),
             FqnType::Js(s) => write!(f, "{s}"),
         }
@@ -588,7 +580,6 @@ impl FqnType {
             FqnType::Kotlin(kotlin_type) => kotlin_type.last().unwrap().node_name(),
             FqnType::Java(java_type) => java_type.last().unwrap().node_name(),
             FqnType::CSharp(csharp_type) => csharp_type.last().unwrap().node_name(),
-            FqnType::TypeScript(typescript_type) => typescript_type.last().unwrap().node_name(),
             FqnType::Rust(rust_type) => rust_type.parts.last().unwrap().node_name(),
             FqnType::Js(s) => s.rsplit("::").next().unwrap_or(s),
         }
@@ -716,7 +707,6 @@ pub enum ImportType {
     Kotlin(KotlinImportType),
     Python(PythonImportType),
     CSharp(CSharpImportType),
-    TypeScript(TypeScriptImportType),
     Rust(RustImportType),
     /// JS/TS import type as a static string (e.g. "DefaultImport", "NamedImport")
     Js(&'static str),
@@ -729,7 +719,6 @@ impl ImportType {
             ImportType::Kotlin(kotlin_type) => kotlin_type.as_str(),
             ImportType::Python(python_type) => python_type.as_str(),
             ImportType::CSharp(csharp_type) => csharp_type.as_str(),
-            ImportType::TypeScript(typescript_type) => typescript_type.as_str(),
             ImportType::Rust(rust_type) => rust_type.as_str(),
             ImportType::Js(s) => s,
         }

@@ -27,7 +27,6 @@ pub use languages::kotlin::KotlinAnalyzer;
 pub use languages::python::PythonAnalyzer;
 pub use languages::ruby::RubyAnalyzer;
 pub use languages::rust::RustAnalyzer;
-pub use languages::typescript::TypeScriptAnalyzer;
 
 /// Analysis service that orchestrates the transformation of parsing results into graph data
 pub struct AnalysisService {
@@ -39,7 +38,6 @@ pub struct AnalysisService {
     kotlin_analyzer: KotlinAnalyzer,
     java_analyzer: JavaAnalyzer,
     csharp_analyzer: CSharpAnalyzer,
-    typescript_analyzer: TypeScriptAnalyzer,
     rust_analyzer: RustAnalyzer,
 }
 
@@ -53,7 +51,6 @@ impl AnalysisService {
         let kotlin_analyzer = KotlinAnalyzer::new();
         let java_analyzer = JavaAnalyzer::new();
         let csharp_analyzer = CSharpAnalyzer::new();
-        let typescript_analyzer = TypeScriptAnalyzer::new();
         let rust_analyzer = RustAnalyzer::new();
 
         Self {
@@ -65,7 +62,6 @@ impl AnalysisService {
             kotlin_analyzer,
             java_analyzer,
             csharp_analyzer,
-            typescript_analyzer,
             rust_analyzer,
         }
     }
@@ -97,10 +93,7 @@ impl AnalysisService {
             file_results.into_iter().partition(|file_result| {
                 matches!(
                     file_result.language,
-                    SupportedLanguage::TypeScript
-                        | SupportedLanguage::Js
-                        | SupportedLanguage::Vue
-                        | SupportedLanguage::Svelte
+                    SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte
                 )
             });
 
@@ -226,6 +219,8 @@ impl AnalysisService {
         let root_dir = Path::new(&self.repository_path);
         let mut discovered_paths = Vec::with_capacity(results.len() + 3);
         let mut modules = HashMap::new();
+        let mut imported_calls: Vec<(String, Vec<crate::analysis::languages::js::JsCallEdge>)> =
+            Vec::new();
 
         for lockfile in ["bun.lock", "bun.lockb", "bunfig.toml"] {
             if root_dir.join(lockfile).is_file() {
@@ -250,6 +245,21 @@ impl AnalysisService {
 
             if let Some(js_analysis) = &file_result.js_analysis {
                 modules.insert(relative.clone(), js_analysis.module_info.clone());
+
+                let pending: Vec<_> = js_analysis
+                    .calls
+                    .iter()
+                    .filter(|c| {
+                        matches!(
+                            &c.callee,
+                            crate::analysis::languages::js::JsCallTarget::ImportedCall { .. }
+                        )
+                    })
+                    .cloned()
+                    .collect();
+                if !pending.is_empty() {
+                    imported_calls.push((relative.clone(), pending));
+                }
 
                 let original_path = js_analysis.relative_path.as_str();
                 let rel_path = ArcIntern::new(relative.clone());
@@ -297,6 +307,7 @@ impl AnalysisService {
         let resolver = JsCrossFileResolver::new(root_dir.to_path_buf(), is_bun, has_tsconfig);
 
         relationships.extend(resolver.resolve(&modules));
+        relationships.extend(resolver.resolve_calls(&imported_calls, &modules));
     }
 
     fn group_results_by_language(
@@ -423,20 +434,6 @@ impl AnalysisService {
                     relationships,
                 );
                 self.csharp_analyzer.process_imports(
-                    file_result,
-                    &relative_path,
-                    imported_symbol_map,
-                    relationships,
-                );
-            }
-            SupportedLanguage::TypeScript => {
-                self.typescript_analyzer.process_definitions(
-                    file_result,
-                    &relative_path,
-                    definition_map,
-                    relationships,
-                );
-                self.typescript_analyzer.process_imports(
                     file_result,
                     &relative_path,
                     imported_symbol_map,
@@ -592,13 +589,6 @@ impl AnalysisService {
                         }
                     }
                 }
-                SupportedLanguage::TypeScript => {
-                    self.typescript_analyzer.process_references(
-                        &references,
-                        &relative_path,
-                        relationships,
-                    );
-                }
                 _ => {}
             }
         }
@@ -658,13 +648,6 @@ impl AnalysisService {
             SupportedLanguage::CSharp => {
                 self.csharp_analyzer
                     .add_definition_relationships(definition_map, relationships);
-            }
-            SupportedLanguage::TypeScript => {
-                self.typescript_analyzer.add_definition_relationships(
-                    definition_map,
-                    imported_symbol_map,
-                    relationships,
-                );
             }
             SupportedLanguage::Rust => {
                 self.rust_analyzer.add_definition_relationships(

@@ -32,11 +32,6 @@ use parser_core::{
         references::types::{RubyExpressionMetadata, RubyReferenceType, RubyTargetResolution},
     },
     rust::{analyzer::RustAnalyzer, imports::RustImportedSymbolInfo, types::RustDefinitionInfo},
-    typescript::{
-        analyzer::TypeScriptAnalyzer,
-        swc::references::types::TypeScriptReferenceInfo,
-        types::{TypeScriptDefinitionInfo, TypeScriptImportedSymbolInfo},
-    },
 };
 use std::time::{Duration, Instant};
 
@@ -238,17 +233,14 @@ impl<'a> FileProcessor<'a> {
         // JS/TS/Vue/Svelte: use OXC directly, bypassing parser-core
         if matches!(
             language,
-            SupportedLanguage::TypeScript
-                | SupportedLanguage::Js
-                | SupportedLanguage::Vue
-                | SupportedLanguage::Svelte
+            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte
         ) {
             return self.process_js(language, start_time);
         }
 
         // Use unified pipeline for all languages (ParserType + rules + analyzer)
         {
-            // 2. Parse the file using language-specific parser (prism for Ruby, swc for TypeScript, ast-grep for others)
+            // 2. Parse the file using language-specific parser (prism for Ruby, ast-grep for others)
             let parse_start = Instant::now();
             let parser = ParserType::for_language(language);
             let parse_result = match parser.parse(self.content, Some(&self.path)) {
@@ -542,28 +534,6 @@ impl<'a> FileProcessor<'a> {
                     ))
                 }
             }
-            SupportedLanguage::TypeScript => {
-                if let UnifiedParseResult::TypeScript(typescript_result) = parse_result {
-                    let analyzer = TypeScriptAnalyzer::new();
-                    match analyzer.analyze_swc(typescript_result) {
-                        Ok(analysis_result) => Ok((
-                            Definitions::TypeScript(analysis_result.definitions),
-                            Some(ImportedSymbols::TypeScript(analysis_result.imports)),
-                            Some(References::TypeScript(analysis_result.references)),
-                        )),
-                        Err(e) => Err(anyhow::anyhow!(
-                            "Failed to analyze TypeScript file '{}': {}",
-                            self.path,
-                            e
-                        )),
-                    }
-                } else {
-                    Err(anyhow::anyhow!(
-                        "Expected TypeScript parse result for TypeScript file '{}'",
-                        self.path
-                    ))
-                }
-            }
             SupportedLanguage::Rust => {
                 if let UnifiedParseResult::TreeSitter(ast_result) = parse_result {
                     let analyzer = RustAnalyzer::new();
@@ -605,7 +575,6 @@ pub enum Definitions {
     Kotlin(Vec<KotlinDefinitionInfo>),
     Java(Vec<JavaDefinitionInfo>),
     CSharp(Vec<CSharpDefinitionInfo>),
-    TypeScript(Vec<TypeScriptDefinitionInfo>),
     Rust(Vec<RustDefinitionInfo>),
     /// Placeholder for JS/TS files analyzed by OXC directly in the linker.
     JsOxc,
@@ -621,7 +590,6 @@ impl Definitions {
             Definitions::Kotlin(defs) => defs.len(),
             Definitions::Java(defs) => defs.len(),
             Definitions::CSharp(defs) => defs.len(),
-            Definitions::TypeScript(defs) => defs.len(),
             Definitions::Rust(defs) => defs.len(),
             Definitions::JsOxc => 0,
             Definitions::Unknown(defs) => defs.len(),
@@ -653,10 +621,6 @@ impl Definitions {
                     .map(|def| def.definition_type.as_str().to_string()),
             ),
             Definitions::CSharp(defs) => Box::new(
-                defs.iter()
-                    .map(|def| def.definition_type.as_str().to_string()),
-            ),
-            Definitions::TypeScript(defs) => Box::new(
                 defs.iter()
                     .map(|def| def.definition_type.as_str().to_string()),
             ),
@@ -704,13 +668,6 @@ impl Definitions {
         }
     }
 
-    pub fn iter_typescript(&self) -> Option<impl Iterator<Item = &TypeScriptDefinitionInfo>> {
-        match self {
-            Definitions::TypeScript(defs) => Some(defs.iter()),
-            _ => None,
-        }
-    }
-
     pub fn iter_rust(&self) -> Option<impl Iterator<Item = &RustDefinitionInfo>> {
         match self {
             Definitions::Rust(defs) => Some(defs.iter()),
@@ -734,7 +691,6 @@ pub enum ImportedSymbols {
     Python(Vec<PythonImportedSymbolInfo>),
     CSharp(Vec<CSharpImportedSymbolInfo>),
     Ruby(Vec<RubyImportedSymbolInfo>),
-    TypeScript(Vec<TypeScriptImportedSymbolInfo>),
     Rust(Vec<RustImportedSymbolInfo>),
 }
 
@@ -747,7 +703,6 @@ impl ImportedSymbols {
             ImportedSymbols::Python(imported_symbols) => imported_symbols.len(),
             ImportedSymbols::CSharp(imported_symbols) => imported_symbols.len(),
             ImportedSymbols::Ruby(imported_symbols) => imported_symbols.len(),
-            ImportedSymbols::TypeScript(imported_symbols) => imported_symbols.len(),
             ImportedSymbols::Rust(imported_symbols) => imported_symbols.len(),
         }
     }
@@ -801,13 +756,6 @@ impl ImportedSymbols {
         }
     }
 
-    pub fn iter_typescript(&self) -> Option<impl Iterator<Item = &TypeScriptImportedSymbolInfo>> {
-        match self {
-            ImportedSymbols::TypeScript(imported_symbols) => Some(imported_symbols.iter()),
-            _ => None,
-        }
-    }
-
     pub fn iter_rust(&self) -> Option<impl Iterator<Item = &RustImportedSymbolInfo>> {
         match self {
             ImportedSymbols::Rust(imported_symbols) => Some(imported_symbols.iter()),
@@ -828,7 +776,6 @@ pub type RubyReference = ReferenceInfo<
 pub enum References {
     Ruby(Vec<RubyReference>),
     Kotlin(Vec<KotlinReferenceInfo>),
-    TypeScript(Vec<TypeScriptReferenceInfo>),
     Java(Vec<JavaReferenceInfo>),
     Python(Vec<PythonReferenceInfo>),
 }
@@ -839,7 +786,6 @@ impl References {
         match self {
             References::Ruby(references) => references.len(),
             References::Kotlin(references) => references.len(),
-            References::TypeScript(references) => references.len(),
             References::Java(references) => references.len(),
             References::Python(references) => references.len(),
         }
@@ -860,13 +806,6 @@ impl References {
     pub fn iter_kotlin(&self) -> Option<impl Iterator<Item = &KotlinReferenceInfo>> {
         match self {
             References::Kotlin(references) => Some(references.iter()),
-            _ => None,
-        }
-    }
-
-    pub fn iter_typescript(&self) -> Option<impl Iterator<Item = &TypeScriptReferenceInfo>> {
-        match self {
-            References::TypeScript(references) => Some(references.iter()),
             _ => None,
         }
     }

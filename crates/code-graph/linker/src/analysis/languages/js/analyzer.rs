@@ -418,9 +418,25 @@ fn extract_imports(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> Vec<JsImpor
 fn extract_call_edges(
     ctx: &Ctx,
     defs: &[JsDef],
+    imports: &[JsImport],
     class_hierarchy: &HashMap<String, Option<String>>,
 ) -> Vec<JsCallEdge> {
     let mut calls = Vec::new();
+
+    let import_lookup: HashMap<&str, (&str, ImportedName)> = imports
+        .iter()
+        .map(|i| {
+            let imported_name = match &i.kind {
+                JsImportKind::Named { imported_name } => ImportedName::Named(imported_name.clone()),
+                JsImportKind::Default => ImportedName::Default,
+                JsImportKind::Namespace => ImportedName::Namespace,
+                JsImportKind::CjsRequire { imported_name } => imported_name
+                    .as_ref()
+                    .map_or(ImportedName::Default, |n| ImportedName::Named(n.clone())),
+            };
+            (i.local_name.as_str(), (i.specifier.as_str(), imported_name))
+        })
+        .collect();
 
     for symbol_id in ctx.scoping.symbol_ids() {
         for ref_id in ctx.scoping.get_resolved_reference_ids(symbol_id) {
@@ -446,14 +462,33 @@ fn extract_call_edges(
             let caller_info = ctx.find_enclosing_def(caller_scope);
             let call_site_span = ctx.nodes.get_node(ref_node_id).span();
             let call_site_range = ctx.lt.span_to_range(call_site_span);
-            let callee_span = ctx.scoping.symbol_span(symbol_id);
-            let callee_range = ctx.lt.span_to_range(callee_span);
-            let callee_fqn = ctx.build_fqn(symbol_id);
 
             let caller = match caller_info {
                 Some((fqn, range)) => JsCallSite::Definition { fqn, range },
                 None => JsCallSite::ModuleLevel,
             };
+
+            let callee_flags = ctx.scoping.symbol_flags(symbol_id);
+            if callee_flags.is_import() {
+                let callee_name = ctx.scoping.symbol_name(symbol_id);
+                if let Some((specifier, imported_name)) = import_lookup.get(callee_name) {
+                    calls.push(JsCallEdge {
+                        caller,
+                        callee: JsCallTarget::ImportedCall {
+                            local_name: callee_name.to_string(),
+                            specifier: specifier.to_string(),
+                            imported_name: imported_name.clone(),
+                        },
+                        call_range: call_site_range,
+                        confidence: JsCallConfidence::Known,
+                    });
+                }
+                continue;
+            }
+
+            let callee_span = ctx.scoping.symbol_span(symbol_id);
+            let callee_range = ctx.lt.span_to_range(callee_span);
+            let callee_fqn = ctx.build_fqn(symbol_id);
 
             calls.push(JsCallEdge {
                 caller,
@@ -750,7 +785,7 @@ impl JsAnalyzer {
         defs.extend(method_defs);
 
         let imports = extract_imports(&ctx, &parsed);
-        let calls = extract_call_edges(&ctx, &defs, &class_hierarchy);
+        let calls = extract_call_edges(&ctx, &defs, &imports, &class_hierarchy);
         let directive = super::frameworks::detect_directive(&parsed.program.directives);
 
         let cjs_exports = extract_cjs_exports(nodes, &ctx.lt);
@@ -1209,5 +1244,71 @@ const x: string = "hello";
         let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
         let x = result.defs.iter().find(|d| d.name == "x").unwrap();
         assert_eq!(x.type_annotation.as_deref(), Some("string"));
+    }
+
+    #[test]
+    fn test_imported_call_creates_imported_call_edge() {
+        let source = r#"
+import { foo } from './utils';
+function bar() { return foo(); }
+"#;
+        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
+        let has_imported_call = result.calls.iter().any(|c| {
+            matches!(
+                &c.callee,
+                JsCallTarget::ImportedCall {
+                    local_name,
+                    specifier,
+                    imported_name: ImportedName::Named(name),
+                } if local_name == "foo" && specifier == "./utils" && name == "foo"
+            )
+        });
+        assert!(
+            has_imported_call,
+            "Calling an imported function should produce an ImportedCall edge, got: {:?}",
+            result.calls
+        );
+    }
+
+    #[test]
+    fn test_imported_default_call() {
+        let source = r#"
+import axios from 'axios';
+function fetch() { return axios('/api'); }
+"#;
+        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
+        let has_imported_call = result.calls.iter().any(|c| {
+            matches!(
+                &c.callee,
+                JsCallTarget::ImportedCall {
+                    local_name,
+                    imported_name: ImportedName::Default,
+                    ..
+                } if local_name == "axios"
+            )
+        });
+        assert!(
+            has_imported_call,
+            "Calling a default-imported function should produce an ImportedCall edge"
+        );
+    }
+
+    #[test]
+    fn test_imported_call_not_emitted_as_intra_file() {
+        let source = r#"
+import { foo } from './utils';
+function bar() { return foo(); }
+"#;
+        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
+        let emitted = result.emit();
+        let calls: Vec<_> = emitted
+            .relationships
+            .iter()
+            .filter(|r| r.relationship_type == RelationshipType::Calls)
+            .collect();
+        assert!(
+            calls.is_empty(),
+            "ImportedCall edges should not emit as intra-file CALLS relationships"
+        );
     }
 }

@@ -19,7 +19,6 @@ pub mod python;
 pub mod references;
 pub mod ruby;
 pub mod rust;
-pub mod typescript;
 pub mod utils;
 
 // Re-export commonly used types

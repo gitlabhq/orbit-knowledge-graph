@@ -14,7 +14,7 @@ fn init_local_git_repository(language: SupportedLanguage) -> LocalGitRepository 
     if language == SupportedLanguage::Ruby {
         let fixtures_path = Path::new(concat!(env!("FIXTURES_DIR"), "/code/test-repo"));
         local_repo.copy_dir(fixtures_path);
-    } else if language == SupportedLanguage::TypeScript {
+    } else if language == SupportedLanguage::Js {
         let fixtures_path = Path::new(concat!(env!("FIXTURES_DIR"), "/code/typescript/test-repo"));
         local_repo.copy_dir(fixtures_path);
     }
@@ -618,7 +618,7 @@ async fn test_detailed_data_inspection() {
 #[traced_test]
 #[tokio::test]
 async fn test_typescript_definition_counts() {
-    let setup = setup_indexing_test(SupportedLanguage::TypeScript).await;
+    let setup = setup_indexing_test(SupportedLanguage::Js).await;
     let graph_data = &setup.graph_data;
 
     // Verify definition count
@@ -648,7 +648,7 @@ async fn test_typescript_definition_counts() {
 #[traced_test]
 #[tokio::test]
 async fn test_typescript_call_relationship_has_location() {
-    let setup = setup_indexing_test(SupportedLanguage::TypeScript).await;
+    let setup = setup_indexing_test(SupportedLanguage::Js).await;
 
     // Original Cypher query (commented out for reference):
     // MATCH (source:DefinitionNode)-[r:DEFINITION_RELATIONSHIPS]->(target:DefinitionNode)

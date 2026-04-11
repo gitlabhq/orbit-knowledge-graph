@@ -5,7 +5,9 @@ use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use super::types::{ExportedBinding, ImportedName, JsModuleInfo};
+use super::types::{
+    ExportedBinding, ImportedName, JsCallEdge, JsCallSite, JsCallTarget, JsModuleInfo,
+};
 
 pub struct JsCrossFileResolver {
     resolver: Resolver,
@@ -112,6 +114,119 @@ impl JsCrossFileResolver {
                         ..Default::default()
                     });
                 }
+            }
+        }
+
+        relationships
+    }
+
+    /// Resolve cross-file CALLS edges for imported function calls.
+    ///
+    /// For each file's `ImportedCall` edges, resolves the import specifier to a
+    /// target file, finds the matching exported definition, and produces a
+    /// definition-to-definition CALLS relationship across files.
+    pub fn resolve_calls(
+        &self,
+        calls_by_file: &[(String, Vec<JsCallEdge>)],
+        modules: &HashMap<String, JsModuleInfo>,
+    ) -> Vec<ConsolidatedRelationship> {
+        let mut relationships = Vec::new();
+
+        for (file_path, calls) in calls_by_file {
+            let abs_path = self.root_dir.join(file_path);
+            let abs_dir = abs_path.parent().unwrap_or(&self.root_dir);
+
+            for call in calls {
+                let JsCallTarget::ImportedCall {
+                    specifier,
+                    imported_name,
+                    ..
+                } = &call.callee
+                else {
+                    continue;
+                };
+
+                let resolved = match self.resolver.resolve(abs_dir, specifier) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let resolved_path = resolved.into_path_buf();
+                let relative_resolved = match resolved_path.strip_prefix(&self.root_dir) {
+                    Ok(rel) => rel.to_string_lossy().to_string(),
+                    Err(_) => continue,
+                };
+
+                let target_module = match modules.get(&relative_resolved) {
+                    Some(m) => m,
+                    None => continue,
+                };
+
+                let export_name = match imported_name {
+                    ImportedName::Named(name) => name.as_str(),
+                    ImportedName::Default => "default",
+                    ImportedName::Namespace => continue,
+                };
+
+                let target_binding = target_module.exports.get(export_name);
+
+                let (final_path, final_range) = if let Some(binding) = target_binding {
+                    if let Some(ref source) = binding.reexport_source {
+                        match self.resolve_reexport(
+                            source,
+                            binding.reexport_name.as_deref().unwrap_or(export_name),
+                            &relative_resolved,
+                            modules,
+                            0,
+                        ) {
+                            Some((p, b)) => (p, b.range),
+                            None => (relative_resolved.clone(), binding.range),
+                        }
+                    } else if let Some(&range) =
+                        target_module.definition_fqns.get(&binding.local_fqn)
+                    {
+                        (relative_resolved.clone(), range)
+                    } else {
+                        (relative_resolved.clone(), binding.range)
+                    }
+                } else if let Some((star_path, star_binding)) = self.resolve_star_export(
+                    export_name,
+                    &relative_resolved,
+                    modules,
+                    &mut HashSet::new(),
+                    0,
+                ) {
+                    (star_path, star_binding.range)
+                } else {
+                    continue;
+                };
+
+                let source_path = ArcIntern::new(file_path.clone());
+                let target_path = ArcIntern::new(final_path);
+
+                let (caller_range, caller_def_range) = match &call.caller {
+                    JsCallSite::Definition { range, .. } => {
+                        (call.call_range, Some(ArcIntern::new(*range)))
+                    }
+                    JsCallSite::ModuleLevel => (call.call_range, None),
+                };
+
+                let rel = ConsolidatedRelationship {
+                    source_path: Some(source_path),
+                    target_path: Some(target_path),
+                    kind: if caller_def_range.is_some() {
+                        RelationshipKind::DefinitionToDefinition
+                    } else {
+                        RelationshipKind::FileToDefinition
+                    },
+                    relationship_type: RelationshipType::Calls,
+                    source_range: ArcIntern::new(caller_range),
+                    target_range: ArcIntern::new(final_range),
+                    source_definition_range: caller_def_range,
+                    target_definition_range: Some(ArcIntern::new(final_range)),
+                    ..Default::default()
+                };
+
+                relationships.push(rel);
             }
         }
 
@@ -372,6 +487,87 @@ mod tests {
         assert_eq!(
             relationships[0].relationship_type,
             RelationshipType::ImportedSymbolToDefinition
+        );
+    }
+
+    #[test]
+    fn test_resolve_calls_across_files() {
+        use super::super::types::{JsCallConfidence, JsCallSite};
+
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("utils.ts"), "export function foo() {}\n").unwrap();
+        fs::write(
+            dir.path().join("main.ts"),
+            "import { foo } from './utils';\n",
+        )
+        .unwrap();
+
+        let foo_range = Range::new(
+            parser_core::utils::Position::new(0, 16),
+            parser_core::utils::Position::new(0, 24),
+            (16, 24),
+        );
+
+        let resolver = JsCrossFileResolver::new(dir.path().to_path_buf(), false, false);
+        let modules = HashMap::from([
+            (
+                "utils.ts".to_string(),
+                JsModuleInfo {
+                    exports: HashMap::from([(
+                        "foo".to_string(),
+                        ExportedBinding {
+                            local_fqn: "foo".to_string(),
+                            range: foo_range,
+                            is_type: false,
+                            is_default: false,
+                            reexport_source: None,
+                            reexport_name: None,
+                        },
+                    )]),
+                    definition_fqns: HashMap::from([("foo".to_string(), foo_range)]),
+                    ..Default::default()
+                },
+            ),
+            ("main.ts".to_string(), JsModuleInfo::default()),
+        ]);
+
+        let caller_range = Range::new(
+            parser_core::utils::Position::new(1, 0),
+            parser_core::utils::Position::new(1, 20),
+            (30, 50),
+        );
+
+        let calls = vec![(
+            "main.ts".to_string(),
+            vec![JsCallEdge {
+                caller: JsCallSite::Definition {
+                    fqn: "bar".to_string(),
+                    range: caller_range,
+                },
+                callee: JsCallTarget::ImportedCall {
+                    local_name: "foo".to_string(),
+                    specifier: "./utils".to_string(),
+                    imported_name: ImportedName::Named("foo".to_string()),
+                },
+                call_range: caller_range,
+                confidence: JsCallConfidence::Known,
+            }],
+        )];
+
+        let relationships = resolver.resolve_calls(&calls, &modules);
+        assert_eq!(
+            relationships.len(),
+            1,
+            "Should resolve one cross-file CALLS edge"
+        );
+        assert_eq!(relationships[0].relationship_type, RelationshipType::Calls);
+        assert_eq!(
+            relationships[0].source_path.as_ref().map(|p| p.as_str()),
+            Some("main.ts")
+        );
+        assert_eq!(
+            relationships[0].target_path.as_ref().map(|p| p.as_str()),
+            Some("utils.ts")
         );
     }
 }

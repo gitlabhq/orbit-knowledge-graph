@@ -169,6 +169,7 @@ impl JsFileAnalysis {
                 JsCallTarget::Direct { fqn, .. } => def_ranges_by_fqn.get(fqn.as_str()).copied(),
                 JsCallTarget::ThisMethod { resolved_range, .. }
                 | JsCallTarget::SuperMethod { resolved_range, .. } => *resolved_range,
+                JsCallTarget::ImportedCall { .. } => continue,
             };
 
             let Some(target_range) = callee_range else {
