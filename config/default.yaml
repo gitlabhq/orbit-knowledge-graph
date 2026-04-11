@@ -108,3 +108,6 @@ metrics:
   prometheus:
     enabled: false
     port: 9394
+
+schema:
+  max_retained_versions: 2

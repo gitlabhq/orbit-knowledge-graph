@@ -33,6 +33,7 @@ impl ChScalar {
 pub enum ChType {
     String,
     Int64,
+    UInt32,
     Float64,
     Bool,
     Array(ChScalar),
@@ -43,6 +44,7 @@ impl fmt::Display for ChType {
         match self {
             ChType::String => write!(f, "String"),
             ChType::Int64 => write!(f, "Int64"),
+            ChType::UInt32 => write!(f, "UInt32"),
             ChType::Float64 => write!(f, "Float64"),
             ChType::Bool => write!(f, "Bool"),
             ChType::Array(s) => write!(f, "Array({s})"),
@@ -78,7 +80,7 @@ impl ChType {
     pub fn to_array(self) -> Self {
         match self {
             ChType::String => ChType::Array(ChScalar::String),
-            ChType::Int64 => ChType::Array(ChScalar::Int64),
+            ChType::Int64 | ChType::UInt32 => ChType::Array(ChScalar::Int64),
             ChType::Float64 => ChType::Array(ChScalar::Float64),
             ChType::Bool => ChType::Array(ChScalar::Bool),
             ChType::Array(_) => self,
