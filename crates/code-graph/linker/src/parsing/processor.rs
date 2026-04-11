@@ -1,3 +1,5 @@
+use crate::analysis::languages::js::JsAnalyzer;
+use crate::analysis::languages::js_sfc;
 use crate::loading::FileInfo;
 use log::debug;
 use parser_core::definitions::DefinitionInfo;
@@ -199,6 +201,9 @@ impl<'a> FileProcessor<'a> {
                 | SupportedLanguage::CSharp
                 | SupportedLanguage::TypeScript
                 | SupportedLanguage::Rust
+                | SupportedLanguage::Js
+                | SupportedLanguage::Vue
+                | SupportedLanguage::Svelte
         );
         if !is_supported {
             return ProcessingResult::Skipped(SkippedFile {
@@ -219,6 +224,14 @@ impl<'a> FileProcessor<'a> {
                 reason: format!("File is excluded due to exclude_extensions match: {language:?}"),
                 file_size: Some(self.size()),
             });
+        }
+
+        // JS/Vue/Svelte: use OXC directly, bypassing parser-core
+        if matches!(
+            language,
+            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte
+        ) {
+            return self.process_js(language, start_time);
         }
 
         // Use unified pipeline for all languages (ParserType + rules + analyzer)
@@ -278,6 +291,85 @@ impl<'a> FileProcessor<'a> {
                 is_supported: true,
             })
         }
+    }
+
+    /// Process JS/TS/Vue/Svelte files using OXC directly.
+    fn process_js(&self, language: SupportedLanguage, start_time: Instant) -> ProcessingResult {
+        let analysis_start = Instant::now();
+
+        // For Vue/Svelte, extract script blocks first
+        let sources: Vec<(String, String)> = match language {
+            SupportedLanguage::Vue | SupportedLanguage::Svelte => {
+                let ext = if language == SupportedLanguage::Vue {
+                    "vue"
+                } else {
+                    "svelte"
+                };
+                let blocks = js_sfc::extract_scripts(self.content, ext);
+                if blocks.is_empty() {
+                    return ProcessingResult::Skipped(SkippedFile {
+                        file_path: self.path.clone(),
+                        reason: "No <script> blocks found".to_string(),
+                        file_size: Some(self.size()),
+                    });
+                }
+                blocks
+                    .into_iter()
+                    .map(|b| {
+                        let ext = if b.is_typescript { "ts" } else { "js" };
+                        let virtual_path = format!("{}.{ext}", self.path);
+                        (virtual_path, b.source_text)
+                    })
+                    .collect()
+            }
+            _ => vec![(self.path.clone(), self.content.to_string())],
+        };
+
+        let mut all_definitions = Vec::new();
+        let mut all_imported_symbols = Vec::new();
+        let mut all_relationships = Vec::new();
+
+        for (file_path, source) in &sources {
+            match JsAnalyzer::analyze_file(source, file_path, &self.path) {
+                Ok(result) => {
+                    all_definitions.extend(result.definitions);
+                    all_imported_symbols.extend(result.imported_symbols);
+                    all_relationships.extend(result.relationships);
+                }
+                Err(e) => {
+                    return ProcessingResult::Error(ErroredFile {
+                        file_path: self.path.clone(),
+                        language: Some(language),
+                        error_message: format!("OXC analysis failed: {e}"),
+                        error_stage: ProcessingStage::Parsing,
+                    });
+                }
+            }
+        }
+
+        let analysis_time = analysis_start.elapsed();
+        let definitions_count = all_definitions.len();
+        let imported_symbols_count = all_imported_symbols.len();
+
+        ProcessingResult::Success(FileProcessingResult {
+            file_path: self.path.clone(),
+            extension: self.extension.clone(),
+            file_size: self.size(),
+            language,
+            definitions: Definitions::JsOxc,
+            imported_symbols: None,
+            references: None,
+            stats: ProcessingStats {
+                total_time: start_time.elapsed(),
+                parse_time: Duration::ZERO,
+                rules_time: Duration::ZERO,
+                analysis_time,
+                rule_matches: 0,
+                definitions_count,
+                imported_symbols_count,
+            },
+            is_supported: true,
+        })
     }
 
     fn analyze_file(
