@@ -19,7 +19,6 @@ use query_engine::compiler::emit_simple_query;
 use query_engine::compiler::{Expr, Insert, Node, OrderExpr, Query, SelectExpr, TableRef};
 use thiserror::Error;
 
-
 const VERSION_TABLE: &str = "gkg_schema_version";
 
 /// Schema version loaded from `config/SCHEMA_VERSION`.
