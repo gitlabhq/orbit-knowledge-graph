@@ -24,15 +24,17 @@ pub fn codegen(
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
 
-    // SETTINGS — only on the top-level query, not subqueries/UNION arms.
+    // SETTINGS — only on SELECT queries, not INSERT or subqueries/UNION arms.
     // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
     // (bare integers, 0/1 bools, escaped quoted strings).
-    let settings = query_config
-        .to_clickhouse_settings()
-        .map_err(crate::error::QueryError::Codegen)?;
-    if !settings.is_empty() {
-        let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();
-        sql.push_str(&format!(" SETTINGS {}", clause.join(", ")));
+    if matches!(ast, Node::Query(_)) {
+        let settings = query_config
+            .to_clickhouse_settings()
+            .map_err(crate::error::QueryError::Codegen)?;
+        if !settings.is_empty() {
+            let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();
+            sql.push_str(&format!(" SETTINGS {}", clause.join(", ")));
+        }
     }
 
     Ok(ParameterizedQuery {
@@ -869,6 +871,27 @@ mod tests {
         assert_eq!(
             result.params.get("p1").map(|p| &p.value),
             Some(&Value::Number(3.into()))
+        );
+    }
+
+    #[test]
+    fn insert_skips_settings() {
+        let ins = Insert {
+            table: "t".into(),
+            columns: vec!["a".into()],
+            values: vec![vec![Expr::int(1)]],
+        };
+
+        let cfg = QueryConfig {
+            max_execution_time: None,
+            use_query_cache: Some(true),
+            query_cache_ttl: Some(60),
+        };
+        let result = codegen(&Node::Insert(Box::new(ins)), empty_ctx(), cfg).unwrap();
+        assert!(
+            !result.sql.contains("SETTINGS"),
+            "INSERT should not have SETTINGS: {}",
+            result.sql,
         );
     }
 
