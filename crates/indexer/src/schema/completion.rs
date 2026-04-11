@@ -13,18 +13,17 @@
 
 use std::sync::Arc;
 
+use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
-use opentelemetry::KeyValue;
-use opentelemetry::global;
-use opentelemetry::metrics::Counter;
+use gkg_utils::arrow::ArrowUtils;
+use query_engine::compiler::generate_graph_tables;
 use tracing::{info, warn};
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
+use crate::metrics::CompletionMetrics;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use query_engine::compiler::generate_graph_tables;
-
 use crate::schema::version::{
     VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,
     read_all_versions, read_migrating_version, table_prefix,
@@ -56,51 +55,6 @@ const COUNT_ENABLED_NAMESPACES: &str = "\
 SELECT count(DISTINCT root_namespace_id) AS ns_count \
 FROM siphon_knowledge_graph_enabled_namespaces \
 WHERE _siphon_deleted = false";
-
-/// Pre-built OTel instruments for migration completion observability.
-#[derive(Clone)]
-pub struct CompletionMetrics {
-    migration_completed: Counter<u64>,
-    cleanup_total: Counter<u64>,
-}
-
-impl CompletionMetrics {
-    pub fn new() -> Self {
-        let meter = global::meter("gkg_schema_migration");
-        let migration_completed = meter
-            .u64_counter("gkg_schema_migration_completed_total")
-            .with_description("Total successful schema migration completions")
-            .build();
-        let cleanup_total = meter
-            .u64_counter("gkg_schema_cleanup_total")
-            .with_description("Total schema table cleanup operations by version and result")
-            .build();
-        Self {
-            migration_completed,
-            cleanup_total,
-        }
-    }
-
-    fn record_migration_completed(&self) {
-        self.migration_completed.add(1, &[]);
-    }
-
-    fn record_cleanup(&self, version: u32, result: &'static str) {
-        self.cleanup_total.add(
-            1,
-            &[
-                KeyValue::new("version", version.to_string()),
-                KeyValue::new("result", result),
-            ],
-        );
-    }
-}
-
-impl Default for CompletionMetrics {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// Scheduled task that detects migration completion and cleans up old tables.
 pub struct MigrationCompletionChecker {
@@ -307,7 +261,10 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| e.to_string())?;
 
-        extract_u64_scalar(&batches, "ns_count")
+        batches
+            .first()
+            .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
+            .ok_or_else(|| "no ns_count in result".to_string())
     }
 
     async fn count_enabled_namespaces(&self) -> Result<u64, String> {
@@ -317,7 +274,10 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| e.to_string())?;
 
-        extract_u64_scalar(&batches, "ns_count")
+        batches
+            .first()
+            .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
+            .ok_or_else(|| "no ns_count in result".to_string())
     }
 
     /// Drops tables for retired versions outside the retention window, then
@@ -402,27 +362,6 @@ impl MigrationCompletionChecker {
 
         Ok(())
     }
-}
-
-/// Extracts a single `u64` value from a query result by column name.
-fn extract_u64_scalar(
-    batches: &[arrow::record_batch::RecordBatch],
-    column: &str,
-) -> Result<u64, String> {
-    for batch in batches {
-        if batch.num_rows() == 0 {
-            continue;
-        }
-        let col = batch
-            .column_by_name(column)
-            .ok_or_else(|| format!("missing {column} column"))?;
-        let col = col
-            .as_any()
-            .downcast_ref::<arrow::array::UInt64Array>()
-            .ok_or_else(|| format!("{column} is not UInt64"))?;
-        return Ok(col.value(0));
-    }
-    Ok(0)
 }
 
 #[cfg(test)]
