@@ -249,34 +249,12 @@ pub async fn read_all_versions(
     let mut entries = Vec::new();
 
     for batch in &batches {
-        if batch.num_rows() == 0 {
-            continue;
-        }
-        let version_col = batch
-            .column_by_name("version")
-            .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing version column".into()))?;
-        let version_col = version_col
-            .as_any()
-            .downcast_ref::<arrow::array::UInt32Array>()
-            .ok_or_else(|| {
-                SchemaVersionError::UnexpectedResult("version column is not UInt32".into())
-            })?;
-
-        let status_col = batch
-            .column_by_name("status")
-            .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing status column".into()))?;
-        let status_col = status_col
-            .as_any()
-            .downcast_ref::<arrow::array::StringArray>()
-            .ok_or_else(|| {
-                SchemaVersionError::UnexpectedResult("status column is not String".into())
-            })?;
-
         for i in 0..batch.num_rows() {
-            entries.push(VersionEntry {
-                version: version_col.value(i),
-                status: status_col.value(i).to_string(),
-            });
+            let version = ArrowUtils::get_column::<UInt32Type>(batch, "version", i)
+                .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing version".into()))?;
+            let status = ArrowUtils::get_column_string(batch, "status", i)
+                .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing status".into()))?;
+            entries.push(VersionEntry { version, status });
         }
     }
 
