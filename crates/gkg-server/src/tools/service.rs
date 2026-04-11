@@ -25,10 +25,31 @@ impl ExecutorError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputFormat {
+    #[default]
+    Llm,
+    Raw,
+}
+
+impl OutputFormat {
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "raw" => Self::Raw,
+            _ => Self::Llm,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ToolPlan {
-    RunGraphQuery { query_json: String },
-    Immediate { result: Value },
+    RunGraphQuery {
+        query_json: String,
+        format: OutputFormat,
+    },
+    Immediate {
+        result: Value,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -71,16 +92,24 @@ impl ToolService {
         let query_json = serde_json::to_string(query)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
-        Ok(ToolPlan::RunGraphQuery { query_json })
+        let format = parse_format(arguments);
+
+        Ok(ToolPlan::RunGraphQuery { query_json, format })
     }
 
     fn execute_get_graph_schema(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
         let args: GetGraphSchemaArgs = serde_json::from_value(arguments.clone())
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
+        let format = parse_format(arguments);
         let expand_nodes = args.expand_nodes.as_deref().unwrap_or(&[]);
         let response = self.build_graph_schema_response(expand_nodes)?;
-        let result = self.format_as_toon(&response)?;
+
+        let result = match format {
+            OutputFormat::Llm => self.format_as_toon(&response)?,
+            OutputFormat::Raw => serde_json::to_value(&response)
+                .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?,
+        };
 
         Ok(ToolPlan::Immediate { result })
     }
@@ -209,6 +238,14 @@ impl ToolService {
 
         Ok(json!(toon_str))
     }
+}
+
+fn parse_format(arguments: &Value) -> OutputFormat {
+    arguments
+        .get("format")
+        .and_then(|v| v.as_str())
+        .map(OutputFormat::from_str_lossy)
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Deserialize)]
@@ -383,8 +420,9 @@ mod tests {
             .expect("Should resolve");
 
         match plan {
-            ToolPlan::RunGraphQuery { query_json } => {
+            ToolPlan::RunGraphQuery { query_json, format } => {
                 assert!(query_json.contains("match"));
+                assert_eq!(format, OutputFormat::Llm);
             }
             _ => panic!("Expected RunGraphQuery plan"),
         }
@@ -476,6 +514,78 @@ mod tests {
             .build_schema_toon(&["FakeNode".to_string()])
             .expect("Should succeed without error");
         assert!(toon.contains("domains"), "Should still return valid schema");
+    }
+
+    #[test]
+    fn get_graph_schema_raw_format_returns_json() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let plan = service
+            .resolve("get_graph_schema", r#"{"format": "raw"}"#)
+            .expect("Should resolve");
+
+        match plan {
+            ToolPlan::Immediate { result } => {
+                assert!(result.is_object(), "Raw format should return a JSON object");
+                assert!(result.get("domains").is_some(), "Should have domains key");
+                assert!(result.get("edges").is_some(), "Should have edges key");
+            }
+            _ => panic!("Expected Immediate plan"),
+        }
+    }
+
+    #[test]
+    fn get_graph_schema_llm_format_returns_toon() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let plan = service
+            .resolve("get_graph_schema", r#"{"format": "llm"}"#)
+            .expect("Should resolve");
+
+        match plan {
+            ToolPlan::Immediate { result } => {
+                assert!(result.is_string(), "LLM format should return a TOON string");
+                let text = result.as_str().unwrap();
+                assert!(text.contains("domains"));
+            }
+            _ => panic!("Expected Immediate plan"),
+        }
+    }
+
+    #[test]
+    fn get_graph_schema_default_format_is_llm() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let plan = service
+            .resolve("get_graph_schema", r#"{}"#)
+            .expect("Should resolve");
+
+        match plan {
+            ToolPlan::Immediate { result } => {
+                assert!(result.is_string(), "Default format should be TOON string");
+            }
+            _ => panic!("Expected Immediate plan"),
+        }
+    }
+
+    #[test]
+    fn query_graph_raw_format_is_carried_in_plan() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        let service = ToolService::new(ontology);
+
+        let plan = service
+            .resolve("query_graph", r#"{"query":{"match":{}}, "format": "raw"}"#)
+            .expect("Should resolve");
+
+        match plan {
+            ToolPlan::RunGraphQuery { format, .. } => {
+                assert_eq!(format, OutputFormat::Raw);
+            }
+            _ => panic!("Expected RunGraphQuery plan"),
+        }
     }
 
     #[test]
