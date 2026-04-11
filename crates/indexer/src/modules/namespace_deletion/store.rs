@@ -7,7 +7,7 @@ use thiserror::Error;
 use arrow::record_batch::RecordBatch;
 
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::schema_version::{SCHEMA_VERSION, prefixed_table_name};
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use clickhouse_client::FromArrowColumn;
 
 use super::lower::{self, DeletionStatement};

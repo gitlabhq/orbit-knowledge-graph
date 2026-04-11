@@ -2,7 +2,7 @@ use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use crate::llqm_v1::ast::{Expr, Insert, InsertSelect, Op, Query, SelectExpr, TableRef};
 use crate::llqm_v1::codegen;
-use crate::schema_version::{SCHEMA_VERSION, prefixed_table_name};
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 pub struct DeletionStatement {
     /// Unprefixed table name, used for logging and test assertions.

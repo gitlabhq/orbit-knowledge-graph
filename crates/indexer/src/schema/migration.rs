@@ -30,7 +30,7 @@ use crate::metrics::MigrationMetrics;
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
-use crate::schema_version::{
+use crate::schema::version::{
     SCHEMA_VERSION, SchemaVersionError, read_active_version, table_prefix, write_migrating_version,
     write_schema_version,
 };

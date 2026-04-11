@@ -28,7 +28,7 @@ const VERSION_TABLE: &str = "gkg_schema_version";
 /// in a way that requires a new table-set. The CI `schema-version-check` job
 /// enforces this.
 pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| {
-    include_str!("../../../config/SCHEMA_VERSION")
+    include_str!("../../../../config/SCHEMA_VERSION")
         .trim()
         .parse()
         .expect("config/SCHEMA_VERSION must contain a valid u32")

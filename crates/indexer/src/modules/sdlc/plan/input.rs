@@ -4,7 +4,7 @@ use ontology::{
 };
 use std::collections::BTreeMap;
 
-use crate::schema_version::{SCHEMA_VERSION, prefixed_table_name};
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 pub(in crate::modules::sdlc) struct PlanInput {
     pub edge_table: String,

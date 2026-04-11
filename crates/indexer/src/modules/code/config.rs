@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use ontology::{Ontology, OntologyError};
 
-use crate::schema_version::{SCHEMA_VERSION, prefixed_table_name};
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 pub const CODE_LOCK_TTL: Duration = Duration::from_secs(60);
 

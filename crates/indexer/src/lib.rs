@@ -39,8 +39,7 @@ pub mod metrics;
 pub mod modules;
 pub mod nats;
 pub mod scheduler;
-pub mod schema_migration;
-pub mod schema_version;
+pub mod schema;
 pub mod topic;
 pub mod types;
 pub mod worker_pool;
@@ -134,10 +133,10 @@ pub enum IndexerError {
     Health(#[from] std::io::Error),
 
     #[error("Schema version error: {0}")]
-    SchemaVersion(#[from] schema_version::SchemaVersionError),
+    SchemaVersion(#[from] schema::version::SchemaVersionError),
 
     #[error("Schema migration error: {0}")]
-    SchemaMigration(#[from] schema_migration::MigrationError),
+    SchemaMigration(#[from] schema::migration::MigrationError),
 
     #[error("Invalid configuration: {0}")]
     InvalidConfig(#[from] gkg_server_config::SchemaConfigError),
@@ -176,7 +175,7 @@ pub async fn run(
 
     let graph_client = config.graph.build_client();
     info!(url = %config.graph.url, "initializing schema version table");
-    schema_version::init(&graph_client).await?;
+    schema::version::init(&graph_client).await?;
 
     info!(url = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
@@ -193,7 +192,7 @@ pub async fn run(
         Arc::new(nats::NatsServicesImpl::new(broker.clone())),
     ));
     info!("running schema migration check");
-    schema_migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
+    schema::migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
         .await?;
 
     let metrics = Arc::new(metrics::EngineMetrics::new());

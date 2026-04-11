@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
-use crate::schema_version::{SCHEMA_VERSION, prefixed_table_name};
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use arrow::array::{Array, StringArray, TimestampMicrosecondArray};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
