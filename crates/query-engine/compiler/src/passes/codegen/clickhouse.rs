@@ -5,7 +5,7 @@
 
 use gkg_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -21,6 +21,7 @@ pub fn codegen(
     let mut ctx = Context::new();
     let mut sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
+        Node::Insert(ins) => ctx.emit_insert(ins),
     };
 
     // SETTINGS — only on the top-level query, not subqueries/UNION arms.
@@ -43,6 +44,18 @@ pub fn codegen(
     })
 }
 
+/// Emit a `Query` (or `Insert`) AST as parameterized ClickHouse SQL without
+/// requiring `ResultContext` or `QueryConfig`. Intended for callers outside the
+/// compiler pipeline (e.g. schema version management).
+pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
+    let mut ctx = Context::new();
+    let sql = match node {
+        Node::Query(q) => ctx.emit_query(q)?,
+        Node::Insert(ins) => ctx.emit_insert(ins),
+    };
+    Ok((sql, ctx.params))
+}
+
 struct Context {
     params: HashMap<String, ParamValue>,
 }
@@ -52,6 +65,24 @@ impl Context {
         Self {
             params: HashMap::new(),
         }
+    }
+
+    fn emit_insert(&mut self, ins: &Insert) -> String {
+        let cols = ins.columns.join(", ");
+        let rows: Vec<String> = ins
+            .values
+            .iter()
+            .map(|row| {
+                let exprs: Vec<String> = row.iter().map(|e| self.emit_expr(e)).collect();
+                format!("({})", exprs.join(", "))
+            })
+            .collect();
+        format!(
+            "INSERT INTO {} ({}) VALUES {}",
+            ins.table,
+            cols,
+            rows.join(", ")
+        )
     }
 
     fn emit_query(&mut self, q: &Query) -> Result<String> {
@@ -258,7 +289,17 @@ impl Context {
 
     fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
-            TableRef::Scan { table, alias } => Ok(format!("{table} AS {alias}")),
+            TableRef::Scan {
+                table,
+                alias,
+                final_,
+            } => {
+                if *final_ {
+                    Ok(format!("{table} FINAL AS {alias}"))
+                } else {
+                    Ok(format!("{table} AS {alias}"))
+                }
+            }
             TableRef::Join {
                 join_type,
                 left,
@@ -798,6 +839,81 @@ mod tests {
         .unwrap();
         assert!(result.sql.contains("UNION ALL"));
         assert!(result.sql.contains(") AS all_edges"));
+    }
+
+    #[test]
+    fn insert_values() {
+        let ins = Insert {
+            table: "gl_schema_versions".into(),
+            columns: vec!["key".into(), "version".into()],
+            values: vec![
+                vec![Expr::string("graph"), Expr::int(3)],
+                vec![Expr::string("datalake"), Expr::int(1)],
+            ],
+        };
+
+        let result = codegen(
+            &Node::Insert(Box::new(ins)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            result.sql,
+            "INSERT INTO gl_schema_versions (key, version) VALUES ({p0:String}, {p1:Int64}), ({p2:String}, {p3:Int64})"
+        );
+        assert_eq!(
+            result.params.get("p0").map(|p| &p.value),
+            Some(&Value::String("graph".into()))
+        );
+        assert_eq!(
+            result.params.get("p1").map(|p| &p.value),
+            Some(&Value::Number(3.into()))
+        );
+    }
+
+    #[test]
+    fn scan_final() {
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("t", "id"), "id")],
+            from: TableRef::scan_final("gl_schema_versions", "t"),
+            ..Default::default()
+        };
+
+        let result = codegen(
+            &Node::Query(Box::new(q)),
+            empty_ctx(),
+            QueryConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT t.id AS id FROM gl_schema_versions FINAL AS t"
+        );
+    }
+
+    #[test]
+    fn emit_simple_query_with_final_and_params() {
+        let q = Query {
+            select: vec![
+                SelectExpr::new(Expr::col("t", "key"), "key"),
+                SelectExpr::new(Expr::col("t", "version"), "version"),
+            ],
+            from: TableRef::scan_final("gl_schema_versions", "t"),
+            where_clause: Some(Expr::eq(Expr::col("t", "key"), Expr::string("graph"))),
+            ..Default::default()
+        };
+
+        let (sql, params) = emit_simple_query(&Node::Query(Box::new(q))).unwrap();
+        assert_eq!(
+            sql,
+            "SELECT t.key AS key, t.version AS version FROM gl_schema_versions FINAL AS t WHERE (t.key = {p0:String})"
+        );
+        assert_eq!(params.len(), 1);
+        assert_eq!(
+            params.get("p0").map(|p| &p.value),
+            Some(&Value::String("graph".into()))
+        );
     }
 
     #[test]

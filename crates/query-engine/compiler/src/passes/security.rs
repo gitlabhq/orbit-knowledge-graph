@@ -21,6 +21,7 @@ pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<
             }
             apply_to_query(q, ctx)
         }
+        Node::Insert(_) => Ok(()),
     }
 }
 
@@ -333,7 +334,9 @@ mod tests {
 
         apply_security_context(&mut node, &ctx).unwrap();
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         assert!(
             q.where_clause.is_some(),
             "outer query should have security filter on outer_e"
@@ -378,7 +381,9 @@ mod tests {
 
         apply_security_context(&mut node, &ctx).unwrap();
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         assert!(
             q.where_clause.is_some(),
             "base query should have security filter"

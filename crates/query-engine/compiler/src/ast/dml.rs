@@ -92,8 +92,12 @@ pub enum Op {
 /// Source of rows in a FROM clause.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
-    /// Read from a physical table → `table AS alias`
-    Scan { table: String, alias: String },
+    /// Read from a physical table → `table [FINAL] AS alias`
+    Scan {
+        table: String,
+        alias: String,
+        final_: bool,
+    },
     /// Combine two sources → `left JOIN_TYPE JOIN right ON condition`
     Join {
         join_type: JoinType,
@@ -208,6 +212,7 @@ impl Default for Query {
             from: TableRef::Scan {
                 table: String::new(),
                 alias: String::new(),
+                final_: false,
             },
             where_clause: None,
             group_by: vec![],
@@ -220,10 +225,19 @@ impl Default for Query {
     }
 }
 
-/// Top-level AST node - either a simple query or a recursive CTE.
+/// `INSERT INTO table (cols) VALUES (row1), (row2), ...`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Insert {
+    pub table: String,
+    pub columns: Vec<String>,
+    pub values: Vec<Vec<Expr>>,
+}
+
+/// Top-level AST node.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Query(Box<Query>),
+    Insert(Box<Insert>),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -444,6 +458,15 @@ impl TableRef {
         TableRef::Scan {
             table: table.into(),
             alias: alias.into(),
+            final_: false,
+        }
+    }
+
+    pub fn scan_final(table: impl Into<String>, alias: impl Into<String>) -> Self {
+        TableRef::Scan {
+            table: table.into(),
+            alias: alias.into(),
+            final_: true,
         }
     }
 

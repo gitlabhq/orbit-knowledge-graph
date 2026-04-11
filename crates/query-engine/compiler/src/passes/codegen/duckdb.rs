@@ -13,7 +13,7 @@
 
 use gkg_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -25,6 +25,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
     let mut ctx = Context::new();
     let sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
+        Node::Insert(ins) => ctx.emit_insert(ins),
     };
     Ok(ParameterizedQuery {
         sql,
@@ -46,6 +47,24 @@ impl Context {
             params: HashMap::new(),
             param_counter: 0,
         }
+    }
+
+    fn emit_insert(&mut self, ins: &Insert) -> String {
+        let cols = ins.columns.join(", ");
+        let rows: Vec<String> = ins
+            .values
+            .iter()
+            .map(|row| {
+                let exprs: Vec<String> = row.iter().map(|e| self.emit_expr(e)).collect();
+                format!("({})", exprs.join(", "))
+            })
+            .collect();
+        format!(
+            "INSERT INTO {} ({}) VALUES {}",
+            ins.table,
+            cols,
+            rows.join(", ")
+        )
     }
 
     fn emit_query(&mut self, q: &Query) -> Result<String> {
@@ -281,7 +300,7 @@ impl Context {
 
     fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
-            TableRef::Scan { table, alias } => Ok(format!("{table} AS {alias}")),
+            TableRef::Scan { table, alias, .. } => Ok(format!("{table} AS {alias}")),
             TableRef::Join {
                 join_type,
                 left,

@@ -144,6 +144,7 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
 
     match node {
         Node::Query(q) => enforce_return_columns(q, input, &selectable_nodes, &mut ctx)?,
+        Node::Insert(_) => return Ok(ctx),
     }
 
     if matches!(

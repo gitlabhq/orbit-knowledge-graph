@@ -35,15 +35,20 @@ pub struct ColumnDef {
 pub enum ColumnType {
     Int64,
     UInt64,
+    UInt32,
     Bool,
     String,
     Date32,
+    /// Plain `DateTime` (second precision, no timezone).
+    DateTime,
     /// Timestamp with sub-second precision and optional timezone.
     /// Precision must be 0–9 for ClickHouse (`DateTime64`).
     Timestamp {
         precision: u8,
         timezone: Option<String>,
     },
+    /// ClickHouse `Enum8('label' = N, ...)`.
+    Enum8(Vec<(std::string::String, i8)>),
     /// Wraps an inner type as nullable.
     Nullable(Box<ColumnType>),
     /// Dictionary-encoded / low-cardinality wrapper.

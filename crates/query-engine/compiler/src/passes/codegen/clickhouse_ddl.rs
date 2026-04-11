@@ -25,9 +25,11 @@ fn emit_column_type(ct: &ColumnType) -> String {
     match ct {
         ColumnType::Int64 => "Int64".into(),
         ColumnType::UInt64 => "UInt64".into(),
+        ColumnType::UInt32 => "UInt32".into(),
         ColumnType::Bool => "Bool".into(),
         ColumnType::String => "String".into(),
         ColumnType::Date32 => "Date32".into(),
+        ColumnType::DateTime => "DateTime".into(),
         ColumnType::Timestamp {
             precision,
             timezone: Some(tz),
@@ -39,6 +41,16 @@ fn emit_column_type(ct: &ColumnType) -> String {
             precision,
             timezone: None,
         } => format!("DateTime64({precision})"),
+        ColumnType::Enum8(variants) => {
+            let items: Vec<String> = variants
+                .iter()
+                .map(|(label, value)| {
+                    let safe = label.replace('\'', "\\'");
+                    format!("'{safe}' = {value}")
+                })
+                .collect();
+            format!("Enum8({})", items.join(", "))
+        }
         ColumnType::Nullable(inner) => format!("Nullable({})", emit_column_type(inner)),
         ColumnType::LowCardinality(inner) => {
             format!("LowCardinality({})", emit_column_type(inner))
@@ -387,6 +399,86 @@ mod tests {
         assert!(
             sql.contains("ORDER BY tuple()"),
             "empty ORDER BY with MergeTree should emit tuple(): {sql}"
+        );
+    }
+
+    #[test]
+    fn emit_uint32_column() {
+        let table = CreateTable {
+            name: "test".into(),
+            columns: vec![ColumnDef::new("version", ColumnType::UInt32)],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "MergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec!["version".into()],
+            primary_key: None,
+            settings: vec![],
+        };
+
+        let sql = emit_create_table(&table);
+        assert!(
+            sql.contains("version UInt32"),
+            "UInt32 column type should emit: {sql}"
+        );
+    }
+
+    #[test]
+    fn emit_datetime_column() {
+        let table = CreateTable {
+            name: "test".into(),
+            columns: vec![ColumnDef::new("created_at", ColumnType::DateTime)],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "MergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec!["created_at".into()],
+            primary_key: None,
+            settings: vec![],
+        };
+
+        let sql = emit_create_table(&table);
+        assert!(
+            sql.contains("created_at DateTime"),
+            "DateTime column type should emit: {sql}"
+        );
+        assert!(
+            !sql.contains("DateTime64"),
+            "DateTime should not emit DateTime64: {sql}"
+        );
+    }
+
+    #[test]
+    fn emit_enum8_column() {
+        let table = CreateTable {
+            name: "test".into(),
+            columns: vec![ColumnDef::new(
+                "status",
+                ColumnType::Enum8(vec![
+                    ("active".into(), 1),
+                    ("migrating".into(), 2),
+                    ("deleted".into(), 3),
+                ]),
+            )],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "MergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec!["status".into()],
+            primary_key: None,
+            settings: vec![],
+        };
+
+        let sql = emit_create_table(&table);
+        assert!(
+            sql.contains("Enum8('active' = 1, 'migrating' = 2, 'deleted' = 3)"),
+            "Enum8 column type should emit variant list: {sql}"
         );
     }
 

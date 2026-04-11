@@ -41,6 +41,7 @@ fn is_edge_table(table: &str, edge_tables: &HashSet<String>) -> bool {
 /// Apply row deduplication to all node table scans in the AST.
 pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
     match node {
+        Node::Insert(_) => {}
         Node::Query(q) => {
             for cte in &mut q.ctes {
                 if cte.name.starts_with("_nf_") {
@@ -57,7 +58,7 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
 /// Deduplicate a `_nf_*` CTE using argMax. These CTEs only select `id`,
 /// so argMax is cheaper than LIMIT BY (hash aggregate vs full sort).
 fn dedup_nf_cte(q: &mut Query, input: &Input) {
-    if let TableRef::Scan { table, alias } = &q.from
+    if let TableRef::Scan { table, alias, .. } = &q.from
         && is_node_table(table, &input.compiler.edge_tables)
     {
         let alias = alias.clone();
@@ -84,7 +85,9 @@ fn dedup_query(q: &mut Query, input: &Input, ontology: &Ontology) {
 /// each nested query's own FROM/WHERE.
 fn add_edge_deleted_filters(from: &TableRef, where_clause: &mut Option<Expr>, input: &Input) {
     match from {
-        TableRef::Scan { table, alias } if is_edge_table(table, &input.compiler.edge_tables) => {
+        TableRef::Scan { table, alias, .. }
+            if is_edge_table(table, &input.compiler.edge_tables) =>
+        {
             let filter = not_deleted(alias);
             *where_clause = Some(match where_clause.take() {
                 Some(existing) => Expr::and(existing, filter),
@@ -121,7 +124,9 @@ fn visit_derived_tables(from: &mut TableRef, input: &Input, ontology: &Ontology)
 
 fn dispatch(q: &mut Query, input: &Input, ontology: &Ontology) {
     match &q.from {
-        TableRef::Scan { table, alias } if is_node_table(table, &input.compiler.edge_tables) => {
+        TableRef::Scan { table, alias, .. }
+            if is_node_table(table, &input.compiler.edge_tables) =>
+        {
             let alias = alias.clone();
             let table = table.clone();
 
@@ -311,7 +316,7 @@ fn apply_limit_by_dedup(
     ontology: &Ontology,
 ) {
     let (table_name, alias) = match from {
-        TableRef::Scan { table, alias } => (table.clone(), alias.clone()),
+        TableRef::Scan { table, alias, .. } => (table.clone(), alias.clone()),
         _ => return,
     };
     let sort_key = ontology.sort_key_for_table(table).unwrap_or_default();
@@ -346,7 +351,9 @@ fn wrap_join_scans(
     ontology: &Ontology,
 ) {
     match from {
-        TableRef::Scan { table, alias } if is_node_table(table, &input.compiler.edge_tables) => {
+        TableRef::Scan { table, alias, .. }
+            if is_node_table(table, &input.compiler.edge_tables) =>
+        {
             let table_name = table.clone();
             let alias_str = alias.clone();
             let sort_key = ontology.sort_key_for_table(&table_name).unwrap_or_default();
@@ -430,7 +437,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
         assert!(has_limit_by(inner));
         assert!(inner.order_by[0].desc);
@@ -460,7 +469,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
         assert!(has_limit_by(inner));
         // traversal_path is in the sort key -- pushed inside
@@ -485,7 +496,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
         // id is in the sort key -- pushed inside
         assert!(where_contains(&inner.where_clause, "\"id\""));
@@ -504,7 +517,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Aggregation), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
         assert!(has_limit_by(inner));
     }
@@ -519,7 +534,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Neighbors), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
         assert!(has_limit_by(inner));
     }
@@ -534,7 +551,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::PathFinding), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
         assert!(has_limit_by(inner));
     }
@@ -549,7 +568,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "gl_edge"));
         assert!(
             where_contains(&q.where_clause, "_deleted"),
@@ -567,7 +588,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "some_cte"));
     }
 
@@ -593,7 +616,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner_p = find_subquery(&q.from, "p").expect("project should be wrapped");
         assert!(find_subquery(&q.from, "e").is_none());
         assert!(has_limit_by(inner_p));
@@ -621,7 +646,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let cte_q = &q.ctes[0].query;
         // _nf_* CTEs should use argMax, not LIMIT BY
         assert!(
@@ -662,7 +689,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner = find_subquery(&q.ctes[0].query.from, "mr").expect("CTE scan wrapped");
         assert!(has_limit_by(inner));
     }
@@ -677,7 +706,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner = find_subquery(&q.from, "u").expect("user should be wrapped");
         assert!(has_limit_by(inner));
     }
@@ -702,7 +733,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
 
         // traversal_path is structural (in sort key) -- pushed inside
@@ -737,7 +770,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Search), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         assert!(
             matches!(&q.from, TableRef::Scan { table, .. } if table == "gl_pipeline"),
             "search should not wrap in subquery"
@@ -794,7 +829,9 @@ mod tests {
         }));
         deduplicate(&mut node, &input_for(QueryType::Hydration), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         assert!(
             matches!(&q.from, TableRef::Scan { table, .. } if table == "gl_user"),
             "hydration should not wrap in subquery"
@@ -854,7 +891,9 @@ mod tests {
         let mut node = Node::Query(Box::new(first));
         deduplicate(&mut node, &input_for(QueryType::Hydration), &ont);
 
-        let Node::Query(q) = &node;
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
         assert!(!q.group_by.is_empty(), "first arm should have GROUP BY");
         assert!(q.having.is_some(), "first arm should have HAVING");
         assert_eq!(q.union_all.len(), 1);
