@@ -399,6 +399,79 @@ integration-test:
     - cargo nextest run --profile ci --all-features --test containers
     - sccache --show-stats || true
 
+# E2E GDK Test
+#
+# Runs the full GKG e2e validation suite against a GDK instance with
+# ClickHouse, NATS, and Siphon. Uses the gkg-e2e-base Docker image
+# as a CI service and builds the GKG binary from the current commit.
+
+e2e-gdk-test:
+  stage: test
+  extends:
+    - .job-template
+    - .sccache-template
+  tags:
+    - saas-linux-large-amd64
+  services:
+    - name: ${CI_REGISTRY_IMAGE}/gkg-e2e-base:latest
+      alias: gdk.test
+  variables:
+    GDK_URL: "https://gdk.test:3443"
+    CLICKHOUSE_URL: "http://gdk.test:8123"
+    NATS_URL: "nats://gdk.test:4222"
+  needs: []
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - pip install -r tests/e2e/requirements.txt
+    - cargo build --release -p gkg-server
+  script:
+    - |
+      # Wait for GDK service to be ready
+      for i in $(seq 1 180); do
+        if curl -sk https://gdk.test:3443/-/readiness 2>/dev/null | grep -q ok; then
+          echo "GDK ready after ${i}s"
+          break
+        fi
+        sleep 1
+      done
+    - |
+      # Start GKG processes connected to the GDK service
+      export GKG__GITLAB__BASE_URL=https://gdk.test:3443
+      export GKG__NATS__URL=gdk.test:4222
+      export GKG__GRAPH__URL=http://gdk.test:8123
+      export GKG__GRAPH__DATABASE=gitlab_clickhouse_main_development
+      export GKG__DATALAKE__URL=http://gdk.test:8123
+      export GKG__DATALAKE__DATABASE=gitlab_clickhouse_development
+      export GKG__BIND_ADDRESS=0.0.0.0:4200
+      export GKG__GRPC_BIND_ADDRESS=0.0.0.0:50054
+      export RUST_LOG=info
+      target/release/gkg-server --mode=webserver &
+      target/release/gkg-server --mode=indexer &
+      export GKG__SCHEDULE__TASKS__GLOBAL__CRON='* * * * * *'
+      export GKG__SCHEDULE__TASKS__NAMESPACE__CRON='* * * * * *'
+      target/release/gkg-server --mode=dispatch-indexing &
+      sleep 5
+    - robot --outputdir results tests/e2e/gkg_validation/
+  after_script:
+    - pkill -f "gkg-server" || true
+  artifacts:
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/output.xml
+    expire_in: 1 week
+  timeout: 30m
+
 # Benchmark Stage
 #
 # Runs code indexing benchmarks when indexing crates change.

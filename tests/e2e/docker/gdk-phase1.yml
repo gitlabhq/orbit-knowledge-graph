@@ -1,0 +1,30 @@
+---
+hostname: gdk.test
+listen_address: 0.0.0.0
+port: 3443
+asdf:
+  opt_out: true
+mise:
+  enabled: true
+gitlab:
+  rails:
+    hostname: gdk.test
+    https:
+      enabled: true
+    port: 3443
+https:
+  enabled: true
+nginx:
+  enabled: true
+  http:
+    enabled: true
+  ssl:
+    certificate: gdk.test.pem
+    key: gdk.test-key.pem
+webpack:
+  enabled: false
+vite:
+  enabled: false
+env:
+  GITLAB_SIMULATE_SAAS: "1"
+  CLOUD_CONNECTOR_SELF_SIGN_TOKENS: "1"
