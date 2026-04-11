@@ -21,7 +21,6 @@ query-engine = { path = "../query-engine" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
-rayon = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }

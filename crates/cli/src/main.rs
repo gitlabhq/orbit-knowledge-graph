@@ -154,25 +154,8 @@ enum Commands {
     },
 }
 
-fn main() -> Result<()> {
-    // Stack sizes are configured via rayon::ThreadPoolBuilder below.
-
-    // Initialize rayon with 32MB stacks for parsing large/deeply-nested files.
-    match rayon::ThreadPoolBuilder::new()
-        .stack_size(32 * 1024 * 1024)
-        .build_global()
-    {
-        Ok(()) => eprintln!("Rayon pool: 32MB stacks configured"),
-        Err(e) => eprintln!("Warning: failed to configure rayon thread pool: {e}"),
-    }
-
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?
-        .block_on(async_main())
-}
-
-async fn async_main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
