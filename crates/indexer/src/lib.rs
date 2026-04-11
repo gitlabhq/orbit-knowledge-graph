@@ -152,6 +152,8 @@ pub struct DispatcherConfig {
     pub datalake: ClickHouseConfiguration,
     #[serde(default)]
     pub schedule: ScheduleConfig,
+    #[serde(default)]
+    pub schema: SchemaConfig,
     #[serde(default = "default_dispatcher_health_bind_address")]
     pub health_bind_address: SocketAddr,
 }
@@ -325,8 +327,17 @@ pub async fn run_dispatcher(
             deletion_store,
             checkpoint_store,
             services.nats.clone(),
-            metrics,
+            metrics.clone(),
             config.schedule.tasks.namespace_deletion.clone(),
+        )),
+        Box::new(schema::completion::MigrationCompletionChecker::new(
+            config.graph.build_client(),
+            config.datalake.build_client(),
+            lock_service.clone(),
+            Arc::new(ontology.clone()),
+            config.schema.clone(),
+            config.schedule.tasks.migration_completion.clone(),
+            metrics,
         )),
     ];
 

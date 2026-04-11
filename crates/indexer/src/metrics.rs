@@ -218,3 +218,51 @@ impl Default for MigrationMetrics {
         Self::new()
     }
 }
+
+/// Pre-built OTel instruments for migration completion observability.
+///
+/// - `gkg_schema_migration_completed_total`: successful migration completions
+/// - `gkg_schema_cleanup_total`: table cleanup operations (labels: `version`, `result`)
+#[derive(Clone)]
+pub struct CompletionMetrics {
+    pub(crate) migration_completed: Counter<u64>,
+    pub(crate) cleanup_total: Counter<u64>,
+}
+
+impl CompletionMetrics {
+    pub fn new() -> Self {
+        let meter = global::meter("gkg_schema_migration");
+        let migration_completed = meter
+            .u64_counter("gkg_schema_migration_completed_total")
+            .with_description("Total successful schema migration completions")
+            .build();
+        let cleanup_total = meter
+            .u64_counter("gkg_schema_cleanup_total")
+            .with_description("Total schema table cleanup operations by version and result")
+            .build();
+        Self {
+            migration_completed,
+            cleanup_total,
+        }
+    }
+
+    pub(crate) fn record_migration_completed(&self) {
+        self.migration_completed.add(1, &[]);
+    }
+
+    pub(crate) fn record_cleanup(&self, version: u32, result: &'static str) {
+        self.cleanup_total.add(
+            1,
+            &[
+                KeyValue::new("version", version.to_string()),
+                KeyValue::new("result", result),
+            ],
+        );
+    }
+}
+
+impl Default for CompletionMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}

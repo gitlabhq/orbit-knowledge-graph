@@ -267,6 +267,22 @@ impl Default for NamespaceDeletionSchedulerConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MigrationCompletionConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+}
+
+impl Default for MigrationCompletionConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 */5 * * * *".into()),
+            },
+        }
+    }
+}
+
 /// Typed per-task configuration for all registered scheduled tasks.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -284,6 +300,8 @@ pub struct ScheduledTasksConfiguration {
     pub table_cleanup: TableCleanupConfig,
     #[serde(default)]
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
+    #[serde(default)]
+    pub migration_completion: MigrationCompletionConfig,
 }
 
 // ── Top-level engine config ──────────────────────────────────────────

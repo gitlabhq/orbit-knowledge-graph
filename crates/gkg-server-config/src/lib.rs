@@ -24,7 +24,7 @@ pub use app::{AppConfig, ConfigError, SECRET_FILE_DIR, SharedAppConfig};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
     CodeIndexingTaskHandlerConfig, EngineConfiguration, GlobalDispatcherConfig,
-    GlobalHandlerConfig, HandlerConfiguration, HandlersConfiguration,
+    GlobalHandlerConfig, HandlerConfiguration, HandlersConfiguration, MigrationCompletionConfig,
     NamespaceCodeBackfillDispatcherConfig, NamespaceDeletionHandlerConfig,
     NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, NamespaceHandlerConfig,
     ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
