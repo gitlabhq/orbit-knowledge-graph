@@ -100,7 +100,7 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
@@ -129,7 +129,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
@@ -168,7 +168,7 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
@@ -205,7 +205,7 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
         "limit": 20
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -271,7 +271,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
         "limit": 20
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -319,7 +319,7 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
         "limit": 30
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -387,7 +387,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
         "limit": 30
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -447,7 +447,7 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
         "limit": 20
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -501,7 +501,7 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let p = result.ctx().get("p").unwrap().clone();
@@ -546,7 +546,7 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     for col in [
         "_gkg_u_id",
@@ -588,7 +588,7 @@ async fn empty_query_result_stays_empty(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -617,7 +617,7 @@ async fn all_authorized_preserves_all_data(ctx: &TestContext) {
         "limit": 20
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -650,7 +650,7 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
         "limit": 20
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -755,7 +755,7 @@ async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
         "limit": 30
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -792,7 +792,7 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
@@ -919,7 +919,7 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -971,7 +971,7 @@ async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -999,7 +999,7 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1072,7 +1072,7 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1120,7 +1120,7 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1150,7 +1150,7 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1194,7 +1194,7 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1242,7 +1242,7 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1287,7 +1287,7 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1345,7 +1345,7 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1390,7 +1390,7 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1507,7 +1507,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
         "limit": 100
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Verify search queries don't generate JOINs
     assert!(
@@ -1565,7 +1565,7 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
         "limit": 50
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let p = result.ctx().get("p").unwrap().clone();
@@ -1609,7 +1609,7 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
         "limit": 100
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -1652,7 +1652,7 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
         "limit": 100
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
@@ -1688,7 +1688,7 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let p = result.ctx().get("p").unwrap().clone();
@@ -1732,7 +1732,7 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1759,7 +1759,7 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
         "limit": 100
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -1794,7 +1794,7 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Verify the SQL includes the required metadata columns
     assert!(
@@ -1910,7 +1910,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // The generated SQL MUST contain the mandatory redaction columns
     assert!(
@@ -1980,7 +1980,7 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // CRITICAL: Mandatory columns must be present for redaction
     assert!(
@@ -2046,7 +2046,7 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Mandatory columns MUST be present even when columns is omitted
     assert!(
@@ -2114,7 +2114,7 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
         "limit": 30
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // CRITICAL: ALL nodes must have mandatory columns for redaction
     assert!(
@@ -2198,7 +2198,7 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
         "limit": 20
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -2258,7 +2258,7 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
         "limit": 50
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -2302,7 +2302,7 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
@@ -2350,7 +2350,7 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Should have mandatory columns plus requested columns (no duplicates)
     assert!(
@@ -2426,7 +2426,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // User (group_by node) should have mandatory columns
     assert!(
@@ -2525,7 +2525,7 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // User (group_by node) should have mandatory columns
     assert!(
@@ -2595,7 +2595,7 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
         "limit": 20
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
@@ -2658,7 +2658,7 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Should have mandatory columns and requested column
     assert!(query.base.sql.contains("_gkg_u_id"));
@@ -2707,7 +2707,7 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -2749,7 +2749,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Verify center node mandatory columns for redaction
     assert!(
@@ -2882,7 +2882,7 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -2913,7 +2913,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
@@ -2956,7 +2956,7 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
         "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3064,7 +3064,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3219,7 +3219,7 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3264,7 +3264,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
         "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3335,7 +3335,7 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         "limit": 20
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Verify edge columns are in the SQL
     assert!(
@@ -3507,7 +3507,7 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
         "limit": 30
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Verify both edge column sets are in SQL
     assert!(
@@ -3642,7 +3642,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
 
     // Verify the SQL contains source_kind filter to prevent ID collisions
     // Note: the entity type 'User' is passed as a parameter, not embedded in SQL
@@ -3729,7 +3729,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3762,7 +3762,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3784,7 +3784,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3812,7 +3812,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3828,7 +3828,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2]}}}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3850,7 +3850,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "node": {"id": "u", "entity": "User", "columns": ["state"], "filters": {"state": "active"}}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3878,7 +3878,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "node": {"id": "u", "entity": "User", "filters": {"state": "blocked"}}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3894,7 +3894,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "node": {"id": "u", "entity": "User", "filters": {"state": {"op": "in", "value": ["active", "blocked"]}}}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -3922,7 +3922,7 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
         "cursor": {"offset": 0, "page_size": 2}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     assert!(
         query.base.sql.contains("LIMIT 100"),
         "SQL LIMIT should come from limit field, not cursor: {}",
@@ -3989,7 +3989,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
         "cursor": {"offset": 0, "page_size": 2}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -4033,7 +4033,7 @@ async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
         "cursor": {"offset": 100, "page_size": 10}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
@@ -4059,7 +4059,7 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
         "cursor": {"offset": 0, "page_size": 2}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx, "").unwrap();
+    let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 

@@ -92,7 +92,7 @@ async fn compile_execute_hydrate(
     query_engine::compiler::ResultContext,
     HydrationPlan,
 ) {
-    let compiled = compile(json, ontology, security_ctx, "").unwrap();
+    let compiled = compile(json, ontology, security_ctx).unwrap();
     let plan = compiled.hydration.clone();
 
     let batches = ctx.query_parameterized(&compiled.base).await;
@@ -112,7 +112,6 @@ async fn compile_execute_hydrate(
         security_context: Some(security_ctx.clone()),
         server_extensions,
         phases: TypeMap::default(),
-        table_prefix: String::new(),
     };
     pipeline_ctx.phases.insert(redaction_output);
     let mut obs = NoOpObserver;
@@ -134,7 +133,7 @@ async fn compile_execute_redact_hydrate(
     client: &Arc<clickhouse_client::ArrowClickHouseClient>,
     mock_service: &MockRedactionService,
 ) -> (QueryResult, query_engine::compiler::ResultContext, usize) {
-    let compiled = compile(json, ontology, security_ctx, "").unwrap();
+    let compiled = compile(json, ontology, security_ctx).unwrap();
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
@@ -155,7 +154,6 @@ async fn compile_execute_redact_hydrate(
         security_context: Some(security_ctx.clone()),
         server_extensions,
         phases: TypeMap::default(),
-        table_prefix: String::new(),
     };
     pipeline_ctx.phases.insert(redaction_output);
     let mut obs = NoOpObserver;
@@ -457,7 +455,7 @@ async fn search_produces_no_hydration_plan(_ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let compiled = compile(json, &ontology, &security_ctx, "").unwrap();
+    let compiled = compile(json, &ontology, &security_ctx).unwrap();
     assert!(
         matches!(compiled.hydration, HydrationPlan::None),
         "Search should produce None (static hydration disabled), got: {:?}",
@@ -479,7 +477,7 @@ async fn traversal_produces_static_hydration_plan(_ctx: &TestContext) {
         "limit": 20
     }"#;
 
-    let compiled = compile(json, &ontology, &security_ctx, "").unwrap();
+    let compiled = compile(json, &ontology, &security_ctx).unwrap();
     assert!(
         matches!(compiled.hydration, HydrationPlan::Static(ref t) if t.len() == 2),
         "Edge-centric traversal should produce Static hydration with 2 templates, got: {:?}",
@@ -497,7 +495,7 @@ async fn hydration_query_type_rejected_from_user_input(_ctx: &TestContext) {
         "limit": 10
     }"#;
 
-    let result = compile(json, &ontology, &security_ctx, "");
+    let result = compile(json, &ontology, &security_ctx);
     assert!(
         result.is_err(),
         "hydration query type must be rejected when submitted via user-facing compile(): {result:?}"
@@ -796,7 +794,7 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let compiled = compile(json, &ontology, &security_ctx, "").unwrap();
+    let compiled = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&compiled.base).await;
     let result = QueryResult::from_batches(&batches, &compiled.base.result_context);
 
@@ -814,7 +812,6 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
         security_context: Some(security_ctx.clone()),
         server_extensions,
         phases: TypeMap::default(),
-        table_prefix: String::new(),
     };
     pipeline_ctx.phases.insert(redaction_output);
 

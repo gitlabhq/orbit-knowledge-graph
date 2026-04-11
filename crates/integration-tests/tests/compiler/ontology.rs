@@ -18,7 +18,7 @@ fn valid_column_in_order_by() {
         "limit": 10,
         "order_by": {"node": "u", "property": "username", "direction": "ASC"}
     }"#;
-    assert!(compile(json, &embedded_ontology(), &test_ctx(), "").is_ok());
+    assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
 }
 
 #[test]
@@ -32,7 +32,6 @@ fn invalid_column_in_order_by() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(err.to_string().contains("does not exist"));
@@ -45,7 +44,7 @@ fn valid_column_in_filter() {
         "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}},
         "limit": 10
     }"#;
-    assert!(compile(json, &embedded_ontology(), &test_ctx(), "").is_ok());
+    assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
 }
 
 #[test]
@@ -56,7 +55,7 @@ fn invalid_column_in_filter() {
             "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}},
             "limit": 10
         }"#,
-        &embedded_ontology(), &test_ctx(), "",
+        &embedded_ontology(), &test_ctx(),
     ).unwrap_err();
     assert!(err.to_string().contains("nonexistent_column"));
 }
@@ -70,7 +69,7 @@ fn valid_column_in_aggregation() {
             "aggregations": [{"function": "count", "target": "p", "property": "name", "alias": "name_count"}],
             "limit": 10
         }"#,
-        &embedded_ontology(), &test_ctx(), "",
+        &embedded_ontology(), &test_ctx(),
     ).is_ok());
 }
 
@@ -83,7 +82,7 @@ fn invalid_column_in_aggregation() {
             "aggregations": [{"function": "sum", "target": "p", "property": "invalid_property", "alias": "total"}],
             "limit": 10
         }"#,
-        &embedded_ontology(), &test_ctx(), "",
+        &embedded_ontology(), &test_ctx(),
     ).unwrap_err();
     assert!(err.to_string().contains("does not exist"));
 }
@@ -98,7 +97,6 @@ fn invalid_entity_type_rejected() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(
@@ -123,7 +121,7 @@ fn full_pipeline() {
         "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_table("gl_edge"));
@@ -143,7 +141,7 @@ fn basic_search_query() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     // Search uses argMax dedup: value filters go to HAVING with argMax.
@@ -182,7 +180,7 @@ fn complex_search_query() {
         "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
@@ -209,7 +207,7 @@ fn search_with_specific_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_u_id"));
@@ -226,7 +224,7 @@ fn search_with_wildcard_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_u_id"));
@@ -246,7 +244,7 @@ fn traversal_with_columns() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_u_id"));
@@ -268,7 +266,7 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_u_id"));
@@ -290,7 +288,7 @@ fn path_finding_uses_gkg_path_not_node_columns() {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_column_ref("_gkg_path"));
@@ -309,7 +307,7 @@ fn result_context_populated() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert_eq!(result.base.result_context.len(), 2);
@@ -346,7 +344,7 @@ fn multi_hop_traversal_generates_union_subquery() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_union_all());
@@ -366,7 +364,7 @@ fn multi_hop_with_min_hops_filter() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_column_ref("hop_e0.depth") || sql.has_column_ref("depth"));
@@ -384,7 +382,7 @@ fn single_hop_does_not_generate_recursive_cte() {
         "limit": 25
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(
@@ -406,7 +404,7 @@ fn multi_hop_aggregation() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_union_all());
@@ -426,7 +424,7 @@ fn definition_uses_project_id_for_redaction() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_d_id"));
@@ -446,7 +444,7 @@ fn project_still_uses_id_for_redaction() {
         "limit": 10
     }"#;
 
-    let result = compile(json, &embedded_ontology(), &test_ctx(), "").unwrap();
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(sql.has_select_column("_gkg_p_id"));
@@ -477,7 +475,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     );
     assert!(result.is_ok(), "valid cursor should compile: {result:?}");
 
@@ -503,7 +500,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     )
     .unwrap_err();
     assert!(
@@ -525,7 +521,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     );
     assert!(
         result.is_ok(),
@@ -542,7 +537,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     );
     assert!(
         result.is_ok(),
@@ -559,7 +553,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     );
     assert!(result.is_ok(), "page_size == limit should be valid");
 
@@ -572,7 +565,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     );
     assert!(err.is_err(), "cursor missing page_size should fail");
 
@@ -584,7 +576,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     );
     assert!(err.is_err(), "cursor missing offset should fail");
 
@@ -597,7 +588,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     );
     assert!(err.is_err(), "empty cursor should fail");
 
@@ -611,7 +601,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     );
     assert!(err.is_err(), "page_size = 0 should fail");
 
@@ -623,7 +612,6 @@ fn cursor_pagination_validation() {
     }"#,
         &ontology,
         &ctx,
-        "",
     );
     assert!(result.is_ok(), "no cursor should compile fine");
     let result = result.unwrap();
@@ -654,7 +642,6 @@ fn render_traversal_inlines_all_params() {
     }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap()
     .base
@@ -681,7 +668,6 @@ fn render_in_filter_inlines_array() {
     }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap()
     .base
@@ -705,7 +691,6 @@ fn render_node_ids_inlines_array() {
     }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap()
     .base
@@ -733,7 +718,6 @@ fn debug_json_round_trip() {
     }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap();
 
@@ -790,7 +774,7 @@ fn hydration_query_type_generates_union_all() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx(), "").unwrap();
+    let result = compile_input(input, &test_ctx()).unwrap();
     // Hydration SQL uses ClickHouse array literals (`IN [1,2,3]`) which
     // sqlparser doesn't support yet, so we check the raw SQL string.
     let raw = &result.base.render();
@@ -818,7 +802,7 @@ fn hydration_single_entity_no_union_all() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx(), "").unwrap();
+    let result = compile_input(input, &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(!sql.has_union_all());
@@ -846,7 +830,7 @@ fn hydration_uses_parameterized_ids() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx(), "").unwrap();
+    let result = compile_input(input, &test_ctx()).unwrap();
     // Hydration SQL uses ClickHouse array literals — check raw strings.
     let parameterized = &result.base.sql;
 
@@ -882,7 +866,7 @@ fn hydration_skips_security_context() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx(), "").unwrap();
+    let result = compile_input(input, &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(
@@ -911,7 +895,7 @@ fn hydration_empty_columns_produces_empty_json() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx(), "").unwrap();
+    let result = compile_input(input, &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         !rendered.contains("map("),
@@ -939,7 +923,7 @@ fn hydration_id_column_excluded_from_map() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx(), "").unwrap();
+    let result = compile_input(input, &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("'username'") && rendered.contains("'state'"));
@@ -969,7 +953,6 @@ fn like_rejects_short_contains_pattern() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(
@@ -989,7 +972,6 @@ fn like_rejects_single_char_starts_with() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(
@@ -1009,7 +991,6 @@ fn like_rejects_empty_ends_with() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(
@@ -1029,7 +1010,6 @@ fn like_rejects_contains_on_email() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(
@@ -1049,7 +1029,6 @@ fn like_rejects_starts_with_on_email() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(
@@ -1070,7 +1049,6 @@ fn like_equality_on_email_compiles() {
         }"#,
             &embedded_ontology(),
             &test_ctx(),
-            "",
         )
         .is_ok()
     );
@@ -1091,7 +1069,6 @@ fn filterable_rejects_traversal_path_starts_with() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(
@@ -1113,7 +1090,6 @@ fn filterable_rejects_traversal_path_equality() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(
@@ -1135,7 +1111,6 @@ fn filterable_rejects_traversal_path_on_mr() {
         }"#,
         &embedded_ontology(),
         &test_ctx(),
-        "",
     )
     .unwrap_err();
     assert!(
@@ -1159,7 +1134,6 @@ fn filterable_allows_traversal_path_in_columns() {
         }"#,
             &embedded_ontology(),
             &test_ctx(),
-            "",
         )
         .is_ok()
     );

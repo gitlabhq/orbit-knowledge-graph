@@ -40,7 +40,7 @@ pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> compiler::Result
     v.check_ontology(&value)?;
     let input: compiler::Input = serde_json::from_value(value)?;
     v.check_references(&input)?;
-    let mut input = normalize(input, ontology, "")?;
+    let mut input = normalize(input, ontology)?;
     let node = lower(&mut input)?;
     Ok(node)
 }

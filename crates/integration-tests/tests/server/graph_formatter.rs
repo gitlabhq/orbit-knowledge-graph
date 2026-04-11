@@ -152,7 +152,7 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
     let security_ctx = test_security_context();
-    let compiled = Arc::new(compile(json, &ontology, &security_ctx, "").unwrap());
+    let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
@@ -167,7 +167,6 @@ async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService)
         security_context: Some(security_ctx),
         server_extensions,
         phases: TypeMap::default(),
-        table_prefix: String::new(),
     };
     pipeline_ctx.phases.insert(RedactionOutput {
         query_result: result,

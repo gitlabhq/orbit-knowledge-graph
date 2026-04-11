@@ -65,7 +65,7 @@ pub(super) async fn run_query_with_security(
 ) -> ResponseView {
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
-    let compiled = Arc::new(compile(json, &ontology, &security_ctx, "").unwrap());
+    let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
 
@@ -81,7 +81,6 @@ pub(super) async fn run_query_with_security(
         security_context: Some(security_ctx),
         server_extensions,
         phases: TypeMap::default(),
-        table_prefix: String::new(),
     };
     pipeline_ctx.phases.insert(RedactionOutput {
         query_result: result,

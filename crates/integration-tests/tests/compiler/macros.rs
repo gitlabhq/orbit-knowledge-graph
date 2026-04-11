@@ -15,7 +15,7 @@ use ontology::Ontology;
 use super::setup::test_ctx;
 
 fn env() -> SecureEnv {
-    SecureEnv::new(Arc::new(Ontology::new()), test_ctx(), String::new())
+    SecureEnv::new(Arc::new(Ontology::new()), test_ctx())
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -26,7 +26,7 @@ fn env() -> SecureEnv {
 fn secure_env_new_stores_fields() {
     let ontology = Arc::new(Ontology::new());
     let ctx = test_ctx();
-    let env = SecureEnv::new(ontology.clone(), ctx.clone(), String::new());
+    let env = SecureEnv::new(ontology.clone(), ctx.clone());
 
     assert!(Arc::ptr_eq(env.ontology(), &ontology));
     assert_eq!(env.security_ctx().org_id, ctx.org_id);
@@ -35,7 +35,7 @@ fn secure_env_new_stores_fields() {
 #[test]
 fn local_env_new_stores_ontology() {
     let ontology = Arc::new(Ontology::new());
-    let env = LocalEnv::new(ontology.clone(), String::new());
+    let env = LocalEnv::new(ontology.clone());
 
     assert!(Arc::ptr_eq(env.ontology(), &ontology));
 }

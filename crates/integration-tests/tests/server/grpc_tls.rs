@@ -44,7 +44,6 @@ fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> G
         tls_config,
         None,
         GrpcConfig::default(),
-        String::new(),
     )
 }
 

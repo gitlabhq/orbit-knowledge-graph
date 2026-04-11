@@ -74,7 +74,7 @@ fn search_json() -> &'static str {
 }
 
 fn secure_env(ontology: &Ontology) -> SecureEnv {
-    SecureEnv::new(Arc::new(ontology.clone()), test_ctx(), String::new())
+    SecureEnv::new(Arc::new(ontology.clone()), test_ctx())
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -371,7 +371,7 @@ fn clickhouse_preset_compiles_traversal_query() {
 fn from_input_preset_compiles_pre_built_input() {
     let ontology = embedded_ontology();
     let ctx = test_ctx();
-    let env = SecureEnv::new(Arc::new(ontology.clone()), ctx, String::new());
+    let env = SecureEnv::new(Arc::new(ontology.clone()), ctx);
 
     let json = r#"{
         "query_type": "search",
@@ -383,7 +383,7 @@ fn from_input_preset_compiles_pre_built_input() {
     v.check_ontology(&value).unwrap();
     let input: compiler::Input = serde_json::from_value(value).unwrap();
     v.check_references(&input).unwrap();
-    let input = compiler::normalize(input, &ontology, "").unwrap();
+    let input = compiler::normalize(input, &ontology).unwrap();
 
     let state = QueryState::from_input(input);
     let result = pipelines::from_input()
@@ -402,7 +402,7 @@ fn hydration_preset_skips_security_and_check() {
     let observer = TestObserver::default();
     let ontology = embedded_ontology();
     let ctx = test_ctx();
-    let env = SecureEnv::new(Arc::new(Ontology::new()), ctx, String::new());
+    let env = SecureEnv::new(Arc::new(Ontology::new()), ctx);
 
     let json = r#"{
         "query_type": "search",
@@ -414,7 +414,7 @@ fn hydration_preset_skips_security_and_check() {
     v.check_ontology(&value).unwrap();
     let input: compiler::Input = serde_json::from_value(value).unwrap();
     v.check_references(&input).unwrap();
-    let mut input = compiler::normalize(input, &ontology, "").unwrap();
+    let mut input = compiler::normalize(input, &ontology).unwrap();
     input.query_type = compiler::QueryType::Hydration;
 
     let state = QueryState::from_input(input);
@@ -459,7 +459,7 @@ fn clickhouse_preset_matches_compile_output() {
     let ctx = test_ctx();
 
     // Via compile() public API
-    let via_api = compiler::compile(search_json(), &ontology, &ctx, "").unwrap();
+    let via_api = compiler::compile(search_json(), &ontology, &ctx).unwrap();
 
     // Via pipeline preset directly
     let env = secure_env(&ontology);
