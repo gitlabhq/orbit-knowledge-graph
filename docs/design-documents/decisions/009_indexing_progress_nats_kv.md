@@ -65,7 +65,7 @@ request.
 
 ### Architecture
 
-```
+```plaintext
 Indexer (DispatchIndexing + Indexer modes)
   |
   | Writes progress after each ETL cycle
@@ -249,7 +249,7 @@ that E2E tests and UI poll for.
 
 State transitions:
 
-```
+```plaintext
                      first dispatch
   pending ──────────────────────────────> indexing
                                             │
@@ -301,31 +301,69 @@ subtree total for all entities at or below that prefix.
 
 **Write flow (post-ETL):**
 
-1. Run one `UNION ALL` count query across all entity tables, grouped by full
-   `traversal_path`:
+1. Run one `UNION ALL` count query across all entity tables using `uniq(id)`
+   instead of `count()`, grouped by full `traversal_path`:
 
    ```sql
-   SELECT 'Project' AS entity, traversal_path, count() AS cnt
+   SELECT 'Project' AS entity, traversal_path, uniq(id) AS cnt
    FROM gl_project
-   WHERE startsWith(traversal_path, {tp:String}) AND NOT _deleted
+   WHERE startsWith(traversal_path, {tp:String})
    GROUP BY traversal_path
    UNION ALL
-   SELECT 'MergeRequest' AS entity, traversal_path, count() AS cnt
+   SELECT 'MergeRequest' AS entity, traversal_path, uniq(id) AS cnt
    FROM gl_merge_request
-   WHERE startsWith(traversal_path, {tp:String}) AND NOT _deleted
+   WHERE startsWith(traversal_path, {tp:String})
    GROUP BY traversal_path
    UNION ALL
    -- ... all 24 node types (SDLC + code tables)
    ```
 
-2. Run one count query for edges:
+   **Why `uniq(id)` instead of `count()`.** Graph tables use
+   `ReplacingMergeTree`, which deduplicates rows with the same primary key
+   during background merges. Between merges, updated rows exist as multiple
+   versions. `count()` counts every version, producing overcounts proportional
+   to update volume. On staging with 16M edge rows, `count()` overcounts by
+   49% overall and up to 300% for frequently updated edge types. `uniq(id)`
+   uses HyperLogLog (HLL), a probabilistic set estimator: duplicate versions
+   of the same entity have the same `id`, so HLL counts them once. HLL error
+   is ~1-2% at high cardinalities, which is acceptable for a progress
+   indicator and far better than the 49-300% overcount from `count()`.
+
+   **Why no `NOT _deleted` filter.** Soft-deleted rows (`_deleted = true`) are
+   physically removed during background merges when
+   `allow_experimental_replacing_merge_with_cleanup = 1` is set (which it is
+   on all graph tables). Between merges, the few surviving deleted rows add
+   negligible error to HLL estimates. Omitting the filter avoids reading the
+   `_deleted` column, which reduces I/O. The `exact_counts = true` path uses
+   `FINAL` with `NOT _deleted` for users who need precise numbers.
+
+   **Why no `FINAL`.** `FINAL` forces ClickHouse to read all raw rows and
+   deduplicate them by primary key at query time. This is correct but
+   expensive: on staging at 16M edges, `FINAL` reads 14.4M rows (620 MB) and
+   takes 579ms vs 71ms without. At billions of edges, `FINAL` would take
+   minutes. More critically, `FINAL` bypasses aggregate projections (see
+   [below](#edge-count-projection)), negating the projection's performance
+   benefit. `uniq()` achieves equivalent deduplication via HLL without `FINAL`.
+
+2. Run one edge count query using the `node_edge_counts` projection:
 
    ```sql
-   SELECT traversal_path, relationship_kind, count() AS cnt
-   FROM gl_edge
-   WHERE startsWith(traversal_path, {tp:String}) AND NOT _deleted
+   SELECT traversal_path, relationship_kind, sum(edge_cnt) AS cnt
+   FROM (
+       SELECT traversal_path, source_kind, target_kind, relationship_kind,
+              uniq(source_id, target_id) AS edge_cnt
+       FROM gl_edge
+       WHERE startsWith(traversal_path, {tp:String})
+       GROUP BY traversal_path, source_kind, target_kind, relationship_kind
+   )
    GROUP BY traversal_path, relationship_kind
    ```
+
+   The inner query matches the `node_edge_counts` projection's GROUP BY
+   signature, so ClickHouse reads pre-aggregated projection data instead of
+   raw edge rows. `uniq(source_id, target_id)` counts distinct edge pairs,
+   naturally deduplicating RMT version duplicates. See
+   [Edge count projection](#edge-count-projection) for details.
 
 3. Run cross-namespace edge queries (see
    [below](#cross-namespace-edge-counting)).
@@ -333,7 +371,7 @@ subtree total for all entities at or below that prefix.
 4. In-memory rollup: for each row, split the traversal path and accumulate
    counts at every ancestor prefix:
 
-   ```
+   ```plaintext
    Row: traversal_path="1/9970/100/200/", entity="MergeRequest", count=45
    Adds 45 to:
      prefix "1.9970.100.200"   (leaf)
@@ -343,9 +381,10 @@ subtree total for all entities at or below that prefix.
 
 5. Write one KV entry per distinct prefix with aggregated subtree counts.
 
-This is 2 ClickHouse queries (one `UNION ALL` for nodes, one for edges) plus
-cross-namespace edge queries, plus in-memory aggregation per ETL cycle. For a
-namespace with G groups, that produces G KV puts. Typically G < 100.
+This is 2 ClickHouse queries (one `UNION ALL` for nodes, one projection
+query for edges) plus cross-namespace edge queries, plus in-memory
+aggregation per ETL cycle. For a namespace with G groups, that produces
+G KV puts. Typically G < 100.
 
 **Read flow (webserver):**
 
@@ -426,42 +465,154 @@ The `code.<project_id>` key provides O(1) lookup by project ID. The webserver
 receives a project ID, reads the key, checks the embedded `traversal_path`
 against the user's access, and returns the per-branch breakdown.
 
+### Edge count projection
+
+The `gl_edge` table stores all graph relationships and is the largest table
+(16M rows on staging, expected to grow to billions). Scanning it for counts
+on every ETL cycle is expensive. A pre-aggregated projection eliminates this
+cost.
+
+**Projection DDL:**
+
+```sql
+ALTER TABLE gl_edge ADD PROJECTION node_edge_counts (
+    SELECT
+        traversal_path,
+        source_kind,
+        target_kind,
+        relationship_kind,
+        uniq(source_id),
+        uniq(target_id),
+        uniq(source_id, target_id)
+    GROUP BY traversal_path, source_kind, target_kind, relationship_kind
+);
+```
+
+**How it works.** ClickHouse builds the projection per data part at insert
+time, computing one HLL sketch per distinct
+`(traversal_path, source_kind, target_kind, relationship_kind)` group. When
+a query's GROUP BY matches the projection's signature, ClickHouse reads the
+pre-aggregated projection data instead of raw rows. HLL states from multiple
+parts are merged during the query (HLL merge is a set union, which is
+associative and handles cross-part deduplication correctly).
+
+**Why `uniq(source_id, target_id)` for edge counts.** Each edge row has a
+unique primary key `(traversal_path, source_id, relationship_kind, target_id,
+source_kind, target_kind)`. Within each projection group (which already fixes
+4 of those 6 columns), `(source_id, target_id)` uniquely identifies an edge.
+Duplicate RMT versions of the same edge share the same `(source_id, target_id)`
+pair, so `uniq(source_id, target_id)` deduplicates them via HLL without
+needing `FINAL`.
+
+**Why `FINAL` cannot be used with this projection.** `FINAL` forces
+ClickHouse to read raw rows for deduplication. Aggregate projections store
+HLL states that have lost per-row granularity, so ClickHouse cannot apply
+RMT dedup to projection data. `EXPLAIN PLAN` confirms this: without `FINAL`,
+the plan shows `ReadFromMergeTree (node_edge_counts)` (projection); with
+`FINAL`, it shows `ReadFromMergeTree (gkg.gl_edge)` (raw table). This was
+verified on both local and staging ClickHouse instances.
+
+**Projection cardinality.** On staging, the projection contains 4,126
+distinct groups for the largest namespace (373 traversal paths x ~40
+relationship types with valid source/target kind combinations). This number
+is bounded by the ontology, not by the raw edge count. At billions of edges,
+the projection still contains ~4,000 rows per namespace.
+
+**Deployment.** After adding the projection DDL to `graph.sql`, run
+`ALTER TABLE gl_edge MATERIALIZE PROJECTION node_edge_counts` to build
+projection data for existing parts. New inserts build projection data
+automatically. Without materialization, ClickHouse falls back to raw table
+scans for parts that lack projection data. On staging before materialization,
+14/16 parts lacked the projection, causing 15,727 granule reads instead of
+12.
+
 ### Performance
 
-Post-ETL count queries add latency to the SDLC handler. Three optimizations
+Post-ETL count queries add latency to the SDLC handler. Four strategies
 keep this acceptable:
+
+#### Use HLL (`uniq()`) instead of `count()` to avoid FINAL
+
+All count queries use `uniq()` instead of `count()`. This eliminates the
+need for `FINAL` while keeping error below ~1-2% (HLL). Without this, the
+only way to get accurate counts is `FINAL`, which is prohibitively expensive
+at scale (see above).
+
+#### Use the edge projection to avoid scanning raw edge data
+
+The `node_edge_counts` projection reduces edge count queries from scanning
+millions of raw rows to reading ~4,000 pre-aggregated projection rows per
+namespace. The node `UNION ALL` query still scans node tables directly, but
+these are 10-100x smaller than `gl_edge`.
 
 #### Skip counts when ETL processed zero rows
 
-The pipeline already tracks `total_rows` per plan. If all plans processed zero
-rows (the common case for incremental indexing with no changes), skip the count
-queries entirely. The existing KV values are already up-to-date.
+The pipeline already tracks `total_rows` per plan. If all plans processed
+zero rows, skip the count queries entirely. The existing KV values are
+already up-to-date.
 
-This eliminates the count overhead in the vast majority of handler invocations.
+#### Debounce count queries
 
-#### Drop FINAL from count queries
+Even with the projection, running count queries on every ETL cycle is
+unnecessary when the dispatcher runs frequently (sub-minute intervals).
+The handler skips count queries if the KV `counts` key was updated less than
+30 seconds ago. At 500ms dispatch intervals, this eliminates ~98% of count
+query invocations while keeping data fresh enough for UI polling.
 
-The existing `GetGraphStats` endpoint already runs count queries without
-`FINAL`. Between background merges, counts may include un-merged old versions,
-producing a slight overcount. With
-`allow_experimental_replacing_merge_with_cleanup = 1` the background merger
-actively cleans up, so drift is small. For a progress indicator, approximate
-counts are acceptable.
+#### Staging performance (X-ClickHouse-Summary)
 
-#### Batch into a single UNION ALL query
+Measured on staging against namespace `1/9970/` (16.4M raw edge rows, ~4M
+node rows, 373 distinct traversal paths):
 
-Instead of N separate round-trips to ClickHouse, emit a single `UNION ALL`
-query for all entity types. This mirrors how `GetGraphStats` works today.
-ClickHouse can parallelize the subqueries internally.
+| Query | Rows read | Data read | Server time | Memory | Accuracy |
+|---|---|---|---|---|---|
+| Edge: `uniq(src,tgt)` via projection | 9,848 | 1.1 MB | 71ms | 121 MB | +0.1% |
+| Edge: `count()` raw scan | 10,162,678 | 340 MB | 217ms | 130 MB | +49.4% |
+| Edge: `FINAL` (ground truth) | 14,413,693 | 620 MB | 579ms | 735 MB | exact |
+| Node: `uniq(id)` UNION ALL | 3,802,448 | 92 MB | 66ms | 158 MB | <1% |
+| Node: `count()` UNION ALL | 3,802,448 | 63 MB | 51ms | 138 MB | 0-95% |
+
+The projection reads **1,032x fewer rows** and **306x less data** than the
+raw scan, and **1,464x fewer rows** than `FINAL`.
+
+Combined post-ETL cost: **137ms server-side** (71ms edges + 66ms nodes).
+With 30s debounce, this runs at most twice per minute per namespace.
+
+#### Accuracy detail
+
+Per-relationship-kind error for `uniq(source_id, target_id)` vs `FINAL` on
+staging:
+
+| Relationship | `count()` error | `uniq()` error |
+|---|---|---|
+| IN_PROJECT (2.1M edges) | +54.2% | -0.6% |
+| HAS_STAGE (455K edges) | +171.4% | +0.6% |
+| AUTHORED (664K edges) | +87.3% | +0.1% |
+| CALLS (273K edges) | +4.2% | +1.8% |
+| HAS_LABEL (106K edges) | +1.3% | 0% |
+| CLOSES (11K edges) | 0% | 0% |
+| MERGED_BY (3.5K edges) | 0% | 0% |
+
+Low-cardinality edge types (< 1K) are exact. High-cardinality types have
+~0.1-1.8% HLL error. The `count()` approach overcounts by 49-300% for edge
+types that are re-written on every incremental run.
+
+Node counts with `uniq(id)` are similarly accurate:
+
+| Table | `count()` error | `uniq(id)` error |
+|---|---|---|
+| gl_note (567K) | +95.1% | +0.2% |
+| gl_definition (393K) | +5.7% | +0.2% |
+| gl_merge_request (31K) | +0.2% | 0% |
+| gl_pipeline (160K) | 0% | -0.3% |
 
 #### Impact analysis
 
-With all three optimizations:
-
-- **Zero-row incremental runs (common case):** no count overhead at all.
-- **Runs with changed data:** one `UNION ALL` node query + one edge query +
-  2 cross-namespace join queries. Estimated ~50-200ms total without `FINAL`,
-  well within the 300s handler `ack_wait` timeout.
+- **Zero-row incremental runs:** no count overhead at all (skip).
+- **Within debounce window:** no count overhead (skip).
+- **Non-zero runs past debounce:** one node `UNION ALL` + one projection
+  edge query + 2 cross-namespace join queries. ~137ms server-side, well
+  within the 300s handler `ack_wait` timeout.
 - **Checkpoint advancement:** `save_completed` happens per-plan before
   counts. Count query failures do not affect watermark progression.
 
@@ -562,7 +713,7 @@ webserver + ClickHouse + NATS) runs alongside Rails.
 
 **Complete "indexing done" check:**
 
-```
+```plaintext
 meta.<ns_id>.initial_backfill_done == true
 AND meta.<ns_id>.state == "idle"
 AND meta.<ns_id>.code.projects_indexed == meta.<ns_id>.code.projects_total
@@ -729,6 +880,25 @@ lifecycle management, monitoring per bucket, and NATS resource consumption
 proportional to enabled namespaces. A single bucket with key prefixes is
 simpler.
 
+### Use `count()` without `FINAL` for count queries
+
+The original version of this ADR proposed `count()` without `FINAL`, relying
+on `allow_experimental_replacing_merge_with_cleanup` to keep overcount
+"small." Staging data disproved this: `count()` overcounts by 49% overall
+and up to 300% for edge types that are re-written every incremental cycle
+(AUTHORED, IN_PROJECT, HAS_STAGE). The background merger cannot keep pace
+with continuous CDC writes. `uniq()` solves this by deduplicating via HLL
+with ~1-2% error instead of 49-300% overcount.
+
+### Use `FINAL` with the edge projection
+
+`FINAL` produces exact counts but bypasses aggregate projections entirely.
+EXPLAIN PLAN confirms that `FROM gl_edge FINAL` reads from
+`ReadFromMergeTree (gkg.gl_edge)` (raw table), not
+`ReadFromMergeTree (node_edge_counts)` (projection). On staging, `FINAL`
+reads 14.4M rows (620 MB, 579ms) vs 9,848 rows (1.1 MB, 71ms) for the
+projection. At billions of edges, `FINAL` would take minutes.
+
 ### Ignore cross-namespace edges
 
 Count edges only by the source entity's traversal path. This undercounts edges
@@ -791,3 +961,4 @@ approach adds 2 join queries per ETL cycle, which is acceptable.
 - [NatsServices trait](../../../crates/indexer/src/nats/services.rs)
 - [Graph stats service](../../../crates/gkg-server/src/graph_stats/mod.rs)
 - [gl_edge table schema](../../../config/graph.sql)
+- [Snippet #5978783: query optimization research](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5978783)
