@@ -7,6 +7,7 @@ use internment::ArcIntern;
 use parser_core::utils::Range;
 
 use super::types::*;
+use std::collections::HashMap;
 
 pub struct JsEmitted {
     pub definitions: Vec<DefinitionNode>,
@@ -17,6 +18,11 @@ pub struct JsEmitted {
 impl JsFileAnalysis {
     pub fn emit(&self) -> JsEmitted {
         let path = ArcIntern::new(self.relative_path.clone());
+        let def_ranges_by_fqn: HashMap<&str, Range> = self
+            .defs
+            .iter()
+            .map(|def| (def.fqn.as_str(), def.range))
+            .collect();
         let mut definitions = Vec::with_capacity(self.defs.len());
         let mut imported_symbols = Vec::with_capacity(self.imports.len());
         let mut relationships = Vec::new();
@@ -114,13 +120,20 @@ impl JsFileAnalysis {
                         alias: None,
                     }),
                 ),
-                JsImportKind::CjsRequire => (
-                    "CjsRequire",
-                    Some(ImportIdentifier {
-                        name: imp.local_name.clone(),
-                        alias: None,
-                    }),
-                ),
+                JsImportKind::CjsRequire { imported_name } => {
+                    let identifier_name = imported_name
+                        .clone()
+                        .unwrap_or_else(|| imp.local_name.clone());
+                    let alias = (identifier_name != imp.local_name).then(|| imp.local_name.clone());
+
+                    (
+                        "CjsRequire",
+                        Some(ImportIdentifier {
+                            name: identifier_name,
+                            alias,
+                        }),
+                    )
+                }
             };
 
             let location = ImportedSymbolLocation {
@@ -153,7 +166,7 @@ impl JsFileAnalysis {
 
         for call in &self.calls {
             let callee_range = match &call.callee {
-                JsCallTarget::Direct { range, .. } => Some(*range),
+                JsCallTarget::Direct { fqn, .. } => def_ranges_by_fqn.get(fqn.as_str()).copied(),
                 JsCallTarget::ThisMethod { resolved_range, .. }
                 | JsCallTarget::SuperMethod { resolved_range, .. } => *resolved_range,
             };

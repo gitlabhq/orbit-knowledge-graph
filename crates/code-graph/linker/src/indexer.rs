@@ -292,8 +292,12 @@ impl RepositoryIndexer {
                             let _permit = cpu_sem.acquire_owned().await.expect("semaphore closed");
 
                             let parse_res = tokio_rayon::spawn(move || {
-                                let processor = FileProcessor::from_file_info(file_info, &content);
-                                processor.process()
+                                // Grow stack to 32MB for deeply nested files (e.g. TypeScript checker.ts)
+                                stacker::maybe_grow(32 * 1024, 32 * 1024 * 1024, || {
+                                    let processor =
+                                        FileProcessor::from_file_info(file_info, &content);
+                                    processor.process()
+                                })
                             })
                             .await;
 

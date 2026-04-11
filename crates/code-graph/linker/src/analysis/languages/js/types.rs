@@ -13,6 +13,17 @@ pub struct JsModuleInfo {
     pub definition_fqns: HashMap<String, Range>,
 }
 
+impl JsModuleInfo {
+    pub fn merge(&mut self, other: Self) {
+        self.exports.extend(other.exports);
+        self.imports.extend(other.imports);
+        self.star_export_sources.extend(other.star_export_sources);
+        self.cjs_exports.extend(other.cjs_exports);
+        self.has_module_syntax |= other.has_module_syntax;
+        self.definition_fqns.extend(other.definition_fqns);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExportedBinding {
     pub local_fqn: String,
@@ -143,7 +154,7 @@ pub enum JsImportKind {
     Named { imported_name: String },
     Default,
     Namespace,
-    CjsRequire,
+    CjsRequire { imported_name: Option<String> },
 }
 
 #[derive(Debug, Clone)]

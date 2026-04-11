@@ -202,26 +202,62 @@ fn extract_cjs_imports(nodes: &AstNodes, lt: &LineTable, imports: &mut Vec<JsImp
                 continue;
             };
             let specifier = str_lit.value.to_string();
+            let range = lt.span_to_range(call.span);
 
-            let binding = nodes.ancestor_ids(node.id()).find_map(|aid| {
-                if let AstKind::VariableDeclarator(decl) = nodes.kind(aid)
-                    && let oxc::ast::ast::BindingPattern::BindingIdentifier(ident) = &decl.id
-                {
-                    return Some(ident.name.to_string());
+            let Some(bindings) = nodes.ancestor_ids(node.id()).find_map(|aid| {
+                if let AstKind::VariableDeclarator(decl) = nodes.kind(aid) {
+                    let mut bindings = Vec::new();
+                    collect_cjs_bindings(&decl.id, &mut bindings, None);
+                    return Some(bindings);
                 }
                 None
-            });
+            }) else {
+                continue;
+            };
 
-            let range = lt.span_to_range(call.span);
-            let local_name = binding.unwrap_or_default();
+            for (local_name, imported_name) in bindings {
+                imports.push(JsImport {
+                    specifier: specifier.clone(),
+                    kind: JsImportKind::CjsRequire { imported_name },
+                    local_name,
+                    range,
+                    is_type: false,
+                });
+            }
+        }
+    }
+}
 
-            imports.push(JsImport {
-                specifier,
-                kind: JsImportKind::CjsRequire,
-                local_name,
-                range,
-                is_type: false,
-            });
+fn collect_cjs_bindings(
+    pattern: &oxc::ast::ast::BindingPattern<'_>,
+    bindings: &mut Vec<(String, Option<String>)>,
+    imported_name: Option<String>,
+) {
+    use oxc::ast::ast::BindingPattern;
+
+    match pattern {
+        BindingPattern::BindingIdentifier(ident) => {
+            bindings.push((ident.name.to_string(), imported_name));
+        }
+        BindingPattern::AssignmentPattern(assign) => {
+            collect_cjs_bindings(&assign.left, bindings, imported_name);
+        }
+        BindingPattern::ObjectPattern(object) => {
+            for property in &object.properties {
+                let property_name = property.key.static_name().map(|name| name.into_owned());
+                collect_cjs_bindings(&property.value, bindings, property_name);
+            }
+            if let Some(rest) = &object.rest {
+                collect_cjs_bindings(&rest.argument, bindings, None);
+            }
+        }
+        BindingPattern::ArrayPattern(array) => {
+            for element in array.elements.iter().flatten() {
+                collect_cjs_bindings(element, bindings, None);
+            }
+            if let Some(rest) = &array.rest {
+                collect_cjs_bindings(&rest.argument, bindings, None);
+            }
         }
     }
 }
@@ -662,11 +698,25 @@ fn extract_cjs_exports(nodes: &AstNodes, lt: &LineTable) -> Vec<CjsExport> {
 }
 
 impl JsAnalyzer {
+    /// Max line length before we skip a file as likely generated/minified.
+    /// OXC's recursive descent parser overflows on deeply nested expressions in long lines.
+    const MAX_LINE_LENGTH: usize = 50_000;
+
     pub fn analyze_file(
         source: &str,
         file_path: &str,
         relative_path: &str,
     ) -> Result<JsFileAnalysis, String> {
+        // Skip files with extremely long lines (generated data, minified bundles).
+        // OXC's recursive descent parser overflows on deeply nested expressions in such lines.
+        if let Some(line) = source.lines().find(|l| l.len() > Self::MAX_LINE_LENGTH) {
+            return Err(format!(
+                "Skipping {file_path}: line too long ({} bytes, max {})",
+                line.len(),
+                Self::MAX_LINE_LENGTH
+            ));
+        }
+
         let source_type = SourceType::from_path(file_path)
             .map_err(|_| format!("Unknown JS source type: {file_path}"))?;
         let allocator = Allocator::default();
@@ -991,6 +1041,7 @@ function increment() { count.value++; }
         let source = r#"
 const fs = require('fs');
 const { join } = require('path');
+const { resolve: presolve } = require('path');
 "#;
         let result = JsAnalyzer::analyze_file(source, "test.js", "test.js").unwrap();
         let def_names: Vec<&str> = result.defs.iter().map(|d| d.name.as_str()).collect();
@@ -999,14 +1050,49 @@ const { join } = require('path');
             def_names.contains(&"join"),
             "Should find join destructured variable"
         );
-
-        let cjs_imports: Vec<_> = result
-            .imports
-            .iter()
-            .filter(|i| i.kind == JsImportKind::CjsRequire)
-            .collect();
         assert!(
-            !cjs_imports.is_empty(),
+            def_names.contains(&"presolve"),
+            "Should preserve aliased destructured require bindings"
+        );
+
+        assert!(
+            result.imports.iter().any(|i| {
+                matches!(
+                    &i.kind,
+                    JsImportKind::CjsRequire {
+                        imported_name: None
+                    }
+                ) && i.local_name == "fs"
+            }),
+            "Default CommonJS require should keep the local binding name"
+        );
+        assert!(
+            result.imports.iter().any(|i| {
+                matches!(
+                    &i.kind,
+                    JsImportKind::CjsRequire {
+                        imported_name: Some(name)
+                    } if name == "join"
+                ) && i.local_name == "join"
+            }),
+            "Destructured CommonJS require should keep the imported member name"
+        );
+        assert!(
+            result.imports.iter().any(|i| {
+                matches!(
+                    &i.kind,
+                    JsImportKind::CjsRequire {
+                        imported_name: Some(name)
+                    } if name == "resolve"
+                ) && i.local_name == "presolve"
+            }),
+            "Aliased CommonJS require should keep both imported and local names"
+        );
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| matches!(&i.kind, JsImportKind::CjsRequire { .. })),
             "CJS require() should produce JsImport entries"
         );
     }

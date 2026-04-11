@@ -5067,6 +5067,7 @@ dependencies = [
  "gkg-utils",
  "ontology",
  "query-engine",
+ "rayon",
  "serde",
  "serde_json",
  "strum 0.28.0",

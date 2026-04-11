@@ -207,9 +207,9 @@ define_languages! {
     },
     TypeScript {
         name: "typescript",
-        extensions: ["ts", "js"],
-        names: ["typescript", "javascript"],
-        exclude_extensions: ["min.js"]
+        extensions: ["ts_legacy_unused"],
+        names: ["typescript_legacy"],
+        exclude_extensions: []
     },
     Kotlin {
         name: "kotlin",
@@ -237,7 +237,7 @@ define_languages! {
     },
     Js {
         name: "js",
-        extensions: ["tsx", "jsx", "mjs", "cjs", "mts", "cts"],
+        extensions: ["ts", "js", "tsx", "jsx", "mjs", "cjs", "mts", "cts"],
         names: ["js"],
         exclude_extensions: ["min.js", "min.mjs"]
     },

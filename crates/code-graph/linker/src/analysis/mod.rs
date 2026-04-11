@@ -2,6 +2,7 @@ pub mod files;
 pub mod languages;
 pub mod types;
 
+use crate::analysis::languages::js::{JsCrossFileResolver, is_bun_project};
 use crate::analysis::types::rels_by_kind;
 use crate::analysis::types::{
     ConsolidatedRelationship, DefinitionNode, DirectoryNode, FileNode, FqnType, GraphData,
@@ -14,6 +15,7 @@ use parser_core::parser::SupportedLanguage;
 use parser_core::utils::{Position, Range};
 use std::{
     collections::{HashMap, HashSet},
+    path::Path,
     time::{Duration, Instant},
 };
 
@@ -91,61 +93,32 @@ impl AnalysisService {
         let mut created_directories = HashSet::new();
         let mut created_dir_relationships = HashSet::new();
 
-        let results_by_language = self.group_results_by_language(file_results);
-        for (language, results) in results_by_language {
-            // JS/TS/Vue/Svelte: OXC analyzer already produced graph nodes and
-            // relationships. Merge them directly instead of going through the
-            // language-specific maps.
-            let is_js = matches!(
-                language,
-                SupportedLanguage::TypeScript
-                    | SupportedLanguage::Js
-                    | SupportedLanguage::Vue
-                    | SupportedLanguage::Svelte
+        let (js_results, non_js_results): (Vec<_>, Vec<_>) =
+            file_results.into_iter().partition(|file_result| {
+                matches!(
+                    file_result.language,
+                    SupportedLanguage::TypeScript
+                        | SupportedLanguage::Js
+                        | SupportedLanguage::Vue
+                        | SupportedLanguage::Svelte
+                )
+            });
+
+        if !js_results.is_empty() {
+            self.extract_js_entities(
+                js_results,
+                &mut definition_nodes,
+                &mut imported_symbol_nodes,
+                &mut file_nodes,
+                &mut directory_nodes,
+                &mut relationships,
+                &mut created_directories,
+                &mut created_dir_relationships,
             );
+        }
 
-            if is_js {
-                for file_result in results {
-                    self.extract_file_system_entities(
-                        &file_result,
-                        &mut file_nodes,
-                        &mut directory_nodes,
-                        &mut relationships,
-                        &mut created_directories,
-                        &mut created_dir_relationships,
-                    );
-
-                    if let Some(js_analysis) = &file_result.js_analysis {
-                        let relative = self
-                            .filesystem_analyzer
-                            .get_relative_path(&file_result.file_path);
-                        let rel_path = ArcIntern::new(relative.clone());
-
-                        let mut emitted = js_analysis.emit();
-
-                        for def in &mut emitted.definitions {
-                            def.file_path = rel_path.clone();
-                        }
-                        for imp in &mut emitted.imported_symbols {
-                            imp.location.file_path = relative.clone();
-                        }
-                        for rel in &mut emitted.relationships {
-                            if rel.source_path.is_some() {
-                                rel.source_path = Some(rel_path.clone());
-                            }
-                            if rel.target_path.is_some() {
-                                rel.target_path = Some(rel_path.clone());
-                            }
-                        }
-
-                        definition_nodes.extend(emitted.definitions);
-                        imported_symbol_nodes.extend(emitted.imported_symbols);
-                        relationships.extend(emitted.relationships);
-                    }
-                }
-                continue;
-            }
-
+        let results_by_language = self.group_results_by_language(non_js_results);
+        for (language, results) in results_by_language {
             let mut definition_map = HashMap::new(); // (fqn_str, file_path) -> (node, fqn)
             let mut imported_symbol_map = HashMap::new(); // (fqn_str, file_path) -> [node, ...]
             let mut imported_symbol_to_imported_symbols = HashMap::new();
@@ -236,6 +209,94 @@ impl AnalysisService {
         };
 
         Ok(graph_data)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn extract_js_entities(
+        &mut self,
+        results: Vec<FileProcessingResult>,
+        definition_nodes: &mut Vec<DefinitionNode>,
+        imported_symbol_nodes: &mut Vec<ImportedSymbolNode>,
+        file_nodes: &mut Vec<FileNode>,
+        directory_nodes: &mut Vec<DirectoryNode>,
+        relationships: &mut Vec<ConsolidatedRelationship>,
+        created_directories: &mut HashSet<String>,
+        created_dir_relationships: &mut HashSet<(String, String)>,
+    ) {
+        let root_dir = Path::new(&self.repository_path);
+        let mut discovered_paths = Vec::with_capacity(results.len() + 3);
+        let mut modules = HashMap::new();
+
+        for lockfile in ["bun.lock", "bun.lockb", "bunfig.toml"] {
+            if root_dir.join(lockfile).is_file() {
+                discovered_paths.push(lockfile.to_string());
+            }
+        }
+
+        for file_result in &results {
+            self.extract_file_system_entities(
+                file_result,
+                file_nodes,
+                directory_nodes,
+                relationships,
+                created_directories,
+                created_dir_relationships,
+            );
+
+            let relative = self
+                .filesystem_analyzer
+                .get_relative_path(&file_result.file_path);
+            discovered_paths.push(relative.clone());
+
+            if let Some(js_analysis) = &file_result.js_analysis {
+                modules.insert(relative.clone(), js_analysis.module_info.clone());
+
+                let original_path = js_analysis.relative_path.as_str();
+                let rel_path = ArcIntern::new(relative.clone());
+                let mut emitted = js_analysis.emit();
+
+                for def in &mut emitted.definitions {
+                    def.file_path = rel_path.clone();
+                }
+                for imp in &mut emitted.imported_symbols {
+                    imp.location.file_path = relative.clone();
+                }
+                for rel in &mut emitted.relationships {
+                    if rel.source_path.is_none()
+                        || rel
+                            .source_path
+                            .as_ref()
+                            .is_some_and(|path| path.as_ref().as_str() == original_path)
+                    {
+                        rel.source_path = Some(rel_path.clone());
+                    }
+                    if rel.target_path.is_none()
+                        || rel
+                            .target_path
+                            .as_ref()
+                            .is_some_and(|path| path.as_ref().as_str() == original_path)
+                    {
+                        rel.target_path = Some(rel_path.clone());
+                    }
+                }
+
+                definition_nodes.extend(emitted.definitions);
+                imported_symbol_nodes.extend(emitted.imported_symbols);
+                relationships.extend(emitted.relationships);
+            }
+        }
+
+        if modules.is_empty() {
+            return;
+        }
+
+        let has_tsconfig = ["tsconfig.json", "jsconfig.json"]
+            .iter()
+            .any(|name| root_dir.join(name).is_file());
+        let is_bun = is_bun_project(root_dir, &discovered_paths);
+        let resolver = JsCrossFileResolver::new(root_dir.to_path_buf(), is_bun, has_tsconfig);
+
+        relationships.extend(resolver.resolve(&modules));
     }
 
     fn group_results_by_language(

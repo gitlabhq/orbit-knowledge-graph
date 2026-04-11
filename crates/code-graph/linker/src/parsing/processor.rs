@@ -209,7 +209,6 @@ impl<'a> FileProcessor<'a> {
                 | SupportedLanguage::Kotlin
                 | SupportedLanguage::Java
                 | SupportedLanguage::CSharp
-                | SupportedLanguage::TypeScript
                 | SupportedLanguage::Rust
                 | SupportedLanguage::Js
                 | SupportedLanguage::Vue
@@ -349,15 +348,17 @@ impl<'a> FileProcessor<'a> {
         let mut all_classes = Vec::new();
 
         let mut directive = None;
-        let mut first_module_info = None;
+        let mut module_info: Option<crate::analysis::languages::js::JsModuleInfo> = None;
         for (file_path, source) in &sources {
             match JsAnalyzer::analyze_file(source, file_path, &self.path) {
                 Ok(result) => {
                     if directive.is_none() {
                         directive = result.directive;
                     }
-                    if first_module_info.is_none() {
-                        first_module_info = Some(result.module_info.clone());
+                    if let Some(merged) = &mut module_info {
+                        merged.merge(result.module_info.clone());
+                    } else {
+                        module_info = Some(result.module_info.clone());
                     }
                     all_defs.extend(result.defs);
                     all_imports.extend(result.imports);
@@ -386,7 +387,7 @@ impl<'a> FileProcessor<'a> {
             calls: all_calls,
             classes: all_classes,
             directive,
-            module_info: first_module_info.unwrap_or_default(),
+            module_info: module_info.unwrap_or_default(),
         };
 
         ProcessingResult::Success(Box::new(FileProcessingResult {
@@ -927,4 +928,44 @@ pub struct ProcessingStats {
     pub definitions_count: usize,
     /// Number of imported symbols extracted
     pub imported_symbols_count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vue_process_merges_module_info_across_script_blocks() {
+        let source = r#"
+<script lang="ts">
+export const serverOnly = 1;
+</script>
+<script setup lang="ts">
+import { ref } from "vue";
+const count = ref(0);
+</script>
+"#;
+
+        let result = FileProcessor::new("App.vue".to_string(), source).process();
+        let ProcessingResult::Success(result) = result else {
+            panic!("Vue processing should succeed");
+        };
+
+        let js_analysis = result
+            .js_analysis
+            .expect("Vue files should produce JS analysis");
+
+        assert!(
+            js_analysis.module_info.exports.contains_key("serverOnly"),
+            "module info should keep exports from the regular script block"
+        );
+        assert!(
+            js_analysis
+                .module_info
+                .imports
+                .iter()
+                .any(|import| import.specifier == "vue"),
+            "module info should merge imports from the setup block"
+        );
+    }
 }

@@ -15,6 +15,7 @@ pub struct JsCrossFileResolver {
 impl JsCrossFileResolver {
     pub fn new(root_dir: PathBuf, is_bun: bool, has_tsconfig: bool) -> Self {
         let resolver = create_resolver(is_bun, has_tsconfig);
+        let root_dir = std::fs::canonicalize(&root_dir).unwrap_or(root_dir);
         Self { resolver, root_dir }
     }
 
@@ -253,6 +254,9 @@ fn create_resolver(is_bun: bool, has_tsconfig: bool) -> Resolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parser_core::utils::Range;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_create_resolver_default() {
@@ -303,5 +307,71 @@ mod tests {
         let result = resolver.resolve_star_export("foo", "a.ts", &modules, &mut HashSet::new(), 0);
 
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_named_import_across_files() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.ts"), "export const foo = 1;\n").unwrap();
+        fs::write(
+            dir.path().join("b.ts"),
+            "import { foo } from './a';\nconsole.log(foo);\n",
+        )
+        .unwrap();
+
+        let resolver = JsCrossFileResolver::new(dir.path().to_path_buf(), false, false);
+        let modules = HashMap::from([
+            (
+                "a.ts".to_string(),
+                JsModuleInfo {
+                    exports: HashMap::from([(
+                        "foo".to_string(),
+                        ExportedBinding {
+                            local_fqn: "foo".to_string(),
+                            range: Range::empty(),
+                            is_type: false,
+                            is_default: false,
+                            reexport_source: None,
+                            reexport_name: None,
+                        },
+                    )]),
+                    ..Default::default()
+                },
+            ),
+            (
+                "b.ts".to_string(),
+                JsModuleInfo {
+                    imports: vec![super::super::types::OwnedImportEntry {
+                        specifier: "./a".to_string(),
+                        imported_name: ImportedName::Named("foo".to_string()),
+                        local_name: "foo".to_string(),
+                        is_type: false,
+                        range: Range::empty(),
+                    }],
+                    ..Default::default()
+                },
+            ),
+        ]);
+
+        let relationships = resolver.resolve(&modules);
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(
+            relationships[0]
+                .source_path
+                .as_ref()
+                .map(|path| path.as_str()),
+            Some("b.ts")
+        );
+        assert_eq!(
+            relationships[0]
+                .target_path
+                .as_ref()
+                .map(|path| path.as_str()),
+            Some("a.ts")
+        );
+        assert_eq!(
+            relationships[0].relationship_type,
+            RelationshipType::ImportedSymbolToDefinition
+        );
     }
 }
