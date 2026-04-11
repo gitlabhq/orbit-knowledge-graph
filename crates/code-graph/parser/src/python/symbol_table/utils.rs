@@ -1,4 +1,5 @@
 use rustc_hash::FxHashMap as HashMap;
+use tracing::error;
 
 use crate::python::symbol_table::visitor::SymbolTableBuilder;
 use crate::python::types::{
@@ -127,6 +128,21 @@ pub fn get_containing_class_name<'a>(node: &Node<'a, StrDoc<SupportLang>>) -> Op
     None
 }
 
+fn has_sufficient_stack(node: &Node<'_, StrDoc<SupportLang>>, context: &'static str) -> bool {
+    let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+    if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        error!(
+            remaining_stack,
+            node_kind = node.kind().as_ref(),
+            context,
+            "stack limit reached, aborting Python recursive traversal"
+        );
+        return false;
+    }
+
+    true
+}
+
 // TODO: Update to return ParsedExpression type
 pub fn parse_expression<'a>(node: &Node<'a, StrDoc<SupportLang>>) -> Option<SymbolChain> {
     let mut symbol_chain = Vec::new();
@@ -135,6 +151,10 @@ pub fn parse_expression<'a>(node: &Node<'a, StrDoc<SupportLang>>) -> Option<Symb
         node: &Node<'a, StrDoc<SupportLang>>,
         symbol_chain: &mut Vec<Symbol>,
     ) -> Result<(), ()> {
+        if !has_sufficient_stack(node, "python expression parsing") {
+            return Err(());
+        }
+
         // We are ignoring nodes that can be represented as function calls. For example, binary
         // operations like x + y are really dunder method calls, i.e. x.__add__(y). We will handle
         // this in the future.
@@ -223,6 +243,10 @@ pub fn is_lambda_method<'a>(node: &Node<'a, StrDoc<SupportLang>>) -> bool {
 }
 
 pub fn is_named_lambda(node: &Node<StrDoc<SupportLang>>) -> bool {
+    if !has_sufficient_stack(node, "python named lambda detection") {
+        return false;
+    }
+
     let node_kind = node.kind();
     let kind_str = node_kind.as_ref();
 
@@ -245,6 +269,10 @@ pub fn parse_for_loop_targets<'a>(node: &Node<'a, StrDoc<SupportLang>>) -> Vec<S
         node: &Node<'a, StrDoc<SupportLang>>,
         symbol_chains: &mut Vec<SymbolChain>,
     ) {
+        if !has_sufficient_stack(node, "python for-loop target parsing") {
+            return;
+        }
+
         let node_kind = node.kind();
         let kind_str = node_kind.as_ref();
 
@@ -280,6 +308,10 @@ pub fn parse_assignment_targets<'a>(
         builder: &mut SymbolTableBuilder,
         should_append: bool,
     ) {
+        if !has_sufficient_stack(node, "python assignment target parsing") {
+            return;
+        }
+
         let node_kind = node.kind();
         let kind_str = node_kind.as_ref();
 
@@ -318,4 +350,58 @@ pub fn parse_assignment_targets<'a>(
     parse_recursive(node, node, &mut symbol_chains, builder, true);
 
     symbol_chains
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::python::symbol_table::test_utils::{
+        find_first_node_by_kind, parse_python, run_on_small_stack,
+    };
+    use crate::python::types::ScopeType;
+    use crate::utils::node_to_range;
+
+    #[test]
+    fn test_parse_expression_bails_out_on_low_stack() {
+        let result = run_on_small_stack(|| {
+            let ast = parse_python("foo.bar()");
+            let call = find_first_node_by_kind(&ast, "call").expect("call node should exist");
+            parse_expression(&call)
+        });
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_for_loop_targets_bails_out_on_low_stack() {
+        let result = run_on_small_stack(|| {
+            let ast = parse_python("for first, second in items:\n    pass\n");
+            let for_statement =
+                find_first_node_by_kind(&ast, "for_statement").expect("for_statement should exist");
+            let left = for_statement
+                .field("left")
+                .expect("for loop left side should exist");
+            parse_for_loop_targets(&left)
+        });
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_assignment_targets_bails_out_on_low_stack() {
+        let result = run_on_small_stack(|| {
+            let ast = parse_python("first, second = value\n");
+            let assignment =
+                find_first_node_by_kind(&ast, "assignment").expect("assignment node should exist");
+            let left = assignment
+                .field("left")
+                .expect("assignment left side should exist");
+            let mut builder =
+                SymbolTableBuilder::new(node_to_range(&ast.root()), ScopeType::Module, None);
+
+            parse_assignment_targets(&left, &mut builder)
+        });
+
+        assert!(result.is_empty());
+    }
 }

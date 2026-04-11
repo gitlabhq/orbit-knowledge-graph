@@ -1,9 +1,13 @@
 //! Tests for Ruby expression extraction and reference creation
 
-use super::expressions::RubySymbolType;
+use super::expressions::{
+    RubyExpressionSymbol, RubySymbolType, extract_symbol_chain_from_node_with_cache,
+};
 use super::types::{RubyReferenceInfo, RubyReferenceType};
+use crate::ruby::utils::LineOffsetCache;
 use crate::ruby::visit::extract_definitions_and_references_from_prism;
-use ruby_prism::parse;
+use ruby_prism::{Visit, parse};
+use std::thread;
 
 #[cfg(test)]
 mod expression_tests {
@@ -445,6 +449,47 @@ user.posts.where(published: true).order(:created_at).limit(10)
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_expression_extraction_bails_out_on_low_stack() {
+        let code = r#"
+user.profile.update(name: "new")
+"#;
+
+        struct CallExtractor<'a> {
+            cache: LineOffsetCache,
+            symbols: Vec<RubyExpressionSymbol>,
+            _marker: std::marker::PhantomData<&'a ()>,
+        }
+
+        impl<'a, 'pr> Visit<'pr> for CallExtractor<'a> {
+            fn visit_call_node(&mut self, node: &ruby_prism::CallNode<'pr>) {
+                extract_symbol_chain_from_node_with_cache(
+                    &node.as_node(),
+                    &mut self.symbols,
+                    &self.cache,
+                );
+            }
+        }
+
+        let symbols = thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(move || {
+                let result = parse(code.as_bytes());
+                let mut extractor = CallExtractor {
+                    cache: LineOffsetCache::new(code),
+                    symbols: Vec::new(),
+                    _marker: std::marker::PhantomData,
+                };
+                extractor.visit(&result.node());
+                extractor.symbols
+            })
+            .expect("small-stack thread should start")
+            .join()
+            .expect("small-stack thread should complete");
+
+        assert!(symbols.is_empty());
     }
 
     #[test]

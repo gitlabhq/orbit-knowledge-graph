@@ -1241,6 +1241,16 @@ fn visit_deletion<'a>(
 ) -> Vec<(SymbolChain, Binding)> {
     // Unrolls deletion targets into symbol chains
     fn visit_recursive<'a>(node: &Node<'a, StrDoc<SupportLang>>, targets: &mut Vec<SymbolChain>) {
+        let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+            error!(
+                remaining_stack,
+                node_kind = node.kind().as_ref(),
+                "stack limit reached, aborting Python deletion target traversal"
+            );
+            return;
+        }
+
         let node_kind = node.kind();
         let kind_str = node_kind.as_ref();
 
@@ -1295,13 +1305,9 @@ fn visit_call<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use treesitter_visit::tree_sitter::StrDoc;
-    use treesitter_visit::{Root, SupportLang};
-
-    // Helper function to create an AST from Python code
-    fn parse_python(code: &str) -> Root<StrDoc<SupportLang>> {
-        Root::new(code, SupportLang::Python)
-    }
+    use crate::python::symbol_table::test_utils::{
+        find_first_node_by_kind, parse_python, run_on_small_stack,
+    };
 
     // Helper function to count total bindings in a tree (including all children)
     fn count_bindings(tree: &SymbolTableTree) -> usize {
@@ -1898,6 +1904,26 @@ del y, z
         assert_eq!(root_table.symbols.len(), 3);
         assert_eq!(total_bindings, 6); // 3 assignments + 3 deletions
         println!("✓ Deletion test passed");
+    }
+
+    #[test]
+    fn test_visit_deletion_bails_out_on_low_stack() {
+        let result = run_on_small_stack(|| {
+            let ast = parse_python("del first, second\n");
+            let delete_statement = find_first_node_by_kind(&ast, "delete_statement")
+                .expect("delete_statement node should exist");
+            let mut builder =
+                SymbolTableBuilder::new(node_to_range(&ast.root()), ScopeType::Module, None);
+
+            visit_deletion(
+                &delete_statement,
+                &mut builder,
+                &HashMap::default(),
+                &HashMap::default(),
+            )
+        });
+
+        assert!(result.is_empty());
     }
 
     #[test]

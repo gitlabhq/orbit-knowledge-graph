@@ -2,6 +2,7 @@ use crate::ruby::utils::LineOffsetCache;
 use crate::utils::Range;
 use ruby_prism::Node;
 use std::sync::Arc;
+use tracing::error;
 
 /// Represents the type of a symbol within a Ruby expression.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -74,6 +75,16 @@ fn extract_and_queue_node_data(
     work_queue: &mut std::collections::VecDeque<RubyExpressionSymbol>,
     cache: &LineOffsetCache,
 ) {
+    let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+    if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        error!(
+            remaining_stack,
+            node_kind = "ruby_node",
+            "stack limit reached, aborting Ruby expression extraction"
+        );
+        return;
+    }
+
     match node {
         Node::CallNode { .. } => {
             if let Some(call_node) = node.as_call_node() {
