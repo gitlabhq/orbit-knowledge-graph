@@ -2,6 +2,7 @@ use crate::analysis::types::ConsolidatedRelationship;
 use crate::graph::{RelationshipKind, RelationshipType};
 use internment::ArcIntern;
 use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
+use parser_core::utils::Range;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -44,76 +45,34 @@ impl JsCrossFileResolver {
                     Err(_) => continue,
                 };
 
-                let target_module = match modules.get(&relative_resolved) {
-                    Some(m) => m,
-                    None => continue,
-                };
-
-                let target_binding = match &import_entry.imported_name {
-                    ImportedName::Named(name) => target_module.exports.get(name),
-                    ImportedName::Default => target_module.exports.values().find(|b| b.is_default),
-                    ImportedName::Namespace => None,
-                };
-
-                if let Some(binding) = target_binding {
-                    let (final_path, final_binding) =
-                        if let Some(ref source) = binding.reexport_source {
-                            let name = match &import_entry.imported_name {
-                                ImportedName::Named(n) => n.as_str(),
-                                ImportedName::Default => "default",
-                                _ => continue,
-                            };
-                            match self.resolve_reexport(
-                                source,
-                                binding.reexport_name.as_deref().unwrap_or(name),
-                                &relative_resolved,
-                                modules,
-                                0,
-                            ) {
-                                Some(resolved) => resolved,
-                                None => (relative_resolved.clone(), binding.clone()),
-                            }
-                        } else {
-                            (relative_resolved.clone(), binding.clone())
-                        };
-
-                    let source_path = ArcIntern::new(file_path.clone());
-                    let target_path = ArcIntern::new(final_path);
-
-                    relationships.push(ConsolidatedRelationship {
-                        source_path: Some(source_path),
-                        target_path: Some(target_path),
-                        kind: RelationshipKind::ImportedSymbolToDefinition,
-                        relationship_type: RelationshipType::ImportedSymbolToDefinition,
-                        source_range: ArcIntern::new(import_entry.range),
-                        target_range: ArcIntern::new(final_binding.range),
-                        ..Default::default()
-                    });
+                if !modules.contains_key(&relative_resolved) {
+                    continue;
                 }
 
-                if target_binding.is_none()
-                    && let ImportedName::Named(name) = &import_entry.imported_name
-                    && let Some(binding) = self.resolve_star_export(
-                        name,
-                        &relative_resolved,
-                        modules,
-                        &mut HashSet::new(),
-                        0,
-                    )
-                {
-                    let source_path = ArcIntern::new(file_path.clone());
-                    let target_path = ArcIntern::new(binding.0);
+                let Some((final_path, final_binding)) =
+                    self.resolve_binding(&import_entry.imported_name, &relative_resolved, modules)
+                else {
+                    continue;
+                };
+                let Some(definition_range) =
+                    self.binding_definition_range(&final_path, &final_binding, modules)
+                else {
+                    continue;
+                };
 
-                    relationships.push(ConsolidatedRelationship {
-                        source_path: Some(source_path),
-                        target_path: Some(target_path),
-                        kind: RelationshipKind::ImportedSymbolToDefinition,
-                        relationship_type: RelationshipType::ImportedSymbolToDefinition,
-                        source_range: ArcIntern::new(import_entry.range),
-                        target_range: ArcIntern::new(binding.1.range),
-                        ..Default::default()
-                    });
-                }
+                let source_path = ArcIntern::new(file_path.clone());
+                let target_path = ArcIntern::new(final_path);
+
+                relationships.push(ConsolidatedRelationship {
+                    source_path: Some(source_path),
+                    target_path: Some(target_path),
+                    kind: RelationshipKind::ImportedSymbolToDefinition,
+                    relationship_type: RelationshipType::ImportedSymbolToDefinition,
+                    source_range: ArcIntern::new(import_entry.range),
+                    target_range: ArcIntern::new(definition_range),
+                    target_definition_range: Some(ArcIntern::new(definition_range)),
+                    ..Default::default()
+                });
             }
         }
 
@@ -156,47 +115,14 @@ impl JsCrossFileResolver {
                     Err(_) => continue,
                 };
 
-                let target_module = match modules.get(&relative_resolved) {
-                    Some(m) => m,
-                    None => continue,
+                let Some((final_path, final_binding)) =
+                    self.resolve_binding(imported_name, &relative_resolved, modules)
+                else {
+                    continue;
                 };
-
-                let export_name = match imported_name {
-                    ImportedName::Named(name) => name.as_str(),
-                    ImportedName::Default => "default",
-                    ImportedName::Namespace => continue,
-                };
-
-                let target_binding = target_module.exports.get(export_name);
-
-                let (final_path, final_range) = if let Some(binding) = target_binding {
-                    if let Some(ref source) = binding.reexport_source {
-                        match self.resolve_reexport(
-                            source,
-                            binding.reexport_name.as_deref().unwrap_or(export_name),
-                            &relative_resolved,
-                            modules,
-                            0,
-                        ) {
-                            Some((p, b)) => (p, b.range),
-                            None => (relative_resolved.clone(), binding.range),
-                        }
-                    } else if let Some(&range) =
-                        target_module.definition_fqns.get(&binding.local_fqn)
-                    {
-                        (relative_resolved.clone(), range)
-                    } else {
-                        (relative_resolved.clone(), binding.range)
-                    }
-                } else if let Some((star_path, star_binding)) = self.resolve_star_export(
-                    export_name,
-                    &relative_resolved,
-                    modules,
-                    &mut HashSet::new(),
-                    0,
-                ) {
-                    (star_path, star_binding.range)
-                } else {
+                let Some(final_range) =
+                    self.binding_definition_range(&final_path, &final_binding, modules)
+                else {
                     continue;
                 };
 
@@ -314,6 +240,62 @@ impl JsCrossFileResolver {
 
         None
     }
+
+    fn resolve_binding(
+        &self,
+        imported_name: &ImportedName,
+        module_path: &str,
+        modules: &HashMap<String, JsModuleInfo>,
+    ) -> Option<(String, ExportedBinding)> {
+        let target_module = modules.get(module_path)?;
+        let target_binding = match imported_name {
+            ImportedName::Named(name) => target_module.exports.get(name),
+            ImportedName::Default => target_module.exports.values().find(|b| b.is_default),
+            ImportedName::Namespace => return None,
+        };
+
+        if let Some(binding) = target_binding {
+            if let Some(ref source) = binding.reexport_source {
+                let export_name = match imported_name {
+                    ImportedName::Named(name) => name.as_str(),
+                    ImportedName::Default => "default",
+                    ImportedName::Namespace => return None,
+                };
+
+                return self
+                    .resolve_reexport(
+                        source,
+                        binding.reexport_name.as_deref().unwrap_or(export_name),
+                        module_path,
+                        modules,
+                        0,
+                    )
+                    .or_else(|| Some((module_path.to_string(), binding.clone())));
+            }
+
+            return Some((module_path.to_string(), binding.clone()));
+        }
+
+        match imported_name {
+            ImportedName::Named(name) => {
+                self.resolve_star_export(name, module_path, modules, &mut HashSet::new(), 0)
+            }
+            ImportedName::Default | ImportedName::Namespace => None,
+        }
+    }
+
+    fn binding_definition_range(
+        &self,
+        module_path: &str,
+        binding: &ExportedBinding,
+        modules: &HashMap<String, JsModuleInfo>,
+    ) -> Option<Range> {
+        binding.definition_range.or_else(|| {
+            modules
+                .get(module_path)
+                .and_then(|module| module.definition_fqns.get(&binding.local_fqn).copied())
+        })
+    }
 }
 
 fn create_resolver(is_bun: bool, has_tsconfig: bool) -> Resolver {
@@ -369,27 +351,6 @@ fn create_resolver(is_bun: bool, has_tsconfig: bool) -> Resolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parser_core::utils::Range;
-    use std::fs;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_create_resolver_default() {
-        let resolver = create_resolver(false, false);
-        let _ = resolver;
-    }
-
-    #[test]
-    fn test_create_resolver_bun() {
-        let resolver = create_resolver(true, false);
-        let _ = resolver;
-    }
-
-    #[test]
-    fn test_create_resolver_with_tsconfig() {
-        let resolver = create_resolver(false, true);
-        let _ = resolver;
-    }
 
     #[test]
     fn test_resolve_star_export_cycle_detection() {
@@ -422,152 +383,5 @@ mod tests {
         let result = resolver.resolve_star_export("foo", "a.ts", &modules, &mut HashSet::new(), 0);
 
         assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_resolve_named_import_across_files() {
-        let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("a.ts"), "export const foo = 1;\n").unwrap();
-        fs::write(
-            dir.path().join("b.ts"),
-            "import { foo } from './a';\nconsole.log(foo);\n",
-        )
-        .unwrap();
-
-        let resolver = JsCrossFileResolver::new(dir.path().to_path_buf(), false, false);
-        let modules = HashMap::from([
-            (
-                "a.ts".to_string(),
-                JsModuleInfo {
-                    exports: HashMap::from([(
-                        "foo".to_string(),
-                        ExportedBinding {
-                            local_fqn: "foo".to_string(),
-                            range: Range::empty(),
-                            is_type: false,
-                            is_default: false,
-                            reexport_source: None,
-                            reexport_name: None,
-                        },
-                    )]),
-                    ..Default::default()
-                },
-            ),
-            (
-                "b.ts".to_string(),
-                JsModuleInfo {
-                    imports: vec![super::super::types::OwnedImportEntry {
-                        specifier: "./a".to_string(),
-                        imported_name: ImportedName::Named("foo".to_string()),
-                        local_name: "foo".to_string(),
-                        is_type: false,
-                        range: Range::empty(),
-                    }],
-                    ..Default::default()
-                },
-            ),
-        ]);
-
-        let relationships = resolver.resolve(&modules);
-        assert_eq!(relationships.len(), 1);
-        assert_eq!(
-            relationships[0]
-                .source_path
-                .as_ref()
-                .map(|path| path.as_str()),
-            Some("b.ts")
-        );
-        assert_eq!(
-            relationships[0]
-                .target_path
-                .as_ref()
-                .map(|path| path.as_str()),
-            Some("a.ts")
-        );
-        assert_eq!(
-            relationships[0].relationship_type,
-            RelationshipType::ImportedSymbolToDefinition
-        );
-    }
-
-    #[test]
-    fn test_resolve_calls_across_files() {
-        use super::super::types::{JsCallConfidence, JsCallSite};
-
-        let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("utils.ts"), "export function foo() {}\n").unwrap();
-        fs::write(
-            dir.path().join("main.ts"),
-            "import { foo } from './utils';\n",
-        )
-        .unwrap();
-
-        let foo_range = Range::new(
-            parser_core::utils::Position::new(0, 16),
-            parser_core::utils::Position::new(0, 24),
-            (16, 24),
-        );
-
-        let resolver = JsCrossFileResolver::new(dir.path().to_path_buf(), false, false);
-        let modules = HashMap::from([
-            (
-                "utils.ts".to_string(),
-                JsModuleInfo {
-                    exports: HashMap::from([(
-                        "foo".to_string(),
-                        ExportedBinding {
-                            local_fqn: "foo".to_string(),
-                            range: foo_range,
-                            is_type: false,
-                            is_default: false,
-                            reexport_source: None,
-                            reexport_name: None,
-                        },
-                    )]),
-                    definition_fqns: HashMap::from([("foo".to_string(), foo_range)]),
-                    ..Default::default()
-                },
-            ),
-            ("main.ts".to_string(), JsModuleInfo::default()),
-        ]);
-
-        let caller_range = Range::new(
-            parser_core::utils::Position::new(1, 0),
-            parser_core::utils::Position::new(1, 20),
-            (30, 50),
-        );
-
-        let calls = vec![(
-            "main.ts".to_string(),
-            vec![JsCallEdge {
-                caller: JsCallSite::Definition {
-                    fqn: "bar".to_string(),
-                    range: caller_range,
-                },
-                callee: JsCallTarget::ImportedCall {
-                    local_name: "foo".to_string(),
-                    specifier: "./utils".to_string(),
-                    imported_name: ImportedName::Named("foo".to_string()),
-                },
-                call_range: caller_range,
-                confidence: JsCallConfidence::Known,
-            }],
-        )];
-
-        let relationships = resolver.resolve_calls(&calls, &modules);
-        assert_eq!(
-            relationships.len(),
-            1,
-            "Should resolve one cross-file CALLS edge"
-        );
-        assert_eq!(relationships[0].relationship_type, RelationshipType::Calls);
-        assert_eq!(
-            relationships[0].source_path.as_ref().map(|p| p.as_str()),
-            Some("main.ts")
-        );
-        assert_eq!(
-            relationships[0].target_path.as_ref().map(|p| p.as_str()),
-            Some("utils.ts")
-        );
     }
 }

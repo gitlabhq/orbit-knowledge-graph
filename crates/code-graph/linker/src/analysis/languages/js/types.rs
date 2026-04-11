@@ -28,6 +28,7 @@ impl JsModuleInfo {
 pub struct ExportedBinding {
     pub local_fqn: String,
     pub range: Range,
+    pub definition_range: Option<Range>,
     pub is_type: bool,
     pub is_default: bool,
     pub reexport_source: Option<String>,

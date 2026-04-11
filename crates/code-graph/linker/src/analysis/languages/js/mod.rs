@@ -3,6 +3,8 @@ mod cross_file;
 mod emit;
 pub mod frameworks;
 pub mod sfc;
+#[cfg(test)]
+mod tests;
 mod types;
 mod workspace;
 

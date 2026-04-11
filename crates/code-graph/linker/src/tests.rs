@@ -111,6 +111,10 @@ impl IndexingTestSetup {
 
 async fn setup_indexing_test(language: SupportedLanguage) -> IndexingTestSetup {
     let local_repo = init_local_git_repository(language);
+    index_local_git_repository(local_repo).await
+}
+
+async fn index_local_git_repository(local_repo: LocalGitRepository) -> IndexingTestSetup {
     let repo_path_str = local_repo.path.to_str().unwrap();
 
     let indexer = RepositoryIndexer::with_graph_identity(

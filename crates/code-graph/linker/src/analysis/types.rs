@@ -623,6 +623,7 @@ impl DefinitionNode {
         let id = compute_id(&[
             &project_id.to_string(),
             branch,
+            self.file_path.as_ref(),
             definition_type_str,
             &fqn_str,
         ]);
@@ -766,9 +767,12 @@ impl ImportedSymbolNode {
             &project_id.to_string(),
             branch,
             &self.location.file_path,
+            self.import_type.as_str(),
             &self.import_path,
             identifier_name.unwrap_or(""),
             identifier_alias.unwrap_or(""),
+            &self.location.start_byte.to_string(),
+            &self.location.end_byte.to_string(),
         ]);
         self.id = Some(id);
         id
@@ -883,5 +887,74 @@ impl OptimizedFileTree {
     /// Get all directories
     pub fn get_dirs(&self) -> &HashSet<PathBuf> {
         &self.dirs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn definition_ids_include_file_path() {
+        let mut first = DefinitionNode::new(
+            FqnType::Js("foo".to_string()),
+            DefinitionType::Js("Function"),
+            Range::empty(),
+            ArcIntern::new("a.ts".to_string()),
+        );
+        let mut second = DefinitionNode::new(
+            FqnType::Js("foo".to_string()),
+            DefinitionType::Js("Function"),
+            Range::empty(),
+            ArcIntern::new("b.ts".to_string()),
+        );
+
+        let first_id = first.assign_id(1, "main");
+        let second_id = second.assign_id(1, "main");
+
+        assert_ne!(first_id, second_id);
+    }
+
+    #[test]
+    fn imported_symbol_ids_include_location() {
+        let mut first = ImportedSymbolNode::new(
+            ImportType::Js("NamedImport"),
+            "./dep".to_string(),
+            Some(ImportIdentifier {
+                name: "foo".to_string(),
+                alias: None,
+            }),
+            ImportedSymbolLocation {
+                file_path: "main.ts".to_string(),
+                start_byte: 0,
+                end_byte: 10,
+                start_line: 0,
+                end_line: 0,
+                start_col: 0,
+                end_col: 10,
+            },
+        );
+        let mut second = ImportedSymbolNode::new(
+            ImportType::Js("NamedImport"),
+            "./dep".to_string(),
+            Some(ImportIdentifier {
+                name: "foo".to_string(),
+                alias: None,
+            }),
+            ImportedSymbolLocation {
+                file_path: "main.ts".to_string(),
+                start_byte: 20,
+                end_byte: 30,
+                start_line: 2,
+                end_line: 2,
+                start_col: 0,
+                end_col: 10,
+            },
+        );
+
+        let first_id = first.assign_id(1, "main");
+        let second_id = second.assign_id(1, "main");
+
+        assert_ne!(first_id, second_id);
     }
 }

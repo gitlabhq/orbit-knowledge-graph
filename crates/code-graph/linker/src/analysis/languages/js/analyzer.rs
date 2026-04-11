@@ -597,6 +597,16 @@ fn build_module_info(
     let mut exports = HashMap::new();
     let mut imports = Vec::new();
     let mut star_export_sources = Vec::new();
+    let definition_fqns: HashMap<String, Range> =
+        defs.iter().map(|d| (d.fqn.clone(), d.range)).collect();
+
+    let find_definition_range = |local_fqn: &str, binding_range: Range| {
+        definition_fqns.get(local_fqn).copied().or_else(|| {
+            defs.iter()
+                .find(|def| def.is_exported && def.range.is_contained_within(binding_range))
+                .map(|def| def.range)
+        })
+    };
 
     for entry in &parsed.module_record.local_export_entries {
         let export_name = match &entry.export_name {
@@ -610,11 +620,13 @@ fn build_module_info(
             oxc::syntax::module_record::ExportLocalName::Null => continue,
         };
         let is_default = matches!(entry.export_name, ExportExportName::Default(_));
+        let export_range = lt.span_to_range(entry.span);
         exports.insert(
             export_name,
             ExportedBinding {
+                definition_range: find_definition_range(&local_fqn, export_range),
                 local_fqn,
-                range: lt.span_to_range(entry.span),
+                range: export_range,
                 is_type: entry.is_type,
                 is_default,
                 reexport_source: None,
@@ -639,6 +651,7 @@ fn build_module_info(
                 ExportedBinding {
                     local_fqn: format!("reexport:{}", module_request.name),
                     range: lt.span_to_range(entry.span),
+                    definition_range: None,
                     is_type: entry.is_type,
                     is_default: false,
                     reexport_source: Some(module_request.name.to_string()),
@@ -667,8 +680,6 @@ fn build_module_info(
             range: lt.span_to_range(entry.module_request.span),
         });
     }
-
-    let definition_fqns = defs.iter().map(|d| (d.fqn.clone(), d.range)).collect();
 
     JsModuleInfo {
         exports,
@@ -806,189 +817,29 @@ impl JsAnalyzer {
 
 #[cfg(test)]
 mod tests {
-    use super::super::frameworks::JsDirective;
     use super::*;
     use crate::graph::RelationshipType;
 
     #[test]
-    fn test_analyze_simple_function() {
+    fn test_default_export_tracks_definition_range() {
         let source = r#"
-function greet(name: string): string {
-    return "Hello, " + name;
+export default class Bar {
+    render() {}
 }
 "#;
         let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let funcs: Vec<_> = result
+        let bar = result
             .defs
             .iter()
-            .filter(|d| d.kind == JsDefKind::Function)
-            .collect();
-        assert_eq!(funcs.len(), 1);
-        assert_eq!(funcs[0].name, "greet");
-    }
+            .find(|d| d.fqn == "Bar")
+            .expect("Should extract Bar definition");
+        let default_export = result
+            .module_info
+            .exports
+            .get("default")
+            .expect("Should track default export binding");
 
-    #[test]
-    fn test_analyze_class_with_methods() {
-        let source = r#"
-class Calculator {
-    add(a: number, b: number): number {
-        return a + b;
-    }
-    subtract(a: number, b: number): number {
-        return a - b;
-    }
-    static create(): Calculator {
-        return new Calculator();
-    }
-}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let def_names: Vec<&str> = result.defs.iter().map(|d| d.name.as_str()).collect();
-
-        assert!(
-            def_names.contains(&"Calculator"),
-            "Should find Calculator class"
-        );
-        assert!(def_names.contains(&"add"), "Should find add method");
-        assert!(
-            def_names.contains(&"subtract"),
-            "Should find subtract method"
-        );
-        assert!(
-            def_names.contains(&"create"),
-            "Should find static create method"
-        );
-
-        let calc = result.defs.iter().find(|d| d.name == "Calculator").unwrap();
-        assert_eq!(calc.kind, JsDefKind::Class);
-
-        let add = result.defs.iter().find(|d| d.name == "add").unwrap();
-        assert_eq!(add.kind.as_str(), "Method");
-        assert_eq!(add.fqn, "Calculator::add");
-
-        let create = result.defs.iter().find(|d| d.name == "create").unwrap();
-        assert_eq!(create.kind.as_str(), "StaticMethod");
-    }
-
-    #[test]
-    fn test_analyze_imports() {
-        let source = r#"
-import { useState } from 'react';
-import type { FC } from 'react';
-import React from 'react';
-import * as path from 'path';
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.tsx", "test.tsx").unwrap();
-        assert_eq!(result.imports.len(), 4);
-
-        let has_named = result.imports.iter().any(|i| {
-            matches!(
-                &i.kind,
-                JsImportKind::Named {
-                    imported_name
-                } if imported_name == "useState"
-            ) && !i.is_type
-        });
-        assert!(has_named, "Should have NamedImport for useState");
-
-        let has_type_named = result.imports.iter().any(|i| {
-            matches!(
-                &i.kind,
-                JsImportKind::Named {
-                    imported_name
-                } if imported_name == "FC"
-            ) && i.is_type
-        });
-        assert!(has_type_named, "Should have TypeOnlyNamedImport for FC");
-
-        let has_default = result
-            .imports
-            .iter()
-            .any(|i| i.kind == JsImportKind::Default && i.local_name == "React");
-        assert!(has_default, "Should have DefaultImport for React");
-
-        let has_namespace = result
-            .imports
-            .iter()
-            .any(|i| i.kind == JsImportKind::Namespace && i.local_name == "path");
-        assert!(has_namespace, "Should have NamespaceImport for path");
-    }
-
-    #[test]
-    fn test_analyze_call_edges() {
-        let source = r#"
-function foo() { return 1; }
-function bar() { return foo(); }
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        assert!(
-            !result.calls.is_empty(),
-            "Should have at least one call edge"
-        );
-
-        let has_direct = result
-            .calls
-            .iter()
-            .any(|c| matches!(&c.callee, JsCallTarget::Direct { fqn, .. } if fqn == "foo"));
-        assert!(has_direct, "Should have a direct call to foo");
-    }
-
-    #[test]
-    fn test_analyze_jsx() {
-        let source = r#"
-import React from 'react';
-function App() {
-    return <div>Hello</div>;
-}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.tsx", "test.tsx").unwrap();
-        assert!(!result.defs.is_empty());
-        let app = result.defs.iter().find(|d| d.name == "App");
-        assert!(app.is_some());
-    }
-
-    #[test]
-    fn test_analyze_interface_and_enum() {
-        let source = r#"
-interface User {
-    name: string;
-    age: number;
-}
-enum Color {
-    Red,
-    Green,
-    Blue,
-}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let iface = result.defs.iter().find(|d| d.name == "User");
-        assert!(iface.is_some());
-        assert_eq!(iface.unwrap().kind, JsDefKind::Interface);
-
-        let color = result.defs.iter().find(|d| d.name == "Color");
-        assert!(color.is_some());
-        assert_eq!(color.unwrap().kind, JsDefKind::Enum);
-    }
-
-    #[test]
-    fn test_analyze_arrow_function() {
-        let source = r#"
-const greet = (name: string) => `Hello, ${name}`;
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let greet = result.defs.iter().find(|d| d.name == "greet");
-        assert!(greet.is_some());
-    }
-
-    #[test]
-    fn test_analyze_exports() {
-        let source = r#"
-export function foo() {}
-export default class Bar {}
-const baz = 1;
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        assert!(result.defs.len() >= 2);
+        assert_eq!(default_export.definition_range, Some(bar.range));
     }
 
     #[test]
@@ -1031,44 +882,6 @@ class Service {
             has_this_call,
             "this.helper() should create a ThisMethod call edge"
         );
-    }
-
-    #[test]
-    fn test_use_server_directive() {
-        let source = r#"
-"use server";
-export async function saveData() {}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        assert_eq!(result.directive, Some(JsDirective::UseServer));
-    }
-
-    #[test]
-    fn test_use_client_directive() {
-        let source = r#"
-"use client";
-export default function Page() {}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.tsx", "test.tsx").unwrap();
-        assert_eq!(result.directive, Some(JsDirective::UseClient));
-    }
-
-    #[test]
-    fn test_vue_script_setup_via_sfc() {
-        let vue_source = r#"<script setup lang="ts">
-import { ref } from 'vue';
-const count = ref(0);
-function increment() { count.value++; }
-</script>"#;
-        let blocks = super::super::sfc::extract_scripts(vue_source, "vue");
-        assert_eq!(blocks.len(), 1);
-        assert!(blocks[0].source_type.is_typescript());
-
-        let result =
-            JsAnalyzer::analyze_file(blocks[0].source_text, "App.vue.ts", "App.vue").unwrap();
-        assert!(!result.imports.is_empty(), "Should find vue import");
-        let increment = result.defs.iter().find(|d| d.name == "increment");
-        assert!(increment.is_some(), "Should find increment function");
     }
 
     #[test]
@@ -1184,56 +997,6 @@ class Child extends Base {
             has_inherited_call,
             "this.helper() should resolve through inheritance to Base::helper"
         );
-    }
-
-    #[test]
-    fn test_emit_produces_graph_types() {
-        let source = r#"
-function foo() { return 1; }
-function bar() { return foo(); }
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let emitted = result.emit();
-        assert!(!emitted.definitions.is_empty());
-        let calls: Vec<_> = emitted
-            .relationships
-            .iter()
-            .filter(|r| r.relationship_type == RelationshipType::Calls)
-            .collect();
-        assert!(!calls.is_empty());
-    }
-
-    #[test]
-    fn test_emit_file_defines_relationships() {
-        let source = r#"
-function topLevel() {}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let emitted = result.emit();
-        let file_defines: Vec<_> = emitted
-            .relationships
-            .iter()
-            .filter(|r| r.relationship_type == RelationshipType::FileDefines)
-            .collect();
-        assert!(
-            !file_defines.is_empty(),
-            "Top-level defs should have FileDefines relationships"
-        );
-    }
-
-    #[test]
-    fn test_emit_import_nodes() {
-        let source = r#"
-import { useState } from 'react';
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.tsx", "test.tsx").unwrap();
-        let emitted = result.emit();
-        assert_eq!(emitted.imported_symbols.len(), 1);
-        assert_eq!(
-            emitted.imported_symbols[0].import_type.as_str(),
-            "NamedImport"
-        );
-        assert_eq!(emitted.imported_symbols[0].import_path, "react");
     }
 
     #[test]
