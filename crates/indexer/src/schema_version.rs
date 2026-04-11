@@ -22,43 +22,6 @@ use tracing::info;
 
 const VERSION_TABLE: &str = "gkg_schema_version";
 
-/// Non-ontology graph tables that must always be prefixed alongside the
-/// ontology-driven node and edge tables.
-///
-/// These tables are defined directly in `config/graph.sql` and are not
-/// tracked in the ontology YAML. When adding a new non-ontology table to
-/// `graph.sql`, add it here too — CI validates that this list is complete.
-pub const NON_ONTOLOGY_GRAPH_TABLES: &[&str] = &[
-    "checkpoint",
-    "code_indexing_checkpoint",
-    "namespace_deletion_schedule",
-];
-
-/// Returns all graph table names (unprefixed) that must be created for a
-/// given schema version.
-///
-/// Combines the non-ontology tables from [`NON_ONTOLOGY_GRAPH_TABLES`] with
-/// ontology-derived node and edge tables. The ontology is the source of truth
-/// for node/edge table names; the constant list covers auxiliary tables.
-pub fn all_graph_tables(ontology: &ontology::Ontology) -> Vec<String> {
-    let mut tables: Vec<String> = NON_ONTOLOGY_GRAPH_TABLES
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-
-    for node in ontology.nodes() {
-        tables.push(node.destination_table.clone());
-    }
-
-    for edge_table in ontology.edge_tables() {
-        if !tables.contains(&edge_table.to_string()) {
-            tables.push(edge_table.to_string());
-        }
-    }
-
-    tables
-}
-
 /// Schema version loaded from `config/SCHEMA_VERSION`.
 ///
 /// Bump this file whenever `config/graph.sql` or `config/ontology/` changes
@@ -327,55 +290,6 @@ mod tests {
     fn table_prefix_large_version() {
         assert_eq!(table_prefix(99), "v99_");
         assert_eq!(prefixed_table_name("checkpoint", 99), "v99_checkpoint");
-    }
-
-    #[test]
-    fn non_ontology_graph_tables_not_empty() {
-        assert!(
-            !NON_ONTOLOGY_GRAPH_TABLES.is_empty(),
-            "NON_ONTOLOGY_GRAPH_TABLES must list at least checkpoint and code_indexing_checkpoint"
-        );
-        assert!(NON_ONTOLOGY_GRAPH_TABLES.contains(&"checkpoint"));
-        assert!(NON_ONTOLOGY_GRAPH_TABLES.contains(&"code_indexing_checkpoint"));
-        assert!(NON_ONTOLOGY_GRAPH_TABLES.contains(&"namespace_deletion_schedule"));
-    }
-
-    #[test]
-    fn all_graph_tables_includes_non_ontology() {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let tables = all_graph_tables(&ontology);
-        for non_ont in NON_ONTOLOGY_GRAPH_TABLES {
-            assert!(
-                tables.contains(&non_ont.to_string()),
-                "all_graph_tables must include non-ontology table '{non_ont}'"
-            );
-        }
-    }
-
-    #[test]
-    fn all_graph_tables_includes_ontology_nodes() {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let tables = all_graph_tables(&ontology);
-        for node in ontology.nodes() {
-            assert!(
-                tables.contains(&node.destination_table),
-                "all_graph_tables must include ontology node table '{}'",
-                node.destination_table
-            );
-        }
-    }
-
-    #[test]
-    fn all_graph_tables_no_duplicates() {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let tables = all_graph_tables(&ontology);
-        let mut seen = std::collections::HashSet::new();
-        for table in &tables {
-            assert!(
-                seen.insert(table.clone()),
-                "duplicate table '{table}' in all_graph_tables"
-            );
-        }
     }
 
     #[test]
