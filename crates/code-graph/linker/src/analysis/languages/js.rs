@@ -26,6 +26,8 @@ pub struct JsAnalysisResult {
     pub relationships: Vec<ConsolidatedRelationship>,
     /// `"use server"` or `"use client"` directive, if present
     pub directive: Option<super::js_nextjs::JsDirective>,
+    /// Owned module info for Pass 2 cross-file resolution
+    pub module_info: JsModuleInfo,
 }
 
 impl JsAnalyzer {
@@ -380,11 +382,17 @@ impl JsAnalyzer {
         // 5. Detect "use server" / "use client" directives from parsed AST
         let directive = super::js_nextjs::detect_directive(&parsed.program.directives);
 
+        // 6. Extract owned module info for Pass 2 (while allocator is still alive)
+        let cjs_exports = extract_cjs_exports(nodes, scoping, source);
+        let mut module_info = build_module_info(&parsed, &definitions, source);
+        module_info.cjs_exports = cjs_exports;
+
         Ok(JsAnalysisResult {
             definitions,
             imported_symbols,
             relationships,
             directive,
+            module_info,
         })
     }
 }
@@ -541,26 +549,16 @@ fn find_enclosing_definition_range(
     None
 }
 
-/// Extract owned module info for Pass 2 cross-file resolution.
-/// Called at the end of Pass 1 while the OXC allocator is still alive.
-pub fn extract_module_info(
+/// Build owned module info from already-parsed OXC data (no re-parsing).
+fn build_module_info(
+    parsed: &oxc::parser::ParserReturn,
+    definitions: &[DefinitionNode],
     source: &str,
-    file_path: &str,
-    analysis: &JsAnalysisResult,
-) -> Result<JsModuleInfo, String> {
-    let source_type = SourceType::from_path(file_path)
-        .map_err(|_| format!("Unknown source type: {file_path}"))?;
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    let semantic_ret = SemanticBuilder::new().build(&parsed.program).semantic;
-    let scoping = semantic_ret.scoping();
-    let nodes = semantic_ret.nodes();
-
+) -> JsModuleInfo {
     let mut exports = HashMap::new();
     let mut imports = Vec::new();
     let mut star_export_sources = Vec::new();
 
-    // Extract exports from ModuleRecord
     for entry in &parsed.module_record.local_export_entries {
         let export_name = match &entry.export_name {
             ExportExportName::Name(n) => n.name.to_string(),
@@ -584,7 +582,6 @@ pub fn extract_module_info(
         );
     }
 
-    // Re-exports (indirect)
     for entry in &parsed.module_record.indirect_export_entries {
         if let Some(ref module_request) = entry.module_request {
             let export_name = match &entry.export_name {
@@ -604,49 +601,39 @@ pub fn extract_module_info(
         }
     }
 
-    // Star re-exports
     for entry in &parsed.module_record.star_export_entries {
         if let Some(ref module_request) = entry.module_request {
             star_export_sources.push(module_request.name.to_string());
         }
     }
 
-    // Extract owned import entries
     for entry in &parsed.module_record.import_entries {
-        let specifier = entry.module_request.name.to_string();
-        let local_name = entry.local_name.name.to_string();
-        let imported_name = match &entry.import_name {
-            ImportImportName::Name(n) => ImportedName::Named(n.name.to_string()),
-            ImportImportName::Default(_) => ImportedName::Default,
-            ImportImportName::NamespaceObject => ImportedName::Namespace,
-        };
         imports.push(OwnedImportEntry {
-            specifier,
-            imported_name,
-            local_name,
+            specifier: entry.module_request.name.to_string(),
+            imported_name: match &entry.import_name {
+                ImportImportName::Name(n) => ImportedName::Named(n.name.to_string()),
+                ImportImportName::Default(_) => ImportedName::Default,
+                ImportImportName::NamespaceObject => ImportedName::Namespace,
+            },
+            local_name: entry.local_name.name.to_string(),
             is_type: entry.is_type,
             range: span_to_range(entry.module_request.span, source),
         });
     }
 
-    // Extract CJS exports
-    let cjs_exports = extract_cjs_exports(nodes, scoping, source);
-
-    // Build definition FQN map from analysis result
-    let definition_fqns = analysis
-        .definitions
+    let definition_fqns = definitions
         .iter()
         .map(|d| (d.fqn.to_string(), d.range))
         .collect();
 
-    Ok(JsModuleInfo {
+    JsModuleInfo {
         exports,
         imports,
         star_export_sources,
-        cjs_exports,
+        cjs_exports: vec![], // CJS exports extracted in analyze_file directly
         has_module_syntax: parsed.module_record.has_module_syntax,
         definition_fqns,
-    })
+    }
 }
 
 /// Scan for CommonJS export patterns: `module.exports = ...` and `exports.foo = ...`

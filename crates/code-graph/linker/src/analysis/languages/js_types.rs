@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 /// Owned per-file data that survives past OXC's allocator scope.
 /// Extracted at the end of Pass 1 for use in Pass 2 cross-file resolution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct JsModuleInfo {
     /// What this file exports (exported name -> binding info)
     pub exports: HashMap<String, ExportedBinding>,

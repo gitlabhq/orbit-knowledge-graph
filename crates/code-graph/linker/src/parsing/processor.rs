@@ -334,11 +334,15 @@ impl<'a> FileProcessor<'a> {
         let mut all_relationships = Vec::new();
 
         let mut directive = None;
+        let mut first_module_info = None;
         for (file_path, source) in &sources {
             match JsAnalyzer::analyze_file(source, file_path, &self.path) {
                 Ok(result) => {
                     if directive.is_none() {
                         directive = result.directive;
+                    }
+                    if first_module_info.is_none() {
+                        first_module_info = Some(result.module_info.clone());
                     }
                     all_definitions.extend(result.definitions);
                     all_imported_symbols.extend(result.imported_symbols);
@@ -364,6 +368,7 @@ impl<'a> FileProcessor<'a> {
             imported_symbols: all_imported_symbols,
             relationships: all_relationships,
             directive,
+            module_info: first_module_info.unwrap_or_default(),
         };
 
         ProcessingResult::Success(Box::new(FileProcessingResult {
