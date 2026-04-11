@@ -39,6 +39,7 @@ const ROOT_SIP_CTE: &str = "_root_ids";
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &mut Input) {
     match node {
+        Node::Insert(_) => {}
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
             if input.query_type == QueryType::Aggregation {
@@ -1273,14 +1274,16 @@ mod tests {
             ..Default::default()
         }));
 
-        let original = match &node {
-            Node::Query(q) => q.where_clause.clone(),
+        let Node::Query(q) = &node else {
+            unreachable!()
         };
+        let original = q.where_clause.clone();
         optimize(&mut node, &mut input);
 
-        match &node {
-            Node::Query(q) => assert_eq!(q.where_clause, original),
-        }
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        assert_eq!(q.where_clause, original);
     }
 
     #[test]

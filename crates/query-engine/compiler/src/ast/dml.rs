@@ -4,7 +4,9 @@
 //! Each node maps directly to ClickHouse SQL constructs.
 
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
+use regex::Regex;
 use serde_json::Value;
 
 pub use gkg_utils::clickhouse::{ChScalar, ChType};
@@ -92,8 +94,12 @@ pub enum Op {
 /// Source of rows in a FROM clause.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
-    /// Read from a physical table → `table AS alias`
-    Scan { table: String, alias: String },
+    /// Read from a physical table → `table [FINAL] AS alias`
+    Scan {
+        table: String,
+        alias: String,
+        final_: bool,
+    },
     /// Combine two sources → `left JOIN_TYPE JOIN right ON condition`
     Join {
         join_type: JoinType,
@@ -208,6 +214,7 @@ impl Default for Query {
             from: TableRef::Scan {
                 table: String::new(),
                 alias: String::new(),
+                final_: false,
             },
             where_clause: None,
             group_by: vec![],
@@ -220,10 +227,60 @@ impl Default for Query {
     }
 }
 
-/// Top-level AST node - either a simple query or a recursive CTE.
+/// SQL identifier pattern: ASCII letter or underscore, then alphanumerics/underscores.
+static SAFE_IDENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").expect("valid regex"));
+
+/// `INSERT INTO table (cols) VALUES (row1), (row2), ...`
+///
+/// Table and column names are interpolated as raw identifiers (not parameterized),
+/// so they are validated at construction time via [`Insert::new`]. Fields are
+/// private to enforce this — use the constructor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Insert {
+    table: String,
+    columns: Vec<String>,
+    values: Vec<Vec<Expr>>,
+}
+
+impl Insert {
+    pub fn new(table: impl Into<String>, columns: Vec<String>, values: Vec<Vec<Expr>>) -> Self {
+        let table = table.into();
+        debug_assert!(
+            SAFE_IDENT.is_match(&table),
+            "INSERT table name is not a safe identifier: {table:?}"
+        );
+        for col in &columns {
+            debug_assert!(
+                SAFE_IDENT.is_match(col),
+                "INSERT column name is not a safe identifier: {col:?}"
+            );
+        }
+        Self {
+            table,
+            columns,
+            values,
+        }
+    }
+
+    pub fn table(&self) -> &str {
+        &self.table
+    }
+
+    pub fn columns(&self) -> &[String] {
+        &self.columns
+    }
+
+    pub fn values(&self) -> &[Vec<Expr>] {
+        &self.values
+    }
+}
+
+/// Top-level AST node.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Query(Box<Query>),
+    Insert(Box<Insert>),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -444,6 +501,15 @@ impl TableRef {
         TableRef::Scan {
             table: table.into(),
             alias: alias.into(),
+            final_: false,
+        }
+    }
+
+    pub fn scan_final(table: impl Into<String>, alias: impl Into<String>) -> Self {
+        TableRef::Scan {
+            table: table.into(),
+            alias: alias.into(),
+            final_: true,
         }
     }
 
