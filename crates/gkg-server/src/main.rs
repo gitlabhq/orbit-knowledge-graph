@@ -11,7 +11,7 @@ use gkg_server::health_check as health_check_mode;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use gkg_server_config::AppConfig;
-use indexer::schema_version;
+use indexer::schema;
 use indexer::{DispatcherConfig, IndexerConfig};
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
             config.schema.validate()?;
             let graph = config.graph.build_client();
             info!("initializing schema version table");
-            schema_version::init(&graph).await?;
+            schema::version::init(&graph).await?;
 
             let dispatcher_config = DispatcherConfig {
                 nats: config.nats.clone(),
@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
             config.schema.validate()?;
             let graph = config.graph.build_client();
             info!("initializing schema version table");
-            schema_version::init(&graph).await?;
+            schema::version::init(&graph).await?;
             run_webserver(&config, ontology).await
         }
     };

@@ -18,7 +18,6 @@ use query_engine::compiler::emit_create_table;
 use query_engine::compiler::emit_simple_query;
 use query_engine::compiler::{Expr, Insert, Node, OrderExpr, Query, SelectExpr, TableRef};
 use thiserror::Error;
-use tracing::info;
 
 const VERSION_TABLE: &str = "gkg_schema_version";
 
@@ -28,7 +27,7 @@ const VERSION_TABLE: &str = "gkg_schema_version";
 /// in a way that requires a new table-set. The CI `schema-version-check` job
 /// enforces this.
 pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| {
-    include_str!("../../../config/SCHEMA_VERSION")
+    include_str!("../../../../config/SCHEMA_VERSION")
         .trim()
         .parse()
         .expect("config/SCHEMA_VERSION must contain a valid u32")
@@ -93,6 +92,21 @@ fn write_version_query(
         vec![vec![Expr::uint32(version), Expr::string("active")]],
     );
     emit_simple_query(&Node::Insert(Box::new(insert))).expect("write_version query must be valid")
+}
+
+fn write_migrating_version_query(
+    version: u32,
+) -> (
+    String,
+    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
+) {
+    let insert = Insert::new(
+        VERSION_TABLE,
+        vec!["version".into(), "status".into()],
+        vec![vec![Expr::uint32(version), Expr::string("migrating")]],
+    );
+    emit_simple_query(&Node::Insert(Box::new(insert)))
+        .expect("write_migrating_version query must be valid")
 }
 
 #[derive(Debug, Error)]
@@ -169,23 +183,32 @@ pub async fn write_schema_version(
     Ok(())
 }
 
-/// Ensures the `gkg_schema_version` table exists and, on a fresh install,
-/// records version 0 as active.
+/// Records a schema version as `migrating` in ClickHouse.
+///
+/// Used by the migration orchestrator to signal that new-prefix tables are
+/// being populated. The version remains `migrating` until the Webserver
+/// cutover (tracked in a subsequent issue).
+pub async fn write_migrating_version(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<(), SchemaVersionError> {
+    let (sql, params) = write_migrating_version_query(version);
+    let mut query = graph.query(&sql);
+    for (name, param) in &params {
+        query = query.param(name, &param.value);
+    }
+    query.execute().await?;
+    Ok(())
+}
+
+/// Ensures the `gkg_schema_version` table exists.
 ///
 /// Called by all service modes (Indexer, Webserver, DispatchIndexing) at
-/// startup so the control table is always present.
+/// startup so the control table is always present. Fresh install handling
+/// (recording version + creating tables) is done by the migration
+/// orchestrator in `schema::migration::run_if_needed`.
 pub async fn init(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionError> {
     ensure_version_table(graph).await?;
-
-    let active = read_active_version(graph).await?;
-    if active.is_none() {
-        info!(
-            version = *SCHEMA_VERSION,
-            "fresh install — recording initial schema version"
-        );
-        write_schema_version(graph, *SCHEMA_VERSION).await?;
-    }
-
     Ok(())
 }
 
@@ -257,5 +280,15 @@ mod tests {
     fn table_prefix_large_version() {
         assert_eq!(table_prefix(99), "v99_");
         assert_eq!(prefixed_table_name("checkpoint", 99), "v99_checkpoint");
+    }
+
+    #[test]
+    fn migrating_query_uses_migrating_status() {
+        let (sql, params) = write_migrating_version_query(1);
+        assert!(
+            sql.contains("gkg_schema_version"),
+            "migrating query must target version table: {sql}"
+        );
+        assert!(!params.is_empty(), "migrating query must have parameters");
     }
 }

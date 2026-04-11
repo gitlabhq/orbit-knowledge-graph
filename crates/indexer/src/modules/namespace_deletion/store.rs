@@ -7,29 +7,17 @@ use thiserror::Error;
 use arrow::record_batch::RecordBatch;
 
 use crate::clickhouse::ArrowClickHouseClient;
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use clickhouse_client::FromArrowColumn;
 
 use super::lower::{self, DeletionStatement};
 use crate::checkpoint::namespace_position_key;
 
+// Datalake tables (siphon_*) are never prefixed — only graph tables are.
 const IS_NAMESPACE_STILL_DELETED: &str = r#"
 SELECT argMax(_siphon_deleted, _siphon_replicated_at) AS is_deleted
 FROM siphon_knowledge_graph_enabled_namespaces
 WHERE root_namespace_id = {namespace_id:Int64}
-"#;
-
-const MARK_DELETION_COMPLETE: &str = r#"
-INSERT INTO namespace_deletion_schedule (namespace_id, traversal_path, scheduled_deletion_date, _deleted)
-SELECT
-    namespace_id,
-    traversal_path,
-    argMax(scheduled_deletion_date, _version) AS scheduled_deletion_date,
-    true
-FROM namespace_deletion_schedule
-WHERE namespace_id = {namespace_id:Int64}
-  AND traversal_path = {traversal_path:String}
-GROUP BY namespace_id, traversal_path
-HAVING argMax(_deleted, _version) = false
 "#;
 
 const DELETED_NAMESPACES_QUERY: &str = r#"
@@ -44,22 +32,54 @@ WHERE enabled._siphon_deleted = true
   AND enabled._siphon_replicated_at <= {watermark:String}
 "#;
 
-const SCHEDULE_DELETION_INSERT: &str = r#"
-INSERT INTO namespace_deletion_schedule (namespace_id, traversal_path, scheduled_deletion_date)
-VALUES ({namespace_id:Int64}, {traversal_path:String}, {scheduled_deletion_date:String})
-"#;
+fn mark_deletion_complete_sql() -> String {
+    let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
+    format!(
+        r#"
+INSERT INTO {table} (namespace_id, traversal_path, scheduled_deletion_date, _deleted)
+SELECT
+    namespace_id,
+    traversal_path,
+    argMax(scheduled_deletion_date, _version) AS scheduled_deletion_date,
+    true
+FROM {table}
+WHERE namespace_id = {{namespace_id:Int64}}
+  AND traversal_path = {{traversal_path:String}}
+GROUP BY namespace_id, traversal_path
+HAVING argMax(_deleted, _version) = false
+"#
+    )
+}
 
-const DELETE_SDLC_CHECKPOINTS: &str = r#"
-INSERT INTO checkpoint (key, watermark, cursor_values, _deleted)
+fn schedule_deletion_insert_sql() -> String {
+    let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
+    format!(
+        r#"
+INSERT INTO {table} (namespace_id, traversal_path, scheduled_deletion_date)
+VALUES ({{namespace_id:Int64}}, {{traversal_path:String}}, {{scheduled_deletion_date:String}})
+"#
+    )
+}
+
+fn delete_sdlc_checkpoints_sql() -> String {
+    let table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    format!(
+        r#"
+INSERT INTO {table} (key, watermark, cursor_values, _deleted)
 SELECT key, argMax(watermark, _version), argMax(cursor_values, _version), true
-FROM checkpoint
-WHERE startsWith(key, {key_prefix:String})
+FROM {table}
+WHERE startsWith(key, {{key_prefix:String}})
 GROUP BY key
 HAVING argMax(_deleted, _version) = false
-"#;
+"#
+    )
+}
 
-const DELETE_CODE_CHECKPOINTS: &str = r#"
-INSERT INTO code_indexing_checkpoint (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, _deleted)
+fn delete_code_checkpoints_sql() -> String {
+    let table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+    format!(
+        r#"
+INSERT INTO {table} (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, _deleted)
 SELECT
     traversal_path,
     project_id,
@@ -68,19 +88,26 @@ SELECT
     argMax(last_commit, _version),
     argMax(indexed_at, _version),
     true
-FROM code_indexing_checkpoint
-WHERE startsWith(traversal_path, {traversal_path:String})
+FROM {table}
+WHERE startsWith(traversal_path, {{traversal_path:String}})
 GROUP BY traversal_path, project_id, branch
 HAVING argMax(_deleted, _version) = false
-"#;
+"#
+    )
+}
 
-const DUE_NAMESPACES_QUERY: &str = r#"
+fn due_namespaces_query_sql() -> String {
+    let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
+    format!(
+        r#"
 SELECT namespace_id, traversal_path
-FROM namespace_deletion_schedule
+FROM {table}
 GROUP BY namespace_id, traversal_path
 HAVING argMax(_deleted, _version) = false
   AND argMax(scheduled_deletion_date, _version) <= now()
-"#;
+"#
+    )
+}
 
 #[derive(Clone)]
 pub struct TableDeletionOutcome {
@@ -193,14 +220,14 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         let key_prefix = format!("{}.", namespace_position_key(namespace_id));
 
         self.graph
-            .query(DELETE_SDLC_CHECKPOINTS)
+            .query(&delete_sdlc_checkpoints_sql())
             .param("key_prefix", key_prefix)
             .execute()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
         self.graph
-            .query(DELETE_CODE_CHECKPOINTS)
+            .query(&delete_code_checkpoints_sql())
             .param("traversal_path", traversal_path)
             .execute()
             .await
@@ -238,7 +265,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         traversal_path: &str,
     ) -> Result<(), NamespaceDeletionStoreError> {
         self.graph
-            .query(MARK_DELETION_COMPLETE)
+            .query(&mark_deletion_complete_sql())
             .param("namespace_id", namespace_id)
             .param("traversal_path", traversal_path)
             .execute()
@@ -273,7 +300,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         scheduled_deletion_date: &str,
     ) -> Result<(), NamespaceDeletionStoreError> {
         self.graph
-            .query(SCHEDULE_DELETION_INSERT)
+            .query(&schedule_deletion_insert_sql())
             .param("namespace_id", namespace_id)
             .param("traversal_path", traversal_path)
             .param("scheduled_deletion_date", scheduled_deletion_date)
@@ -290,7 +317,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError> {
         let batches = self
             .graph
-            .query(DUE_NAMESPACES_QUERY)
+            .query(&due_namespaces_query_sql())
             .fetch_arrow()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;

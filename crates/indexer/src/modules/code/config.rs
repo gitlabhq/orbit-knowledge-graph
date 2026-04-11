@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use ontology::{Ontology, OntologyError};
 
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+
 pub const CODE_LOCK_TTL: Duration = Duration::from_secs(60);
 
 pub mod subjects {
@@ -11,7 +13,8 @@ pub mod subjects {
     pub const KNOWLEDGE_GRAPH_ENABLED_NAMESPACES: &str = "knowledge_graph_enabled_namespaces";
 }
 
-/// ClickHouse table names for code graph entities, derived from the ontology.
+/// ClickHouse table names for code graph entities, derived from the ontology
+/// and prefixed according to the embedded `SCHEMA_VERSION`.
 pub struct CodeTableNames {
     pub branch: String,
     pub directory: String,
@@ -24,12 +27,15 @@ pub struct CodeTableNames {
 impl CodeTableNames {
     pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
         Ok(Self {
-            branch: ontology.table_name("Branch")?.to_owned(),
-            directory: ontology.table_name("Directory")?.to_owned(),
-            file: ontology.table_name("File")?.to_owned(),
-            definition: ontology.table_name("Definition")?.to_owned(),
-            imported_symbol: ontology.table_name("ImportedSymbol")?.to_owned(),
-            edge: ontology.edge_table().to_string(),
+            branch: prefixed_table_name(ontology.table_name("Branch")?, *SCHEMA_VERSION),
+            directory: prefixed_table_name(ontology.table_name("Directory")?, *SCHEMA_VERSION),
+            file: prefixed_table_name(ontology.table_name("File")?, *SCHEMA_VERSION),
+            definition: prefixed_table_name(ontology.table_name("Definition")?, *SCHEMA_VERSION),
+            imported_symbol: prefixed_table_name(
+                ontology.table_name("ImportedSymbol")?,
+                *SCHEMA_VERSION,
+            ),
+            edge: prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION),
         })
     }
 

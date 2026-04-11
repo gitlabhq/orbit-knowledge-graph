@@ -79,7 +79,7 @@ pub use passes::check::check_ast;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     clickhouse::emit_simple_query, clickhouse_ddl::emit_create_table, codegen,
-    ddl_generator::generate_graph_tables,
+    ddl_generator::generate_graph_tables, ddl_generator::generate_graph_tables_with_prefix,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use passes::hydrate::{
