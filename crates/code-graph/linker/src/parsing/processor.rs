@@ -1,5 +1,4 @@
-use crate::analysis::languages::js::{JsAnalysisResult, JsAnalyzer};
-use crate::analysis::languages::js_sfc;
+use crate::analysis::languages::js::{JsAnalyzer, JsFileAnalysis, extract_scripts};
 use crate::loading::FileInfo;
 use log::debug;
 use parser_core::definitions::DefinitionInfo;
@@ -17,7 +16,10 @@ use parser_core::{
         analyzer::KotlinAnalyzer,
         types::{KotlinDefinitionInfo, KotlinImportedSymbolInfo, KotlinReferenceInfo},
     },
-    parser::{ParserType, SupportedLanguage, UnifiedParseResult, detect_language_from_extension},
+    parser::{
+        ParserType, SupportedLanguage, UnifiedParseResult, detect_language_from_extension,
+        is_excluded_path,
+    },
     python::{
         analyzer::PythonAnalyzer,
         types::{PythonDefinitionInfo, PythonImportedSymbolInfo, PythonReferenceInfo},
@@ -178,6 +180,14 @@ impl<'a> FileProcessor<'a> {
     pub fn process(&self) -> ProcessingResult {
         let start_time = Instant::now();
 
+        if is_excluded_path(&self.path) {
+            return ProcessingResult::Skipped(SkippedFile {
+                file_path: self.path.clone(),
+                reason: "Excluded file pattern (e.g. minified)".to_string(),
+                file_size: Some(self.size()),
+            });
+        }
+
         // 1. Detect language using pre-computed extension (avoids duplicate parsing)
         let language = match detect_language_from_extension(&self.extension) {
             Ok(lang) => lang,
@@ -282,7 +292,7 @@ impl<'a> FileProcessor<'a> {
                 definitions,
                 imported_symbols: imports,
                 references,
-                js_graph_data: None,
+                js_analysis: None,
                 stats: ProcessingStats {
                     total_time: start_time.elapsed(),
                     parse_time,
@@ -309,7 +319,7 @@ impl<'a> FileProcessor<'a> {
                 } else {
                     "svelte"
                 };
-                let blocks = js_sfc::extract_scripts(self.content, ext);
+                let blocks = extract_scripts(self.content, ext);
                 if blocks.is_empty() {
                     return ProcessingResult::Skipped(SkippedFile {
                         file_path: self.path.clone(),
@@ -320,18 +330,23 @@ impl<'a> FileProcessor<'a> {
                 blocks
                     .into_iter()
                     .map(|b| {
-                        let ext = if b.is_typescript { "ts" } else { "js" };
+                        let ext = if b.source_type.is_typescript() {
+                            "ts"
+                        } else {
+                            "js"
+                        };
                         let virtual_path = format!("{}.{ext}", self.path);
-                        (virtual_path, b.source_text)
+                        (virtual_path, b.source_text.to_string())
                     })
                     .collect()
             }
             _ => vec![(self.path.clone(), self.content.to_string())],
         };
 
-        let mut all_definitions = Vec::new();
-        let mut all_imported_symbols = Vec::new();
-        let mut all_relationships = Vec::new();
+        let mut all_defs = Vec::new();
+        let mut all_imports = Vec::new();
+        let mut all_calls = Vec::new();
+        let mut all_classes = Vec::new();
 
         let mut directive = None;
         let mut first_module_info = None;
@@ -344,9 +359,10 @@ impl<'a> FileProcessor<'a> {
                     if first_module_info.is_none() {
                         first_module_info = Some(result.module_info.clone());
                     }
-                    all_definitions.extend(result.definitions);
-                    all_imported_symbols.extend(result.imported_symbols);
-                    all_relationships.extend(result.relationships);
+                    all_defs.extend(result.defs);
+                    all_imports.extend(result.imports);
+                    all_calls.extend(result.calls);
+                    all_classes.extend(result.classes);
                 }
                 Err(e) => {
                     return ProcessingResult::Error(ErroredFile {
@@ -360,13 +376,15 @@ impl<'a> FileProcessor<'a> {
         }
 
         let analysis_time = analysis_start.elapsed();
-        let definitions_count = all_definitions.len();
-        let imported_symbols_count = all_imported_symbols.len();
+        let definitions_count = all_defs.len();
+        let imported_symbols_count = all_imports.len();
 
-        let js_result = JsAnalysisResult {
-            definitions: all_definitions,
-            imported_symbols: all_imported_symbols,
-            relationships: all_relationships,
+        let js_analysis = JsFileAnalysis {
+            relative_path: self.path.clone(),
+            defs: all_defs,
+            imports: all_imports,
+            calls: all_calls,
+            classes: all_classes,
             directive,
             module_info: first_module_info.unwrap_or_default(),
         };
@@ -379,7 +397,7 @@ impl<'a> FileProcessor<'a> {
             definitions: Definitions::JsOxc,
             imported_symbols: None,
             references: None,
-            js_graph_data: Some(js_result),
+            js_analysis: Some(js_analysis),
             stats: ProcessingStats {
                 total_time: start_time.elapsed(),
                 parse_time: Duration::ZERO,
@@ -884,10 +902,8 @@ pub struct FileProcessingResult {
     pub imported_symbols: Option<ImportedSymbols>,
     /// Extracted references for Ruby (used for reference resolution)
     pub references: Option<References>,
-    /// Pre-computed graph data from OXC-based JS/TS analysis.
-    /// When set, AnalysisService merges these directly into GraphData
-    /// instead of processing through the language-specific analysis pipeline.
-    pub js_graph_data: Option<JsAnalysisResult>,
+    /// Rich JS/TS analysis from OXC. Call `.emit()` to convert to graph types.
+    pub js_analysis: Option<JsFileAnalysis>,
     /// Processing statistics
     pub stats: ProcessingStats,
     /// Whether this language is supported for analysis

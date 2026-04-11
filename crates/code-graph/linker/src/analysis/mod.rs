@@ -115,20 +115,21 @@ impl AnalysisService {
                         &mut created_dir_relationships,
                     );
 
-                    if let Some(mut js_data) = file_result.js_graph_data {
+                    if let Some(js_analysis) = &file_result.js_analysis {
                         let relative = self
                             .filesystem_analyzer
                             .get_relative_path(&file_result.file_path);
                         let rel_path = ArcIntern::new(relative.clone());
 
-                        // Relativize file paths in definitions and imported symbols
-                        for def in &mut js_data.definitions {
+                        let mut emitted = js_analysis.emit();
+
+                        for def in &mut emitted.definitions {
                             def.file_path = rel_path.clone();
                         }
-                        for imp in &mut js_data.imported_symbols {
+                        for imp in &mut emitted.imported_symbols {
                             imp.location.file_path = relative.clone();
                         }
-                        for rel in &mut js_data.relationships {
+                        for rel in &mut emitted.relationships {
                             if rel.source_path.is_some() {
                                 rel.source_path = Some(rel_path.clone());
                             }
@@ -137,9 +138,9 @@ impl AnalysisService {
                             }
                         }
 
-                        definition_nodes.extend(js_data.definitions);
-                        imported_symbol_nodes.extend(js_data.imported_symbols);
-                        relationships.extend(js_data.relationships);
+                        definition_nodes.extend(emitted.definitions);
+                        imported_symbol_nodes.extend(emitted.imported_symbols);
+                        relationships.extend(emitted.relationships);
                     }
                 }
                 continue;

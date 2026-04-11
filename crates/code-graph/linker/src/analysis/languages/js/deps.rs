@@ -2,13 +2,12 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-use super::js_workspace;
+use super::workspace::WorkspacePackage;
 
 #[derive(Debug, Clone)]
 pub struct DependencyInfo {
     pub package_name: String,
     pub version_range: String,
-    /// Which workspace package declares this dep (None = root)
     pub workspace_package: Option<String>,
     pub is_dev_dependency: bool,
     pub is_peer_dependency: bool,
@@ -27,12 +26,16 @@ struct PackageJsonDeps {
     optional_dependencies: HashMap<String, String>,
 }
 
-/// Extract all dependency declarations from a project.
-/// Walks the root `package.json` plus all workspace package `package.json` files.
-pub fn parse_all_dependencies(root_dir: &Path) -> Result<Vec<DependencyInfo>, String> {
+/// Parse dependencies from the root package.json and workspace package.json files.
+///
+/// Workspace packages are provided by the caller (from `detect_workspaces`)
+/// rather than re-scanning the filesystem.
+pub fn parse_all_dependencies(
+    root_dir: &Path,
+    workspace_packages: &[WorkspacePackage],
+) -> Result<Vec<DependencyInfo>, String> {
     let mut all_deps = Vec::new();
 
-    // Root package.json
     let root_pkg = root_dir.join("package.json");
     if root_pkg.is_file() {
         let content = std::fs::read_to_string(&root_pkg)
@@ -40,9 +43,7 @@ pub fn parse_all_dependencies(root_dir: &Path) -> Result<Vec<DependencyInfo>, St
         all_deps.extend(parse_package_json(&content, None)?);
     }
 
-    // Workspace packages
-    let workspace_packages = js_workspace::detect_workspaces(root_dir);
-    for pkg in &workspace_packages {
+    for pkg in workspace_packages {
         let pkg_json = root_dir.join(&pkg.path).join("package.json");
         if pkg_json.is_file()
             && let Ok(content) = std::fs::read_to_string(&pkg_json)
@@ -122,6 +123,7 @@ pub fn parse_package_json(
 
 #[cfg(test)]
 mod tests {
+    use super::super::workspace;
     use super::*;
 
     #[test]
@@ -205,14 +207,12 @@ mod tests {
     fn test_parse_all_with_workspaces() {
         let dir = tempfile::TempDir::new().unwrap();
 
-        // Root package.json with workspaces
         std::fs::write(
             dir.path().join("package.json"),
             r#"{ "workspaces": ["packages/*"], "devDependencies": { "turbo": "^2.0.0" } }"#,
         )
         .unwrap();
 
-        // Workspace package
         let pkg_dir = dir.path().join("packages").join("ui");
         std::fs::create_dir_all(&pkg_dir).unwrap();
         std::fs::write(
@@ -221,9 +221,13 @@ mod tests {
         )
         .unwrap();
 
-        let deps = parse_all_dependencies(dir.path()).unwrap();
+        let discovered_paths = vec![
+            "packages/ui/src/index.ts".to_string(),
+            "packages/ui/package.json".to_string(),
+        ];
+        let workspace_packages = workspace::detect_workspaces(dir.path(), &discovered_paths);
+        let deps = parse_all_dependencies(dir.path(), &workspace_packages).unwrap();
 
-        // Should have root dep (turbo) + workspace dep (react)
         assert!(deps.iter().any(|d| d.package_name == "turbo"), "root dep");
         assert!(
             deps.iter()

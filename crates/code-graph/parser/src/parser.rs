@@ -120,6 +120,33 @@ macro_rules! define_languages {
             }
         }
 
+        /// Check whether a file path should be excluded based on its language's
+        /// `exclude_extensions` patterns (e.g. `"min.js"`, `"min.mjs"`).
+        ///
+        /// Returns `true` if the filename ends with any exclude pattern for the
+        /// language that would otherwise match the file's extension.
+        pub fn is_excluded_path(file_path: &str) -> bool {
+            let path = std::path::Path::new(file_path);
+            let extension = match path.extension().and_then(|ext| ext.to_str()) {
+                Some(ext) => ext,
+                None => return false,
+            };
+
+            let lang = match EXTENSION_MAP.get(extension) {
+                Some(lang) => lang,
+                None => return false,
+            };
+
+            let file_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name,
+                None => return false,
+            };
+
+            lang.exclude_extensions()
+                .iter()
+                .any(|pattern| file_name.ends_with(pattern))
+        }
+
         pub fn detect_language_from_path(file_path: &str) -> Result<SupportedLanguage> {
             let path = std::path::Path::new(file_path);
             let extension = path
@@ -127,13 +154,27 @@ macro_rules! define_languages {
                 .and_then(|ext| ext.to_str())
                 .ok_or_else(|| Error::UnsupportedLanguage("No file extension".to_string()))?;
 
-            EXTENSION_MAP
+            let lang = EXTENSION_MAP
                 .get(extension)
                 .copied()
                 .ok_or_else(|| Error::UnsupportedLanguage(format!(
                     "Unsupported file extension: {}",
                     extension
-                )))
+                )))?;
+
+            let file_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+
+            if lang.exclude_extensions().iter().any(|pattern| file_name.ends_with(pattern)) {
+                return Err(Error::UnsupportedLanguage(format!(
+                    "Excluded file pattern: {}",
+                    file_path
+                )));
+            }
+
+            Ok(lang)
         }
 
         pub fn get_supported_extensions() -> SmallVec<[&'static str; 11]> {
@@ -579,9 +620,36 @@ mod tests {
 
     #[test]
     fn test_exclude_extensions() {
-        // TypeScript should exclude minified JS files
         let ts_excludes = SupportedLanguage::TypeScript.exclude_extensions();
         assert!(ts_excludes.contains(&"min.js"));
+
+        let js_excludes = SupportedLanguage::Js.exclude_extensions();
+        assert!(js_excludes.contains(&"min.js"));
+        assert!(js_excludes.contains(&"min.mjs"));
+    }
+
+    #[test]
+    fn test_detect_language_from_path_excludes_minified() {
+        assert!(detect_language_from_path("bundle.min.js").is_err());
+        assert!(detect_language_from_path("vendor.min.mjs").is_err());
+        assert!(detect_language_from_path("/some/path/app.min.js").is_err());
+
+        assert!(detect_language_from_path("app.js").is_ok());
+        assert!(detect_language_from_path("index.mjs").is_ok());
+        assert!(detect_language_from_path("component.tsx").is_ok());
+    }
+
+    #[test]
+    fn test_is_excluded_path() {
+        assert!(is_excluded_path("bundle.min.js"));
+        assert!(is_excluded_path("vendor.min.mjs"));
+        assert!(is_excluded_path("/deep/path/lib.min.js"));
+
+        assert!(!is_excluded_path("app.js"));
+        assert!(!is_excluded_path("index.mjs"));
+        assert!(!is_excluded_path("test.rb"));
+        assert!(!is_excluded_path("no_extension"));
+        assert!(!is_excluded_path("unknown.xyz"));
     }
 
     #[test]

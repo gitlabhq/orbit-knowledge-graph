@@ -1,10 +1,6 @@
-/// The directive found in a JS/TS file, if any.
-/// Detected from OXC's parsed `Program.directives` (standard ECMAScript directive prologues).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsDirective {
-    /// `"use server"` -- marks the file as a React Server Action module
     UseServer,
-    /// `"use client"` -- marks the file as a React Client Component module
     UseClient,
 }
 
@@ -17,11 +13,6 @@ impl JsDirective {
     }
 }
 
-/// Extract the React directive from OXC's parsed program directives.
-/// Returns `Some(JsDirective)` if `"use server"` or `"use client"` is present.
-///
-/// This reads directly from OXC's `Program.directives` -- the parser already
-/// handles these as standard ECMAScript directive prologues.
 pub fn detect_directive<'a>(
     directives: impl IntoIterator<Item = &'a oxc::ast::ast::Directive<'a>>,
 ) -> Option<JsDirective> {
@@ -85,7 +76,6 @@ mod tests {
 
     #[test]
     fn test_directive_after_comment() {
-        // Directives must be before any statements, but comments are fine
         assert_eq!(
             parse_directive("// some comment\n\"use server\";\nexport async function f() {}"),
             Some(JsDirective::UseServer)

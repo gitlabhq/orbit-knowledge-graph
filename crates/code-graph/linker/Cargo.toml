@@ -38,7 +38,6 @@ strum = { workspace = true }
 oxc = { workspace = true }
 oxc_linter = { workspace = true }
 oxc_resolver = { workspace = true }
-memchr = { workspace = true }
 serde_yaml = { workspace = true }
 
 [dev-dependencies]

@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -8,7 +9,12 @@ pub struct WorkspacePackage {
     pub path: String,
 }
 
-pub fn detect_workspaces(root_dir: &Path) -> Vec<WorkspacePackage> {
+/// Detect workspace packages by matching workspace glob patterns against
+/// already-discovered file paths, eliminating recursive directory scanning.
+///
+/// `discovered_paths` should contain relative file paths from the indexer's
+/// walk (e.g. `"packages/core/src/index.ts"`).
+pub fn detect_workspaces(root_dir: &Path, discovered_paths: &[String]) -> Vec<WorkspacePackage> {
     let globs = read_workspace_globs(root_dir);
     if globs.is_empty() {
         return Vec::new();
@@ -16,7 +22,7 @@ pub fn detect_workspaces(root_dir: &Path) -> Vec<WorkspacePackage> {
 
     let mut packages = Vec::new();
     for glob in &globs {
-        for dir in expand_workspace_glob(root_dir, glob) {
+        for dir in expand_workspace_glob_from_paths(glob, discovered_paths, root_dir) {
             let pkg_json_path = dir.join("package.json");
             if let Some(pkg) = read_package_meta(&pkg_json_path, root_dir) {
                 packages.push(pkg);
@@ -28,11 +34,14 @@ pub fn detect_workspaces(root_dir: &Path) -> Vec<WorkspacePackage> {
     packages
 }
 
-pub fn is_bun_project(root_dir: &Path) -> bool {
-    if root_dir.join("bun.lock").is_file() || root_dir.join("bun.lockb").is_file() {
-        return true;
-    }
-    if root_dir.join("bunfig.toml").is_file() {
+/// Check if this is a Bun project by inspecting discovered file paths
+/// and the root package.json content.
+pub fn is_bun_project(root_dir: &Path, discovered_paths: &[String]) -> bool {
+    let has_bun_lock = discovered_paths
+        .iter()
+        .any(|p| p == "bun.lock" || p == "bun.lockb");
+    let has_bunfig = discovered_paths.iter().any(|p| p == "bunfig.toml");
+    if has_bun_lock || has_bunfig {
         return true;
     }
     has_bun_types_dep(root_dir)
@@ -96,64 +105,67 @@ fn read_workspace_globs(root_dir: &Path) -> Vec<String> {
     Vec::new()
 }
 
-fn expand_workspace_glob(root_dir: &Path, pattern: &str) -> Vec<std::path::PathBuf> {
+/// Match workspace glob patterns against discovered file paths to find
+/// workspace directories, instead of scanning the filesystem with read_dir.
+fn expand_workspace_glob_from_paths(
+    pattern: &str,
+    discovered_paths: &[String],
+    root_dir: &Path,
+) -> Vec<std::path::PathBuf> {
     let pattern = pattern.strip_suffix('/').unwrap_or(pattern);
-    let mut results = Vec::new();
+    let mut dirs = HashSet::new();
 
-    if let Some(prefix) = pattern.strip_suffix("/*") {
-        let search_dir = root_dir.join(prefix);
-        if let Ok(entries) = std::fs::read_dir(&search_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    results.push(path);
-                }
+    if let Some(prefix) = pattern.strip_suffix("/**") {
+        // "packages/**" -> find all dirs under packages/ at any depth that have a package.json
+        let prefix_with_slash = format!("{prefix}/");
+        for path in discovered_paths {
+            if let Some(rest) = path.strip_prefix(&prefix_with_slash)
+                && let Some(slash_pos) = rest.find('/')
+            {
+                dirs.insert(root_dir.join(prefix).join(&rest[..slash_pos]));
             }
         }
-    } else if let Some(prefix) = pattern.strip_suffix("/**") {
-        collect_dirs_recursive(root_dir.join(prefix).as_path(), &mut results);
+    } else if let Some(prefix) = pattern.strip_suffix("/*") {
+        // "packages/*" -> find all dirs under packages/ at depth 1
+        let prefix_with_slash = format!("{prefix}/");
+        for path in discovered_paths {
+            if let Some(rest) = path.strip_prefix(&prefix_with_slash)
+                && let Some(slash_pos) = rest.find('/')
+            {
+                dirs.insert(root_dir.join(prefix).join(&rest[..slash_pos]));
+            }
+        }
     } else if !pattern.contains('*') {
-        let path = root_dir.join(pattern);
-        if path.is_dir() {
-            results.push(path);
+        // Exact directory name
+        let prefix_with_slash = format!("{pattern}/");
+        if discovered_paths
+            .iter()
+            .any(|p| p.starts_with(&prefix_with_slash))
+        {
+            dirs.insert(root_dir.join(pattern));
         }
     } else {
+        // Generic "prefix*suffix" pattern (e.g. "packages/core-*")
         let parts: Vec<&str> = pattern.split('*').collect();
         if parts.len() == 2 {
             let prefix_part = parts[0];
             let suffix_part = parts[1];
-            let search_dir = root_dir.join(prefix_part.trim_end_matches('/'));
-            if let Ok(entries) = std::fs::read_dir(&search_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        let name = entry.file_name();
-                        let name_str = name.to_string_lossy();
-                        if suffix_part.is_empty() || name_str.ends_with(suffix_part) {
-                            results.push(path);
-                        }
+            let search_prefix = prefix_part.trim_end_matches('/');
+            let search_with_slash = format!("{search_prefix}/");
+            for path in discovered_paths {
+                if let Some(rest) = path.strip_prefix(&search_with_slash)
+                    && let Some(slash_pos) = rest.find('/')
+                {
+                    let dir_name = &rest[..slash_pos];
+                    if suffix_part.is_empty() || dir_name.ends_with(suffix_part) {
+                        dirs.insert(root_dir.join(search_prefix).join(dir_name));
                     }
                 }
             }
         }
     }
 
-    results
-}
-
-fn collect_dirs_recursive(dir: &Path, results: &mut Vec<std::path::PathBuf>) {
-    if !dir.is_dir() {
-        return;
-    }
-    results.push(dir.to_path_buf());
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                collect_dirs_recursive(&path, results);
-            }
-        }
-    }
+    dirs.into_iter().collect()
 }
 
 #[derive(Deserialize)]
@@ -209,6 +221,15 @@ mod tests {
         dir
     }
 
+    fn workspace_discovered_paths() -> Vec<String> {
+        vec![
+            "packages/core/src/index.ts".to_string(),
+            "packages/core/package.json".to_string(),
+            "packages/utils/src/helpers.ts".to_string(),
+            "packages/utils/package.json".to_string(),
+        ]
+    }
+
     #[test]
     fn test_pnpm_workspace_yaml() {
         let dir = setup_workspace_dir();
@@ -218,7 +239,7 @@ mod tests {
         )
         .unwrap();
 
-        let packages = detect_workspaces(dir.path());
+        let packages = detect_workspaces(dir.path(), &workspace_discovered_paths());
         assert_eq!(packages.len(), 2);
 
         let core = packages.iter().find(|p| p.name == "@myapp/core").unwrap();
@@ -235,7 +256,7 @@ mod tests {
         )
         .unwrap();
 
-        let packages = detect_workspaces(dir.path());
+        let packages = detect_workspaces(dir.path(), &workspace_discovered_paths());
         assert_eq!(packages.len(), 2);
     }
 
@@ -248,7 +269,7 @@ mod tests {
         )
         .unwrap();
 
-        let packages = detect_workspaces(dir.path());
+        let packages = detect_workspaces(dir.path(), &workspace_discovered_paths());
         assert_eq!(packages.len(), 2);
     }
 
@@ -274,7 +295,12 @@ mod tests {
         )
         .unwrap();
 
-        let packages = detect_workspaces(dir.path());
+        let paths = vec![
+            "apps/web/src/index.ts".to_string(),
+            "apps/web/package.json".to_string(),
+            "packages/core/src/index.ts".to_string(),
+        ];
+        let packages = detect_workspaces(dir.path(), &paths);
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].name, "@myapp/web");
     }
@@ -282,17 +308,17 @@ mod tests {
     #[test]
     fn test_is_bun_project_bun_lock() {
         let dir = TempDir::new().unwrap();
-        assert!(!is_bun_project(dir.path()));
+        assert!(!is_bun_project(dir.path(), &[]));
 
-        fs::write(dir.path().join("bun.lock"), "{}").unwrap();
-        assert!(is_bun_project(dir.path()));
+        let paths = vec!["bun.lock".to_string()];
+        assert!(is_bun_project(dir.path(), &paths));
     }
 
     #[test]
     fn test_is_bun_project_bunfig() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("bunfig.toml"), "[install]\n").unwrap();
-        assert!(is_bun_project(dir.path()));
+        let paths = vec!["bunfig.toml".to_string()];
+        assert!(is_bun_project(dir.path(), &paths));
     }
 
     #[test]
@@ -303,13 +329,13 @@ mod tests {
             r#"{"devDependencies": {"@types/bun": "^1.0.0"}}"#,
         )
         .unwrap();
-        assert!(is_bun_project(dir.path()));
+        assert!(is_bun_project(dir.path(), &[]));
     }
 
     #[test]
     fn test_no_workspaces() {
         let dir = TempDir::new().unwrap();
-        let packages = detect_workspaces(dir.path());
+        let packages = detect_workspaces(dir.path(), &[]);
         assert!(packages.is_empty());
     }
 }

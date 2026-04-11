@@ -5,9 +5,8 @@ use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use super::js_types::{ExportedBinding, ImportedName, JsModuleInfo};
+use super::types::{ExportedBinding, ImportedName, JsModuleInfo};
 
-/// Cross-file resolver using oxc_resolver.
 pub struct JsCrossFileResolver {
     resolver: Resolver,
     root_dir: PathBuf,
@@ -19,8 +18,6 @@ impl JsCrossFileResolver {
         Self { resolver, root_dir }
     }
 
-    /// Resolve all cross-file edges for a set of analyzed modules.
-    /// Returns new relationships to add to the graph.
     pub fn resolve(
         &self,
         modules: &HashMap<String, JsModuleInfo>,
@@ -29,7 +26,6 @@ impl JsCrossFileResolver {
 
         for (file_path, module_info) in modules {
             let abs_path = self.root_dir.join(file_path);
-            // resolve() takes a directory, not a file path
             let abs_dir = abs_path.parent().unwrap_or(&self.root_dir);
 
             for import_entry in &module_info.imports {
@@ -37,44 +33,61 @@ impl JsCrossFileResolver {
 
                 let resolved_path = match resolved {
                     Ok(resolution) => resolution.into_path_buf(),
-                    Err(_) => continue, // external dep or unresolvable, skip silently
+                    Err(_) => continue,
                 };
 
-                // Convert resolved absolute path to relative
                 let relative_resolved = match resolved_path.strip_prefix(&self.root_dir) {
                     Ok(rel) => rel.to_string_lossy().to_string(),
-                    Err(_) => continue, // outside repo, skip
+                    Err(_) => continue,
                 };
 
                 let target_module = match modules.get(&relative_resolved) {
                     Some(m) => m,
-                    None => continue, // file not in our analysis set
+                    None => continue,
                 };
 
-                // Match imported binding to target's exports
                 let target_binding = match &import_entry.imported_name {
                     ImportedName::Named(name) => target_module.exports.get(name),
                     ImportedName::Default => target_module.exports.values().find(|b| b.is_default),
-                    ImportedName::Namespace => None, // links to all exports, handled separately
+                    ImportedName::Namespace => None,
                 };
 
                 if let Some(binding) = target_binding {
-                    let source_path = ArcIntern::new(file_path.clone());
-                    let target_path = ArcIntern::new(relative_resolved.clone());
+                    let (final_path, final_binding) =
+                        if let Some(ref source) = binding.reexport_source {
+                            let name = match &import_entry.imported_name {
+                                ImportedName::Named(n) => n.as_str(),
+                                ImportedName::Default => "default",
+                                _ => continue,
+                            };
+                            match self.resolve_reexport(
+                                source,
+                                binding.reexport_name.as_deref().unwrap_or(name),
+                                &relative_resolved,
+                                modules,
+                                0,
+                            ) {
+                                Some(resolved) => resolved,
+                                None => (relative_resolved.clone(), binding.clone()),
+                            }
+                        } else {
+                            (relative_resolved.clone(), binding.clone())
+                        };
 
-                    // ImportedSymbol -> Definition edge
+                    let source_path = ArcIntern::new(file_path.clone());
+                    let target_path = ArcIntern::new(final_path);
+
                     relationships.push(ConsolidatedRelationship {
                         source_path: Some(source_path),
                         target_path: Some(target_path),
                         kind: RelationshipKind::ImportedSymbolToDefinition,
                         relationship_type: RelationshipType::ImportedSymbolToDefinition,
                         source_range: ArcIntern::new(import_entry.range),
-                        target_range: ArcIntern::new(binding.range),
+                        target_range: ArcIntern::new(final_binding.range),
                         ..Default::default()
                     });
                 }
 
-                // If target has star exports, follow the chain
                 if target_binding.is_none()
                     && let ImportedName::Named(name) = &import_entry.imported_name
                     && let Some(binding) = self.resolve_star_export(
@@ -104,8 +117,42 @@ impl JsCrossFileResolver {
         relationships
     }
 
-    /// Follow star re-export chains to find a named export.
-    /// Returns (file_path, ExportedBinding) if found.
+    fn resolve_reexport(
+        &self,
+        source: &str,
+        name: &str,
+        from_file: &str,
+        modules: &HashMap<String, JsModuleInfo>,
+        depth: usize,
+    ) -> Option<(String, ExportedBinding)> {
+        if depth > 10 {
+            return None;
+        }
+
+        let abs_dir = self.root_dir.join(from_file).parent()?.to_path_buf();
+        let resolution = self.resolver.resolve(&abs_dir, source).ok()?;
+        let rel = resolution
+            .into_path_buf()
+            .strip_prefix(&self.root_dir)
+            .ok()?
+            .to_string_lossy()
+            .to_string();
+        let target_module = modules.get(&rel)?;
+        let binding = target_module.exports.get(name)?;
+
+        if let Some(ref next_source) = binding.reexport_source {
+            self.resolve_reexport(
+                next_source,
+                binding.reexport_name.as_deref().unwrap_or(name),
+                &rel,
+                modules,
+                depth + 1,
+            )
+        } else {
+            Some((rel, binding.clone()))
+        }
+    }
+
     fn resolve_star_export(
         &self,
         name: &str,
@@ -120,12 +167,19 @@ impl JsCrossFileResolver {
 
         let module = modules.get(current_file)?;
 
-        // Check direct exports first
         if let Some(binding) = module.exports.get(name) {
+            if let Some(ref source) = binding.reexport_source {
+                return self.resolve_reexport(
+                    source,
+                    binding.reexport_name.as_deref().unwrap_or(name),
+                    current_file,
+                    modules,
+                    0,
+                );
+            }
             return Some((current_file.to_string(), binding.clone()));
         }
 
-        // Follow star re-exports
         for star_source in &module.star_export_sources {
             let abs_path = self.root_dir.join(current_file);
             let abs_dir = abs_path.parent().unwrap_or(&self.root_dir);
@@ -203,7 +257,6 @@ mod tests {
     #[test]
     fn test_create_resolver_default() {
         let resolver = create_resolver(false, false);
-        // Just verify it doesn't panic
         let _ = resolver;
     }
 
@@ -223,7 +276,6 @@ mod tests {
     fn test_resolve_star_export_cycle_detection() {
         let mut modules = HashMap::new();
 
-        // Create a cycle: a.ts re-exports from b.ts, b.ts re-exports from a.ts
         modules.insert(
             "a.ts".to_string(),
             JsModuleInfo {
@@ -250,7 +302,6 @@ mod tests {
         let resolver = JsCrossFileResolver::new(PathBuf::from("/tmp/test"), false, false);
         let result = resolver.resolve_star_export("foo", "a.ts", &modules, &mut HashSet::new(), 0);
 
-        // Should return None without infinite loop
         assert!(result.is_none());
     }
 }
