@@ -75,7 +75,6 @@ mod tests {
             security_context: None,
             server_extensions: Default::default(),
             phases: Default::default(),
-            table_prefix: String::new(),
         };
         ctx.phases.insert(AuthorizationOutput {
             query_result: QueryResult::from_batches(&[batch], &result_ctx),

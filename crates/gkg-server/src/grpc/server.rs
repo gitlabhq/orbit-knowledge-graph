@@ -34,7 +34,6 @@ impl GrpcServer {
         tls_config: Option<ServerTlsConfig>,
         resolver_registry: Option<Arc<ColumnResolverRegistry>>,
         grpc_config: GrpcConfig,
-        table_prefix: String,
     ) -> Self {
         let service = KnowledgeGraphServiceImpl::new(
             validator,
@@ -43,7 +42,6 @@ impl GrpcServer {
             cluster_health,
             resolver_registry,
             grpc_config.stream_timeout_secs,
-            table_prefix,
         );
         Self {
             addr,
@@ -106,7 +104,6 @@ mod tests {
             None,
             None,
             GrpcConfig::default(),
-            String::new(),
         );
         assert_eq!(server.addr(), addr);
     }

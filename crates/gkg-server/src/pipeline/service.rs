@@ -25,8 +25,6 @@ pub struct QueryPipelineService {
     client: Arc<ArrowClickHouseClient>,
     profiling: ProfilingConfig,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
-    /// Table prefix derived from active schema version. Empty for version 0.
-    table_prefix: String,
 }
 
 impl QueryPipelineService {
@@ -34,14 +32,12 @@ impl QueryPipelineService {
         ontology: Arc<Ontology>,
         client: Arc<ArrowClickHouseClient>,
         profiling: ProfilingConfig,
-        table_prefix: String,
     ) -> Self {
         Self {
             ontology,
             client,
             profiling,
             resolver_registry: None,
-            table_prefix,
         }
     }
 
@@ -74,7 +70,6 @@ impl QueryPipelineService {
             compiled: None,
             ontology: Arc::clone(&self.ontology),
             security_context: None,
-            table_prefix: self.table_prefix.clone(),
             server_extensions,
             phases: TypeMap::default(),
         };
