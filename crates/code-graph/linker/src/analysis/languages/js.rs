@@ -19,6 +19,7 @@ use super::js_types::{CjsExport, ExportedBinding, ImportedName, JsModuleInfo, Ow
 
 pub struct JsAnalyzer;
 
+#[derive(Clone, Debug)]
 pub struct JsAnalysisResult {
     pub definitions: Vec<DefinitionNode>,
     pub imported_symbols: Vec<ImportedSymbolNode>,
@@ -95,6 +96,49 @@ impl JsAnalyzer {
             }
 
             definitions.push(def_node);
+        }
+
+        // 1b. Extract class methods from ClassTable (methods don't appear in the symbol table)
+        let class_table = semantic.classes();
+        for (class_id, elements) in class_table.elements.iter_enumerated() {
+            // Find the class name by looking up the class node
+            let class_node_id = class_table.declarations[class_id];
+            let class_name = if let AstKind::Class(class) = nodes.kind(class_node_id) {
+                class
+                    .id
+                    .as_ref()
+                    .map(|id| id.name.to_string())
+                    .unwrap_or_default()
+            } else {
+                continue;
+            };
+
+            if class_name.is_empty() {
+                continue;
+            }
+
+            for element in elements.iter() {
+                if !element.kind.is_method() {
+                    continue;
+                }
+
+                let method_name = element.name.to_string();
+                let fqn = format!("{class_name}::{method_name}");
+                let range = span_to_range(element.span, source);
+                let def_type = if element.r#static {
+                    "StaticMethod"
+                } else {
+                    "Method"
+                };
+
+                let def_node = DefinitionNode::new(
+                    FqnType::Js(fqn),
+                    DefinitionType::Js(def_type),
+                    range,
+                    path.clone(),
+                );
+                definitions.push(def_node);
+            }
         }
 
         // 2. Extract imports from ModuleRecord
@@ -222,6 +266,75 @@ impl JsAnalyzer {
                         target_range: ArcIntern::new(callee_range),
                         ..Default::default()
                     });
+                }
+            }
+        }
+
+        // 3b. Handle this.method() and super.method() calls via AST walking
+        for node in nodes.iter() {
+            if let AstKind::CallExpression(call) = nodes.kind(node.id())
+                && let oxc::ast::ast::Expression::StaticMemberExpression(member) = &call.callee
+            {
+                let method_name = member.property.name.as_str();
+                let call_span = call.span;
+                let call_range = span_to_range(call_span, source);
+
+                let is_this =
+                    matches!(&member.object, oxc::ast::ast::Expression::ThisExpression(_));
+                let is_super = matches!(&member.object, oxc::ast::ast::Expression::Super(_));
+
+                if !is_this && !is_super {
+                    continue;
+                }
+
+                // Walk ancestors to find enclosing class and method
+                let mut enclosing_class: Option<String> = None;
+                let mut caller_method: Option<String> = None;
+                for aid in nodes.ancestor_ids(node.id()).skip(1) {
+                    match nodes.kind(aid) {
+                        AstKind::MethodDefinition(method) if caller_method.is_none() => {
+                            if let Some(name) = method.key.static_name() {
+                                caller_method = Some(name.to_string());
+                            }
+                        }
+                        AstKind::Class(class) => {
+                            if let Some(id) = &class.id {
+                                enclosing_class = Some(id.name.to_string());
+                            }
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+
+                let Some(class_name) = enclosing_class else {
+                    continue;
+                };
+
+                // Find the target method's range from our definitions
+                let target_fqn = format!("{class_name}::{method_name}");
+                let target_def = definitions.iter().find(|d| d.fqn.to_string() == target_fqn);
+
+                if let Some(target) = target_def {
+                    let caller_fqn_str = caller_method.map(|m| format!("{class_name}::{m}"));
+
+                    let caller_def = caller_fqn_str
+                        .as_ref()
+                        .and_then(|fqn| definitions.iter().find(|d| d.fqn.to_string() == *fqn));
+
+                    if let Some(caller) = caller_def {
+                        relationships.push(ConsolidatedRelationship {
+                            source_path: Some(path.clone()),
+                            target_path: Some(path.clone()),
+                            kind: RelationshipKind::DefinitionToDefinition,
+                            relationship_type: RelationshipType::Calls,
+                            source_range: ArcIntern::new(call_range),
+                            target_range: ArcIntern::new(target.range),
+                            source_definition_range: Some(ArcIntern::new(caller.range)),
+                            target_definition_range: Some(ArcIntern::new(target.range)),
+                            ..Default::default()
+                        });
+                    }
                 }
             }
         }
@@ -606,21 +719,58 @@ function greet(name: string): string {
     }
 
     #[test]
-    fn test_analyze_class() {
+    fn test_analyze_class_with_methods() {
         let source = r#"
 class Calculator {
     add(a: number, b: number): number {
         return a + b;
     }
+    subtract(a: number, b: number): number {
+        return a - b;
+    }
+    static create(): Calculator {
+        return new Calculator();
+    }
 }
 "#;
         let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
+        let def_names: Vec<&str> = result.definitions.iter().map(|d| d.fqn.name()).collect();
+
+        assert!(
+            def_names.contains(&"Calculator"),
+            "Should find Calculator class"
+        );
+        assert!(def_names.contains(&"add"), "Should find add method");
+        assert!(
+            def_names.contains(&"subtract"),
+            "Should find subtract method"
+        );
+        assert!(
+            def_names.contains(&"create"),
+            "Should find static create method"
+        );
+
         let calc = result
             .definitions
             .iter()
-            .find(|d| d.fqn.name() == "Calculator");
-        assert!(calc.is_some(), "Should find Calculator class");
-        assert_eq!(calc.unwrap().definition_type.as_str(), "Class");
+            .find(|d| d.fqn.name() == "Calculator")
+            .unwrap();
+        assert_eq!(calc.definition_type.as_str(), "Class");
+
+        let add = result
+            .definitions
+            .iter()
+            .find(|d| d.fqn.name() == "add")
+            .unwrap();
+        assert_eq!(add.definition_type.as_str(), "Method");
+        assert_eq!(add.fqn.to_string(), "Calculator::add");
+
+        let create = result
+            .definitions
+            .iter()
+            .find(|d| d.fqn.name() == "create")
+            .unwrap();
+        assert_eq!(create.definition_type.as_str(), "StaticMethod");
     }
 
     #[test]

@@ -111,7 +111,7 @@ quote = "1.0.45"
 proc-macro2 = "1.0.106"
 
 # JS/TS ecosystem (OXC)
-oxc = { version = "0.124.0", features = ["semantic"] }
+oxc = { version = "0.124.0", features = ["semantic", "ast_visit"] }
 oxc_resolver = "11.19.1"
 memchr = "2.7.6"
 

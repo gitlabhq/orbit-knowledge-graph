@@ -1,14 +1,11 @@
-use crate::analysis::types::{
-    ConsolidatedRelationship, ImportedSymbolLocation,
-};
+use crate::analysis::types::ConsolidatedRelationship;
 use crate::graph::{RelationshipKind, RelationshipType};
 use internment::ArcIntern;
 use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
-use parser_core::utils::{Position, Range};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use super::js_types::{ExportedBinding, ImportedName, JsModuleInfo, OwnedImportEntry};
+use super::js_types::{ExportedBinding, ImportedName, JsModuleInfo};
 
 /// Cross-file resolver using oxc_resolver.
 pub struct JsCrossFileResolver {
@@ -32,12 +29,14 @@ impl JsCrossFileResolver {
 
         for (file_path, module_info) in modules {
             let abs_path = self.root_dir.join(file_path);
+            // resolve() takes a directory, not a file path
+            let abs_dir = abs_path.parent().unwrap_or(&self.root_dir);
 
             for import_entry in &module_info.imports {
-                let resolved = self.resolver.resolve(&abs_path, &import_entry.specifier);
+                let resolved = self.resolver.resolve(abs_dir, &import_entry.specifier);
 
                 let resolved_path = match resolved {
-                    Ok(resolution) => resolution.into_path(),
+                    Ok(resolution) => resolution.into_path_buf(),
                     Err(_) => continue, // external dep or unresolvable, skip silently
                 };
 
@@ -55,10 +54,7 @@ impl JsCrossFileResolver {
                 // Match imported binding to target's exports
                 let target_binding = match &import_entry.imported_name {
                     ImportedName::Named(name) => target_module.exports.get(name),
-                    ImportedName::Default => target_module
-                        .exports
-                        .values()
-                        .find(|b| b.is_default),
+                    ImportedName::Default => target_module.exports.values().find(|b| b.is_default),
                     ImportedName::Namespace => None, // links to all exports, handled separately
                 };
 
@@ -79,29 +75,28 @@ impl JsCrossFileResolver {
                 }
 
                 // If target has star exports, follow the chain
-                if target_binding.is_none() {
-                    if let ImportedName::Named(name) = &import_entry.imported_name {
-                        if let Some(binding) = self.resolve_star_export(
-                            name,
-                            &relative_resolved,
-                            modules,
-                            &mut HashSet::new(),
-                            0,
-                        ) {
-                            let source_path = ArcIntern::new(file_path.clone());
-                            let target_path = ArcIntern::new(binding.0);
+                if target_binding.is_none()
+                    && let ImportedName::Named(name) = &import_entry.imported_name
+                    && let Some(binding) = self.resolve_star_export(
+                        name,
+                        &relative_resolved,
+                        modules,
+                        &mut HashSet::new(),
+                        0,
+                    )
+                {
+                    let source_path = ArcIntern::new(file_path.clone());
+                    let target_path = ArcIntern::new(binding.0);
 
-                            relationships.push(ConsolidatedRelationship {
-                                source_path: Some(source_path),
-                                target_path: Some(target_path),
-                                kind: RelationshipKind::ImportedSymbolToDefinition,
-                                relationship_type: RelationshipType::ImportedSymbolToDefinition,
-                                source_range: ArcIntern::new(import_entry.range),
-                                target_range: ArcIntern::new(binding.1.range),
-                                ..Default::default()
-                            });
-                        }
-                    }
+                    relationships.push(ConsolidatedRelationship {
+                        source_path: Some(source_path),
+                        target_path: Some(target_path),
+                        kind: RelationshipKind::ImportedSymbolToDefinition,
+                        relationship_type: RelationshipType::ImportedSymbolToDefinition,
+                        source_range: ArcIntern::new(import_entry.range),
+                        target_range: ArcIntern::new(binding.1.range),
+                        ..Default::default()
+                    });
                 }
             }
         }
@@ -133,8 +128,9 @@ impl JsCrossFileResolver {
         // Follow star re-exports
         for star_source in &module.star_export_sources {
             let abs_path = self.root_dir.join(current_file);
-            if let Ok(resolution) = self.resolver.resolve(&abs_path, star_source) {
-                let resolved_path = resolution.into_path();
+            let abs_dir = abs_path.parent().unwrap_or(&self.root_dir);
+            if let Ok(resolution) = self.resolver.resolve(abs_dir, star_source) {
+                let resolved_path = resolution.into_path_buf();
                 if let Ok(rel) = resolved_path.strip_prefix(&self.root_dir) {
                     let rel_str = rel.to_string_lossy().to_string();
                     if let Some(result) =
@@ -252,8 +248,7 @@ mod tests {
         );
 
         let resolver = JsCrossFileResolver::new(PathBuf::from("/tmp/test"), false, false);
-        let result =
-            resolver.resolve_star_export("foo", "a.ts", &modules, &mut HashSet::new(), 0);
+        let result = resolver.resolve_star_export("foo", "a.ts", &modules, &mut HashSet::new(), 0);
 
         // Should return None without infinite loop
         assert!(result.is_none());

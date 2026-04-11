@@ -366,10 +366,11 @@ impl ParserType {
     pub fn for_language(language: SupportedLanguage) -> Self {
         match language {
             SupportedLanguage::Ruby => Self::Ruby(create_ruby_parser()),
-            SupportedLanguage::TypeScript => Self::TypeScript(create_typescript_parser()),
-            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
-                Self::JsOxc(language)
-            }
+            // TypeScript now routes through OXC alongside Js/Vue/Svelte
+            SupportedLanguage::TypeScript
+            | SupportedLanguage::Js
+            | SupportedLanguage::Vue
+            | SupportedLanguage::Svelte => Self::JsOxc(language),
             _ => Self::TreeSitter(GenericParser::new(language)),
         }
     }
@@ -655,7 +656,7 @@ mod tests {
     fn test_get_supported_extensions() {
         let extensions = get_supported_extensions();
 
-        // 12 original + 6 Js + 1 Vue + 1 Svelte = 20
+        // 12 original + 6 Js (tsx,jsx,mjs,cjs,mts,cts) + 1 Vue + 1 Svelte = 20
         assert_eq!(extensions.len(), 20);
 
         assert!(extensions.contains(&"rb"));

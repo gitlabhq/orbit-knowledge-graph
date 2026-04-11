@@ -39,7 +39,7 @@ type ParseFilesResult = (
 
 #[derive(Debug)]
 enum IndexingProcessingResult {
-    Success(FileProcessingResult),
+    Success(Box<FileProcessingResult>),
     Skipped(SkippedFile),
     Error(ErroredFile),
 }
@@ -347,7 +347,7 @@ impl RepositoryIndexer {
 
             match result {
                 IndexingProcessingResult::Success(file_result) => {
-                    file_results.push(file_result);
+                    file_results.push(*file_result);
                 }
                 IndexingProcessingResult::Skipped(skipped) => {
                     skipped_files.push(skipped);

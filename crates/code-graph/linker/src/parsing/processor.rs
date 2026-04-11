@@ -1,4 +1,4 @@
-use crate::analysis::languages::js::JsAnalyzer;
+use crate::analysis::languages::js::{JsAnalysisResult, JsAnalyzer};
 use crate::analysis::languages::js_sfc;
 use crate::loading::FileInfo;
 use log::debug;
@@ -66,7 +66,7 @@ pub enum ProcessingStage {
 /// Result of processing a file that can be success, skipped, or error
 #[derive(Debug)]
 pub enum ProcessingResult {
-    Success(FileProcessingResult),
+    Success(Box<FileProcessingResult>),
     Skipped(SkippedFile),
     Error(ErroredFile),
 }
@@ -226,10 +226,13 @@ impl<'a> FileProcessor<'a> {
             });
         }
 
-        // JS/Vue/Svelte: use OXC directly, bypassing parser-core
+        // JS/TS/Vue/Svelte: use OXC directly, bypassing parser-core
         if matches!(
             language,
-            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte
+            SupportedLanguage::TypeScript
+                | SupportedLanguage::Js
+                | SupportedLanguage::Vue
+                | SupportedLanguage::Svelte
         ) {
             return self.process_js(language, start_time);
         }
@@ -271,7 +274,7 @@ impl<'a> FileProcessor<'a> {
             let definitions_count = definitions.count();
             let imported_symbols_count = imports.as_ref().map_or(0, |i| i.count());
 
-            ProcessingResult::Success(FileProcessingResult {
+            ProcessingResult::Success(Box::new(FileProcessingResult {
                 file_path: self.path.clone(),
                 extension: self.extension.clone(),
                 file_size: self.size(),
@@ -279,6 +282,7 @@ impl<'a> FileProcessor<'a> {
                 definitions,
                 imported_symbols: imports,
                 references,
+                js_graph_data: None,
                 stats: ProcessingStats {
                     total_time: start_time.elapsed(),
                     parse_time,
@@ -289,7 +293,7 @@ impl<'a> FileProcessor<'a> {
                     imported_symbols_count,
                 },
                 is_supported: true,
-            })
+            }))
         }
     }
 
@@ -351,7 +355,13 @@ impl<'a> FileProcessor<'a> {
         let definitions_count = all_definitions.len();
         let imported_symbols_count = all_imported_symbols.len();
 
-        ProcessingResult::Success(FileProcessingResult {
+        let js_result = JsAnalysisResult {
+            definitions: all_definitions,
+            imported_symbols: all_imported_symbols,
+            relationships: all_relationships,
+        };
+
+        ProcessingResult::Success(Box::new(FileProcessingResult {
             file_path: self.path.clone(),
             extension: self.extension.clone(),
             file_size: self.size(),
@@ -359,6 +369,7 @@ impl<'a> FileProcessor<'a> {
             definitions: Definitions::JsOxc,
             imported_symbols: None,
             references: None,
+            js_graph_data: Some(js_result),
             stats: ProcessingStats {
                 total_time: start_time.elapsed(),
                 parse_time: Duration::ZERO,
@@ -369,7 +380,7 @@ impl<'a> FileProcessor<'a> {
                 imported_symbols_count,
             },
             is_supported: true,
-        })
+        }))
     }
 
     fn analyze_file(
@@ -846,7 +857,7 @@ impl References {
     }
 }
 
-/// Result of processing a single file using Ruby analyzer
+/// Result of processing a single file
 #[derive(Clone, Debug)]
 pub struct FileProcessingResult {
     /// File path
@@ -863,6 +874,10 @@ pub struct FileProcessingResult {
     pub imported_symbols: Option<ImportedSymbols>,
     /// Extracted references for Ruby (used for reference resolution)
     pub references: Option<References>,
+    /// Pre-computed graph data from OXC-based JS/TS analysis.
+    /// When set, AnalysisService merges these directly into GraphData
+    /// instead of processing through the language-specific analysis pipeline.
+    pub js_graph_data: Option<JsAnalysisResult>,
     /// Processing statistics
     pub stats: ProcessingStats,
     /// Whether this language is supported for analysis

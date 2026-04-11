@@ -93,6 +93,58 @@ impl AnalysisService {
 
         let results_by_language = self.group_results_by_language(file_results);
         for (language, results) in results_by_language {
+            // JS/TS/Vue/Svelte: OXC analyzer already produced graph nodes and
+            // relationships. Merge them directly instead of going through the
+            // language-specific maps.
+            let is_js = matches!(
+                language,
+                SupportedLanguage::TypeScript
+                    | SupportedLanguage::Js
+                    | SupportedLanguage::Vue
+                    | SupportedLanguage::Svelte
+            );
+
+            if is_js {
+                for file_result in results {
+                    self.extract_file_system_entities(
+                        &file_result,
+                        &mut file_nodes,
+                        &mut directory_nodes,
+                        &mut relationships,
+                        &mut created_directories,
+                        &mut created_dir_relationships,
+                    );
+
+                    if let Some(mut js_data) = file_result.js_graph_data {
+                        let relative = self
+                            .filesystem_analyzer
+                            .get_relative_path(&file_result.file_path);
+                        let rel_path = ArcIntern::new(relative.clone());
+
+                        // Relativize file paths in definitions and imported symbols
+                        for def in &mut js_data.definitions {
+                            def.file_path = rel_path.clone();
+                        }
+                        for imp in &mut js_data.imported_symbols {
+                            imp.location.file_path = relative.clone();
+                        }
+                        for rel in &mut js_data.relationships {
+                            if rel.source_path.is_some() {
+                                rel.source_path = Some(rel_path.clone());
+                            }
+                            if rel.target_path.is_some() {
+                                rel.target_path = Some(rel_path.clone());
+                            }
+                        }
+
+                        definition_nodes.extend(js_data.definitions);
+                        imported_symbol_nodes.extend(js_data.imported_symbols);
+                        relationships.extend(js_data.relationships);
+                    }
+                }
+                continue;
+            }
+
             let mut definition_map = HashMap::new(); // (fqn_str, file_path) -> (node, fqn)
             let mut imported_symbol_map = HashMap::new(); // (fqn_str, file_path) -> [node, ...]
             let mut imported_symbol_to_imported_symbols = HashMap::new();
