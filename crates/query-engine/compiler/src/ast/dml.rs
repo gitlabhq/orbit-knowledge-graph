@@ -94,7 +94,7 @@ pub enum Op {
 /// Source of rows in a FROM clause.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
-    /// Read from a physical table → `table [FINAL] AS alias`
+    /// Read from a physical table → `table AS alias [FINAL]`
     Scan {
         table: String,
         alias: String,
