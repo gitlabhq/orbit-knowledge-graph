@@ -17,8 +17,9 @@ use crate::input::{
     InputRelationship, OrderDirection, QueryType,
 };
 use ontology::constants::{
-    DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
-    SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
+    DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN,
+    SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
+    TRAVERSAL_PATH_COLUMN,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -152,7 +153,6 @@ fn lower_search(input: &Input) -> Result<Node> {
 /// Multi-hop: UNION ALL of edge self-joins.
 /// Multi-rel: secondary edges JOINed on shared columns.
 fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
-    let edge_table = input.compiler.default_edge_table.clone();
     let first_rel = input.relationships.first().unwrap();
     let (start_col, end_col) = first_rel.direction.edge_columns();
 
@@ -170,7 +170,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
     let edge_alias;
     if first_rel.max_hops > 1 {
         edge_alias = "hop_e0";
-        let union = build_hop_union_all(&edge_table, first_rel, edge_alias);
+        let union = build_hop_union_all(first_rel, edge_alias);
         let (from_col, to_col) = first_rel.direction.union_columns();
         from = union;
         select.extend(edge_select_exprs(edge_alias));
@@ -187,8 +187,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
         all_edge_aliases.push((edge_alias.to_string(), start_col, end_col, true));
     } else {
         edge_alias = "e0";
-        let (edge, edge_type_cond) =
-            edge_scan(&edge_table, edge_alias, &type_filter(&first_rel.types));
+        let (edge, edge_type_cond) = edge_scan(edge_alias, &type_filter(&first_rel.types));
         from = edge;
         select.extend(edge_select_exprs(edge_alias));
         if let Some(tc) = edge_type_cond {
@@ -229,7 +228,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 Expr::col(&shared_alias, &shared_col),
                 Expr::col(&alias, sec_shared_col),
             );
-            let union = build_hop_union_all(&edge_table, rel, &alias);
+            let union = build_hop_union_all(rel, &alias);
             from = TableRef::join(JoinType::Inner, from, union, join_cond);
             select.extend(edge_select_exprs(&alias));
             select.push(edge_depth_select_expr(&alias));
@@ -268,7 +267,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 join_cond = Expr::and(join_cond, tf);
             }
 
-            let (sec_scan, _) = edge_scan(&edge_table, &alias, &None);
+            let (sec_scan, _) = edge_scan(&alias, &None);
             from = TableRef::join(JoinType::Inner, from, sec_scan, join_cond);
             select.extend(edge_select_exprs(&alias));
 
@@ -443,7 +442,6 @@ fn build_node_where(node: &InputNode) -> Option<Expr> {
 }
 
 fn lower_aggregation(input: &mut Input) -> Result<Node> {
-    let edge_table = input.compiler.default_edge_table.clone();
     let group_by_ids: HashSet<String> = input
         .aggregations
         .iter()
@@ -483,12 +481,7 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         let table = resolve_table(node)?;
         (TableRef::scan(&table, &node.id), HashMap::new())
     } else {
-        build_joins(
-            &edge_table,
-            &input.nodes,
-            &input.relationships,
-            &edge_only_targets,
-        )?
+        build_joins(&input.nodes, &input.relationships, &edge_only_targets)?
     };
 
     // Build WHERE from non-edge-only nodes + edge filters.
@@ -670,7 +663,6 @@ fn agg_expr_with_edge_col(
 // the working table is opaque to the optimizer (ClickHouse #75026).
 
 fn lower_path_finding(input: &Input) -> Result<Node> {
-    let edge_table = &input.compiler.default_edge_table;
     let path = input
         .path
         .as_ref()
@@ -696,7 +688,6 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let forward_cte = Cte::new(
         FORWARD_CTE,
         build_frontier(
-            edge_table,
             &start.node_ids,
             forward_depth,
             &rel_type_filter,
@@ -708,7 +699,6 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         Some(Cte::new(
             BACKWARD_CTE,
             build_frontier(
-                edge_table,
                 &end.node_ids,
                 backward_depth,
                 &rel_type_filter,
@@ -903,7 +893,6 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 /// `e1.target_kind = entity` (backward) to constrain the anchor side to
 /// the expected entity type.
 fn build_frontier(
-    edge_table: &str,
     anchor_ids: &[i64],
     max_depth: u32,
     rel_type_filter: &Option<Vec<String>>,
@@ -913,7 +902,6 @@ fn build_frontier(
     let arms: Vec<Query> = (1..=max_depth)
         .map(|depth| {
             build_frontier_arm(
-                edge_table,
                 anchor_ids,
                 depth,
                 rel_type_filter,
@@ -946,7 +934,6 @@ fn build_frontier(
 /// `anchor_entity`: when set, adds a kind predicate on the anchor side of
 /// the first edge so the frontier only starts from the expected entity type.
 fn build_frontier_arm(
-    edge_table: &str,
     anchor_ids: &[i64],
     depth: u32,
     rel_type_filter: &Option<Vec<String>>,
@@ -963,16 +950,16 @@ fn build_frontier_arm(
     let last = format!("e{depth}");
 
     // Build join chain: e1 JOIN e2 ON e1.next = e2.anchor JOIN e3 ...
-    let (mut from, first_type_cond) = edge_scan(edge_table, "e1", rel_type_filter);
+    let (mut from, first_type_cond) = edge_scan("e1", rel_type_filter);
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
-        let (edge_tref, edge_type_cond) = edge_scan(edge_table, &curr, rel_type_filter);
+        let (edge_table, edge_type_cond) = edge_scan(&curr, rel_type_filter);
         let mut join_cond = Expr::eq(Expr::col(&prev, next_col), Expr::col(&curr, anchor_col));
         if let Some(tc) = edge_type_cond {
             join_cond = Expr::and(join_cond, tc);
         }
-        from = TableRef::join(JoinType::Inner, from, edge_tref, join_cond);
+        from = TableRef::join(JoinType::Inner, from, edge_table, join_cond);
     }
 
     // path_nodes: array of (id, kind) tuples for each hop's exit node.
@@ -1059,7 +1046,6 @@ fn build_frontier_arm(
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_neighbors(input: &mut Input) -> Result<Node> {
-    let default_edge_table = input.compiler.default_edge_table.clone();
     let neighbors_config = input
         .neighbors
         .as_ref()
@@ -1134,8 +1120,7 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
 
     // Edge-only: scan gl_edge directly, filter by center node IDs via IN subquery.
     let build_arm = |dir: Direction| -> Query {
-        let (edge_tref, edge_type_cond) =
-            edge_scan(&default_edge_table, edge_alias, &rel_type_filter);
+        let (edge_table, edge_type_cond) = edge_scan(edge_alias, &rel_type_filter);
         let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
         {
             Direction::Outgoing => (
@@ -1186,7 +1171,7 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
             SelectExpr::new(Expr::int(is_outgoing), neighbor_is_outgoing_column()),
         ];
 
-        let mut from = edge_tref;
+        let mut from = edge_table;
 
         if center_uses_default_pk {
             select.push(SelectExpr::new(
@@ -1320,22 +1305,17 @@ fn build_hydration_arm(node: &InputNode) -> Result<Query> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Build a UNION ALL subquery for multi-hop traversal (1 to max_hops).
-fn build_hop_union_all(edge_table: &str, rel: &InputRelationship, alias: &str) -> TableRef {
+fn build_hop_union_all(rel: &InputRelationship, alias: &str) -> TableRef {
     let rel_type_filter = type_filter(&rel.types);
     let start = rel.min_hops.max(1);
     let queries = (start..=rel.max_hops)
-        .map(|depth| build_hop_arm(edge_table, depth, &rel_type_filter, rel.direction))
+        .map(|depth| build_hop_arm(depth, &rel_type_filter, rel.direction))
         .collect();
     TableRef::union_all(queries, alias)
 }
 
 /// Build one arm of the union: a chain of edge joins for a specific depth.
-fn build_hop_arm(
-    edge_table: &str,
-    depth: u32,
-    type_filter: &Option<Vec<String>>,
-    direction: Direction,
-) -> Query {
+fn build_hop_arm(depth: u32, type_filter: &Option<Vec<String>>, direction: Direction) -> Query {
     let (start_col, end_col) = direction.edge_columns();
     let end_type_col = match direction {
         Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
@@ -1344,7 +1324,7 @@ fn build_hop_arm(
     let last = format!("e{depth}");
 
     // Build chain: e1 -> e2 -> e3 -> ...
-    let (mut from, first_type_cond) = edge_scan(edge_table, "e1", type_filter);
+    let (mut from, first_type_cond) = edge_scan("e1", type_filter);
 
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
@@ -1352,12 +1332,12 @@ fn build_hop_arm(
         // No traversal_path condition between consecutive edges: cross-namespace
         // relationships (e.g. RELATED_TO, CLOSES) can link entities in different
         // namespaces, so consecutive edges may have different paths.
-        let (edge_tref, edge_type_cond) = edge_scan(edge_table, &curr, type_filter);
+        let (edge_table, edge_type_cond) = edge_scan(&curr, type_filter);
         let mut join_cond = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
         if let Some(tc) = edge_type_cond {
             join_cond = Expr::and(join_cond, tc);
         }
-        from = TableRef::join(JoinType::Inner, from, edge_tref, join_cond);
+        from = TableRef::join(JoinType::Inner, from, edge_table, join_cond);
     }
 
     let (
@@ -1417,12 +1397,8 @@ fn build_hop_arm(
 
 /// Returns `(table_ref, type_condition)` for an edge table scan.
 /// The type condition should be folded into the JOIN ON or WHERE clause.
-fn edge_scan(
-    edge_table: &str,
-    alias: &str,
-    type_filter: &Option<Vec<String>>,
-) -> (TableRef, Option<Expr>) {
-    let table = TableRef::scan(edge_table, alias);
+fn edge_scan(alias: &str, type_filter: &Option<Vec<String>>) -> (TableRef, Option<Expr>) {
+    let table = TableRef::scan(EDGE_TABLE, alias);
     let cond = type_filter.as_ref().and_then(|types| {
         Expr::col_in(
             alias,
@@ -1450,7 +1426,6 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
 /// Nodes in `skip_nodes` are omitted from the tree — they are handled
 /// edge-only via `node_edge_col` + `_nf_*` CTEs instead.
 fn build_joins(
-    edge_table: &str,
     nodes: &[InputNode],
     rels: &[InputRelationship],
     skip_nodes: &HashSet<String>,
@@ -1467,7 +1442,7 @@ fn build_joins(
     } else {
         // Both nodes skipped — start from edge.
         let alias = "e0".to_string();
-        let (edge, _) = edge_scan(edge_table, &alias, &type_filter(&first_rel.types));
+        let (edge, _) = edge_scan(&alias, &type_filter(&first_rel.types));
         let mut edge_aliases = HashMap::new();
         edge_aliases.insert(0, alias);
         return Ok((edge, edge_aliases));
@@ -1486,7 +1461,7 @@ fn build_joins(
             let alias = format!("hop_e{i}");
             edge_aliases.insert(i, alias.clone());
 
-            let union = build_hop_union_all(edge_table, rel, &alias);
+            let union = build_hop_union_all(rel, &alias);
             let (from_col, to_col) = rel.direction.union_columns();
 
             let source_cond = Expr::eq(
@@ -1553,7 +1528,7 @@ fn build_joins(
         let alias = format!("e{i}");
         edge_aliases.insert(i, alias.clone());
 
-        let (edge, edge_type_cond) = edge_scan(edge_table, &alias, &type_filter(&rel.types));
+        let (edge, edge_type_cond) = edge_scan(&alias, &type_filter(&rel.types));
         let source_cond = source_join_cond(&rel.from, &alias, rel.direction);
         let target_cond = target_join_cond(&alias, &rel.to, rel.direction);
 
@@ -1871,7 +1846,7 @@ mod tests {
         validate::Validator::new(&ontology)
             .check_references(&input)
             .unwrap();
-        normalize::normalize(input, &ontology, "").unwrap()
+        normalize::normalize(input, &ontology).unwrap()
     }
 
     #[test]

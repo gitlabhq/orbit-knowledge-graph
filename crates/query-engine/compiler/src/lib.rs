@@ -27,7 +27,7 @@
 //!     "limit": 10
 //! }"#;
 //!
-//! let result = compile(json, &ontology, &ctx, "").unwrap();
+//! let result = compile(json, &ontology, &ctx).unwrap();
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
@@ -71,8 +71,7 @@ pub use passes::{
 };
 pub use pipelines::{
     DuckDbState, HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput,
-    HasResultCtx, HasSecurityCtx, HasTablePrefix, LocalEnv, QueryState, SealInput, SealJson,
-    SealNode, SecureEnv,
+    HasResultCtx, HasSecurityCtx, LocalEnv, QueryState, SealInput, SealJson, SealNode, SecureEnv,
 };
 
 // Re-export key types from pass modules.
@@ -108,21 +107,13 @@ use std::sync::Arc;
 ///
 /// Runs the full ClickHouse compilation pipeline:
 /// `JSON → Validate → Normalize → Lower → Optimize → Enforce → Deduplicate → Security → Check → Codegen`
-///
-/// `table_prefix` is prepended to every node and edge table name in the generated SQL.
-/// Pass `""` for no prefix (schema version 0 or fresh install).
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     json_input: &str,
     ontology: &Ontology,
     ctx: &SecurityContext,
-    table_prefix: &str,
 ) -> Result<CompiledQueryContext> {
-    let env = SecureEnv::new(
-        Arc::new(ontology.clone()),
-        ctx.clone(),
-        table_prefix.to_string(),
-    );
+    let env = SecureEnv::new(Arc::new(ontology.clone()), ctx.clone());
     let state = QueryState::from_json(json_input);
     let pipeline = pipelines::clickhouse().seal();
     pipeline.execute(state, &env)?.into_output().count_err()
@@ -134,18 +125,8 @@ pub fn compile(
 /// For hydration queries (`QueryType::Hydration`), skips security, check, and
 /// hydrate plan passes but applies dedup (argMax) — codegen defaults to
 /// `HydrationPlan::None`. For all other query types, runs the full secure pipeline.
-///
-/// `table_prefix` is prepended to every node and edge table name in the generated SQL.
-pub fn compile_input(
-    input: Input,
-    ctx: &SecurityContext,
-    table_prefix: &str,
-) -> Result<CompiledQueryContext> {
-    let env = SecureEnv::new(
-        Arc::new(Ontology::new()),
-        ctx.clone(),
-        table_prefix.to_string(),
-    );
+pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
+    let env = SecureEnv::new(Arc::new(Ontology::new()), ctx.clone());
     let is_hydration = input.query_type == QueryType::Hydration;
     let state = QueryState::from_input(input);
 
@@ -173,7 +154,7 @@ pub fn compile_input(
 /// ```
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let env = LocalEnv::new(Arc::new(ontology.clone()), String::new());
+    let env = LocalEnv::new(Arc::new(ontology.clone()));
     let state = DuckDbState::from_json(json_input);
     let pipeline = pipelines::duckdb().seal();
     pipeline.execute(state, &env)?.into_output().count_err()
@@ -187,7 +168,7 @@ pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQu
 /// metadata for table resolution and column aliasing.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local_input(input: Input, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let env = LocalEnv::new(Arc::new(ontology.clone()), String::new());
+    let env = LocalEnv::new(Arc::new(ontology.clone()));
     let state = DuckDbState::from_input(input);
     let pipeline = pipelines::duckdb_hydration().seal();
     pipeline.execute(state, &env)?.into_output().count_err()

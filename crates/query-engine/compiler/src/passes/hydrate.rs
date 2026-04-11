@@ -74,22 +74,14 @@ pub struct VirtualColumnRequest {
 ///   columns come from `node.virtual_columns` (populated by normalize).
 ///   Search/Aggregation only get a plan when VCRs are present.
 /// - PathFinding/Neighbors: dynamic plan over all ontology entity types.
-///
-/// `table_prefix` is prepended to every destination table name so that
-/// hydration queries target the same versioned table-set as the base query.
-/// Pass `""` for no prefix (schema version 0, local/DuckDB use, or tests).
-pub fn generate_hydration_plan(
-    input: &Input,
-    ontology: &Ontology,
-    table_prefix: &str,
-) -> HydrationPlan {
+pub fn generate_hydration_plan(input: &Input, ontology: &Ontology) -> HydrationPlan {
     match input.query_type {
         QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => {
-            HydrationPlan::Dynamic(build_dynamic_specs(input, ontology, table_prefix))
+            HydrationPlan::Dynamic(build_dynamic_specs(input, ontology))
         }
         QueryType::Search | QueryType::Aggregation | QueryType::Traversal => {
-            let mut templates = build_static_templates(input, ontology, table_prefix);
+            let mut templates = build_static_templates(input, ontology);
 
             // Search/Aggregation only need templates with VCRs.
             // Traversal needs all templates for DB-column hydration.
@@ -106,11 +98,7 @@ pub fn generate_hydration_plan(
     }
 }
 
-fn build_static_templates(
-    input: &Input,
-    ontology: &Ontology,
-    table_prefix: &str,
-) -> Vec<HydrationTemplate> {
+fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTemplate> {
     input
         .nodes
         .iter()
@@ -136,7 +124,7 @@ fn build_static_templates(
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
                 node_alias: node.id.clone(),
-                destination_table: format!("{table_prefix}{}", ont_node.destination_table),
+                destination_table: ont_node.destination_table.clone(),
                 columns,
                 virtual_columns,
                 injected_columns,
@@ -148,11 +136,7 @@ fn build_static_templates(
 /// Pre-resolve column specs for every ontology entity type based on the
 /// query's `dynamic_columns` mode. The server matches discovered entity
 /// types against this list at runtime.
-fn build_dynamic_specs(
-    input: &Input,
-    ontology: &Ontology,
-    table_prefix: &str,
-) -> Vec<DynamicEntityColumns> {
+fn build_dynamic_specs(input: &Input, ontology: &Ontology) -> Vec<DynamicEntityColumns> {
     ontology
         .node_names()
         .filter_map(|name| {
@@ -186,7 +170,7 @@ fn build_dynamic_specs(
 
             Some(DynamicEntityColumns {
                 entity_type: name.to_string(),
-                destination_table: format!("{table_prefix}{}", node.destination_table),
+                destination_table: node.destination_table.clone(),
                 columns,
                 virtual_columns,
                 injected_columns,

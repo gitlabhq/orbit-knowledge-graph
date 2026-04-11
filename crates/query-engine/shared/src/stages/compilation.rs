@@ -20,9 +20,8 @@ impl PipelineStage for CompilationStage {
         let t = Instant::now();
         let ontology = &ctx.ontology;
         let security_context = ctx.security_context()?;
-        let table_prefix = &ctx.table_prefix;
 
-        let compiled = compile(&ctx.query_json, ontology, security_context, table_prefix)
+        let compiled = compile(&ctx.query_json, ontology, security_context)
             .map_err(|e| PipelineError::Compile {
                 client_safe: e.is_client_safe(),
                 message: e.to_string(),

@@ -17,7 +17,7 @@ use crate::input::Input;
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
 use crate::pipelines::{
     HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasQueryConfig,
-    HasResultCtx, HasSecurityCtx, HasTablePrefix,
+    HasResultCtx, HasSecurityCtx,
 };
 
 pub struct ValidatePass;
@@ -46,18 +46,14 @@ pub struct NormalizePass;
 
 impl<E, S> CompilerPass<E, S> for NormalizePass
 where
-    E: PipelineEnv + HasOntology + HasTablePrefix,
+    E: PipelineEnv + HasOntology,
     S: PipelineState + HasInput,
 {
     const NAME: &'static str = "normalize";
 
     fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let input = state.take_input()?;
-        state.set_input(normalize::normalize(
-            input,
-            env.ontology(),
-            env.table_prefix(),
-        )?);
+        state.set_input(normalize::normalize(input, env.ontology())?);
         Ok(())
     }
 }
@@ -168,14 +164,14 @@ pub struct HydratePlanPass;
 
 impl<E, S> CompilerPass<E, S> for HydratePlanPass
 where
-    E: PipelineEnv + HasOntology + HasTablePrefix,
+    E: PipelineEnv + HasOntology,
     S: PipelineState + HasInput + HasHydrationPlan,
 {
     const NAME: &'static str = "hydrate_plan";
 
     fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let input = state.input()?;
-        let plan = hydrate::generate_hydration_plan(input, env.ontology(), env.table_prefix());
+        let plan = hydrate::generate_hydration_plan(input, env.ontology());
         state.set_hydration_plan(plan);
         Ok(())
     }
