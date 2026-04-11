@@ -34,7 +34,7 @@ fn emit_column_type(ct: &ColumnType) -> String {
             precision,
             timezone: Some(tz),
         } => {
-            let safe_tz = tz.replace('\'', "\\'");
+            let safe_tz = tz.replace('\\', "\\\\").replace('\'', "\\'");
             format!("DateTime64({precision}, '{safe_tz}')")
         }
         ColumnType::Timestamp {
@@ -45,7 +45,7 @@ fn emit_column_type(ct: &ColumnType) -> String {
             let items: Vec<String> = variants
                 .iter()
                 .map(|(label, value)| {
-                    let safe = label.replace('\'', "\\'");
+                    let safe = label.replace('\\', "\\\\").replace('\'', "\\'");
                     format!("'{safe}' = {value}")
                 })
                 .collect();

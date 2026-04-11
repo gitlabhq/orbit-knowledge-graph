@@ -4,7 +4,9 @@
 //! Each node maps directly to ClickHouse SQL constructs.
 
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
+use regex::Regex;
 use serde_json::Value;
 
 pub use gkg_utils::clickhouse::{ChScalar, ChType};
@@ -225,12 +227,40 @@ impl Default for Query {
     }
 }
 
+/// SQL identifier pattern: ASCII letter or underscore, then alphanumerics/underscores.
+static SAFE_IDENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").expect("valid regex"));
+
 /// `INSERT INTO table (cols) VALUES (row1), (row2), ...`
+///
+/// Table and column names are interpolated as raw identifiers (not parameterized),
+/// so they are validated at construction time via [`Insert::new`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Insert {
     pub table: String,
     pub columns: Vec<String>,
     pub values: Vec<Vec<Expr>>,
+}
+
+impl Insert {
+    pub fn new(table: impl Into<String>, columns: Vec<String>, values: Vec<Vec<Expr>>) -> Self {
+        let table = table.into();
+        debug_assert!(
+            SAFE_IDENT.is_match(&table),
+            "INSERT table name is not a safe identifier: {table:?}"
+        );
+        for col in &columns {
+            debug_assert!(
+                SAFE_IDENT.is_match(col),
+                "INSERT column name is not a safe identifier: {col:?}"
+            );
+        }
+        Self {
+            table,
+            columns,
+            values,
+        }
+    }
 }
 
 /// Top-level AST node.

@@ -47,8 +47,14 @@ pub fn codegen(
 }
 
 /// Emit a `Query` (or `Insert`) AST as parameterized ClickHouse SQL without
-/// requiring `ResultContext` or `QueryConfig`. Intended for callers outside the
-/// compiler pipeline (e.g. schema version management).
+/// requiring `ResultContext` or `QueryConfig`.
+///
+/// # Trust boundary
+///
+/// This function bypasses the compiler security pipeline (`apply_security_context`,
+/// `check_ast`, `enforce_return`). It must only be used for trusted, internally
+/// constructed ASTs (e.g. schema version management DDL/DML), never for
+/// user-supplied query input.
 pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
     let mut ctx = Context::new();
     let sql = match node {
