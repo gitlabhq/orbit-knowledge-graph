@@ -2,10 +2,10 @@ apiVersion: vendir.k14s.io/v1alpha1
 directories:
 - contents:
   - git:
-      commitTitle: Merge branch 'fix/webserver-gitlab-config' into 'main'...
-      sha: 316668c62a743418860e57d323ab15eb9ad661a1
+      commitTitle: Merge branch 'renovate/common-ci-tasks' into 'main'...
+      sha: 2e1b2aef7b3e8a9c988d68bdccd317476b823f61
       tags:
-      - v0.14.1
+      - v0.15.0-2-g2e1b2ae
     path: .
   path: gkg
 - contents:
@@ -14,10 +14,10 @@ directories:
       version: 1.3.16
     path: nats
   - git:
-      commitTitle: Merge branch 'arun/nats-config-change' into 'main'...
-      sha: 6a7367a53785ecc51bbaf5780fd4f8cca7fc8531
+      commitTitle: Merge branch 'arun/add-reconciler-support' into 'main'...
+      sha: 9df79d3f824eabe98cdb1ff40ede130e695b33ca
       tags:
-      - v1.9.0-2-g6a7367a
+      - v1.10.0
     path: siphon
   path: charts
 kind: LockConfig
