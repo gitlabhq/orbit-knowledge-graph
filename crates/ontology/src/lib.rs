@@ -404,6 +404,53 @@ impl Ontology {
         loading::load_embedded()
     }
 
+    /// Returns a clone with all physical table names prefixed for the given
+    /// schema version.
+    ///
+    /// This prepends `prefix` to every `destination_table` on nodes and edges,
+    /// the default edge table, edge table config keys, auxiliary table names,
+    /// and `skip_security_filter_for_tables`. Local (DuckDB) table names are
+    /// not affected.
+    ///
+    /// An empty prefix returns a clone with table names unchanged (v0 backward
+    /// compatibility).
+    #[must_use]
+    pub fn with_schema_version_prefix(mut self, prefix: &str) -> Self {
+        if prefix.is_empty() {
+            return self;
+        }
+
+        self.default_edge_table = format!("{prefix}{}", self.default_edge_table);
+
+        self.edge_table_configs = self
+            .edge_table_configs
+            .into_iter()
+            .map(|(k, v)| (format!("{prefix}{k}"), v))
+            .collect();
+
+        for node in self.nodes.values_mut() {
+            node.destination_table = format!("{prefix}{}", node.destination_table);
+        }
+
+        for edge_list in self.edges.values_mut() {
+            for edge in edge_list {
+                edge.destination_table = format!("{prefix}{}", edge.destination_table);
+            }
+        }
+
+        self.skip_security_filter_for_tables = self
+            .skip_security_filter_for_tables
+            .into_iter()
+            .map(|t| format!("{prefix}{t}"))
+            .collect();
+
+        for aux in &mut self.auxiliary_tables {
+            aux.name = format!("{prefix}{}", aux.name);
+        }
+
+        self
+    }
+
     /// Get a node by name.
     #[must_use]
     pub fn get_node(&self, name: &str) -> Option<&NodeEntity> {
@@ -1875,5 +1922,63 @@ properties:
                 "local entity '{entity_name}' should have at least one field after exclusions"
             );
         }
+    }
+
+    #[test]
+    fn with_schema_version_prefix_empty_is_identity() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let original_edge = ontology.edge_table().to_string();
+        let original_user = ontology.table_name("User").unwrap().to_string();
+
+        let prefixed = ontology.with_schema_version_prefix("");
+
+        assert_eq!(prefixed.edge_table(), original_edge);
+        assert_eq!(prefixed.table_name("User").unwrap(), original_user);
+    }
+
+    #[test]
+    fn with_schema_version_prefix_applies_to_all_tables() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let prefixed = ontology.with_schema_version_prefix("v1_");
+
+        assert_eq!(prefixed.edge_table(), "v1_gl_edge");
+        assert!(prefixed.table_name("User").unwrap().starts_with("v1_"));
+
+        for node in prefixed.nodes() {
+            assert!(
+                node.destination_table.starts_with("v1_"),
+                "node table '{}' should be prefixed",
+                node.destination_table
+            );
+        }
+
+        for edge_table in prefixed.edge_tables() {
+            assert!(
+                edge_table.starts_with("v1_"),
+                "edge table '{edge_table}' should be prefixed",
+            );
+        }
+
+        for aux in prefixed.auxiliary_tables() {
+            assert!(
+                aux.name.starts_with("v1_"),
+                "auxiliary table '{}' should be prefixed",
+                aux.name
+            );
+        }
+    }
+
+    #[test]
+    fn with_schema_version_prefix_does_not_affect_local_tables() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let local_edge_before = ontology.local_edge_table_name().map(String::from);
+
+        let prefixed = ontology.with_schema_version_prefix("v2_");
+
+        assert_eq!(
+            prefixed.local_edge_table_name().map(String::from),
+            local_edge_before,
+            "local edge table should not be prefixed"
+        );
     }
 }

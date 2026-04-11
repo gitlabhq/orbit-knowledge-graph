@@ -107,6 +107,8 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or(0);
             let prefix = schema::version::table_prefix(active_version);
             info!(version = active_version, table_prefix = %prefix, "resolved active schema version");
+            let ontology =
+                Arc::new(Arc::unwrap_or_clone(ontology).with_schema_version_prefix(&prefix));
             run_webserver(&config, ontology).await
         }
     };
