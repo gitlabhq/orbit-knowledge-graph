@@ -518,6 +518,8 @@ pub enum DefinitionType {
     CSharp(CSharpDefinitionType),
     TypeScript(TypeScriptDefinitionType),
     Rust(RustDefinitionType),
+    /// JS/TS definition type as a static string (e.g. "Class", "Function", "Method")
+    Js(&'static str),
     Unsupported(),
 }
 
@@ -531,6 +533,7 @@ impl DefinitionType {
             DefinitionType::CSharp(csharp_type) => csharp_type.as_str(),
             DefinitionType::TypeScript(typescript_type) => typescript_type.as_str(),
             DefinitionType::Rust(rust_type) => rust_type.as_str(),
+            DefinitionType::Js(s) => s,
             DefinitionType::Unsupported() => "unsupported",
         }
     }
@@ -546,6 +549,9 @@ pub enum FqnType {
     CSharp(CSharpFqn),
     TypeScript(TypeScriptFqn),
     Rust(RustFqn),
+    /// JS/TS FQN as a flat string (e.g. "MyClass::myMethod").
+    /// The name component is the last `::` segment.
+    Js(String),
 }
 
 impl std::fmt::Display for FqnType {
@@ -568,6 +574,7 @@ impl std::fmt::Display for FqnType {
                 write!(f, "{}", typescript_fqn_to_string(typescript_type))
             }
             FqnType::Rust(rust_type) => write!(f, "{}", rust_fqn_to_string(rust_type)),
+            FqnType::Js(s) => write!(f, "{s}"),
         }
     }
 }
@@ -583,6 +590,7 @@ impl FqnType {
             FqnType::CSharp(csharp_type) => csharp_type.last().unwrap().node_name(),
             FqnType::TypeScript(typescript_type) => typescript_type.last().unwrap().node_name(),
             FqnType::Rust(rust_type) => rust_type.parts.last().unwrap().node_name(),
+            FqnType::Js(s) => s.rsplit("::").next().unwrap_or(s),
         }
     }
 }
@@ -710,6 +718,8 @@ pub enum ImportType {
     CSharp(CSharpImportType),
     TypeScript(TypeScriptImportType),
     Rust(RustImportType),
+    /// JS/TS import type as a static string (e.g. "DefaultImport", "NamedImport")
+    Js(&'static str),
 }
 
 impl ImportType {
@@ -721,6 +731,7 @@ impl ImportType {
             ImportType::CSharp(csharp_type) => csharp_type.as_str(),
             ImportType::TypeScript(typescript_type) => typescript_type.as_str(),
             ImportType::Rust(rust_type) => rust_type.as_str(),
+            ImportType::Js(s) => s,
         }
     }
 }

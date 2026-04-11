@@ -453,7 +453,12 @@ impl<'a> FileProcessor<'a> {
                         self.path
                     ))
                 }
-            } // Note: Use _ => { Ok(Definitions::Unknown(vec![])) } if you want to comment out certain match arms
+            }
+            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
+                // OXC-based analysis handled directly in the linker, not through parser-core.
+                // TODO: Wire JsAnalyzer::analyze_file() here
+                Ok((Definitions::JsOxc, None, None))
+            }
         };
         debug!("Finished analyzing file {}.", self.path);
         result
@@ -470,6 +475,8 @@ pub enum Definitions {
     CSharp(Vec<CSharpDefinitionInfo>),
     TypeScript(Vec<TypeScriptDefinitionInfo>),
     Rust(Vec<RustDefinitionInfo>),
+    /// Placeholder for JS/TS files analyzed by OXC directly in the linker.
+    JsOxc,
     Unknown(Vec<DefinitionInfo<(), ()>>),
 }
 
@@ -484,6 +491,7 @@ impl Definitions {
             Definitions::CSharp(defs) => defs.len(),
             Definitions::TypeScript(defs) => defs.len(),
             Definitions::Rust(defs) => defs.len(),
+            Definitions::JsOxc => 0,
             Definitions::Unknown(defs) => defs.len(),
         }
     }
@@ -524,6 +532,7 @@ impl Definitions {
                 defs.iter()
                     .map(|def| def.definition_type.as_str().to_string()),
             ),
+            Definitions::JsOxc => Box::new(std::iter::empty()),
             Definitions::Unknown(_) => Box::new(std::iter::empty()),
         }
     }

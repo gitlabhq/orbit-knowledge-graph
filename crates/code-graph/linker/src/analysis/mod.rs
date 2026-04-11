@@ -342,7 +342,10 @@ impl AnalysisService {
                     imported_symbol_map,
                     relationships,
                 );
-            } // Note: use _ => {} as a catch-all if you want to disable some analyzers
+            }
+            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
+                // TODO: OXC-based analysis handles definitions and imports directly
+            }
         }
     }
 
@@ -555,7 +558,10 @@ impl AnalysisService {
                     imported_symbol_map,
                     relationships,
                 );
-            } // Note: use _ => {} as a catch-all if you want to disable some analyzers
+            }
+            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
+                // TODO: OXC-based definition relationships
+            }
         }
     }
 }

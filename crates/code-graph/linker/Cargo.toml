@@ -35,6 +35,10 @@ smallvec = { workspace = true }
 internment = { workspace = true, features = ["arc"] }
 stacker = { workspace = true }
 strum = { workspace = true }
+oxc = { workspace = true }
+oxc_resolver = { workspace = true }
+memchr = { workspace = true }
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 gitalisk-core = { workspace = true }

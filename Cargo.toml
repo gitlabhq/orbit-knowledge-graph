@@ -110,6 +110,11 @@ syn = { version = "2.0.117", features = ["full"] }
 quote = "1.0.45"
 proc-macro2 = "1.0.106"
 
+# JS/TS ecosystem (OXC)
+oxc = { version = "0.124.0", features = ["semantic"] }
+oxc_resolver = "11.19.1"
+memchr = "2.7.6"
+
 # Simulator dependencies
 rand = "0.10"
 sqlformat = "0.5"
