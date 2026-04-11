@@ -1,22 +1,24 @@
 *** Settings ***
-Library    RequestsLibrary
-Library    Collections
-Library    OperatingSystem
-Library    Process
-Library    String
+Library     RequestsLibrary
+Library     Collections
+Library     OperatingSystem
+Library     Process
+Library     String
+
 
 *** Variables ***
-${GDK_URL}              https://gdk.test:3443
-${API_BASE}             ${GDK_URL}/api/v4
-${CLICKHOUSE_URL}       http://127.0.0.1:8123
-${GRAPH_DB}             gitlab_clickhouse_main_development
-${DATALAKE_DB}          gitlab_clickhouse_development
-${GKG_GRPC}             127.0.0.1:50054
-${GKG_HTTP}             http://127.0.0.1:4200
-${NATS_URL}             nats://127.0.0.1:4222
-${GKG_REPO}             %{HOME}/gitlab/orbit/knowledge-graph
-${CDC_WAIT_SECS}        60
-${INDEX_TIMEOUT_SECS}   60
+${GDK_URL}                  https://gdk.test:3443
+${API_BASE}                 ${GDK_URL}/api/v4
+${CLICKHOUSE_URL}           http://127.0.0.1:8123
+${GRAPH_DB}                 gitlab_clickhouse_main_development
+${DATALAKE_DB}              gitlab_clickhouse_development
+${GKG_GRPC}                 127.0.0.1:50054
+${GKG_HTTP}                 http://127.0.0.1:4200
+${NATS_URL}                 nats://127.0.0.1:4222
+${GKG_REPO}                 %{HOME}/gitlab/orbit/knowledge-graph
+${CDC_WAIT_SECS}            60
+${INDEX_TIMEOUT_SECS}       60
+
 
 *** Keywords ***
 Load PAT
@@ -47,13 +49,17 @@ GitLab API PUT
 
 ClickHouse Query
     [Arguments]    ${sql}    ${database}=${GRAPH_DB}
-    ${result}=    Run Process    bash    -c    curl -s "http://127.0.0.1:8123/?database\=${database}" --data-binary @- <<< "${sql}"    timeout=10
+    ${result}=    Run Process
+    ...    bash
+    ...    -c
+    ...    curl -s "http://127.0.0.1:8123/?database\=${database}" --data-binary @- <<< "${sql}"
+    ...    timeout=10
     RETURN    ${result.stdout}
 
 Wait For CDC
     [Documentation]    Wait for Siphon CDC replication, reload the traversal path
-    ...               dictionary so MRs/issues get the correct traversal_path
-    ...               through the materialized views, then touch MRs to re-replicate.
+    ...    dictionary so MRs/issues get the correct traversal_path
+    ...    through the materialized views, then touch MRs to re-replicate.
     ${has_ns}=    Run Keyword And Return Status    Variable Should Exist    ${TOP_GROUP_ID}
     IF    ${has_ns}
         Wait Until Namespace In Datalake    ${TOP_GROUP_ID}
@@ -73,7 +79,9 @@ Wait Until Namespace In Datalake
             Log    WARNING: namespace ${namespace_id} not in datalake after ${timeout}s, continuing anyway
             RETURN
         END
-        ${result}=    ClickHouse Query    SELECT count() FROM siphon_namespaces FINAL WHERE id = ${namespace_id}    ${DATALAKE_DB}
+        ${result}=    ClickHouse Query
+        ...    SELECT count() FROM siphon_namespaces FINAL WHERE id = ${namespace_id}
+        ...    ${DATALAKE_DB}
         ${count}=    Strip String    ${result}
         IF    '${count}' != '0'
             Log    Namespace ${namespace_id} found in datalake after ${i} polls
@@ -93,7 +101,7 @@ Touch MRs To Re-Replicate
     IF    not ${has_p1}    RETURN
     ${script}=    Catenate    SEPARATOR=;
     ...    [${PROJECT1_ID}, ${PROJECT2_ID}].each do |pid|
-    ...      MergeRequest.where(source_project_id: pid).update_all(updated_at: Time.current)
+    ...    MergeRequest.where(source_project_id: pid).update_all(updated_at: Time.current)
     ...    end
     ...    Issue.where(project_id: [${PROJECT1_ID}, ${PROJECT2_ID}]).update_all(updated_at: Time.current)
     ${result}=    Run Process    bash    -c
@@ -103,7 +111,11 @@ Touch MRs To Re-Replicate
 
 Start Indexer Services
     [Documentation]    Start dispatcher (every-second cron) and indexer as background processes
-    Run Process    bash    -c    pkill -9 -f "gkg-server --mode.dispatch" 2>/dev/null; pkill -9 -f "gkg-server --mode.indexer" 2>/dev/null; sleep 1    timeout=10
+    Run Process
+    ...    bash
+    ...    -c
+    ...    pkill -9 -f "gkg-server --mode.dispatch" 2>/dev/null; pkill -9 -f "gkg-server --mode.indexer" 2>/dev/null; sleep 1
+    ...    timeout=10
     ${test_dir}=    Set Variable    ${GKG_REPO}/tests/e2e/indexing_progress
     ${disp}=    Start Process    ${test_dir}/run-dispatcher.sh
     ...    stdout=/tmp/gkg-dispatcher.log    stderr=STDOUT
@@ -114,11 +126,15 @@ Start Indexer Services
 
 Stop Indexer Services
     [Documentation]    Stop dispatcher and indexer (leaves webserver running)
-    Run Process    bash    -c    pkill -9 -f "gkg-server --mode.dispatch" 2>/dev/null; pkill -9 -f "gkg-server --mode.indexer" 2>/dev/null    timeout=10
+    Run Process
+    ...    bash
+    ...    -c
+    ...    pkill -9 -f "gkg-server --mode.dispatch" 2>/dev/null; pkill -9 -f "gkg-server --mode.indexer" 2>/dev/null
+    ...    timeout=10
 
 Wait For Indexing Complete
-    [Arguments]    ${traversal_path}    ${timeout_secs}=${INDEX_TIMEOUT_SECS}
     [Documentation]    Poll GetIndexingStatus until state=idle and initial_backfill_done=true
+    [Arguments]    ${traversal_path}    ${timeout_secs}=${INDEX_TIMEOUT_SECS}
     ${deadline}=    Evaluate    time.time() + ${timeout_secs}    modules=time
     FOR    ${i}    IN RANGE    200
         ${now}=    Evaluate    time.time()    modules=time
@@ -131,9 +147,7 @@ Wait For Indexing Complete
             ${state}=    Set Variable    ${body['state']}
             ${done}=    Set Variable    ${body['initial_backfill_done']}
             Log    Poll ${i}: state=${state} backfill_done=${done}
-            IF    '${state}' == 'idle' and ${done}
-                RETURN    ${resp}
-            END
+            IF    '${state}' == 'idle' and ${done}    RETURN    ${resp}
         END
         Sleep    3
     END
@@ -142,7 +156,12 @@ Wait For Indexing Complete
 Get Indexing Status
     [Arguments]    ${traversal_path}    ${exact_counts}=${False}
     ${params}=    Create Dictionary    traversal_path=${traversal_path}    exact_counts=${exact_counts}
-    ${resp}=    GET On Session    gdk    /orbit/indexing_status    params=${params}    headers=&{API_HEADERS}    expected_status=any
+    ${resp}=    GET On Session
+    ...    gdk
+    ...    /orbit/indexing_status
+    ...    params=${params}
+    ...    headers=&{API_HEADERS}
+    ...    expected_status=any
     RETURN    ${resp}
 
 Enable Namespace For KG
@@ -176,7 +195,11 @@ Create Subgroup
 
 Create Project
     [Arguments]    ${name}    ${namespace_id}
-    ${data}=    Create Dictionary    name=${name}    namespace_id=${namespace_id}    visibility=public    initialize_with_readme=${True}
+    ${data}=    Create Dictionary
+    ...    name=${name}
+    ...    namespace_id=${namespace_id}
+    ...    visibility=public
+    ...    initialize_with_readme=${True}
     ${resp}=    GitLab API POST    /projects    ${data}
     Should Be Equal As Integers    ${resp.status_code}    201    msg=Failed to create project: ${resp.text}
     RETURN    ${resp.json()['id']}
@@ -201,8 +224,8 @@ Create Issue
     RETURN    ${resp.json()['iid']}
 
 Get Domain Item Count
-    [Arguments]    ${status_response}    ${domain_name}    ${entity_name}
     [Documentation]    Extract a specific entity count from the indexing status response
+    [Arguments]    ${status_response}    ${domain_name}    ${entity_name}
     ${domains}=    Set Variable    ${status_response.json()['domains']}
     FOR    ${domain}    IN    @{domains}
         IF    '${domain["name"]}' == '${domain_name}'

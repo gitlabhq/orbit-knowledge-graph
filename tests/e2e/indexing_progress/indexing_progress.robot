@@ -1,57 +1,19 @@
 *** Settings ***
-Documentation     End-to-end tests for the GetIndexingStatus feature.
-...               Covers initial backfill, incremental updates, hierarchy rollup,
-...               state transitions, and count accuracy.
-...               Uses the status endpoint itself to poll for completion.
-Resource          resources/common.robot
-Suite Setup       Suite Init
-Suite Teardown    Suite Cleanup
+Documentation       End-to-end tests for the GetIndexingStatus feature.
+...                 Covers initial backfill, incremental updates, hierarchy rollup,
+...                 state transitions, and count accuracy.
+...                 Uses the status endpoint itself to poll for completion.
 
-*** Keywords ***
-Suite Init
-    Create API Session
-    ${ts}=    Evaluate    str(int(time.time()))[-6:]    modules=time
-    Set Suite Variable    ${RUN_ID}    ${ts}
-    ${result}=    Run Process    bash    -c
-    ...    cd $HOME/gitlab/gdk/gitlab && bundle exec spring rails runner 'Feature.enable(:knowledge_graph); puts Feature.enabled?(:knowledge_graph)'
-    ...    timeout=30
-    Should Contain    ${result.stdout}    true
+Resource            resources/common.robot
 
-Suite Cleanup
-    Stop Indexer Services
-    Log    E2E indexing progress tests completed
+Suite Setup         Suite Init
+Suite Teardown      Suite Cleanup
 
-Seed Test Data
-    [Documentation]    Create test entities via GitLab API and enable namespace
-    ${name}=    Set Variable    idx-e2e-${RUN_ID}
-    ${group_id}=    Create Top Level Group    ${name}    ${name}
-    Set Suite Variable    ${TOP_GROUP_ID}    ${group_id}
-
-    ${sub_name}=    Set Variable    sub-${RUN_ID}
-    ${sub_id}=    Create Subgroup    ${sub_name}    ${sub_name}    ${group_id}
-    Set Suite Variable    ${SUB_GROUP_ID}    ${sub_id}
-
-    ${proj1_id}=    Create Project    app-one-${RUN_ID}    ${group_id}
-    ${proj2_id}=    Create Project    app-two-${RUN_ID}    ${group_id}
-    Set Suite Variable    ${PROJECT1_ID}    ${proj1_id}
-    Set Suite Variable    ${PROJECT2_ID}    ${proj2_id}
-
-    Create Merge Request    ${proj1_id}    Fix login    fix/login-${RUN_ID}
-    Create Merge Request    ${proj1_id}    Add tests    feat/tests-${RUN_ID}
-    Create Merge Request    ${proj2_id}    Update deps    chore/deps-${RUN_ID}
-
-    Create Issue    ${proj1_id}    Track performance
-    Create Issue    ${proj2_id}    Security audit
-
-    Enable Namespace For KG    ${group_id}
-
-    Set Suite Variable    ${ORG_ID}    1
-    Set Suite Variable    ${TRAVERSAL_PATH}    1/${group_id}/
 
 *** Test Cases ***
 Test 1: Initial Backfill Produces Correct Counts
     [Documentation]    Seed data, start indexer services, poll status endpoint until
-    ...               state=idle and initial_backfill_done=true, then verify counts.
+    ...    state=idle and initial_backfill_done=true, then verify counts.
     [Tags]    backfill    critical
     Seed Test Data
     Wait For CDC
@@ -208,3 +170,47 @@ Test 8: Count Accuracy vs ClickHouse FINAL
     ...    msg=KV count ${kv_projects} should be within 5%% of FINAL count ${ch_count}
 
     Log    Accuracy OK: KV=${kv_projects} FINAL=${ch_count}
+
+
+*** Keywords ***
+Suite Init
+    Create API Session
+    ${ts}=    Evaluate    str(int(time.time()))[-6:]    modules=time
+    Set Suite Variable    ${RUN_ID}    ${ts}
+    ${result}=    Run Process
+    ...    bash
+    ...    -c
+    ...    cd $HOME/gitlab/gdk/gitlab && bundle exec spring rails runner 'Feature.enable(:knowledge_graph); puts Feature.enabled?(:knowledge_graph)'
+    ...    timeout=30
+    Should Contain    ${result.stdout}    true
+
+Suite Cleanup
+    Stop Indexer Services
+    Log    E2E indexing progress tests completed
+
+Seed Test Data
+    [Documentation]    Create test entities via GitLab API and enable namespace
+    ${name}=    Set Variable    idx-e2e-${RUN_ID}
+    ${group_id}=    Create Top Level Group    ${name}    ${name}
+    Set Suite Variable    ${TOP_GROUP_ID}    ${group_id}
+
+    ${sub_name}=    Set Variable    sub-${RUN_ID}
+    ${sub_id}=    Create Subgroup    ${sub_name}    ${sub_name}    ${group_id}
+    Set Suite Variable    ${SUB_GROUP_ID}    ${sub_id}
+
+    ${proj1_id}=    Create Project    app-one-${RUN_ID}    ${group_id}
+    ${proj2_id}=    Create Project    app-two-${RUN_ID}    ${group_id}
+    Set Suite Variable    ${PROJECT1_ID}    ${proj1_id}
+    Set Suite Variable    ${PROJECT2_ID}    ${proj2_id}
+
+    Create Merge Request    ${proj1_id}    Fix login    fix/login-${RUN_ID}
+    Create Merge Request    ${proj1_id}    Add tests    feat/tests-${RUN_ID}
+    Create Merge Request    ${proj2_id}    Update deps    chore/deps-${RUN_ID}
+
+    Create Issue    ${proj1_id}    Track performance
+    Create Issue    ${proj2_id}    Security audit
+
+    Enable Namespace For KG    ${group_id}
+
+    Set Suite Variable    ${ORG_ID}    1
+    Set Suite Variable    ${TRAVERSAL_PATH}    1/${group_id}/
