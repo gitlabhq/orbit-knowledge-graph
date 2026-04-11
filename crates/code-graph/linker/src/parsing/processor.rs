@@ -333,9 +333,13 @@ impl<'a> FileProcessor<'a> {
         let mut all_imported_symbols = Vec::new();
         let mut all_relationships = Vec::new();
 
+        let mut directive = None;
         for (file_path, source) in &sources {
             match JsAnalyzer::analyze_file(source, file_path, &self.path) {
                 Ok(result) => {
+                    if directive.is_none() {
+                        directive = result.directive;
+                    }
                     all_definitions.extend(result.definitions);
                     all_imported_symbols.extend(result.imported_symbols);
                     all_relationships.extend(result.relationships);
@@ -359,6 +363,7 @@ impl<'a> FileProcessor<'a> {
             definitions: all_definitions,
             imported_symbols: all_imported_symbols,
             relationships: all_relationships,
+            directive,
         };
 
         ProcessingResult::Success(Box::new(FileProcessingResult {

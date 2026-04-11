@@ -24,6 +24,8 @@ pub struct JsAnalysisResult {
     pub definitions: Vec<DefinitionNode>,
     pub imported_symbols: Vec<ImportedSymbolNode>,
     pub relationships: Vec<ConsolidatedRelationship>,
+    /// `"use server"` or `"use client"` directive, if present
+    pub directive: Option<super::js_nextjs::JsDirective>,
 }
 
 impl JsAnalyzer {
@@ -230,6 +232,7 @@ impl JsAnalyzer {
                     AstKind::CallExpression(_)
                         | AstKind::NewExpression(_)
                         | AstKind::TaggedTemplateExpression(_)
+                        | AstKind::JSXOpeningElement(_) // <Component /> is a component call
                 );
 
                 if !is_call {
@@ -361,10 +364,14 @@ impl JsAnalyzer {
             }
         }
 
+        // 5. Detect "use server" / "use client" directives from parsed AST
+        let directive = super::js_nextjs::detect_directive(&parsed.program.directives);
+
         Ok(JsAnalysisResult {
             definitions,
             imported_symbols,
             relationships,
+            directive,
         })
     }
 }
@@ -866,5 +873,111 @@ const baz = 1;
 "#;
         let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
         assert!(result.definitions.len() >= 2);
+    }
+
+    #[test]
+    fn test_jsx_component_creates_call_edge() {
+        let source = r#"
+function Button() { return <button>click</button>; }
+function App() { return <Button />; }
+"#;
+        let result = JsAnalyzer::analyze_file(source, "test.tsx", "test.tsx").unwrap();
+        let calls: Vec<_> = result
+            .relationships
+            .iter()
+            .filter(|r| r.relationship_type == RelationshipType::Calls)
+            .collect();
+        assert!(
+            !calls.is_empty(),
+            "JSX <Button /> should create a CALLS edge from App to Button"
+        );
+    }
+
+    #[test]
+    fn test_this_method_call_edge() {
+        let source = r#"
+class Service {
+    helper() { return 1; }
+    run() { return this.helper(); }
+}
+"#;
+        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
+        let calls: Vec<_> = result
+            .relationships
+            .iter()
+            .filter(|r| r.relationship_type == RelationshipType::Calls)
+            .collect();
+        assert!(
+            !calls.is_empty(),
+            "this.helper() should create a CALLS edge from run to helper"
+        );
+    }
+
+    #[test]
+    fn test_use_server_directive() {
+        let source = r#"
+"use server";
+export async function saveData() {}
+"#;
+        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
+        assert_eq!(
+            result.directive,
+            Some(super::super::js_nextjs::JsDirective::UseServer)
+        );
+    }
+
+    #[test]
+    fn test_use_client_directive() {
+        let source = r#"
+"use client";
+export default function Page() {}
+"#;
+        let result = JsAnalyzer::analyze_file(source, "test.tsx", "test.tsx").unwrap();
+        assert_eq!(
+            result.directive,
+            Some(super::super::js_nextjs::JsDirective::UseClient)
+        );
+    }
+
+    #[test]
+    fn test_vue_script_setup_via_sfc() {
+        // Test that the SFC extractor + analyzer pipeline works for Vue
+        let vue_source = r#"<script setup lang="ts">
+import { ref } from 'vue';
+const count = ref(0);
+function increment() { count.value++; }
+</script>"#;
+        let blocks = super::super::js_sfc::extract_scripts(vue_source, "vue");
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].is_typescript);
+
+        // Analyze the extracted script block
+        let result =
+            JsAnalyzer::analyze_file(&blocks[0].source_text, "App.vue.ts", "App.vue").unwrap();
+        assert!(
+            !result.imported_symbols.is_empty(),
+            "Should find vue import"
+        );
+        let increment = result
+            .definitions
+            .iter()
+            .find(|d| d.fqn.name() == "increment");
+        assert!(increment.is_some(), "Should find increment function");
+    }
+
+    #[test]
+    fn test_commonjs_require() {
+        let source = r#"
+const fs = require('fs');
+const { join } = require('path');
+"#;
+        let result = JsAnalyzer::analyze_file(source, "test.js", "test.js").unwrap();
+        // CJS require creates variable definitions
+        let defs: Vec<&str> = result.definitions.iter().map(|d| d.fqn.name()).collect();
+        assert!(defs.contains(&"fs"), "Should find fs variable");
+        assert!(
+            defs.contains(&"join"),
+            "Should find join destructured variable"
+        );
     }
 }
