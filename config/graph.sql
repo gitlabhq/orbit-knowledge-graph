@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS gl_group (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -88,7 +89,8 @@ CREATE TABLE IF NOT EXISTS gl_project (
     _deleted Bool DEFAULT false,
     INDEX idx_archived archived TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -113,7 +115,8 @@ CREATE TABLE IF NOT EXISTS gl_note (
     INDEX idx_internal internal TYPE minmax GRANULARITY 1,
     INDEX idx_confidential confidential TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -143,7 +146,8 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     INDEX idx_discussion_locked discussion_locked TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_state_id (SELECT * ORDER BY (state, id))
+    PROJECTION by_state_id (SELECT * ORDER BY (state, id)),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -163,7 +167,8 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -188,7 +193,8 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     INDEX idx_deleted_file deleted_file TYPE minmax GRANULARITY 1,
     INDEX idx_binary binary TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -207,7 +213,8 @@ CREATE TABLE IF NOT EXISTS gl_milestone (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -223,7 +230,8 @@ CREATE TABLE IF NOT EXISTS gl_label (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -249,7 +257,8 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     INDEX idx_work_item_type work_item_type TYPE set(10) GRANULARITY 2,
     INDEX idx_confidential confidential TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -305,7 +314,8 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     INDEX idx_tag tag TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_status_id (SELECT * ORDER BY (status, id))
+    PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -321,7 +331,8 @@ CREATE TABLE IF NOT EXISTS gl_stage (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -350,7 +361,8 @@ CREATE TABLE IF NOT EXISTS gl_job (
     INDEX idx_retried retried TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_status_id (SELECT * ORDER BY (status, id))
+    PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -381,7 +393,8 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     INDEX idx_resolved_on_default_branch resolved_on_default_branch TYPE minmax GRANULARITY 1,
     INDEX idx_present_on_default_branch present_on_default_branch TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -397,7 +410,8 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -414,7 +428,8 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -433,7 +448,8 @@ CREATE TABLE IF NOT EXISTS gl_finding (
     _deleted Bool DEFAULT false,
     INDEX idx_deduplicated deduplicated TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -450,7 +466,8 @@ CREATE TABLE IF NOT EXISTS gl_security_scan (
     _deleted Bool DEFAULT false,
     INDEX idx_latest latest TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -474,7 +491,8 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -488,7 +506,8 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -506,7 +525,8 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -524,7 +544,8 @@ CREATE TABLE IF NOT EXISTS gl_file (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -546,7 +567,8 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -569,7 +591,8 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY traversal_path)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;

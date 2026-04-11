@@ -7,7 +7,7 @@ toc_hide: true
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -524,13 +524,12 @@ relationship types with valid source/target kind combinations). This number
 is bounded by the ontology, not by the raw edge count. At billions of edges,
 the projection still contains ~4,000 rows per namespace.
 
-**Deployment.** After adding the projection DDL to `graph.sql`, run
-`ALTER TABLE gl_edge MATERIALIZE PROJECTION node_edge_counts` to build
-projection data for existing parts. New inserts build projection data
-automatically. Without materialization, ClickHouse falls back to raw table
-scans for parts that lack projection data. On staging before materialization,
-14/16 parts lacked the projection, causing 15,727 granule reads instead of
-12.
+**Deployment.** Both `node_edge_counts` (on `gl_edge`) and `tp_count`
+(on all 23 node tables) are defined in `graph.sql`. After deployment, run
+`ALTER TABLE <table> MATERIALIZE PROJECTION <name>` for each table to
+build projection data on existing parts. New inserts build projection
+data automatically. Without materialization, ClickHouse falls back to
+raw table scans for parts that lack projection data.
 
 ### Performance
 
@@ -544,12 +543,26 @@ need for `FINAL` while keeping error below ~1-2% (HLL). Without this, the
 only way to get accurate counts is `FINAL`, which is prohibitively expensive
 at scale (see above).
 
-#### Use the edge projection to avoid scanning raw edge data
+#### Use projections to avoid scanning raw data
 
-The `node_edge_counts` projection reduces edge count queries from scanning
-millions of raw rows to reading ~4,000 pre-aggregated projection rows per
-namespace. The node `UNION ALL` query still scans node tables directly, but
-these are 10-100x smaller than `gl_edge`.
+The `node_edge_counts` projection on `gl_edge` reduces edge count queries
+from scanning millions of raw rows to reading ~4,000 pre-aggregated
+projection rows per namespace.
+
+Each of the 23 namespace-scoped node tables has a `tp_count` projection:
+
+```sql
+PROJECTION tp_count (
+    SELECT traversal_path, uniq(id)
+    GROUP BY traversal_path
+)
+```
+
+This reduces the node `UNION ALL` from scanning 7.3M raw rows (500ms) to
+reading ~3,500 projection rows (213ms server-side). The remaining time is
+query coordination overhead across 23 UNION ALL arms, not data scanning.
+At 100x scale the projection-backed query stays flat while a raw scan
+would grow to ~50s.
 
 #### Skip counts when ETL processed zero rows
 
@@ -583,27 +596,20 @@ Measured on staging against namespace `1/9970/` (16.4M raw edge rows,
 
 | Query | Rows read | Data read | Server time | Memory | Accuracy |
 |---|---|---|---|---|---|
-| Node: `uniq(id)` UNION ALL (23 tables) | 7,327,854 | 180 MB | 500ms | 189 MB | <1% |
-| Edge: `uniq(src,tgt)` via projection | 9,848 | 1.1 MB | 70ms | 121 MB | +0.1% |
+| Node: `uniq(id)` UNION ALL (23 tables, `tp_count`) | 3,470 | 384 KB | 213ms | 28 MB | <1% |
+| Edge: `uniq(src,tgt)` via `node_edge_counts` | 9,848 | 1.1 MB | 70ms | 121 MB | +0.1% |
 | Cross-namespace WorkItem join | 83,284 | 2.3 MB | 62ms | 31 MB | exact |
 | Cross-namespace Vulnerability join | 3,545 | 149 KB | 63ms | 10 MB | exact |
-| **Total (full handler)** | **7,424,531** | **184 MB** | **695ms** | **351 MB** | |
+| **Total (full handler)** | **100,147** | **3.9 MB** | **408ms** | **190 MB** | |
 
-For comparison, `FINAL` edge counts: 14,413,693 rows, 620 MB, 579ms,
-735 MB (exact but bypasses projection). `count()` edge scan: 10,162,678
-rows, 340 MB, 217ms, +49.4% overcount.
+For comparison, without node projections (`tp_count`): node UNION ALL
+reads 7,327,854 rows (180 MB, 500ms). Without `node_edge_counts`: edge
+scan reads 10,162,678 rows (340 MB, 217ms, +49.4% overcount). With
+`FINAL`: 14,413,693 rows (620 MB, 579ms, exact but bypasses projections).
 
-The edge projection reads **1,032x fewer rows** than the raw edge scan.
-Combined post-ETL cost: **695ms server-side**. The node UNION ALL
-dominates (72%). With 30s debounce, this runs at most twice per minute
-per namespace.
-
-**Scaling.** At 10x staging data, the node UNION ALL grows to ~5s while
-the edge projection stays at ~70ms (bounded by projection cardinality,
-not row count). To bring node counts to the same level, add
-`PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY
-traversal_path)` to the largest node tables. This is not required for
-GA but recommended before reaching 100M+ node rows.
+Combined post-ETL cost: **408ms server-side**. With 30s debounce, this
+runs at most twice per minute per namespace. Both projections ensure
+query time stays flat regardless of table size.
 
 #### Accuracy detail
 
