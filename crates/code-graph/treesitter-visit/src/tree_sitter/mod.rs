@@ -45,12 +45,58 @@ pub struct StrDoc<L: LanguageExt> {
     pub tree: Tree,
 }
 
+/// Default stall limit for the progress callback. 100K iterations at the same
+/// byte offset is clearly pathological -- normal parsing always advances.
+const DEFAULT_MAX_STALL: u64 = 100_000;
+
 impl<L: LanguageExt> StrDoc<L> {
     pub fn try_new(src: &str, lang: L) -> Result<Self, String> {
+        Self::try_new_with_stall_limit(src, lang, DEFAULT_MAX_STALL)
+    }
+
+    /// Parse source with a configurable stall limit for the progress callback.
+    /// If the parser calls the progress callback more than `max_stall` times
+    /// at the same byte offset, the parse is aborted.
+    pub(crate) fn try_new_with_stall_limit(
+        src: &str,
+        lang: L,
+        max_stall: u64,
+    ) -> Result<Self, String> {
         let src = src.to_string();
         let ts_lang = lang.get_ts_language();
-        let tree =
-            parse_lang(|p| p.parse(src.as_bytes(), None), ts_lang).map_err(|e| e.to_string())?;
+        let tree = parse_lang(
+            |p| {
+                use std::ops::ControlFlow;
+                use std::sync::atomic::{AtomicU64, Ordering};
+
+                let stall_count = AtomicU64::new(0);
+                let last_offset = AtomicU64::new(u64::MAX);
+
+                let mut progress = |state: &tree_sitter::ParseState| {
+                    let offset = state.current_byte_offset() as u64;
+                    if offset == last_offset.load(Ordering::Relaxed) {
+                        if stall_count.fetch_add(1, Ordering::Relaxed) >= max_stall {
+                            log::warn!(
+                                "tree-sitter parse aborted: stalled at byte offset {offset} \
+                                 (>{max_stall} iterations without progress)"
+                            );
+                            return ControlFlow::Break(());
+                        }
+                    } else {
+                        last_offset.store(offset, Ordering::Relaxed);
+                        stall_count.store(0, Ordering::Relaxed);
+                    }
+                    ControlFlow::Continue(())
+                };
+
+                let mut opts =
+                    tree_sitter::ParseOptions::default().progress_callback(&mut progress);
+                let mut read = |offset: usize, _: tree_sitter::Point| &src.as_bytes()[offset..];
+                p.parse_with_options(&mut read, None, Some(opts.reborrow()))
+            },
+            ts_lang,
+        )
+        .map_err(|e| e.to_string())?;
         Ok(Self { src, lang, tree })
     }
 
@@ -288,5 +334,66 @@ impl<L: LanguageExt> crate::Root<StrDoc<L>> {
 
     pub fn generate(self) -> String {
         self.doc.src
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StrDoc;
+    use std::ops::ControlFlow;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Reproduce the stall detection logic from try_new_with_stall_limit and verify
+    /// it fires correctly. This tests the algorithm directly rather than relying on
+    /// tree-sitter's internal behavior which varies between debug and release builds.
+    #[test]
+    fn test_stall_detection_logic() {
+        let max_stall: u64 = 3;
+        let stall_count = AtomicU64::new(0);
+        let last_offset = AtomicU64::new(u64::MAX);
+
+        let check = |offset: u64| -> ControlFlow<()> {
+            if offset == last_offset.load(Ordering::Relaxed) {
+                if stall_count.fetch_add(1, Ordering::Relaxed) >= max_stall {
+                    return ControlFlow::Break(());
+                }
+            } else {
+                last_offset.store(offset, Ordering::Relaxed);
+                stall_count.store(0, Ordering::Relaxed);
+            }
+            ControlFlow::Continue(())
+        };
+
+        // Advancing offsets: never stalls
+        assert_eq!(check(0), ControlFlow::Continue(()));
+        assert_eq!(check(1), ControlFlow::Continue(()));
+        assert_eq!(check(2), ControlFlow::Continue(()));
+
+        // Stall at offset 5: fetch_add returns previous value, >= fires after max_stall increments
+        assert_eq!(check(5), ControlFlow::Continue(())); // first visit, sets last_offset=5
+        assert_eq!(check(5), ControlFlow::Continue(())); // count: 0 -> 1
+        assert_eq!(check(5), ControlFlow::Continue(())); // count: 1 -> 2
+        assert_eq!(check(5), ControlFlow::Continue(())); // count: 2 -> 3
+        assert_eq!(check(5), ControlFlow::Break(())); // count: 3 >= 3, abort
+
+        // After advancing, counter resets
+        stall_count.store(0, Ordering::Relaxed);
+        assert_eq!(check(10), ControlFlow::Continue(()));
+        assert_eq!(check(11), ControlFlow::Continue(())); // advance resets count
+        assert_eq!(check(11), ControlFlow::Continue(())); // count: 0 -> 1
+        assert_eq!(check(11), ControlFlow::Continue(())); // count: 1 -> 2
+        assert_eq!(check(11), ControlFlow::Continue(())); // count: 2 -> 3
+        assert_eq!(check(11), ControlFlow::Break(())); // count: 3 >= 3, abort
+    }
+
+    #[cfg(feature = "builtin-parser")]
+    #[test]
+    fn test_default_stall_limit_allows_valid_parse() {
+        let result = StrDoc::try_new("def f(x):\n    return x\n", crate::SupportLang::Python);
+        assert!(
+            result.is_ok(),
+            "Valid Python should parse: {:?}",
+            result.err()
+        );
     }
 }
