@@ -234,23 +234,24 @@ static SAFE_IDENT: LazyLock<Regex> =
 /// `INSERT INTO table (cols) VALUES (row1), (row2), ...`
 ///
 /// Table and column names are interpolated as raw identifiers (not parameterized),
-/// so they are validated at construction time via [`Insert::new`].
+/// so they are validated at construction time via [`Insert::new`]. Fields are
+/// private to enforce this — use the constructor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Insert {
-    pub table: String,
-    pub columns: Vec<String>,
-    pub values: Vec<Vec<Expr>>,
+    table: String,
+    columns: Vec<String>,
+    values: Vec<Vec<Expr>>,
 }
 
 impl Insert {
     pub fn new(table: impl Into<String>, columns: Vec<String>, values: Vec<Vec<Expr>>) -> Self {
         let table = table.into();
-        debug_assert!(
+        assert!(
             SAFE_IDENT.is_match(&table),
             "INSERT table name is not a safe identifier: {table:?}"
         );
         for col in &columns {
-            debug_assert!(
+            assert!(
                 SAFE_IDENT.is_match(col),
                 "INSERT column name is not a safe identifier: {col:?}"
             );
@@ -260,6 +261,18 @@ impl Insert {
             columns,
             values,
         }
+    }
+
+    pub fn table(&self) -> &str {
+        &self.table
+    }
+
+    pub fn columns(&self) -> &[String] {
+        &self.columns
+    }
+
+    pub fn values(&self) -> &[Vec<Expr>] {
+        &self.values
     }
 }
 

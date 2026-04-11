@@ -76,9 +76,9 @@ impl Context {
     }
 
     fn emit_insert(&mut self, ins: &Insert) -> String {
-        let cols = ins.columns.join(", ");
+        let cols = ins.columns().join(", ");
         let rows: Vec<String> = ins
-            .values
+            .values()
             .iter()
             .map(|row| {
                 let exprs: Vec<String> = row.iter().map(|e| self.emit_expr(e)).collect();
@@ -87,7 +87,7 @@ impl Context {
             .collect();
         format!(
             "INSERT INTO {} ({}) VALUES {}",
-            ins.table,
+            ins.table(),
             cols,
             rows.join(", ")
         )
@@ -851,14 +851,14 @@ mod tests {
 
     #[test]
     fn insert_values() {
-        let ins = Insert {
-            table: "gl_schema_versions".into(),
-            columns: vec!["key".into(), "version".into()],
-            values: vec![
+        let ins = Insert::new(
+            "gl_schema_versions",
+            vec!["key".into(), "version".into()],
+            vec![
                 vec![Expr::string("graph"), Expr::int(3)],
                 vec![Expr::string("datalake"), Expr::int(1)],
             ],
-        };
+        );
 
         let result = codegen(
             &Node::Insert(Box::new(ins)),
@@ -882,11 +882,7 @@ mod tests {
 
     #[test]
     fn insert_skips_settings() {
-        let ins = Insert {
-            table: "t".into(),
-            columns: vec!["a".into()],
-            values: vec![vec![Expr::int(1)]],
-        };
+        let ins = Insert::new("t", vec!["a".into()], vec![vec![Expr::int(1)]]);
 
         let cfg = QueryConfig {
             max_execution_time: None,

@@ -50,9 +50,9 @@ impl Context {
     }
 
     fn emit_insert(&mut self, ins: &Insert) -> String {
-        let cols = ins.columns.join(", ");
+        let cols = ins.columns().join(", ");
         let rows: Vec<String> = ins
-            .values
+            .values()
             .iter()
             .map(|row| {
                 let exprs: Vec<String> = row.iter().map(|e| self.emit_expr(e)).collect();
@@ -61,7 +61,7 @@ impl Context {
             .collect();
         format!(
             "INSERT INTO {} ({}) VALUES {}",
-            ins.table,
+            ins.table(),
             cols,
             rows.join(", ")
         )
