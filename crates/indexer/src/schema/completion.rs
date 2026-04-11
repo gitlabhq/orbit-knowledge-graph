@@ -221,7 +221,12 @@ impl MigrationCompletionChecker {
             .map_err(|e| format!("count enabled namespaces: {e}"))?;
 
         if enabled_count == 0 {
-            return Ok(true);
+            warn!(
+                version,
+                "enabled namespace count is 0 — skipping promotion to avoid \
+                 premature completion during a datalake outage"
+            );
+            return Ok(false);
         }
 
         // SDLC completeness: namespaces with entries in the new checkpoint table.
