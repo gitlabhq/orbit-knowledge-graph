@@ -39,10 +39,11 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 Before the NATS engine starts, `schema_migration::run_if_needed()` compares the embedded
 `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a NATS KV
-distributed lock, creates new-prefix ClickHouse tables (parsing DDL from embedded `graph.sql`),
-and marks the new version as `migrating`. All write paths (checkpoints, namespace deletion,
-ontology-driven tables) use `prefixed_table_name(table, SCHEMA_VERSION)` so they always target
-the current schema version's table-set.
+distributed lock, generates DDL from the ontology via `generate_graph_tables_with_prefix()`,
+creates new-prefix ClickHouse tables, and marks the new version as `migrating`. All write paths
+(checkpoints, namespace deletion, ontology-driven tables) use
+`prefixed_table_name(table, SCHEMA_VERSION)` so they always target the current schema version's
+table-set.
 
 ### Entry point
 

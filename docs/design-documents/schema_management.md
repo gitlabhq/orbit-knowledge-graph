@@ -100,10 +100,10 @@ flow **before** the NATS engine starts consuming messages:
 3. **Drain** — The engine has not started; no in-flight NATS messages exist. This phase is a
    no-op today and is reserved for future dual-write scenarios.
 
-4. **Create new-prefix tables** — Parse `config/graph.sql` (embedded via `include_str!`) and
-   execute `CREATE TABLE IF NOT EXISTS vN_<table>` for each graph table. The table list is
-   derived from the ontology (node + edge tables) plus the constant list in
-   `schema_version::NON_ONTOLOGY_GRAPH_TABLES` (`checkpoint`, `code_indexing_checkpoint`,
+4. **Create new-prefix tables** — Generate DDL from the ontology via
+   `generate_graph_tables_with_prefix()` and execute `CREATE TABLE IF NOT EXISTS vN_<table>`
+   for each graph table. The table list is derived from the ontology: node tables, edge tables,
+   and auxiliary tables (`checkpoint`, `code_indexing_checkpoint`,
    `namespace_deletion_schedule`). Control tables (`gkg_schema_version`) are not prefixed.
 
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
