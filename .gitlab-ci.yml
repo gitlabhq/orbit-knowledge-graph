@@ -402,6 +402,7 @@ integration-test:
         - crates/utils/**/*
         - config/ontology/**/*
         - code-indexing-benchmark.yaml
+        - .gitlab-ci.yml
 
 code-indexing-benchmark-build:
   stage: benchmark
@@ -446,18 +447,13 @@ code-indexing-benchmark-build:
       - temp/
   script:
     - |
-      GROUP_FLAG=""
-      if [[ -n "$GROUP" ]]; then
-        GROUP_FLAG="--group $GROUP"
-      fi
-
-      OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${GROUP:-all}.json"
+      OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${GROUP}.json"
       gitlab-xtasks benchmark hyperfine \
         --config code-indexing-benchmark.yaml \
         --architecture "$ARCH" \
-        --scenario "$SCENARIO" \
-        --output-file "$OUTPUT_FILE" \
-        $GROUP_FLAG
+        --scenario index \
+        --group "$GROUP" \
+        --output-file "$OUTPUT_FILE"
   artifacts:
     paths:
       - gkg-benchmark-*.json
@@ -473,8 +469,7 @@ code-indexing-benchmark-linux:
     ARCH: "linux-x86_64"
   parallel:
     matrix:
-      - SCENARIO: [gkg_index_4_threads]
-        GROUP: [ruby, typescript, java]
+      - GROUP: [ruby, typescript, java, go]
 
 code-indexing-benchmark-analyze:
   stage: benchmark
