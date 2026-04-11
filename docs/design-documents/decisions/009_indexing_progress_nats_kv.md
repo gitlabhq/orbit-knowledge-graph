@@ -229,6 +229,11 @@ Tracks pipeline lifecycle and operational state.
 }
 ```
 
+`projects_indexed` is derived from `code_indexing_checkpoint` filtered by
+traversal path prefix (`uniq(project_id)`). `projects_total` comes from
+`gl_project` (`count() ... FINAL WHERE NOT _deleted`). Both are small
+queries (< 1000 rows on staging).
+
 ### State machine
 
 The state model uses two independent axes:
@@ -315,7 +320,8 @@ subtree total for all entities at or below that prefix.
    WHERE startsWith(traversal_path, {tp:String})
    GROUP BY traversal_path
    UNION ALL
-   -- ... all 24 node types (SDLC + code tables)
+   -- ... all 23 namespace-scoped node types
+   -- (User is global-scope with no traversal_path; excluded)
    ```
 
    **Why `uniq(id)` instead of `count()`.** Graph tables use
@@ -547,36 +553,57 @@ these are 10-100x smaller than `gl_edge`.
 
 #### Skip counts when ETL processed zero rows
 
-The pipeline already tracks `total_rows` per plan. If all plans processed
-zero rows, skip the count queries entirely. The existing KV values are
-already up-to-date.
+If all plans processed zero rows, skip the count queries entirely. The
+existing KV values are already up-to-date. This requires `Pipeline::run()`
+to return a result struct containing `total_rows: u64`. Today it returns
+`Result<(), HandlerError>` and `total_rows` is only emitted to metrics.
 
 #### Debounce count queries
 
 Even with the projection, running count queries on every ETL cycle is
 unnecessary when the dispatcher runs frequently (sub-minute intervals).
-The handler skips count queries if the KV `counts` key was updated less than
-30 seconds ago. At 500ms dispatch intervals, this eliminates ~98% of count
+The handler maintains an in-process `HashMap<NamespaceId, Instant>` and
+skips count queries if the last update was less than 30 seconds ago. This
+avoids any NATS KV or JSON overhead on the debounce check. The map resets
+on handler restart, which is a safe default (counts run on the first cycle
+after restart). At 500ms dispatch intervals, this eliminates ~98% of count
 query invocations while keeping data fresh enough for UI polling.
+
+#### Query timeout
+
+Count queries include `SETTINGS max_execution_time = 30` to prevent
+runaway queries from blocking the handler. A 30s timeout is well within
+the handler's `ack_wait` (300s) and covers worst-case scenarios under
+ClickHouse load.
 
 #### Staging performance (X-ClickHouse-Summary)
 
-Measured on staging against namespace `1/9970/` (16.4M raw edge rows, ~4M
-node rows, 373 distinct traversal paths):
+Measured on staging against namespace `1/9970/` (16.4M raw edge rows,
+7.3M node rows across 23 tables, 373 distinct traversal paths):
 
 | Query | Rows read | Data read | Server time | Memory | Accuracy |
 |---|---|---|---|---|---|
-| Edge: `uniq(src,tgt)` via projection | 9,848 | 1.1 MB | 71ms | 121 MB | +0.1% |
-| Edge: `count()` raw scan | 10,162,678 | 340 MB | 217ms | 130 MB | +49.4% |
-| Edge: `FINAL` (ground truth) | 14,413,693 | 620 MB | 579ms | 735 MB | exact |
-| Node: `uniq(id)` UNION ALL | 3,802,448 | 92 MB | 66ms | 158 MB | <1% |
-| Node: `count()` UNION ALL | 3,802,448 | 63 MB | 51ms | 138 MB | 0-95% |
+| Node: `uniq(id)` UNION ALL (23 tables) | 7,327,854 | 180 MB | 500ms | 189 MB | <1% |
+| Edge: `uniq(src,tgt)` via projection | 9,848 | 1.1 MB | 70ms | 121 MB | +0.1% |
+| Cross-namespace WorkItem join | 83,284 | 2.3 MB | 62ms | 31 MB | exact |
+| Cross-namespace Vulnerability join | 3,545 | 149 KB | 63ms | 10 MB | exact |
+| **Total (full handler)** | **7,424,531** | **184 MB** | **695ms** | **351 MB** | |
 
-The projection reads **1,032x fewer rows** and **306x less data** than the
-raw scan, and **1,464x fewer rows** than `FINAL`.
+For comparison, `FINAL` edge counts: 14,413,693 rows, 620 MB, 579ms,
+735 MB (exact but bypasses projection). `count()` edge scan: 10,162,678
+rows, 340 MB, 217ms, +49.4% overcount.
 
-Combined post-ETL cost: **137ms server-side** (71ms edges + 66ms nodes).
-With 30s debounce, this runs at most twice per minute per namespace.
+The edge projection reads **1,032x fewer rows** than the raw edge scan.
+Combined post-ETL cost: **695ms server-side**. The node UNION ALL
+dominates (72%). With 30s debounce, this runs at most twice per minute
+per namespace.
+
+**Scaling.** At 10x staging data, the node UNION ALL grows to ~5s while
+the edge projection stays at ~70ms (bounded by projection cardinality,
+not row count). To bring node counts to the same level, add
+`PROJECTION tp_count (SELECT traversal_path, uniq(id) GROUP BY
+traversal_path)` to the largest node tables. This is not required for
+GA but recommended before reaching 100M+ node rows.
 
 #### Accuracy detail
 
@@ -611,7 +638,7 @@ Node counts with `uniq(id)` are similarly accurate:
 - **Zero-row incremental runs:** no count overhead at all (skip).
 - **Within debounce window:** no count overhead (skip).
 - **Non-zero runs past debounce:** one node `UNION ALL` + one projection
-  edge query + 2 cross-namespace join queries. ~137ms server-side, well
+  edge query + 2 cross-namespace join queries. ~695ms server-side, well
   within the 300s handler `ack_wait` timeout.
 - **Checkpoint advancement:** `save_completed` happens per-plan before
   counts. Count query failures do not affect watermark progression.
@@ -625,14 +652,17 @@ With pre-aggregation at every group level, the key count per bucket is:
 
 | Component | Keys per namespace | Example (100 namespaces) |
 |---|---|---|
-| `counts.<tp>` | 1 per distinct group-level prefix | ~10,000 |
+| `counts.<tp>` | 1 per distinct traversal path (typically 3-400) | ~30,000 |
 | `code.<project_id>` | 1 per indexed project | ~20,000 |
 | `meta.<ns_id>` | 1 per enabled namespace | ~100 |
-| **Total** | | **~30,000** |
+| **Total** | | **~50,000** |
 
-NATS JetStream stores KV entries as messages in a stream. 30K small messages
-(1-15KB each) is trivial -- NATS is designed for millions of messages.
-Total storage: ~150-500MB.
+On staging, namespace `1/9970/` (the largest) has 373 distinct traversal
+paths. Other namespaces range from 3 to 146.
+
+NATS JetStream stores KV entries as messages in a stream. 50K small
+messages (1-15KB each) is trivial -- NATS is designed for millions of
+messages. Total storage: ~200-750MB.
 
 **No iteration on the hot path.** Reads are O(1) by exact key. Writes target
 specific keys. The only time key enumeration occurs is during namespace
