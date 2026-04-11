@@ -246,12 +246,12 @@ pub struct Insert {
 impl Insert {
     pub fn new(table: impl Into<String>, columns: Vec<String>, values: Vec<Vec<Expr>>) -> Self {
         let table = table.into();
-        assert!(
+        debug_assert!(
             SAFE_IDENT.is_match(&table),
             "INSERT table name is not a safe identifier: {table:?}"
         );
         for col in &columns {
-            assert!(
+            debug_assert!(
                 SAFE_IDENT.is_match(col),
                 "INSERT column name is not a safe identifier: {col:?}"
             );
