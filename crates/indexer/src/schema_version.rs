@@ -10,7 +10,9 @@
 
 use std::sync::LazyLock;
 
+use arrow::datatypes::UInt32Type;
 use clickhouse_client::ArrowClickHouseClient;
+use gkg_utils::arrow::ArrowUtils;
 use thiserror::Error;
 use tracing::info;
 
@@ -88,16 +90,7 @@ pub async fn read_active_version(
         if batch.num_rows() == 0 {
             continue;
         }
-        let col = batch
-            .column_by_name("version")
-            .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing version column".into()))?;
-        let col = col
-            .as_any()
-            .downcast_ref::<arrow::array::UInt32Array>()
-            .ok_or_else(|| {
-                SchemaVersionError::UnexpectedResult("version column is not UInt32".into())
-            })?;
-        return Ok(Some(col.value(0)));
+        return Ok(ArrowUtils::get_column::<UInt32Type>(batch, "version", 0));
     }
 
     Ok(None)
