@@ -97,7 +97,18 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .map_err(Into::into)
         }
-        Mode::Webserver => run_webserver(&config, ontology).await,
+        Mode::Webserver => {
+            config.schema.validate()?;
+            let graph = config.graph.build_client();
+            info!("initializing schema version table");
+            schema::version::init(&graph).await?;
+            let active_version = schema::version::read_active_version(&graph)
+                .await?
+                .unwrap_or(0);
+            let prefix = schema::version::table_prefix(active_version);
+            info!(version = active_version, table_prefix = %prefix, "resolved active schema version");
+            run_webserver(&config, ontology).await
+        }
     };
 
     signal_task.abort();
