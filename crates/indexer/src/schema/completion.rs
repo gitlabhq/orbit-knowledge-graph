@@ -124,23 +124,28 @@ impl ScheduledTask for MigrationCompletionChecker {
 impl MigrationCompletionChecker {
     async fn run_inner(&self) -> Result<(), TaskError> {
         // Phase 1: detect completion of any migrating version.
-        self.check_completion().await?;
+        // Returns the post-mutation version list if a promotion happened,
+        // so phase 2 doesn't need to re-read (avoids write-visibility lag).
+        let versions_after_promotion = self.check_completion().await?;
 
         // Phase 2: clean up old retired versions outside retention window.
-        self.cleanup_old_versions().await?;
+        self.cleanup_old_versions(versions_after_promotion).await?;
 
         Ok(())
     }
 
     /// Checks whether a `migrating` version has been fully re-indexed and
     /// should be promoted to `active`.
-    async fn check_completion(&self) -> Result<(), TaskError> {
+    ///
+    /// Returns the updated version entries if a promotion happened, so the
+    /// caller can pass them to cleanup without re-reading from ClickHouse.
+    async fn check_completion(&self) -> Result<Option<Vec<VersionEntry>>, TaskError> {
         let migrating = read_migrating_version(&self.graph)
             .await
             .map_err(|e| TaskError::new(format!("read migrating version: {e}")))?;
 
         let Some(migrating_version) = migrating else {
-            return Ok(());
+            return Ok(None);
         };
 
         info!(
@@ -160,27 +165,24 @@ impl MigrationCompletionChecker {
                 version = migrating_version,
                 "migration not yet complete — namespaces still being indexed"
             );
-            return Ok(());
+            return Ok(None);
         }
 
         // Promote: migrating → active, old active → retired.
-        let versions = read_all_versions(&self.graph)
+        let mut versions = read_all_versions(&self.graph)
             .await
             .map_err(|e| TaskError::new(format!("read all versions: {e}")))?;
 
-        let old_active: Vec<&VersionEntry> = versions
-            .iter()
-            .filter(|v| v.status == "active" && v.version != migrating_version)
-            .collect();
-
-        for entry in &old_active {
-            info!(
-                version = entry.version,
-                "marking old active version as retired"
-            );
-            mark_version_retired(&self.graph, entry.version)
-                .await
-                .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
+        for entry in &versions {
+            if entry.status == "active" && entry.version != migrating_version {
+                info!(
+                    version = entry.version,
+                    "marking old active version as retired"
+                );
+                mark_version_retired(&self.graph, entry.version)
+                    .await
+                    .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
+            }
         }
 
         info!(
@@ -193,12 +195,22 @@ impl MigrationCompletionChecker {
 
         self.metrics.record_migration_completed();
 
+        // Reflect the mutations in the in-memory list so cleanup doesn't
+        // need to re-read and risk write-visibility lag.
+        for entry in &mut versions {
+            if entry.version == migrating_version {
+                entry.status = "active".to_string();
+            } else if entry.status == "active" {
+                entry.status = "retired".to_string();
+            }
+        }
+
         info!(
             version = migrating_version,
             "schema migration to v{migrating_version} complete"
         );
 
-        Ok(())
+        Ok(Some(versions))
     }
 
     /// Returns `true` if all enabled namespaces have checkpoint entries in both
@@ -287,10 +299,16 @@ impl MigrationCompletionChecker {
 
     /// Drops tables for retired versions outside the retention window, then
     /// marks them `dropped`.
-    async fn cleanup_old_versions(&self) -> Result<(), TaskError> {
-        let versions = read_all_versions(&self.graph)
-            .await
-            .map_err(|e| TaskError::new(format!("read all versions: {e}")))?;
+    async fn cleanup_old_versions(
+        &self,
+        cached_versions: Option<Vec<VersionEntry>>,
+    ) -> Result<(), TaskError> {
+        let versions = match cached_versions {
+            Some(v) => v,
+            None => read_all_versions(&self.graph)
+                .await
+                .map_err(|e| TaskError::new(format!("read all versions: {e}")))?,
+        };
 
         // Keep the top `max_retained_versions` non-dropped entries.
         let retained: Vec<&VersionEntry> =
