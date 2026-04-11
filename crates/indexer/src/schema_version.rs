@@ -1,55 +1,30 @@
 //! Schema version tracking with table prefix support.
 //!
-//! Embeds the schema version at compile time from `config/SCHEMA_VERSION` and
-//! persists it in the `gkg_schema_version` ClickHouse control table.
+//! Loads the schema version from `config/SCHEMA_VERSION` (embedded at compile
+//! time via `include_str!`) and persists it in the `gkg_schema_version`
+//! ClickHouse control table.
 //!
 //! Table prefix derivation maps a version number to the string prepended to
 //! graph table names. Version 0 uses no prefix (backward compatible); version N
 //! uses `vN_`.
 
+use std::sync::LazyLock;
+
 use clickhouse_client::ArrowClickHouseClient;
 use thiserror::Error;
 use tracing::info;
 
-/// Schema version embedded at compile time from `config/SCHEMA_VERSION`.
+/// Schema version loaded from `config/SCHEMA_VERSION`.
 ///
 /// Bump this file whenever `config/graph.sql` or `config/ontology/` changes
 /// in a way that requires a new table-set. The CI `schema-version-check` job
 /// enforces this.
-pub const SCHEMA_VERSION: u32 = {
-    let bytes = include_bytes!("../../../config/SCHEMA_VERSION");
-    parse_u32_from_bytes(bytes)
-};
-
-/// Parses a `u32` from a byte slice containing an ASCII decimal integer
-/// optionally followed by trailing whitespace. Panics at compile time on
-/// invalid input, including digits after whitespace (e.g. `"1 2\n"`).
-const fn parse_u32_from_bytes(bytes: &[u8]) -> u32 {
-    let mut i = 0;
-    let mut value: u32 = 0;
-    let mut found_digit = false;
-    let mut found_trailing_whitespace = false;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b >= b'0' && b <= b'9' {
-            if found_trailing_whitespace {
-                panic!("config/SCHEMA_VERSION contains digits after whitespace");
-            }
-            value = value * 10 + (b - b'0') as u32;
-            found_digit = true;
-        } else if (b == b'\n' || b == b'\r' || b == b' ') && found_digit {
-            // Only trailing whitespace after digits is allowed.
-            found_trailing_whitespace = true;
-        } else {
-            panic!("config/SCHEMA_VERSION contains non-digit characters");
-        }
-        i += 1;
-    }
-    if !found_digit {
-        panic!("config/SCHEMA_VERSION is empty");
-    }
-    value
-}
+pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| {
+    include_str!("../../../config/SCHEMA_VERSION")
+        .trim()
+        .parse()
+        .expect("config/SCHEMA_VERSION must contain a valid u32")
+});
 
 const CREATE_VERSION_TABLE: &str = "\
 CREATE TABLE IF NOT EXISTS gkg_schema_version (
@@ -128,7 +103,7 @@ pub async fn read_active_version(
     Ok(None)
 }
 
-/// Records the embedded `SCHEMA_VERSION` as the active version in ClickHouse.
+/// Records the given version as the active version in ClickHouse.
 pub async fn write_schema_version(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -152,10 +127,10 @@ pub async fn init(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionErro
     let active = read_active_version(graph).await?;
     if active.is_none() {
         info!(
-            version = SCHEMA_VERSION,
+            version = *SCHEMA_VERSION,
             "fresh install — recording initial schema version"
         );
-        write_schema_version(graph, SCHEMA_VERSION).await?;
+        write_schema_version(graph, *SCHEMA_VERSION).await?;
     }
 
     Ok(())
@@ -167,7 +142,7 @@ mod tests {
 
     #[test]
     fn schema_version_is_valid_u32() {
-        let _ = SCHEMA_VERSION;
+        let _ = *SCHEMA_VERSION;
     }
 
     #[test]
