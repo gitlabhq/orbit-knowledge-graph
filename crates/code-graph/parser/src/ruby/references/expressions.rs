@@ -79,7 +79,7 @@ fn extract_and_queue_node_data(
     if remaining_stack < crate::MINIMUM_STACK_REMAINING {
         error!(
             remaining_stack,
-            node_kind = ?node,
+            node_kind = "ruby_node",
             "stack limit reached, aborting Ruby expression extraction"
         );
         return;

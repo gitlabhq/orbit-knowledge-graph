@@ -355,45 +355,11 @@ pub fn parse_assignment_targets<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::python::symbol_table::test_utils::{
+        find_first_node_by_kind, parse_python, run_on_small_stack,
+    };
     use crate::python::types::ScopeType;
     use crate::utils::node_to_range;
-    use std::thread;
-    use treesitter_visit::Root;
-
-    fn parse_python(code: &str) -> Root<StrDoc<SupportLang>> {
-        Root::new(code, SupportLang::Python)
-    }
-
-    fn find_first_node_by_kind<'a>(
-        root: &'a Root<StrDoc<SupportLang>>,
-        kind: &str,
-    ) -> Option<Node<'a, StrDoc<SupportLang>>> {
-        let mut stack = vec![root.root()];
-
-        while let Some(node) = stack.pop() {
-            if node.kind() == kind {
-                return Some(node);
-            }
-
-            for child in node.children() {
-                stack.push(child);
-            }
-        }
-
-        None
-    }
-
-    fn run_on_small_stack<T>(f: impl FnOnce() -> T + Send + 'static) -> T
-    where
-        T: Send + 'static,
-    {
-        thread::Builder::new()
-            .stack_size(64 * 1024)
-            .spawn(f)
-            .expect("small-stack thread should start")
-            .join()
-            .expect("small-stack thread should complete")
-    }
 
     #[test]
     fn test_parse_expression_bails_out_on_low_stack() {

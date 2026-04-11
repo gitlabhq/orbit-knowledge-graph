@@ -16,7 +16,6 @@ use crate::utils::Range;
 use ruby_prism::{ParseResult, Visit};
 use smallvec::SmallVec;
 use std::sync::Arc;
-use tracing::error;
 
 /// Type alias for the extraction result tuple
 type ExtractionResult = (
@@ -303,26 +302,11 @@ impl<'a> RubyAstVisitor<'a> {
         !self.in_assignment_context()
     }
 
-    fn visit_with_stack_growth<'pr>(
-        &mut self,
-        node: &ruby_prism::Node<'pr>,
-        context: &'static str,
-    ) {
+    fn visit_with_stack_growth<'pr>(&mut self, node: &ruby_prism::Node<'pr>) {
         stacker::maybe_grow(
             crate::MINIMUM_STACK_REMAINING,
             RUBY_VISITOR_STACK_SIZE,
-            || {
-                let remaining_stack = stacker::remaining_stack().unwrap_or(0);
-                if remaining_stack < crate::MINIMUM_STACK_REMAINING {
-                    error!(
-                        remaining_stack,
-                        context, "stack limit reached, aborting Ruby AST traversal"
-                    );
-                    return;
-                }
-
-                self.visit(node);
-            },
+            || self.visit(node),
         );
     }
 
@@ -500,7 +484,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         }
 
         while let Some(child_node) = stack.pop() {
-            self.visit_with_stack_growth(&child_node, "ruby class body traversal");
+            self.visit_with_stack_growth(&child_node);
         }
 
         self.pop_scope();
@@ -517,7 +501,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
 
         // Use stack-based approach for children
         if let Some(body) = node.body() {
-            self.visit_with_stack_growth(&body, "ruby module body traversal");
+            self.visit_with_stack_growth(&body);
         }
 
         self.pop_scope();
@@ -581,7 +565,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         }
 
         while let Some(child_node) = stack.pop() {
-            self.visit_with_stack_growth(&child_node, "ruby method body traversal");
+            self.visit_with_stack_growth(&child_node);
         }
 
         // Pop the method scope
@@ -620,7 +604,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         self.push_call_context(CallContext::LambdaCall);
 
         while let Some(child_node) = stack.pop() {
-            self.visit_with_stack_growth(&child_node, "ruby lambda traversal");
+            self.visit_with_stack_growth(&child_node);
         }
 
         // Pop lambda context
@@ -665,7 +649,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit_with_stack_growth(&value, "ruby constant assignment traversal");
+            self.visit_with_stack_growth(&value);
             self.pop_call_context();
         }
     }
@@ -707,7 +691,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit_with_stack_growth(&value, "ruby local assignment traversal");
+            self.visit_with_stack_growth(&value);
             self.pop_call_context();
         }
     }
@@ -750,7 +734,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit_with_stack_growth(&value, "ruby instance assignment traversal");
+            self.visit_with_stack_growth(&value);
             self.pop_call_context();
         }
     }
@@ -811,7 +795,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit_with_stack_growth(&value, "ruby class assignment traversal");
+            self.visit_with_stack_growth(&value);
             self.pop_call_context();
         }
     }
@@ -872,7 +856,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit_with_stack_growth(&value, "ruby global assignment traversal");
+            self.visit_with_stack_growth(&value);
             self.pop_call_context();
         }
     }
@@ -952,7 +936,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         }
 
         while let Some(child_node) = stack.pop() {
-            self.visit_with_stack_growth(&child_node, "ruby call traversal");
+            self.visit_with_stack_growth(&child_node);
         }
 
         // Pop lambda context
@@ -990,7 +974,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         }
 
         while let Some(child_node) = stack.pop() {
-            self.visit_with_stack_growth(&child_node, "ruby block traversal");
+            self.visit_with_stack_growth(&child_node);
         }
     }
 }
