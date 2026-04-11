@@ -303,7 +303,7 @@ impl Context {
                 final_,
             } => {
                 if *final_ {
-                    Ok(format!("{table} FINAL AS {alias}"))
+                    Ok(format!("{table} AS {alias} FINAL"))
                 } else {
                     Ok(format!("{table} AS {alias}"))
                 }
@@ -913,7 +913,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result.sql,
-            "SELECT t.id AS id FROM gl_schema_versions FINAL AS t"
+            "SELECT t.id AS id FROM gl_schema_versions AS t FINAL"
         );
     }
 
@@ -932,7 +932,7 @@ mod tests {
         let (sql, params) = emit_simple_query(&Node::Query(Box::new(q))).unwrap();
         assert_eq!(
             sql,
-            "SELECT t.key AS key, t.version AS version FROM gl_schema_versions FINAL AS t WHERE (t.key = {p0:String})"
+            "SELECT t.key AS key, t.version AS version FROM gl_schema_versions AS t FINAL WHERE (t.key = {p0:String})"
         );
         assert_eq!(params.len(), 1);
         assert_eq!(
