@@ -315,9 +315,37 @@ pub trait LanguageParser<T = Root<StrDoc<SupportLang>>> {
     fn language(&self) -> SupportedLanguage;
 }
 
+/// Detect Python `def` or `class` lines missing the trailing colon.
+/// tree-sitter-python 0.25.0 enters infinite C-level recursion in error recovery on this pattern.
+/// The stall detector in treesitter-visit catches this in principle, but the C stack can
+/// overflow before enough progress callbacks fire. This heuristic prevents the file from
+/// reaching tree-sitter at all.
+fn has_python_missing_colon_defect(code: &str) -> bool {
+    for line in code.lines() {
+        let trimmed = line.trim();
+        if !(trimmed.starts_with("def ") || trimmed.starts_with("class ")) {
+            continue;
+        }
+        if !trimmed.contains('(') {
+            continue;
+        }
+        let without_comment = trimmed.split('#').next().unwrap_or(trimmed).trim_end();
+        if !without_comment.ends_with(':') {
+            return true;
+        }
+    }
+    false
+}
+
 /// Extension trait for parsers that use tree-sitter
 pub trait TreeSitterParser: LanguageParser<Root<StrDoc<SupportLang>>> {
     fn parse_ast(&self, code: &str) -> Result<Root<StrDoc<SupportLang>>> {
+        if self.language() == SupportedLanguage::Python && has_python_missing_colon_defect(code) {
+            return Err(Error::Parse(
+                "Python file has `def`/`class` without colon (triggers tree-sitter infinite recursion)".to_string(),
+            ));
+        }
+
         let ast = self.language().to_support_lang().ast_grep(code);
 
         if ast.root().text().is_empty() && !code.is_empty() {
