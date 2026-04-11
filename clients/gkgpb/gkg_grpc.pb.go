@@ -25,11 +25,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	KnowledgeGraphService_ListTools_FullMethodName        = "/gkg.v1.KnowledgeGraphService/ListTools"
-	KnowledgeGraphService_ExecuteQuery_FullMethodName     = "/gkg.v1.KnowledgeGraphService/ExecuteQuery"
-	KnowledgeGraphService_GetGraphSchema_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetGraphSchema"
-	KnowledgeGraphService_GetClusterHealth_FullMethodName = "/gkg.v1.KnowledgeGraphService/GetClusterHealth"
-	KnowledgeGraphService_GetGraphStats_FullMethodName    = "/gkg.v1.KnowledgeGraphService/GetGraphStats"
+	KnowledgeGraphService_ListTools_FullMethodName         = "/gkg.v1.KnowledgeGraphService/ListTools"
+	KnowledgeGraphService_ExecuteQuery_FullMethodName      = "/gkg.v1.KnowledgeGraphService/ExecuteQuery"
+	KnowledgeGraphService_GetGraphSchema_FullMethodName    = "/gkg.v1.KnowledgeGraphService/GetGraphSchema"
+	KnowledgeGraphService_GetClusterHealth_FullMethodName  = "/gkg.v1.KnowledgeGraphService/GetClusterHealth"
+	KnowledgeGraphService_GetGraphStats_FullMethodName     = "/gkg.v1.KnowledgeGraphService/GetGraphStats"
+	KnowledgeGraphService_GetIndexingStatus_FullMethodName = "/gkg.v1.KnowledgeGraphService/GetIndexingStatus"
 )
 
 // KnowledgeGraphServiceClient is the client API for KnowledgeGraphService service.
@@ -54,9 +55,14 @@ type KnowledgeGraphServiceClient interface {
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error)
-	// Returns entity counts per domain, scoped by traversal_path prefix.
-	// Used by admin dashboards to inspect graph coverage.
+	// Deprecated: use GetIndexingStatus instead. Returns entity counts per domain
+	// via live ClickHouse queries (slow, no projection optimization).
 	GetGraphStats(ctx context.Context, in *GetGraphStatsRequest, opts ...grpc.CallOption) (*GetGraphStatsResponse, error)
+	// Returns indexing progress from NATS KV snapshots written post-ETL.
+	// Replaces GetGraphStats with pre-aggregated counts, state machine,
+	// and code indexing progress. O(1) reads from KV, no ClickHouse on read path.
+	// Used by GET /api/v4/orbit/indexing_status and admin dashboards.
+	GetIndexingStatus(ctx context.Context, in *GetIndexingStatusRequest, opts ...grpc.CallOption) (*GetIndexingStatusResponse, error)
 }
 
 type knowledgeGraphServiceClient struct {
@@ -120,6 +126,16 @@ func (c *knowledgeGraphServiceClient) GetGraphStats(ctx context.Context, in *Get
 	return out, nil
 }
 
+func (c *knowledgeGraphServiceClient) GetIndexingStatus(ctx context.Context, in *GetIndexingStatusRequest, opts ...grpc.CallOption) (*GetIndexingStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetIndexingStatusResponse)
+	err := c.cc.Invoke(ctx, KnowledgeGraphService_GetIndexingStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KnowledgeGraphServiceServer is the server API for KnowledgeGraphService service.
 // All implementations must embed UnimplementedKnowledgeGraphServiceServer
 // for forward compatibility.
@@ -142,9 +158,14 @@ type KnowledgeGraphServiceServer interface {
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error)
-	// Returns entity counts per domain, scoped by traversal_path prefix.
-	// Used by admin dashboards to inspect graph coverage.
+	// Deprecated: use GetIndexingStatus instead. Returns entity counts per domain
+	// via live ClickHouse queries (slow, no projection optimization).
 	GetGraphStats(context.Context, *GetGraphStatsRequest) (*GetGraphStatsResponse, error)
+	// Returns indexing progress from NATS KV snapshots written post-ETL.
+	// Replaces GetGraphStats with pre-aggregated counts, state machine,
+	// and code indexing progress. O(1) reads from KV, no ClickHouse on read path.
+	// Used by GET /api/v4/orbit/indexing_status and admin dashboards.
+	GetIndexingStatus(context.Context, *GetIndexingStatusRequest) (*GetIndexingStatusResponse, error)
 	mustEmbedUnimplementedKnowledgeGraphServiceServer()
 }
 
@@ -169,6 +190,9 @@ func (UnimplementedKnowledgeGraphServiceServer) GetClusterHealth(context.Context
 }
 func (UnimplementedKnowledgeGraphServiceServer) GetGraphStats(context.Context, *GetGraphStatsRequest) (*GetGraphStatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetGraphStats not implemented")
+}
+func (UnimplementedKnowledgeGraphServiceServer) GetIndexingStatus(context.Context, *GetIndexingStatusRequest) (*GetIndexingStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetIndexingStatus not implemented")
 }
 func (UnimplementedKnowledgeGraphServiceServer) mustEmbedUnimplementedKnowledgeGraphServiceServer() {}
 func (UnimplementedKnowledgeGraphServiceServer) testEmbeddedByValue()                               {}
@@ -270,6 +294,24 @@ func _KnowledgeGraphService_GetGraphStats_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KnowledgeGraphService_GetIndexingStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetIndexingStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeGraphServiceServer).GetIndexingStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KnowledgeGraphService_GetIndexingStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeGraphServiceServer).GetIndexingStatus(ctx, req.(*GetIndexingStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KnowledgeGraphService_ServiceDesc is the grpc.ServiceDesc for KnowledgeGraphService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -292,6 +334,10 @@ var KnowledgeGraphService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetGraphStats",
 			Handler:    _KnowledgeGraphService_GetGraphStats_Handler,
+		},
+		{
+			MethodName: "GetIndexingStatus",
+			Handler:    _KnowledgeGraphService_GetIndexingStatus_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

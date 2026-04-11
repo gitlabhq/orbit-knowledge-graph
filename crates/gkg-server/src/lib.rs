@@ -5,6 +5,7 @@ pub mod content;
 pub mod graph_stats;
 pub mod grpc;
 pub mod health_check;
+pub mod indexing_status;
 pub mod pipeline;
 pub mod proto;
 pub mod redaction;

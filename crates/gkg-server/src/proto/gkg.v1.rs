@@ -361,6 +361,109 @@ pub struct GraphStatsItem {
     #[prost(int64, tag = "2")]
     pub count: i64,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetIndexingStatusRequest {
+    /// traversal_path prefix (e.g. "1/9970/")
+    #[prost(string, tag = "1")]
+    pub traversal_path: ::prost::alloc::string::String,
+    /// true: live FINAL queries; false: KV snapshot (default)
+    #[prost(bool, tag = "2")]
+    pub exact_counts: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetIndexingStatusResponse {
+    #[prost(enumeration = "IndexingState", tag = "1")]
+    pub state: i32,
+    #[prost(bool, tag = "2")]
+    pub initial_backfill_done: bool,
+    /// ISO 8601 timestamp of last KV update
+    #[prost(string, tag = "3")]
+    pub updated_at: ::prost::alloc::string::String,
+    /// node counts grouped by ontology domain
+    #[prost(message, repeated, tag = "4")]
+    pub domains: ::prost::alloc::vec::Vec<IndexingStatusDomain>,
+    /// relationship_kind -> count
+    #[prost(map = "string, int64", tag = "5")]
+    pub edge_counts: ::std::collections::HashMap<::prost::alloc::string::String, i64>,
+    #[prost(message, optional, tag = "6")]
+    pub sdlc: ::core::option::Option<SdlcProgress>,
+    #[prost(message, optional, tag = "7")]
+    pub code: ::core::option::Option<CodeOverview>,
+    /// true if KV data is older than staleness threshold
+    #[prost(bool, tag = "8")]
+    pub stale: bool,
+}
+/// Node counts for a single ontology domain.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct IndexingStatusDomain {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "2")]
+    pub items: ::prost::alloc::vec::Vec<IndexingStatusItem>,
+}
+/// Count and status for a single entity type within a domain.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IndexingStatusItem {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(enumeration = "EntityStatus", tag = "2")]
+    pub status: i32,
+    #[prost(int64, tag = "3")]
+    pub count: i64,
+}
+/// SDLC pipeline progress metadata.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SdlcProgress {
+    /// ISO 8601 timestamp
+    #[prost(string, tag = "1")]
+    pub last_completed_at: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub last_started_at: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "3")]
+    pub last_duration_ms: u64,
+    #[prost(uint64, tag = "4")]
+    pub cycle_count: u64,
+    #[prost(string, tag = "5")]
+    pub last_error: ::prost::alloc::string::String,
+}
+/// Code indexing overview for a namespace.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CodeOverview {
+    #[prost(int64, tag = "1")]
+    pub projects_indexed: i64,
+    #[prost(int64, tag = "2")]
+    pub projects_total: i64,
+    #[prost(string, tag = "3")]
+    pub last_indexed_at: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "4")]
+    pub projects: ::prost::alloc::vec::Vec<ProjectCodeOverview>,
+}
+/// Per-project code indexing status.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ProjectCodeOverview {
+    #[prost(int64, tag = "1")]
+    pub project_id: i64,
+    #[prost(string, tag = "2")]
+    pub traversal_path: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "3")]
+    pub branches: ::prost::alloc::vec::Vec<BranchCodeStats>,
+}
+/// Per-branch code indexing stats.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BranchCodeStats {
+    #[prost(string, tag = "1")]
+    pub branch: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub last_commit: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub indexed_at: ::prost::alloc::string::String,
+    /// entity_name -> count
+    #[prost(map = "string, int64", tag = "4")]
+    pub nodes: ::std::collections::HashMap<::prost::alloc::string::String, i64>,
+    /// relationship_kind -> count
+    #[prost(map = "string, int64", tag = "5")]
+    pub edges: ::std::collections::HashMap<::prost::alloc::string::String, i64>,
+}
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
 /// LLM returns compact text (GOON for queries, TOON for schema/health) optimized for token budgets.
@@ -442,6 +545,66 @@ impl ClusterStatus {
             "CLUSTER_STATUS_HEALTHY" => Some(Self::Healthy),
             "CLUSTER_STATUS_DEGRADED" => Some(Self::Degraded),
             "CLUSTER_STATUS_UNHEALTHY" => Some(Self::Unhealthy),
+            _ => None,
+        }
+    }
+}
+/// Indexing state for a namespace. Derived from checkpoint table and KV metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum IndexingState {
+    Pending = 0,
+    Indexing = 1,
+    Idle = 2,
+}
+impl IndexingState {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Pending => "INDEXING_STATE_PENDING",
+            Self::Indexing => "INDEXING_STATE_INDEXING",
+            Self::Idle => "INDEXING_STATE_IDLE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "INDEXING_STATE_PENDING" => Some(Self::Pending),
+            "INDEXING_STATE_INDEXING" => Some(Self::Indexing),
+            "INDEXING_STATE_IDLE" => Some(Self::Idle),
+            _ => None,
+        }
+    }
+}
+/// Per-entity indexing status derived from checkpoint presence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum EntityStatus {
+    Pending = 0,
+    InProgress = 1,
+    Completed = 2,
+}
+impl EntityStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Pending => "ENTITY_STATUS_PENDING",
+            Self::InProgress => "ENTITY_STATUS_IN_PROGRESS",
+            Self::Completed => "ENTITY_STATUS_COMPLETED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ENTITY_STATUS_PENDING" => Some(Self::Pending),
+            "ENTITY_STATUS_IN_PROGRESS" => Some(Self::InProgress),
+            "ENTITY_STATUS_COMPLETED" => Some(Self::Completed),
             _ => None,
         }
     }
@@ -652,8 +815,8 @@ pub mod knowledge_graph_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Returns entity counts per domain, scoped by traversal_path prefix.
-        /// Used by admin dashboards to inspect graph coverage.
+        /// Deprecated: use GetIndexingStatus instead. Returns entity counts per domain
+        /// via live ClickHouse queries (slow, no projection optimization).
         pub async fn get_graph_stats(
             &mut self,
             request: impl tonic::IntoRequest<super::GetGraphStatsRequest>,
@@ -677,6 +840,36 @@ pub mod knowledge_graph_service_client {
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetGraphStats"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Returns indexing progress from NATS KV snapshots written post-ETL.
+        /// Replaces GetGraphStats with pre-aggregated counts, state machine,
+        /// and code indexing progress. O(1) reads from KV, no ClickHouse on read path.
+        /// Used by GET /api/v4/orbit/indexing_status and admin dashboards.
+        pub async fn get_indexing_status(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetIndexingStatusRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetIndexingStatusResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/GetIndexingStatus",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetIndexingStatus"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -740,13 +933,24 @@ pub mod knowledge_graph_service_server {
             tonic::Response<super::GetClusterHealthResponse>,
             tonic::Status,
         >;
-        /// Returns entity counts per domain, scoped by traversal_path prefix.
-        /// Used by admin dashboards to inspect graph coverage.
+        /// Deprecated: use GetIndexingStatus instead. Returns entity counts per domain
+        /// via live ClickHouse queries (slow, no projection optimization).
         async fn get_graph_stats(
             &self,
             request: tonic::Request<super::GetGraphStatsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetGraphStatsResponse>,
+            tonic::Status,
+        >;
+        /// Returns indexing progress from NATS KV snapshots written post-ETL.
+        /// Replaces GetGraphStats with pre-aggregated counts, state machine,
+        /// and code indexing progress. O(1) reads from KV, no ClickHouse on read path.
+        /// Used by GET /api/v4/orbit/indexing_status and admin dashboards.
+        async fn get_indexing_status(
+            &self,
+            request: tonic::Request<super::GetIndexingStatusRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetIndexingStatusResponse>,
             tonic::Status,
         >;
     }
@@ -1056,6 +1260,55 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetGraphStatsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/GetIndexingStatus" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetIndexingStatusSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::GetIndexingStatusRequest>
+                    for GetIndexingStatusSvc<T> {
+                        type Response = super::GetIndexingStatusResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetIndexingStatusRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::get_indexing_status(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetIndexingStatusSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

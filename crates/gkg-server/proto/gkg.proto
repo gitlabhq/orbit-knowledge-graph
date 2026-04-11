@@ -38,9 +38,15 @@ service KnowledgeGraphService {
   // Used by GET /api/v4/orbit/status.
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
 
-  // Returns entity counts per domain, scoped by traversal_path prefix.
-  // Used by admin dashboards to inspect graph coverage.
+  // Deprecated: use GetIndexingStatus instead. Returns entity counts per domain
+  // via live ClickHouse queries (slow, no projection optimization).
   rpc GetGraphStats(GetGraphStatsRequest) returns (GetGraphStatsResponse);
+
+  // Returns indexing progress from NATS KV snapshots written post-ETL.
+  // Replaces GetGraphStats with pre-aggregated counts, state machine,
+  // and code indexing progress. O(1) reads from KV, no ClickHouse on read path.
+  // Used by GET /api/v4/orbit/indexing_status and admin dashboards.
+  rpc GetIndexingStatus(GetIndexingStatusRequest) returns (GetIndexingStatusResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -291,4 +297,84 @@ message GraphStatsDomain {
 message GraphStatsItem {
   string name = 1;
   int64 count = 2;
+}
+
+// ---------------------------------------------------------------------------
+// GetIndexingStatus -- indexing progress from NATS KV
+// ---------------------------------------------------------------------------
+
+// Indexing state for a namespace. Derived from checkpoint table and KV metadata.
+enum IndexingState {
+  INDEXING_STATE_PENDING = 0;
+  INDEXING_STATE_INDEXING = 1;
+  INDEXING_STATE_IDLE = 2;
+}
+
+// Per-entity indexing status derived from checkpoint presence.
+enum EntityStatus {
+  ENTITY_STATUS_PENDING = 0;
+  ENTITY_STATUS_IN_PROGRESS = 1;
+  ENTITY_STATUS_COMPLETED = 2;
+}
+
+message GetIndexingStatusRequest {
+  string traversal_path = 1;  // traversal_path prefix (e.g. "1/9970/")
+  bool exact_counts = 2;      // true: live FINAL queries; false: KV snapshot (default)
+}
+
+message GetIndexingStatusResponse {
+  IndexingState state = 1;
+  bool initial_backfill_done = 2;
+  string updated_at = 3;                        // ISO 8601 timestamp of last KV update
+  repeated IndexingStatusDomain domains = 4;    // node counts grouped by ontology domain
+  map<string, int64> edge_counts = 5;           // relationship_kind -> count
+  SdlcProgress sdlc = 6;
+  CodeOverview code = 7;
+  bool stale = 8;                               // true if KV data is older than staleness threshold
+}
+
+// Node counts for a single ontology domain.
+message IndexingStatusDomain {
+  string name = 1;
+  repeated IndexingStatusItem items = 2;
+}
+
+// Count and status for a single entity type within a domain.
+message IndexingStatusItem {
+  string name = 1;
+  EntityStatus status = 2;
+  int64 count = 3;
+}
+
+// SDLC pipeline progress metadata.
+message SdlcProgress {
+  string last_completed_at = 1;     // ISO 8601 timestamp
+  string last_started_at = 2;
+  uint64 last_duration_ms = 3;
+  uint64 cycle_count = 4;
+  string last_error = 5;
+}
+
+// Code indexing overview for a namespace.
+message CodeOverview {
+  int64 projects_indexed = 1;
+  int64 projects_total = 2;
+  string last_indexed_at = 3;
+  repeated ProjectCodeOverview projects = 4;
+}
+
+// Per-project code indexing status.
+message ProjectCodeOverview {
+  int64 project_id = 1;
+  string traversal_path = 2;
+  repeated BranchCodeStats branches = 3;
+}
+
+// Per-branch code indexing stats.
+message BranchCodeStats {
+  string branch = 1;
+  string last_commit = 2;
+  string indexed_at = 3;
+  map<string, int64> nodes = 4;   // entity_name -> count
+  map<string, int64> edges = 5;   // relationship_kind -> count
 }

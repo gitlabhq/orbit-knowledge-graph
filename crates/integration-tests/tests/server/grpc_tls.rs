@@ -43,6 +43,7 @@ fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> G
         cluster_health,
         tls_config,
         None,
+        None,
         GrpcConfig::default(),
     )
 }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gkg_server_config::ClickHouseConfiguration;
+use indexer::nats::NatsServices;
 use ontology::Ontology;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tonic::transport::Server as TonicServer;
@@ -33,6 +34,7 @@ impl GrpcServer {
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
         resolver_registry: Option<Arc<ColumnResolverRegistry>>,
+        nats: Option<Arc<dyn NatsServices>>,
         grpc_config: GrpcConfig,
     ) -> Self {
         let service = KnowledgeGraphServiceImpl::new(
@@ -41,6 +43,7 @@ impl GrpcServer {
             clickhouse_config,
             cluster_health,
             resolver_registry,
+            nats,
             grpc_config.stream_timeout_secs,
         );
         Self {
@@ -101,6 +104,7 @@ mod tests {
             ontology,
             &clickhouse_config,
             cluster_health,
+            None,
             None,
             None,
             GrpcConfig::default(),

@@ -172,6 +172,106 @@ func (ClusterStatus) EnumDescriptor() ([]byte, []int) {
 	return file_gkg_proto_rawDescGZIP(), []int{2}
 }
 
+// Indexing state for a namespace. Derived from checkpoint table and KV metadata.
+type IndexingState int32
+
+const (
+	IndexingState_INDEXING_STATE_PENDING  IndexingState = 0
+	IndexingState_INDEXING_STATE_INDEXING IndexingState = 1
+	IndexingState_INDEXING_STATE_IDLE     IndexingState = 2
+)
+
+// Enum value maps for IndexingState.
+var (
+	IndexingState_name = map[int32]string{
+		0: "INDEXING_STATE_PENDING",
+		1: "INDEXING_STATE_INDEXING",
+		2: "INDEXING_STATE_IDLE",
+	}
+	IndexingState_value = map[string]int32{
+		"INDEXING_STATE_PENDING":  0,
+		"INDEXING_STATE_INDEXING": 1,
+		"INDEXING_STATE_IDLE":     2,
+	}
+)
+
+func (x IndexingState) Enum() *IndexingState {
+	p := new(IndexingState)
+	*p = x
+	return p
+}
+
+func (x IndexingState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (IndexingState) Descriptor() protoreflect.EnumDescriptor {
+	return file_gkg_proto_enumTypes[3].Descriptor()
+}
+
+func (IndexingState) Type() protoreflect.EnumType {
+	return &file_gkg_proto_enumTypes[3]
+}
+
+func (x IndexingState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use IndexingState.Descriptor instead.
+func (IndexingState) EnumDescriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{3}
+}
+
+// Per-entity indexing status derived from checkpoint presence.
+type EntityStatus int32
+
+const (
+	EntityStatus_ENTITY_STATUS_PENDING     EntityStatus = 0
+	EntityStatus_ENTITY_STATUS_IN_PROGRESS EntityStatus = 1
+	EntityStatus_ENTITY_STATUS_COMPLETED   EntityStatus = 2
+)
+
+// Enum value maps for EntityStatus.
+var (
+	EntityStatus_name = map[int32]string{
+		0: "ENTITY_STATUS_PENDING",
+		1: "ENTITY_STATUS_IN_PROGRESS",
+		2: "ENTITY_STATUS_COMPLETED",
+	}
+	EntityStatus_value = map[string]int32{
+		"ENTITY_STATUS_PENDING":     0,
+		"ENTITY_STATUS_IN_PROGRESS": 1,
+		"ENTITY_STATUS_COMPLETED":   2,
+	}
+)
+
+func (x EntityStatus) Enum() *EntityStatus {
+	p := new(EntityStatus)
+	*p = x
+	return p
+}
+
+func (x EntityStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EntityStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_gkg_proto_enumTypes[4].Descriptor()
+}
+
+func (EntityStatus) Type() protoreflect.EnumType {
+	return &file_gkg_proto_enumTypes[4]
+}
+
+func (x EntityStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EntityStatus.Descriptor instead.
+func (EntityStatus) EnumDescriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{4}
+}
+
 // Envelope for the execute_query stream. Each message carries exactly one of:
 // request (client initial), redaction exchange (server/client), result, or error.
 type ExecuteQueryMessage struct {
@@ -2126,6 +2226,556 @@ func (x *GraphStatsItem) GetCount() int64 {
 	return 0
 }
 
+type GetIndexingStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TraversalPath string                 `protobuf:"bytes,1,opt,name=traversal_path,json=traversalPath,proto3" json:"traversal_path,omitempty"` // traversal_path prefix (e.g. "1/9970/")
+	ExactCounts   bool                   `protobuf:"varint,2,opt,name=exact_counts,json=exactCounts,proto3" json:"exact_counts,omitempty"`      // true: live FINAL queries; false: KV snapshot (default)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetIndexingStatusRequest) Reset() {
+	*x = GetIndexingStatusRequest{}
+	mi := &file_gkg_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetIndexingStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetIndexingStatusRequest) ProtoMessage() {}
+
+func (x *GetIndexingStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetIndexingStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetIndexingStatusRequest) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *GetIndexingStatusRequest) GetTraversalPath() string {
+	if x != nil {
+		return x.TraversalPath
+	}
+	return ""
+}
+
+func (x *GetIndexingStatusRequest) GetExactCounts() bool {
+	if x != nil {
+		return x.ExactCounts
+	}
+	return false
+}
+
+type GetIndexingStatusResponse struct {
+	state               protoimpl.MessageState  `protogen:"open.v1"`
+	State               IndexingState           `protobuf:"varint,1,opt,name=state,proto3,enum=gkg.v1.IndexingState" json:"state,omitempty"`
+	InitialBackfillDone bool                    `protobuf:"varint,2,opt,name=initial_backfill_done,json=initialBackfillDone,proto3" json:"initial_backfill_done,omitempty"`
+	UpdatedAt           string                  `protobuf:"bytes,3,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`                                                                               // ISO 8601 timestamp of last KV update
+	Domains             []*IndexingStatusDomain `protobuf:"bytes,4,rep,name=domains,proto3" json:"domains,omitempty"`                                                                                                    // node counts grouped by ontology domain
+	EdgeCounts          map[string]int64        `protobuf:"bytes,5,rep,name=edge_counts,json=edgeCounts,proto3" json:"edge_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // relationship_kind -> count
+	Sdlc                *SdlcProgress           `protobuf:"bytes,6,opt,name=sdlc,proto3" json:"sdlc,omitempty"`
+	Code                *CodeOverview           `protobuf:"bytes,7,opt,name=code,proto3" json:"code,omitempty"`
+	Stale               bool                    `protobuf:"varint,8,opt,name=stale,proto3" json:"stale,omitempty"` // true if KV data is older than staleness threshold
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *GetIndexingStatusResponse) Reset() {
+	*x = GetIndexingStatusResponse{}
+	mi := &file_gkg_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetIndexingStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetIndexingStatusResponse) ProtoMessage() {}
+
+func (x *GetIndexingStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetIndexingStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetIndexingStatusResponse) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *GetIndexingStatusResponse) GetState() IndexingState {
+	if x != nil {
+		return x.State
+	}
+	return IndexingState_INDEXING_STATE_PENDING
+}
+
+func (x *GetIndexingStatusResponse) GetInitialBackfillDone() bool {
+	if x != nil {
+		return x.InitialBackfillDone
+	}
+	return false
+}
+
+func (x *GetIndexingStatusResponse) GetUpdatedAt() string {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return ""
+}
+
+func (x *GetIndexingStatusResponse) GetDomains() []*IndexingStatusDomain {
+	if x != nil {
+		return x.Domains
+	}
+	return nil
+}
+
+func (x *GetIndexingStatusResponse) GetEdgeCounts() map[string]int64 {
+	if x != nil {
+		return x.EdgeCounts
+	}
+	return nil
+}
+
+func (x *GetIndexingStatusResponse) GetSdlc() *SdlcProgress {
+	if x != nil {
+		return x.Sdlc
+	}
+	return nil
+}
+
+func (x *GetIndexingStatusResponse) GetCode() *CodeOverview {
+	if x != nil {
+		return x.Code
+	}
+	return nil
+}
+
+func (x *GetIndexingStatusResponse) GetStale() bool {
+	if x != nil {
+		return x.Stale
+	}
+	return false
+}
+
+// Node counts for a single ontology domain.
+type IndexingStatusDomain struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Items         []*IndexingStatusItem  `protobuf:"bytes,2,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IndexingStatusDomain) Reset() {
+	*x = IndexingStatusDomain{}
+	mi := &file_gkg_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexingStatusDomain) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexingStatusDomain) ProtoMessage() {}
+
+func (x *IndexingStatusDomain) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexingStatusDomain.ProtoReflect.Descriptor instead.
+func (*IndexingStatusDomain) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *IndexingStatusDomain) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *IndexingStatusDomain) GetItems() []*IndexingStatusItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+// Count and status for a single entity type within a domain.
+type IndexingStatusItem struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Status        EntityStatus           `protobuf:"varint,2,opt,name=status,proto3,enum=gkg.v1.EntityStatus" json:"status,omitempty"`
+	Count         int64                  `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IndexingStatusItem) Reset() {
+	*x = IndexingStatusItem{}
+	mi := &file_gkg_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexingStatusItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexingStatusItem) ProtoMessage() {}
+
+func (x *IndexingStatusItem) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexingStatusItem.ProtoReflect.Descriptor instead.
+func (*IndexingStatusItem) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *IndexingStatusItem) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *IndexingStatusItem) GetStatus() EntityStatus {
+	if x != nil {
+		return x.Status
+	}
+	return EntityStatus_ENTITY_STATUS_PENDING
+}
+
+func (x *IndexingStatusItem) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+// SDLC pipeline progress metadata.
+type SdlcProgress struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	LastCompletedAt string                 `protobuf:"bytes,1,opt,name=last_completed_at,json=lastCompletedAt,proto3" json:"last_completed_at,omitempty"` // ISO 8601 timestamp
+	LastStartedAt   string                 `protobuf:"bytes,2,opt,name=last_started_at,json=lastStartedAt,proto3" json:"last_started_at,omitempty"`
+	LastDurationMs  uint64                 `protobuf:"varint,3,opt,name=last_duration_ms,json=lastDurationMs,proto3" json:"last_duration_ms,omitempty"`
+	CycleCount      uint64                 `protobuf:"varint,4,opt,name=cycle_count,json=cycleCount,proto3" json:"cycle_count,omitempty"`
+	LastError       string                 `protobuf:"bytes,5,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *SdlcProgress) Reset() {
+	*x = SdlcProgress{}
+	mi := &file_gkg_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SdlcProgress) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SdlcProgress) ProtoMessage() {}
+
+func (x *SdlcProgress) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SdlcProgress.ProtoReflect.Descriptor instead.
+func (*SdlcProgress) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *SdlcProgress) GetLastCompletedAt() string {
+	if x != nil {
+		return x.LastCompletedAt
+	}
+	return ""
+}
+
+func (x *SdlcProgress) GetLastStartedAt() string {
+	if x != nil {
+		return x.LastStartedAt
+	}
+	return ""
+}
+
+func (x *SdlcProgress) GetLastDurationMs() uint64 {
+	if x != nil {
+		return x.LastDurationMs
+	}
+	return 0
+}
+
+func (x *SdlcProgress) GetCycleCount() uint64 {
+	if x != nil {
+		return x.CycleCount
+	}
+	return 0
+}
+
+func (x *SdlcProgress) GetLastError() string {
+	if x != nil {
+		return x.LastError
+	}
+	return ""
+}
+
+// Code indexing overview for a namespace.
+type CodeOverview struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ProjectsIndexed int64                  `protobuf:"varint,1,opt,name=projects_indexed,json=projectsIndexed,proto3" json:"projects_indexed,omitempty"`
+	ProjectsTotal   int64                  `protobuf:"varint,2,opt,name=projects_total,json=projectsTotal,proto3" json:"projects_total,omitempty"`
+	LastIndexedAt   string                 `protobuf:"bytes,3,opt,name=last_indexed_at,json=lastIndexedAt,proto3" json:"last_indexed_at,omitempty"`
+	Projects        []*ProjectCodeOverview `protobuf:"bytes,4,rep,name=projects,proto3" json:"projects,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CodeOverview) Reset() {
+	*x = CodeOverview{}
+	mi := &file_gkg_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CodeOverview) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CodeOverview) ProtoMessage() {}
+
+func (x *CodeOverview) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CodeOverview.ProtoReflect.Descriptor instead.
+func (*CodeOverview) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *CodeOverview) GetProjectsIndexed() int64 {
+	if x != nil {
+		return x.ProjectsIndexed
+	}
+	return 0
+}
+
+func (x *CodeOverview) GetProjectsTotal() int64 {
+	if x != nil {
+		return x.ProjectsTotal
+	}
+	return 0
+}
+
+func (x *CodeOverview) GetLastIndexedAt() string {
+	if x != nil {
+		return x.LastIndexedAt
+	}
+	return ""
+}
+
+func (x *CodeOverview) GetProjects() []*ProjectCodeOverview {
+	if x != nil {
+		return x.Projects
+	}
+	return nil
+}
+
+// Per-project code indexing status.
+type ProjectCodeOverview struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId     int64                  `protobuf:"varint,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	TraversalPath string                 `protobuf:"bytes,2,opt,name=traversal_path,json=traversalPath,proto3" json:"traversal_path,omitempty"`
+	Branches      []*BranchCodeStats     `protobuf:"bytes,3,rep,name=branches,proto3" json:"branches,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProjectCodeOverview) Reset() {
+	*x = ProjectCodeOverview{}
+	mi := &file_gkg_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProjectCodeOverview) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProjectCodeOverview) ProtoMessage() {}
+
+func (x *ProjectCodeOverview) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProjectCodeOverview.ProtoReflect.Descriptor instead.
+func (*ProjectCodeOverview) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *ProjectCodeOverview) GetProjectId() int64 {
+	if x != nil {
+		return x.ProjectId
+	}
+	return 0
+}
+
+func (x *ProjectCodeOverview) GetTraversalPath() string {
+	if x != nil {
+		return x.TraversalPath
+	}
+	return ""
+}
+
+func (x *ProjectCodeOverview) GetBranches() []*BranchCodeStats {
+	if x != nil {
+		return x.Branches
+	}
+	return nil
+}
+
+// Per-branch code indexing stats.
+type BranchCodeStats struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Branch        string                 `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
+	LastCommit    string                 `protobuf:"bytes,2,opt,name=last_commit,json=lastCommit,proto3" json:"last_commit,omitempty"`
+	IndexedAt     string                 `protobuf:"bytes,3,opt,name=indexed_at,json=indexedAt,proto3" json:"indexed_at,omitempty"`
+	Nodes         map[string]int64       `protobuf:"bytes,4,rep,name=nodes,proto3" json:"nodes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // entity_name -> count
+	Edges         map[string]int64       `protobuf:"bytes,5,rep,name=edges,proto3" json:"edges,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // relationship_kind -> count
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BranchCodeStats) Reset() {
+	*x = BranchCodeStats{}
+	mi := &file_gkg_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BranchCodeStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BranchCodeStats) ProtoMessage() {}
+
+func (x *BranchCodeStats) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BranchCodeStats.ProtoReflect.Descriptor instead.
+func (*BranchCodeStats) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *BranchCodeStats) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+func (x *BranchCodeStats) GetLastCommit() string {
+	if x != nil {
+		return x.LastCommit
+	}
+	return ""
+}
+
+func (x *BranchCodeStats) GetIndexedAt() string {
+	if x != nil {
+		return x.IndexedAt
+	}
+	return ""
+}
+
+func (x *BranchCodeStats) GetNodes() map[string]int64 {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *BranchCodeStats) GetEdges() map[string]int64 {
+	if x != nil {
+		return x.Edges
+	}
+	return nil
+}
+
 var File_gkg_proto protoreflect.FileDescriptor
 
 const file_gkg_proto_rawDesc = "" +
@@ -2273,7 +2923,65 @@ const file_gkg_proto_rawDesc = "" +
 	"\x05items\x18\x02 \x03(\v2\x16.gkg.v1.GraphStatsItemR\x05items\":\n" +
 	"\x0eGraphStatsItem\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x03R\x05count*B\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\"d\n" +
+	"\x18GetIndexingStatusRequest\x12%\n" +
+	"\x0etraversal_path\x18\x01 \x01(\tR\rtraversalPath\x12!\n" +
+	"\fexact_counts\x18\x02 \x01(\bR\vexactCounts\"\xd0\x03\n" +
+	"\x19GetIndexingStatusResponse\x12+\n" +
+	"\x05state\x18\x01 \x01(\x0e2\x15.gkg.v1.IndexingStateR\x05state\x122\n" +
+	"\x15initial_backfill_done\x18\x02 \x01(\bR\x13initialBackfillDone\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\x03 \x01(\tR\tupdatedAt\x126\n" +
+	"\adomains\x18\x04 \x03(\v2\x1c.gkg.v1.IndexingStatusDomainR\adomains\x12R\n" +
+	"\vedge_counts\x18\x05 \x03(\v21.gkg.v1.GetIndexingStatusResponse.EdgeCountsEntryR\n" +
+	"edgeCounts\x12(\n" +
+	"\x04sdlc\x18\x06 \x01(\v2\x14.gkg.v1.SdlcProgressR\x04sdlc\x12(\n" +
+	"\x04code\x18\a \x01(\v2\x14.gkg.v1.CodeOverviewR\x04code\x12\x14\n" +
+	"\x05stale\x18\b \x01(\bR\x05stale\x1a=\n" +
+	"\x0fEdgeCountsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"\\\n" +
+	"\x14IndexingStatusDomain\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x120\n" +
+	"\x05items\x18\x02 \x03(\v2\x1a.gkg.v1.IndexingStatusItemR\x05items\"l\n" +
+	"\x12IndexingStatusItem\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
+	"\x06status\x18\x02 \x01(\x0e2\x14.gkg.v1.EntityStatusR\x06status\x12\x14\n" +
+	"\x05count\x18\x03 \x01(\x03R\x05count\"\xcc\x01\n" +
+	"\fSdlcProgress\x12*\n" +
+	"\x11last_completed_at\x18\x01 \x01(\tR\x0flastCompletedAt\x12&\n" +
+	"\x0flast_started_at\x18\x02 \x01(\tR\rlastStartedAt\x12(\n" +
+	"\x10last_duration_ms\x18\x03 \x01(\x04R\x0elastDurationMs\x12\x1f\n" +
+	"\vcycle_count\x18\x04 \x01(\x04R\n" +
+	"cycleCount\x12\x1d\n" +
+	"\n" +
+	"last_error\x18\x05 \x01(\tR\tlastError\"\xc1\x01\n" +
+	"\fCodeOverview\x12)\n" +
+	"\x10projects_indexed\x18\x01 \x01(\x03R\x0fprojectsIndexed\x12%\n" +
+	"\x0eprojects_total\x18\x02 \x01(\x03R\rprojectsTotal\x12&\n" +
+	"\x0flast_indexed_at\x18\x03 \x01(\tR\rlastIndexedAt\x127\n" +
+	"\bprojects\x18\x04 \x03(\v2\x1b.gkg.v1.ProjectCodeOverviewR\bprojects\"\x90\x01\n" +
+	"\x13ProjectCodeOverview\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x01 \x01(\x03R\tprojectId\x12%\n" +
+	"\x0etraversal_path\x18\x02 \x01(\tR\rtraversalPath\x123\n" +
+	"\bbranches\x18\x03 \x03(\v2\x17.gkg.v1.BranchCodeStatsR\bbranches\"\xd1\x02\n" +
+	"\x0fBranchCodeStats\x12\x16\n" +
+	"\x06branch\x18\x01 \x01(\tR\x06branch\x12\x1f\n" +
+	"\vlast_commit\x18\x02 \x01(\tR\n" +
+	"lastCommit\x12\x1d\n" +
+	"\n" +
+	"indexed_at\x18\x03 \x01(\tR\tindexedAt\x128\n" +
+	"\x05nodes\x18\x04 \x03(\v2\".gkg.v1.BranchCodeStats.NodesEntryR\x05nodes\x128\n" +
+	"\x05edges\x18\x05 \x03(\v2\".gkg.v1.BranchCodeStats.EdgesEntryR\x05edges\x1a8\n" +
+	"\n" +
+	"NodesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\x1a8\n" +
+	"\n" +
+	"EdgesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01*B\n" +
 	"\x0eResponseFormat\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_RAW\x10\x00\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_LLM\x10\x01* \n" +
@@ -2283,13 +2991,22 @@ const file_gkg_proto_rawDesc = "" +
 	"\x1aCLUSTER_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16CLUSTER_STATUS_HEALTHY\x10\x01\x12\x1b\n" +
 	"\x17CLUSTER_STATUS_DEGRADED\x10\x02\x12\x1c\n" +
-	"\x18CLUSTER_STATUS_UNHEALTHY\x10\x032\x9d\x03\n" +
+	"\x18CLUSTER_STATUS_UNHEALTHY\x10\x03*a\n" +
+	"\rIndexingState\x12\x1a\n" +
+	"\x16INDEXING_STATE_PENDING\x10\x00\x12\x1b\n" +
+	"\x17INDEXING_STATE_INDEXING\x10\x01\x12\x17\n" +
+	"\x13INDEXING_STATE_IDLE\x10\x02*e\n" +
+	"\fEntityStatus\x12\x19\n" +
+	"\x15ENTITY_STATUS_PENDING\x10\x00\x12\x1d\n" +
+	"\x19ENTITY_STATUS_IN_PROGRESS\x10\x01\x12\x1b\n" +
+	"\x17ENTITY_STATUS_COMPLETED\x10\x022\xf7\x03\n" +
 	"\x15KnowledgeGraphService\x12@\n" +
 	"\tListTools\x12\x18.gkg.v1.ListToolsRequest\x1a\x19.gkg.v1.ListToolsResponse\x12L\n" +
 	"\fExecuteQuery\x12\x1b.gkg.v1.ExecuteQueryMessage\x1a\x1b.gkg.v1.ExecuteQueryMessage(\x010\x01\x12O\n" +
 	"\x0eGetGraphSchema\x12\x1d.gkg.v1.GetGraphSchemaRequest\x1a\x1e.gkg.v1.GetGraphSchemaResponse\x12U\n" +
 	"\x10GetClusterHealth\x12\x1f.gkg.v1.GetClusterHealthRequest\x1a .gkg.v1.GetClusterHealthResponse\x12L\n" +
-	"\rGetGraphStats\x12\x1c.gkg.v1.GetGraphStatsRequest\x1a\x1d.gkg.v1.GetGraphStatsResponseb\x06proto3"
+	"\rGetGraphStats\x12\x1c.gkg.v1.GetGraphStatsRequest\x1a\x1d.gkg.v1.GetGraphStatsResponse\x12X\n" +
+	"\x11GetIndexingStatus\x12 .gkg.v1.GetIndexingStatusRequest\x1a!.gkg.v1.GetIndexingStatusResponseb\x06proto3"
 
 var (
 	file_gkg_proto_rawDescOnce sync.Once
@@ -2303,92 +3020,118 @@ func file_gkg_proto_rawDescGZIP() []byte {
 	return file_gkg_proto_rawDescData
 }
 
-var file_gkg_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_gkg_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_gkg_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_gkg_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
 var file_gkg_proto_goTypes = []any{
-	(ResponseFormat)(0),              // 0: gkg.v1.ResponseFormat
-	(QueryType)(0),                   // 1: gkg.v1.QueryType
-	(ClusterStatus)(0),               // 2: gkg.v1.ClusterStatus
-	(*ExecuteQueryMessage)(nil),      // 3: gkg.v1.ExecuteQueryMessage
-	(*ExecuteQueryRequest)(nil),      // 4: gkg.v1.ExecuteQueryRequest
-	(*ExecuteQueryResult)(nil),       // 5: gkg.v1.ExecuteQueryResult
-	(*QueryMetadata)(nil),            // 6: gkg.v1.QueryMetadata
-	(*ExecuteQueryError)(nil),        // 7: gkg.v1.ExecuteQueryError
-	(*GetGraphSchemaRequest)(nil),    // 8: gkg.v1.GetGraphSchemaRequest
-	(*GetGraphSchemaResponse)(nil),   // 9: gkg.v1.GetGraphSchemaResponse
-	(*StructuredSchema)(nil),         // 10: gkg.v1.StructuredSchema
-	(*SchemaDomain)(nil),             // 11: gkg.v1.SchemaDomain
-	(*SchemaNode)(nil),               // 12: gkg.v1.SchemaNode
-	(*SchemaProperty)(nil),           // 13: gkg.v1.SchemaProperty
-	(*SchemaEdge)(nil),               // 14: gkg.v1.SchemaEdge
-	(*SchemaEdgeVariant)(nil),        // 15: gkg.v1.SchemaEdgeVariant
-	(*SchemaNodeStyle)(nil),          // 16: gkg.v1.SchemaNodeStyle
-	(*RedactionExchange)(nil),        // 17: gkg.v1.RedactionExchange
-	(*RedactionRequired)(nil),        // 18: gkg.v1.RedactionRequired
-	(*ResourceToAuthorize)(nil),      // 19: gkg.v1.ResourceToAuthorize
-	(*RedactionResponse)(nil),        // 20: gkg.v1.RedactionResponse
-	(*ResourceAuthorization)(nil),    // 21: gkg.v1.ResourceAuthorization
-	(*ListToolsRequest)(nil),         // 22: gkg.v1.ListToolsRequest
-	(*ListToolsResponse)(nil),        // 23: gkg.v1.ListToolsResponse
-	(*ToolDefinition)(nil),           // 24: gkg.v1.ToolDefinition
-	(*GetClusterHealthRequest)(nil),  // 25: gkg.v1.GetClusterHealthRequest
-	(*GetClusterHealthResponse)(nil), // 26: gkg.v1.GetClusterHealthResponse
-	(*StructuredClusterHealth)(nil),  // 27: gkg.v1.StructuredClusterHealth
-	(*ComponentHealth)(nil),          // 28: gkg.v1.ComponentHealth
-	(*ReplicaStatus)(nil),            // 29: gkg.v1.ReplicaStatus
-	(*GetGraphStatsRequest)(nil),     // 30: gkg.v1.GetGraphStatsRequest
-	(*GetGraphStatsResponse)(nil),    // 31: gkg.v1.GetGraphStatsResponse
-	(*GraphStatsDomain)(nil),         // 32: gkg.v1.GraphStatsDomain
-	(*GraphStatsItem)(nil),           // 33: gkg.v1.GraphStatsItem
-	nil,                              // 34: gkg.v1.ResourceAuthorization.AuthorizedEntry
-	nil,                              // 35: gkg.v1.ComponentHealth.MetricsEntry
+	(ResponseFormat)(0),               // 0: gkg.v1.ResponseFormat
+	(QueryType)(0),                    // 1: gkg.v1.QueryType
+	(ClusterStatus)(0),                // 2: gkg.v1.ClusterStatus
+	(IndexingState)(0),                // 3: gkg.v1.IndexingState
+	(EntityStatus)(0),                 // 4: gkg.v1.EntityStatus
+	(*ExecuteQueryMessage)(nil),       // 5: gkg.v1.ExecuteQueryMessage
+	(*ExecuteQueryRequest)(nil),       // 6: gkg.v1.ExecuteQueryRequest
+	(*ExecuteQueryResult)(nil),        // 7: gkg.v1.ExecuteQueryResult
+	(*QueryMetadata)(nil),             // 8: gkg.v1.QueryMetadata
+	(*ExecuteQueryError)(nil),         // 9: gkg.v1.ExecuteQueryError
+	(*GetGraphSchemaRequest)(nil),     // 10: gkg.v1.GetGraphSchemaRequest
+	(*GetGraphSchemaResponse)(nil),    // 11: gkg.v1.GetGraphSchemaResponse
+	(*StructuredSchema)(nil),          // 12: gkg.v1.StructuredSchema
+	(*SchemaDomain)(nil),              // 13: gkg.v1.SchemaDomain
+	(*SchemaNode)(nil),                // 14: gkg.v1.SchemaNode
+	(*SchemaProperty)(nil),            // 15: gkg.v1.SchemaProperty
+	(*SchemaEdge)(nil),                // 16: gkg.v1.SchemaEdge
+	(*SchemaEdgeVariant)(nil),         // 17: gkg.v1.SchemaEdgeVariant
+	(*SchemaNodeStyle)(nil),           // 18: gkg.v1.SchemaNodeStyle
+	(*RedactionExchange)(nil),         // 19: gkg.v1.RedactionExchange
+	(*RedactionRequired)(nil),         // 20: gkg.v1.RedactionRequired
+	(*ResourceToAuthorize)(nil),       // 21: gkg.v1.ResourceToAuthorize
+	(*RedactionResponse)(nil),         // 22: gkg.v1.RedactionResponse
+	(*ResourceAuthorization)(nil),     // 23: gkg.v1.ResourceAuthorization
+	(*ListToolsRequest)(nil),          // 24: gkg.v1.ListToolsRequest
+	(*ListToolsResponse)(nil),         // 25: gkg.v1.ListToolsResponse
+	(*ToolDefinition)(nil),            // 26: gkg.v1.ToolDefinition
+	(*GetClusterHealthRequest)(nil),   // 27: gkg.v1.GetClusterHealthRequest
+	(*GetClusterHealthResponse)(nil),  // 28: gkg.v1.GetClusterHealthResponse
+	(*StructuredClusterHealth)(nil),   // 29: gkg.v1.StructuredClusterHealth
+	(*ComponentHealth)(nil),           // 30: gkg.v1.ComponentHealth
+	(*ReplicaStatus)(nil),             // 31: gkg.v1.ReplicaStatus
+	(*GetGraphStatsRequest)(nil),      // 32: gkg.v1.GetGraphStatsRequest
+	(*GetGraphStatsResponse)(nil),     // 33: gkg.v1.GetGraphStatsResponse
+	(*GraphStatsDomain)(nil),          // 34: gkg.v1.GraphStatsDomain
+	(*GraphStatsItem)(nil),            // 35: gkg.v1.GraphStatsItem
+	(*GetIndexingStatusRequest)(nil),  // 36: gkg.v1.GetIndexingStatusRequest
+	(*GetIndexingStatusResponse)(nil), // 37: gkg.v1.GetIndexingStatusResponse
+	(*IndexingStatusDomain)(nil),      // 38: gkg.v1.IndexingStatusDomain
+	(*IndexingStatusItem)(nil),        // 39: gkg.v1.IndexingStatusItem
+	(*SdlcProgress)(nil),              // 40: gkg.v1.SdlcProgress
+	(*CodeOverview)(nil),              // 41: gkg.v1.CodeOverview
+	(*ProjectCodeOverview)(nil),       // 42: gkg.v1.ProjectCodeOverview
+	(*BranchCodeStats)(nil),           // 43: gkg.v1.BranchCodeStats
+	nil,                               // 44: gkg.v1.ResourceAuthorization.AuthorizedEntry
+	nil,                               // 45: gkg.v1.ComponentHealth.MetricsEntry
+	nil,                               // 46: gkg.v1.GetIndexingStatusResponse.EdgeCountsEntry
+	nil,                               // 47: gkg.v1.BranchCodeStats.NodesEntry
+	nil,                               // 48: gkg.v1.BranchCodeStats.EdgesEntry
 }
 var file_gkg_proto_depIdxs = []int32{
-	4,  // 0: gkg.v1.ExecuteQueryMessage.request:type_name -> gkg.v1.ExecuteQueryRequest
-	17, // 1: gkg.v1.ExecuteQueryMessage.redaction:type_name -> gkg.v1.RedactionExchange
-	5,  // 2: gkg.v1.ExecuteQueryMessage.result:type_name -> gkg.v1.ExecuteQueryResult
-	7,  // 3: gkg.v1.ExecuteQueryMessage.error:type_name -> gkg.v1.ExecuteQueryError
+	6,  // 0: gkg.v1.ExecuteQueryMessage.request:type_name -> gkg.v1.ExecuteQueryRequest
+	19, // 1: gkg.v1.ExecuteQueryMessage.redaction:type_name -> gkg.v1.RedactionExchange
+	7,  // 2: gkg.v1.ExecuteQueryMessage.result:type_name -> gkg.v1.ExecuteQueryResult
+	9,  // 3: gkg.v1.ExecuteQueryMessage.error:type_name -> gkg.v1.ExecuteQueryError
 	0,  // 4: gkg.v1.ExecuteQueryRequest.format:type_name -> gkg.v1.ResponseFormat
 	1,  // 5: gkg.v1.ExecuteQueryRequest.query_type:type_name -> gkg.v1.QueryType
-	6,  // 6: gkg.v1.ExecuteQueryResult.metadata:type_name -> gkg.v1.QueryMetadata
+	8,  // 6: gkg.v1.ExecuteQueryResult.metadata:type_name -> gkg.v1.QueryMetadata
 	0,  // 7: gkg.v1.GetGraphSchemaRequest.format:type_name -> gkg.v1.ResponseFormat
-	10, // 8: gkg.v1.GetGraphSchemaResponse.structured:type_name -> gkg.v1.StructuredSchema
-	11, // 9: gkg.v1.StructuredSchema.domains:type_name -> gkg.v1.SchemaDomain
-	12, // 10: gkg.v1.StructuredSchema.nodes:type_name -> gkg.v1.SchemaNode
-	14, // 11: gkg.v1.StructuredSchema.edges:type_name -> gkg.v1.SchemaEdge
-	13, // 12: gkg.v1.SchemaNode.properties:type_name -> gkg.v1.SchemaProperty
-	16, // 13: gkg.v1.SchemaNode.style:type_name -> gkg.v1.SchemaNodeStyle
-	15, // 14: gkg.v1.SchemaEdge.variants:type_name -> gkg.v1.SchemaEdgeVariant
-	18, // 15: gkg.v1.RedactionExchange.required:type_name -> gkg.v1.RedactionRequired
-	20, // 16: gkg.v1.RedactionExchange.response:type_name -> gkg.v1.RedactionResponse
-	19, // 17: gkg.v1.RedactionRequired.resources:type_name -> gkg.v1.ResourceToAuthorize
-	21, // 18: gkg.v1.RedactionResponse.authorizations:type_name -> gkg.v1.ResourceAuthorization
-	34, // 19: gkg.v1.ResourceAuthorization.authorized:type_name -> gkg.v1.ResourceAuthorization.AuthorizedEntry
-	24, // 20: gkg.v1.ListToolsResponse.tools:type_name -> gkg.v1.ToolDefinition
+	12, // 8: gkg.v1.GetGraphSchemaResponse.structured:type_name -> gkg.v1.StructuredSchema
+	13, // 9: gkg.v1.StructuredSchema.domains:type_name -> gkg.v1.SchemaDomain
+	14, // 10: gkg.v1.StructuredSchema.nodes:type_name -> gkg.v1.SchemaNode
+	16, // 11: gkg.v1.StructuredSchema.edges:type_name -> gkg.v1.SchemaEdge
+	15, // 12: gkg.v1.SchemaNode.properties:type_name -> gkg.v1.SchemaProperty
+	18, // 13: gkg.v1.SchemaNode.style:type_name -> gkg.v1.SchemaNodeStyle
+	17, // 14: gkg.v1.SchemaEdge.variants:type_name -> gkg.v1.SchemaEdgeVariant
+	20, // 15: gkg.v1.RedactionExchange.required:type_name -> gkg.v1.RedactionRequired
+	22, // 16: gkg.v1.RedactionExchange.response:type_name -> gkg.v1.RedactionResponse
+	21, // 17: gkg.v1.RedactionRequired.resources:type_name -> gkg.v1.ResourceToAuthorize
+	23, // 18: gkg.v1.RedactionResponse.authorizations:type_name -> gkg.v1.ResourceAuthorization
+	44, // 19: gkg.v1.ResourceAuthorization.authorized:type_name -> gkg.v1.ResourceAuthorization.AuthorizedEntry
+	26, // 20: gkg.v1.ListToolsResponse.tools:type_name -> gkg.v1.ToolDefinition
 	0,  // 21: gkg.v1.GetClusterHealthRequest.format:type_name -> gkg.v1.ResponseFormat
-	27, // 22: gkg.v1.GetClusterHealthResponse.structured:type_name -> gkg.v1.StructuredClusterHealth
+	29, // 22: gkg.v1.GetClusterHealthResponse.structured:type_name -> gkg.v1.StructuredClusterHealth
 	2,  // 23: gkg.v1.StructuredClusterHealth.status:type_name -> gkg.v1.ClusterStatus
-	28, // 24: gkg.v1.StructuredClusterHealth.components:type_name -> gkg.v1.ComponentHealth
+	30, // 24: gkg.v1.StructuredClusterHealth.components:type_name -> gkg.v1.ComponentHealth
 	2,  // 25: gkg.v1.ComponentHealth.status:type_name -> gkg.v1.ClusterStatus
-	29, // 26: gkg.v1.ComponentHealth.replicas:type_name -> gkg.v1.ReplicaStatus
-	35, // 27: gkg.v1.ComponentHealth.metrics:type_name -> gkg.v1.ComponentHealth.MetricsEntry
-	32, // 28: gkg.v1.GetGraphStatsResponse.domains:type_name -> gkg.v1.GraphStatsDomain
-	33, // 29: gkg.v1.GraphStatsDomain.items:type_name -> gkg.v1.GraphStatsItem
-	22, // 30: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
-	3,  // 31: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
-	8,  // 32: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
-	25, // 33: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
-	30, // 34: gkg.v1.KnowledgeGraphService.GetGraphStats:input_type -> gkg.v1.GetGraphStatsRequest
-	23, // 35: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
-	3,  // 36: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
-	9,  // 37: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
-	26, // 38: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
-	31, // 39: gkg.v1.KnowledgeGraphService.GetGraphStats:output_type -> gkg.v1.GetGraphStatsResponse
-	35, // [35:40] is the sub-list for method output_type
-	30, // [30:35] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	31, // 26: gkg.v1.ComponentHealth.replicas:type_name -> gkg.v1.ReplicaStatus
+	45, // 27: gkg.v1.ComponentHealth.metrics:type_name -> gkg.v1.ComponentHealth.MetricsEntry
+	34, // 28: gkg.v1.GetGraphStatsResponse.domains:type_name -> gkg.v1.GraphStatsDomain
+	35, // 29: gkg.v1.GraphStatsDomain.items:type_name -> gkg.v1.GraphStatsItem
+	3,  // 30: gkg.v1.GetIndexingStatusResponse.state:type_name -> gkg.v1.IndexingState
+	38, // 31: gkg.v1.GetIndexingStatusResponse.domains:type_name -> gkg.v1.IndexingStatusDomain
+	46, // 32: gkg.v1.GetIndexingStatusResponse.edge_counts:type_name -> gkg.v1.GetIndexingStatusResponse.EdgeCountsEntry
+	40, // 33: gkg.v1.GetIndexingStatusResponse.sdlc:type_name -> gkg.v1.SdlcProgress
+	41, // 34: gkg.v1.GetIndexingStatusResponse.code:type_name -> gkg.v1.CodeOverview
+	39, // 35: gkg.v1.IndexingStatusDomain.items:type_name -> gkg.v1.IndexingStatusItem
+	4,  // 36: gkg.v1.IndexingStatusItem.status:type_name -> gkg.v1.EntityStatus
+	42, // 37: gkg.v1.CodeOverview.projects:type_name -> gkg.v1.ProjectCodeOverview
+	43, // 38: gkg.v1.ProjectCodeOverview.branches:type_name -> gkg.v1.BranchCodeStats
+	47, // 39: gkg.v1.BranchCodeStats.nodes:type_name -> gkg.v1.BranchCodeStats.NodesEntry
+	48, // 40: gkg.v1.BranchCodeStats.edges:type_name -> gkg.v1.BranchCodeStats.EdgesEntry
+	24, // 41: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
+	5,  // 42: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
+	10, // 43: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
+	27, // 44: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
+	32, // 45: gkg.v1.KnowledgeGraphService.GetGraphStats:input_type -> gkg.v1.GetGraphStatsRequest
+	36, // 46: gkg.v1.KnowledgeGraphService.GetIndexingStatus:input_type -> gkg.v1.GetIndexingStatusRequest
+	25, // 47: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
+	5,  // 48: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
+	11, // 49: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
+	28, // 50: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
+	33, // 51: gkg.v1.KnowledgeGraphService.GetGraphStats:output_type -> gkg.v1.GetGraphStatsResponse
+	37, // 52: gkg.v1.KnowledgeGraphService.GetIndexingStatus:output_type -> gkg.v1.GetIndexingStatusResponse
+	47, // [47:53] is the sub-list for method output_type
+	41, // [41:47] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_gkg_proto_init() }
@@ -2423,8 +3166,8 @@ func file_gkg_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gkg_proto_rawDesc), len(file_gkg_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   33,
+			NumEnums:      5,
+			NumMessages:   44,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -11,6 +11,7 @@ use crate::IndexerConfig;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+use crate::progress::ProgressWriter;
 use datalake::{Datalake, DatalakeQuery};
 use handler::global::GlobalHandler;
 use handler::namespace::NamespaceHandler;
@@ -64,12 +65,19 @@ pub async fn register_handlers(
     }
 
     if !plans.namespaced.is_empty() {
-        registry.register_handler(Box::new(NamespaceHandler::new(
-            plans.namespaced,
-            Arc::clone(&pipeline),
-            metrics.clone(),
-            namespace_handler_config,
-        )));
+        let progress_writer = Arc::new(ProgressWriter::new(
+            Arc::new(config.graph.build_client()),
+            Arc::new(ontology.clone()),
+        ));
+        registry.register_handler(Box::new(
+            NamespaceHandler::new(
+                plans.namespaced,
+                Arc::clone(&pipeline),
+                metrics.clone(),
+                namespace_handler_config,
+            )
+            .with_progress_writer(progress_writer),
+        ));
     }
 
     Ok(())

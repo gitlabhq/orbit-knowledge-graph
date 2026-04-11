@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crate::checkpoint::namespace_position_key;
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::progress::ProgressWriter;
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
 use gkg_server_config::{HandlerConfiguration, NamespaceHandlerConfig};
@@ -19,6 +20,7 @@ pub struct NamespaceHandler {
     pipeline: Arc<Pipeline>,
     metrics: SdlcMetrics,
     config: NamespaceHandlerConfig,
+    progress_writer: Option<Arc<ProgressWriter>>,
 }
 
 impl NamespaceHandler {
@@ -33,7 +35,13 @@ impl NamespaceHandler {
             pipeline,
             metrics,
             config,
+            progress_writer: None,
         }
+    }
+
+    pub fn with_progress_writer(mut self, writer: Arc<ProgressWriter>) -> Self {
+        self.progress_writer = Some(writer);
+        self
     }
 }
 
@@ -70,7 +78,10 @@ impl Handler for NamespaceHandler {
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
             position_key: namespace_position_key(payload.namespace),
-            base_conditions: BTreeMap::from([("traversal_path".to_string(), traversal_path)]),
+            base_conditions: BTreeMap::from([(
+                "traversal_path".to_string(),
+                traversal_path.clone(),
+            )]),
         };
 
         let result = self
@@ -87,11 +98,31 @@ impl Handler for NamespaceHandler {
         self.metrics
             .record_handler_duration("namespace_handler", elapsed.as_secs_f64());
 
+        let error_msg = result.as_ref().err().map(|e| e.to_string());
+
         if result.is_ok() {
             info!(
                 namespace_id = payload.namespace,
                 elapsed_ms = elapsed.as_millis() as u64,
                 "namespace indexing completed"
+            );
+        }
+
+        if let Some(writer) = &self.progress_writer
+            && let Err(e) = writer
+                .write_progress(
+                    context.nats.as_ref(),
+                    payload.namespace,
+                    &traversal_path,
+                    elapsed,
+                    error_msg.as_deref(),
+                )
+                .await
+        {
+            tracing::warn!(
+                namespace_id = payload.namespace,
+                error = %e,
+                "failed to write indexing progress"
             );
         }
 

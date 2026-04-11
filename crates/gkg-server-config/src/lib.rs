@@ -13,6 +13,7 @@ pub mod engine;
 pub mod gitlab;
 pub mod grpc;
 pub mod health_check;
+pub mod indexing_progress;
 pub mod metrics;
 pub mod nats;
 pub mod query;

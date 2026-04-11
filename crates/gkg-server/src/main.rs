@@ -142,6 +142,27 @@ async fn run_webserver(
     let resolver_registry = Some(Arc::new(registry));
     info!("Content resolution enabled (GitlabClient configured)");
 
+    let nats: Option<std::sync::Arc<dyn indexer::nats::NatsServices>> =
+        match indexer::nats::NatsBroker::connect(&config.nats).await {
+            Ok(broker) => {
+                let broker = std::sync::Arc::new(broker);
+                broker
+                    .ensure_kv_bucket_exists(
+                        gkg_server_config::indexing_progress::INDEXING_PROGRESS_BUCKET,
+                        indexer::nats::KvBucketConfig::default(),
+                    )
+                    .await?;
+                info!("NATS connected for indexing status KV reads");
+                Some(std::sync::Arc::new(indexer::nats::NatsServicesImpl::new(
+                    broker,
+                )))
+            }
+            Err(e) => {
+                tracing::warn!("NATS not available, indexing status disabled: {e}");
+                None
+            }
+        };
+
     let graph_client = config.graph.build_client();
     let http_server =
         HttpServer::bind(config.bind_address, graph_client, Some(gitlab_client)).await?;
@@ -157,6 +178,7 @@ async fn run_webserver(
         cluster_health,
         tls_config,
         resolver_registry,
+        nats,
         config.grpc.clone(),
     );
     info!(addr = %config.grpc_bind_address, "gRPC server starting");

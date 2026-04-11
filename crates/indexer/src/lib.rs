@@ -38,6 +38,7 @@ pub mod locking;
 pub mod metrics;
 pub mod modules;
 pub mod nats;
+pub mod progress;
 pub mod scheduler;
 pub mod schema_version;
 pub mod topic;
@@ -180,6 +181,12 @@ pub async fn run(
     let per_message_ttl = KvBucketConfig::with_per_message_ttl();
     broker
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
+        .await?;
+    broker
+        .ensure_kv_bucket_exists(
+            gkg_server_config::indexing_progress::INDEXING_PROGRESS_BUCKET,
+            KvBucketConfig::default(),
+        )
         .await?;
 
     let metrics = Arc::new(metrics::EngineMetrics::new());

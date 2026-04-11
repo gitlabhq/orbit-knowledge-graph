@@ -13,15 +13,18 @@ use tracing::{Instrument, info, instrument};
 use crate::auth::{Claims, JwtValidator};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_stats::GraphStatsService;
+use crate::indexing_status::IndexingStatusService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
     GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
-    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
-    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
-    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
+    GetIndexingStatusRequest, GetIndexingStatusResponse, ListToolsRequest, ListToolsResponse,
+    QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
+    SchemaNodeStyle, SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition,
+    execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
+use indexer::nats::NatsServices;
 use query_engine::formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
 
 use super::auth::extract_claims;
@@ -33,6 +36,7 @@ pub struct KnowledgeGraphServiceImpl {
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
     graph_stats: GraphStatsService,
+    indexing_status: Option<IndexingStatusService>,
     stream_timeout_secs: u64,
 }
 
@@ -43,6 +47,7 @@ impl KnowledgeGraphServiceImpl {
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         resolver_registry: Option<Arc<ColumnResolverRegistry>>,
+        nats: Option<Arc<dyn NatsServices>>,
         stream_timeout_secs: u64,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
@@ -56,6 +61,7 @@ impl KnowledgeGraphServiceImpl {
             pipeline = pipeline.with_resolver_registry(registry);
         }
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
+        let indexing_status = nats.map(|n| IndexingStatusService::new(n, Arc::clone(&ontology)));
         Self {
             validator,
             ontology,
@@ -63,6 +69,7 @@ impl KnowledgeGraphServiceImpl {
             pipeline,
             cluster_health,
             graph_stats,
+            indexing_status,
             stream_timeout_secs,
         }
     }
@@ -247,6 +254,28 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         info!(traversal_path = %req.traversal_path, "Fetching graph stats for user");
 
         let response = self.graph_stats.get_stats(&req.traversal_path).await?;
+        Ok(Response::new(response))
+    }
+
+    #[instrument(skip(self, request), fields(user_id, source_type))]
+    async fn get_indexing_status(
+        &self,
+        request: Request<GetIndexingStatusRequest>,
+    ) -> Result<Response<GetIndexingStatusResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
+
+        let req = request.get_ref();
+        authorize_traversal_path(&claims, &req.traversal_path)?;
+
+        info!(traversal_path = %req.traversal_path, "Fetching indexing status for user");
+
+        let service = self.indexing_status.as_ref().ok_or_else(|| {
+            Status::unavailable("indexing status not available (NATS not configured)")
+        })?;
+
+        let response = service.get_status(&req.traversal_path).await?;
         Ok(Response::new(response))
     }
 }
@@ -441,6 +470,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             None,
+            None,
             60,
         );
 
@@ -468,6 +498,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             None,
             60,
         );
@@ -498,6 +529,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             None,
             60,
         );
@@ -535,6 +567,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             None,
+            None,
             60,
         );
 
@@ -559,6 +592,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             None,
+            None,
             60,
         );
 
@@ -576,6 +610,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             None,
             60,
         );
@@ -606,6 +641,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             None,
+            None,
             60,
         );
 
@@ -629,6 +665,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             None,
             60,
         );
@@ -657,6 +694,7 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             None,
             60,
         );
@@ -762,6 +800,7 @@ mod tests {
             Arc::clone(&ontology),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
+            None,
             None,
             60,
         );
