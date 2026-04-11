@@ -36,7 +36,6 @@ pub mod health;
 pub mod llqm_v1;
 pub mod locking;
 pub mod metrics;
-pub mod migration_completion;
 pub mod modules;
 pub mod nats;
 pub mod scheduler;
@@ -331,7 +330,7 @@ pub async fn run_dispatcher(
             metrics.clone(),
             config.schedule.tasks.namespace_deletion.clone(),
         )),
-        Box::new(migration_completion::MigrationCompletionChecker::new(
+        Box::new(schema::completion::MigrationCompletionChecker::new(
             config.graph.build_client(),
             config.datalake.build_client(),
             lock_service.clone(),
