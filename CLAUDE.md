@@ -53,6 +53,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Query response JSON schema | `crates/gkg-server/schemas/query_response.json` |
 | Query test fixtures | `fixtures/queries/` |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
+| Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |
 | Graph DDL (local DuckDB) | `config/graph_local.sql` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
@@ -86,7 +87,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |
 | `query-engine/shared` | Shared pipeline stages (compilation, extraction, output), virtual column resolution (`ColumnResolver` trait, `ColumnResolverRegistry`, `resolve_virtual_columns`) |
 | `query-engine/formatters` | Result formatters (graph, raw row, goon) |
-| `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/` |
+| `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema_version.rs`) |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `code-graph` | Parent crate for code parsing and graph construction; re-exports `treesitter-visit`, `parser-core`, `code-graph-linker` |
 | `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper |

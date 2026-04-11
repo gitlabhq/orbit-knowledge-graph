@@ -46,7 +46,7 @@ pub mod pipeline;
 pub mod pipelines;
 
 pub use ast::ddl;
-pub use ast::{Expr, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
     EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX,
     EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, HYDRATION_NODE_ALIAS, edge_kinds_column,
@@ -78,7 +78,8 @@ pub use pipelines::{
 pub use passes::check::check_ast;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
-    clickhouse_ddl::emit_create_table, codegen, ddl_generator::generate_graph_tables,
+    clickhouse::emit_simple_query, clickhouse_ddl::emit_create_table, codegen,
+    ddl_generator::generate_graph_tables,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use passes::hydrate::{

@@ -320,6 +320,13 @@ impl Expr {
         }
     }
 
+    pub fn uint32(value: u32) -> Self {
+        Expr::Param {
+            data_type: ChType::UInt32,
+            value: Value::Number(value.into()),
+        }
+    }
+
     pub fn func(name: impl Into<String>, args: Vec<Expr>) -> Self {
         Expr::FuncCall {
             name: name.into(),
