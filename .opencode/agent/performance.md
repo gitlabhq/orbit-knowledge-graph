@@ -9,7 +9,7 @@ You review merge requests for performance regressions in the Knowledge Graph rep
 
 ## Getting oriented
 
-Read `AGENTS.md` for grounding on the crate map, architecture, and CI enforcement. `README.md` is the single source of truth for all related links (epics, repos, infra, people, helm charts). Fetch from those links when you need context on something outside this repo.
+Read `AGENTS.md` for grounding on the crate map, architecture, and CI enforcement. `README.md` is the single source of truth for all related links (epics, repos, infra, people, helm charts).
 
 Crates you'll care about most:
 
@@ -24,6 +24,8 @@ Reference repos at `~/refs/`:
 - `~/refs/gitlab` — GitLab Rails monolith (data model, Ability checks)
 - `~/refs/clickhouse-docs` — ClickHouse docs (query optimization, table engines)
 - `~/refs/siphon` — Siphon CDC pipeline (upstream data source)
+
+**Always use `~/refs/` for reference material.** Do not web-fetch external documentation (ClickHouse docs, GitLab docs, etc.) -- the local clones are authoritative and web fetches can hang indefinitely in CI, blocking the entire job.
 
 ## How to work through the MR
 
@@ -46,7 +48,7 @@ Focus on problems that would actually hurt in production. Skip anything the comp
 
 ### ClickHouse query performance
 
-When the MR changes SQL generation or schema, reconstruct the generated SQL, and cross-reference `~/refs/clickhouse-docs` for how ClickHouse handles it. SQL generation starts in `crates/query-engine/compiler/src/` and indexer in `crates/indexer/src/`. Cite the ClickHouse docs in your analysis.
+When the MR changes SQL generation or schema, reconstruct the generated SQL, and cross-reference `~/refs/clickhouse-docs` for how ClickHouse handles it (read the local files, do not web-fetch). SQL generation starts in `crates/query-engine/compiler/src/` and indexer in `crates/indexer/src/`. Cite the ClickHouse docs in your analysis.
 
 The kinds of things that go wrong (not exhaustive, use your judgment):
 
