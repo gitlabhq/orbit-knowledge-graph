@@ -16,8 +16,8 @@ pub struct NamespaceTarget {
     pub namespace: String,
     #[serde(default)]
     pub deployments: Vec<String>,
-    #[serde(default)]
-    pub statefulsets: Vec<String>,
+    #[serde(default, rename = "statefulSets")]
+    pub stateful_sets: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -51,7 +51,7 @@ targets:
     deployments:
       - gkg-indexer
       - gkg-webserver
-    statefulsets:
+    statefulSets:
       - clickhouse
   - namespace: siphon
     deployments:
@@ -61,9 +61,9 @@ targets:
         assert_eq!(config.targets.len(), 2);
         assert_eq!(config.targets[0].namespace, "gkg");
         assert_eq!(config.targets[0].deployments.len(), 2);
-        assert_eq!(config.targets[0].statefulsets, vec!["clickhouse"]);
+        assert_eq!(config.targets[0].stateful_sets, vec!["clickhouse"]);
         assert_eq!(config.targets[1].namespace, "siphon");
-        assert!(config.targets[1].statefulsets.is_empty());
+        assert!(config.targets[1].stateful_sets.is_empty());
     }
 
     #[test]
@@ -78,6 +78,6 @@ targets:
         let yaml = "namespace: gkg";
         let target: NamespaceTarget = serde_yaml::from_str(yaml).unwrap();
         assert!(target.deployments.is_empty());
-        assert!(target.statefulsets.is_empty());
+        assert!(target.stateful_sets.is_empty());
     }
 }

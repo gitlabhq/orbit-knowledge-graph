@@ -22,7 +22,7 @@ impl K8sChecker {
             for name in &target.deployments {
                 results.push(self.check_deployment(&target.namespace, name).await);
             }
-            for name in &target.statefulsets {
+            for name in &target.stateful_sets {
                 results.push(self.check_statefulset(&target.namespace, name).await);
             }
         }
