@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Phase 1: Configure GDK with HTTPS/nginx (no ClickHouse/NATS/Siphon).
-# These services require a running init system which isn't available during
-# Docker build. They'll be configured at container startup in the entrypoint.
+# Configure GDK with HTTPS, ClickHouse, NATS, and Siphon.
+# ClickHouse and NATS are pre-installed as system packages.
 set -euo pipefail
 
 export MISE_PYTHON_GITHUB_ATTESTATIONS=false
@@ -9,12 +8,13 @@ eval "$(~/.local/bin/mise activate bash)"
 
 cd /gitlab-gdk/gitlab-development-kit
 
-# Phase 1: HTTPS + nginx only (no services that need to be running)
-cp /tmp/gdk-phase1-overlay.yml gdk.yml
+# Apply the full config
+cp /tmp/gdk-e2e-overlay.yml gdk.yml
+
+# Reconfigure GDK
 mise x -- gdk reconfigure
 
-# Stop all services
+# Stop everything (entrypoint starts services at runtime)
 mise x -- gdk stop || true
 
-echo "Phase 1 setup complete (HTTPS/nginx configured)."
-echo "ClickHouse, NATS, and Siphon will be configured at container startup."
+echo "GDK e2e setup complete."
