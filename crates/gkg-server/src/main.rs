@@ -74,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
                 graph: config.graph.clone(),
                 datalake: config.datalake.clone(),
                 schedule: config.schedule.clone(),
+                schema: config.schema.clone(),
                 health_bind_address: config.dispatcher_health_bind_address,
             };
             indexer::run_dispatcher(&dispatcher_config, &ontology, shutdown)
@@ -101,6 +102,11 @@ async fn main() -> anyhow::Result<()> {
             let graph = config.graph.build_client();
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
+            let active_version = schema::version::read_active_version(&graph)
+                .await?
+                .unwrap_or(0);
+            let prefix = schema::version::table_prefix(active_version);
+            info!(version = active_version, table_prefix = %prefix, "resolved active schema version");
             run_webserver(&config, ontology).await
         }
     };

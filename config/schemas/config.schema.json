@@ -184,6 +184,9 @@
           "global": {
             "cron": null
           },
+          "migration-completion": {
+            "cron": "0 */5 * * * *"
+          },
           "namespace": {
             "cron": null
           },
@@ -586,6 +589,20 @@
         }
       },
       "additionalProperties": false
+    },
+    "MigrationCompletionConfig": {
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
     },
     "NamespaceCodeBackfillDispatcherConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
@@ -1011,6 +1028,9 @@
             "global": {
               "cron": null
             },
+            "migration-completion": {
+              "cron": "0 */5 * * * *"
+            },
             "namespace": {
               "cron": null
             },
@@ -1046,6 +1066,12 @@
           "$ref": "#/$defs/GlobalDispatcherConfig",
           "default": {
             "cron": null
+          }
+        },
+        "migration-completion": {
+          "$ref": "#/$defs/MigrationCompletionConfig",
+          "default": {
+            "cron": "0 */5 * * * *"
           }
         },
         "namespace": {

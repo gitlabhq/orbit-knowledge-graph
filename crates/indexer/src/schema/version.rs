@@ -201,6 +201,105 @@ pub async fn write_migrating_version(
     Ok(())
 }
 
+const READ_MIGRATING_VERSION: &str = "\
+SELECT version FROM gkg_schema_version FINAL WHERE status = 'migrating' ORDER BY created_at DESC LIMIT 1";
+
+const READ_ALL_VERSIONS: &str = "\
+SELECT version, CAST(status AS String) AS status FROM gkg_schema_version FINAL ORDER BY version DESC";
+
+const WRITE_ACTIVE_VERSION: &str = "\
+INSERT INTO gkg_schema_version (version, status) VALUES ({version:UInt32}, 'active')";
+
+const WRITE_RETIRED_VERSION: &str = "\
+INSERT INTO gkg_schema_version (version, status) VALUES ({version:UInt32}, 'retired')";
+
+const WRITE_DROPPED_VERSION: &str = "\
+INSERT INTO gkg_schema_version (version, status) VALUES ({version:UInt32}, 'dropped')";
+
+/// Reads the migrating schema version from ClickHouse.
+///
+/// Returns `None` if no version is currently migrating.
+pub async fn read_migrating_version(
+    graph: &ArrowClickHouseClient,
+) -> Result<Option<u32>, SchemaVersionError> {
+    let batches = graph.query_arrow(READ_MIGRATING_VERSION).await?;
+
+    for batch in &batches {
+        if batch.num_rows() == 0 {
+            continue;
+        }
+        return Ok(ArrowUtils::get_column::<UInt32Type>(batch, "version", 0));
+    }
+
+    Ok(None)
+}
+
+/// Schema version entry with its status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionEntry {
+    pub version: u32,
+    pub status: String,
+}
+
+/// Reads all schema versions from ClickHouse, ordered by version descending.
+pub async fn read_all_versions(
+    graph: &ArrowClickHouseClient,
+) -> Result<Vec<VersionEntry>, SchemaVersionError> {
+    let batches = graph.query_arrow(READ_ALL_VERSIONS).await?;
+    let mut entries = Vec::new();
+
+    for batch in &batches {
+        for i in 0..batch.num_rows() {
+            let version = ArrowUtils::get_column::<UInt32Type>(batch, "version", i)
+                .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing version".into()))?;
+            let status = ArrowUtils::get_column_string(batch, "status", i)
+                .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing status".into()))?;
+            entries.push(VersionEntry { version, status });
+        }
+    }
+
+    Ok(entries)
+}
+
+/// Marks a schema version as `active` in ClickHouse.
+pub async fn mark_version_active(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<(), SchemaVersionError> {
+    graph
+        .query(WRITE_ACTIVE_VERSION)
+        .param("version", version)
+        .execute()
+        .await?;
+    Ok(())
+}
+
+/// Marks a schema version as `retired` in ClickHouse.
+pub async fn mark_version_retired(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<(), SchemaVersionError> {
+    graph
+        .query(WRITE_RETIRED_VERSION)
+        .param("version", version)
+        .execute()
+        .await?;
+    Ok(())
+}
+
+/// Marks a schema version as `dropped` in ClickHouse.
+pub async fn mark_version_dropped(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<(), SchemaVersionError> {
+    graph
+        .query(WRITE_DROPPED_VERSION)
+        .param("version", version)
+        .execute()
+        .await?;
+    Ok(())
+}
+
 /// Ensures the `gkg_schema_version` table exists.
 ///
 /// Called by all service modes (Indexer, Webserver, DispatchIndexing) at

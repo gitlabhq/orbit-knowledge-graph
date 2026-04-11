@@ -45,6 +45,14 @@ creates new-prefix ClickHouse tables, and marks the new version as `migrating`. 
 `prefixed_table_name(table, SCHEMA_VERSION)` so they always target the current schema version's
 table-set.
 
+### Migration completion and cleanup
+
+`migration_completion::MigrationCompletionChecker` runs as a scheduled task in DispatchIndexing
+mode. It detects when all enabled namespaces have been re-indexed into new-prefix tables (by
+comparing checkpoint entries against enabled namespaces), promotes the `migrating` version to
+`active`, retires the old active version, and drops tables for retired versions outside the
+`max_retained_versions` retention window.
+
 ### Entry point
 
 The `run()` function in `lib.rs` wires everything together: runs the migration orchestrator,
