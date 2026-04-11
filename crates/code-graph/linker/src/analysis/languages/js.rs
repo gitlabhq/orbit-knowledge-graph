@@ -240,7 +240,8 @@ impl JsAnalyzer {
                 }
 
                 let caller_scope = reference.scope_id();
-                let caller_range = find_enclosing_definition_range(scoping, nodes, caller_scope);
+                let caller_range =
+                    find_enclosing_definition_range(scoping, nodes, caller_scope, source);
                 let call_site_span = nodes.get_node(ref_node_id).span();
                 let call_site_range = span_to_range(call_site_span, source);
                 let callee_span = scoping.symbol_span(symbol_id);
@@ -343,20 +344,32 @@ impl JsAnalyzer {
         }
 
         // 4. Build definition-to-definition parent-child relationships from FQN hierarchy
-        let def_fqns: Vec<(String, Range)> = definitions
+        let def_info: Vec<(String, Range, &str)> = definitions
             .iter()
-            .map(|d| (d.fqn.to_string(), d.range))
+            .map(|d| (d.fqn.to_string(), d.range, d.definition_type.as_str()))
             .collect();
 
-        for (child_fqn, child_range) in &def_fqns {
+        for (child_fqn, child_range, child_type) in &def_info {
             if let Some(parent_fqn) = child_fqn.rsplit_once("::").map(|(p, _)| p.to_string())
-                && let Some((_, parent_range)) = def_fqns.iter().find(|(f, _)| *f == parent_fqn)
+                && let Some((_, parent_range, parent_type)) =
+                    def_info.iter().find(|(f, _, _)| *f == parent_fqn)
             {
+                let rel_type = match (*parent_type, *child_type) {
+                    ("Class", "Method" | "StaticMethod") => RelationshipType::ClassToMethod,
+                    ("Class", "Class") => RelationshipType::ClassToClass,
+                    ("Class", "Function") => RelationshipType::ClassToMethod,
+                    ("Function", "Function") => RelationshipType::FunctionToFunction,
+                    ("Function", "Class") => RelationshipType::FunctionToClass,
+                    ("Method" | "StaticMethod", "Function") => RelationshipType::MethodToFunction,
+                    ("Method" | "StaticMethod", "Class") => RelationshipType::MethodToClass,
+                    ("Interface", "Function") => RelationshipType::InterfaceToFunction,
+                    _ => RelationshipType::ClassToMethod,
+                };
                 relationships.push(ConsolidatedRelationship {
                     source_path: Some(path.clone()),
                     target_path: Some(path.clone()),
                     kind: RelationshipKind::DefinitionToDefinition,
-                    relationship_type: RelationshipType::ClassToMethod, // simplified; refine later
+                    relationship_type: rel_type,
                     source_range: ArcIntern::new(*parent_range),
                     target_range: ArcIntern::new(*child_range),
                     ..Default::default()
@@ -502,6 +515,7 @@ fn find_enclosing_definition_range(
     scoping: &oxc::semantic::Scoping,
     _nodes: &AstNodes,
     scope_id: oxc::syntax::scope::ScopeId,
+    source: &str,
 ) -> Option<Range> {
     let mut current = Some(scope_id);
     while let Some(sid) = current {
@@ -510,7 +524,6 @@ fn find_enclosing_definition_range(
             return None;
         }
 
-        // Check if any symbol declares this scope
         if let Some(parent_scope) = scoping.scope_parent_id(sid) {
             for (_, &sym_id) in scoping.get_bindings(parent_scope) {
                 let sym_flags = scoping.symbol_flags(sym_id);
@@ -518,14 +531,7 @@ fn find_enclosing_definition_range(
                     && (scoping.symbol_scope_id(sym_id) == sid
                         || scoping.symbol_declaration(sym_id) == scoping.get_node_id(sid))
                 {
-                    let span = scoping.symbol_span(sym_id);
-                    // We need source text for proper conversion but we don't have it here.
-                    // Use byte offsets directly.
-                    return Some(Range::new(
-                        Position::new(0, 0),
-                        Position::new(0, 0),
-                        (span.start as usize, span.end as usize),
-                    ));
+                    return Some(span_to_range(scoping.symbol_span(sym_id), source));
                 }
             }
         }
