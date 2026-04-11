@@ -188,7 +188,7 @@ pub async fn run(
 
     // Run the migration orchestrator before the engine starts consuming messages.
     // This ensures no in-flight NATS messages exist during the drain phase.
-    let migration_metrics = schema_migration::MigrationMetrics::new();
+    let migration_metrics = metrics::MigrationMetrics::new();
     let lock_service: Arc<dyn locking::LockService> = Arc::new(locking::NatsLockService::new(
         Arc::new(nats::NatsServicesImpl::new(broker.clone())),
     ));

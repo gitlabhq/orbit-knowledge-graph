@@ -22,12 +22,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use opentelemetry::KeyValue;
-use opentelemetry::global;
-use opentelemetry::metrics::Counter;
 use query_engine::compiler::{emit_create_table, generate_graph_tables};
 use thiserror::Error;
 use tracing::{info, warn};
+
+use crate::metrics::MigrationMetrics;
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
@@ -61,45 +60,6 @@ pub enum MigrationError {
 
     #[error("migration lock held by another pod after {seconds}s; giving up")]
     LockTimeout { seconds: u64 },
-}
-
-/// Pre-built OTel instruments for schema migration observability.
-///
-/// Metric: `gkg_schema_migration_total` with labels `phase` and `result`.
-/// - phase: `acquire_lock` | `create_tables` | `mark_migrating` | `complete`
-/// - result: `success` | `failure` | `skipped`
-#[derive(Clone)]
-pub struct MigrationMetrics {
-    pub(crate) migration_total: Counter<u64>,
-}
-
-impl MigrationMetrics {
-    pub fn new() -> Self {
-        let meter = global::meter("gkg_schema_migration");
-        let migration_total = meter
-            .u64_counter("gkg_schema_migration_total")
-            .with_description(
-                "Total schema migration phase executions, labelled by phase and result",
-            )
-            .build();
-        Self { migration_total }
-    }
-
-    pub(crate) fn record(&self, phase: &'static str, result: &'static str) {
-        self.migration_total.add(
-            1,
-            &[
-                KeyValue::new("phase", phase),
-                KeyValue::new("result", result),
-            ],
-        );
-    }
-}
-
-impl Default for MigrationMetrics {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Runs the pre-engine migration check.
