@@ -27,7 +27,7 @@ fn lock() -> Arc<dyn LockService> {
 }
 
 #[tokio::test]
-async fn fresh_install_records_version_without_creating_tables() {
+async fn fresh_install_creates_tables_and_records_version() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
 
@@ -40,7 +40,10 @@ async fn fresh_install_records_version_without_creating_tables() {
         Some(*SCHEMA_VERSION)
     );
 
-    // Fresh install path skips table creation.
+    // Fresh install creates all ontology-driven tables.
+    let prefix = table_prefix(*SCHEMA_VERSION);
+    let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+
     let result = ctx
         .query(
             "SELECT toInt64(count()) AS cnt FROM system.tables \
@@ -48,7 +51,11 @@ async fn fresh_install_records_version_without_creating_tables() {
         )
         .await;
     let count = i64::extract_column(&result, 0).unwrap();
-    assert_eq!(count, vec![0]);
+    assert_eq!(
+        count,
+        vec![expected_tables.len() as i64],
+        "fresh install should create all ontology tables"
+    );
 }
 
 #[tokio::test]

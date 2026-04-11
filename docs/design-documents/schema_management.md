@@ -28,7 +28,8 @@ Version 0 is the initial (V0) schema — the unversioned table layout used since
 ### `gkg_schema_version` control table
 
 All service modes (Indexer, Webserver, DispatchIndexing) create this table on startup if it does
-not exist and record the embedded version as active on a fresh install:
+not exist. On a fresh install, the Indexer also creates all graph tables from the ontology DDL
+generator and records the embedded version as active:
 
 ```sql
 CREATE TABLE IF NOT EXISTS gkg_schema_version (

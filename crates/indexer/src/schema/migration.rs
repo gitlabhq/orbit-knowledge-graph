@@ -71,9 +71,9 @@ pub enum MigrationError {
 /// # Behaviour
 ///
 /// - **No mismatch** (active version == embedded version): returns immediately.
-/// - **Fresh install** (no active version): records embedded version as active
-///   and returns. Table creation is handled by the operator applying `graph.sql`
-///   before deployment.
+/// - **Fresh install** (no active version): creates all graph tables from the
+///   ontology (using the version prefix), records embedded version as active,
+///   and returns. No manual DDL (`graph.sql`) is needed.
 /// - **Version mismatch**: acquires lock, creates new-prefix tables, marks
 ///   migrating, releases lock.
 pub async fn run_if_needed(
@@ -88,10 +88,11 @@ pub async fn run_if_needed(
         None => {
             info!(
                 version = *SCHEMA_VERSION,
-                "fresh install — no migration needed, recording initial schema version"
+                "fresh install — creating tables from ontology and recording initial schema version"
             );
+            create_prefixed_tables(graph, ontology, metrics).await?;
             write_schema_version(graph, *SCHEMA_VERSION).await?;
-            metrics.record("complete", "skipped");
+            metrics.record("complete", "fresh_install");
             Ok(())
         }
         Some(v) if v == *SCHEMA_VERSION => {
