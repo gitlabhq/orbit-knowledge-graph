@@ -1241,6 +1241,16 @@ fn visit_deletion<'a>(
 ) -> Vec<(SymbolChain, Binding)> {
     // Unrolls deletion targets into symbol chains
     fn visit_recursive<'a>(node: &Node<'a, StrDoc<SupportLang>>, targets: &mut Vec<SymbolChain>) {
+        let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+        if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+            error!(
+                remaining_stack,
+                node_kind = node.kind().as_ref(),
+                "stack limit reached, aborting Python deletion target traversal"
+            );
+            return;
+        }
+
         let node_kind = node.kind();
         let kind_str = node_kind.as_ref();
 
@@ -1295,6 +1305,7 @@ fn visit_call<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
     use treesitter_visit::tree_sitter::StrDoc;
     use treesitter_visit::{Root, SupportLang};
 
@@ -1312,6 +1323,37 @@ mod tests {
             }
         }
         count
+    }
+
+    fn find_first_node_by_kind<'a>(
+        root: &'a Root<StrDoc<SupportLang>>,
+        kind: &str,
+    ) -> Option<Node<'a, StrDoc<SupportLang>>> {
+        let mut stack = vec![root.root()];
+
+        while let Some(node) = stack.pop() {
+            if node.kind() == kind {
+                return Some(node);
+            }
+
+            for child in node.children() {
+                stack.push(child);
+            }
+        }
+
+        None
+    }
+
+    fn run_on_small_stack<T>(f: impl FnOnce() -> T + Send + 'static) -> T
+    where
+        T: Send + 'static,
+    {
+        thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(f)
+            .expect("small-stack thread should start")
+            .join()
+            .expect("small-stack thread should complete")
     }
 
     #[test]
@@ -1898,6 +1940,26 @@ del y, z
         assert_eq!(root_table.symbols.len(), 3);
         assert_eq!(total_bindings, 6); // 3 assignments + 3 deletions
         println!("✓ Deletion test passed");
+    }
+
+    #[test]
+    fn test_visit_deletion_bails_out_on_low_stack() {
+        let result = run_on_small_stack(|| {
+            let ast = parse_python("del first, second\n");
+            let delete_statement = find_first_node_by_kind(&ast, "delete_statement")
+                .expect("delete_statement node should exist");
+            let mut builder =
+                SymbolTableBuilder::new(node_to_range(&ast.root()), ScopeType::Module, None);
+
+            visit_deletion(
+                &delete_statement,
+                &mut builder,
+                &HashMap::default(),
+                &HashMap::default(),
+            )
+        });
+
+        assert!(result.is_empty());
     }
 
     #[test]

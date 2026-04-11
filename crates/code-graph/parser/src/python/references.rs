@@ -1,5 +1,6 @@
 use rustc_hash::FxHashMap as HashMap;
 use rustc_hash::FxHashSet as HashSet;
+use tracing::error;
 
 use crate::python::types::{
     PythonDefinitionInfo, PythonDefinitionType, ScopeGroup, ScopeGroupType, ScopeType,
@@ -169,6 +170,17 @@ fn resolve_chain_recursive(
     binding_cache: &mut BindingCache,
     visited: &mut HashSet<(String, Range, SymbolTableId)>,
 ) -> Vec<PythonTargetResolution> {
+    let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+    if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+        error!(
+            remaining_stack,
+            scope_id = scope_id.0,
+            symbol_chain = symbol_chain.as_str(),
+            "stack limit reached, aborting Python reference resolution"
+        );
+        return Vec::new();
+    }
+
     // Check for circular references
     let key = (symbol_chain.as_str(), *location, *scope_id);
     if visited.contains(&key) {
@@ -620,14 +632,27 @@ mod tests {
     use super::*;
     use crate::parser::SupportedLanguage;
     use crate::python::analyzer::{PythonAnalysisResult, PythonAnalyzer};
+    use crate::python::fqn::build_fqn_index;
+    use crate::python::imports::find_imports;
+    use crate::python::symbol_table::visitor::build_symbol_table;
     use crate::references::ReferenceTarget;
     use crate::{LanguageParser, parser::GenericParser};
+    use std::thread;
 
     fn analyze_python_code(code: &str) -> crate::Result<PythonAnalysisResult> {
         let analyzer = PythonAnalyzer::new();
         let parser = GenericParser::default_for_language(SupportedLanguage::Python);
         let parse_result = parser.parse(code, Some("test.py"))?;
         analyzer.analyze(&parse_result)
+    }
+
+    fn build_python_symbol_table(code: &str) -> crate::Result<SymbolTableTree> {
+        let parser = GenericParser::default_for_language(SupportedLanguage::Python);
+        let parse_result = parser.parse(code, Some("test.py"))?;
+        let (node_fqn_map, definitions) = build_fqn_index(&parse_result.ast);
+        let imports = find_imports(&parse_result.ast, &node_fqn_map);
+
+        Ok(build_symbol_table(&parse_result.ast, definitions, imports))
     }
 
     fn get_reference_by_name<'a>(
@@ -2013,6 +2038,38 @@ obj.method_c()
             method_calls.len() >= 5,
             "Should find at least 5 method calls"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_find_references_bails_out_on_low_stack() -> crate::Result<()> {
+        let symbol_table = build_python_symbol_table(
+            r#"
+def target():
+    pass
+
+alias = target
+alias()
+"#,
+        )?;
+
+        let references = thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(move || find_references(&symbol_table))
+            .expect("small-stack thread should start")
+            .join()
+            .expect("small-stack thread should complete");
+
+        let alias_reference = references
+            .iter()
+            .find(|reference| reference.name == "alias()")
+            .expect("alias() reference should exist");
+
+        assert!(matches!(
+            alias_reference.target,
+            ReferenceTarget::Unresolved()
+        ));
 
         Ok(())
     }

@@ -16,6 +16,7 @@ use crate::utils::Range;
 use ruby_prism::{ParseResult, Visit};
 use smallvec::SmallVec;
 use std::sync::Arc;
+use tracing::error;
 
 /// Type alias for the extraction result tuple
 type ExtractionResult = (
@@ -23,6 +24,8 @@ type ExtractionResult = (
     Vec<RubyImportedSymbolInfo>,
     Vec<RubyReferenceInfo>,
 );
+
+const RUBY_VISITOR_STACK_SIZE: usize = 1024 * 1024;
 
 /// Extract definitions, references, and imports from Ruby Prism AST using the Visit trait
 pub fn extract_definitions_and_references_from_prism(
@@ -36,7 +39,11 @@ pub fn extract_definitions_and_references_from_prism(
         RubyAstVisitor::with_capacity(source_code, estimated_definitions, estimated_references);
 
     // Visit the program node to extract all definitions, expressions, and imports
-    extractor.visit(&parse_result.node());
+    stacker::maybe_grow(
+        crate::MINIMUM_STACK_REMAINING,
+        RUBY_VISITOR_STACK_SIZE,
+        || extractor.visit(&parse_result.node()),
+    );
 
     // Shrink vectors to fit their current data size to reduce memory usage
     extractor.shrink_to_fit();
@@ -296,6 +303,29 @@ impl<'a> RubyAstVisitor<'a> {
         !self.in_assignment_context()
     }
 
+    fn visit_with_stack_growth<'pr>(
+        &mut self,
+        node: &ruby_prism::Node<'pr>,
+        context: &'static str,
+    ) {
+        stacker::maybe_grow(
+            crate::MINIMUM_STACK_REMAINING,
+            RUBY_VISITOR_STACK_SIZE,
+            || {
+                let remaining_stack = stacker::remaining_stack().unwrap_or(0);
+                if remaining_stack < crate::MINIMUM_STACK_REMAINING {
+                    error!(
+                        remaining_stack,
+                        context, "stack limit reached, aborting Ruby AST traversal"
+                    );
+                    return;
+                }
+
+                self.visit(node);
+            },
+        );
+    }
+
     fn is_lambda_block(&self) -> bool {
         // A block is a lambda block if we're currently in a lambda call context
         self.in_lambda_call_context()
@@ -470,7 +500,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         }
 
         while let Some(child_node) = stack.pop() {
-            self.visit(&child_node);
+            self.visit_with_stack_growth(&child_node, "ruby class body traversal");
         }
 
         self.pop_scope();
@@ -487,7 +517,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
 
         // Use stack-based approach for children
         if let Some(body) = node.body() {
-            self.visit(&body);
+            self.visit_with_stack_growth(&body, "ruby module body traversal");
         }
 
         self.pop_scope();
@@ -551,7 +581,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         }
 
         while let Some(child_node) = stack.pop() {
-            self.visit(&child_node);
+            self.visit_with_stack_growth(&child_node, "ruby method body traversal");
         }
 
         // Pop the method scope
@@ -590,7 +620,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         self.push_call_context(CallContext::LambdaCall);
 
         while let Some(child_node) = stack.pop() {
-            self.visit(&child_node);
+            self.visit_with_stack_growth(&child_node, "ruby lambda traversal");
         }
 
         // Pop lambda context
@@ -635,7 +665,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit(&value);
+            self.visit_with_stack_growth(&value, "ruby constant assignment traversal");
             self.pop_call_context();
         }
     }
@@ -677,7 +707,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit(&value);
+            self.visit_with_stack_growth(&value, "ruby local assignment traversal");
             self.pop_call_context();
         }
     }
@@ -720,7 +750,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit(&value);
+            self.visit_with_stack_growth(&value, "ruby instance assignment traversal");
             self.pop_call_context();
         }
     }
@@ -781,7 +811,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit(&value);
+            self.visit_with_stack_growth(&value, "ruby class assignment traversal");
             self.pop_call_context();
         }
     }
@@ -842,7 +872,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         if self.value_may_contain_definitions(&value) {
             // Track that we're entering an assignment context
             self.push_call_context(CallContext::Assignment);
-            self.visit(&value);
+            self.visit_with_stack_growth(&value, "ruby global assignment traversal");
             self.pop_call_context();
         }
     }
@@ -922,7 +952,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         }
 
         while let Some(child_node) = stack.pop() {
-            self.visit(&child_node);
+            self.visit_with_stack_growth(&child_node, "ruby call traversal");
         }
 
         // Pop lambda context
@@ -960,7 +990,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
         }
 
         while let Some(child_node) = stack.pop() {
-            self.visit(&child_node);
+            self.visit_with_stack_growth(&child_node, "ruby block traversal");
         }
     }
 }
@@ -968,6 +998,7 @@ impl<'a, 'pr> Visit<'pr> for RubyAstVisitor<'a> {
 #[cfg(test)]
 mod tests {
     use ruby_prism::parse;
+    use std::thread;
 
     use super::*;
 
@@ -1079,5 +1110,34 @@ end
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn test_prism_visitor_grows_stack_on_low_stack() {
+        let code = r#"
+class Outer
+  class Inner
+    def call
+      value = lambda { |x| x + 1 }
+      value.call(1)
+    end
+  end
+end
+"#;
+
+        let (definitions, references) = thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(move || {
+                let result = parse(code.as_bytes());
+                let (definitions, _imports, references) =
+                    extract_definitions_and_references_from_prism(code, &result);
+                (definitions, references)
+            })
+            .expect("small-stack thread should start")
+            .join()
+            .expect("small-stack thread should complete");
+
+        assert!(!definitions.is_empty());
+        assert!(!references.is_empty());
     }
 }
