@@ -24,6 +24,7 @@ pub fn check_ast(node: &Node, ctx: &SecurityContext) -> Result<()> {
             }
             check_query(q, ctx)
         }
+        Node::Insert(_) => Ok(()),
     }
 }
 

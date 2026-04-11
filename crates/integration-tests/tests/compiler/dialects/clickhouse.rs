@@ -13,7 +13,9 @@ fn compile_to_ast_works() {
     }"#;
 
     let node = compile_to_ast(json, &test_ontology()).unwrap();
-    let Node::Query(ref q) = node;
+    let Node::Query(ref q) = node else {
+        unreachable!()
+    };
     assert_eq!(q.limit, Some(10));
     assert!(!q.select.is_empty());
 }
