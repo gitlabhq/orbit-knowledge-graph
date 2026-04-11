@@ -4,6 +4,7 @@ project:
 repos_dir: temp
 
 repos:
+  # GitLab (Ruby + TypeScript)
   - name: gitlab
     source: gitlab
     project: gitlab-org/gitlab
@@ -14,8 +15,40 @@ repos:
     source: gitlab
     project: gitlab-org/gitlab-shell
     version: v14.47.0
-    groups: [ruby]
+    groups: [ruby, go]
 
+  # Go services (GDK components)
+  - name: gitaly
+    source: gitlab
+    project: gitlab-org/gitaly
+    version: v18.10.3
+    groups: [go]
+
+  - name: gitlab-http-router
+    source: gitlab
+    project: gitlab-org/cells/http-router
+    version: main
+    groups: [go, typescript]
+
+  - name: gitlab-topology-service
+    source: gitlab
+    project: gitlab-org/cells/topology-service
+    version: main
+    groups: [go]
+
+  - name: gitlab-zoekt-indexer
+    source: gitlab
+    project: gitlab-org/gitlab-zoekt-indexer
+    version: v1.13.0
+    groups: [go]
+
+  - name: siphon
+    source: gitlab
+    project: gitlab-org/analytics-section/siphon
+    version: main
+    groups: [go]
+
+  # Java (GitHub)
   - name: okhttp
     source: github
     project: square/okhttp
@@ -30,6 +63,7 @@ repos:
     commit_sha: 112859b85d50de2a7e63f73c8fc70b99eea24291
     groups: [java]
 
+  # TypeScript (GitHub)
   - name: vscode
     source: github
     project: microsoft/vscode
@@ -46,9 +80,8 @@ repos:
 
 scenarios:
   hyperfine:
-    - id: gkg_index_4_threads
-      command: ./target/release/orbit index ${REPOS_DIR} --threads 4 --stats
-      description: Index repos with 4 threads
+    - id: index
+      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats
       warmup: 1
       min_runs: 3
       max_runs: 3
