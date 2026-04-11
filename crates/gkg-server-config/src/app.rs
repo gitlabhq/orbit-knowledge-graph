@@ -92,6 +92,7 @@ impl AppConfig {
             .add_source(SecretFileSource::new(secret_dir))
             .add_source(
                 config::Environment::with_prefix("GKG")
+                    .prefix_separator("_")
                     .separator("__")
                     .try_parsing(true),
             )
@@ -265,6 +266,96 @@ handlers:
         assert_eq!(
             config.gitlab.jwt.verifying_key.as_deref(),
             Some("env-secret-at-least-32-bytes-long")
+        );
+    }
+
+    /// Verifies `prefix_separator("_")` is required for `GKG_GRAPH__DATABASE`
+    /// style env vars to work with real process env vars.
+    ///
+    /// Without it, the config crate defaults the prefix separator to the
+    /// hierarchy separator (`__`), so it looks for `GKG__GRAPH__DATABASE`
+    /// (double underscore after prefix) and silently ignores
+    /// `GKG_GRAPH__DATABASE` (single underscore).
+    ///
+    /// Uses a subprocess since env vars must be set before config loading
+    /// and `std::env::set_var` is unsafe in multi-threaded test runners.
+    #[test]
+    fn real_env_vars_override_yaml_defaults() {
+        let test_bin = std::env::current_exe().unwrap();
+        // The test binary must run from the workspace root so config/default.yaml is found.
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let output = std::process::Command::new(&test_bin)
+            .current_dir(workspace_root)
+            .arg("app::tests::subprocess_env_config_loader")
+            .arg("--ignored")
+            .arg("--exact")
+            .arg("--nocapture")
+            .env("GKG_GRAPH__DATABASE", "env_graph_db")
+            .env("GKG_DATALAKE__DATABASE", "env_datalake_db")
+            .env("GKG_NATS__URL", "nats://env-host:4222")
+            .output()
+            .expect("failed to spawn subprocess");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // Parse the JSON line printed by the inner test.
+        let json_line = stdout
+            .lines()
+            .find(|l| l.starts_with('{'))
+            .unwrap_or_else(|| {
+                panic!(
+                    "inner test did not print JSON.\nstdout: {stdout}\nstderr: {stderr}\nexit: {}",
+                    output.status
+                )
+            });
+        let values: serde_json::Value =
+            serde_json::from_str(json_line).expect("inner test should print valid JSON");
+
+        // If the inner test returned an error, fail with it.
+        if let Some(err) = values.get("error") {
+            panic!("inner test config load failed: {err}");
+        }
+
+        assert_eq!(
+            values["graph_database"], "env_graph_db",
+            "GKG_GRAPH__DATABASE should override config/default.yaml"
+        );
+        assert_eq!(
+            values["datalake_database"], "env_datalake_db",
+            "GKG_DATALAKE__DATABASE should override config/default.yaml"
+        );
+        assert_eq!(
+            values["nats_url"], "nats://env-host:4222",
+            "GKG_NATS__URL should override config/default.yaml"
+        );
+    }
+
+    /// Subprocess helper: loads config with real process env vars and prints
+    /// the resolved values as JSON. Only runs when called by the outer test.
+    #[test]
+    #[ignore]
+    fn subprocess_env_config_loader() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = match AppConfig::load_with_secret_dir(dir.path().to_str().unwrap()) {
+            Ok(c) => c,
+            Err(e) => {
+                println!("{}", serde_json::json!({"error": e.to_string()}));
+                return;
+            }
+        };
+
+        println!(
+            "{}",
+            serde_json::json!({
+                "graph_database": config.graph.database,
+                "datalake_database": config.datalake.database,
+                "nats_url": config.nats.url,
+            })
         );
     }
 }
