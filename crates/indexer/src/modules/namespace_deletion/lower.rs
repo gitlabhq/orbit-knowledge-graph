@@ -2,7 +2,7 @@ use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use crate::llqm_v1::ast::{Expr, Insert, InsertSelect, Op, Query, SelectExpr, TableRef};
 use crate::llqm_v1::codegen;
-use crate::schema_version::{prefixed_table_name, SCHEMA_VERSION};
+use crate::schema_version::{SCHEMA_VERSION, prefixed_table_name};
 
 pub struct DeletionStatement {
     /// Unprefixed table name, used for logging and test assertions.
@@ -195,7 +195,7 @@ mod tests {
             let sql = &statement.sql;
             let table = &statement.table;
 
-            let prefixed = prefixed_table_name(table, SCHEMA_VERSION);
+            let prefixed = prefixed_table_name(table, *SCHEMA_VERSION);
             assert!(
                 sql.starts_with(&format!("INSERT INTO {prefixed} (")),
                 "{table}: should start with INSERT INTO prefixed table: {sql}"

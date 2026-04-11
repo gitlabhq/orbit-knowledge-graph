@@ -27,15 +27,15 @@ pub struct CodeTableNames {
 impl CodeTableNames {
     pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
         Ok(Self {
-            branch: prefixed_table_name(ontology.table_name("Branch")?, SCHEMA_VERSION),
-            directory: prefixed_table_name(ontology.table_name("Directory")?, SCHEMA_VERSION),
-            file: prefixed_table_name(ontology.table_name("File")?, SCHEMA_VERSION),
-            definition: prefixed_table_name(ontology.table_name("Definition")?, SCHEMA_VERSION),
+            branch: prefixed_table_name(ontology.table_name("Branch")?, *SCHEMA_VERSION),
+            directory: prefixed_table_name(ontology.table_name("Directory")?, *SCHEMA_VERSION),
+            file: prefixed_table_name(ontology.table_name("File")?, *SCHEMA_VERSION),
+            definition: prefixed_table_name(ontology.table_name("Definition")?, *SCHEMA_VERSION),
             imported_symbol: prefixed_table_name(
                 ontology.table_name("ImportedSymbol")?,
-                SCHEMA_VERSION,
+                *SCHEMA_VERSION,
             ),
-            edge: prefixed_table_name(ontology.edge_table(), SCHEMA_VERSION),
+            edge: prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION),
         })
     }
 

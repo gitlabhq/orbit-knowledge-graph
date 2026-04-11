@@ -115,7 +115,7 @@ pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput 
     // Apply the schema-version prefix at the boundary where ontology names
     // enter the SDLC plan layer. All downstream write paths use these prefixed
     // names via Transformation::destination_table → ClickHouseDestination.
-    let edge_table = prefixed_table_name(ontology.edge_table(), SCHEMA_VERSION);
+    let edge_table = prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION);
     let mut node_plans = Vec::new();
     let mut standalone_edge_plans = Vec::new();
 
@@ -163,7 +163,7 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
     let extra_fk_columns = collect_fk_extract_columns(etl, namespaced);
     append_missing(&mut node_columns, &extra_fk_columns);
 
-    let node_destination = prefixed_table_name(&node.destination_table, SCHEMA_VERSION);
+    let node_destination = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
     NodePlan {
         name: node.name.clone(),
         scope,

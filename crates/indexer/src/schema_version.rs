@@ -385,9 +385,6 @@ mod tests {
             sql.contains("gkg_schema_version"),
             "migrating query must target version table: {sql}"
         );
-        assert!(
-            !params.is_empty(),
-            "migrating query must have parameters"
-        );
+        assert!(!params.is_empty(), "migrating query must have parameters");
     }
 }
