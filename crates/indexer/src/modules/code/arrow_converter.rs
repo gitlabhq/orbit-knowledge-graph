@@ -590,12 +590,10 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph::linker::analysis::types::{DefinitionType, FqnType};
+    use code_graph::linker::analysis::canonical_helpers::fqn_parts_to_canonical;
     use internment::ArcIntern;
-    use parser_core::ruby::types::{RubyDefinitionType, RubyFqn, RubyFqnPart, RubyFqnPartType};
+    use parser_core::ruby::types::{RubyFqnPart, RubyFqnPartType};
     use parser_core::utils::{Position, Range};
-    use smallvec::SmallVec;
-    use std::sync::Arc as StdArc;
 
     fn create_test_definition(
         class_name: &str,
@@ -610,16 +608,18 @@ mod tests {
             (start_byte, end_byte),
         );
 
-        let fqn = RubyFqn {
-            parts: StdArc::new(SmallVec::from_vec(vec![
+        let fqn = fqn_parts_to_canonical(
+            &[
                 RubyFqnPart::new(RubyFqnPartType::Class, class_name.to_string(), range),
                 RubyFqnPart::new(RubyFqnPartType::Method, method_name.to_string(), range),
-            ])),
-        };
+            ],
+            code_graph_types::Language::Ruby,
+        );
 
         DefinitionNode::new(
-            FqnType::Ruby(fqn),
-            DefinitionType::Ruby(RubyDefinitionType::Method),
+            fqn,
+            "Method".to_string(),
+            code_graph_types::DefKind::Method,
             range,
             ArcIntern::new(file_path.to_string()),
         )

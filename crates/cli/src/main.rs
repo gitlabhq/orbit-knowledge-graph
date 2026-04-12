@@ -480,10 +480,10 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
 
 async fn index_repo(
     git: &workspace::GitInfo,
-    config: &IndexingConfig,
+    config: &IndexConfig,
     store: &workspace::Workspace,
     ontology: &Ontology,
-) -> Result<RepositoryIndexingResult> {
+) -> Result<IndexResult> {
     let key = git.repo_path.to_string_lossy().to_string();
     let repo_name = git
         .repo_path

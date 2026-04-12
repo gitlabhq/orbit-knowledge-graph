@@ -75,6 +75,14 @@ register_languages! {
     Rust => SupportLang::Rust,
 }
 
+pub fn detect_language_from_path(path: &str) -> Result<Language> {
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("");
+    detect_language_from_extension(extension)
+}
+
 /// Result of parsing operations
 #[derive(Clone)]
 pub struct ParseResult<'a, T = Root<StrDoc<SupportLang>>> {
