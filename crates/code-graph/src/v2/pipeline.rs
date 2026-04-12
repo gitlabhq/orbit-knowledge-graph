@@ -10,7 +10,9 @@ use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
 
-use crate::linker::v2::{GraphBuilder, GraphData, NoResolver, ReferenceResolver};
+use crate::linker::v2::{
+    GraphBuilder, GraphData, NoResolver, ReferenceResolver, ResolutionContext,
+};
 
 /// Input to a language pipeline: file path + source bytes.
 pub type FileInput = (String, Vec<u8>);
@@ -74,8 +76,11 @@ where
             return Err(errors);
         }
 
-        // Resolve references across all parsed results
-        let resolved_edges = R::resolve(&canonical_results, root_path);
+        // Build shared indexes for resolution
+        let ctx = ResolutionContext::build(&canonical_results, root_path);
+
+        // Resolve references using the per-language resolver
+        let resolved_edges = R::resolve(&ctx);
 
         // Build the graph with structural edges + resolved edges
         let mut builder = GraphBuilder::new(root_path.to_string());
