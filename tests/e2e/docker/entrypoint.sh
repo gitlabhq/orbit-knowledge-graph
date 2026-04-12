@@ -23,6 +23,10 @@ fi
 
 eval "$(~/.local/bin/mise activate bash)"
 cd /gitlab-gdk/gitlab-development-kit
+
+# Patch nginx to listen on 0.0.0.0 (not gdk.test/127.0.0.1) so CI services can reach it
+sed -i 's/listen gdk\.test:/listen 0.0.0.0:/g' nginx/conf/nginx.conf
+
 mise x -- gdk start
 
 echo "=== Waiting for ClickHouse ==="
