@@ -1254,6 +1254,7 @@ dependencies = [
  "intervaltree",
  "serde",
  "smallvec",
+ "strum 0.28.0",
 ]
 
 [[package]]

@@ -1,6 +1,21 @@
 use serde::{Deserialize, Serialize};
+use strum::{AsRefStr, Display, EnumIter, EnumString};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    EnumIter,
+    EnumString,
+    AsRefStr,
+    Display,
+)]
+#[strum(serialize_all = "snake_case")]
 pub enum Language {
     Ruby,
     Python,
@@ -12,18 +27,6 @@ pub enum Language {
 }
 
 impl Language {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Ruby => "ruby",
-            Self::Python => "python",
-            Self::TypeScript => "typescript",
-            Self::Kotlin => "kotlin",
-            Self::CSharp => "csharp",
-            Self::Java => "java",
-            Self::Rust => "rust",
-        }
-    }
-
     pub const fn file_extensions(&self) -> &'static [&'static str] {
         match self {
             Self::Ruby => &["rb", "rbw", "rake", "gemspec"],
@@ -60,11 +63,5 @@ impl Language {
             Self::Java => &["java"],
             Self::Rust => &["rust"],
         }
-    }
-}
-
-impl std::fmt::Display for Language {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
     }
 }

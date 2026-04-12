@@ -10,3 +10,4 @@ workspace = true
 intervaltree = { workspace = true }
 serde = { workspace = true }
 smallvec = { workspace = true }
+strum = { workspace = true }

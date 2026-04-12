@@ -1,10 +1,12 @@
 use crate::fqn::Fqn;
 use crate::lang::Language;
 use crate::range::Range;
+use strum::{AsRefStr, Display, EnumIter, EnumString};
 
 /// Canonical definition categories used by the linker for
 /// language-agnostic relationship determination.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, EnumString, AsRefStr, Display)]
+#[strum(serialize_all = "snake_case")]
 pub enum DefKind {
     Class,
     Interface,
@@ -19,56 +21,25 @@ pub enum DefKind {
 }
 
 impl DefKind {
-    pub const fn as_str(&self) -> &'static str {
+    pub const fn as_upper_str(&self) -> &'static str {
         match self {
-            Self::Class => "class",
-            Self::Interface => "interface",
-            Self::Module => "module",
-            Self::Function => "function",
-            Self::Method => "method",
-            Self::Constructor => "constructor",
-            Self::Lambda => "lambda",
-            Self::Property => "property",
-            Self::EnumEntry => "enum_entry",
-            Self::Other => "other",
+            Self::Class => "CLASS",
+            Self::Interface => "INTERFACE",
+            Self::Module => "MODULE",
+            Self::Function => "FUNCTION",
+            Self::Method => "METHOD",
+            Self::Constructor => "CONSTRUCTOR",
+            Self::Lambda => "LAMBDA",
+            Self::Property => "PROPERTY",
+            Self::EnumEntry => "ENUM_ENTRY",
+            Self::Other => "OTHER",
         }
-    }
-}
-
-impl std::fmt::Display for DefKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// Edge kinds for the code graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EdgeKind {
-    Contains,
-    Defines,
-    Imports,
-    Calls,
-}
-
-impl EdgeKind {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Contains => "CONTAINS",
-            Self::Defines => "DEFINES",
-            Self::Imports => "IMPORTS",
-            Self::Calls => "CALLS",
-        }
-    }
-}
-
-impl std::fmt::Display for EdgeKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
     }
 }
 
 /// Resolution status of a reference at a call site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, EnumString, AsRefStr, Display)]
+#[strum(serialize_all = "snake_case")]
 pub enum ReferenceStatus {
     Resolved,
     Ambiguous,
