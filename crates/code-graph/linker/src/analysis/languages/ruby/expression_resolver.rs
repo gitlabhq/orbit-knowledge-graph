@@ -33,7 +33,7 @@ use super::{
     scope_resolver::ScopeResolver,
     type_map::{InferredType, ScopeId, VariableId},
 };
-use crate::analysis::types::{ConsolidatedRelationship, DefinitionNode, DefinitionType};
+use crate::analysis::types::{ConsolidatedRelationship, DefinitionNode};
 use crate::graph::RelationshipType;
 use crate::parse_types::{References, RubyReference};
 use internment::ArcIntern;
@@ -628,8 +628,8 @@ impl ResolutionStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::types::{DefinitionType, FqnType};
-    use parser_core::ruby::types::{RubyDefinitionType, RubyFqn};
+    use crate::analysis::types::{FqnType};
+    use parser_core::ruby::types::{RubyRubyFqn};
     use parser_core::utils::{Position, Range};
 
     #[test]

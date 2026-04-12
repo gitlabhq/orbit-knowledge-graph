@@ -8,26 +8,16 @@ use internment::ArcIntern;
 use rustc_hash::FxHasher;
 
 use crate::graph::{RelationshipKind, RelationshipType};
-use code_graph_types::{CanonicalFqn, DefKind};
+use code_graph_types::{CanonicalFqn, DefKind, Range};
 use parser_core::{
-    csharp::types::{CSharpDefinitionType, CSharpFqn, CSharpImportType},
-    definitions::DefinitionTypeInfo,
+    csharp::types::CSharpImportType,
     imports::ImportTypeInfo,
-    java::ast::java_fqn_to_string,
-    java::types::{JavaDefinitionType, JavaFqn, JavaImportType},
-    kotlin::ast::kotlin_fqn_to_string,
-    kotlin::types::{KotlinDefinitionType, KotlinFqn, KotlinImportType},
-    python::fqn::python_fqn_to_string,
-    python::types::{PythonDefinitionType, PythonFqn, PythonImportType},
-    ruby::{
-        fqn::ruby_fqn_to_string,
-        types::{RubyDefinitionType, RubyFqn},
-    },
-    rust::fqn::rust_fqn_to_string,
-    rust::types::{RustDefinitionType, RustFqn, RustImportType},
-    typescript::ast::typescript_fqn_to_string,
-    typescript::types::{TypeScriptDefinitionType, TypeScriptFqn, TypeScriptImportType},
-    utils::{HasRange, Position, Range},
+    java::types::JavaImportType,
+    kotlin::types::KotlinImportType,
+    python::types::PythonImportType,
+    rust::types::RustImportType,
+    typescript::types::TypeScriptImportType,
+    utils::HasRange,
 };
 use serde::{Deserialize, Serialize};
 
@@ -511,82 +501,6 @@ impl gkg_utils::arrow::AsRecordBatch<RowContext<'_>> for FileNode {
 
 /// Represents a language-specific definition type (e.g. class, module, method, etc.)
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum DefinitionType {
-    Ruby(RubyDefinitionType),
-    Python(PythonDefinitionType),
-    Kotlin(KotlinDefinitionType),
-    Java(JavaDefinitionType),
-    CSharp(CSharpDefinitionType),
-    TypeScript(TypeScriptDefinitionType),
-    Rust(RustDefinitionType),
-    Unsupported(),
-}
-
-impl DefinitionType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            DefinitionType::Ruby(ruby_type) => ruby_type.as_str(),
-            DefinitionType::Python(python_type) => python_type.as_str(),
-            DefinitionType::Kotlin(kotlin_type) => kotlin_type.as_str(),
-            DefinitionType::Java(java_type) => java_type.as_str(),
-            DefinitionType::CSharp(csharp_type) => csharp_type.as_str(),
-            DefinitionType::TypeScript(typescript_type) => typescript_type.as_str(),
-            DefinitionType::Rust(rust_type) => rust_type.as_str(),
-            DefinitionType::Unsupported() => "unsupported",
-        }
-    }
-}
-
-/// Represents a language-specific FQN type
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum FqnType {
-    Ruby(RubyFqn),
-    Python(PythonFqn),
-    Kotlin(KotlinFqn),
-    Java(JavaFqn),
-    CSharp(CSharpFqn),
-    TypeScript(TypeScriptFqn),
-    Rust(RustFqn),
-}
-
-impl std::fmt::Display for FqnType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FqnType::Ruby(ruby_type) => write!(f, "{}", ruby_fqn_to_string(ruby_type)),
-            FqnType::Python(python_type) => write!(f, "{}", python_fqn_to_string(python_type)),
-            FqnType::Kotlin(kotlin_type) => write!(f, "{}", kotlin_fqn_to_string(kotlin_type)),
-            FqnType::Java(java_type) => write!(f, "{}", java_fqn_to_string(java_type)),
-            FqnType::CSharp(csharp_type) => write!(
-                f,
-                "{}",
-                csharp_type
-                    .iter()
-                    .map(|part| part.node_name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".")
-            ),
-            FqnType::TypeScript(typescript_type) => {
-                write!(f, "{}", typescript_fqn_to_string(typescript_type))
-            }
-            FqnType::Rust(rust_type) => write!(f, "{}", rust_fqn_to_string(rust_type)),
-        }
-    }
-}
-
-impl FqnType {
-    #[inline(always)]
-    pub fn name(&self) -> &str {
-        match self {
-            FqnType::Ruby(ruby_type) => ruby_type.parts.last().unwrap().node_name(),
-            FqnType::Python(python_type) => python_type.parts.last().unwrap().node_name(),
-            FqnType::Kotlin(kotlin_type) => kotlin_type.last().unwrap().node_name(),
-            FqnType::Java(java_type) => java_type.last().unwrap().node_name(),
-            FqnType::CSharp(csharp_type) => csharp_type.last().unwrap().node_name(),
-            FqnType::TypeScript(typescript_type) => typescript_type.last().unwrap().node_name(),
-            FqnType::Rust(rust_type) => rust_type.parts.last().unwrap().node_name(),
-        }
-    }
-}
 /// Represents a definition node in the graph
 #[derive(Debug, Clone)]
 pub struct DefinitionNode {
@@ -706,6 +620,11 @@ impl ImportedSymbolLocation {
 
 /// Represents a language-specific import type
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+
+
+/// Per-language import type. Will be replaced by a canonical string
+/// once ImportedSymbolNode is converted to canonical types.
+#[derive(Debug, Clone)]
 pub enum ImportType {
     Java(JavaImportType),
     Kotlin(KotlinImportType),
@@ -718,12 +637,12 @@ pub enum ImportType {
 impl ImportType {
     pub fn as_str(&self) -> &str {
         match self {
-            ImportType::Java(java_type) => java_type.as_str(),
-            ImportType::Kotlin(kotlin_type) => kotlin_type.as_str(),
-            ImportType::Python(python_type) => python_type.as_str(),
-            ImportType::CSharp(csharp_type) => csharp_type.as_str(),
-            ImportType::TypeScript(typescript_type) => typescript_type.as_str(),
-            ImportType::Rust(rust_type) => rust_type.as_str(),
+            ImportType::Java(t) => t.as_str(),
+            ImportType::Kotlin(t) => t.as_str(),
+            ImportType::Python(t) => t.as_str(),
+            ImportType::CSharp(t) => t.as_str(),
+            ImportType::TypeScript(t) => t.as_str(),
+            ImportType::Rust(t) => t.as_str(),
         }
     }
 }
