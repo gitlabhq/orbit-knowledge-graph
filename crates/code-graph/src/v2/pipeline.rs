@@ -11,10 +11,11 @@ use std::marker::PhantomData;
 use std::path::Path;
 
 use crate::linker::v2::{
-    GraphBuilder, GraphData, NoResolver, ReferenceResolver, ResolutionContext,
+    GraphBuilder, GraphData, NoResolver, ReferenceResolver, ResolutionContext, RulesResolver,
 };
-use crate::v2::resolvers::java::JavaResolver;
-use crate::v2::resolvers::python::PythonResolver;
+use crate::v2::lang_rules::java::JavaRules;
+use crate::v2::lang_rules::kotlin::KotlinRules;
+use crate::v2::lang_rules::python::PythonRules;
 
 /// Input to a language pipeline: file path + source bytes.
 pub type FileInput = (String, Vec<u8>);
@@ -126,9 +127,9 @@ macro_rules! register_v2_pipelines {
 }
 
 register_v2_pipelines! {
-    Python  => GenericPipeline<PythonCanonicalParser, PythonResolver>,
-    Java    => GenericPipeline<JavaCanonicalParser, JavaResolver>,
-    Kotlin  => GenericPipeline<KotlinCanonicalParser, NoResolver>,
+    Python  => GenericPipeline<PythonCanonicalParser, RulesResolver<PythonRules>>,
+    Java    => GenericPipeline<JavaCanonicalParser, RulesResolver<JavaRules>>,
+    Kotlin  => GenericPipeline<KotlinCanonicalParser, RulesResolver<KotlinRules>>,
     CSharp  => GenericPipeline<CSharpCanonicalParser, NoResolver>,
 }
 

@@ -1265,6 +1265,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-test",
+ "treesitter-visit",
  "walkdir",
 ]
 

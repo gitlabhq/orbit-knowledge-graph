@@ -181,6 +181,14 @@ impl SsaResolver {
         defs
     }
 
+    /// Look up a variable's reaching definitions without recording the read.
+    /// Used by the ReachingResolver when it already has the read recorded
+    /// via the walker.
+    pub fn read_variable_stateless(&mut self, variable: &str, block: BlockId) -> ReachingDefs {
+        let value = self.read_variable_internal(variable, block);
+        self.resolve_value(&value)
+    }
+
     /// Get all recorded reads (for the ReachingResolver to produce edges).
     pub fn reads(&self) -> &[(BlockId, String, ReachingDefs)] {
         &self.reads
