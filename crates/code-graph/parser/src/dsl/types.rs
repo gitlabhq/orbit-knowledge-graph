@@ -1,0 +1,362 @@
+use rustc_hash::FxHashSet;
+use treesitter_visit::tree_sitter::StrDoc;
+use treesitter_visit::{Node, SupportLang};
+
+use crate::definitions::{DefinitionInfo, DefinitionTypeInfo};
+use crate::fqn::Fqn;
+use crate::utils::Range;
+
+use code_graph_types::{DefKind, DefinitionMetadata};
+
+use super::extractors::{Extract, MetadataRule};
+use super::predicates::Pred;
+
+type N<'a> = Node<'a, StrDoc<SupportLang>>;
+
+pub type LabelFn = fn(&N<'_>) -> &'static str;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DslDefinitionType {
+    pub label: &'static str,
+}
+
+impl DefinitionTypeInfo for DslDefinitionType {
+    fn as_str(&self) -> &str {
+        self.label
+    }
+}
+
+pub type DslFqn = Fqn<String>;
+pub type DslDefinitionInfo = DefinitionInfo<DslDefinitionType, DslFqn>;
+
+pub fn dsl_fqn_to_string(fqn: &DslFqn) -> String {
+    fqn.parts.join(".")
+}
+
+#[derive(Debug, Clone)]
+pub struct DslRawReference {
+    pub name: String,
+    pub range: Range,
+}
+
+#[derive(Debug, Clone)]
+pub struct DslImport {
+    pub path: String,
+    pub name: Option<String>,
+    pub alias: Option<String>,
+    pub range: Range,
+}
+
+/// Shared behavior for scope and reference rules.
+pub trait Rule {
+    fn kind(&self) -> &'static str;
+    fn condition(&self) -> Option<&Pred>;
+    fn extract(&self) -> &Extract;
+
+    fn matches(&self, node: &N<'_>, node_kind: &str) -> bool {
+        self.kind() == node_kind && self.condition().is_none_or(|c| c.test(node))
+    }
+
+    fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        self.extract().extract_name(node)
+    }
+}
+
+enum Label {
+    Static(&'static str),
+    Fn(LabelFn),
+}
+
+pub struct ScopeRule {
+    kind: &'static str,
+    label: Label,
+    def_kind: DefKind,
+    condition: Option<Pred>,
+    name: Extract,
+    pub(crate) creates_scope: bool,
+    pub(crate) metadata_rule: Option<MetadataRule>,
+}
+
+impl Rule for ScopeRule {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+    fn condition(&self) -> Option<&Pred> {
+        self.condition.as_ref()
+    }
+    fn extract(&self) -> &Extract {
+        &self.name
+    }
+}
+
+impl ScopeRule {
+    pub fn when(mut self, pred: Pred) -> Self {
+        self.condition = Some(match self.condition {
+            Some(existing) => existing.and(pred),
+            None => pred,
+        });
+        self
+    }
+
+    pub fn name_from(mut self, extract: Extract) -> Self {
+        self.name = extract;
+        self
+    }
+
+    pub fn no_scope(mut self) -> Self {
+        self.creates_scope = false;
+        self
+    }
+
+    pub fn def_kind(mut self, kind: DefKind) -> Self {
+        self.def_kind = kind;
+        self
+    }
+
+    pub fn metadata(mut self, rule: MetadataRule) -> Self {
+        self.metadata_rule = Some(rule);
+        self
+    }
+
+    pub(crate) fn resolve_def_kind(&self) -> DefKind {
+        self.def_kind
+    }
+
+    pub(crate) fn extract_metadata(&self, node: &N<'_>) -> Option<Box<DefinitionMetadata>> {
+        self.metadata_rule.as_ref()?.extract_metadata(node)
+    }
+
+    pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
+        match &self.label {
+            Label::Static(s) => s,
+            Label::Fn(f) => f(node),
+        }
+    }
+}
+
+pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
+    ScopeRule {
+        kind,
+        label: Label::Static(label),
+        def_kind: DefKind::Other,
+        condition: None,
+        name: Extract::Default,
+        creates_scope: true,
+        metadata_rule: None,
+    }
+}
+
+pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
+    ScopeRule {
+        kind,
+        label: Label::Fn(label_fn),
+        def_kind: DefKind::Other,
+        condition: None,
+        name: Extract::Default,
+        creates_scope: true,
+        metadata_rule: None,
+    }
+}
+
+pub struct ReferenceRule {
+    kind: &'static str,
+    condition: Option<Pred>,
+    name: Extract,
+}
+
+impl Rule for ReferenceRule {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+    fn condition(&self) -> Option<&Pred> {
+        self.condition.as_ref()
+    }
+    fn extract(&self) -> &Extract {
+        &self.name
+    }
+}
+
+impl ReferenceRule {
+    pub fn when(mut self, pred: Pred) -> Self {
+        self.condition = Some(match self.condition {
+            Some(existing) => existing.and(pred),
+            None => pred,
+        });
+        self
+    }
+
+    pub fn name_from(mut self, extract: Extract) -> Self {
+        self.name = extract;
+        self
+    }
+}
+
+pub fn reference(kind: &'static str) -> ReferenceRule {
+    ReferenceRule {
+        kind,
+        condition: None,
+        name: Extract::Default,
+    }
+}
+
+pub struct ImportRule {
+    kind: &'static str,
+    condition: Option<Pred>,
+    /// Extracts the import source/path (e.g. `<stdio.h>`, `os.path`).
+    path: Extract,
+    /// Extracts the imported symbol name. None = whole-module import.
+    symbol: Option<Extract>,
+    /// Extracts the alias. None = no aliasing.
+    alias: Option<Extract>,
+}
+
+impl Rule for ImportRule {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+    fn condition(&self) -> Option<&Pred> {
+        self.condition.as_ref()
+    }
+    fn extract(&self) -> &Extract {
+        &self.path
+    }
+}
+
+impl ImportRule {
+    pub fn when(mut self, pred: Pred) -> Self {
+        self.condition = Some(match self.condition {
+            Some(existing) => existing.and(pred),
+            None => pred,
+        });
+        self
+    }
+
+    pub fn path_from(mut self, extract: Extract) -> Self {
+        self.path = extract;
+        self
+    }
+
+    pub fn symbol_from(mut self, extract: Extract) -> Self {
+        self.symbol = Some(extract);
+        self
+    }
+
+    pub fn alias_from(mut self, extract: Extract) -> Self {
+        self.alias = Some(extract);
+        self
+    }
+
+    pub(crate) fn extract_symbol(&self, node: &N<'_>) -> Option<String> {
+        self.symbol.as_ref()?.extract_name(node)
+    }
+
+    pub(crate) fn extract_alias(&self, node: &N<'_>) -> Option<String> {
+        self.alias.as_ref()?.extract_name(node)
+    }
+}
+
+pub fn import(kind: &'static str) -> ImportRule {
+    ImportRule {
+        kind,
+        condition: None,
+        path: Extract::Default,
+        symbol: None,
+        alias: None,
+    }
+}
+
+pub trait DslLanguage {
+    fn name() -> &'static str;
+
+    fn auto_scopes() -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
+    fn auto_refs() -> &'static [&'static str] {
+        &[]
+    }
+    fn auto_imports() -> &'static [&'static str] {
+        &[]
+    }
+
+    fn scopes() -> Vec<ScopeRule> {
+        vec![]
+    }
+    fn refs() -> Vec<ReferenceRule> {
+        vec![]
+    }
+    fn imports() -> Vec<ImportRule> {
+        vec![]
+    }
+
+    fn spec() -> LanguageSpec {
+        LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
+            .auto(Self::auto_scopes())
+            .auto_refs(Self::auto_refs())
+            .auto_imports(Self::auto_imports())
+    }
+}
+
+pub struct LanguageSpec {
+    pub name: &'static str,
+    pub scopes: Vec<ScopeRule>,
+    pub refs: Vec<ReferenceRule>,
+    pub imports: Vec<ImportRule>,
+    pub(crate) scope_kinds: FxHashSet<&'static str>,
+}
+
+impl LanguageSpec {
+    pub fn new(
+        name: &'static str,
+        scopes: Vec<ScopeRule>,
+        refs: Vec<ReferenceRule>,
+        imports: Vec<ImportRule>,
+    ) -> Self {
+        let scope_kinds = scopes.iter().map(|r| r.kind).collect();
+        Self {
+            name,
+            scopes,
+            refs,
+            imports,
+            scope_kinds,
+        }
+    }
+
+    /// Register node kinds that automatically create scopes using
+    /// default name extraction (`name` field, then first identifier child).
+    /// Explicit `scope()` rules override these for the same node kind
+    /// via last-rule-wins semantics.
+    pub fn auto(mut self, entries: &[(&'static str, &'static str)]) -> Self {
+        let mut auto_rules: Vec<ScopeRule> = entries
+            .iter()
+            .map(|&(kind, label)| scope(kind, label))
+            .collect();
+        // Prepend so explicit rules come later and win.
+        auto_rules.append(&mut self.scopes);
+        self.scopes = auto_rules;
+        self.scope_kinds = self.scopes.iter().map(|r| r.kind).collect();
+        self
+    }
+
+    /// Register node kinds that automatically produce references using
+    /// default name extraction. Explicit `reference()` rules override.
+    pub fn auto_refs(mut self, kinds: &[&'static str]) -> Self {
+        let mut auto_rules: Vec<ReferenceRule> =
+            kinds.iter().map(|&kind| reference(kind)).collect();
+        auto_rules.append(&mut self.refs);
+        self.refs = auto_rules;
+        self
+    }
+
+    /// Register node kinds that automatically produce imports using
+    /// default path extraction. Explicit `import()` rules override.
+    pub fn auto_imports(mut self, kinds: &[&'static str]) -> Self {
+        let mut auto_rules: Vec<ImportRule> = kinds.iter().map(|&kind| import(kind)).collect();
+        auto_rules.append(&mut self.imports);
+        self.imports = auto_rules;
+        self
+    }
+
+    pub(crate) fn is_scope_candidate(&self, kind: &str) -> bool {
+        self.scope_kinds.contains(kind)
+    }
+}
