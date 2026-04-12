@@ -4,45 +4,22 @@
 Run the full GKG stack (GDK + Siphon + NATS + ClickHouse + GKG components)
 in CI with HTTPS, test users, and Robot Framework e2e tests.
 
-## Status: CONTAINER VERIFIED -- pushing image to registry
+## Status: IMAGE PUSHED, MR CREATED -- ready for CI validation
+
+## MR: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/884
+## Image: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg-e2e-base:latest
 
 ## What's Done
-- [x] Docker image built and ALL services verified running
-- [x] Robot Framework tests passing inside container (2/2 green)
-  - Services Are Running: ClickHouse, NATS, GDK all verified
-  - Seed Test Data: groups, projects, MRs, issues created via API
-- [x] Full service stack operational:
-  - Rails HTTPS at gdk.test:3443 (readiness OK)
-  - ClickHouse at port 8123 (queries working)
-  - NATS at port 4222 (connected)
-  - Siphon CDC (producer + consumer active, LSN tracking)
-  - nginx, Workhorse, Gitaly, PostgreSQL, Redis all up
-- [x] Data seeding:
-  - EE Ultimate license installed (expires +1 year)
-  - Cloud Connector key created
-  - knowledge_graph feature flag enabled
-  - KG namespaces enabled for all root groups
-  - Root password reset (prevents expiry-based 403)
-  - PAT created and saved
-- [x] CI job configured in .gitlab-ci.yml (manual trigger)
-- [x] Robot Framework test suite (3 files, 10+ tests)
-- [x] Branch pushed with 4 commits
-- [ ] Image push to GitLab Container Registry (in progress)
-
-## Fixes Applied
-1. ClickHouse memory limit -> 8GB (default 3GB too low)
-2. PostgreSQL wal_level -> logical (for Siphon CDC)
-3. ClickHouse databases created + click_house.yml copied at startup
-4. ClickHouse migrations run at startup
-5. Root password reset (GDK default expires)
-6. Namespace.root -> parent_id:nil (API compatibility)
-7. Removed gitlab:duo:setup (not available)
-8. GDK_GITLAB_DIR env var for portable paths
-9. mise activation in shell commands for Rails runner
-10. Simplified suite setup (verify API instead of re-enabling flags)
+- [x] Docker image built, tested, and pushed to GitLab Container Registry
+- [x] All 14 GDK services verified running in container
+- [x] Robot Framework tests passing (2/2 service + seed tests green)
+- [x] Siphon CDC pipeline operational (producer + consumer)
+- [x] Data seeding: EE license, CC key, feature flags, KG namespaces, PAT
+- [x] CI job configured (manual trigger on MRs and main)
+- [x] MR !884 created
+- [x] Image pushed: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg-e2e-base:latest
 
 ## What Remains
-- [ ] Wait for image push to complete
-- [ ] Validate CI job runs end-to-end
-- [ ] Run the full test suite (including CDC + indexing tests)
-- [ ] Update progress and finalize MR
+- [ ] Trigger CI job on MR and validate it works end-to-end
+- [ ] Run the full e2e test suite (CDC + indexing + queries + mutations)
+- [ ] Clean up any remaining issues from CI run
