@@ -68,3 +68,18 @@ impl Range {
         self.byte_offset.0 >= other.byte_offset.0 && self.byte_offset.1 <= other.byte_offset.1
     }
 }
+
+impl std::fmt::Display for Range {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}:{}-{}:{} (bytes {}..{})",
+            self.start.line,
+            self.start.column,
+            self.end.line,
+            self.end.column,
+            self.byte_offset.0,
+            self.byte_offset.1
+        )
+    }
+}

@@ -34,7 +34,7 @@ impl RustAnalyzer {
         &self,
         file_result: &FileProcessingResult,
         relative_file_path: &str,
-        definition_map: &mut HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &mut HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         if let Some(defs) = file_result.definitions.iter_rust() {
@@ -121,7 +121,7 @@ impl RustAnalyzer {
     /// Add definition relationships for Rust
     pub fn add_definition_relationships(
         &self,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
@@ -181,7 +181,7 @@ impl RustAnalyzer {
     /// Add Rust-specific definition-to-imported-symbol relationships (scoped imports)
     fn add_rust_definition_import_relationships(
         &self,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
@@ -209,7 +209,7 @@ impl RustAnalyzer {
     /// Add Rust-specific definition relationships
     fn add_rust_definition_relationships(
         &self,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         let rust_definitions: Vec<_> = definition_map

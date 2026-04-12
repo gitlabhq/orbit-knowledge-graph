@@ -49,7 +49,7 @@ impl PythonAnalyzer {
         &self,
         file_result: &FileProcessingResult,
         relative_file_path: &str,
-        definition_map: &mut HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &mut HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         if let Some(defs) = file_result.definitions.iter_python() {
@@ -149,7 +149,7 @@ impl PythonAnalyzer {
         &self,
         file_references: &Option<References>,
         relative_file_path: &str,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
         imported_symbol_to_imported_symbols: &HashMap<
@@ -221,7 +221,7 @@ impl PythonAnalyzer {
         file_path: &str,
         reference: &PythonReferenceInfo,
         source_definition: &Option<DefinitionNode>,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
         imported_symbol_to_imported_symbols: &HashMap<
@@ -392,7 +392,7 @@ impl PythonAnalyzer {
         file_path: &str,
         reference: &PythonReferenceInfo,
         source_definition: &Option<DefinitionNode>,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
         imported_symbol_to_imported_symbols: &HashMap<
@@ -643,7 +643,7 @@ impl PythonAnalyzer {
     pub fn resolve_imported_symbols(
         &self,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         file_tree: &OptimizedFileTree,
         imported_symbol_to_imported_symbols: &mut HashMap<
             ImportedSymbolLocation,
@@ -736,7 +736,7 @@ impl PythonAnalyzer {
     /// Create definition-to-definition and definition-to-imported-symbol relationships using definitions map
     pub fn add_definition_relationships(
         &self,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
@@ -859,7 +859,7 @@ impl PythonAnalyzer {
 
     fn get_matching_definition_or_imported_symbol(
         &self,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         name: &String,
         file_path: &str,

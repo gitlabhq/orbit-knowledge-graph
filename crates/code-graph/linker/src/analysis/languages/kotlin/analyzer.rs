@@ -32,7 +32,7 @@ impl KotlinAnalyzer {
         &mut self,
         file_result: &FileProcessingResult,
         relative_file_path: &str,
-        definition_map: &mut HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &mut HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         if let Some(defs) = file_result.definitions.iter_kotlin() {
@@ -144,7 +144,7 @@ impl KotlinAnalyzer {
 
     pub fn add_definition_relationships(
         &self,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         for ((_, child_file_path), (child_def, child_fqn)) in definition_map {

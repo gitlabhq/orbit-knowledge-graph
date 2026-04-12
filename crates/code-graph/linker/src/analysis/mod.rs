@@ -243,7 +243,7 @@ impl AnalysisService {
     fn extract_language_entities(
         &mut self,
         file_result: &FileProcessingResult,
-        definition_map: &mut HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &mut HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &mut HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
@@ -351,7 +351,7 @@ impl AnalysisService {
         &mut self,
         language: Language,
         file_tree: OptimizedFileTree,
-        definition_map: &mut HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &mut HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &mut HashMap<(String, String), Vec<ImportedSymbolNode>>,
         imported_symbol_to_imported_symbols: &mut HashMap<
             ImportedSymbolLocation,
@@ -428,7 +428,7 @@ impl AnalysisService {
         &mut self,
         language: Language,
         file_references: Vec<(String, Option<References>)>,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
         imported_symbol_to_imported_symbols: &HashMap<
@@ -489,7 +489,7 @@ impl AnalysisService {
 
     fn add_nodes(
         &self,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         definition_nodes: &mut Vec<DefinitionNode>,
         imported_symbol_nodes: &mut Vec<ImportedSymbolNode>,
@@ -514,7 +514,7 @@ impl AnalysisService {
     fn add_definition_relationships(
         &self,
         language: Language,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {

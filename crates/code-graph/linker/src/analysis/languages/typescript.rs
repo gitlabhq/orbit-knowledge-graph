@@ -33,7 +33,7 @@ impl TypeScriptAnalyzer {
         &self,
         file_result: &FileProcessingResult,
         relative_file_path: &str,
-        definition_map: &mut HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &mut HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         if let Some(defs) = file_result.definitions.iter_typescript() {
@@ -182,7 +182,7 @@ impl TypeScriptAnalyzer {
     /// Create definition-to-definition and definition-to-imported-symbol relationships using definitions map
     pub fn add_definition_relationships(
         &self,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {

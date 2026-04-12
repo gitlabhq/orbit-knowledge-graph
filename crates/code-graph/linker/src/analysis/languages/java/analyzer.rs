@@ -32,7 +32,7 @@ impl JavaAnalyzer {
         &mut self,
         file_result: &FileProcessingResult,
         relative_file_path: &str,
-        definition_map: &mut HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &mut HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         if let Some(defs) = file_result.definitions.iter_java() {
@@ -142,7 +142,7 @@ impl JavaAnalyzer {
     /// Create definition-to-definition relationships using definitions map
     pub fn add_definition_relationships(
         &self,
-        definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+        definition_map: &HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         for ((_child_fqn_string, child_file_path), (child_def, child_fqn)) in definition_map {

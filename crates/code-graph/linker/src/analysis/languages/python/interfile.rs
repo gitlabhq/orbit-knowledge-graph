@@ -18,7 +18,7 @@ use crate::analysis::types::{DefinitionNode, FqnType, ImportedSymbolNode, Optimi
 pub fn get_possible_symbol_locations(
     imported_symbol_node: &ImportedSymbolNode,
     file_tree: &OptimizedFileTree,
-    _definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
+    _definition_map: &HashMap<(String, String), DefinitionNode>,
 ) -> Vec<String> {
     let mut possible_files = Vec::new();
 

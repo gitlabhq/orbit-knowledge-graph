@@ -8,6 +8,7 @@ use internment::ArcIntern;
 use rustc_hash::FxHasher;
 
 use crate::graph::{RelationshipKind, RelationshipType};
+use code_graph_types::{CanonicalFqn, DefKind};
 use parser_core::{
     csharp::types::{CSharpDefinitionType, CSharpFqn, CSharpImportType},
     definitions::DefinitionTypeInfo,
@@ -590,8 +591,9 @@ impl FqnType {
 #[derive(Debug, Clone)]
 pub struct DefinitionNode {
     pub id: Option<i64>,
-    pub fqn: FqnType,
-    pub definition_type: DefinitionType,
+    pub fqn: CanonicalFqn,
+    pub definition_type: String,
+    pub kind: DefKind,
     pub range: Range,
     pub file_path: ArcIntern<String>,
 }
@@ -604,8 +606,9 @@ impl HasRange for DefinitionNode {
 
 impl DefinitionNode {
     pub fn new(
-        fqn: FqnType,
-        definition_type: DefinitionType,
+        fqn: CanonicalFqn,
+        definition_type: String,
+        kind: DefKind,
         range: Range,
         file_path: ArcIntern<String>,
     ) -> Self {
@@ -613,6 +616,7 @@ impl DefinitionNode {
             id: None,
             fqn,
             definition_type,
+            kind,
             range,
             file_path,
         }
@@ -620,11 +624,10 @@ impl DefinitionNode {
 
     pub fn assign_id(&mut self, project_id: i64, branch: &str) -> i64 {
         let fqn_str = self.fqn.to_string();
-        let definition_type_str = self.definition_type.as_str();
         let id = compute_id(&[
             &project_id.to_string(),
             branch,
-            definition_type_str,
+            &self.definition_type,
             &fqn_str,
         ]);
         self.id = Some(id);
