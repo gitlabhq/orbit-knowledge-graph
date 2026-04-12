@@ -4,12 +4,7 @@
 
 echo "=== gkg-e2e-base starting ==="
 
-# Fix ClickHouse to listen on all interfaces (default is localhost only)
-CH_CONFIG="/gitlab-gdk/gitlab-development-kit/clickhouse/config.xml"
-sed -i 's|<!-- <listen_host>0.0.0.0</listen_host> -->|<listen_host>0.0.0.0</listen_host>|' "$CH_CONFIG"
-sed -i 's|<listen_host>::1</listen_host>|<!-- <listen_host>::1</listen_host> -->|' "$CH_CONFIG"
-sed -i 's|<listen_host>127.0.0.1</listen_host>|<!-- <listen_host>127.0.0.1</listen_host> -->|' "$CH_CONFIG"
-# Remove memory limit
+# Remove memory limit for ClickHouse
 mkdir -p /gitlab-gdk/gitlab-development-kit/clickhouse/config.d
 cat > /gitlab-gdk/gitlab-development-kit/clickhouse/config.d/zz-e2e.xml <<'XML'
 <clickhouse>
@@ -26,6 +21,23 @@ fi
 eval "$(~/.local/bin/mise activate bash)"
 cd /gitlab-gdk/gitlab-development-kit
 mise x -- gdk start
+
+# After GDK starts, fix ClickHouse to listen on all interfaces and restart it
+echo "=== Fixing ClickHouse listen address ==="
+CH_CONFIG="/gitlab-gdk/gitlab-development-kit/clickhouse/config.xml"
+# Replace localhost-only listen_host with 0.0.0.0
+sed -i '/<listen_host>::1<\/listen_host>/d' "$CH_CONFIG"
+sed -i '/<listen_host>127\.0\.0\.1<\/listen_host>/d' "$CH_CONFIG"
+sed -i 's|<!-- <listen_host>0\.0\.0\.0</listen_host> -->|<listen_host>0.0.0.0</listen_host>|' "$CH_CONFIG"
+# If 0.0.0.0 wasn't in a comment, add it before </clickhouse>
+grep -q '<listen_host>0.0.0.0</listen_host>' "$CH_CONFIG" || \
+    sed -i 's|</clickhouse>|    <listen_host>0.0.0.0</listen_host>\n</clickhouse>|' "$CH_CONFIG"
+# Verify
+echo "ClickHouse listen_host entries:"
+grep "listen_host" "$CH_CONFIG" | grep -v "<!--"
+# Restart ClickHouse to apply
+sv restart /gitlab-gdk/gitlab-development-kit/services/clickhouse
+sleep 3
 
 echo "=== Waiting for ClickHouse ==="
 for i in $(seq 1 60); do
