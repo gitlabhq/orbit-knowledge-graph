@@ -1219,6 +1219,7 @@ dependencies = [
  "rayon",
  "rustc-hash",
  "strum 0.28.0",
+ "tempfile",
  "treesitter-visit",
 ]
 

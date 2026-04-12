@@ -6,7 +6,8 @@ use strum::IntoEnumIterator;
 
 use crate::linker::v2::{GraphBuilder, GraphData};
 use parser_core::v2::{
-    java::JavaCanonicalParser, kotlin::KotlinCanonicalParser, python::PythonCanonicalParser,
+    csharp::CSharpCanonicalParser, java::JavaCanonicalParser, kotlin::KotlinCanonicalParser,
+    python::PythonCanonicalParser,
 };
 
 pub struct PipelineConfig {
@@ -171,6 +172,7 @@ impl Pipeline {
             Language::Python => &PythonCanonicalParser,
             Language::Java => &JavaCanonicalParser,
             Language::Kotlin => &KotlinCanonicalParser,
+            Language::CSharp => &CSharpCanonicalParser,
             _ => {
                 return Err(PipelineError {
                     file_path: path.to_string(),
@@ -183,5 +185,229 @@ impl Pipeline {
             file_path: path.to_string(),
             error: format!("Parse error: {e}"),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use code_graph_types::{DefKind, NodeKind};
+    use parser_core::v2::CanonicalParser;
+
+    fn fixture_path(relative: &str) -> String {
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        format!("{manifest}/parser/src/{relative}")
+    }
+
+    fn parse_fixture_file(path: &str, parser: &dyn CanonicalParser) -> CanonicalResult {
+        let source = std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
+        parser
+            .parse_file(&source, path)
+            .unwrap_or_else(|e| panic!("Failed to parse {path}: {e}"))
+    }
+
+    // ── Python fixture ──────────────────────────────────────────────
+
+    #[test]
+    fn python_definitions_fixture() {
+        let path = fixture_path("python/fixtures/definitions.py");
+        let result = parse_fixture_file(&path, &PythonCanonicalParser);
+
+        assert!(
+            result.definitions.len() >= 10,
+            "Expected at least 10 definitions, got {}",
+            result.definitions.len()
+        );
+
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"simple_function"));
+        assert!(names.contains(&"module_lambda"));
+        assert!(names.contains(&"SimpleClass"));
+        assert!(names.contains(&"decorated_function"));
+
+        let class_defs: Vec<_> = result
+            .definitions
+            .iter()
+            .filter(|d| d.kind == DefKind::Class)
+            .collect();
+        assert!(!class_defs.is_empty(), "Should find at least one class");
+
+        let method_defs: Vec<_> = result
+            .definitions
+            .iter()
+            .filter(|d| d.kind == DefKind::Method)
+            .collect();
+        assert!(!method_defs.is_empty(), "Should find at least one method");
+    }
+
+    // ── Java fixture ────────────────────────────────────────────────
+
+    #[test]
+    fn java_comprehensive_fixture() {
+        let path = fixture_path("java/fixtures/ComprehensiveJavaDefinitions.java");
+        let result = parse_fixture_file(&path, &JavaCanonicalParser);
+
+        assert!(
+            result.definitions.len() >= 5,
+            "Expected at least 5 definitions, got {}",
+            result.definitions.len()
+        );
+
+        let kinds: Vec<DefKind> = result.definitions.iter().map(|d| d.kind).collect();
+        assert!(kinds.contains(&DefKind::Class), "Should have a class");
+        assert!(kinds.contains(&DefKind::Method), "Should have a method");
+    }
+
+    // ── Kotlin fixture ──────────────────────────────────────────────
+
+    #[test]
+    fn kotlin_comprehensive_fixture() {
+        let path = fixture_path("kotlin/fixtures/ComprehensiveKotlinDefinitions.kt");
+        let result = parse_fixture_file(&path, &KotlinCanonicalParser);
+
+        assert!(
+            result.definitions.len() >= 5,
+            "Expected at least 5 definitions, got {}",
+            result.definitions.len()
+        );
+
+        let kinds: Vec<DefKind> = result.definitions.iter().map(|d| d.kind).collect();
+        assert!(kinds.contains(&DefKind::Class), "Should have a class");
+        assert!(kinds.contains(&DefKind::Function), "Should have a function");
+    }
+
+    // ── C# fixture ──────────────────────────────────────────────────
+
+    #[test]
+    fn csharp_comprehensive_fixture() {
+        let path = fixture_path("csharp/fixtures/ComprehensiveCSharp.cs");
+        let result = parse_fixture_file(&path, &CSharpCanonicalParser);
+
+        assert!(
+            result.definitions.len() >= 5,
+            "Expected at least 5 definitions, got {}",
+            result.definitions.len()
+        );
+
+        let kinds: Vec<DefKind> = result.definitions.iter().map(|d| d.kind).collect();
+        assert!(kinds.contains(&DefKind::Class), "Should have a class");
+    }
+
+    // ── Full pipeline e2e ───────────────────────────────────────────
+
+    #[test]
+    fn full_pipeline_on_fixture_directory() {
+        // Create a temp directory with fixture files from all 4 languages
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        std::fs::write(
+            root.join("app.py"),
+            r#"
+class UserService:
+    def get_user(self, id):
+        return self.db.find(id)
+
+    def create_user(self, name):
+        user = User(name)
+        self.db.save(user)
+        return user
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            root.join("Service.java"),
+            r#"
+package com.example;
+
+import java.util.List;
+
+public class Service {
+    public void run() {
+        helper();
+    }
+    private void helper() {}
+}
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            root.join("App.kt"),
+            r#"
+package com.app
+
+class App {
+    fun start() {
+        println("started")
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            root.join("Controller.cs"),
+            r#"
+using System;
+
+namespace MyApp {
+    public class Controller {
+        public void Index() {}
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let pipeline = Pipeline::new(PipelineConfig::default());
+        let result = pipeline.run(root);
+
+        // Should have parsed all 4 files
+        assert_eq!(result.stats.files_parsed, 4, "Should parse 4 files");
+        assert_eq!(result.errors.len(), 0, "Should have no errors");
+
+        // Should have definitions from all languages
+        assert!(
+            result.stats.definitions_count >= 8,
+            "Expected at least 8 definitions, got {}",
+            result.stats.definitions_count
+        );
+
+        // Graph should have files, directories, and edges
+        assert_eq!(result.graph.files.len(), 4);
+        assert!(!result.graph.directories.is_empty());
+        assert!(!result.graph.edges.is_empty());
+
+        // Should have containment edges (definition → definition)
+        let def_to_def = result
+            .graph
+            .edges
+            .iter()
+            .filter(|e| {
+                e.relationship.source_node == NodeKind::Definition
+                    && e.relationship.target_node == NodeKind::Definition
+            })
+            .count();
+        assert!(
+            def_to_def >= 4,
+            "Expected at least 4 def-to-def edges, got {def_to_def}"
+        );
+
+        // Should have file→definition edges
+        let file_to_def = result
+            .graph
+            .edges
+            .iter()
+            .filter(|e| {
+                e.relationship.source_node == NodeKind::File
+                    && e.relationship.target_node == NodeKind::Definition
+            })
+            .count();
+        assert!(
+            file_to_def >= 8,
+            "Expected at least 8 file→def edges, got {file_to_def}"
+        );
     }
 }
