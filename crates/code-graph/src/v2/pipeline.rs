@@ -13,6 +13,7 @@ use std::path::Path;
 use crate::linker::v2::{
     GraphBuilder, GraphData, NoResolver, ReferenceResolver, ResolutionContext,
 };
+use crate::v2::resolvers::python::PythonResolver;
 
 /// Input to a language pipeline: file path + source bytes.
 pub type FileInput = (String, Vec<u8>);
@@ -123,9 +124,8 @@ macro_rules! register_v2_pipelines {
     };
 }
 
-// TODO: replace NoResolver with per-language resolvers (PythonResolver, etc.)
 register_v2_pipelines! {
-    Python  => GenericPipeline<PythonCanonicalParser, NoResolver>,
+    Python  => GenericPipeline<PythonCanonicalParser, PythonResolver>,
     Java    => GenericPipeline<JavaCanonicalParser, NoResolver>,
     Kotlin  => GenericPipeline<KotlinCanonicalParser, NoResolver>,
     CSharp  => GenericPipeline<CSharpCanonicalParser, NoResolver>,

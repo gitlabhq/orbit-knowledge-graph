@@ -13,6 +13,7 @@ ignore = { workspace = true }
 log = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
+stacker = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

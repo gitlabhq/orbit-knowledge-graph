@@ -1,3 +1,3 @@
 mod canonical;
 
-pub use canonical::PythonCanonicalParser;
+pub use canonical::{PythonAst, PythonCanonicalParser};

@@ -306,11 +306,14 @@ fn node_range(node: &Node<StrDoc<SupportLang>>) -> Range {
 mod tests {
     use super::*;
 
-    fn parse(code: &str) -> CanonicalResult {
-        JavaCanonicalParser
-            .parse_file(code.as_bytes(), "Test.java")
-            .unwrap()
-    }
+    
+        fn parse(code: &str) -> CanonicalResult {
+            JavaCanonicalParser
+                .parse_file(code.as_bytes(), "Test.java")
+                .unwrap()
+                .0
+        }
+    
 
     #[test]
     fn class_with_methods() {

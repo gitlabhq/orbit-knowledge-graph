@@ -442,11 +442,14 @@ fn node_range(node: &Node<StrDoc<SupportLang>>) -> Range {
 mod tests {
     use super::*;
 
-    fn parse(code: &str) -> CanonicalResult {
-        CSharpCanonicalParser
-            .parse_file(code.as_bytes(), "Test.cs")
-            .unwrap()
-    }
+    
+        fn parse(code: &str) -> CanonicalResult {
+            CSharpCanonicalParser
+                .parse_file(code.as_bytes(), "Test.cs")
+                .unwrap()
+                .0
+        }
+    
 
     #[test]
     fn class_with_methods() {

@@ -337,11 +337,14 @@ fn node_range(node: &Node<StrDoc<SupportLang>>) -> Range {
 mod tests {
     use super::*;
 
-    fn parse(code: &str) -> CanonicalResult {
-        KotlinCanonicalParser
-            .parse_file(code.as_bytes(), "Test.kt")
-            .unwrap()
-    }
+    
+        fn parse(code: &str) -> CanonicalResult {
+            KotlinCanonicalParser
+                .parse_file(code.as_bytes(), "Test.kt")
+                .unwrap()
+                .0
+        }
+    
 
     #[test]
     fn class_with_methods() {

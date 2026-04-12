@@ -399,11 +399,14 @@ fn extract_call_reference(
 mod tests {
     use super::*;
 
-    fn parse(code: &str) -> CanonicalResult {
-        PythonCanonicalParser
-            .parse_file(code.as_bytes(), "test.py")
-            .unwrap()
-    }
+    
+        fn parse(code: &str) -> CanonicalResult {
+            PythonCanonicalParser
+                .parse_file(code.as_bytes(), "test.py")
+                .unwrap()
+                .0
+        }
+    
 
     #[test]
     fn classes_and_methods() {
