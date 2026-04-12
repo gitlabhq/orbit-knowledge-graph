@@ -1,5 +1,3 @@
-use super::edges::Edge;
-
 /// Language-agnostic reference resolver.
 ///
 /// Resolves `CanonicalReference` entries against the full definition
