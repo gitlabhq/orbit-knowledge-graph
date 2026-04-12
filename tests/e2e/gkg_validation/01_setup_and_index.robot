@@ -97,8 +97,6 @@ Suite Init
     ${ts}=    Evaluate    str(int(time.time()))[-6:]    modules=time
     Set Suite Variable    ${RUN_ID}    ${ts}
 
-    # Enable knowledge_graph feature flag
-    ${result}=    Run Process    bash    -c
-    ...    cd %{HOME}/gitlab/gdk/gitlab && bundle exec spring rails runner 'Feature.enable(:knowledge_graph); puts Feature.enabled?(:knowledge_graph)'
-    ...    timeout=30
-    Should Contain    ${result.stdout}    true
+    # Verify API is accessible (feature flags are set by seed-data.rb)
+    ${resp}=    GitLab API GET    /version
+    Should Be Equal As Integers    ${resp.status_code}    200    msg=GitLab API not accessible

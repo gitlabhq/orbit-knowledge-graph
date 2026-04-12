@@ -7,15 +7,16 @@ Library     String
 
 
 *** Variables ***
-${GDK_URL}                  https://gdk.test:3443
+${GDK_URL}                  %{GDK_URL=https://gdk.test:3443}
 ${API_BASE}                 ${GDK_URL}/api/v4
-${CLICKHOUSE_URL}           http://127.0.0.1:8123
+${CLICKHOUSE_URL}           %{CLICKHOUSE_URL=http://127.0.0.1:8123}
 ${GRAPH_DB}                 gitlab_clickhouse_main_development
 ${DATALAKE_DB}              gitlab_clickhouse_development
 ${GKG_GRPC}                 127.0.0.1:50054
 ${GKG_HTTP}                 http://127.0.0.1:4200
 ${NATS_URL}                 nats://127.0.0.1:4222
-${GKG_REPO}                 %{HOME}/gitlab/orbit/knowledge-graph
+${GKG_REPO}                 %{GKG_REPO=%{HOME}/gitlab/orbit/knowledge-graph}
+${GDK_GITLAB_DIR}           %{GDK_GITLAB_DIR=%{HOME}/gitlab/gdk/gitlab}
 ${CDC_WAIT_SECS}            90
 ${INDEX_TIMEOUT_SECS}       120
 
@@ -107,7 +108,7 @@ Enable Namespace For KG
     ...    )
     ${result}=    Run Process
     ...    bash    -c
-    ...    cd %{HOME}/gitlab/gdk/gitlab && bundle exec spring rails runner '${script}'
+    ...    eval "$(~/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null; cd ${GDK_GITLAB_DIR} && bundle exec spring rails runner '${script}'
     ...    timeout=30
     Log    ${result.stdout}
     Should Be Equal As Integers    ${result.rc}    0

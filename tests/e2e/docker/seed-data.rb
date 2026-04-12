@@ -61,8 +61,15 @@ Namespace.where(type: "Group", parent_id: nil).each do |ns|
 end
 puts "Knowledge graph namespaces enabled"
 
-puts "--- Creating PAT for e2e tests ---"
+puts "--- Resetting root password ---"
 root = User.find_by(username: "root")
+root.password = "5iveL!fe"
+root.password_confirmation = "5iveL!fe"
+root.password_expires_at = nil
+root.save!
+puts "Root password reset"
+
+puts "--- Creating PAT for e2e tests ---"
 token = root.personal_access_tokens.create!(
   name: "e2e-test-token",
   scopes: [:api, :read_api, :read_user, :read_repository],
