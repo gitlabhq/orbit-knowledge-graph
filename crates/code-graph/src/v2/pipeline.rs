@@ -2,12 +2,11 @@ use code_graph_types::{CanonicalResult, Language};
 use ignore::WalkBuilder;
 use rayon::prelude::*;
 use std::path::Path;
-use strum::IntoEnumIterator;
 
 use crate::linker::v2::{GraphBuilder, GraphData};
 use parser_core::v2::{
-    csharp::CSharpCanonicalParser, java::JavaCanonicalParser, kotlin::KotlinCanonicalParser,
-    python::PythonCanonicalParser,
+    csharp::CSharpCanonicalParser, detect_language_from_extension, java::JavaCanonicalParser,
+    kotlin::KotlinCanonicalParser, python::PythonCanonicalParser,
 };
 
 pub struct PipelineConfig {
@@ -111,14 +110,6 @@ impl Pipeline {
     }
 
     fn walk_files(&self, root: &Path) -> Vec<(String, Language)> {
-        let supported_extensions: std::collections::HashMap<&str, Language> = Language::iter()
-            .flat_map(|lang| lang.file_extensions().iter().map(move |ext| (*ext, lang)))
-            .collect();
-
-        let excluded_extensions: Vec<&str> = Language::iter()
-            .flat_map(|lang| lang.exclude_extensions().iter().copied())
-            .collect();
-
         let mut entries = Vec::new();
 
         let walker = WalkBuilder::new(root)
@@ -133,29 +124,27 @@ impl Pipeline {
 
             let path = entry.path();
 
-            // Check file size
             if let Ok(metadata) = path.metadata() {
                 if metadata.len() > self.config.max_file_size {
                     continue;
                 }
             }
 
-            // Check extension
             let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
                 continue;
             };
 
             // Skip excluded extensions (e.g. min.js)
             let path_str = path.to_string_lossy();
-            if excluded_extensions
-                .iter()
-                .any(|excl| path_str.ends_with(excl))
-            {
-                continue;
-            }
-
-            if let Some(&language) = supported_extensions.get(ext) {
-                entries.push((path.to_string_lossy().to_string(), language));
+            if let Some(lang) = detect_language_from_extension(ext) {
+                if lang
+                    .exclude_extensions()
+                    .iter()
+                    .any(|excl| path_str.ends_with(excl))
+                {
+                    continue;
+                }
+                entries.push((path_str.to_string(), lang));
             }
         }
 

@@ -1214,11 +1214,8 @@ dependencies = [
  "code-graph-types",
  "ignore",
  "log",
- "num_cpus",
  "parser-core",
  "rayon",
- "rustc-hash",
- "strum 0.28.0",
  "tempfile",
  "treesitter-visit",
 ]
