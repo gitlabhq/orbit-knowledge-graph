@@ -449,19 +449,16 @@ e2e-gdk-test:
         sleep 1
       done
     - |
-      # Create a PAT via the API (seed-data.rb runs inside the service container)
-      PAT=$(curl -sk -X POST "http://gdk.test:3000/oauth/token" \
+      # Get OAuth token, then use it to create a real Personal Access Token
+      OAUTH=$(curl -s -X POST "http://gdk.test:3000/oauth/token" \
         -d "grant_type=password&username=root&password=5iveL!fe" 2>/dev/null \
         | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
-      if [ -z "$PAT" ]; then
-        # Fallback: use API to create PAT with default creds
-        PAT=$(curl -sk -X POST "http://gdk.test:3000/api/v4/users/1/personal_access_tokens" \
-          -H "PRIVATE-TOKEN: $(curl -sk -X POST 'http://gdk.test:3000/oauth/token' \
-            -d 'grant_type=password&username=root&password=5iveL!fe' 2>/dev/null \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)" \
-          -d 'name=e2e-ci&scopes[]=api&scopes[]=read_api' 2>/dev/null \
-          | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
-      fi
+      echo "OAuth token length: ${#OAUTH}"
+      PAT=$(curl -s -X POST "http://gdk.test:3000/api/v4/users/1/personal_access_tokens" \
+        -H "Authorization: Bearer $OAUTH" \
+        -H "Content-Type: application/json" \
+        -d '{"name":"e2e-ci","scopes":["api","read_api","read_user","read_repository"]}' 2>/dev/null \
+        | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
       echo "$PAT" > ~/.gdk_token
       echo "PAT created (length: ${#PAT})"
     - |
