@@ -1,6 +1,6 @@
 use crate::fqn::Fqn;
-use crate::lang::Language;
 use crate::range::Range;
+use code_graph_config::Language;
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
 /// Canonical definition categories used by the linker for

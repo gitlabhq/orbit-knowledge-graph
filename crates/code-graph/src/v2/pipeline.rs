@@ -1,10 +1,37 @@
-use code_graph_types::{CanonicalResult, Language};
+use code_graph_config::{detect_language_from_extension, Language};
+use code_graph_types::CanonicalResult;
 use ignore::WalkBuilder;
+use parser_core::v2::CanonicalParser;
+use parser_core::v2::{
+    csharp::CSharpCanonicalParser, java::JavaCanonicalParser, kotlin::KotlinCanonicalParser,
+    python::PythonCanonicalParser,
+};
 use rayon::prelude::*;
 use std::path::Path;
 
 use crate::linker::v2::{GraphBuilder, GraphData};
-use parser_core::v2::detect_language_from_extension;
+
+macro_rules! register_v2_parsers {
+    ($( $variant:ident => $parser:expr ),+ $(,)?) => {
+        fn dispatch_parse(
+            language: Language,
+            source: &[u8],
+            file_path: &str,
+        ) -> Option<parser_core::Result<CanonicalResult>> {
+            Some(match language {
+                $(Language::$variant => $parser.parse_file(source, file_path),)+
+                _ => return None,
+            })
+        }
+    };
+}
+
+register_v2_parsers! {
+    Python  => PythonCanonicalParser,
+    Java    => JavaCanonicalParser,
+    Kotlin  => KotlinCanonicalParser,
+    CSharp  => CSharpCanonicalParser,
+}
 
 pub struct PipelineConfig {
     pub max_file_size: u64,
@@ -154,9 +181,9 @@ impl Pipeline {
             error: format!("Failed to read file: {e}"),
         })?;
 
-        parser_core::v2::parse_file(language, &source, path)
+        dispatch_parse(language, &source, path)
             .unwrap_or_else(|| {
-                Err(crate::parser_core::Error::Parse(format!(
+                Err(parser_core::Error::Parse(format!(
                     "Language {language} not yet supported in v2 pipeline"
                 )))
             })
@@ -179,7 +206,7 @@ mod tests {
 
     fn parse_fixture_file(path: &str, language: Language) -> CanonicalResult {
         let source = std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
-        parser_core::v2::parse_file(language, &source, path)
+        dispatch_parse(language, &source, path)
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse {path}: {e}"))
     }

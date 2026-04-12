@@ -1,6 +1,7 @@
+use code_graph_config::Language;
 use code_graph_types::{
     CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind, Fqn,
-    Language, Position, Range, ReferenceStatus,
+    Position, Range, ReferenceStatus,
 };
 use std::sync::Arc;
 use treesitter_visit::tree_sitter::StrDoc;

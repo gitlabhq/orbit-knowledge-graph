@@ -1210,6 +1210,7 @@ dependencies = [
 name = "code-graph"
 version = "0.1.0"
 dependencies = [
+ "code-graph-config",
  "code-graph-linker",
  "code-graph-types",
  "ignore",
@@ -1221,12 +1222,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "code-graph-config"
+version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "rustc-hash",
+ "serde",
+ "strum 0.28.0",
+ "treesitter-visit",
+]
+
+[[package]]
 name = "code-graph-linker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
  "chrono",
+ "code-graph-config",
  "code-graph-types",
  "criterion",
  "futures",
@@ -1257,11 +1270,11 @@ dependencies = [
 name = "code-graph-types"
 version = "0.1.0"
 dependencies = [
+ "code-graph-config",
  "intervaltree",
  "serde",
  "smallvec",
  "strum 0.28.0",
- "treesitter-visit",
 ]
 
 [[package]]
@@ -5059,6 +5072,7 @@ dependencies = [
 name = "parser-core"
 version = "0.1.0"
 dependencies = [
+ "code-graph-config",
  "code-graph-types",
  "internment",
  "mimalloc",

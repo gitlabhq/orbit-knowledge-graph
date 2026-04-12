@@ -5,6 +5,7 @@ version = "0.1.0"
 resolver = "2"
 members = [
   "crates/code-graph",
+  "crates/code-graph/config",
   "crates/code-graph/types",
   "crates/code-graph/treesitter-visit",
   "crates/code-graph/parser",

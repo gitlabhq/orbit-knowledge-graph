@@ -270,6 +270,7 @@ impl GraphBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use code_graph_config::Language;
     use code_graph_types::*;
 
     fn make_result(file_path: &str, defs: Vec<CanonicalDefinition>) -> CanonicalResult {
