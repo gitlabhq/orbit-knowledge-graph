@@ -1213,6 +1213,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "code-graph-linker",
+ "code-graph-types",
  "futures",
  "ignore",
  "log",
@@ -1233,6 +1234,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
+ "code-graph-types",
  "criterion",
  "gitalisk-core",
  "gkg-utils",
@@ -1250,6 +1252,14 @@ dependencies = [
  "tracing",
  "tracing-test",
  "walkdir",
+]
+
+[[package]]
+name = "code-graph-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "smallvec",
 ]
 
 [[package]]
@@ -5040,6 +5050,7 @@ name = "parser-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "code-graph-types",
  "internment",
  "log",
  "mimalloc",

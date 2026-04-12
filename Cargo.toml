@@ -8,6 +8,7 @@ members = [
   "crates/code-graph/treesitter-visit",
   "crates/code-graph/parser",
   "crates/code-graph/linker",
+  "crates/code-graph/types",
   "crates/clickhouse-client",
   "crates/indexer",
   "crates/query-engine",

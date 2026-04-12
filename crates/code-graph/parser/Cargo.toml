@@ -8,6 +8,7 @@ license = "MIT"
 path = "src/lib.rs"
 
 [dependencies]
+code-graph-types = { path = "../types" }
 treesitter-visit = { path = "../treesitter-visit", features = ["builtin-parser"] }
 
 # Common dependencies

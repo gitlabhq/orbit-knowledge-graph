@@ -1,0 +1,11 @@
+[package]
+name = "code-graph-types"
+version.workspace = true
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+smallvec = { workspace = true }
+serde = { workspace = true }
