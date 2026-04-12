@@ -1,19 +1,21 @@
 use std::collections::HashMap;
 
-use crate::graph::RelationshipType;
-use parser_core::java::types::{
-    JavaDefinitionType, JavaFqn, JavaFqnPartType, JavaImportedSymbolInfo,
-};
-
+use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::{
     languages::java::{expression_resolver::ExpressionResolver, utils::full_import_path},
     types::{
-        ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
-        ImportType, ImportedSymbolLocation, ImportedSymbolNode,
+        ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
+        ImportedSymbolLocation, ImportedSymbolNode,
     },
 };
+use crate::graph::RelationshipType;
 use crate::parse_types::{FileProcessingResult, References};
+use code_graph_types::{Language, Range, ToCanonical};
 use internment::ArcIntern;
+use parser_core::definitions::DefinitionTypeInfo;
+use parser_core::java::types::{
+    JavaDefinitionType, JavaFqn, JavaFqnPartType, JavaImportedSymbolInfo,
+};
 use parser_core::utils::Range;
 
 #[derive(Default)]
@@ -43,11 +45,12 @@ impl JavaAnalyzer {
                     continue;
                 }
 
-                let fqn = FqnType::Java(definition.fqn.clone());
+                let fqn = fqn_parts_to_canonical(&definition.fqn, Language::Java);
                 let path = ArcIntern::new(relative_file_path.to_string());
                 let definition_node = DefinitionNode::new(
                     fqn.clone(),
-                    DefinitionType::Java(definition.definition_type),
+                    definition.definition_type.as_str().to_string(),
+                    definition.definition_type.to_def_kind(),
                     definition.range,
                     path.clone(),
                 );
@@ -78,7 +81,7 @@ impl JavaAnalyzer {
 
                 definition_map.insert(
                     (fqn.to_string(), relative_file_path.to_string()),
-                    (definition_node, fqn),
+                    definition_node,
                 );
             }
         }
@@ -145,17 +148,16 @@ impl JavaAnalyzer {
         definition_map: &HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
-        for ((_child_fqn_string, child_file_path), (child_def, child_fqn)) in definition_map {
-            if let Some(parent_fqn_string) = self.get_parent_fqn_string(child_fqn)
-                && let Some((parent_def, _)) =
-                    definition_map.get(&(parent_fqn_string.clone(), child_file_path.to_string()))
-                && let Some(relationship_type) = self.get_definition_relationship_type(
-                    &parent_def.definition_type,
-                    &child_def.definition_type,
-                )
+        for ((_child_fqn_string, child_file_path), child_def) in definition_map {
+            if let Some(parent_fqn) = child_def.fqn.parent()
+                && let Some(parent_def) =
+                    definition_map.get(&(parent_fqn.to_string(), child_file_path.to_string()))
+                && let Some(relationship_type) =
+                    crate::analysis::canonical_helpers::determine_relationship_type(
+                        parent_def.kind,
+                        child_def.kind,
+                    )
             {
-                // FIXME: https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/177
-                // Definition Heirarchy relationships should have their own struct
                 let mut relationship = ConsolidatedRelationship::definition_to_definition(
                     parent_def.file_path.clone(),
                     child_def.file_path.clone(),
@@ -165,115 +167,6 @@ impl JavaAnalyzer {
                 relationship.target_range = ArcIntern::new(child_def.range);
                 relationships.push(relationship);
             }
-        }
-    }
-
-    fn get_parent_fqn_string(&self, fqn: &FqnType) -> Option<String> {
-        match fqn {
-            FqnType::Java(java_fqn) => {
-                if java_fqn.len() <= 1 {
-                    return None;
-                }
-
-                let parent_parts: Vec<String> = java_fqn[..java_fqn.len() - 1]
-                    .iter()
-                    .map(|part| part.node_name.clone())
-                    .collect();
-
-                if parent_parts.is_empty() {
-                    None
-                } else {
-                    Some(parent_parts.join("."))
-                }
-            }
-            _ => None,
-        }
-    }
-
-    fn get_definition_relationship_type(
-        &self,
-        parent_type: &DefinitionType,
-        child_type: &DefinitionType,
-    ) -> Option<RelationshipType> {
-        use JavaDefinitionType::*;
-
-        let parent_type = self.simplify_definition_type(parent_type)?;
-        let child_type = self.simplify_definition_type(child_type)?;
-
-        match (parent_type, child_type) {
-            // Class relationships
-            (DefinitionType::Java(Class), DefinitionType::Java(Class)) => {
-                Some(RelationshipType::ClassToClass)
-            }
-            (DefinitionType::Java(Class), DefinitionType::Java(Interface)) => {
-                Some(RelationshipType::ClassToInterface)
-            }
-            (DefinitionType::Java(Class), DefinitionType::Java(EnumConstant)) => {
-                Some(RelationshipType::ClassToEnumEntry)
-            }
-            (DefinitionType::Java(Class), DefinitionType::Java(Method)) => {
-                Some(RelationshipType::ClassToMethod)
-            }
-            (DefinitionType::Java(Class), DefinitionType::Java(Lambda)) => {
-                Some(RelationshipType::ClassToLambda)
-            }
-            // Interface relationships
-            (DefinitionType::Java(Interface), DefinitionType::Java(Interface)) => {
-                Some(RelationshipType::InterfaceToInterface)
-            }
-            (DefinitionType::Java(Interface), DefinitionType::Java(Class)) => {
-                Some(RelationshipType::InterfaceToClass)
-            }
-            (DefinitionType::Java(Interface), DefinitionType::Java(Method)) => {
-                Some(RelationshipType::InterfaceToMethod)
-            }
-            (DefinitionType::Java(Interface), DefinitionType::Java(Lambda)) => {
-                Some(RelationshipType::InterfaceToLambda)
-            }
-            // Method relationships
-            (DefinitionType::Java(Method), DefinitionType::Java(Method)) => {
-                Some(RelationshipType::MethodToMethod)
-            }
-            (DefinitionType::Java(Method), DefinitionType::Java(Class)) => {
-                Some(RelationshipType::MethodToClass)
-            }
-            (DefinitionType::Java(Method), DefinitionType::Java(Interface)) => {
-                Some(RelationshipType::MethodToInterface)
-            }
-            (DefinitionType::Java(Method), DefinitionType::Java(Lambda)) => {
-                Some(RelationshipType::MethodToLambda)
-            }
-            // Lambda relationships
-            (DefinitionType::Java(Lambda), DefinitionType::Java(Lambda)) => {
-                Some(RelationshipType::LambdaToLambda)
-            }
-            (DefinitionType::Java(Lambda), DefinitionType::Java(Class)) => {
-                Some(RelationshipType::LambdaToClass)
-            }
-            (DefinitionType::Java(Lambda), DefinitionType::Java(Method)) => {
-                Some(RelationshipType::LambdaToMethod)
-            }
-            (DefinitionType::Java(Lambda), DefinitionType::Java(Interface)) => {
-                Some(RelationshipType::LambdaToInterface)
-            }
-            _ => None,
-        }
-    }
-
-    fn simplify_definition_type(&self, definition_type: &DefinitionType) -> Option<DefinitionType> {
-        use JavaDefinitionType::*;
-
-        match definition_type {
-            DefinitionType::Java(Class) => Some(DefinitionType::Java(Class)),
-            DefinitionType::Java(Enum) => Some(DefinitionType::Java(Class)),
-            DefinitionType::Java(AnnotationDeclaration) => Some(DefinitionType::Java(Class)),
-            DefinitionType::Java(Record) => Some(DefinitionType::Java(Class)),
-            DefinitionType::Java(Interface) => Some(DefinitionType::Java(Interface)),
-            DefinitionType::Java(EnumConstant) => Some(DefinitionType::Java(EnumConstant)),
-            DefinitionType::Java(Method) => Some(DefinitionType::Java(Method)),
-            DefinitionType::Java(Constructor) => Some(DefinitionType::Java(Method)),
-            DefinitionType::Java(Lambda) => Some(DefinitionType::Java(Lambda)),
-            _ => None,
         }
     }
 
