@@ -1,6 +1,6 @@
 use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType, ImportedSymbolLocation,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportedSymbolLocation,
     ImportedSymbolNode,
 };
 use crate::graph::RelationshipType;
@@ -8,6 +8,7 @@ use crate::parse_types::FileProcessingResult;
 use code_graph_types::{Language, Range, ToCanonical};
 use internment::ArcIntern;
 use parser_core::definitions::DefinitionTypeInfo;
+use parser_core::imports::ImportTypeInfo;
 use parser_core::rust::{fqn::rust_fqn_to_string, imports::RustImportedSymbolInfo, types::RustFqn};
 use smallvec::SmallVec;
 use std::collections::HashMap;
@@ -86,7 +87,7 @@ impl RustAnalyzer {
                 {
                     let import_fqn_string = rust_fqn_to_string(&import_fqn);
                     let imported_symbol_node = ImportedSymbolNode::new(
-                        ImportType::Rust(import.import_type),
+                        import.import_type.as_str().to_string(),
                         import.import_path.clone(),
                         Some(self.create_import_identifier(import)),
                         location.clone(),

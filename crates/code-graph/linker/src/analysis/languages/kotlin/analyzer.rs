@@ -4,8 +4,8 @@ use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::{
     languages::kotlin::{expression_resolver::KotlinExpressionResolver, utils::full_import_path},
     types::{
-        ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
-        ImportedSymbolLocation, ImportedSymbolNode,
+        ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportedSymbolLocation,
+        ImportedSymbolNode,
     },
 };
 use crate::graph::RelationshipType;
@@ -13,6 +13,7 @@ use crate::parse_types::{FileProcessingResult, References};
 use code_graph_types::{Language, Range, ToCanonical};
 use internment::ArcIntern;
 use parser_core::definitions::DefinitionTypeInfo;
+use parser_core::imports::ImportTypeInfo;
 use parser_core::kotlin::types::{
     KotlinDefinitionType, KotlinFqn, KotlinFqnPartType, KotlinImportedSymbolInfo,
 };
@@ -98,7 +99,7 @@ impl KotlinAnalyzer {
                 let identifier = self.create_imported_symbol_identifier(imported_symbol);
 
                 let imported_symbol_node = ImportedSymbolNode::new(
-                    ImportType::Kotlin(imported_symbol.import_type),
+                    imported_symbol.import_type.as_str().to_string(),
                     imported_symbol.import_path.clone(),
                     identifier,
                     location.clone(),

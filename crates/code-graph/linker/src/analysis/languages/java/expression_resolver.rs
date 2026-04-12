@@ -10,7 +10,7 @@ use crate::analysis::{
         java_file::{JavaClass, JavaFile},
         utils::full_import_path,
     },
-    types::{ConsolidatedRelationship, DefinitionNode, ImportType, ImportedSymbolNode},
+    types::{ConsolidatedRelationship, DefinitionNode, ImportedSymbolNode},
 };
 use crate::parse_types::References;
 
@@ -904,10 +904,7 @@ impl ExpressionResolver {
 
         let file = self.files.get_mut(&file_path).unwrap();
 
-        if matches!(
-            imported_symbol.import_type,
-            ImportType::Java(JavaImportType::WildcardImport)
-        ) {
+        if imported_symbol.import_type == "WildcardImport" {
             file.wildcard_imports
                 .insert(imported_symbol.import_path.clone());
             file.import_nodes

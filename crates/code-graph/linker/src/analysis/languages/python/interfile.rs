@@ -164,20 +164,18 @@ fn get_possible_paths(base_path: &Path, module_parts: &[&str]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::types::{
-        ImportIdentifier, ImportType, ImportedSymbolLocation, ImportedSymbolNode,
-    };
+    use crate::analysis::types::{ImportIdentifier, ImportedSymbolLocation, ImportedSymbolNode};
+    use parser_core::imports::ImportTypeInfo;
     use parser_core::python::types::PythonImportType;
     use std::collections::HashMap;
 
-    /// Helper function to create a test ImportedSymbolNode
     fn create_imported_symbol_node(
         import_path: &str,
         file_path: &str,
         import_type: PythonImportType,
     ) -> ImportedSymbolNode {
         ImportedSymbolNode::new(
-            ImportType::Python(import_type),
+            import_type.as_str().to_string(),
             import_path.to_string(),
             Some(ImportIdentifier {
                 name: "test_symbol".to_string(),

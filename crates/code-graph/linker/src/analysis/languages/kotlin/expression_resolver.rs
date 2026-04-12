@@ -20,10 +20,7 @@ use crate::analysis::{
         types::{KotlinScopeTree, ScopeContext},
         utils::{full_import_path, get_binary_operator_function, get_unary_operator_function},
     },
-    types::{
-        ConsolidatedRelationship, DefinitionNode, ImportType, ImportedSymbolLocation,
-        ImportedSymbolNode,
-    },
+    types::{ConsolidatedRelationship, DefinitionNode, ImportedSymbolLocation, ImportedSymbolNode},
 };
 use crate::parse_types::References;
 
@@ -1776,10 +1773,7 @@ impl KotlinExpressionResolver {
 
         let file = self.files.get_mut(&file_path).unwrap();
 
-        if matches!(
-            imported_symbol.import_type,
-            ImportType::Kotlin(KotlinImportType::WildcardImport)
-        ) {
+        if imported_symbol.import_type == "WildcardImport" {
             file.wildcard_imports
                 .insert(imported_symbol.import_path.clone());
             file.import_nodes

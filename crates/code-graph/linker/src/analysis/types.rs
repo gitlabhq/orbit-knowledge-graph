@@ -9,11 +9,7 @@ use rustc_hash::FxHasher;
 
 use crate::graph::{RelationshipKind, RelationshipType};
 use code_graph_types::{CanonicalFqn, DefKind, Position, Range};
-use parser_core::{
-    csharp::types::CSharpImportType, imports::ImportTypeInfo, java::types::JavaImportType,
-    kotlin::types::KotlinImportType, python::types::PythonImportType, rust::types::RustImportType,
-    typescript::types::TypeScriptImportType, utils::HasRange,
-};
+use parser_core::utils::HasRange;
 use serde::{Deserialize, Serialize};
 
 /// Context for [`AsRecordBatch`](gkg_utils::arrow::AsRecordBatch)
@@ -611,31 +607,6 @@ impl ImportedSymbolLocation {
     }
 }
 
-/// Per-language import type. Will be replaced by a canonical string
-/// once ImportedSymbolNode is converted to canonical types.
-#[derive(Debug, Clone)]
-pub enum ImportType {
-    Java(JavaImportType),
-    Kotlin(KotlinImportType),
-    Python(PythonImportType),
-    CSharp(CSharpImportType),
-    TypeScript(TypeScriptImportType),
-    Rust(RustImportType),
-}
-
-impl ImportType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            ImportType::Java(t) => t.as_str(),
-            ImportType::Kotlin(t) => t.as_str(),
-            ImportType::Python(t) => t.as_str(),
-            ImportType::CSharp(t) => t.as_str(),
-            ImportType::TypeScript(t) => t.as_str(),
-            ImportType::Rust(t) => t.as_str(),
-        }
-    }
-}
-
 /// Represents an identifier associated with an imported symbol
 #[derive(Debug, Clone)]
 pub struct ImportIdentifier {
@@ -648,7 +619,7 @@ pub struct ImportIdentifier {
 #[derive(Debug, Clone)]
 pub struct ImportedSymbolNode {
     pub id: Option<i64>,
-    pub import_type: ImportType,
+    pub import_type: String,
     pub import_path: String,
     pub identifier: Option<ImportIdentifier>,
     pub location: ImportedSymbolLocation,
@@ -656,7 +627,7 @@ pub struct ImportedSymbolNode {
 
 impl ImportedSymbolNode {
     pub fn new(
-        import_type: ImportType,
+        import_type: String,
         import_path: String,
         identifier: Option<ImportIdentifier>,
         location: ImportedSymbolLocation,

@@ -3,7 +3,7 @@ use tracing::error;
 use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::languages::python::interfile::get_possible_symbol_locations;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType, ImportedSymbolLocation,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportedSymbolLocation,
     ImportedSymbolNode, OptimizedFileTree,
 };
 use crate::graph::{RelationshipKind, RelationshipType};
@@ -11,11 +11,12 @@ use crate::parse_types::{FileProcessingResult, References};
 use code_graph_types::{Language, Range, ToCanonical};
 use internment::ArcIntern;
 use parser_core::definitions::DefinitionTypeInfo;
+use parser_core::imports::ImportTypeInfo;
 use parser_core::python::fqn::python_fqn_to_string;
 use parser_core::python::types::PythonReferenceInfo;
 use parser_core::python::types::{
-    Connector, PartialResolution, PythonFqn, PythonImportType, PythonImportedSymbolInfo,
-    PythonTargetResolution, Symbol,
+    Connector, PartialResolution, PythonDefinitionType, PythonFqn, PythonImportType,
+    PythonImportedSymbolInfo, PythonTargetResolution, Symbol,
 };
 use parser_core::references::ReferenceTarget;
 use std::collections::{HashMap, HashSet};
@@ -108,7 +109,7 @@ impl PythonAnalyzer {
                     "".to_string()
                 };
                 let imported_symbol_node = ImportedSymbolNode::new(
-                    ImportType::Python(imported_symbol.import_type),
+                    imported_symbol.import_type.as_str().to_string(),
                     imported_symbol.import_path.clone(),
                     identifier,
                     location.clone(),
@@ -638,16 +639,16 @@ impl PythonAnalyzer {
             imported_symbol_map
         {
             for imported_symbol_node in imported_symbol_nodes {
-                if let ImportType::Python(import_type) = imported_symbol_node.import_type {
+                {
                     let possible_files = get_possible_symbol_locations(
                         imported_symbol_node,
                         file_tree,
                         definition_map,
                     );
 
-                    match import_type {
-                        PythonImportType::FutureImport | PythonImportType::AliasedFutureImport => {}
-                        PythonImportType::Import | PythonImportType::AliasedImport => {
+                    match imported_symbol_node.import_type.as_str() {
+                        "FutureImport" | "AliasedFutureImport" => {}
+                        "Import" | "AliasedImport" => {
                             // NOTE: For now, we are ignoring other possible files because it's very unlikely that there will
                             // be more than one
                             if let Some(possible_file) = possible_files.first() {
@@ -657,8 +658,7 @@ impl PythonAnalyzer {
                                 );
                             }
                         }
-                        PythonImportType::WildcardImport
-                        | PythonImportType::RelativeWildcardImport => {
+                        "WildcardImport" | "RelativeWildcardImport" => {
                             // TODO: We should preserve all *possible* relationships instead of only the first. When we attempt to resolve
                             // unresolved or partial resolutions, we will need to explore all possible files for a symbol.
                             let first_possible_file = possible_files.first();

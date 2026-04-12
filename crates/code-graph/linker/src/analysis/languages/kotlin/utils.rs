@@ -1,18 +1,14 @@
-use parser_core::kotlin::types::KotlinImportType;
-
-use crate::analysis::types::{ImportType, ImportedSymbolNode};
-
-// Imports
+use crate::analysis::types::ImportedSymbolNode;
 
 /// Returns the name of the imported symbol and the full import path.
 pub(crate) fn full_import_path(import: &ImportedSymbolNode) -> (String, String) {
-    let name = match import.import_type {
-        ImportType::Kotlin(KotlinImportType::Import) => import
+    let name = match import.import_type.as_str() {
+        "Import" => import
             .identifier
             .as_ref()
             .map(|i| i.name.clone())
             .unwrap_or_default(),
-        ImportType::Kotlin(KotlinImportType::AliasedImport) => import
+        "AliasedImport" => import
             .identifier
             .as_ref()
             .map(|i| i.alias.clone().unwrap_or_else(|| i.name.clone()))

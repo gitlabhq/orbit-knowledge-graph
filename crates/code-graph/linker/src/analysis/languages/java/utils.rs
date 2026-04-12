@@ -1,17 +1,9 @@
-use crate::analysis::types::{ImportType, ImportedSymbolNode};
-use parser_core::java::types::JavaImportType;
-
-// Imports
+use crate::analysis::types::ImportedSymbolNode;
 
 /// Returns the name of the imported symbol and the full import path.
 pub fn full_import_path(import: &ImportedSymbolNode) -> (String, String) {
-    let name = match import.import_type {
-        ImportType::Java(JavaImportType::Import) => import
-            .identifier
-            .as_ref()
-            .map(|i| i.name.clone())
-            .unwrap_or_default(),
-        ImportType::Java(JavaImportType::StaticImport) => import
+    let name = match import.import_type.as_str() {
+        "Import" | "StaticImport" => import
             .identifier
             .as_ref()
             .map(|i| i.name.clone())
