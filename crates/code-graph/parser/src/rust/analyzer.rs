@@ -32,7 +32,7 @@ impl RustAnalysisResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::SupportedLanguage;
+    use crate::parser::Language;
     use crate::{LanguageParser, parser::GenericParser};
 
     #[test]
@@ -60,7 +60,7 @@ pub fn main() {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs"))?;
         let result = analyzer.analyze(&parse_result)?;
 
@@ -105,7 +105,7 @@ fn simple_function() {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("simple.rs"))?;
         let result = analyzer.analyze(&parse_result)?;
 
@@ -180,7 +180,7 @@ pub fn main() {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("comprehensive.rs"))?;
         let result = analyzer.analyze(&parse_result)?;
 
@@ -332,7 +332,7 @@ fn main() {
 }
 "#;
 
-        let parser = GenericParser::new(SupportedLanguage::Rust);
+        let parser = GenericParser::new(Language::Rust);
         let parser_result = parser.parse(rust_code, None)?;
         let analysis = analyzer.analyze(&parser_result)?;
 

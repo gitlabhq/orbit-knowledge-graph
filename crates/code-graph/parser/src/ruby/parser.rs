@@ -1,4 +1,4 @@
-use crate::parser::{ParseResult, SupportedLanguage};
+use crate::parser::{Language, ParseResult};
 use crate::{Error, Result};
 use ruby_prism::{ParseResult as PrismParseResult, parse};
 
@@ -28,14 +28,10 @@ impl RubyParser {
             return Err(Error::Parse("Failed to parse Ruby code".to_string()));
         }
 
-        Ok(ParseResult::new(
-            SupportedLanguage::Ruby,
-            file_path,
-            parse_result,
-        ))
+        Ok(ParseResult::new(Language::Ruby, file_path, parse_result))
     }
 
-    pub fn language(&self) -> SupportedLanguage {
-        SupportedLanguage::Ruby
+    pub fn language(&self) -> Language {
+        Language::Ruby
     }
 }

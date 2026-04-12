@@ -1228,7 +1228,7 @@ mod tests {
     use super::*;
     use crate::{
         java::types::JavaImportType,
-        parser::{GenericParser, LanguageParser, SupportedLanguage},
+        parser::{GenericParser, Language, LanguageParser},
     };
 
     #[test]
@@ -1250,7 +1250,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1321,7 +1321,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1399,7 +1399,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1451,7 +1451,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1499,7 +1499,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1587,7 +1587,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1649,7 +1649,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let analysis_result = parse_ast(&parse_result.ast);
@@ -1709,7 +1709,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1762,7 +1762,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1798,7 +1798,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1837,7 +1837,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1876,7 +1876,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1916,7 +1916,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -1958,7 +1958,7 @@ mod tests {
         import java.io.*;
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let imports = parse_ast(&parse_result.ast).imports;
@@ -2003,7 +2003,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -2057,7 +2057,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -2125,7 +2125,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let result = parse_ast(&parse_result.ast);
@@ -2187,7 +2187,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -2282,7 +2282,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let references = parse_ast(&parse_result.ast).references;
@@ -2398,7 +2398,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;
@@ -2435,7 +2435,7 @@ mod tests {
             var x = 1;
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(java_code, Some("test.java")).unwrap();
 
         let definitions = parse_ast(&parse_result.ast).definitions;

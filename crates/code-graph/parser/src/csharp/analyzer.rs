@@ -21,7 +21,7 @@ impl CSharpAnalyzer {
 #[cfg(test)]
 mod tests {
     use crate::{
-        DefinitionLookup, LanguageParser, SupportedLanguage, csharp::analyzer::CSharpAnalyzer,
+        DefinitionLookup, Language, LanguageParser, csharp::analyzer::CSharpAnalyzer,
         parser::GenericParser,
     };
 
@@ -34,7 +34,7 @@ mod tests {
         let csharp_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read ComprehensiveCSharp.cs fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let parse_result = parser.parse(&csharp_code, Some(fixture_path)).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();
@@ -274,7 +274,7 @@ mod tests {
         let csharp_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read ComprehensiveCSharp.cs fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let parse_result = parser.parse(&csharp_code, Some(fixture_path)).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();
@@ -364,7 +364,7 @@ namespace TestNamespace {
 }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let parse_result = parser.parse(code, None).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();
@@ -454,7 +454,7 @@ namespace TestNamespace {
 }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let parse_result = parser.parse(code, None).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();
@@ -593,7 +593,7 @@ namespace TestNamespace {
 }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let parse_result = parser.parse(code, None).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();
@@ -710,7 +710,7 @@ namespace OuterNamespace.InnerNamespace {
 }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let parse_result = parser.parse(code, None).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();

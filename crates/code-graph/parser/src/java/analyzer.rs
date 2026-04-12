@@ -64,7 +64,7 @@ impl JavaAnalyzerResult {
 
 #[cfg(test)]
 mod tests {
-    use crate::{LanguageParser, SupportedLanguage, parser::GenericParser};
+    use crate::{Language, LanguageParser, parser::GenericParser};
 
     use super::*;
 
@@ -75,7 +75,7 @@ mod tests {
         let java_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read ComprehensiveJavaDefinitions.java fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(&java_code, Some(fixture_path)).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();
@@ -150,7 +150,7 @@ mod tests {
         let java_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read ComprehensiveJavaDefinitions.java fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(&java_code, Some(fixture_path)).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();
@@ -209,7 +209,7 @@ mod tests {
         let java_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read VeryLongCallChain.java fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Java);
+        let parser = GenericParser::default_for_language(Language::Java);
         let parse_result = parser.parse(&java_code, Some(fixture_path)).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();

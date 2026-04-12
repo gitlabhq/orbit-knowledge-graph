@@ -1,219 +1,85 @@
 //! Core parser traits and implementations
 
 use crate::{Error, Result};
+pub use code_graph_types::Language;
 use once_cell::sync::Lazy;
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
 use std::borrow::Cow;
-use std::fmt;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{LanguageExt, Root, SupportLang};
 
-macro_rules! define_languages {
-    (
-        $(
-            $variant:ident {
-                name: $name:literal,
-                extensions: [$($ext:literal),+],
-                names: [$($lang_name:literal),+],
-                exclude_extensions: [$($exclude_ext:literal),*]
-            }
-        ),+ $(,)?
-    ) => {
-        /// Supported languages for parsing
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        pub enum SupportedLanguage {
-            $($variant),+
-        }
+pub fn supported_language_from_str(language_str: &str) -> Result<Language> {
+    LANGUAGE_NAME_MAP
+        .get(language_str.to_lowercase().trim())
+        .copied()
+        .ok_or_else(|| {
+            Error::UnsupportedLanguage(format!("Unsupported language: {}", language_str))
+        })
+}
 
-        $(
-            pastey::paste! {
-                const [<$variant:upper _EXTENSIONS>]: &[&str] = &[$($ext),+];
-                const [<$variant:upper _EXCLUDE_EXTENSIONS>]: &[&str] = &[$($exclude_ext),*];
-            }
-        )+
+pub fn detect_language_from_extension(extension: &str) -> Result<Language> {
+    EXTENSION_MAP
+        .get(extension.to_lowercase().trim())
+        .copied()
+        .ok_or_else(|| Error::UnsupportedLanguage(format!("Unsupported extension: {}", extension)))
+}
 
-        impl SupportedLanguage {
-            /// Convert to treesitter-visit's SupportLang
-            pub fn to_support_lang(&self) -> SupportLang {
-                match self {
-                    $(SupportedLanguage::$variant => SupportLang::$variant),+
-                }
-            }
+pub fn get_supported_extensions() -> Vec<&'static str> {
+    ALL_LANGUAGES
+        .iter()
+        .flat_map(|lang| lang.file_extensions())
+        .copied()
+        .collect()
+}
+/// Generates treesitter binding + lookup maps from Language enum.
+/// All config (extensions, names, etc.) lives on Language in code-graph-types.
+macro_rules! register_languages {
+    ($($variant:ident => $support_lang:expr),+ $(,)?) => {
+        const ALL_LANGUAGES: &[Language] = &[$(Language::$variant),+];
 
-            pub const fn as_str(&self) -> &'static str {
-                match self {
-                    $(SupportedLanguage::$variant => $name),+
-                }
-            }
-
-            pub const fn file_extensions(&self) -> &'static [&'static str] {
-                match self {
-                    $(SupportedLanguage::$variant => pastey::paste! { [<$variant:upper _EXTENSIONS>] }),+
-                }
-            }
-
-            /// File path patterns to exclude for this language
-            pub const fn exclude_extensions(&self) -> &'static [&'static str] {
-                match self {
-                    $(SupportedLanguage::$variant => pastey::paste! { [<$variant:upper _EXCLUDE_EXTENSIONS>] }),+
-                }
+        pub fn to_support_lang(lang: Language) -> SupportLang {
+            match lang {
+                $(Language::$variant => $support_lang),+
             }
         }
 
-        static EXTENSION_MAP: Lazy<FxHashMap<&'static str, SupportedLanguage>> = Lazy::new(|| {
+        static EXTENSION_MAP: Lazy<FxHashMap<&'static str, Language>> = Lazy::new(|| {
             let mut map = FxHashMap::default();
-            $(
-                $(
-                    map.insert($ext, SupportedLanguage::$variant);
-                )+
-            )+
+            for lang in ALL_LANGUAGES {
+                for ext in lang.file_extensions() {
+                    map.insert(*ext, *lang);
+                }
+            }
             map
         });
 
-        static LANGUAGE_NAME_MAP: Lazy<FxHashMap<&'static str, SupportedLanguage>> = Lazy::new(|| {
+        static LANGUAGE_NAME_MAP: Lazy<FxHashMap<&'static str, Language>> = Lazy::new(|| {
             let mut map = FxHashMap::default();
-            $(
-                $(
-                    map.insert($lang_name, SupportedLanguage::$variant);
-                )+
-            )+
+            for lang in ALL_LANGUAGES {
+                for name in lang.names() {
+                    map.insert(*name, *lang);
+                }
+            }
             map
         });
-
-
-        /// Parse language from its string representation
-        ///
-        /// # Arguments
-        /// * `language_str` - The language name (e.g., "python", "ruby", "typescript", "javascript")
-        ///
-        /// # Example
-        /// ```
-        /// use parser_core::parser::SupportedLanguage;
-        /// use parser_core::parser::supported_language_from_str;
-        /// let lang = supported_language_from_str("python").unwrap();
-        /// assert_eq!(lang, SupportedLanguage::Python);
-        /// ```
-        pub fn supported_language_from_str(language_str: &str) -> Result<SupportedLanguage> {
-            LANGUAGE_NAME_MAP
-                .get(language_str.to_lowercase().trim())
-                .copied()
-                .ok_or_else(|| Error::UnsupportedLanguage(format!(
-                    "Unsupported language: {}",
-                    language_str
-                )))
-        }
-
-        /// Detect language from a pre-computed file extension
-        ///
-        /// # Arguments
-        /// * `extension` - The file extension without the dot (e.g., "rb", "py")
-        ///
-        /// # Example
-        /// ```
-        /// use parser_core::parser::detect_language_from_extension;
-        /// let lang = detect_language_from_extension("rb").unwrap();
-        /// ```
-        pub fn detect_language_from_extension(extension: &str) -> Result<SupportedLanguage> {
-            match extension {
-                $($(
-                    $ext => Ok(SupportedLanguage::$variant),
-                )+)+
-                _ => Err(Error::UnsupportedLanguage(format!(
-                    "Unsupported file extension: {}",
-                    extension
-                ))),
-            }
-        }
-
-        pub fn detect_language_from_path(file_path: &str) -> Result<SupportedLanguage> {
-            let path = std::path::Path::new(file_path);
-            let extension = path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .ok_or_else(|| Error::UnsupportedLanguage("No file extension".to_string()))?;
-
-            EXTENSION_MAP
-                .get(extension)
-                .copied()
-                .ok_or_else(|| Error::UnsupportedLanguage(format!(
-                    "Unsupported file extension: {}",
-                    extension
-                )))
-        }
-
-        pub fn get_supported_extensions() -> SmallVec<[&'static str; 11]> {
-            let mut extensions = SmallVec::new();
-            $(
-                extensions.extend_from_slice(pastey::paste! { [<$variant:upper _EXTENSIONS>] });
-            )+
-            extensions
-        }
     };
 }
 
-define_languages! {
-    Ruby {
-        // string representation of the language
-        name: "ruby",
-        // file extensions that are associated with the language
-        extensions: ["rb", "rbw", "rake", "gemspec"],
-        // names that are associated with the language
-        // eg. for typescript, we have both "typescript" and "javascript"
-        // since the typescript parser can parse both javascript and typescript files
-        names: ["ruby"],
-        exclude_extensions: []
-    },
-    Python {
-        name: "python",
-        extensions: ["py"],
-        names: ["python"],
-        exclude_extensions: []
-    },
-    TypeScript {
-        name: "typescript",
-        extensions: ["ts", "js"],
-        names: ["typescript", "javascript"],
-        exclude_extensions: ["min.js"]
-    },
-    Kotlin {
-        name: "kotlin",
-        extensions: ["kt", "kts"],
-        names: ["kotlin"],
-        exclude_extensions: []
-    },
-    CSharp {
-        name: "csharp",
-        extensions: ["cs"],
-        names: ["csharp"],
-        exclude_extensions: []
-    },
-    Java {
-        name: "java",
-        extensions: ["java"],
-        names: ["java"],
-        exclude_extensions: []
-    },
-    Rust {
-        name: "rust",
-        extensions: ["rs"],
-        names: ["rust"],
-        exclude_extensions: []
-    }
-}
-
-impl fmt::Display for SupportedLanguage {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
+register_languages! {
+    Ruby => SupportLang::Ruby,
+    Python => SupportLang::Python,
+    TypeScript => SupportLang::TypeScript,
+    Kotlin => SupportLang::Kotlin,
+    CSharp => SupportLang::CSharp,
+    Java => SupportLang::Java,
+    Rust => SupportLang::Rust,
 }
 
 /// Result of parsing operations
 #[derive(Clone)]
 pub struct ParseResult<'a, T = Root<StrDoc<SupportLang>>> {
     /// The language that was parsed
-    pub language: SupportedLanguage,
+    pub language: Language,
 
     /// File path (if available)
     pub file_path: Option<Cow<'a, str>>,
@@ -224,7 +90,7 @@ pub struct ParseResult<'a, T = Root<StrDoc<SupportLang>>> {
 
 impl<'a, T> ParseResult<'a, T> {
     /// Create a new ParseResult
-    pub fn new(language: SupportedLanguage, file_path: Option<&'a str>, ast: T) -> Self {
+    pub fn new(language: Language, file_path: Option<&'a str>, ast: T) -> Self {
         Self {
             language,
             file_path: file_path.map(Cow::Borrowed),
@@ -240,13 +106,13 @@ pub type DefaultParseResult<'a> = ParseResult<'a, Root<StrDoc<SupportLang>>>;
 pub trait LanguageParser<T = Root<StrDoc<SupportLang>>> {
     fn parse<'a>(&self, code: &'a str, file_path: Option<&'a str>) -> Result<ParseResult<'a, T>>;
 
-    fn language(&self) -> SupportedLanguage;
+    fn language(&self) -> Language;
 }
 
 /// Extension trait for parsers that use tree-sitter
 pub trait TreeSitterParser: LanguageParser<Root<StrDoc<SupportLang>>> {
     fn parse_ast(&self, code: &str) -> Result<Root<StrDoc<SupportLang>>> {
-        let ast = self.language().to_support_lang().ast_grep(code);
+        let ast = to_support_lang(self.language()).ast_grep(code);
 
         if ast.root().text().is_empty() && !code.is_empty() {
             return Err(Error::Parse(
@@ -261,19 +127,19 @@ pub trait TreeSitterParser: LanguageParser<Root<StrDoc<SupportLang>>> {
 /// A generic parser implementation that can be configured for different languages
 #[derive(Debug, Clone)]
 pub struct GenericParser {
-    language: SupportedLanguage,
+    language: Language,
 }
 
 impl GenericParser {
-    pub const fn new(language: SupportedLanguage) -> Self {
+    pub const fn new(language: Language) -> Self {
         Self { language }
     }
 
-    pub const fn default_for_language(language: SupportedLanguage) -> Self {
+    pub const fn default_for_language(language: Language) -> Self {
         Self::new(language)
     }
 
-    pub const fn language(&self) -> SupportedLanguage {
+    pub const fn language(&self) -> Language {
         self.language
     }
 }
@@ -288,7 +154,7 @@ impl LanguageParser<Root<StrDoc<SupportLang>>> for GenericParser {
         Ok(ParseResult::new(self.language, file_path, ast))
     }
 
-    fn language(&self) -> SupportedLanguage {
+    fn language(&self) -> Language {
         self.language
     }
 }
@@ -327,15 +193,15 @@ pub enum UnifiedParseResult<'a> {
 }
 
 impl ParserType {
-    pub fn for_language(language: SupportedLanguage) -> Self {
+    pub fn for_language(language: Language) -> Self {
         match language {
-            SupportedLanguage::Ruby => Self::Ruby(create_ruby_parser()),
-            SupportedLanguage::TypeScript => Self::TypeScript(create_typescript_parser()),
+            Language::Ruby => Self::Ruby(create_ruby_parser()),
+            Language::TypeScript => Self::TypeScript(create_typescript_parser()),
             _ => Self::TreeSitter(GenericParser::new(language)),
         }
     }
 
-    pub fn language(&self) -> SupportedLanguage {
+    pub fn language(&self) -> Language {
         match self {
             Self::TreeSitter(parser) => parser.language(),
             Self::Ruby(parser) => parser.language(),
@@ -366,7 +232,7 @@ impl ParserType {
 }
 
 impl<'a> UnifiedParseResult<'a> {
-    pub fn language(&self) -> SupportedLanguage {
+    pub fn language(&self) -> Language {
         match self {
             Self::TreeSitter(result) => result.language,
             Self::Ruby(result) => result.language,
@@ -389,13 +255,13 @@ mod tests {
 
     #[test]
     fn test_supported_language_conversion() {
-        assert_eq!(SupportedLanguage::Ruby.as_str(), "ruby");
-        assert_eq!(SupportedLanguage::Python.as_str(), "python");
+        assert_eq!(Language::Ruby.as_str(), "ruby");
+        assert_eq!(Language::Python.as_str(), "python");
     }
 
     #[test]
     fn test_all_ruby_file_extensions() {
-        let extensions = SupportedLanguage::Ruby.file_extensions();
+        let extensions = Language::Ruby.file_extensions();
         assert!(extensions.contains(&"rb"));
         assert!(extensions.contains(&"rbw"));
         assert!(extensions.contains(&"rake"));
@@ -405,7 +271,7 @@ mod tests {
 
     #[test]
     fn test_all_python_file_extensions() {
-        let extensions = SupportedLanguage::Python.file_extensions();
+        let extensions = Language::Python.file_extensions();
         assert!(extensions.contains(&"py"));
         assert_eq!(extensions.len(), 1);
     }
@@ -414,11 +280,11 @@ mod tests {
     fn test_language_detection() {
         assert_eq!(
             detect_language_from_path("test.rb").unwrap(),
-            SupportedLanguage::Ruby
+            Language::Ruby
         );
         assert_eq!(
             detect_language_from_path("test.py").unwrap(),
-            SupportedLanguage::Python
+            Language::Python
         );
         assert!(detect_language_from_path("unknown.xyz").is_err());
     }
@@ -428,23 +294,23 @@ mod tests {
         // Test the new optimized function
         assert_eq!(
             detect_language_from_extension("rb").unwrap(),
-            SupportedLanguage::Ruby
+            Language::Ruby
         );
         assert_eq!(
             detect_language_from_extension("rbw").unwrap(),
-            SupportedLanguage::Ruby
+            Language::Ruby
         );
         assert_eq!(
             detect_language_from_extension("rake").unwrap(),
-            SupportedLanguage::Ruby
+            Language::Ruby
         );
         assert_eq!(
             detect_language_from_extension("gemspec").unwrap(),
-            SupportedLanguage::Ruby
+            Language::Ruby
         );
         assert_eq!(
             detect_language_from_extension("py").unwrap(),
-            SupportedLanguage::Python
+            Language::Python
         );
 
         // Test error case
@@ -485,17 +351,17 @@ mod tests {
 
     #[test]
     fn test_parser_creation() {
-        let parser = GenericParser::new(SupportedLanguage::Ruby);
-        assert_eq!(parser.language(), SupportedLanguage::Ruby);
+        let parser = GenericParser::new(Language::Ruby);
+        assert_eq!(parser.language(), Language::Ruby);
     }
 
     #[test]
     fn test_parse_simple_ruby() -> Result<()> {
-        let parser = GenericParser::default_for_language(SupportedLanguage::Ruby);
+        let parser = GenericParser::default_for_language(Language::Ruby);
         let code = "class Test\n  def hello\n    puts 'world'\n  end\nend";
         let result = parser.parse(code, Some("test.rb"))?;
 
-        assert_eq!(result.language, SupportedLanguage::Ruby);
+        assert_eq!(result.language, Language::Ruby);
         assert_eq!(result.file_path.as_deref(), Some("test.rb"));
         assert!(!result.ast.root().text().is_empty());
 
@@ -504,11 +370,11 @@ mod tests {
 
     #[test]
     fn test_parse_simple_python() -> Result<()> {
-        let parser = GenericParser::default_for_language(SupportedLanguage::Python);
+        let parser = GenericParser::default_for_language(Language::Python);
         let code = "class Test:\n  def hello(self):\n    print('world')\n";
         let result = parser.parse(code, Some("test.py"))?;
 
-        assert_eq!(result.language, SupportedLanguage::Python);
+        assert_eq!(result.language, Language::Python);
         assert_eq!(result.file_path.as_deref(), Some("test.py"));
         assert!(!result.ast.root().text().is_empty());
 
@@ -517,8 +383,8 @@ mod tests {
 
     #[test]
     fn test_display_implementation() {
-        assert_eq!(format!("{}", SupportedLanguage::Ruby), "ruby");
-        assert_eq!(format!("{}", SupportedLanguage::Python), "python");
+        assert_eq!(format!("{}", Language::Ruby), "ruby");
+        assert_eq!(format!("{}", Language::Python), "python");
     }
 
     #[test]
@@ -536,24 +402,24 @@ mod tests {
     #[test]
     fn test_exclude_extensions() {
         // TypeScript should exclude minified JS files
-        let ts_excludes = SupportedLanguage::TypeScript.exclude_extensions();
+        let ts_excludes = Language::TypeScript.exclude_extensions();
         assert!(ts_excludes.contains(&"min.js"));
     }
 
     #[test]
     fn test_default_for_language() {
-        let parser1 = GenericParser::new(SupportedLanguage::Ruby);
-        let parser2 = GenericParser::default_for_language(SupportedLanguage::Ruby);
+        let parser1 = GenericParser::new(Language::Ruby);
+        let parser2 = GenericParser::default_for_language(Language::Ruby);
         assert_eq!(parser1.language(), parser2.language());
     }
 
     #[test]
     fn test_parse_result_fields() -> Result<()> {
-        let parser = GenericParser::new(SupportedLanguage::Ruby);
+        let parser = GenericParser::new(Language::Ruby);
         let code = "puts 'hello'";
         let result = parser.parse(code, Some("test.rb"))?;
 
-        assert_eq!(result.language, SupportedLanguage::Ruby);
+        assert_eq!(result.language, Language::Ruby);
         assert_eq!(result.file_path.as_deref(), Some("test.rb"));
         assert_eq!(result.ast.root().text(), code);
 
@@ -566,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_parse_ast_error_handling() {
-        let parser = GenericParser::new(SupportedLanguage::Ruby);
+        let parser = GenericParser::new(Language::Ruby);
 
         // Test with empty code - this should be fine as empty AST is expected for empty input
         let result = parser.parse_ast("");
@@ -583,22 +449,20 @@ mod tests {
 
     #[test]
     fn test_to_support_lang() {
-        let ruby_lang = SupportedLanguage::Ruby.to_support_lang();
-        assert_eq!(ruby_lang, SupportLang::Ruby);
-        let python_lang = SupportedLanguage::Python.to_support_lang();
-        assert_eq!(python_lang, SupportLang::Python);
+        assert_eq!(to_support_lang(Language::Ruby), SupportLang::Ruby);
+        assert_eq!(to_support_lang(Language::Python), SupportLang::Python);
     }
 
     #[test]
     fn test_parser_clone() {
-        let parser = GenericParser::new(SupportedLanguage::Ruby);
+        let parser = GenericParser::new(Language::Ruby);
         let cloned = parser.clone();
         assert_eq!(parser.language(), cloned.language());
     }
 
     #[test]
     fn test_parse_result_clone() {
-        let parser = GenericParser::new(SupportedLanguage::Ruby);
+        let parser = GenericParser::new(Language::Ruby);
         let code = "puts 'hello'";
         let result = parser.parse(code, Some("test.rb")).unwrap();
 
@@ -632,44 +496,32 @@ mod tests {
     #[test]
     fn test_from_str() {
         // Test all supported languages
-        assert_eq!(
-            supported_language_from_str("ruby").unwrap(),
-            SupportedLanguage::Ruby
-        );
+        assert_eq!(supported_language_from_str("ruby").unwrap(), Language::Ruby);
         assert_eq!(
             supported_language_from_str("python").unwrap(),
-            SupportedLanguage::Python
+            Language::Python
         );
         assert_eq!(
             supported_language_from_str("typescript").unwrap(),
-            SupportedLanguage::TypeScript
+            Language::TypeScript
         );
         assert_eq!(
             supported_language_from_str("javascript").unwrap(),
-            SupportedLanguage::TypeScript
+            Language::TypeScript
         );
         assert_eq!(
             supported_language_from_str("kotlin").unwrap(),
-            SupportedLanguage::Kotlin
+            Language::Kotlin
         );
         assert_eq!(
             supported_language_from_str("csharp").unwrap(),
-            SupportedLanguage::CSharp
+            Language::CSharp
         );
-        assert_eq!(
-            supported_language_from_str("java").unwrap(),
-            SupportedLanguage::Java
-        );
-        assert_eq!(
-            supported_language_from_str("rust").unwrap(),
-            SupportedLanguage::Rust
-        );
+        assert_eq!(supported_language_from_str("java").unwrap(), Language::Java);
+        assert_eq!(supported_language_from_str("rust").unwrap(), Language::Rust);
 
         // Test case insensitivity
-        assert_eq!(
-            supported_language_from_str("Ruby").unwrap(),
-            SupportedLanguage::Ruby
-        );
+        assert_eq!(supported_language_from_str("Ruby").unwrap(), Language::Ruby);
 
         // Test error case
         assert!(supported_language_from_str("unknown").is_err());
@@ -678,28 +530,28 @@ mod tests {
 
     #[test]
     fn test_parser_type_creation() {
-        let ruby_parser = ParserType::for_language(SupportedLanguage::Ruby);
-        assert_eq!(ruby_parser.language(), SupportedLanguage::Ruby);
+        let ruby_parser = ParserType::for_language(Language::Ruby);
+        assert_eq!(ruby_parser.language(), Language::Ruby);
         assert!(matches!(ruby_parser, ParserType::Ruby(_)));
 
-        let python_parser = ParserType::for_language(SupportedLanguage::Python);
-        assert_eq!(python_parser.language(), SupportedLanguage::Python);
+        let python_parser = ParserType::for_language(Language::Python);
+        assert_eq!(python_parser.language(), Language::Python);
         assert!(matches!(python_parser, ParserType::TreeSitter(_)));
     }
 
     #[test]
     fn test_create_ruby_parser() {
         let parser = create_ruby_parser();
-        assert_eq!(parser.language(), SupportedLanguage::Ruby);
+        assert_eq!(parser.language(), Language::Ruby);
     }
 
     #[test]
     fn test_ruby_parser_integration() -> Result<()> {
-        let parser_type = ParserType::for_language(SupportedLanguage::Ruby);
+        let parser_type = ParserType::for_language(Language::Ruby);
         let code = "class Test\n  def hello\n    puts 'world'\n  end\nend";
         let result = parser_type.parse(code, Some("test.rb"))?;
 
-        assert_eq!(result.language(), SupportedLanguage::Ruby);
+        assert_eq!(result.language(), Language::Ruby);
         assert_eq!(result.file_path(), Some("test.rb"));
         assert!(matches!(result, UnifiedParseResult::Ruby(_)));
 
@@ -708,11 +560,11 @@ mod tests {
 
     #[test]
     fn test_unified_parser_python() -> Result<()> {
-        let parser_type = ParserType::for_language(SupportedLanguage::Python);
+        let parser_type = ParserType::for_language(Language::Python);
         let code = "class Test:\n    def hello(self):\n        print('world')";
         let result = parser_type.parse(code, Some("test.py"))?;
 
-        assert_eq!(result.language(), SupportedLanguage::Python);
+        assert_eq!(result.language(), Language::Python);
         assert_eq!(result.file_path(), Some("test.py"));
         assert!(matches!(result, UnifiedParseResult::TreeSitter(_)));
 

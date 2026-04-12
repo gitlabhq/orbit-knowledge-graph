@@ -7,7 +7,7 @@ pub type RubyImportedSymbolInfo = ImportedSymbolInfo<RubyImportType, RubyFqn>;
 mod import_tests {
     use super::*;
     use crate::imports::ImportIdentifier;
-    use crate::parser::{ParserType, SupportedLanguage, UnifiedParseResult};
+    use crate::parser::{Language, ParserType, UnifiedParseResult};
     use crate::ruby::analyzer::RubyAnalyzer;
     use crate::ruby::types::RubyImportType;
     // use crate::ruby::visit::extract_definitions_and_references_from_prism;
@@ -15,7 +15,7 @@ mod import_tests {
         code: &str,
         expected_imported_symbols: Vec<(RubyImportType, &str, ImportIdentifier)>, // (import_type, import_path, identifier)
     ) {
-        let parser = ParserType::for_language(SupportedLanguage::Ruby);
+        let parser = ParserType::for_language(Language::Ruby);
         let parse_result = parser.parse(code, None).unwrap();
         let ruby_analyzer = RubyAnalyzer::new();
 
@@ -410,7 +410,7 @@ def top_level_method
 end
         "#;
 
-        let parser = ParserType::for_language(SupportedLanguage::Ruby);
+        let parser = ParserType::for_language(Language::Ruby);
         let parse_result = parser.parse(ruby_code, None).unwrap();
         let ruby_analyzer = RubyAnalyzer::new();
 
@@ -487,7 +487,7 @@ class MyClass
 end
         "#;
 
-        let parser = ParserType::for_language(SupportedLanguage::Ruby);
+        let parser = ParserType::for_language(Language::Ruby);
         let parse_result = parser.parse(ruby_code, None).unwrap();
         let ruby_analyzer = RubyAnalyzer::new();
 

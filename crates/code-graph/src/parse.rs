@@ -5,7 +5,7 @@ use parser_core::{
     csharp::analyzer::CSharpAnalyzer,
     java::analyzer::JavaAnalyzer,
     kotlin::analyzer::KotlinAnalyzer,
-    parser::{ParserType, SupportedLanguage, UnifiedParseResult, detect_language_from_extension},
+    parser::{Language, ParserType, UnifiedParseResult, detect_language_from_extension},
     python::analyzer::PythonAnalyzer,
     ruby::analyzer::RubyAnalyzer,
     rust::analyzer::RustAnalyzer,
@@ -41,13 +41,13 @@ pub fn parse(path: &str, content: &str) -> ProcessingResult {
 
     let is_supported = matches!(
         language,
-        SupportedLanguage::Ruby
-            | SupportedLanguage::Python
-            | SupportedLanguage::Kotlin
-            | SupportedLanguage::Java
-            | SupportedLanguage::CSharp
-            | SupportedLanguage::TypeScript
-            | SupportedLanguage::Rust
+        Language::Ruby
+            | Language::Python
+            | Language::Kotlin
+            | Language::Java
+            | Language::CSharp
+            | Language::TypeScript
+            | Language::Rust
     );
 
     let file_size = content.len() as u64;
@@ -127,13 +127,13 @@ pub fn parse(path: &str, content: &str) -> ProcessingResult {
 
 fn analyze(
     path: &str,
-    language: SupportedLanguage,
+    language: Language,
     parse_result: &UnifiedParseResult,
     content: &str,
 ) -> Result<(Definitions, Option<ImportedSymbols>, Option<References>), anyhow::Error> {
     debug!("Starting to analyze file {}.", path);
     let result = match language {
-        SupportedLanguage::Ruby => {
+        Language::Ruby => {
             if let UnifiedParseResult::Ruby(ruby_result) = parse_result {
                 let analyzer = RubyAnalyzer::new();
                 match analyzer.analyze_with_prism(content, &ruby_result.ast) {
@@ -159,7 +159,7 @@ fn analyze(
                 Err(anyhow::anyhow!("Expected Ruby parse result for '{path}'"))
             }
         }
-        SupportedLanguage::Python => {
+        Language::Python => {
             if let UnifiedParseResult::TreeSitter(ast) = parse_result {
                 let analyzer = PythonAnalyzer::new();
                 match analyzer.analyze(ast) {
@@ -178,7 +178,7 @@ fn analyze(
                 ))
             }
         }
-        SupportedLanguage::Kotlin => {
+        Language::Kotlin => {
             if let UnifiedParseResult::TreeSitter(ast) = parse_result {
                 let analyzer = KotlinAnalyzer::new();
                 match analyzer.analyze(ast) {
@@ -197,7 +197,7 @@ fn analyze(
                 ))
             }
         }
-        SupportedLanguage::Java => {
+        Language::Java => {
             if let UnifiedParseResult::TreeSitter(ast) = parse_result {
                 let analyzer = JavaAnalyzer::new();
                 match analyzer.analyze(ast) {
@@ -214,7 +214,7 @@ fn analyze(
                 ))
             }
         }
-        SupportedLanguage::CSharp => {
+        Language::CSharp => {
             if let UnifiedParseResult::TreeSitter(ast) = parse_result {
                 let analyzer = CSharpAnalyzer::new();
                 match analyzer.analyze(ast) {
@@ -233,7 +233,7 @@ fn analyze(
                 ))
             }
         }
-        SupportedLanguage::TypeScript => {
+        Language::TypeScript => {
             if let UnifiedParseResult::TypeScript(ts) = parse_result {
                 let analyzer = TypeScriptAnalyzer::new();
                 match analyzer.analyze_swc(ts) {
@@ -252,7 +252,7 @@ fn analyze(
                 ))
             }
         }
-        SupportedLanguage::Rust => {
+        Language::Rust => {
             if let UnifiedParseResult::TreeSitter(ast) = parse_result {
                 let analyzer = RustAnalyzer::new();
                 match analyzer.analyze(ast) {

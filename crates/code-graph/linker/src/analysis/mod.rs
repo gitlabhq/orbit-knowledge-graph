@@ -10,7 +10,7 @@ use crate::analysis::types::{
 use crate::graph::{RelationshipKind, RelationshipType};
 use crate::parse_types::{FileProcessingResult, References};
 use internment::ArcIntern;
-use parser_core::parser::SupportedLanguage;
+use parser_core::parser::Language;
 use parser_core::utils::{Position, Range};
 use std::{
     collections::{HashMap, HashSet},
@@ -134,7 +134,7 @@ impl AnalysisService {
                 &imported_symbol_map,
                 &mut relationships,
             );
-            if language == SupportedLanguage::Python {
+            if language == Language::Python {
                 let file_tree =
                     OptimizedFileTree::new(file_references.iter().map(|(path, _)| path));
 
@@ -188,7 +188,7 @@ impl AnalysisService {
     fn group_results_by_language(
         &self,
         file_results: Vec<FileProcessingResult>,
-    ) -> HashMap<SupportedLanguage, Vec<FileProcessingResult>> {
+    ) -> HashMap<Language, Vec<FileProcessingResult>> {
         let mut results_by_language = HashMap::new();
 
         for file_result in file_results {
@@ -251,7 +251,7 @@ impl AnalysisService {
             .filesystem_analyzer
             .get_relative_path(&file_result.file_path);
         match file_result.language {
-            SupportedLanguage::Ruby => {
+            Language::Ruby => {
                 let _ = self.ruby_analyzer.process_definitions(
                     file_result,
                     &relative_path,
@@ -259,7 +259,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::Python => {
+            Language::Python => {
                 self.python_analyzer.process_definitions(
                     file_result,
                     &relative_path,
@@ -273,7 +273,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::Kotlin => {
+            Language::Kotlin => {
                 self.kotlin_analyzer.process_definitions(
                     file_result,
                     &relative_path,
@@ -287,7 +287,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::Java => {
+            Language::Java => {
                 self.java_analyzer.process_definitions(
                     file_result,
                     &relative_path,
@@ -301,7 +301,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::CSharp => {
+            Language::CSharp => {
                 self.csharp_analyzer.process_definitions(
                     file_result,
                     &relative_path,
@@ -315,7 +315,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::TypeScript => {
+            Language::TypeScript => {
                 self.typescript_analyzer.process_definitions(
                     file_result,
                     &relative_path,
@@ -329,7 +329,7 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::Rust => {
+            Language::Rust => {
                 self.rust_analyzer.process_definitions(
                     file_result,
                     &relative_path,
@@ -349,7 +349,7 @@ impl AnalysisService {
     #[allow(clippy::too_many_arguments)]
     fn extract_import_relationships(
         &mut self,
-        language: SupportedLanguage,
+        language: Language,
         file_tree: OptimizedFileTree,
         definition_map: &mut HashMap<(String, String), (DefinitionNode, FqnType)>,
         imported_symbol_map: &mut HashMap<(String, String), Vec<ImportedSymbolNode>>,
@@ -361,7 +361,7 @@ impl AnalysisService {
         imported_symbol_to_files: &mut HashMap<ImportedSymbolLocation, Vec<String>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
-        if language == SupportedLanguage::Python {
+        if language == Language::Python {
             // Maps imported symbols to their sources (e.g. a definition, another imported symbol, etc.)
             self.python_analyzer.resolve_imported_symbols(
                 imported_symbol_map,
@@ -426,7 +426,7 @@ impl AnalysisService {
     #[allow(clippy::too_many_arguments)]
     fn extract_reference_relationships(
         &mut self,
-        language: SupportedLanguage,
+        language: Language,
         file_references: Vec<(String, Option<References>)>,
         definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
@@ -440,7 +440,7 @@ impl AnalysisService {
     ) {
         for (relative_path, references) in file_references {
             match language {
-                SupportedLanguage::Python => {
+                Language::Python => {
                     self.python_analyzer.process_references(
                         &references,
                         &relative_path,
@@ -452,21 +452,21 @@ impl AnalysisService {
                         imported_symbol_to_files,
                     );
                 }
-                SupportedLanguage::Ruby | SupportedLanguage::Java | SupportedLanguage::Kotlin => {
+                Language::Ruby | Language::Java | Language::Kotlin => {
                     if let Some(references) = references {
-                        if language == SupportedLanguage::Ruby {
+                        if language == Language::Ruby {
                             self.ruby_analyzer.process_references(
                                 &references,
                                 &relative_path,
                                 relationships,
                             );
-                        } else if language == SupportedLanguage::Java {
+                        } else if language == Language::Java {
                             self.java_analyzer.process_references(
                                 &references,
                                 &relative_path,
                                 relationships,
                             );
-                        } else if language == SupportedLanguage::Kotlin {
+                        } else if language == Language::Kotlin {
                             self.kotlin_analyzer.process_references(
                                 &references,
                                 &relative_path,
@@ -475,7 +475,7 @@ impl AnalysisService {
                         }
                     }
                 }
-                SupportedLanguage::TypeScript => {
+                Language::TypeScript => {
                     self.typescript_analyzer.process_references(
                         &references,
                         &relative_path,
@@ -513,43 +513,43 @@ impl AnalysisService {
 
     fn add_definition_relationships(
         &self,
-        language: SupportedLanguage,
+        language: Language,
         definition_map: &HashMap<(String, String), (DefinitionNode, FqnType)>,
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         match language {
-            SupportedLanguage::Ruby => {
+            Language::Ruby => {
                 self.ruby_analyzer
                     .add_definition_relationships(definition_map, relationships);
             }
-            SupportedLanguage::Python => {
+            Language::Python => {
                 self.python_analyzer.add_definition_relationships(
                     definition_map,
                     imported_symbol_map,
                     relationships,
                 );
             }
-            SupportedLanguage::Kotlin => {
+            Language::Kotlin => {
                 self.kotlin_analyzer
                     .add_definition_relationships(definition_map, relationships);
             }
-            SupportedLanguage::Java => {
+            Language::Java => {
                 self.java_analyzer
                     .add_definition_relationships(definition_map, relationships);
             }
-            SupportedLanguage::CSharp => {
+            Language::CSharp => {
                 self.csharp_analyzer
                     .add_definition_relationships(definition_map, relationships);
             }
-            SupportedLanguage::TypeScript => {
+            Language::TypeScript => {
                 self.typescript_analyzer.add_definition_relationships(
                     definition_map,
                     imported_symbol_map,
                     relationships,
                 );
             }
-            SupportedLanguage::Rust => {
+            Language::Rust => {
                 self.rust_analyzer.add_definition_relationships(
                     definition_map,
                     imported_symbol_map,

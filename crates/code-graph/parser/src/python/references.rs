@@ -630,7 +630,7 @@ fn pop_last_symbol(symbol_chain: &mut SymbolChain) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::SupportedLanguage;
+    use crate::parser::Language;
     use crate::python::analyzer::{PythonAnalysisResult, PythonAnalyzer};
     use crate::python::fqn::build_fqn_index;
     use crate::python::imports::find_imports;
@@ -641,13 +641,13 @@ mod tests {
 
     fn analyze_python_code(code: &str) -> crate::Result<PythonAnalysisResult> {
         let analyzer = PythonAnalyzer::new();
-        let parser = GenericParser::default_for_language(SupportedLanguage::Python);
+        let parser = GenericParser::default_for_language(Language::Python);
         let parse_result = parser.parse(code, Some("test.py"))?;
         analyzer.analyze(&parse_result)
     }
 
     fn build_python_symbol_table(code: &str) -> crate::Result<SymbolTableTree> {
-        let parser = GenericParser::default_for_language(SupportedLanguage::Python);
+        let parser = GenericParser::default_for_language(Language::Python);
         let parse_result = parser.parse(code, Some("test.py"))?;
         let (node_fqn_map, definitions) = build_fqn_index(&parse_result.ast);
         let imports = find_imports(&parse_result.ast, &node_fqn_map);

@@ -390,11 +390,11 @@ fn create_import_info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::SupportedLanguage;
+    use crate::parser::Language;
     use crate::{LanguageParser, parser::GenericParser};
 
     fn extract_imports_for_test(rust_code: &str) -> crate::Result<Vec<RustImportedSymbolInfo>> {
-        let parser = GenericParser::new(SupportedLanguage::Rust);
+        let parser = GenericParser::new(Language::Rust);
         let parser_result = parser.parse(rust_code, None)?;
 
         let mut all_imports = Vec::new();
@@ -714,7 +714,7 @@ impl TopLevelStruct {
 "#;
 
         // Use our new direct AST approach with scope integration
-        let parser = GenericParser::new(SupportedLanguage::Rust);
+        let parser = GenericParser::new(Language::Rust);
         let parser_result = parser.parse(rust_code, None)?;
 
         // Build FQN map to get scope information for testing scope integration

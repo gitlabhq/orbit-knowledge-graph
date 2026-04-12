@@ -2,7 +2,7 @@
 
 use parser_core::{
     Result,
-    parser::{GenericParser, LanguageParser, SupportedLanguage, detect_language_from_path},
+    parser::{GenericParser, Language, LanguageParser, detect_language_from_path},
 };
 
 fn main() -> Result<()> {
@@ -55,7 +55,7 @@ result = calc.add(10).result
 
     // 4. Multi-language Support
     println!("\n4. Multi-language Support:");
-    let languages = [SupportedLanguage::Ruby];
+    let languages = [Language::Ruby];
 
     for lang in &languages {
         let _parser = GenericParser::default_for_language(*lang);

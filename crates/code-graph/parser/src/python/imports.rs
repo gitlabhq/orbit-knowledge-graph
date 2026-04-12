@@ -245,7 +245,7 @@ fn get_scope_for_node(
 #[cfg(test)]
 mod import_tests {
     use super::*;
-    use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
+    use crate::parser::{GenericParser, Language, LanguageParser};
     use crate::python::fqn::build_fqn_index;
 
     fn test_import_extraction(
@@ -256,7 +256,7 @@ mod import_tests {
         println!("\n=== Testing: {description} ===");
         println!("Code snippet:\n{code}");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Python);
+        let parser = GenericParser::default_for_language(Language::Python);
         let parse_result = parser.parse(code, Some("test.py")).unwrap();
         let (node_fqn_map, _definitions) = build_fqn_index(&parse_result.ast);
         let imported_symbols = find_imports(&parse_result.ast, &node_fqn_map);

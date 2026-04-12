@@ -37,7 +37,7 @@ impl PythonAnalysisResult {
 mod tests {
     use super::*;
     use crate::definitions::DefinitionLookup;
-    use crate::parser::SupportedLanguage;
+    use crate::parser::Language;
     use crate::{LanguageParser, parser::GenericParser};
 
     #[test]
@@ -47,7 +47,7 @@ mod tests {
         let python_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read definitions.py fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Python);
+        let parser = GenericParser::default_for_language(Language::Python);
         let parse_result = parser.parse(&python_code, Some(fixture_path))?;
         let result = analyzer.analyze(&parse_result)?;
 
@@ -231,7 +231,7 @@ mod tests {
         let python_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read imports.py fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Python);
+        let parser = GenericParser::default_for_language(Language::Python);
         let parse_result = parser.parse(&python_code, Some(fixture_path))?;
         let result = analyzer.analyze(&parse_result)?;
 

@@ -312,7 +312,7 @@ pub fn parse_ast(ast: &Root<StrDoc<SupportLang>>) -> (CSharpDefinitions, CSharpI
 mod tests {
     use super::*;
     use crate::{
-        LanguageParser, SupportedLanguage,
+        Language, LanguageParser,
         parser::GenericParser,
         utils::{Position, Range},
     };
@@ -323,7 +323,7 @@ mod tests {
         expected_type: CSharpFqnPartType,
         expected_range: Range,
     ) {
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let ast = parser.parse(code, None).unwrap().ast;
         let (definitions, _imports) = parse_ast(&ast);
 
@@ -362,7 +362,7 @@ mod tests {
         // Note: Namespaces are not included in definitions since they don't have a CSharpDefinitionType
         // This test verifies that we can still parse and handle namespaces correctly in the FQN structure
         let code = "namespace My.Test.App { class TestClass { } }";
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let ast = parser.parse(code, None).unwrap().ast;
         let (definitions, _imports) = parse_ast(&ast);
 
@@ -588,7 +588,7 @@ namespace N {
     }
 }
         "#;
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let ast = parser.parse(code, None).unwrap().ast;
         let (definitions, _imports) = parse_ast(&ast);
 
@@ -614,7 +614,7 @@ class MyClass {
     void MyMethod() {}
 }
         "#;
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let ast = parser.parse(code, None).unwrap().ast;
         let (definitions, _imports) = parse_ast(&ast);
 
@@ -652,7 +652,7 @@ class MyClass {
 using System;
 using Console = System.Console;
 "#;
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let ast = parser.parse(code, None).unwrap().ast;
         let (_definitions, imports) = parse_ast(&ast);
 
@@ -686,7 +686,7 @@ using Console = System.Console;
         let csharp_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read ComprehensiveCSharp.cs fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let ast = parser.parse(&csharp_code, Some(fixture_path)).unwrap().ast;
         let (_definitions, imports) = parse_ast(&ast);
 
@@ -744,7 +744,7 @@ namespace TestNamespace {
 }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::CSharp);
+        let parser = GenericParser::default_for_language(Language::CSharp);
         let ast = parser.parse(code, None).unwrap().ast;
         let (definitions, _imports) = parse_ast(&ast);
 

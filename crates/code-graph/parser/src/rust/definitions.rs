@@ -41,7 +41,7 @@ pub fn extract_definitions_from_map(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
+    use crate::parser::{GenericParser, Language, LanguageParser};
     use crate::rust::fqn::{build_fqn_and_node_indices, rust_fqn_to_string};
 
     #[test]
@@ -56,7 +56,7 @@ mod network {
 mod utils;
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -90,7 +90,7 @@ struct User {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -128,7 +128,7 @@ enum Message {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -180,7 +180,7 @@ pub trait Clone {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -252,7 +252,7 @@ pub async fn async_function() -> Result<(), std::io::Error> {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -313,7 +313,7 @@ impl Display for Point {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -356,7 +356,7 @@ pub fn test_macros() {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -396,7 +396,7 @@ pub fn test_closures() {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -431,7 +431,7 @@ pub struct Container {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -497,7 +497,7 @@ impl FloatOrInt {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);
@@ -555,7 +555,7 @@ mod outer {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (_, _, definitions_map, _) = build_fqn_and_node_indices(&parse_result.ast);
         let definitions = extract_definitions_from_map(&definitions_map);

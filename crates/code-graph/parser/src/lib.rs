@@ -28,7 +28,7 @@ pub mod utils;
 // Re-export commonly used types
 pub use analyzer::{AnalysisResult, Analyzer};
 pub use definitions::DefinitionLookup;
-pub use parser::{LanguageParser, ParseResult, SupportedLanguage};
+pub use parser::{Language, LanguageParser, ParseResult};
 pub use treesitter_visit::{LanguageExt, SupportLang};
 pub use utils::{Position, Range};
 
@@ -68,14 +68,14 @@ mod tests {
     #[test]
     fn test_library_exports() {
         // Test that main exports are available
-        let _: SupportedLanguage = SupportedLanguage::Ruby;
+        let _: Language = Language::Ruby;
         let _: Result<()> = Ok(());
     }
 
     #[test]
     fn test_complete_ruby_parsing_workflow() -> Result<()> {
         // 1. Create parser
-        let parser = GenericParser::default_for_language(SupportedLanguage::Ruby);
+        let parser = GenericParser::default_for_language(Language::Ruby);
 
         // 2. Sample Ruby code
         let ruby_code = r#"
@@ -114,7 +114,7 @@ squared = MathUtils.square(result)
         let parse_result = parser.parse(ruby_code, Some("calculator.rb"))?;
 
         // 5. Verify results
-        assert_eq!(parse_result.language, SupportedLanguage::Ruby);
+        assert_eq!(parse_result.language, Language::Ruby);
         assert_eq!(parse_result.file_path.as_deref(), Some("calculator.rb"));
         assert!(!parse_result.ast.root().text().is_empty());
 
@@ -128,7 +128,7 @@ squared = MathUtils.square(result)
 
     #[test]
     fn test_cross_language_support() -> Result<()> {
-        let languages = [("test.rb", SupportedLanguage::Ruby)];
+        let languages = [("test.rb", Language::Ruby)];
 
         for (file_path, expected_lang) in languages {
             let detected = detect_language_from_path(file_path)?;

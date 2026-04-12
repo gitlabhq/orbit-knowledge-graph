@@ -64,7 +64,7 @@ pub fn ruby_fqn_to_string(fqn: &RubyFqn) -> String {
 mod tests {
     use super::*;
     use crate::Range;
-    use crate::parser::{ParserType, SupportedLanguage, UnifiedParseResult};
+    use crate::parser::{Language, ParserType, UnifiedParseResult};
     use crate::ruby::types::RubyFqnPart;
     use crate::ruby::types::RubyFqnPartType;
     use crate::ruby::visit::extract_definitions_and_references_from_prism;
@@ -202,7 +202,7 @@ module TestModule
 end
 "#;
 
-        let parser = ParserType::for_language(SupportedLanguage::Ruby);
+        let parser = ParserType::for_language(Language::Ruby);
         let parse_result = parser.parse(ruby_code, Some("test.rb")).unwrap();
 
         let definitions = if let UnifiedParseResult::Ruby(prism_parse_result) = parse_result {

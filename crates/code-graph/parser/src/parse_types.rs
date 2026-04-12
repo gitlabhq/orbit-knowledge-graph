@@ -4,7 +4,7 @@ use crate::{
     definitions::DefinitionInfo,
     java::types::{JavaDefinitionInfo, JavaImportedSymbolInfo, JavaReferenceInfo},
     kotlin::types::{KotlinDefinitionInfo, KotlinImportedSymbolInfo, KotlinReferenceInfo},
-    parser::SupportedLanguage,
+    parser::Language,
     python::types::{PythonDefinitionInfo, PythonImportedSymbolInfo, PythonReferenceInfo},
     references::ReferenceInfo,
     ruby::{
@@ -30,7 +30,7 @@ pub struct SkippedFile {
 #[derive(Debug, Clone)]
 pub struct ErroredFile {
     pub file_path: String,
-    pub language: Option<SupportedLanguage>,
+    pub language: Option<Language>,
     pub error_message: String,
     pub error_stage: ProcessingStage,
 }
@@ -342,7 +342,7 @@ pub struct FileProcessingResult {
     pub file_path: String,
     pub extension: String,
     pub file_size: u64,
-    pub language: SupportedLanguage,
+    pub language: Language,
     pub definitions: Definitions,
     pub imported_symbols: Option<ImportedSymbols>,
     pub references: Option<References>,

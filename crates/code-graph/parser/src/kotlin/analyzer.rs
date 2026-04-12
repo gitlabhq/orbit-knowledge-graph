@@ -78,7 +78,7 @@ impl KotlinAnalyzerResult {
 
 #[cfg(test)]
 mod tests {
-    use crate::{LanguageParser, SupportedLanguage, parser::GenericParser};
+    use crate::{Language, LanguageParser, parser::GenericParser};
 
     use super::*;
 
@@ -89,7 +89,7 @@ mod tests {
         let kotlin_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read ComprehensiveKotlinDefinitions.kt fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(&kotlin_code, Some(fixture_path)).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();
@@ -196,7 +196,7 @@ mod tests {
         let kotlin_code = std::fs::read_to_string(fixture_path)
             .expect("Should be able to read ComprehensiveKotlinDefinitions.kt fixture");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(&kotlin_code, Some(fixture_path)).unwrap();
 
         let result = analyzer.analyze(&parse_result).unwrap();

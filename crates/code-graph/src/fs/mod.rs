@@ -9,7 +9,7 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use ignore::WalkBuilder;
 use ignore::gitignore::GitignoreBuilder;
-use parser_core::parser::{SupportedLanguage, get_supported_extensions};
+use parser_core::parser::{Language, get_supported_extensions};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -35,7 +35,7 @@ impl Default for FsConfig {
 pub struct SourceFile {
     pub path: PathBuf,
     pub content: String,
-    pub language: SupportedLanguage,
+    pub language: Language,
 }
 
 impl SourceFile {

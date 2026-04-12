@@ -5,7 +5,7 @@ pub type PythonDefinitions = Vec<PythonDefinitionInfo>;
 
 #[cfg(test)]
 mod definition_tests {
-    use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
+    use crate::parser::{GenericParser, Language, LanguageParser};
     use crate::python::fqn::build_fqn_index;
     use crate::python::fqn::python_fqn_to_string;
     use crate::python::types::PythonDefinitionType;
@@ -18,7 +18,7 @@ mod definition_tests {
         println!("\n=== Testing: {description} ===");
         println!("Code snippet:\n{code}");
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Python);
+        let parser = GenericParser::default_for_language(Language::Python);
         let parse_result = parser.parse(code, Some("test.py")).unwrap();
         let (_node_fqn_map, definitions) = build_fqn_index(&parse_result.ast);
 

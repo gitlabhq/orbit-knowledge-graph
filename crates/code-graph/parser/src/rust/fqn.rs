@@ -667,7 +667,7 @@ pub fn find_rust_fqn_for_node<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
+    use crate::parser::{GenericParser, Language, LanguageParser};
     #[test]
     fn test_rust_fqn_computation_with_sample_code() {
         let rust_code = r#"
@@ -730,7 +730,7 @@ pub fn top_level_function() {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("test.rs")).unwrap();
         let (rust_node_fqn_map, _node_index_map, _, _) =
             build_fqn_and_node_indices(&parse_result.ast);
@@ -796,7 +796,7 @@ mod outer {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("nested.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 
@@ -857,7 +857,7 @@ impl<'a, T> Iterator<'a, T> for Container<T> {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("generics.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 
@@ -902,7 +902,7 @@ impl Point {
 fn standalone_function() {}
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("metadata.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 
@@ -953,7 +953,7 @@ fn main() {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("closures.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 
@@ -1026,7 +1026,7 @@ mod test_mod {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("closure_names.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 
@@ -1091,7 +1091,7 @@ impl AsyncStruct {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("async_unsafe.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 
@@ -1163,7 +1163,7 @@ pub enum Result<T, E = Box<dyn std::error::Error>> {
 pub type StringResult<T> = Result<T, String>;
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser
             .parse(rust_code, Some("complex_generics.rs"))
             .unwrap();
@@ -1234,7 +1234,7 @@ impl TraitWithSelfVariations for SelfVariations {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("self_variations.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 
@@ -1350,7 +1350,7 @@ where
 pub struct GenericPair<T, U>(T, U);
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("trait_impls.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 
@@ -1467,7 +1467,7 @@ mod level1 {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("edge_cases.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 
@@ -1532,7 +1532,7 @@ impl ComplexSelf {
 }
 "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Rust);
+        let parser = GenericParser::default_for_language(Language::Rust);
         let parse_result = parser.parse(rust_code, Some("complex_self.rs")).unwrap();
         let (rust_node_fqn_map, _, _, _) = build_fqn_and_node_indices(&parse_result.ast);
 

@@ -1,5 +1,5 @@
 use super::types::TypeScriptSwcAst;
-use crate::parser::{ParseResult, SupportedLanguage};
+use crate::parser::{Language, ParseResult};
 use crate::{Error, Result};
 use std::path::Path;
 use swc_common::{FileName, SourceMap, sync::Lrc};
@@ -61,8 +61,8 @@ impl TypeScriptParser {
         Self
     }
 
-    pub fn language(&self) -> SupportedLanguage {
-        SupportedLanguage::TypeScript
+    pub fn language(&self) -> Language {
+        Language::TypeScript
     }
 
     pub fn parse<'a>(

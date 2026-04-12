@@ -1760,7 +1760,7 @@ mod tests {
     use super::*;
     use crate::{
         kotlin::types::{KotlinDefinitions, KotlinImportType, KotlinImports},
-        parser::{GenericParser, LanguageParser, SupportedLanguage},
+        parser::{GenericParser, Language, LanguageParser},
     };
 
     #[test]
@@ -1779,7 +1779,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -1831,7 +1831,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -1918,7 +1918,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -1970,7 +1970,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2009,7 +2009,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2044,7 +2044,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2080,7 +2080,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2116,7 +2116,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2151,7 +2151,7 @@ mod tests {
         )
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2197,7 +2197,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2252,7 +2252,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2289,7 +2289,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2337,7 +2337,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2378,7 +2378,7 @@ mod tests {
             get() = length
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2401,7 +2401,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2431,7 +2431,7 @@ mod tests {
         )
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2489,7 +2489,7 @@ mod tests {
         value class MyValueClass(val value: Int)
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2528,7 +2528,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -2553,7 +2553,7 @@ mod tests {
         import kotlin.mysql.*
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { imports, .. } = parse_ast(&parse_result.ast);
@@ -2627,7 +2627,7 @@ mod tests {
         fun await(block: () -> Unit) { block() }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let references = parse_ast(&parse_result.ast).references;
@@ -2804,7 +2804,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let references = parse_ast(&parse_result.ast).references;
@@ -2865,7 +2865,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let references = parse_ast(&parse_result.ast).references;
@@ -2918,7 +2918,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let references = parse_ast(&parse_result.ast).references;
@@ -2960,7 +2960,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
@@ -3007,7 +3007,7 @@ mod tests {
         }
         "#;
 
-        let parser = GenericParser::default_for_language(SupportedLanguage::Kotlin);
+        let parser = GenericParser::default_for_language(Language::Kotlin);
         let parse_result = parser.parse(kotlin_code, Some("test.kt")).unwrap();
 
         let KotlinAnalyzerResult { definitions, .. } = parse_ast(&parse_result.ast);
