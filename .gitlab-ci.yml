@@ -431,7 +431,7 @@ e2e-gdk-test:
       allow_failure: true
   before_script:
     - !reference [.sccache-template, before_script]
-    - pip install -r tests/e2e/requirements.txt
+    - python3 -m pip install --break-system-packages -r tests/e2e/requirements.txt
     - cargo build --release -p gkg-server
   script:
     - |

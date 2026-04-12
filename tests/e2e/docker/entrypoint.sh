@@ -8,9 +8,10 @@ grep -q gdk.test /etc/hosts || echo "127.0.0.1 gdk.test" | sudo tee -a /etc/host
 
 # Increase ClickHouse memory limit (default 3GB is too low alongside GDK)
 mkdir -p /gitlab-gdk/gitlab-development-kit/clickhouse/config.d
-cat > /gitlab-gdk/gitlab-development-kit/clickhouse/config.d/memory.xml <<'XML'
+cat > /gitlab-gdk/gitlab-development-kit/clickhouse/config.d/e2e.xml <<'XML'
 <clickhouse>
   <max_server_memory_usage>8000000000</max_server_memory_usage>
+  <listen_host>0.0.0.0</listen_host>
 </clickhouse>
 XML
 
