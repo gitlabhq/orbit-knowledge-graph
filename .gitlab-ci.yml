@@ -436,14 +436,33 @@ e2e-gdk-test:
     - cargo build --release -p gkg-server
   script:
     - |
-      # Wait for GDK service to be ready
-      for i in $(seq 1 180); do
+      # Wait for GDK service to be fully ready (entrypoint takes ~3-5 min)
+      echo "Waiting for GDK service (may take 5+ min for entrypoint to complete)..."
+      for i in $(seq 1 600); do
         if curl -sk https://gdk.test:3443/-/readiness 2>/dev/null | grep -q ok; then
           echo "GDK ready after ${i}s"
           break
         fi
+        [ "$((i % 30))" -eq 0 ] && echo "Still waiting... ${i}s"
+        [ "$i" -eq 600 ] && echo "WARNING: GDK not ready after 600s" && exit 1
         sleep 1
       done
+    - |
+      # Create a PAT via the API (seed-data.rb runs inside the service container)
+      PAT=$(curl -sk -X POST "https://gdk.test:3443/oauth/token" \
+        -d "grant_type=password&username=root&password=5iveL!fe" 2>/dev/null \
+        | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
+      if [ -z "$PAT" ]; then
+        # Fallback: use API to create PAT with default creds
+        PAT=$(curl -sk -X POST "https://gdk.test:3443/api/v4/users/1/personal_access_tokens" \
+          -H "PRIVATE-TOKEN: $(curl -sk -X POST 'https://gdk.test:3443/oauth/token' \
+            -d 'grant_type=password&username=root&password=5iveL!fe' 2>/dev/null \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)" \
+          -d 'name=e2e-ci&scopes[]=api&scopes[]=read_api' 2>/dev/null \
+          | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+      fi
+      echo "$PAT" > ~/.gdk_token
+      echo "PAT created (length: ${#PAT})"
     - |
       # Start GKG processes connected to the GDK service
       export GKG__GITLAB__BASE_URL=https://gdk.test:3443
