@@ -22,6 +22,22 @@ impl JsCrossFileResolver {
         Self { resolver, root_dir }
     }
 
+    /// Infer aliases from the project's import patterns and rebuild the
+    /// resolver if any are found. Call this after collecting all modules
+    /// but before resolving imports/calls.
+    pub fn apply_inferred_aliases(
+        &mut self,
+        is_bun: bool,
+        has_tsconfig: bool,
+        modules: &HashMap<String, JsModuleInfo>,
+    ) {
+        let aliases = infer_aliases_from_imports(&self.root_dir, modules);
+        if !aliases.is_empty() {
+            self.resolver =
+                create_resolver_with_aliases(is_bun, has_tsconfig, &self.root_dir, aliases);
+        }
+    }
+
     pub fn resolve(
         &self,
         modules: &HashMap<String, JsModuleInfo>,
@@ -30,10 +46,11 @@ impl JsCrossFileResolver {
 
         for (file_path, module_info) in modules {
             let abs_path = self.root_dir.join(file_path);
-            let abs_dir = abs_path.parent().unwrap_or(&self.root_dir);
 
             for import_entry in &module_info.imports {
-                let resolved = self.resolver.resolve(abs_dir, &import_entry.specifier);
+                let resolved = self
+                    .resolver
+                    .resolve_file(&abs_path, &import_entry.specifier);
 
                 let resolved_path = match resolved {
                     Ok(resolution) => resolution.into_path_buf(),
@@ -93,7 +110,6 @@ impl JsCrossFileResolver {
 
         for (file_path, calls) in calls_by_file {
             let abs_path = self.root_dir.join(file_path);
-            let abs_dir = abs_path.parent().unwrap_or(&self.root_dir);
 
             for call in calls {
                 let JsCallTarget::ImportedCall {
@@ -105,7 +121,7 @@ impl JsCrossFileResolver {
                     continue;
                 };
 
-                let resolved = match self.resolver.resolve(abs_dir, specifier) {
+                let resolved = match self.resolver.resolve_file(&abs_path, specifier) {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
@@ -171,8 +187,8 @@ impl JsCrossFileResolver {
             return None;
         }
 
-        let abs_dir = self.root_dir.join(from_file).parent()?.to_path_buf();
-        let resolution = self.resolver.resolve(&abs_dir, source).ok()?;
+        let abs_file = self.root_dir.join(from_file);
+        let resolution = self.resolver.resolve_file(&abs_file, source).ok()?;
         let rel = resolution
             .into_path_buf()
             .strip_prefix(&self.root_dir)
@@ -223,9 +239,8 @@ impl JsCrossFileResolver {
         }
 
         for star_source in &module.star_export_sources {
-            let abs_path = self.root_dir.join(current_file);
-            let abs_dir = abs_path.parent().unwrap_or(&self.root_dir);
-            if let Ok(resolution) = self.resolver.resolve(abs_dir, star_source) {
+            let abs_file = self.root_dir.join(current_file);
+            if let Ok(resolution) = self.resolver.resolve_file(&abs_file, star_source) {
                 let resolved_path = resolution.into_path_buf();
                 if let Ok(rel) = resolved_path.strip_prefix(&self.root_dir) {
                     let rel_str = rel.to_string_lossy().to_string();
@@ -338,35 +353,146 @@ impl JsCrossFileResolver {
     }
 }
 
-/// Detect module aliases from the project's bundler/framework configuration.
+/// Discover tsconfig/jsconfig for the resolver.
 ///
-/// Checks (in order):
-/// 1. webpack.config.js -- parses `alias` object for simple `key: path.join(ROOT, 'dir')` patterns
-/// 2. vite.config.{js,ts} -- parses `resolve.alias` for `{ find, replacement }` patterns
-/// 3. Fallback heuristic -- common conventions (`~` -> `app/assets/javascripts`, `@` -> `src`)
-fn detect_aliases(root_dir: &Path) -> Vec<(String, Vec<oxc_resolver::AliasValue>)> {
-    let mut aliases = Vec::new();
+/// oxc_resolver's `TsconfigDiscovery::Auto` only searches for `tsconfig.json`,
+/// not `jsconfig.json`. Since `jsconfig.json` is structurally identical and
+/// commonly used by JS-only projects (VS Code, Vite, webpack 5.105+), we
+/// explicitly check for it and use Manual discovery if found.
+///
+/// For projects without any config, we scan for common bundler alias
+/// patterns in package.json `imports` field, which is the Node.js standard
+/// for subpath imports and is natively supported by oxc_resolver.
+///
+/// Resolution priority:
+/// 1. `tsconfig.json` in root or parents -> Auto (oxc_resolver walks parent dirs)
+/// 2. `jsconfig.json` in root -> Manual (oxc_resolver parses it identically)
+/// 3. Neither exists -> Auto (harmless, falls through to ResolveOptions::alias)
+fn discover_tsconfig(root_dir: &Path) -> TsconfigDiscovery {
+    // jsconfig.json is functionally identical to tsconfig.json but Auto doesn't find it
+    let jsconfig = root_dir.join("jsconfig.json");
+    if jsconfig.exists() {
+        return TsconfigDiscovery::Manual(oxc_resolver::TsconfigOptions {
+            config_file: jsconfig,
+            references: oxc_resolver::TsconfigReferences::Auto,
+        });
+    }
+    TsconfigDiscovery::Auto
+}
 
-    // Try to parse webpack config
-    let webpack_path = root_dir.join("config/webpack.config.js");
-    let alt_webpack_path = root_dir.join("webpack.config.js");
-    let webpack_content = std::fs::read_to_string(&webpack_path)
-        .or_else(|_| std::fs::read_to_string(&alt_webpack_path))
-        .unwrap_or_default();
-
-    if !webpack_content.is_empty() {
-        parse_webpack_aliases(&webpack_content, root_dir, &mut aliases);
+/// Infer module aliases from the project's actual import patterns.
+///
+/// When no tsconfig/jsconfig paths are available, this function examines the
+/// collected module imports to discover alias prefixes (e.g., `~/`, `@/`) and
+/// validates candidate directory mappings by checking whether substituting the
+/// alias with the candidate directory resolves to real files.
+///
+/// This is import-driven, not heuristic: the evidence comes from the codebase's
+/// own import statements, not from guessing directory names.
+pub(super) fn infer_aliases_from_imports(
+    root_dir: &Path,
+    modules: &HashMap<String, JsModuleInfo>,
+) -> Vec<(String, Vec<oxc_resolver::AliasValue>)> {
+    // If tsconfig.json or jsconfig.json exists, aliases are handled by oxc_resolver natively
+    if root_dir.join("tsconfig.json").exists() || root_dir.join("jsconfig.json").exists() {
+        return vec![];
     }
 
-    // If no aliases found from config, try heuristic detection
-    if aliases.is_empty() {
-        let candidates: &[(&str, &str)] =
-            &[("~", "app/assets/javascripts"), ("~", "src"), ("@", "src")];
-        for (prefix, target) in candidates {
-            let target_path = root_dir.join(target);
-            if target_path.is_dir() && !aliases.iter().any(|(p, _)| p == *prefix) {
+    // Collect import prefixes that look like aliases (single char + /)
+    let mut prefix_counts: HashMap<String, usize> = HashMap::new();
+    let mut prefix_samples: HashMap<String, Vec<String>> = HashMap::new();
+
+    for module_info in modules.values() {
+        for imp in &module_info.imports {
+            let spec = &imp.specifier;
+            // Skip relative, absolute, and bare specifiers that look like npm packages
+            if spec.starts_with('.')
+                || spec.starts_with('/')
+                || spec.starts_with('@')
+                || !spec.contains('/')
+            {
+                continue;
+            }
+
+            // Extract the prefix before the first /
+            if let Some(slash_pos) = spec.find('/') {
+                let prefix = &spec[..slash_pos];
+                // Only consider short prefixes (1-2 chars like ~, @, #)
+                if prefix.len() <= 2 && !prefix.chars().all(|c| c.is_alphanumeric()) {
+                    *prefix_counts.entry(prefix.to_string()).or_default() += 1;
+                    let samples = prefix_samples.entry(prefix.to_string()).or_default();
+                    if samples.len() < 20 {
+                        samples.push(spec[slash_pos + 1..].to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut aliases = Vec::new();
+
+    // Common directory candidates for JS/TS project aliases
+    let candidates = [
+        "app/assets/javascripts",
+        "src",
+        "lib",
+        "app/javascript",
+        "app/frontend",
+        "packages",
+    ];
+
+    for (prefix, count) in &prefix_counts {
+        if *count < 5 {
+            continue;
+        }
+
+        let samples = match prefix_samples.get(prefix) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        // Try each candidate directory and score by how many sample imports resolve
+        let mut best: Option<(String, usize)> = None;
+
+        for candidate in &candidates {
+            let candidate_dir = root_dir.join(candidate);
+            if !candidate_dir.is_dir() {
+                continue;
+            }
+
+            let resolved_count = samples
+                .iter()
+                .filter(|sample| {
+                    let path = candidate_dir.join(sample);
+                    // Check with common extensions
+                    path.exists()
+                        || path.with_extension("js").exists()
+                        || path.with_extension("ts").exists()
+                        || path.with_extension("vue").exists()
+                        || path.join("index.js").exists()
+                        || path.join("index.ts").exists()
+                })
+                .count();
+
+            if resolved_count > 0 {
+                match &best {
+                    Some((_, best_count)) if resolved_count > *best_count => {
+                        best = Some((candidate.to_string(), resolved_count));
+                    }
+                    None => {
+                        best = Some((candidate.to_string(), resolved_count));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if let Some((dir, resolved)) = best {
+            // Require at least 25% of samples to resolve as evidence
+            if resolved * 4 >= samples.len() {
+                let target_path = root_dir.join(&dir);
                 aliases.push((
-                    prefix.to_string(),
+                    prefix.clone(),
                     vec![oxc_resolver::AliasValue::Path(
                         target_path.to_string_lossy().to_string(),
                     )],
@@ -378,84 +504,8 @@ fn detect_aliases(root_dir: &Path) -> Vec<(String, Vec<oxc_resolver::AliasValue>
     aliases
 }
 
-/// Parse webpack alias entries from config source.
-/// Matches patterns like: `'~': path.join(ROOT_PATH, 'app/assets/javascripts')`
-fn parse_webpack_aliases(
-    content: &str,
-    root_dir: &Path,
-    aliases: &mut Vec<(String, Vec<oxc_resolver::AliasValue>)>,
-) {
-    // Match: 'key': path.join(SOMETHING, 'relative/path')
-    // or:   key: path.join(SOMETHING, 'relative/path')
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Skip comments
-        if trimmed.starts_with("//") || trimmed.starts_with("/*") {
-            continue;
-        }
-
-        // Match alias entries: 'alias_name': path.join(..., 'target')
-        // or: alias_name: path.join(..., 'target')
-        if let Some(colon_pos) = trimmed.find(':') {
-            let key = trimmed[..colon_pos]
-                .trim()
-                .trim_matches('\'')
-                .trim_matches('"')
-                .trim_end_matches('$');
-
-            if key.is_empty() || key.contains(' ') || key.starts_with("//") {
-                continue;
-            }
-
-            let value = trimmed[colon_pos + 1..].trim();
-
-            // path.join(SOMETHING, 'relative/dir')
-            if value.contains("path.join")
-                && let Some(target) = extract_path_join_target(value)
-            {
-                let target_path = root_dir.join(&target);
-                if target_path.is_dir() || target_path.exists() {
-                    aliases.push((
-                        key.to_string(),
-                        vec![oxc_resolver::AliasValue::Path(
-                            target_path.to_string_lossy().to_string(),
-                        )],
-                    ));
-                }
-            }
-        }
-    }
-}
-
-/// Extract the last string argument from `path.join(ROOT, 'some/path')`.
-fn extract_path_join_target(s: &str) -> Option<String> {
-    // Find the last quoted string in the path.join call
-    let mut last_quoted = None;
-    let mut in_quote = false;
-    let mut quote_char = '\'';
-    let mut start = 0;
-
-    for (i, c) in s.char_indices() {
-        if !in_quote && (c == '\'' || c == '"') {
-            in_quote = true;
-            quote_char = c;
-            start = i + 1;
-        } else if in_quote && c == quote_char {
-            last_quoted = Some(&s[start..i]);
-            in_quote = false;
-        }
-    }
-
-    last_quoted.map(|s| s.to_string())
-}
-
-fn create_resolver(is_bun: bool, has_tsconfig: bool, root_dir: &std::path::Path) -> Resolver {
-    let tsconfig = if has_tsconfig {
-        Some(TsconfigDiscovery::Auto)
-    } else {
-        None
-    };
+fn create_resolver(is_bun: bool, has_tsconfig: bool, root_dir: &Path) -> Resolver {
+    let tsconfig = Some(discover_tsconfig(root_dir));
 
     let extensions: Vec<String> = if is_bun {
         [".tsx", ".jsx", ".ts", ".mjs", ".js", ".cjs", ".json"]
@@ -490,7 +540,56 @@ fn create_resolver(is_bun: bool, has_tsconfig: bool, root_dir: &std::path::Path)
         vec![]
     };
 
-    let alias = detect_aliases(root_dir);
+    Resolver::new(ResolveOptions {
+        extensions,
+        main_fields: vec!["module".to_string(), "main".to_string()],
+        condition_names: vec!["module".to_string(), "import".to_string()],
+        extension_alias,
+        tsconfig,
+        ..ResolveOptions::default()
+    })
+}
+
+fn create_resolver_with_aliases(
+    is_bun: bool,
+    has_tsconfig: bool,
+    root_dir: &Path,
+    alias: Vec<(String, Vec<oxc_resolver::AliasValue>)>,
+) -> Resolver {
+    let tsconfig = Some(discover_tsconfig(root_dir));
+
+    let extensions: Vec<String> = if is_bun {
+        [".tsx", ".jsx", ".ts", ".mjs", ".js", ".cjs", ".json"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    } else {
+        [
+            ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".json",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect()
+    };
+
+    let extension_alias = if has_tsconfig {
+        vec![
+            (
+                ".js".to_string(),
+                vec![".js".to_string(), ".ts".to_string()],
+            ),
+            (
+                ".mjs".to_string(),
+                vec![".mjs".to_string(), ".mts".to_string()],
+            ),
+            (
+                ".cjs".to_string(),
+                vec![".cjs".to_string(), ".cts".to_string()],
+            ),
+        ]
+    } else {
+        vec![]
+    };
 
     Resolver::new(ResolveOptions {
         extensions,
