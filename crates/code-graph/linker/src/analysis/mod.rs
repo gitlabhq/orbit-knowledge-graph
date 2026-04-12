@@ -1,3 +1,4 @@
+pub mod analyzer_trait;
 pub mod canonical_helpers;
 pub mod files;
 pub mod languages;
@@ -43,6 +44,30 @@ pub struct AnalysisService {
 }
 
 impl AnalysisService {
+    fn get_analyzer(&mut self, language: Language) -> &mut dyn analyzer_trait::LanguageAnalyzer {
+        match language {
+            Language::Ruby => &mut self.ruby_analyzer,
+            Language::Python => &mut self.python_analyzer,
+            Language::Kotlin => &mut self.kotlin_analyzer,
+            Language::Java => &mut self.java_analyzer,
+            Language::CSharp => &mut self.csharp_analyzer,
+            Language::TypeScript => &mut self.typescript_analyzer,
+            Language::Rust => &mut self.rust_analyzer,
+        }
+    }
+
+    fn get_analyzer_ref(&self, language: Language) -> &dyn analyzer_trait::LanguageAnalyzer {
+        match language {
+            Language::Ruby => &self.ruby_analyzer,
+            Language::Python => &self.python_analyzer,
+            Language::Kotlin => &self.kotlin_analyzer,
+            Language::Java => &self.java_analyzer,
+            Language::CSharp => &self.csharp_analyzer,
+            Language::TypeScript => &self.typescript_analyzer,
+            Language::Rust => &self.rust_analyzer,
+        }
+    }
+
     /// Create a new analysis service
     pub fn new(repository_name: String, repository_path: String) -> Self {
         let filesystem_analyzer =
@@ -240,7 +265,6 @@ impl AnalysisService {
         file_nodes.push(file_node);
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn extract_language_entities(
         &mut self,
         file_result: &FileProcessingResult,
@@ -251,100 +275,14 @@ impl AnalysisService {
         let relative_path = self
             .filesystem_analyzer
             .get_relative_path(&file_result.file_path);
-        match file_result.language {
-            Language::Ruby => {
-                let _ = self.ruby_analyzer.process_definitions(
-                    file_result,
-                    &relative_path,
-                    definition_map,
-                    relationships,
-                );
-            }
-            Language::Python => {
-                self.python_analyzer.process_definitions(
-                    file_result,
-                    &relative_path,
-                    definition_map,
-                    relationships,
-                );
-                self.python_analyzer.process_imports(
-                    file_result,
-                    &relative_path,
-                    imported_symbol_map,
-                    relationships,
-                );
-            }
-            Language::Kotlin => {
-                self.kotlin_analyzer.process_definitions(
-                    file_result,
-                    &relative_path,
-                    definition_map,
-                    relationships,
-                );
-                self.kotlin_analyzer.process_imports(
-                    file_result,
-                    &relative_path,
-                    imported_symbol_map,
-                    relationships,
-                );
-            }
-            Language::Java => {
-                self.java_analyzer.process_definitions(
-                    file_result,
-                    &relative_path,
-                    definition_map,
-                    relationships,
-                );
-                self.java_analyzer.process_imports(
-                    file_result,
-                    &relative_path,
-                    imported_symbol_map,
-                    relationships,
-                );
-            }
-            Language::CSharp => {
-                self.csharp_analyzer.process_definitions(
-                    file_result,
-                    &relative_path,
-                    definition_map,
-                    relationships,
-                );
-                self.csharp_analyzer.process_imports(
-                    file_result,
-                    &relative_path,
-                    imported_symbol_map,
-                    relationships,
-                );
-            }
-            Language::TypeScript => {
-                self.typescript_analyzer.process_definitions(
-                    file_result,
-                    &relative_path,
-                    definition_map,
-                    relationships,
-                );
-                self.typescript_analyzer.process_imports(
-                    file_result,
-                    &relative_path,
-                    imported_symbol_map,
-                    relationships,
-                );
-            }
-            Language::Rust => {
-                self.rust_analyzer.process_definitions(
-                    file_result,
-                    &relative_path,
-                    definition_map,
-                    relationships,
-                );
-                self.rust_analyzer.process_imports(
-                    file_result,
-                    &relative_path,
-                    imported_symbol_map,
-                    relationships,
-                );
-            } // Note: use _ => {} as a catch-all if you want to disable some analyzers
-        }
+        let analyzer = self.get_analyzer(file_result.language);
+        analyzer.process_definitions(file_result, &relative_path, definition_map, relationships);
+        analyzer.process_imports(
+            file_result,
+            &relative_path,
+            imported_symbol_map,
+            relationships,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -516,45 +454,8 @@ impl AnalysisService {
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
-        match language {
-            Language::Ruby => {
-                self.ruby_analyzer
-                    .add_definition_relationships(definition_map, relationships);
-            }
-            Language::Python => {
-                self.python_analyzer.add_definition_relationships(
-                    definition_map,
-                    imported_symbol_map,
-                    relationships,
-                );
-            }
-            Language::Kotlin => {
-                self.kotlin_analyzer
-                    .add_definition_relationships(definition_map, relationships);
-            }
-            Language::Java => {
-                self.java_analyzer
-                    .add_definition_relationships(definition_map, relationships);
-            }
-            Language::CSharp => {
-                self.csharp_analyzer
-                    .add_definition_relationships(definition_map, relationships);
-            }
-            Language::TypeScript => {
-                self.typescript_analyzer.add_definition_relationships(
-                    definition_map,
-                    imported_symbol_map,
-                    relationships,
-                );
-            }
-            Language::Rust => {
-                self.rust_analyzer.add_definition_relationships(
-                    definition_map,
-                    imported_symbol_map,
-                    relationships,
-                );
-            } // Note: use _ => {} as a catch-all if you want to disable some analyzers
-        }
+        let analyzer = self.get_analyzer_ref(language);
+        analyzer.add_definition_relationships(definition_map, imported_symbol_map, relationships);
     }
 }
 

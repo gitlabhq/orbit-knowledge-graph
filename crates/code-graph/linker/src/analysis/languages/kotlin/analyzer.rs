@@ -200,3 +200,58 @@ impl KotlinAnalyzer {
         None
     }
 }
+
+impl crate::analysis::analyzer_trait::LanguageAnalyzer for KotlinAnalyzer {
+    fn process_definitions(
+        &mut self,
+        file_result: &crate::parse_types::FileProcessingResult,
+        relative_file_path: &str,
+        definition_map: &mut std::collections::HashMap<
+            (String, String),
+            crate::analysis::types::DefinitionNode,
+        >,
+        relationships: &mut Vec<crate::analysis::types::ConsolidatedRelationship>,
+    ) {
+        KotlinAnalyzer::process_definitions(
+            self,
+            file_result,
+            relative_file_path,
+            definition_map,
+            relationships,
+        );
+    }
+
+    fn process_imports(
+        &mut self,
+        file_result: &crate::parse_types::FileProcessingResult,
+        relative_file_path: &str,
+        imported_symbol_map: &mut std::collections::HashMap<
+            (String, String),
+            Vec<crate::analysis::types::ImportedSymbolNode>,
+        >,
+        relationships: &mut Vec<crate::analysis::types::ConsolidatedRelationship>,
+    ) {
+        KotlinAnalyzer::process_imports(
+            self,
+            file_result,
+            relative_file_path,
+            imported_symbol_map,
+            relationships,
+        );
+    }
+
+    fn add_definition_relationships(
+        &self,
+        definition_map: &std::collections::HashMap<
+            (String, String),
+            crate::analysis::types::DefinitionNode,
+        >,
+        _imported_symbol_map: &std::collections::HashMap<
+            (String, String),
+            Vec<crate::analysis::types::ImportedSymbolNode>,
+        >,
+        relationships: &mut Vec<crate::analysis::types::ConsolidatedRelationship>,
+    ) {
+        KotlinAnalyzer::add_definition_relationships(self, definition_map, relationships);
+    }
+}
