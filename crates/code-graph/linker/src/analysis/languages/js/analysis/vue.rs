@@ -68,36 +68,96 @@ pub(super) fn extract_vue_options_api(
             type_annotation: None,
         });
 
+        let lifecycle_hooks = [
+            "beforeCreate",
+            "created",
+            "beforeMount",
+            "mounted",
+            "beforeUpdate",
+            "updated",
+            "beforeDestroy",
+            "destroyed",
+            "beforeUnmount",
+            "unmounted",
+            "activated",
+            "deactivated",
+            "errorCaptured",
+        ];
+
         for prop in &obj.properties {
             let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
                 continue;
             };
-            let key_name = p.key.static_name();
-            let is_methods = key_name.as_deref() == Some("methods");
-            let is_computed = key_name.as_deref() == Some("computed");
-            if !is_methods && !is_computed {
-                continue;
-            }
-            let oxc::ast::ast::Expression::ObjectExpression(methods_obj) = &p.value else {
+            let Some(key_name) = p.key.static_name() else {
                 continue;
             };
-            for method_prop in &methods_obj.properties {
-                let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(mp) = method_prop else {
+            let key = key_name.as_ref();
+
+            // methods: { ... } and computed: { ... } -- extract each child as a Method
+            if key == "methods" || key == "computed" {
+                let oxc::ast::ast::Expression::ObjectExpression(methods_obj) = &p.value else {
                     continue;
                 };
-                let Some(method_name) = mp.key.static_name() else {
+                for method_prop in &methods_obj.properties {
+                    let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(mp) = method_prop else {
+                        continue;
+                    };
+                    let Some(method_name) = mp.key.static_name() else {
+                        continue;
+                    };
+                    let method_name = method_name.to_string();
+                    let fqn = format!("{component_name}::{method_name}");
+                    defs.push(JsDef {
+                        name: method_name,
+                        fqn,
+                        kind: JsDefKind::Method {
+                            class_fqn: component_name.clone(),
+                            is_static: false,
+                        },
+                        range: span_to_range(mp.span),
+                        is_exported: false,
+                        type_annotation: None,
+                    });
+                }
+            }
+            // watch: { ... } -- extract each watcher as a Method
+            else if key == "watch" {
+                let oxc::ast::ast::Expression::ObjectExpression(watch_obj) = &p.value else {
                     continue;
                 };
-                let method_name = method_name.to_string();
-                let fqn = format!("{component_name}::{method_name}");
+                for watch_prop in &watch_obj.properties {
+                    let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(wp) = watch_prop else {
+                        continue;
+                    };
+                    let Some(watcher_name) = wp.key.static_name() else {
+                        continue;
+                    };
+                    let watcher_name = watcher_name.to_string();
+                    let fqn = format!("{component_name}::watch_{watcher_name}");
+                    defs.push(JsDef {
+                        name: format!("watch_{watcher_name}"),
+                        fqn,
+                        kind: JsDefKind::Method {
+                            class_fqn: component_name.clone(),
+                            is_static: false,
+                        },
+                        range: span_to_range(wp.span),
+                        is_exported: false,
+                        type_annotation: None,
+                    });
+                }
+            }
+            // data() and lifecycle hooks -- extract the function itself as a Method
+            else if key == "data" || lifecycle_hooks.contains(&key) {
+                let fqn = format!("{component_name}::{key}");
                 defs.push(JsDef {
-                    name: method_name,
+                    name: key.to_string(),
                     fqn,
                     kind: JsDefKind::Method {
                         class_fqn: component_name.clone(),
                         is_static: false,
                     },
-                    range: span_to_range(mp.span),
+                    range: span_to_range(p.span),
                     is_exported: false,
                     type_annotation: None,
                 });
