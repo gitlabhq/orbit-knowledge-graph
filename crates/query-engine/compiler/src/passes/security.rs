@@ -7,10 +7,17 @@
 //! - 1 path: `startsWith(path)`
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, skip_security_filter_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
+
+/// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
+static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
 
 /// Inject security filters into an AST node (mutates in place).
 pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<()> {
@@ -133,17 +140,27 @@ fn apply_security_to_from(table_ref: &mut TableRef, ctx: &SecurityContext) -> Re
 }
 
 /// Determines if a table should have traversal path security filters applied.
+///
+/// Handles both unprefixed (`gl_user`) and schema-version-prefixed
+/// (`v1_gl_user`) table names. CTEs like `path_cte` are excluded.
 fn should_apply_security_filter(table: &str) -> bool {
-    // Only apply to actual node tables and edge table (GL_TABLE_PREFIX)
-    // This excludes CTEs like "path_cte" which don't have traversal_path
-    if !table.starts_with(GL_TABLE_PREFIX) {
-        return false;
-    }
-    // Skip tables for entities whose visibility is relationship-based
-    if skip_security_filter_tables().iter().any(|t| t == table) {
-        return false;
-    }
-    true
+    let re = GL_TABLE_RE.get_or_init(|| {
+        Regex::new(&format!(
+            r"^(?:v\d+_)?({}.+)$",
+            regex::escape(GL_TABLE_PREFIX)
+        ))
+        .expect("valid regex")
+    });
+
+    let unprefixed = match re.captures(table).and_then(|c| c.get(1)) {
+        Some(m) => m.as_str(),
+        None => return false,
+    };
+
+    // The skip list uses unprefixed names from the embedded ontology.
+    !skip_security_filter_tables()
+        .iter()
+        .any(|t| t == unprefixed)
 }
 
 #[cfg(test)]

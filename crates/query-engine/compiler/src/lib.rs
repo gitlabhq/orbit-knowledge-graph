@@ -58,7 +58,6 @@ pub use input::{
     ColumnSelection, DynamicColumnMode, EntityAuthConfig, Input, InputNode, QueryType, parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
-pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
 pub use pipeline::{
     CompilerPass, Pipeline, PipelineEnv, PipelineObserver, PipelineState, Seal, SealedPipeline,
@@ -176,3 +175,56 @@ pub fn compile_local_input(input: Input, ontology: &Ontology) -> Result<Compiled
 
 // Pipeline presets are in `pipelines.rs`.
 // Tests are in `tests/compiler_tests.rs` and `tests/ontology_tests.rs`.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn security_ctx() -> SecurityContext {
+        SecurityContext::new(1, vec!["1/".to_string()]).expect("valid context")
+    }
+
+    #[test]
+    fn compile_with_prefixed_ontology_produces_prefixed_sql() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let prefixed = ontology.with_schema_version_prefix("v1_");
+
+        let query = r#"{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"]},"limit":1}"#;
+        let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("v1_gl_group"),
+            "search SQL should use prefixed node table v1_gl_group, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn compile_with_prefixed_ontology_prefixes_edge_table() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let prefixed = ontology.with_schema_version_prefix("v1_");
+
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":1}"#;
+        let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("v1_gl_edge"),
+            "traversal SQL should use prefixed edge table v1_gl_edge, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn compile_without_prefix_uses_unprefixed_tables() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"]},"limit":1}"#;
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("gl_group") && !sql.contains("v1_gl_group"),
+            "unprefixed search should use gl_group, got: {sql}"
+        );
+    }
+}
