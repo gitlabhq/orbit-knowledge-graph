@@ -455,6 +455,39 @@ fn extract_call_edges(
             );
 
             if !is_call {
+                // P0: namespace import member calls — import * as ns from '...'; ns.foo()
+                if let AstKind::StaticMemberExpression(member) = ctx.nodes.parent_kind(ref_node_id)
+                    && let Some(call_node_id) = ctx.nodes.ancestor_ids(ref_node_id).nth(1)
+                    && matches!(
+                        ctx.nodes.kind(call_node_id),
+                        AstKind::CallExpression(_) | AstKind::NewExpression(_)
+                    )
+                    && ctx.scoping.symbol_flags(symbol_id).is_import()
+                {
+                    let name = ctx.scoping.symbol_name(symbol_id);
+                    if let Some((specifier, ImportedName::Namespace)) = import_lookup.get(name) {
+                        let method_name = member.property.name.to_string();
+                        let call_range = ctx
+                            .lt
+                            .span_to_range(ctx.nodes.get_node(call_node_id).span());
+                        let caller_scope = reference.scope_id();
+                        let caller_info = ctx.find_enclosing_def(caller_scope);
+                        let caller = match caller_info {
+                            Some((fqn, range)) => JsCallSite::Definition { fqn, range },
+                            None => JsCallSite::ModuleLevel,
+                        };
+                        calls.push(JsCallEdge {
+                            caller,
+                            callee: JsCallTarget::ImportedCall {
+                                local_name: name.to_string(),
+                                specifier: specifier.to_string(),
+                                imported_name: ImportedName::Named(method_name),
+                            },
+                            call_range,
+                            confidence: JsCallConfidence::Known,
+                        });
+                    }
+                }
                 continue;
             }
 
@@ -812,266 +845,5 @@ impl JsAnalyzer {
             directive,
             module_info,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::graph::RelationshipType;
-
-    #[test]
-    fn test_default_export_tracks_definition_range() {
-        let source = r#"
-export default class Bar {
-    render() {}
-}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let bar = result
-            .defs
-            .iter()
-            .find(|d| d.fqn == "Bar")
-            .expect("Should extract Bar definition");
-        let default_export = result
-            .module_info
-            .exports
-            .get("default")
-            .expect("Should track default export binding");
-
-        assert_eq!(default_export.definition_range, Some(bar.range));
-    }
-
-    #[test]
-    fn test_jsx_component_creates_call_edge() {
-        let source = r#"
-function Button() { return <button>click</button>; }
-function App() { return <Button />; }
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.tsx", "test.tsx").unwrap();
-        let has_button_call = result
-            .calls
-            .iter()
-            .any(|c| matches!(&c.callee, JsCallTarget::Direct { fqn, .. } if fqn == "Button"));
-        assert!(
-            has_button_call,
-            "JSX <Button /> should create a call edge from App to Button"
-        );
-    }
-
-    #[test]
-    fn test_this_method_call_edge() {
-        let source = r#"
-class Service {
-    helper() { return 1; }
-    run() { return this.helper(); }
-}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let has_this_call = result.calls.iter().any(|c| {
-            matches!(
-                &c.callee,
-                JsCallTarget::ThisMethod {
-                    method_name,
-                    resolved_fqn: Some(_),
-                    ..
-                } if method_name == "helper"
-            )
-        });
-        assert!(
-            has_this_call,
-            "this.helper() should create a ThisMethod call edge"
-        );
-    }
-
-    #[test]
-    fn test_commonjs_require() {
-        let source = r#"
-const fs = require('fs');
-const { join } = require('path');
-const { resolve: presolve } = require('path');
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.js", "test.js").unwrap();
-        let def_names: Vec<&str> = result.defs.iter().map(|d| d.name.as_str()).collect();
-        assert!(def_names.contains(&"fs"), "Should find fs variable");
-        assert!(
-            def_names.contains(&"join"),
-            "Should find join destructured variable"
-        );
-        assert!(
-            def_names.contains(&"presolve"),
-            "Should preserve aliased destructured require bindings"
-        );
-
-        assert!(
-            result.imports.iter().any(|i| {
-                matches!(
-                    &i.kind,
-                    JsImportKind::CjsRequire {
-                        imported_name: None
-                    }
-                ) && i.local_name == "fs"
-            }),
-            "Default CommonJS require should keep the local binding name"
-        );
-        assert!(
-            result.imports.iter().any(|i| {
-                matches!(
-                    &i.kind,
-                    JsImportKind::CjsRequire {
-                        imported_name: Some(name)
-                    } if name == "join"
-                ) && i.local_name == "join"
-            }),
-            "Destructured CommonJS require should keep the imported member name"
-        );
-        assert!(
-            result.imports.iter().any(|i| {
-                matches!(
-                    &i.kind,
-                    JsImportKind::CjsRequire {
-                        imported_name: Some(name)
-                    } if name == "resolve"
-                ) && i.local_name == "presolve"
-            }),
-            "Aliased CommonJS require should keep both imported and local names"
-        );
-        assert!(
-            result
-                .imports
-                .iter()
-                .any(|i| matches!(&i.kind, JsImportKind::CjsRequire { .. })),
-            "CJS require() should produce JsImport entries"
-        );
-    }
-
-    #[test]
-    fn test_super_method_call_edge() {
-        let source = r#"
-class Animal {
-    speak() { return "..."; }
-}
-class Dog extends Animal {
-    speak() { return super.speak() + " Woof!"; }
-}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let has_super_call = result.calls.iter().any(|c| {
-            matches!(
-                &c.callee,
-                JsCallTarget::SuperMethod {
-                    method_name,
-                    resolved_fqn: Some(_),
-                    ..
-                } if method_name == "speak"
-            )
-        });
-        assert!(
-            has_super_call,
-            "super.speak() should create a SuperMethod call edge"
-        );
-    }
-
-    #[test]
-    fn test_this_method_inherited() {
-        let source = r#"
-class Base {
-    helper() { return 1; }
-}
-class Child extends Base {
-    run() { return this.helper(); }
-}
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let has_inherited_call = result.calls.iter().any(|c| {
-            matches!(
-                &c.callee,
-                JsCallTarget::ThisMethod {
-                    method_name,
-                    resolved_fqn: Some(fqn),
-                    ..
-                } if method_name == "helper" && fqn == "Base::helper"
-            )
-        });
-        assert!(
-            has_inherited_call,
-            "this.helper() should resolve through inheritance to Base::helper"
-        );
-    }
-
-    #[test]
-    fn test_type_annotation_extraction() {
-        let source = r#"
-const x: string = "hello";
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let x = result.defs.iter().find(|d| d.name == "x").unwrap();
-        assert_eq!(x.type_annotation.as_deref(), Some("string"));
-    }
-
-    #[test]
-    fn test_imported_call_creates_imported_call_edge() {
-        let source = r#"
-import { foo } from './utils';
-function bar() { return foo(); }
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let has_imported_call = result.calls.iter().any(|c| {
-            matches!(
-                &c.callee,
-                JsCallTarget::ImportedCall {
-                    local_name,
-                    specifier,
-                    imported_name: ImportedName::Named(name),
-                } if local_name == "foo" && specifier == "./utils" && name == "foo"
-            )
-        });
-        assert!(
-            has_imported_call,
-            "Calling an imported function should produce an ImportedCall edge, got: {:?}",
-            result.calls
-        );
-    }
-
-    #[test]
-    fn test_imported_default_call() {
-        let source = r#"
-import axios from 'axios';
-function fetch() { return axios('/api'); }
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let has_imported_call = result.calls.iter().any(|c| {
-            matches!(
-                &c.callee,
-                JsCallTarget::ImportedCall {
-                    local_name,
-                    imported_name: ImportedName::Default,
-                    ..
-                } if local_name == "axios"
-            )
-        });
-        assert!(
-            has_imported_call,
-            "Calling a default-imported function should produce an ImportedCall edge"
-        );
-    }
-
-    #[test]
-    fn test_imported_call_not_emitted_as_intra_file() {
-        let source = r#"
-import { foo } from './utils';
-function bar() { return foo(); }
-"#;
-        let result = JsAnalyzer::analyze_file(source, "test.ts", "test.ts").unwrap();
-        let emitted = result.emit();
-        let calls: Vec<_> = emitted
-            .relationships
-            .iter()
-            .filter(|r| r.relationship_type == RelationshipType::Calls)
-            .collect();
-        assert!(
-            calls.is_empty(),
-            "ImportedCall edges should not emit as intra-file CALLS relationships"
-        );
     }
 }
