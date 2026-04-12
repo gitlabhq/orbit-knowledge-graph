@@ -195,16 +195,38 @@ fn find_method_in_defs<'a>(
     None
 }
 
-fn build_variable_type_map(nodes: &AstNodes) -> HashMap<String, String> {
+fn build_variable_type_map(nodes: &AstNodes) -> HashMap<String, (String, JsCallConfidence)> {
     let mut map = HashMap::new();
     for node in nodes.iter() {
-        if let AstKind::VariableDeclarator(decl) = node.kind()
-            && let Some(init) = &decl.init
-            && let oxc::ast::ast::Expression::NewExpression(new_expr) = init
-            && let oxc::ast::ast::Expression::Identifier(callee) = &new_expr.callee
-            && let oxc::ast::ast::BindingPattern::BindingIdentifier(binding) = &decl.id
-        {
-            map.insert(binding.name.to_string(), callee.name.to_string());
+        match node.kind() {
+            // P1: const x = new Foo() → x is Foo (Inferred)
+            AstKind::VariableDeclarator(decl) => {
+                if let Some(init) = &decl.init
+                    && let oxc::ast::ast::Expression::NewExpression(new_expr) = init
+                    && let oxc::ast::ast::Expression::Identifier(callee) = &new_expr.callee
+                    && let oxc::ast::ast::BindingPattern::BindingIdentifier(binding) = &decl.id
+                {
+                    map.insert(
+                        binding.name.to_string(),
+                        (callee.name.to_string(), JsCallConfidence::Inferred),
+                    );
+                }
+            }
+            // P2: function f(svc: Service) → svc is Service (Annotated)
+            AstKind::FormalParameter(param) => {
+                if let oxc::ast::ast::BindingPattern::BindingIdentifier(ident) = &param.pattern
+                    && let Some(type_ann) = &param.type_annotation
+                    && let oxc::ast::ast::TSType::TSTypeReference(type_ref) =
+                        &type_ann.type_annotation
+                    && let oxc::ast::ast::TSTypeName::IdentifierReference(id) = &type_ref.type_name
+                {
+                    map.insert(
+                        ident.name.to_string(),
+                        (id.name.to_string(), JsCallConfidence::Annotated),
+                    );
+                }
+            }
+            _ => {}
         }
     }
     map
@@ -435,7 +457,7 @@ fn extract_call_edges(
     defs: &[JsDef],
     imports: &[JsImport],
     class_hierarchy: &HashMap<String, Option<String>>,
-    variable_type_map: &HashMap<String, String>,
+    variable_type_map: &HashMap<String, (String, JsCallConfidence)>,
 ) -> Vec<JsCallEdge> {
     let mut calls = Vec::new();
 
@@ -513,7 +535,7 @@ fn extract_call_edges(
                     else {
                         let resolved = variable_type_map
                             .get(name)
-                            .map(|cls| (cls.as_str(), JsCallConfidence::Inferred))
+                            .map(|(cls, conf)| (cls.as_str(), *conf))
                             .or_else(|| {
                                 class_hierarchy
                                     .contains_key(name)

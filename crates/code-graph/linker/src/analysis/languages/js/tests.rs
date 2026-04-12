@@ -566,6 +566,15 @@ mod integration_tests {
             ) && call.confidence == JsCallConfidence::Known),
             "Parser.fromConfig() should resolve to Parser::fromConfig with Known confidence"
         );
+
+        // P2: function runWithService(svc: Parser) { svc.parse(...) } → Parser::parse
+        assert!(
+            js.calls.iter().any(|call| matches!(
+                &call.callee,
+                JsCallTarget::Direct { fqn, .. } if fqn == "Parser::parse"
+            ) && call.confidence == JsCallConfidence::Annotated),
+            "svc.parse() with typed param should resolve to Parser::parse with Annotated confidence"
+        );
     }
 
     #[traced_test]
