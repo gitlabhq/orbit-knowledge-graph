@@ -58,7 +58,6 @@ pub use input::{
     ColumnSelection, DynamicColumnMode, EntityAuthConfig, Input, InputNode, QueryType, parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
-pub use ontology::constants::EDGE_TABLE;
 pub use ontology::{Ontology, OntologyError};
 pub use pipeline::{
     CompilerPass, Pipeline, PipelineEnv, PipelineObserver, PipelineState, Seal, SealedPipeline,
