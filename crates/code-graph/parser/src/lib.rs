@@ -8,6 +8,8 @@
 pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024; // 128 KiB
 
 pub mod analyzer;
+pub mod canonical;
+pub mod canonical_conversions;
 pub mod csharp;
 pub mod definitions;
 pub mod fqn;
