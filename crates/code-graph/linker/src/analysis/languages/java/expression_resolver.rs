@@ -10,9 +10,7 @@ use crate::analysis::{
         java_file::{JavaClass, JavaFile},
         utils::full_import_path,
     },
-    types::{
-        ConsolidatedRelationship, DefinitionNode, DefinitionType, ImportType, ImportedSymbolNode,
-    },
+    types::{ConsolidatedRelationship, DefinitionNode, ImportType, ImportedSymbolNode},
 };
 use crate::parse_types::References;
 

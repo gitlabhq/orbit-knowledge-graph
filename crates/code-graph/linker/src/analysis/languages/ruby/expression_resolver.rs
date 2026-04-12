@@ -628,8 +628,8 @@ impl ResolutionStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::types::{FqnType};
-    use parser_core::ruby::types::{RubyRubyFqn};
+    use crate::analysis::types::FqnType;
+    use parser_core::ruby::types::RubyRubyFqn;
     use parser_core::utils::{Position, Range};
 
     #[test]

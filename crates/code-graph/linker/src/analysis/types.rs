@@ -8,16 +8,11 @@ use internment::ArcIntern;
 use rustc_hash::FxHasher;
 
 use crate::graph::{RelationshipKind, RelationshipType};
-use code_graph_types::{CanonicalFqn, DefKind, Range};
+use code_graph_types::{CanonicalFqn, DefKind, Position, Range};
 use parser_core::{
-    csharp::types::CSharpImportType,
-    imports::ImportTypeInfo,
-    java::types::JavaImportType,
-    kotlin::types::KotlinImportType,
-    python::types::PythonImportType,
-    rust::types::RustImportType,
-    typescript::types::TypeScriptImportType,
-    utils::HasRange,
+    csharp::types::CSharpImportType, imports::ImportTypeInfo, java::types::JavaImportType,
+    kotlin::types::KotlinImportType, python::types::PythonImportType, rust::types::RustImportType,
+    typescript::types::TypeScriptImportType, utils::HasRange,
 };
 use serde::{Deserialize, Serialize};
 
@@ -499,8 +494,6 @@ impl gkg_utils::arrow::AsRecordBatch<RowContext<'_>> for FileNode {
     }
 }
 
-/// Represents a language-specific definition type (e.g. class, module, method, etc.)
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 /// Represents a definition node in the graph
 #[derive(Debug, Clone)]
 pub struct DefinitionNode {
@@ -617,10 +610,6 @@ impl ImportedSymbolLocation {
         )
     }
 }
-
-/// Represents a language-specific import type
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-
 
 /// Per-language import type. Will be replaced by a canonical string
 /// once ImportedSymbolNode is converted to canonical types.

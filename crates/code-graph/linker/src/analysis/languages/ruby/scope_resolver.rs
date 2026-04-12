@@ -581,8 +581,7 @@ impl ScopeResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::types::DefinitionType;
-    use crate::analysis::types::FqnType;
+    use code_graph_types::DefKind;
     use internment::ArcIntern;
     use parser_core::utils::{Position, Range};
 

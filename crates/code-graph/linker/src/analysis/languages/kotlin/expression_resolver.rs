@@ -4,7 +4,7 @@ use parser_core::{
     kotlin::{
         ast::kotlin_fqn_to_string,
         types::{
-            KotlinDefinitionInfo, KotlinKotlinExpression, KotlinExpressionInfo,
+            KotlinDefinitionInfo, KotlinDefinitionType, KotlinExpression, KotlinExpressionInfo,
             KotlinImportType,
         },
     },
@@ -21,8 +21,8 @@ use crate::analysis::{
         utils::{full_import_path, get_binary_operator_function, get_unary_operator_function},
     },
     types::{
-        ConsolidatedRelationship, DefinitionNode, ImportType,
-        ImportedSymbolLocation, ImportedSymbolNode,
+        ConsolidatedRelationship, DefinitionNode, ImportType, ImportedSymbolLocation,
+        ImportedSymbolNode,
     },
 };
 use crate::parse_types::References;
