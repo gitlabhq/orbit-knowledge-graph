@@ -9,8 +9,8 @@ pub use edge::{containment_edge_kind, containment_relationship, EdgeKind, NodeKi
 pub use fqn::Fqn;
 pub use lang::Language;
 pub use node::{
-    CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind,
-    ReferenceStatus, ToCanonical,
+    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, CanonicalReference,
+    CanonicalResult, DefKind, ReferenceStatus, ToCanonical,
 };
 pub use range::{Position, Range};
 pub use scope::{HasRange, ScopeIndex};

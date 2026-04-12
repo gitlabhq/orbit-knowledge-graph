@@ -1211,6 +1211,8 @@ name = "code-graph"
 version = "0.1.0"
 dependencies = [
  "code-graph-linker",
+ "code-graph-types",
+ "num_cpus",
  "parser-core",
  "treesitter-visit",
 ]
@@ -1222,6 +1224,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "chrono",
+ "code-graph-types",
  "criterion",
  "futures",
  "gitalisk-core",
@@ -5052,6 +5055,7 @@ dependencies = [
 name = "parser-core"
 version = "0.1.0"
 dependencies = [
+ "code-graph-types",
  "internment",
  "mimalloc",
  "once_cell",

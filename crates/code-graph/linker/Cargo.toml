@@ -13,6 +13,7 @@ path = "src/lib.rs"
 test-utils = []
 
 [dependencies]
+code-graph-types = { path = "../types" }
 parser-core = { path = "../parser" }
 gkg-utils = { path = "../../utils" }
 arrow = { workspace = true }

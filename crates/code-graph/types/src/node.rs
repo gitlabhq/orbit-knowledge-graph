@@ -93,6 +93,23 @@ pub struct CanonicalReference {
     pub target_fqn: Option<Fqn>,
 }
 
+/// A directory in the code graph.
+#[derive(Debug, Clone)]
+pub struct CanonicalDirectory {
+    pub path: String,
+    pub name: String,
+}
+
+/// A file in the code graph.
+#[derive(Debug, Clone)]
+pub struct CanonicalFile {
+    pub path: String,
+    pub name: String,
+    pub extension: String,
+    pub language: Language,
+    pub size: u64,
+}
+
 /// The complete output of parsing a single file. This is the boundary
 /// type between the parser and the linker — the parser produces this,
 /// the linker consumes it. Nothing language-specific crosses this boundary.

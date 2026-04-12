@@ -21,6 +21,7 @@ pub mod ruby;
 pub mod rust;
 pub mod typescript;
 pub mod utils;
+pub mod v2;
 
 // Re-export commonly used types
 pub use analyzer::{AnalysisResult, Analyzer};

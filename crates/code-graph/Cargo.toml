@@ -4,9 +4,11 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+code-graph-types = { path = "types" }
 treesitter-visit = { path = "treesitter-visit" }
 parser-core = { path = "parser" }
 code-graph-linker = { path = "linker" }
+num_cpus = { workspace = true }
 
 [lints]
 workspace = true
