@@ -1,63 +1,56 @@
-JS/TS Ecosystem Indexer - Test Matrix
-=======================================
+JS/TS Ecosystem Indexer - Gap Analysis from 20-Agent Validation
+================================================================
 
-## Repo Results (2026-04-12)
+## What's Working Well (confirmed across all agents)
+- Import extraction: 100% -- every static import captured correctly
+- Definition extraction: ~95% for standard patterns
+- Intra-component this.method() calls: ~90% accuracy
+- Ruby/Python graph: fully intact, no regressions
+- Vue Options API methods/computed: extracted correctly
+- Webpack alias resolution: 41.5% (up from 0%)
 
-| Repo       | Files  | Defs    | Imports | Rels      | CALLS  | XFile | Skip | Err | Time   |
-|------------|--------|---------|---------|-----------|--------|-------|------|-----|--------|
-| zod        | 397    | 12,441  | 1,300   | 22,826    | 8,364  | 433   | 0    | 0   | 0.04s  |
-| preact     | 238    | 8,637   | 1,367   | 20,732    | 10,060 | 130   | 0    | 0   | 0.03s  |
-| express    | 141    | 5,763   | 392     | 11,653    | 5,195  | 0     | 0    | 0   | 0.01s  |
-| got        | 77     | 8,270   | 639     | 13,372    | 4,163  | 79    | 0    | 0   | 0.01s  |
-| pinia      | 149    | 2,248   | 831     | 5,425     | 1,936  | 77    | 7    | 0   | 0.02s  |
-| vue-core   | 528    | 22,954  | 5,403   | 61,270    | 29,561 | 1,185 | 7    | 0   | 0.07s  |
-| nest       | 1,709  | 20,404  | 8,289   | 49,201    | 14,771 | 4,201 | 0    | 0   | 0.13s  |
-| fastify    | 297    | 20,495  | 1,810   | 34,474    | 11,440 | 0     | 0    | 0   | 0.03s  |
-| cal.com    | 7,510  | 139,240 | 55,355  | 285,755   | 72,807 | 2,435 | 0    | 1   | 0.62s  |
-| gitlab     | 63,041 | 382,540 | 112,173 | 1,084,006 |345,583 |40,164 | 27   | 2   | 5.11s  |
+## GitLab Monolith Results (after all fixes)
+  Total defs:       415,447
+  Vue methods:       28,891
+  Total CALLS:      408,637
+  Cross-file CALLS:  42,449
+  Imports resolved:  49,925 (26.6% of 112K total)
 
-## Pattern Coverage Matrix
+## Remaining Gaps (ranked by impact)
 
-| Pattern                        | Confidence | Test Fixture? | zod | preact | express | vue-core | nest | gitlab |
-|--------------------------------|------------|---------------|-----|--------|---------|----------|------|--------|
-| Direct call: foo()             | Known      | via reexport  | YES | YES    | YES     | YES      | YES  | YES    |
-| Imported call: import{foo}     | Known      | reexport      | YES | YES    | -       | YES      | YES  | YES    |
-| Default import call            | Known      | default-import| YES | YES    | -       | YES      | YES  | YES    |
-| Namespace: ns.foo()            | Known      | namespace     | YES | YES    | -       | YES      | YES  | YES    |
-| this.method()                  | Known      | inheritance   | YES | YES    | -       | YES      | YES  | PARTIAL|
-| super.method()                 | Known      | inheritance   | YES | YES    | -       | -        | -    | -      |
-| Re-export chain                | Known      | reexport      | YES | YES    | -       | YES      | YES  | YES    |
-| JSX <Component />              | Known      | jsx-component | -   | YES    | -       | -        | -    | -      |
-| new ClassName()                | Known      | var-static    | YES | YES    | -       | -        | YES  | YES    |
-| Tagged template                | Known      | -             | -   | -      | -       | -        | -    | YES    |
-| Variable method: x.bar()      | Inferred   | var-static    | YES | YES    | -       | -        | YES  | YES    |
-| Param type: svc.run()         | Annotated  | var-static    | YES | -      | -       | YES      | YES  | -      |
-| Static: Class.method()        | Known      | var-static    | YES | -      | -       | -        | YES  | -      |
-| Callback: arr.map(fn)         | Guessed    | var-static    | YES | YES    | -       | YES      | YES  | YES    |
-| CJS require cross-file        | Known      | -             | -   | -      | NO(gap) | -        | -    | -      |
-| Vue Options API this.method() | -          | -             | -   | -      | -       | -        | -    | NO(gap)|
-| Vue <script setup> functions  | Known      | vue-merged    | -   | -      | -       | -        | -    | PARTIAL|
+### P0: DefaultImport resolution (3.1%, 35K imports)
+  Root cause: Vue SFC `export default {}` not tracked as ExportedBinding
+  Impact: Most .vue component imports fail to resolve
+  Fix: Create default ExportedBinding for Vue virtual class
 
-## Identified Gaps
+### P1: Cross-file imported function calls from Vue methods
+  Root cause: calls to imported functions inside Options API methods
+  (e.g., this calls createAlert(), visitUrl()) produce ImportedCall
+  but import resolution fails for 58% of paths
+  Impact: ~97% of cross-file calls from Vue methods invisible
+  Fix: Depends on P0 + continued webpack alias improvement
 
-1. **CJS cross-file resolution (express, fastify)**: 0 cross-file edges despite CJS resolver wiring.
-   Root cause: OXC's `common_js_require()` may not recognize all require patterns in pure CJS files.
-   Impact: express (392 CJS imports, 0 resolved), fastify (1,216 CJS imports, 0 resolved)
+### P2: mapState/mapActions/mapMutations (Vuex/Pinia)
+  Root cause: Runtime-injected methods/getters not recognized
+  Impact: Entire Vuex store layer opaque
+  Fix: Parse mapState/mapActions calls in Options API
 
-2. **Vue Options API this.method()**: GitLab has 4,480 Vue files but only 104 CALLS from them.
-   Root cause: Options API methods are object literal properties, not class methods.
-   Phase 2 only walks ancestors looking for Class nodes, not object literals.
-   Impact: ~4,000 Vue files with near-zero call graph coverage.
+### P3: False CALLS to Variables (52.7% of total CALLS)
+  Root cause: ALL references treated as calls, not just invocations
+  Impact: 184K false positive edges
+  Fix: Filter by reference type (FunctionCall vs PropertyAccess)
 
-3. **Prisma failed to index**: Empty results. Needs investigation.
+### P4: Duplicate edges (22.8%, 255K excess)
+  Root cause: Definition ID hash collisions (same FQN+type, different bytes)
+  Impact: Edge inflation, slow queries
+  Fix: Include byte position in ID hash (tracked by #60)
 
-4. **1,406 Vue files with zero definitions**: 31% of GitLab Vue files.
-   Possible cause: template-only files or script extraction issues.
+### P5: Fan-out bug in import resolution
+  Root cause: Resolves to file, creates edges to ALL defs, not name-matched
+  Impact: Wrong IMPORTS edges
+  Fix: Filter resolve_binding results by imported name
 
-## Remaining Test Fixtures Needed
-
-- CJS cross-file: require('./foo') -> module.exports resolution
-- Vue Options API: export default { methods: { handleClick() { this.fetchData() } } }
-- Vue Composition API: <script setup> with cross-file imports
-- Decorator class methods (NestJS pattern)
-- TSX component with props
+### P6: Apollo smart query callbacks not extracted
+### P7: Dynamic import() in Vue components not captured
+### P8: Mixin composition not modeled as edges
+### P9: NamespaceImport IMPORTS edges (0%, design choice)
