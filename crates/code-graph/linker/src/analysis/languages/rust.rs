@@ -1,16 +1,14 @@
+use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
-    ImportType, ImportedSymbolLocation, ImportedSymbolNode,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
+    ImportedSymbolLocation, ImportedSymbolNode,
 };
 use crate::graph::RelationshipType;
 use crate::parse_types::FileProcessingResult;
+use code_graph_types::{Language, Range, ToCanonical};
 use internment::ArcIntern;
-use parser_core::rust::{
-    fqn::rust_fqn_to_string,
-    imports::RustImportedSymbolInfo,
-    types::{RustDefinitionType, RustFqn},
-};
-use parser_core::utils::Range;
+use parser_core::definitions::DefinitionTypeInfo;
+use parser_core::rust::{imports::RustImportedSymbolInfo, types::RustFqn};
 use smallvec::SmallVec;
 use std::collections::HashMap;
 
@@ -39,11 +37,12 @@ impl RustAnalyzer {
     ) {
         if let Some(defs) = file_result.definitions.iter_rust() {
             for definition in defs {
-                let fqn = FqnType::Rust(definition.fqn.clone());
+                let fqn = fqn_parts_to_canonical(&definition.fqn.parts, Language::Rust);
                 let path = ArcIntern::new(relative_file_path.to_string());
                 let definition_node = DefinitionNode::new(
                     fqn.clone(),
-                    DefinitionType::Rust(definition.definition_type),
+                    definition.definition_type.as_str().to_string(),
+                    definition.definition_type.to_def_kind(),
                     definition.range,
                     path.clone(),
                 );
@@ -59,13 +58,7 @@ impl RustAnalyzer {
                     continue;
                 }
 
-                definition_map.insert(
-                    key,
-                    (
-                        definition_node.clone(),
-                        FqnType::Rust(definition.fqn.clone()),
-                    ),
-                );
+                definition_map.insert(key, definition_node);
                 let mut relationship =
                     ConsolidatedRelationship::file_to_definition(path.clone(), path.clone());
                 relationship.relationship_type = RelationshipType::FileDefines;
@@ -186,7 +179,7 @@ impl RustAnalyzer {
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
         // Iterate through all definitions to find imports scoped within them
-        for ((definition_fqn_string, file_path), (definition_node, _)) in definition_map {
+        for ((definition_fqn_string, file_path), definition_node) in definition_map {
             // Look for imports that have this definition's FQN as their scope
             if let Some(imported_symbol_nodes) =
                 imported_symbol_map.get(&(definition_fqn_string.clone(), file_path.clone()))
@@ -214,111 +207,64 @@ impl RustAnalyzer {
     ) {
         let rust_definitions: Vec<_> = definition_map
             .values()
-            .filter_map(|(node, fqn_type)| {
-                if let FqnType::Rust(fqn) = fqn_type {
-                    Some((node, fqn))
-                } else {
-                    None
-                }
-            })
             .collect();
 
-        for (node, fqn) in &rust_definitions {
-            self.create_rust_nested_relationships(node, fqn, &rust_definitions, relationships);
+        for node in &rust_definitions {
+            self.create_nested_relationships(node, &rust_definitions, relationships);
         }
     }
 
-    /// Create nested relationships for Rust definitions (e.g., module contains struct, impl contains method)
-    fn create_rust_nested_relationships(
+    fn create_nested_relationships(
         &self,
         node: &DefinitionNode,
-        fqn: &RustFqn,
-        all_definitions: &[(&DefinitionNode, &RustFqn)],
+        all_definitions: &[&DefinitionNode],
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
-        if fqn.len() <= 1 {
-            return; // No parent for top-level definitions
-        }
+        let Some(parent_fqn) = node.fqn.parent() else {
+            return;
+        };
+        let parent_fqn_string = parent_fqn.to_string();
 
-        // Look for parent definitions in the FQN hierarchy
-        for i in 1..fqn.len() {
-            let parent_parts = fqn.parts[..fqn.len() - i].to_vec();
-            let parent_fqn = RustFqn::new(SmallVec::from_vec(parent_parts));
-            let parent_fqn_string = rust_fqn_to_string(&parent_fqn);
-
-            // Find the parent definition
-            if let Some((parent_node, _)) = all_definitions
-                .iter()
-                .find(|(def_node, _)| def_node.fqn.to_string() == parent_fqn_string)
+        if let Some(parent_node) = all_definitions
+            .iter()
+            .find(|def| def.fqn.to_string() == parent_fqn_string)
+        {
+            if let Some(rel_type) =
+                determine_relationship_type(parent_node.kind, node.kind)
             {
-                let relationship_type = self.determine_rust_relationship_type(
-                    &parent_node.definition_type,
-                    &node.definition_type,
+                let mut relationship = ConsolidatedRelationship::definition_to_definition(
+                    parent_node.file_path.clone(),
+                    node.file_path.clone(),
                 );
-
-                if let Some(rel_type) = relationship_type {
-                    let mut relationship = ConsolidatedRelationship::definition_to_definition(
-                        parent_node.file_path.clone(),
-                        node.file_path.clone(),
-                    );
-                    relationship.relationship_type = rel_type;
-                    relationship.source_range = ArcIntern::new(parent_node.range);
-                    relationship.target_range = ArcIntern::new(node.range);
-                    relationships.push(relationship);
-                    break; // Only create relationship with immediate parent
-                }
+                relationship.relationship_type = rel_type;
+                relationship.source_range = ArcIntern::new(parent_node.range);
+                relationship.target_range = ArcIntern::new(node.range);
+                relationships.push(relationship);
             }
         }
     }
+}
 
-    /// Determine the appropriate relationship type between Rust definitions
-    fn determine_rust_relationship_type(
-        &self,
-        parent_type: &DefinitionType,
-        child_type: &DefinitionType,
-    ) -> Option<RelationshipType> {
-        match (parent_type, child_type) {
-            // Use appropriate relationship types based on what's available
-            (DefinitionType::Rust(RustDefinitionType::Module), _) => {
-                Some(RelationshipType::ModuleToSingletonMethod)
-            }
-            (
-                DefinitionType::Rust(RustDefinitionType::Struct),
-                DefinitionType::Rust(RustDefinitionType::Field),
-            ) => {
-                Some(RelationshipType::ClassToMethod) // Reuse for struct->field
-            }
-            (
-                DefinitionType::Rust(RustDefinitionType::Enum),
-                DefinitionType::Rust(RustDefinitionType::Variant),
-            ) => {
-                Some(RelationshipType::ClassToMethod) // Reuse for enum->variant
-            }
-            (
-                DefinitionType::Rust(RustDefinitionType::Trait),
-                DefinitionType::Rust(RustDefinitionType::Method),
-            ) => {
-                Some(RelationshipType::ClassToMethod) // Reuse for trait->method
-            }
-            (
-                DefinitionType::Rust(RustDefinitionType::Impl),
-                DefinitionType::Rust(RustDefinitionType::Method),
-            ) => {
-                Some(RelationshipType::ClassToMethod) // Reuse for impl->method
-            }
-            (
-                DefinitionType::Rust(RustDefinitionType::Impl),
-                DefinitionType::Rust(RustDefinitionType::AssociatedFunction),
-            ) => {
-                Some(RelationshipType::ClassToMethod) // Reuse for impl->associated function
-            }
-            (
-                DefinitionType::Rust(RustDefinitionType::Union),
-                DefinitionType::Rust(RustDefinitionType::Field),
-            ) => {
-                Some(RelationshipType::ClassToMethod) // Reuse for union->field
-            }
-            _ => None,
+use code_graph_types::DefKind;
+
+/// Determine relationship type from canonical DefKind pairs.
+/// This is language-agnostic — works for any language.
+fn determine_relationship_type(
+    parent: DefKind,
+    child: DefKind,
+) -> Option<RelationshipType> {
+    match (parent, child) {
+        (DefKind::Module, _) => Some(RelationshipType::ModuleToSingletonMethod),
+        (DefKind::Class | DefKind::Interface, DefKind::Method | DefKind::Constructor) => {
+            Some(RelationshipType::ClassToMethod)
         }
+        (DefKind::Class, DefKind::Property | DefKind::EnumEntry) => {
+            Some(RelationshipType::ClassToMethod)
+        }
+        (DefKind::Other, DefKind::Method) => {
+            // Impl blocks (DefKind::Other) containing methods
+            Some(RelationshipType::ClassToMethod)
+        }
+        _ => None,
     }
 }
