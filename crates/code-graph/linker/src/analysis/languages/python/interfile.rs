@@ -3,7 +3,7 @@ use std::{
     path::Path,
 };
 
-use crate::analysis::types::{DefinitionNode, FqnType, ImportedSymbolNode, OptimizedFileTree};
+use crate::analysis::types::{DefinitionNode, ImportedSymbolNode, OptimizedFileTree};
 
 /// Given 'from foo.bar import symbol', returns possible files:
 /// - foo/bar.py

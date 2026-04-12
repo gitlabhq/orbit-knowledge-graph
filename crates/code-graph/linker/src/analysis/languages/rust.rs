@@ -1,7 +1,7 @@
 use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
-    ImportedSymbolLocation, ImportedSymbolNode,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType, ImportedSymbolLocation,
+    ImportedSymbolNode,
 };
 use crate::graph::RelationshipType;
 use crate::parse_types::FileProcessingResult;
@@ -205,9 +205,7 @@ impl RustAnalyzer {
         definition_map: &HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
-        let rust_definitions: Vec<_> = definition_map
-            .values()
-            .collect();
+        let rust_definitions: Vec<_> = definition_map.values().collect();
 
         for node in &rust_definitions {
             self.create_nested_relationships(node, &rust_definitions, relationships);
@@ -229,9 +227,10 @@ impl RustAnalyzer {
             .iter()
             .find(|def| def.fqn.to_string() == parent_fqn_string)
         {
-            if let Some(rel_type) =
-                crate::analysis::canonical_helpers::determine_relationship_type(parent_node.kind, node.kind)
-            {
+            if let Some(rel_type) = crate::analysis::canonical_helpers::determine_relationship_type(
+                parent_node.kind,
+                node.kind,
+            ) {
                 let mut relationship = ConsolidatedRelationship::definition_to_definition(
                     parent_node.file_path.clone(),
                     node.file_path.clone(),

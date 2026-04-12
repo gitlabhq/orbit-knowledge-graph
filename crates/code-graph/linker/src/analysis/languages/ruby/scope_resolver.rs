@@ -14,7 +14,7 @@
 //!
 
 use super::type_map::{InferredType, ScopeId, TypeMap, VariableId};
-use crate::analysis::types::{DefinitionNode, FqnType};
+use crate::analysis::types::DefinitionNode;
 use parser_core::ruby::{
     references::expressions::RubySymbolType,
     types::{RubyDefinitionType, RubyFqn},

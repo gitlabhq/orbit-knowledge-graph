@@ -361,12 +361,7 @@ impl ExpressionResolver {
                         .get_definition(context.current_scope.as_str())
                     {
                         // Additional validation: only create relationships for actual method definitions
-                        if matches!(
-                            calling_definition.definition_type,
-                            DefinitionType::Ruby(
-                                RubyDefinitionType::Method | RubyDefinitionType::SingletonMethod
-                            )
-                        ) {
+                        if matches!(calling_definition.kind, code_graph_types::DefKind::Method) {
                             // Create unique key to prevent duplicate relationships
                             let relationship_key =
                                 format!("{}->{}", context.current_scope.as_str(), definition.fqn);
@@ -499,10 +494,8 @@ impl ExpressionResolver {
                 // Constants typically refer to classes/modules
                 if let Some(definition) = resolved_definition {
                     if matches!(
-                        definition.definition_type,
-                        DefinitionType::Ruby(
-                            RubyDefinitionType::Class | RubyDefinitionType::Module
-                        )
+                        definition.kind,
+                        code_graph_types::DefKind::Class | code_graph_types::DefKind::Module
                     ) {
                         InferredType::new_concrete(definition.fqn.to_string())
                     } else {
@@ -529,10 +522,8 @@ impl ExpressionResolver {
                 // Instance variables: only use concrete type information, no heuristics
                 if let Some(definition) = resolved_definition {
                     if matches!(
-                        definition.definition_type,
-                        DefinitionType::Ruby(
-                            RubyDefinitionType::Class | RubyDefinitionType::Module
-                        )
+                        definition.kind,
+                        code_graph_types::DefKind::Class | code_graph_types::DefKind::Module
                     ) {
                         InferredType::new_concrete(definition.fqn.to_string())
                     } else {
@@ -547,10 +538,8 @@ impl ExpressionResolver {
                 if let Some(definition) = resolved_definition {
                     // If we found a definition and it's a class/module, the identifier represents that type
                     if matches!(
-                        definition.definition_type,
-                        DefinitionType::Ruby(
-                            RubyDefinitionType::Class | RubyDefinitionType::Module
-                        )
+                        definition.kind,
+                        code_graph_types::DefKind::Class | code_graph_types::DefKind::Module
                     ) {
                         InferredType::new_concrete(definition.fqn.to_string())
                     } else if let Some(receiver) = receiver_type {
@@ -648,22 +637,25 @@ mod tests {
         let mut resolver = ExpressionResolver::new();
 
         // Add a test definition
+        let fqn = crate::analysis::canonical_helpers::fqn_parts_to_canonical(
+            &[
+                parser_core::ruby::types::RubyFqnPart::new(
+                    parser_core::ruby::types::RubyFqnPartType::Class,
+                    "User".to_string(),
+                    Range::new(Position::new(1, 0), Position::new(1, 4), (0, 4)),
+                ),
+                parser_core::ruby::types::RubyFqnPart::new(
+                    parser_core::ruby::types::RubyFqnPartType::Method,
+                    "save".to_string(),
+                    Range::new(Position::new(2, 0), Position::new(2, 4), (20, 24)),
+                ),
+            ],
+            code_graph_types::Language::Ruby,
+        );
         let node = DefinitionNode::new(
-            FqnType::Ruby(RubyFqn {
-                parts: std::sync::Arc::new(smallvec::SmallVec::from_vec(vec![
-                    parser_core::ruby::types::RubyFqnPart::new(
-                        parser_core::ruby::types::RubyFqnPartType::Class,
-                        "User".to_string(),
-                        Range::new(Position::new(1, 0), Position::new(1, 4), (0, 4)),
-                    ),
-                    parser_core::ruby::types::RubyFqnPart::new(
-                        parser_core::ruby::types::RubyFqnPartType::Method,
-                        "save".to_string(),
-                        Range::new(Position::new(2, 0), Position::new(2, 4), (20, 24)),
-                    ),
-                ])),
-            }),
-            DefinitionType::Ruby(RubyDefinitionType::Method),
+            fqn,
+            "Method".to_string(),
+            code_graph_types::DefKind::Method,
             Range::new(Position::new(1, 0), Position::new(1, 10), (0, 10)),
             ArcIntern::new("user.rb".to_string()),
         );
@@ -691,11 +683,7 @@ mod tests {
             ])),
         };
 
-        resolver.add_definition(
-            "User#save".to_string(),
-            node,
-            &crate::analysis::types::FqnType::Ruby(ruby_fqn),
-        );
+        resolver.add_definition("User#save".to_string(), node);
 
         // Test resolution
         let scope = ScopeId::new("TestClass#test_method".to_string());

@@ -153,5 +153,4 @@ impl RubyAnalyzer {
             self.stats.relationships_created += new_relationships;
         }
     }
-
 }

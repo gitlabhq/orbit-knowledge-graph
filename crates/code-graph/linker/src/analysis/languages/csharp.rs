@@ -1,7 +1,7 @@
 use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
-    ImportedSymbolLocation, ImportedSymbolNode,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType, ImportedSymbolLocation,
+    ImportedSymbolNode,
 };
 use crate::graph::RelationshipType;
 use crate::parse_types::FileProcessingResult;
@@ -116,7 +116,10 @@ impl CSharpAnalyzer {
                 && let Some(parent_def) =
                     definition_map.get(&(parent_fqn.to_string(), child_file_path.to_string()))
                 && let Some(relationship_type) =
-                    crate::analysis::canonical_helpers::determine_relationship_type(parent_def.kind, child_def.kind)
+                    crate::analysis::canonical_helpers::determine_relationship_type(
+                        parent_def.kind,
+                        child_def.kind,
+                    )
             {
                 let mut relationship = ConsolidatedRelationship::definition_to_definition(
                     parent_def.file_path.clone(),

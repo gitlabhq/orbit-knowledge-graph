@@ -5,7 +5,7 @@ pub mod types;
 
 use crate::analysis::types::rels_by_kind;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, DirectoryNode, FileNode, FqnType, GraphData,
+    ConsolidatedRelationship, DefinitionNode, DirectoryNode, FileNode, GraphData,
     ImportedSymbolLocation, ImportedSymbolNode, OptimizedFileTree,
 };
 use crate::graph::{RelationshipKind, RelationshipType};
@@ -496,10 +496,7 @@ impl AnalysisService {
         imported_symbol_nodes: &mut Vec<ImportedSymbolNode>,
     ) {
         // Add definition nodes
-        let unrolled_definitions: Vec<DefinitionNode> = definition_map
-            .values()
-            .map(|(def_node, _)| def_node.clone())
-            .collect();
+        let unrolled_definitions: Vec<DefinitionNode> = definition_map.values().cloned().collect();
         definition_nodes.extend(unrolled_definitions);
 
         // Add imported symbol nodes

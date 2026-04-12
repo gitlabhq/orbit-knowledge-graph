@@ -1,7 +1,7 @@
 use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
-    ImportedSymbolLocation, ImportedSymbolNode,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType, ImportedSymbolLocation,
+    ImportedSymbolNode,
 };
 use crate::graph::{RelationshipKind, RelationshipType};
 use crate::parse_types::{FileProcessingResult, References};
@@ -257,5 +257,4 @@ impl TypeScriptAnalyzer {
 
         None
     }
-
 }

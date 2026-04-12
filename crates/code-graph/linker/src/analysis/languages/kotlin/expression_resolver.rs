@@ -1469,17 +1469,11 @@ impl KotlinExpressionResolver {
                 // If the definition is a property, resolve the type of the property.
 
                 let definition_file = self.files.get(definition.file_path.as_ref())?;
-                if matches!(
-                    definition.definition_type,
-                    DefinitionType::Kotlin(KotlinDefinitionType::Property)
-                ) {
+                if matches!(definition.kind, code_graph_types::DefKind::Property) {
                     if let Some(binding) = definition_file.constants.get(import_path) {
                         return self.resolve_binding_type(binding, None, definition_file);
                     }
-                } else if matches!(
-                    definition.definition_type,
-                    DefinitionType::Kotlin(KotlinDefinitionType::Function)
-                ) {
+                } else if matches!(definition.kind, code_graph_types::DefKind::Function) {
                     if let Some(function) = definition_file.functions.get(import_path) {
                         resolutions
                             .definition_resolutions
@@ -1558,17 +1552,11 @@ impl KotlinExpressionResolver {
             if let Some(definition) = self.definition_nodes.get(&full_import_path) {
                 // If the definition is a property, resolve the type of the property.
                 let definition_file = self.files.get(definition.file_path.as_ref())?;
-                if matches!(
-                    definition.definition_type,
-                    DefinitionType::Kotlin(KotlinDefinitionType::Property)
-                ) {
+                if matches!(definition.kind, code_graph_types::DefKind::Property) {
                     if let Some(binding) = definition_file.constants.get(&full_import_path) {
                         return self.resolve_binding_type(binding, None, definition_file);
                     }
-                } else if matches!(
-                    definition.definition_type,
-                    DefinitionType::Kotlin(KotlinDefinitionType::Function)
-                ) {
+                } else if matches!(definition.kind, code_graph_types::DefKind::Function) {
                     if let Some(function) = definition_file.functions.get(&full_import_path) {
                         resolutions
                             .definition_resolutions

@@ -554,10 +554,7 @@ impl ExpressionResolver {
 
                 // If the imported symbol is an enum constant, resolve to its parent enum type.
                 if let Some(def_node) = self.definition_nodes.get(import_path)
-                    && matches!(
-                        def_node.definition_type,
-                        DefinitionType::Java(JavaDefinitionType::EnumConstant)
-                    )
+                    && def_node.kind == code_graph_types::DefKind::EnumEntry
                 {
                     let parent_fqn = import_path
                         .rsplit_once('.')

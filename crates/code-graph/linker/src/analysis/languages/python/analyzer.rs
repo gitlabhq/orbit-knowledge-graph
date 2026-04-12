@@ -3,8 +3,8 @@ use tracing::error;
 use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::languages::python::interfile::get_possible_symbol_locations;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
-    ImportedSymbolLocation, ImportedSymbolNode, OptimizedFileTree,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType, ImportedSymbolLocation,
+    ImportedSymbolNode, OptimizedFileTree,
 };
 use crate::graph::{RelationshipKind, RelationshipType};
 use crate::parse_types::{FileProcessingResult, References};
@@ -53,10 +53,7 @@ impl PythonAnalyzer {
     ) {
         if let Some(defs) = file_result.definitions.iter_python() {
             for definition in defs {
-                let fqn = fqn_parts_to_canonical(
-                    definition.fqn.parts.as_ref(),
-                    Language::Python,
-                );
+                let fqn = fqn_parts_to_canonical(definition.fqn.parts.as_ref(), Language::Python);
                 let path = ArcIntern::new(relative_file_path.to_string());
                 let definition_node = DefinitionNode::new(
                     fqn.clone(),
@@ -165,7 +162,7 @@ impl PythonAnalyzer {
                     let fqn_string = python_fqn_to_string(scope);
                     definition_map
                         .get(&(fqn_string, file_path.clone()))
-                        .map(|map_value| map_value.0.clone())
+                        .cloned()
                 } else {
                     None
                 };
@@ -236,7 +233,7 @@ impl PythonAnalyzer {
                         python_fqn_to_string(&target_def_info.fqn),
                         file_path.to_owned(),
                     ))
-                    .map(|map_value| map_value.0.clone());
+                    .cloned();
                 if let Some(target_def_node) = target_def_node {
                     self.add_definition_reference_relationship(
                         file_path,
@@ -556,23 +553,11 @@ impl PythonAnalyzer {
 
                     match &curr_target {
                         ResolvedTarget::Definition(definition_node) => {
-                            if let DefinitionType::Python(definition_type) =
-                                definition_node.definition_type
-                            {
-                                // Special handling for function definitions, since we don't track function outputs (for now)
-                                if !(definition_type == PythonDefinitionType::Class
-                                    || definition_type == PythonDefinitionType::DecoratedClass)
-                                {
-                                    // If not a function call, we terminate search
-                                    if *connector != Connector::Call {
-                                        is_terminated = true;
-                                        break;
-                                    }
+                            if definition_node.kind != code_graph_types::DefKind::Class {
+                                if *connector != Connector::Call {
+                                    is_terminated = true;
+                                    break;
                                 }
-                            } else {
-                                // Non-Python definition, terminate search (shouldn't happen)
-                                is_terminated = true;
-                                break;
                             }
                         }
                         ResolvedTarget::File(_) => {
@@ -865,7 +850,7 @@ impl PythonAnalyzer {
         // Get matching definition and imported symbol (if either exist)
         let matched_definition_node = definition_map
             .get(&(name.clone(), file_path.to_owned()))
-            .map(|(definition_node, _)| definition_node.clone());
+            .cloned();
         let matched_imported_symbol_node = if let Some(imported_symbol_nodes) =
             imported_symbol_map.get(&("".to_string(), file_path.to_owned()))
         {

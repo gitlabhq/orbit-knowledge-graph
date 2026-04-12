@@ -2,7 +2,6 @@ use crate::graph::RelationshipType;
 use code_graph_types::{CanonicalFqn, DefKind, FqnPart, Language, Range};
 use parser_core::fqn::FQNPart;
 use smallvec::SmallVec;
-use std::fmt::Display;
 use std::hash::Hash;
 
 /// Convert any FQNPart-based FQN to CanonicalFqn.
@@ -90,7 +89,6 @@ pub fn determine_relationship_type(parent: DefKind, child: DefKind) -> Option<Re
         (DefKind::Lambda, DefKind::Method) => Some(RelationshipType::LambdaToMethod),
         (DefKind::Lambda, DefKind::Interface) => Some(RelationshipType::LambdaToInterface),
         (DefKind::Lambda, DefKind::Property) => Some(RelationshipType::LambdaToProperty),
-        (DefKind::Class, DefKind::EnumEntry) => Some(RelationshipType::ClassToEnumEntry),
         // Impl blocks (Rust: DefKind::Other for impl)
         (DefKind::Other, DefKind::Method | DefKind::Function) => {
             Some(RelationshipType::ClassToMethod)
