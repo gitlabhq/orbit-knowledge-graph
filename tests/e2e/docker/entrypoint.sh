@@ -25,10 +25,14 @@ fi
 eval "$(~/.local/bin/mise activate bash)"
 cd /gitlab-gdk/gitlab-development-kit
 
-# Patch nginx to listen on 0.0.0.0 (not gdk.test/127.0.0.1) so CI services can reach it
-sed -i 's/listen gdk\.test:/listen 0.0.0.0:/g' nginx/conf/nginx.conf
-
 mise x -- gdk start
+
+# Patch nginx to listen on 0.0.0.0 AFTER gdk start (which may regenerate configs)
+sed -i 's/listen gdk\.test:/listen 0.0.0.0:/g' nginx/conf/nginx.conf
+# Also patch workhorse to listen on 0.0.0.0
+sed -i 's/listenAddr = "gdk\.test:/listenAddr = "0.0.0.0:/g' gitlab-workhorse/config.toml 2>/dev/null || true
+# Reload nginx with the patched config
+sv restart services/nginx || true
 
 echo "=== Waiting for ClickHouse ==="
 for i in $(seq 1 60); do
