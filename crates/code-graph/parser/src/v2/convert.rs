@@ -1,11 +1,18 @@
 use code_graph_types::CanonicalResult;
 
-/// Primary entry point for languages that own their full parse pipeline
-/// (e.g. Ruby with ruby-prism, or any language with deeply custom logic).
+/// Parses a source file into canonical types, optionally retaining the
+/// raw AST for downstream resolution.
 ///
-/// The language module handles everything — parsing, scope resolution,
-/// reference resolution — and produces a `CanonicalResult` directly.
-/// The v2 linker doesn't care how you got there.
+/// The associated type `Ast` determines what (if anything) the parser
+/// preserves beyond the `CanonicalResult`. Languages that don't need
+/// AST-level resolution set `Ast = ()`. Languages whose resolvers walk
+/// expression trees set `Ast` to the concrete tree-sitter root type.
 pub trait CanonicalParser {
-    fn parse_file(&self, source: &[u8], file_path: &str) -> crate::Result<CanonicalResult>;
+    type Ast: Send;
+
+    fn parse_file(
+        &self,
+        source: &[u8],
+        file_path: &str,
+    ) -> crate::Result<(CanonicalResult, Self::Ast)>;
 }

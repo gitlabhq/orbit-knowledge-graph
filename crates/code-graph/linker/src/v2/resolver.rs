@@ -4,28 +4,22 @@ use super::edges::Edge;
 /// Trait for resolving references into edges.
 ///
 /// Receives a `ResolutionContext` containing all parsed results plus
-/// pre-built indexes (definitions by FQN/name/file, imports by path,
-/// per-file scope indices).
-///
-/// Responsible for *all* reference resolution — both intra-file
-/// (scope-based) and cross-file (import/symbol lookup).
-///
-/// The parser produces raw, unresolved references. The resolver
-/// is the only place resolution happens.
+/// pre-built indexes. The generic `A` matches the AST type — resolvers
+/// that need expression-level access constrain `A` to their concrete
+/// AST type.
 ///
 /// Each language implements its own resolver. Generic resolvers
-/// (`NoResolver`, `GlobalBacktracker`) are available for languages
-/// that don't need custom logic.
-pub trait ReferenceResolver {
-    fn resolve(ctx: &ResolutionContext) -> Vec<Edge>;
+/// (`NoResolver`, `GlobalBacktracker`) work with any AST type.
+pub trait ReferenceResolver<A = ()> {
+    fn resolve(ctx: &ResolutionContext<A>) -> Vec<Edge>;
 }
 
 /// No reference resolution. Only structural edges (containment,
 /// file→def) are produced by the GraphBuilder.
 pub struct NoResolver;
 
-impl ReferenceResolver for NoResolver {
-    fn resolve(_ctx: &ResolutionContext) -> Vec<Edge> {
+impl<A> ReferenceResolver<A> for NoResolver {
+    fn resolve(_ctx: &ResolutionContext<A>) -> Vec<Edge> {
         vec![]
     }
 }
@@ -37,11 +31,9 @@ impl ReferenceResolver for NoResolver {
 /// that don't have full expression resolvers.
 pub struct GlobalBacktracker;
 
-impl ReferenceResolver for GlobalBacktracker {
-    fn resolve(_ctx: &ResolutionContext) -> Vec<Edge> {
+impl<A> ReferenceResolver<A> for GlobalBacktracker {
+    fn resolve(_ctx: &ResolutionContext<A>) -> Vec<Edge> {
         // TODO: implement name-based backtracking resolution
-        // Uses ctx.definitions.lookup_name() with local-first preference
-        // and ctx.scopes.enclosing_definition() for caller context
         vec![]
     }
 }

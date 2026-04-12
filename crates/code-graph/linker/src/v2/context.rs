@@ -1,26 +1,32 @@
-use code_graph_types::{CanonicalDefinition, CanonicalImport, CanonicalResult, ScopeIndex};
+use code_graph_types::{CanonicalDefinition, CanonicalImport, CanonicalResult, Range, ScopeIndex};
 use rustc_hash::FxHashMap;
 
 /// Shared resolution context built from all parsed results for a language.
 ///
-/// The `GenericPipeline` builds this once after parsing. Per-language
-/// `ReferenceResolver` implementations receive it to resolve references.
+/// Owns all data. Built once by the pipeline after parsing, consumed
+/// by the resolver.
 ///
-/// This replaces V1's scattered `definition_map`, `imported_symbol_map`,
-/// and per-file scope building with clean, indexed data structures.
-pub struct ResolutionContext<'a> {
-    pub root_path: &'a str,
-    pub results: &'a [CanonicalResult],
-    pub definitions: DefinitionIndex<'a>,
-    pub imports: ImportIndex<'a>,
-    pub scopes: FileScopes<'a>,
+/// The generic `A` carries the raw AST type. Languages that need
+/// expression-level resolution set `A` to the concrete tree-sitter root.
+/// Languages that don't need it use `A = ()`.
+pub struct ResolutionContext<A = ()> {
+    pub root_path: String,
+    pub results: Vec<CanonicalResult>,
+    pub definitions: DefinitionIndex,
+    pub imports: ImportIndex,
+    pub scopes: FileScopes,
+    pub asts: FxHashMap<String, A>,
 }
 
-impl<'a> ResolutionContext<'a> {
-    pub fn build(results: &'a [CanonicalResult], root_path: &'a str) -> Self {
-        let definitions = DefinitionIndex::build(results);
-        let imports = ImportIndex::build(results);
-        let scopes = FileScopes::build(results);
+impl<A> ResolutionContext<A> {
+    pub fn build(
+        results: Vec<CanonicalResult>,
+        asts: FxHashMap<String, A>,
+        root_path: String,
+    ) -> Self {
+        let definitions = DefinitionIndex::build(&results);
+        let imports = ImportIndex::build(&results);
+        let scopes = FileScopes::build(&results);
 
         Self {
             root_path,
@@ -28,51 +34,53 @@ impl<'a> ResolutionContext<'a> {
             definitions,
             imports,
             scopes,
+            asts,
         }
+    }
+
+    /// Resolve a DefRef to the actual definition + file path.
+    pub fn resolve_def(&self, r: DefRef) -> (&CanonicalDefinition, &str) {
+        let result = &self.results[r.file_idx];
+        (&result.definitions[r.def_idx], &result.file_path)
+    }
+
+    /// Resolve an ImportRef to the actual import + file path.
+    pub fn resolve_import(&self, r: ImportRef) -> (&CanonicalImport, &str) {
+        let result = &self.results[r.file_idx];
+        (&result.imports[r.import_idx], &result.file_path)
     }
 }
 
+/// Lightweight reference to a definition: file index + definition index.
+#[derive(Clone, Copy, Debug)]
+pub struct DefRef {
+    pub file_idx: usize,
+    pub def_idx: usize,
+}
+
 /// Index of all definitions across files.
-///
-/// Supports lookup by:
-/// - FQN string (for cross-file symbol resolution)
-/// - Name (for name-based backtracking)
-/// - File path (for intra-file resolution)
-pub struct DefinitionIndex<'a> {
-    by_fqn: FxHashMap<String, Vec<&'a CanonicalDefinition>>,
-    by_name: FxHashMap<&'a str, Vec<DefinitionRef<'a>>>,
-    by_file: FxHashMap<&'a str, Vec<&'a CanonicalDefinition>>,
+pub struct DefinitionIndex {
+    by_fqn: FxHashMap<String, Vec<DefRef>>,
+    by_name: FxHashMap<String, Vec<DefRef>>,
+    by_file: FxHashMap<String, Vec<usize>>,
 }
 
-/// A definition with its file context.
-#[derive(Clone)]
-pub struct DefinitionRef<'a> {
-    pub definition: &'a CanonicalDefinition,
-    pub file_path: &'a str,
-}
+impl DefinitionIndex {
+    fn build(results: &[CanonicalResult]) -> Self {
+        let mut by_fqn: FxHashMap<String, Vec<DefRef>> = FxHashMap::default();
+        let mut by_name: FxHashMap<String, Vec<DefRef>> = FxHashMap::default();
+        let mut by_file: FxHashMap<String, Vec<usize>> = FxHashMap::default();
 
-impl<'a> DefinitionIndex<'a> {
-    fn build(results: &'a [CanonicalResult]) -> Self {
-        let mut by_fqn: FxHashMap<String, Vec<&CanonicalDefinition>> = FxHashMap::default();
-        let mut by_name: FxHashMap<&str, Vec<DefinitionRef>> = FxHashMap::default();
-        let mut by_file: FxHashMap<&str, Vec<&CanonicalDefinition>> = FxHashMap::default();
+        for (file_idx, result) in results.iter().enumerate() {
+            by_file
+                .entry(result.file_path.clone())
+                .or_default()
+                .push(file_idx);
 
-        for result in results {
-            for def in &result.definitions {
-                by_fqn.entry(def.fqn.to_string()).or_default().push(def);
-
-                by_name
-                    .entry(def.name.as_str())
-                    .or_default()
-                    .push(DefinitionRef {
-                        definition: def,
-                        file_path: &result.file_path,
-                    });
-
-                by_file
-                    .entry(result.file_path.as_str())
-                    .or_default()
-                    .push(def);
+            for (def_idx, def) in result.definitions.iter().enumerate() {
+                let r = DefRef { file_idx, def_idx };
+                by_fqn.entry(def.fqn.to_string()).or_default().push(r);
+                by_name.entry(def.name.clone()).or_default().push(r);
             }
         }
 
@@ -83,15 +91,15 @@ impl<'a> DefinitionIndex<'a> {
         }
     }
 
-    pub fn lookup_fqn(&self, fqn: &str) -> &[&'a CanonicalDefinition] {
+    pub fn lookup_fqn(&self, fqn: &str) -> &[DefRef] {
         self.by_fqn.get(fqn).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    pub fn lookup_name(&self, name: &str) -> &[DefinitionRef<'a>] {
+    pub fn lookup_name(&self, name: &str) -> &[DefRef] {
         self.by_name.get(name).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    pub fn in_file(&self, file_path: &str) -> &[&'a CanonicalDefinition] {
+    pub fn file_indices(&self, file_path: &str) -> &[usize] {
         self.by_file
             .get(file_path)
             .map(|v| v.as_slice())
@@ -99,118 +107,117 @@ impl<'a> DefinitionIndex<'a> {
     }
 }
 
+/// Lightweight reference to an import: file index + import index.
+#[derive(Clone, Copy, Debug)]
+pub struct ImportRef {
+    pub file_idx: usize,
+    pub import_idx: usize,
+}
+
 /// Index of all imports across files.
-pub struct ImportIndex<'a> {
-    by_file: FxHashMap<&'a str, Vec<&'a CanonicalImport>>,
-    by_path: FxHashMap<&'a str, Vec<ImportRef<'a>>>,
+pub struct ImportIndex {
+    by_file: FxHashMap<String, Vec<ImportRef>>,
+    by_path: FxHashMap<String, Vec<ImportRef>>,
 }
 
-#[derive(Clone)]
-pub struct ImportRef<'a> {
-    pub import: &'a CanonicalImport,
-    pub file_path: &'a str,
-}
+impl ImportIndex {
+    fn build(results: &[CanonicalResult]) -> Self {
+        let mut by_file: FxHashMap<String, Vec<ImportRef>> = FxHashMap::default();
+        let mut by_path: FxHashMap<String, Vec<ImportRef>> = FxHashMap::default();
 
-impl<'a> ImportIndex<'a> {
-    fn build(results: &'a [CanonicalResult]) -> Self {
-        let mut by_file: FxHashMap<&str, Vec<&CanonicalImport>> = FxHashMap::default();
-        let mut by_path: FxHashMap<&str, Vec<ImportRef>> = FxHashMap::default();
-
-        for result in results {
-            for imp in &result.imports {
-                by_file
-                    .entry(result.file_path.as_str())
-                    .or_default()
-                    .push(imp);
-
-                by_path
-                    .entry(imp.path.as_str())
-                    .or_default()
-                    .push(ImportRef {
-                        import: imp,
-                        file_path: &result.file_path,
-                    });
+        for (file_idx, result) in results.iter().enumerate() {
+            for (import_idx, imp) in result.imports.iter().enumerate() {
+                let r = ImportRef {
+                    file_idx,
+                    import_idx,
+                };
+                by_file.entry(result.file_path.clone()).or_default().push(r);
+                by_path.entry(imp.path.clone()).or_default().push(r);
             }
         }
 
         Self { by_file, by_path }
     }
 
-    pub fn in_file(&self, file_path: &str) -> &[&'a CanonicalImport] {
+    pub fn in_file(&self, file_path: &str) -> &[ImportRef] {
         self.by_file
             .get(file_path)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
-    pub fn by_import_path(&self, path: &str) -> &[ImportRef<'a>] {
+    pub fn by_import_path(&self, path: &str) -> &[ImportRef] {
         self.by_path.get(path).map(|v| v.as_slice()).unwrap_or(&[])
     }
 }
 
-/// Per-file scope indices for byte-offset → enclosing definition lookup.
-pub struct FileScopes<'a> {
-    scopes: FxHashMap<&'a str, ScopeIndex<ScopedDef<'a>>>,
-}
-
+/// Per-file scope index for byte-offset → enclosing definition lookup.
 #[derive(Debug, Clone)]
-pub struct ScopedDef<'a> {
-    pub definition: &'a CanonicalDefinition,
+pub struct ScopedDef {
+    pub file_idx: usize,
+    pub def_idx: usize,
+    pub range: Range,
 }
 
-impl<'a> code_graph_types::HasRange for ScopedDef<'a> {
-    fn range(&self) -> code_graph_types::Range {
-        self.definition.range
+impl code_graph_types::HasRange for ScopedDef {
+    fn range(&self) -> Range {
+        self.range
     }
 }
 
-impl<'a> FileScopes<'a> {
-    fn build(results: &'a [CanonicalResult]) -> Self {
-        let mut scopes: FxHashMap<&str, ScopeIndex<ScopedDef>> = FxHashMap::default();
+pub struct FileScopes {
+    scopes: FxHashMap<String, ScopeIndex<ScopedDef>>,
+}
 
-        for result in results {
+impl FileScopes {
+    fn build(results: &[CanonicalResult]) -> Self {
+        let mut scopes: FxHashMap<String, ScopeIndex<ScopedDef>> = FxHashMap::default();
+
+        for (file_idx, result) in results.iter().enumerate() {
             let items: Vec<_> = result
                 .definitions
                 .iter()
-                .map(|def| (def.range, ScopedDef { definition: def }))
+                .enumerate()
+                .map(|(def_idx, def)| {
+                    (
+                        def.range,
+                        ScopedDef {
+                            file_idx,
+                            def_idx,
+                            range: def.range,
+                        },
+                    )
+                })
                 .collect();
 
             if !items.is_empty() {
-                scopes.insert(result.file_path.as_str(), ScopeIndex::from_items(items));
+                scopes.insert(result.file_path.clone(), ScopeIndex::from_items(items));
             }
         }
 
         Self { scopes }
     }
 
-    /// Find the innermost enclosing definition at a byte offset in a file.
-    pub fn enclosing_definition(
+    pub fn enclosing_scope(
         &self,
         file_path: &str,
         byte_start: usize,
         byte_end: usize,
-    ) -> Option<&'a CanonicalDefinition> {
+    ) -> Option<&ScopedDef> {
         self.scopes
             .get(file_path)?
             .find_innermost(byte_start, byte_end)
-            .map(|s| s.definition)
     }
 
-    /// Find all definitions whose range contains the given byte span.
-    pub fn containing_definitions(
+    pub fn containing_scopes(
         &self,
         file_path: &str,
         byte_start: usize,
         byte_end: usize,
-    ) -> Vec<&'a CanonicalDefinition> {
+    ) -> Vec<&ScopedDef> {
         self.scopes
             .get(file_path)
-            .map(|idx| {
-                idx.find_containing(byte_start, byte_end)
-                    .into_iter()
-                    .map(|s| s.definition)
-                    .collect()
-            })
+            .map(|idx| idx.find_containing(byte_start, byte_end))
             .unwrap_or_default()
     }
 }

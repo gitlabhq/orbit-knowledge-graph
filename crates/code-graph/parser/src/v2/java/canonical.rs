@@ -15,7 +15,9 @@ const LANG: Language = Language::Java;
 pub struct JavaCanonicalParser;
 
 impl CanonicalParser for JavaCanonicalParser {
-    fn parse_file(&self, source: &[u8], file_path: &str) -> crate::Result<CanonicalResult> {
+    type Ast = ();
+
+    fn parse_file(&self, source: &[u8], file_path: &str) -> crate::Result<(CanonicalResult, ())> {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
@@ -33,15 +35,18 @@ impl CanonicalParser for JavaCanonicalParser {
             .map(|(_, ext)| ext.to_string())
             .unwrap_or_default();
 
-        Ok(CanonicalResult {
-            file_path: file_path.to_string(),
-            extension,
-            file_size: source.len() as u64,
-            language: LANG,
-            definitions: defs,
-            imports,
-            references: refs,
-        })
+        Ok((
+            CanonicalResult {
+                file_path: file_path.to_string(),
+                extension,
+                file_size: source.len() as u64,
+                language: LANG,
+                definitions: defs,
+                imports,
+                references: refs,
+            },
+            (),
+        ))
     }
 }
 

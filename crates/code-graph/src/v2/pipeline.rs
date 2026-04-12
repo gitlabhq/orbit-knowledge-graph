@@ -36,15 +36,16 @@ pub trait LanguagePipeline {
 
 /// Generic pipeline parameterized by parser `P` and resolver `R`.
 ///
-/// - `P` produces `CanonicalResult` per file (parallel)
-/// - `R` resolves references across all results into edges (sync)
+/// - `P` produces `(CanonicalResult, P::Ast)` per file (parallel)
+/// - `R` resolves references across all results + ASTs into edges (sync)
 /// - `GraphBuilder` constructs the final graph with structural + resolved edges
-pub struct GenericPipeline<P: CanonicalParser, R: ReferenceResolver>(PhantomData<(P, R)>);
+pub struct GenericPipeline<P: CanonicalParser, R: ReferenceResolver<P::Ast>>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
 where
     P: CanonicalParser + Default + Sync + Send,
-    R: ReferenceResolver,
+    P::Ast: Send,
+    R: ReferenceResolver<P::Ast>,
 {
     fn process_files(
         files: Vec<FileInput>,
@@ -53,7 +54,7 @@ where
         let parser = P::default();
 
         // Parse all files in parallel
-        let results: Vec<_> = files
+        let parse_results: Vec<_> = files
             .par_iter()
             .map(|(path, source)| {
                 parser.parse_file(source, path).map_err(|e| PipelineError {
@@ -64,10 +65,15 @@ where
             .collect();
 
         let mut canonical_results = Vec::new();
+        let mut asts: FxHashMap<String, P::Ast> = FxHashMap::default();
         let mut errors = Vec::new();
-        for r in results {
+
+        for r in parse_results {
             match r {
-                Ok(result) => canonical_results.push(result),
+                Ok((result, ast)) => {
+                    asts.insert(result.file_path.clone(), ast);
+                    canonical_results.push(result);
+                }
                 Err(err) => errors.push(err),
             }
         }
@@ -76,16 +82,16 @@ where
             return Err(errors);
         }
 
-        // Build shared indexes for resolution
-        let ctx = ResolutionContext::build(&canonical_results, root_path);
+        // Build resolution context — owns results + ASTs
+        let ctx = ResolutionContext::build(canonical_results, asts, root_path.to_string());
 
-        // Resolve references using the per-language resolver
+        // Resolve references
         let resolved_edges = R::resolve(&ctx);
 
         // Build the graph with structural edges + resolved edges
         let mut builder = GraphBuilder::new(root_path.to_string());
-        for result in canonical_results {
-            builder.add_result(result);
+        for result in &ctx.results {
+            builder.add_result(result.clone());
         }
 
         let mut graph = builder.build();
