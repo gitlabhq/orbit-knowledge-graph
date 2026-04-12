@@ -16,7 +16,6 @@ use parser_core::definitions::DefinitionTypeInfo;
 use parser_core::java::types::{
     JavaDefinitionType, JavaFqn, JavaFqnPartType, JavaImportedSymbolInfo,
 };
-use parser_core::utils::Range;
 
 #[derive(Default)]
 pub struct JavaAnalyzer {

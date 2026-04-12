@@ -11,6 +11,7 @@ use crate::parse_types::{FileProcessingResult, References};
 use code_graph_types::{Language, Range, ToCanonical};
 use internment::ArcIntern;
 use parser_core::definitions::DefinitionTypeInfo;
+use parser_core::python::fqn::python_fqn_to_string;
 use parser_core::python::types::PythonReferenceInfo;
 use parser_core::python::types::{
     Connector, PartialResolution, PythonDefinitionType, PythonFqn, PythonImportType,

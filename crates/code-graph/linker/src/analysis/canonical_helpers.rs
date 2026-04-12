@@ -8,13 +8,13 @@ use std::hash::Hash;
 /// Convert any FQNPart-based FQN to CanonicalFqn.
 pub fn fqn_parts_to_canonical<T, M>(parts: &[FQNPart<T, M>], lang: Language) -> CanonicalFqn
 where
-    T: Display + Eq + Hash + Send + Sync + 'static,
+    T: std::fmt::Debug + Eq + Hash + Send + Sync + 'static,
     M: Eq + Hash + Send + Sync + 'static,
 {
     let canonical_parts: SmallVec<[FqnPart; 8]> = parts
         .iter()
         .map(|part| {
-            let part_type_str = part.node_type().to_string();
+            let part_type_str = format!("{:?}", part.node_type());
             FqnPart {
                 part_type: Box::leak(part_type_str.into_boxed_str()),
                 name: part.node_name().to_string(),
