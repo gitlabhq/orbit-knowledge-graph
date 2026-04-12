@@ -1212,8 +1212,13 @@ version = "0.1.0"
 dependencies = [
  "code-graph-linker",
  "code-graph-types",
+ "ignore",
+ "log",
  "num_cpus",
  "parser-core",
+ "rayon",
+ "rustc-hash",
+ "strum 0.28.0",
  "treesitter-visit",
 ]
 

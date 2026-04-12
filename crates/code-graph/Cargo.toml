@@ -8,7 +8,12 @@ code-graph-types = { path = "types" }
 treesitter-visit = { path = "treesitter-visit" }
 parser-core = { path = "parser" }
 code-graph-linker = { path = "linker" }
+ignore = { workspace = true }
+log = { workspace = true }
 num_cpus = { workspace = true }
+rayon = { workspace = true }
+rustc-hash = { workspace = true }
+strum = { workspace = true }
 
 [lints]
 workspace = true
