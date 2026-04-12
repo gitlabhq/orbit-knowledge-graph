@@ -1,16 +1,17 @@
+use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
-    ImportType, ImportedSymbolLocation, ImportedSymbolNode,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
+    ImportedSymbolLocation, ImportedSymbolNode,
 };
 use crate::graph::{RelationshipKind, RelationshipType};
 use crate::parse_types::{FileProcessingResult, References};
+use code_graph_types::{Language, Range, ToCanonical};
 use internment::ArcIntern;
+use parser_core::definitions::DefinitionTypeInfo;
 use parser_core::typescript::{
-    ast::typescript_fqn_to_string,
     swc::references::types::{TypeScriptReferenceTarget, TypeScriptTargetResolution},
     types::{TypeScriptDefinitionType, TypeScriptImportedSymbolInfo},
 };
-use parser_core::utils::Range;
 use std::collections::HashMap;
 
 // Handles Python-specific analysis operations
@@ -41,16 +42,16 @@ impl TypeScriptAnalyzer {
                 if definition.definition_type == TypeScriptDefinitionType::Namespace {
                     continue;
                 }
-                let fqn = FqnType::TypeScript(definition.fqn.clone());
+                let fqn = fqn_parts_to_canonical(&definition.fqn, Language::TypeScript);
                 let path = ArcIntern::new(relative_file_path.to_string());
                 let definition_node = DefinitionNode::new(
                     fqn.clone(),
-                    DefinitionType::TypeScript(definition.definition_type),
+                    definition.definition_type.as_str().to_string(),
+                    definition.definition_type.to_def_kind(),
                     definition.range,
                     path.clone(),
                 );
 
-                // If top-level definition, add file-to-definition relationship
                 if definition.fqn.len() == 1 {
                     let relationship = ConsolidatedRelationship {
                         source_path: Some(path.clone()),
@@ -66,10 +67,7 @@ impl TypeScriptAnalyzer {
 
                 definition_map.insert(
                     (fqn.to_string(), relative_file_path.to_string()),
-                    (
-                        definition_node.clone(),
-                        FqnType::TypeScript(definition.fqn.clone()),
-                    ),
+                    definition_node,
                 );
             }
         }
@@ -186,8 +184,7 @@ impl TypeScriptAnalyzer {
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
-        for ((child_fqn_string, child_file_path), (child_def, child_fqn)) in definition_map {
-            // Handle definition-to-imported-symbol relationships
+        for ((child_fqn_string, child_file_path), child_def) in definition_map {
             if let Some(imported_symbol_nodes) =
                 imported_symbol_map.get(&(child_fqn_string.clone(), child_file_path.to_string()))
             {
@@ -207,14 +204,14 @@ impl TypeScriptAnalyzer {
                 }
             }
 
-            // Handle definition-to-definition relationships
-            if let Some(parent_fqn_string) = self.get_parent_fqn_string(child_fqn)
-                && let Some((parent_def, _)) =
-                    definition_map.get(&(parent_fqn_string.clone(), child_file_path.to_string()))
-                && let Some(relationship_type) = self.get_definition_relationship_type(
-                    &parent_def.definition_type,
-                    &child_def.definition_type,
-                )
+            if let Some(parent_fqn) = child_def.fqn.parent()
+                && let Some(parent_def) =
+                    definition_map.get(&(parent_fqn.to_string(), child_file_path.to_string()))
+                && let Some(relationship_type) =
+                    crate::analysis::canonical_helpers::determine_relationship_type(
+                        parent_def.kind,
+                        child_def.kind,
+                    )
             {
                 let relationship = ConsolidatedRelationship {
                     source_path: Some(parent_def.file_path.clone()),
@@ -230,7 +227,6 @@ impl TypeScriptAnalyzer {
         }
     }
 
-    /// Create an imported symbol location from an imported symbol info
     fn create_imported_symbol_location(
         &self,
         imported_symbol: &TypeScriptImportedSymbolInfo,
@@ -261,85 +257,4 @@ impl TypeScriptAnalyzer {
         None
     }
 
-    /// Extract parent FQN string from a given FQN
-    fn get_parent_fqn_string(&self, fqn: &FqnType) -> Option<String> {
-        match fqn {
-            FqnType::TypeScript(typescript_fqn) => {
-                let parts_len = typescript_fqn.len();
-                if parts_len <= 1 {
-                    return None;
-                }
-
-                // Build parent string directly without creating new Vec
-                Some(
-                    typescript_fqn[..parts_len - 1]
-                        .iter()
-                        .map(|part| part.node_name.as_str())
-                        .collect::<Vec<_>>()
-                        .join("::"),
-                )
-            }
-            _ => None,
-        }
-    }
-
-    fn simplify_definition_type(&self, definition_type: &DefinitionType) -> DefinitionType {
-        match definition_type {
-            DefinitionType::TypeScript(TypeScriptDefinitionType::NamedClassExpression) => {
-                DefinitionType::TypeScript(TypeScriptDefinitionType::Class)
-            }
-            DefinitionType::TypeScript(TypeScriptDefinitionType::NamedFunctionExpression) => {
-                DefinitionType::TypeScript(TypeScriptDefinitionType::Function)
-            }
-            DefinitionType::TypeScript(TypeScriptDefinitionType::NamedArrowFunction) => {
-                DefinitionType::TypeScript(TypeScriptDefinitionType::Function)
-            }
-            DefinitionType::TypeScript(
-                TypeScriptDefinitionType::NamedGeneratorFunctionExpression,
-            ) => DefinitionType::TypeScript(TypeScriptDefinitionType::Function),
-            DefinitionType::TypeScript(TypeScriptDefinitionType::NamedCallExpression) => {
-                DefinitionType::TypeScript(TypeScriptDefinitionType::Function)
-            }
-            _ => *definition_type,
-        }
-    }
-    /// Determine the relationship type between parent and child definitions using proper types
-    fn get_definition_relationship_type(
-        &self,
-        parent_type: &DefinitionType,
-        child_type: &DefinitionType,
-    ) -> Option<RelationshipType> {
-        use TypeScriptDefinitionType::*;
-
-        let parent_type = self.simplify_definition_type(parent_type);
-        let child_type = self.simplify_definition_type(child_type);
-
-        match (parent_type, child_type) {
-            (DefinitionType::TypeScript(Class), DefinitionType::TypeScript(Class)) => {
-                Some(RelationshipType::ClassToClass)
-            }
-            (DefinitionType::TypeScript(Class), DefinitionType::TypeScript(Method)) => {
-                Some(RelationshipType::ClassToMethod)
-            }
-            (DefinitionType::TypeScript(Method), DefinitionType::TypeScript(Class)) => {
-                Some(RelationshipType::MethodToClass)
-            }
-            (DefinitionType::TypeScript(Method), DefinitionType::TypeScript(Function)) => {
-                Some(RelationshipType::MethodToFunction)
-            }
-            (DefinitionType::TypeScript(Function), DefinitionType::TypeScript(Class)) => {
-                Some(RelationshipType::FunctionToClass)
-            }
-            (DefinitionType::TypeScript(Function), DefinitionType::TypeScript(Function)) => {
-                Some(RelationshipType::FunctionToFunction)
-            }
-            (DefinitionType::TypeScript(Interface), DefinitionType::TypeScript(Class)) => {
-                Some(RelationshipType::InterfaceToClass)
-            }
-            (DefinitionType::TypeScript(Interface), DefinitionType::TypeScript(Function)) => {
-                Some(RelationshipType::InterfaceToFunction)
-            }
-            _ => None, // Unknown or unsupported relationship
-        }
-    }
 }

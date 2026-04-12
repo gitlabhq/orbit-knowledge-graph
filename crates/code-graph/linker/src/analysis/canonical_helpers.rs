@@ -67,6 +67,7 @@ pub fn determine_relationship_type(parent: DefKind, child: DefKind) -> Option<Re
         (DefKind::Interface, DefKind::Method) => Some(RelationshipType::InterfaceToMethod),
         (DefKind::Interface, DefKind::Property) => Some(RelationshipType::InterfaceToProperty),
         (DefKind::Interface, DefKind::Lambda) => Some(RelationshipType::InterfaceToLambda),
+        (DefKind::Interface, DefKind::Function) => Some(RelationshipType::InterfaceToFunction),
         // Method relationships
         (DefKind::Method, DefKind::Method) => Some(RelationshipType::MethodToMethod),
         (DefKind::Method, DefKind::Function) => Some(RelationshipType::MethodToFunction),
