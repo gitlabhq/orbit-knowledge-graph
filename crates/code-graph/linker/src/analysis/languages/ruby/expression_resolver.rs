@@ -627,8 +627,6 @@ impl ResolutionStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::types::FqnType;
-    use parser_core::ruby::types::RubyRubyFqn;
     use parser_core::utils::{Position, Range};
 
     #[test]
@@ -658,29 +656,6 @@ mod tests {
             Range::new(Position::new(1, 0), Position::new(1, 10), (0, 10)),
             ArcIntern::new("user.rb".to_string()),
         );
-
-        let ruby_fqn = RubyFqn {
-            parts: std::sync::Arc::new(smallvec::SmallVec::from_vec(vec![
-                parser_core::ruby::types::RubyFqnPart::new(
-                    parser_core::ruby::types::RubyFqnPartType::Class,
-                    "User".to_string(),
-                    Range::new(
-                        parser_core::utils::Position { line: 1, column: 0 },
-                        parser_core::utils::Position { line: 1, column: 4 },
-                        (0, 4),
-                    ),
-                ),
-                parser_core::ruby::types::RubyFqnPart::new(
-                    parser_core::ruby::types::RubyFqnPartType::Method,
-                    "save".to_string(),
-                    Range::new(
-                        parser_core::utils::Position { line: 2, column: 0 },
-                        parser_core::utils::Position { line: 2, column: 4 },
-                        (20, 24),
-                    ),
-                ),
-            ])),
-        };
 
         resolver.add_definition("User#save".to_string(), node);
 

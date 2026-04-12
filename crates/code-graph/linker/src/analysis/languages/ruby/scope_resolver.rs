@@ -578,7 +578,6 @@ impl ScopeResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_types::DefKind;
     use internment::ArcIntern;
     use parser_core::utils::{Position, Range};
 
@@ -586,65 +585,31 @@ mod tests {
     fn test_definition_map_method_lookup() {
         let mut def_map = DefinitionMap::new();
 
-        // Create a test definition
-        let node = DefinitionNode::new(
-            FqnType::Ruby(RubyFqn {
-                parts: std::sync::Arc::new(smallvec::SmallVec::from_vec(vec![
-                    parser_core::ruby::types::RubyFqnPart::new(
-                        parser_core::ruby::types::RubyFqnPartType::Class,
-                        "User".to_string(),
-                        parser_core::utils::Range::new(
-                            parser_core::utils::Position { line: 1, column: 0 },
-                            parser_core::utils::Position {
-                                line: 1,
-                                column: 10,
-                            },
-                            (0, 10),
-                        ),
-                    ),
-                    parser_core::ruby::types::RubyFqnPart::new(
-                        parser_core::ruby::types::RubyFqnPartType::Method,
-                        "save".to_string(),
-                        parser_core::utils::Range::new(
-                            parser_core::utils::Position { line: 2, column: 0 },
-                            parser_core::utils::Position { line: 2, column: 4 },
-                            (20, 24),
-                        ),
-                    ),
-                ])),
-            }),
-            DefinitionType::Ruby(RubyDefinitionType::Method),
-            Range::new(Position::new(1, 0), Position::new(1, 10), (0, 10)),
-            ArcIntern::new("user.rb".to_string()),
-        );
-
-        // Create a mock RubyFqn
-        let ruby_fqn = RubyFqn {
-            parts: std::sync::Arc::new(smallvec::SmallVec::from_vec(vec![
+        let fqn = crate::analysis::canonical_helpers::fqn_parts_to_canonical(
+            &[
                 parser_core::ruby::types::RubyFqnPart::new(
                     parser_core::ruby::types::RubyFqnPartType::Class,
                     "User".to_string(),
-                    parser_core::utils::Range::new(
-                        parser_core::utils::Position { line: 1, column: 0 },
-                        parser_core::utils::Position { line: 1, column: 4 },
-                        (0, 4),
-                    ),
+                    Range::new(Position::new(1, 0), Position::new(1, 10), (0, 10)),
                 ),
                 parser_core::ruby::types::RubyFqnPart::new(
                     parser_core::ruby::types::RubyFqnPartType::Method,
                     "save".to_string(),
-                    parser_core::utils::Range::new(
-                        parser_core::utils::Position { line: 2, column: 0 },
-                        parser_core::utils::Position { line: 2, column: 4 },
-                        (20, 24),
-                    ),
+                    Range::new(Position::new(2, 0), Position::new(2, 4), (20, 24)),
                 ),
-            ])),
-        };
+            ],
+            code_graph_types::Language::Ruby,
+        );
+        let node = DefinitionNode::new(
+            fqn,
+            "Method".to_string(),
+            code_graph_types::DefKind::Method,
+            Range::new(Position::new(1, 0), Position::new(1, 10), (0, 10)),
+            ArcIntern::new("user.rb".to_string()),
+        );
 
-        def_map.add_definition("User#save".to_string(), node, &FqnType::Ruby(ruby_fqn));
+        def_map.add_definition("User#save".to_string(), node);
 
-        // Test lookup
         let result = def_map.find_instance_method("User", "save");
         assert!(result.is_some());
         assert_eq!(result.unwrap().name(), "save");

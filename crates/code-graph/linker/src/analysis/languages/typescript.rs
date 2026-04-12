@@ -7,7 +7,6 @@ use crate::graph::{RelationshipKind, RelationshipType};
 use crate::parse_types::{FileProcessingResult, References};
 use code_graph_types::{Language, Range, ToCanonical};
 use internment::ArcIntern;
-use parser_core::definitions::DefinitionTypeInfo;
 use parser_core::typescript::{
     ast::typescript_fqn_to_string,
     swc::references::types::{TypeScriptReferenceTarget, TypeScriptTargetResolution},
