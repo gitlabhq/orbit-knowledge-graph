@@ -564,7 +564,7 @@ impl AssociationEdgeValue {
 /// associations:
 ///   AUTHORED:
 ///     "User -> MergeRequest": 1           # Each MR has 1 author
-///   MERGED_BY:
+///   MERGED:
 ///     "User -> MergeRequest":             # 30% of MRs have a merger
 ///       ratio: 0.3
 ///       per: target                       # Iterate over MRs, not Users

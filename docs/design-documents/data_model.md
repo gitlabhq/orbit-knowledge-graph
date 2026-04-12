@@ -81,7 +81,9 @@ graph TD
     WorkItem -- IN_PROJECT --> Project
     WorkItem -- IN_GROUP --> Group
     User -- APPROVED --> MergeRequest
+    User -- MERGED --> MergeRequest
     User -- REVIEWER --> MergeRequest
+    User -- CLOSED --> WorkItem
 ```
 
 ### Implemented Relationship Types
@@ -100,9 +102,13 @@ graph TD
 | `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
 | `TRIGGERED`                         | `Pipeline`     | `MergeRequest`, `Branch` | A pipeline was triggered for a merge request or a branch push.                                  |
-| `CLOSED_BY`                         | `User`         | `WorkItem`     | A user closed a work item.                                                                              |
+| `CLOSED`                            | `User`         | `WorkItem`     | A user closed a work item.                                                                              |
+| `MERGED`                            | `User`         | `MergeRequest` | A user merged a merge request.                                                                          |
 | `APPROVED`                          | `User`         | `MergeRequest` | A user approved a merge request.                                                                        |
 | `REVIEWER`                          | `User`         | `MergeRequest` | A user is a reviewer of a merge request.                                                                |
+| `CONFIRMED_BY`                      | `User`         | `Vulnerability`| A user confirmed a vulnerability.                                                                       |
+| `DISMISSED_BY`                      | `User`         | `Vulnerability`| A user dismissed a vulnerability.                                                                       |
+| `RESOLVED_BY`                       | `User`         | `Vulnerability`| A user resolved a vulnerability.                                                                        |
 | `HAS_JOB`                           | `Pipeline`     | `Job`          | A pipeline contains jobs.                                                                               |
 | `HAS_STAGE`                         | `Pipeline`     | `Stage`        | A pipeline contains stages.                                                                             |
 | `HAS_NOTE`                          | `MergeRequest`, `WorkItem` | `Note` | An entity has notes attached.                                                          |

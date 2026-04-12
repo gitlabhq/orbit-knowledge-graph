@@ -58,7 +58,7 @@ q4:
         {"id": "merger", "entity": "User", "node_ids": "$sample"}
       ],
       "relationships": [
-        {"type": "MERGED_BY", "from": "merger", "to": "mr"}
+        {"type": "MERGED", "from": "merger", "to": "mr"}
       ],
       "limit": 30,
       "order_by": {"node": "mr", "property": "updated_at", "direction": "DESC"}

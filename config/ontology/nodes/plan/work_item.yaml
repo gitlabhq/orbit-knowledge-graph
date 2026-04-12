@@ -145,7 +145,7 @@ etl:
       direction: outgoing
     closed_by_id:
       to: User
-      as: CLOSED_BY
+      as: CLOSED
       direction: incoming
     label_ids:
       to: Label
