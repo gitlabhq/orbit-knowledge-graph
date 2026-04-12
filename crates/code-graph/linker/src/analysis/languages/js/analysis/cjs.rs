@@ -3,7 +3,7 @@ use oxc::semantic::AstNodes;
 use oxc::span::Span;
 use parser_core::utils::Range;
 
-use super::types::{CjsExport, JsImport, JsImportKind};
+use super::super::types::{CjsExport, JsImport, JsImportKind};
 
 pub(super) fn extract_cjs_imports(
     nodes: &AstNodes,

@@ -3,7 +3,7 @@ use oxc::semantic::AstNodes;
 use parser_core::utils::Range;
 use std::collections::HashMap;
 
-use super::types::{JsDef, JsDefKind};
+use super::super::types::{JsDef, JsDefKind};
 
 pub(super) fn extract_vue_options_api(
     nodes: &AstNodes,
@@ -44,6 +44,18 @@ pub(super) fn extract_vue_options_api(
                     .unwrap_or("Component")
                     .to_string()
             });
+
+        // Only create virtual class if the object has methods or computed
+        let has_component_methods = obj.properties.iter().any(|prop| {
+            let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
+                return false;
+            };
+            let name = p.key.static_name();
+            name.as_deref() == Some("methods") || name.as_deref() == Some("computed")
+        });
+        if !has_component_methods {
+            continue;
+        }
 
         class_hierarchy.insert(component_name.clone(), None);
 

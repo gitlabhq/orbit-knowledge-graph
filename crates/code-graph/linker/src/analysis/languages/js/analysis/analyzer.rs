@@ -9,12 +9,12 @@ use oxc::syntax::symbol::{SymbolFlags, SymbolId};
 use parser_core::utils::{Position, Range};
 use std::collections::HashMap;
 
-use super::calls::{build_class_hierarchy, build_variable_type_map, extract_call_edges};
-use super::cjs::{extract_cjs_exports, extract_cjs_imports};
-use super::types::{
+use super::super::types::{
     ExportedBinding, ImportedName, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsFileAnalysis,
     JsImport, JsImportKind, JsMemberKind, JsModuleInfo, OwnedImportEntry,
 };
+use super::calls::{build_class_hierarchy, build_variable_type_map, extract_call_edges};
+use super::cjs::{extract_cjs_exports, extract_cjs_imports};
 use super::vue::extract_vue_options_api;
 
 pub(super) type NodeId = oxc::semantic::NodeId;
@@ -474,7 +474,7 @@ impl JsAnalyzer {
         let imports = extract_imports(&ctx, &parsed);
         let variable_type_map = build_variable_type_map(nodes);
         let calls = extract_call_edges(&ctx, &defs, &imports, &class_hierarchy, &variable_type_map);
-        let directive = super::frameworks::detect_directive(&parsed.program.directives);
+        let directive = super::super::frameworks::detect_directive(&parsed.program.directives);
 
         let cjs_exports = extract_cjs_exports(nodes, |span| ctx.lt.span_to_range(span));
         let mut module_info = build_module_info(&parsed, &defs, &ctx.lt);

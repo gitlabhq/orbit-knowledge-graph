@@ -3,11 +3,11 @@ use oxc::semantic::AstNodes;
 use oxc::span::GetSpan;
 use std::collections::{HashMap, HashSet};
 
-use super::analyzer::Ctx;
-use super::types::{
+use super::super::types::{
     ImportedName, JsCallConfidence, JsCallEdge, JsCallSite, JsCallTarget, JsDef, JsDefKind,
     JsImport, JsImportKind,
 };
+use super::analyzer::Ctx;
 
 pub(super) fn build_class_hierarchy(nodes: &AstNodes) -> HashMap<String, Option<String>> {
     let mut hierarchy = HashMap::new();
