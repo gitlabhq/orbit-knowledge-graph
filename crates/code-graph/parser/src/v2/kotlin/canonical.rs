@@ -11,6 +11,7 @@ use crate::v2::CanonicalParser;
 
 const LANG: Language = Language::Kotlin;
 
+#[derive(Default)]
 pub struct KotlinCanonicalParser;
 
 impl CanonicalParser for KotlinCanonicalParser {

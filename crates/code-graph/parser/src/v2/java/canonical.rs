@@ -11,6 +11,7 @@ use crate::v2::CanonicalParser;
 
 const LANG: Language = Language::Java;
 
+#[derive(Default)]
 pub struct JavaCanonicalParser;
 
 impl CanonicalParser for JavaCanonicalParser {

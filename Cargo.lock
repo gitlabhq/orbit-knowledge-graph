@@ -1217,6 +1217,7 @@ dependencies = [
  "log",
  "parser-core",
  "rayon",
+ "rustc-hash",
  "tempfile",
  "treesitter-visit",
 ]

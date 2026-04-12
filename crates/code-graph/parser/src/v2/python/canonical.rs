@@ -11,6 +11,7 @@ use crate::v2::CanonicalParser;
 
 const LANG: Language = Language::Python;
 
+#[derive(Default)]
 pub struct PythonCanonicalParser;
 
 impl CanonicalParser for PythonCanonicalParser {

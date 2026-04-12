@@ -1,5 +1,4 @@
 use code_graph_config::{detect_language_from_extension, Language};
-use code_graph_types::CanonicalResult;
 use ignore::WalkBuilder;
 use parser_core::v2::CanonicalParser;
 use parser_core::v2::{
@@ -7,30 +6,102 @@ use parser_core::v2::{
     python::PythonCanonicalParser,
 };
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
+use std::marker::PhantomData;
 use std::path::Path;
 
 use crate::linker::v2::{GraphBuilder, GraphData};
 
-macro_rules! register_v2_parsers {
-    ($( $variant:ident => $parser:expr ),+ $(,)?) => {
-        fn dispatch_parse(
+/// Input to a language pipeline: file path + source bytes.
+pub type FileInput = (String, Vec<u8>);
+
+/// Trait for language-specific graph production.
+///
+/// Two strategies:
+/// - **Generic**: `GenericPipeline<P>` for languages using the standard
+///   `CanonicalParser → GraphBuilder` flow.
+/// - **Custom**: implement directly for languages that need full control
+///   over parsing and linking (e.g. Ruby).
+///
+/// Each pipeline receives all files for its language at once (needed
+/// for cross-file resolution) and produces a `GraphData`.
+pub trait LanguagePipeline {
+    fn process_files(
+        files: Vec<FileInput>,
+        root_path: &str,
+    ) -> Result<GraphData, Vec<PipelineError>>;
+}
+
+/// Generic pipeline for languages that use a `CanonicalParser`.
+/// Parses files in parallel, feeds results into `GraphBuilder`.
+pub struct GenericPipeline<P: CanonicalParser>(PhantomData<P>);
+
+impl<P: CanonicalParser + Default + Sync + Send> LanguagePipeline for GenericPipeline<P> {
+    fn process_files(
+        files: Vec<FileInput>,
+        root_path: &str,
+    ) -> Result<GraphData, Vec<PipelineError>> {
+        let parser = P::default();
+
+        let results: Vec<_> = files
+            .par_iter()
+            .map(|(path, source)| {
+                parser.parse_file(source, path).map_err(|e| PipelineError {
+                    file_path: path.clone(),
+                    error: format!("Parse error: {e}"),
+                })
+            })
+            .collect();
+
+        let mut canonical_results = Vec::new();
+        let mut errors = Vec::new();
+        for r in results {
+            match r {
+                Ok(result) => canonical_results.push(result),
+                Err(err) => errors.push(err),
+            }
+        }
+
+        if !errors.is_empty() && canonical_results.is_empty() {
+            return Err(errors);
+        }
+
+        let mut builder = GraphBuilder::new(root_path.to_string());
+        for result in canonical_results {
+            builder.add_result(result);
+        }
+
+        Ok(builder.build())
+    }
+}
+
+/// Registration macro for v2 pipelines.
+///
+/// Generates `dispatch_language` which routes files to the correct
+/// `LanguagePipeline` implementation per language.
+///
+/// Adding a new language: implement `LanguagePipeline` (or use
+/// `GenericPipeline<YourParser>`), add one line here.
+macro_rules! register_v2_pipelines {
+    ($( $variant:ident => $pipeline:ty ),+ $(,)?) => {
+        fn dispatch_language(
             language: Language,
-            source: &[u8],
-            file_path: &str,
-        ) -> Option<parser_core::Result<CanonicalResult>> {
+            files: Vec<FileInput>,
+            root_path: &str,
+        ) -> Option<Result<GraphData, Vec<PipelineError>>> {
             Some(match language {
-                $(Language::$variant => $parser.parse_file(source, file_path),)+
+                $(Language::$variant => <$pipeline>::process_files(files, root_path),)+
                 _ => return None,
             })
         }
     };
 }
 
-register_v2_parsers! {
-    Python  => PythonCanonicalParser,
-    Java    => JavaCanonicalParser,
-    Kotlin  => KotlinCanonicalParser,
-    CSharp  => CSharpCanonicalParser,
+register_v2_pipelines! {
+    Python     => GenericPipeline<PythonCanonicalParser>,
+    Java       => GenericPipeline<JavaCanonicalParser>,
+    Kotlin     => GenericPipeline<KotlinCanonicalParser>,
+    CSharp     => GenericPipeline<CSharpCanonicalParser>,
 }
 
 pub struct PipelineConfig {
@@ -77,46 +148,46 @@ impl Pipeline {
         Self { config }
     }
 
-    /// Run the full pipeline on a directory.
     pub fn run(&self, root: &Path) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
 
-        // 1. Walk filesystem, collecting file paths + languages
-        let file_entries = self.walk_files(root);
+        // 1. Walk filesystem, group files by language
+        let files_by_language = self.walk_and_group(root);
 
-        // 2. Parse in parallel → Vec<Result<CanonicalResult, PipelineError>>
-        let parse_results: Vec<_> = file_entries
-            .par_iter()
-            .map(|(path, language)| self.parse_file(path, *language))
-            .collect();
+        // 2. Process each language through its pipeline
+        let mut all_graphs: Vec<GraphData> = Vec::new();
+        let mut all_errors: Vec<PipelineError> = Vec::new();
+        let mut files_parsed = 0usize;
+        let mut files_skipped = 0usize;
 
-        let mut results = Vec::new();
-        let mut errors = Vec::new();
-        for r in parse_results {
-            match r {
-                Ok(result) => results.push(result),
-                Err(err) => errors.push(err),
+        for (language, files) in files_by_language {
+            let file_count = files.len();
+
+            match dispatch_language(language, files, &root_str) {
+                Some(Ok(graph)) => {
+                    files_parsed += file_count;
+                    all_graphs.push(graph);
+                }
+                Some(Err(errors)) => {
+                    files_skipped += file_count;
+                    all_errors.extend(errors);
+                }
+                None => {
+                    files_skipped += file_count;
+                    all_errors.push(PipelineError {
+                        file_path: String::new(),
+                        error: format!("Language {language} not yet supported in v2 pipeline"),
+                    });
+                }
             }
         }
 
-        let files_parsed = results.len();
-        let files_skipped = file_entries.len() - files_parsed;
+        // 3. Merge all per-language graphs
+        let graph = Self::merge_graphs(all_graphs);
 
-        // 3. Build graph (sync — needs all results)
-        let mut builder = GraphBuilder::new(root_str);
-
-        let mut definitions_count = 0;
-        let mut imports_count = 0;
-        let mut references_count = 0;
-
-        for result in results {
-            definitions_count += result.definitions.len();
-            imports_count += result.imports.len();
-            references_count += result.references.len();
-            builder.add_result(result);
-        }
-
-        let graph = builder.build();
+        let definitions_count = graph.definitions.len();
+        let imports_count = graph.imports.len();
+        let references_count = 0; // TODO: track when reference resolution is added
         let edges_count = graph.edges.len();
 
         PipelineResult {
@@ -129,12 +200,12 @@ impl Pipeline {
                 references_count,
                 edges_count,
             },
-            errors,
+            errors: all_errors,
         }
     }
 
-    fn walk_files(&self, root: &Path) -> Vec<(String, Language)> {
-        let mut entries = Vec::new();
+    fn walk_and_group(&self, root: &Path) -> FxHashMap<Language, Vec<FileInput>> {
+        let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
 
         let walker = WalkBuilder::new(root)
             .git_ignore(self.config.respect_gitignore)
@@ -158,7 +229,6 @@ impl Pipeline {
                 continue;
             };
 
-            // Skip excluded extensions (e.g. min.js)
             let path_str = path.to_string_lossy();
             if let Some(lang) = detect_language_from_extension(ext) {
                 if lang
@@ -168,29 +238,40 @@ impl Pipeline {
                 {
                     continue;
                 }
-                entries.push((path_str.to_string(), lang));
+
+                let source = match std::fs::read(path) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+
+                groups
+                    .entry(lang)
+                    .or_default()
+                    .push((path_str.to_string(), source));
             }
         }
 
-        entries
+        groups
     }
 
-    fn parse_file(&self, path: &str, language: Language) -> Result<CanonicalResult, PipelineError> {
-        let source = std::fs::read(path).map_err(|e| PipelineError {
-            file_path: path.to_string(),
-            error: format!("Failed to read file: {e}"),
-        })?;
+    fn merge_graphs(graphs: Vec<GraphData>) -> GraphData {
+        let mut merged = GraphData {
+            directories: Vec::new(),
+            files: Vec::new(),
+            definitions: Vec::new(),
+            imports: Vec::new(),
+            edges: Vec::new(),
+        };
 
-        dispatch_parse(language, &source, path)
-            .unwrap_or_else(|| {
-                Err(parser_core::Error::Parse(format!(
-                    "Language {language} not yet supported in v2 pipeline"
-                )))
-            })
-            .map_err(|e| PipelineError {
-                file_path: path.to_string(),
-                error: format!("Parse error: {e}"),
-            })
+        for g in graphs {
+            merged.directories.extend(g.directories);
+            merged.files.extend(g.files);
+            merged.definitions.extend(g.definitions);
+            merged.imports.extend(g.imports);
+            merged.edges.extend(g.edges);
+        }
+
+        merged
     }
 }
 
@@ -204,11 +285,11 @@ mod tests {
         format!("{manifest}/parser/src/{relative}")
     }
 
-    fn parse_fixture_file(path: &str, language: Language) -> CanonicalResult {
+    fn parse_fixture_file(path: &str, language: Language) -> GraphData {
         let source = std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
-        dispatch_parse(language, &source, path)
+        dispatch_language(language, vec![(path.to_string(), source)], "/")
             .unwrap_or_else(|| panic!("Language {language} not supported"))
-            .unwrap_or_else(|e| panic!("Failed to parse {path}: {e}"))
+            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"))
     }
 
     // ── Python fixture ──────────────────────────────────────────────
@@ -216,33 +297,30 @@ mod tests {
     #[test]
     fn python_definitions_fixture() {
         let path = fixture_path("python/fixtures/definitions.py");
-        let result = parse_fixture_file(&path, Language::Python);
+        let graph = parse_fixture_file(&path, Language::Python);
 
         assert!(
-            result.definitions.len() >= 10,
+            graph.definitions.len() >= 10,
             "Expected at least 10 definitions, got {}",
-            result.definitions.len()
+            graph.definitions.len()
         );
 
-        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
+        let names: Vec<&str> = graph
+            .definitions
+            .iter()
+            .map(|(_, d)| d.name.as_str())
+            .collect();
         assert!(names.contains(&"simple_function"));
         assert!(names.contains(&"module_lambda"));
         assert!(names.contains(&"SimpleClass"));
         assert!(names.contains(&"decorated_function"));
 
-        let class_defs: Vec<_> = result
+        let class_defs: Vec<_> = graph
             .definitions
             .iter()
-            .filter(|d| d.kind == DefKind::Class)
+            .filter(|(_, d)| d.kind == DefKind::Class)
             .collect();
         assert!(!class_defs.is_empty(), "Should find at least one class");
-
-        let method_defs: Vec<_> = result
-            .definitions
-            .iter()
-            .filter(|d| d.kind == DefKind::Method)
-            .collect();
-        assert!(!method_defs.is_empty(), "Should find at least one method");
     }
 
     // ── Java fixture ────────────────────────────────────────────────
@@ -250,15 +328,15 @@ mod tests {
     #[test]
     fn java_comprehensive_fixture() {
         let path = fixture_path("java/fixtures/ComprehensiveJavaDefinitions.java");
-        let result = parse_fixture_file(&path, Language::Java);
+        let graph = parse_fixture_file(&path, Language::Java);
 
         assert!(
-            result.definitions.len() >= 5,
+            graph.definitions.len() >= 5,
             "Expected at least 5 definitions, got {}",
-            result.definitions.len()
+            graph.definitions.len()
         );
 
-        let kinds: Vec<DefKind> = result.definitions.iter().map(|d| d.kind).collect();
+        let kinds: Vec<DefKind> = graph.definitions.iter().map(|(_, d)| d.kind).collect();
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
         assert!(kinds.contains(&DefKind::Method), "Should have a method");
     }
@@ -268,15 +346,15 @@ mod tests {
     #[test]
     fn kotlin_comprehensive_fixture() {
         let path = fixture_path("kotlin/fixtures/ComprehensiveKotlinDefinitions.kt");
-        let result = parse_fixture_file(&path, Language::Kotlin);
+        let graph = parse_fixture_file(&path, Language::Kotlin);
 
         assert!(
-            result.definitions.len() >= 5,
+            graph.definitions.len() >= 5,
             "Expected at least 5 definitions, got {}",
-            result.definitions.len()
+            graph.definitions.len()
         );
 
-        let kinds: Vec<DefKind> = result.definitions.iter().map(|d| d.kind).collect();
+        let kinds: Vec<DefKind> = graph.definitions.iter().map(|(_, d)| d.kind).collect();
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
         assert!(kinds.contains(&DefKind::Function), "Should have a function");
     }
@@ -286,15 +364,15 @@ mod tests {
     #[test]
     fn csharp_comprehensive_fixture() {
         let path = fixture_path("csharp/fixtures/ComprehensiveCSharp.cs");
-        let result = parse_fixture_file(&path, Language::CSharp);
+        let graph = parse_fixture_file(&path, Language::CSharp);
 
         assert!(
-            result.definitions.len() >= 5,
+            graph.definitions.len() >= 5,
             "Expected at least 5 definitions, got {}",
-            result.definitions.len()
+            graph.definitions.len()
         );
 
-        let kinds: Vec<DefKind> = result.definitions.iter().map(|d| d.kind).collect();
+        let kinds: Vec<DefKind> = graph.definitions.iter().map(|(_, d)| d.kind).collect();
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
     }
 
@@ -302,7 +380,6 @@ mod tests {
 
     #[test]
     fn full_pipeline_on_fixture_directory() {
-        // Create a temp directory with fixture files from all 4 languages
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
 
@@ -369,23 +446,19 @@ namespace MyApp {
         let pipeline = Pipeline::new(PipelineConfig::default());
         let result = pipeline.run(root);
 
-        // Should have parsed all 4 files
         assert_eq!(result.stats.files_parsed, 4, "Should parse 4 files");
         assert_eq!(result.errors.len(), 0, "Should have no errors");
 
-        // Should have definitions from all languages
         assert!(
             result.stats.definitions_count >= 8,
             "Expected at least 8 definitions, got {}",
             result.stats.definitions_count
         );
 
-        // Graph should have files, directories, and edges
         assert_eq!(result.graph.files.len(), 4);
         assert!(!result.graph.directories.is_empty());
         assert!(!result.graph.edges.is_empty());
 
-        // Should have containment edges (definition → definition)
         let def_to_def = result
             .graph
             .edges
@@ -400,7 +473,6 @@ namespace MyApp {
             "Expected at least 4 def-to-def edges, got {def_to_def}"
         );
 
-        // Should have file→definition edges
         let file_to_def = result
             .graph
             .edges

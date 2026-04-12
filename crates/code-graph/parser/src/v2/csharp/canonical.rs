@@ -11,6 +11,7 @@ use crate::v2::CanonicalParser;
 
 const LANG: Language = Language::CSharp;
 
+#[derive(Default)]
 pub struct CSharpCanonicalParser;
 
 impl CanonicalParser for CSharpCanonicalParser {
