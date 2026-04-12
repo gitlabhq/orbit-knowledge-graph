@@ -4,22 +4,26 @@
 Run the full GKG stack (GDK + Siphon + NATS + ClickHouse + GKG components)
 in CI with HTTPS, test users, and Robot Framework e2e tests.
 
-## Status: IMAGE PUSHED, MR CREATED -- ready for CI validation
+## Status: CI ITERATION 3 -- fixing service networking and PAT auth
 
-## MR: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/884
+## MR: !884 -- https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/884
 ## Image: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg-e2e-base:latest
 
-## What's Done
-- [x] Docker image built, tested, and pushed to GitLab Container Registry
-- [x] All 14 GDK services verified running in container
-- [x] Robot Framework tests passing (2/2 service + seed tests green)
-- [x] Siphon CDC pipeline operational (producer + consumer)
-- [x] Data seeding: EE license, CC key, feature flags, KG namespaces, PAT
-- [x] CI job configured (manual trigger on MRs and main)
-- [x] MR !884 created
-- [x] Image pushed: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg-e2e-base:latest
+## CI Job Iterations
+1. Job 13882180765: FAILED -- python3 not found in rust-builder image
+2. Job 13882202134: FAILED -- PAT file not in main job container, GDK startup timeout (180s too short)
+3. Job 13882321703: RUNNING -- fixed python3, increased timeout to 600s, PAT via OAuth API
 
-## What Remains
-- [ ] Trigger CI job on MR and validate it works end-to-end
-- [ ] Run the full e2e test suite (CDC + indexing + queries + mutations)
-- [ ] Clean up any remaining issues from CI run
+## Fixes Applied (cumulative)
+1. ClickHouse memory limit -> 8GB
+2. PostgreSQL wal_level -> logical
+3. ClickHouse databases + config created at startup
+4. ClickHouse migrations run at startup
+5. Root password reset in seed script
+6. GDK_GITLAB_DIR env var for portable paths
+7. mise activation in shell commands
+8. Simplified suite setup
+9. Install python3 + procps in CI before_script
+10. Increase GDK wait timeout 180s -> 600s
+11. Create PAT via OAuth API (not filesystem)
+12. ClickHouse listen on 0.0.0.0 for CI networking
