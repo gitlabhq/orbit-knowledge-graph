@@ -4,8 +4,8 @@ use oxc::span::GetSpan;
 use std::collections::{HashMap, HashSet};
 
 use super::super::types::{
-    ImportedName, JsCallConfidence, JsCallEdge, JsCallSite, JsCallTarget, JsDef, JsDefKind,
-    JsImport, JsImportKind,
+    ImportedName, JsCallConfidence, JsCallEdge, JsCallSite, JsCallTarget, JsDef, JsImport,
+    JsImportKind,
 };
 use super::analyzer::Ctx;
 
@@ -329,10 +329,10 @@ pub(super) fn extract_call_edges(
                         let method = caller_method.as_ref().unwrap();
                         let watch_name = format!("watch_{method}");
                         for def in defs.iter() {
-                            if let JsDefKind::Method { class_fqn, .. } = &def.kind
+                            if let Some(class_fqn) = def.kind.class_fqn()
                                 && (def.name == *method || def.name == watch_name)
                             {
-                                enclosing_class = Some(class_fqn.clone());
+                                enclosing_class = Some(class_fqn.to_string());
                                 if def.name == watch_name {
                                     caller_method = Some(watch_name.clone());
                                 }

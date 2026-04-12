@@ -155,6 +155,20 @@ fn classify_symbol_kind(
         if matches!(nodes.parent_kind(decl_node_id), AstKind::FormalParameter(_)) {
             return None;
         }
+        // Promote arrow functions and function expressions to Function.
+        // OXC's SymbolFlags marks these as Variable (technically correct for the
+        // const binding), but semantically they are callable functions.
+        if let AstKind::VariableDeclarator(decl) = nodes.kind(decl_node_id)
+            && decl.init.as_ref().is_some_and(|init| {
+                matches!(
+                    init,
+                    oxc::ast::ast::Expression::ArrowFunctionExpression(_)
+                        | oxc::ast::ast::Expression::FunctionExpression(_)
+                )
+            })
+        {
+            return Some(JsDefKind::Function);
+        }
         return Some(JsDefKind::Variable);
     }
     None
@@ -423,11 +437,22 @@ impl JsAnalyzer {
         file_path: &str,
         relative_path: &str,
     ) -> Result<JsFileAnalysis, String> {
+        // Skip files with extremely long lines (generated/minified bundles).
         if let Some(line) = source.lines().find(|l| l.len() > Self::MAX_LINE_LENGTH) {
             return Err(format!(
                 "Skipping {file_path}: line too long ({} bytes, max {})",
                 line.len(),
                 Self::MAX_LINE_LENGTH
+            ));
+        }
+
+        // Skip minified files: average line length > 500 bytes indicates
+        // bundled/minified output, not human-written source.
+        let line_count = source.lines().count().max(1);
+        let avg_line_len = source.len() / line_count;
+        if avg_line_len > 500 && source.len() > 5_000 {
+            return Err(format!(
+                "Skipping {file_path}: likely minified (avg line {avg_line_len} bytes, {line_count} lines)"
             ));
         }
 

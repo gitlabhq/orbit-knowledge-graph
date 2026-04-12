@@ -112,8 +112,8 @@ pub(super) fn extract_vue_options_api(
             };
             let key = key_name.as_ref();
 
-            // methods: { ... } and computed: { ... } -- extract each child as a Method
-            if key == "methods" || key == "computed" {
+            // methods: { ... } -- extract each child as a Method
+            if key == "methods" {
                 let oxc::ast::ast::Expression::ObjectExpression(methods_obj) = &p.value else {
                     continue;
                 };
@@ -139,7 +139,33 @@ pub(super) fn extract_vue_options_api(
                     });
                 }
             }
-            // watch: { ... } -- extract each watcher as a Method
+            // computed: { ... } -- extract each child as ComputedProperty
+            else if key == "computed" {
+                let oxc::ast::ast::Expression::ObjectExpression(computed_obj) = &p.value else {
+                    continue;
+                };
+                for cp in &computed_obj.properties {
+                    let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(mp) = cp else {
+                        continue;
+                    };
+                    let Some(prop_name) = mp.key.static_name() else {
+                        continue;
+                    };
+                    let prop_name = prop_name.to_string();
+                    let fqn = format!("{component_name}::{prop_name}");
+                    defs.push(JsDef {
+                        name: prop_name,
+                        fqn,
+                        kind: JsDefKind::ComputedProperty {
+                            class_fqn: component_name.clone(),
+                        },
+                        range: span_to_range(mp.span),
+                        is_exported: false,
+                        type_annotation: None,
+                    });
+                }
+            }
+            // watch: { ... } -- extract each watcher as Watcher
             else if key == "watch" {
                 let oxc::ast::ast::Expression::ObjectExpression(watch_obj) = &p.value else {
                     continue;
@@ -156,9 +182,8 @@ pub(super) fn extract_vue_options_api(
                     defs.push(JsDef {
                         name: format!("watch_{watcher_name}"),
                         fqn,
-                        kind: JsDefKind::Method {
+                        kind: JsDefKind::Watcher {
                             class_fqn: component_name.clone(),
-                            is_static: false,
                         },
                         range: span_to_range(wp.span),
                         is_exported: false,
@@ -166,8 +191,8 @@ pub(super) fn extract_vue_options_api(
                     });
                 }
             }
-            // data() and lifecycle hooks -- extract the function itself as a Method
-            else if key == "data" || lifecycle_hooks.contains(&key) {
+            // data() -- extract as Method (it's a function returning reactive state)
+            else if key == "data" {
                 let fqn = format!("{component_name}::{key}");
                 defs.push(JsDef {
                     name: key.to_string(),
@@ -175,6 +200,20 @@ pub(super) fn extract_vue_options_api(
                     kind: JsDefKind::Method {
                         class_fqn: component_name.clone(),
                         is_static: false,
+                    },
+                    range: span_to_range(p.span),
+                    is_exported: false,
+                    type_annotation: None,
+                });
+            }
+            // lifecycle hooks -- extract as LifecycleHook
+            else if lifecycle_hooks.contains(&key) {
+                let fqn = format!("{component_name}::{key}");
+                defs.push(JsDef {
+                    name: key.to_string(),
+                    fqn,
+                    kind: JsDefKind::LifecycleHook {
+                        class_fqn: component_name.clone(),
                     },
                     range: span_to_range(p.span),
                     is_exported: false,

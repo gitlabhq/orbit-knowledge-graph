@@ -83,6 +83,9 @@ pub enum JsDefKind {
     Class,
     Function,
     Method { class_fqn: String, is_static: bool },
+    ComputedProperty { class_fqn: String },
+    Watcher { class_fqn: String },
+    LifecycleHook { class_fqn: String },
     Getter { class_fqn: String },
     Setter { class_fqn: String },
     Interface,
@@ -94,6 +97,18 @@ pub enum JsDefKind {
 }
 
 impl JsDefKind {
+    pub fn class_fqn(&self) -> Option<&str> {
+        match self {
+            Self::Method { class_fqn, .. }
+            | Self::ComputedProperty { class_fqn }
+            | Self::Watcher { class_fqn }
+            | Self::LifecycleHook { class_fqn }
+            | Self::Getter { class_fqn }
+            | Self::Setter { class_fqn } => Some(class_fqn),
+            _ => None,
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Class => "Class",
@@ -104,6 +119,9 @@ impl JsDefKind {
             Self::Method {
                 is_static: false, ..
             } => "Method",
+            Self::ComputedProperty { .. } => "ComputedProperty",
+            Self::Watcher { .. } => "Watcher",
+            Self::LifecycleHook { .. } => "LifecycleHook",
             Self::Getter { .. } => "Getter",
             Self::Setter { .. } => "Setter",
             Self::Interface => "Interface",
