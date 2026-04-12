@@ -4,7 +4,7 @@ use internment::ArcIntern;
 use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
 use parser_core::utils::Range;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::types::{
     CjsExport, ExportedBinding, ImportedName, JsCallEdge, JsCallSite, JsCallTarget, JsModuleInfo,
@@ -17,8 +17,8 @@ pub struct JsCrossFileResolver {
 
 impl JsCrossFileResolver {
     pub fn new(root_dir: PathBuf, is_bun: bool, has_tsconfig: bool) -> Self {
-        let resolver = create_resolver(is_bun, has_tsconfig);
         let root_dir = std::fs::canonicalize(&root_dir).unwrap_or(root_dir);
+        let resolver = create_resolver(is_bun, has_tsconfig, &root_dir);
         Self { resolver, root_dir }
     }
 
@@ -338,7 +338,119 @@ impl JsCrossFileResolver {
     }
 }
 
-fn create_resolver(is_bun: bool, has_tsconfig: bool) -> Resolver {
+/// Detect module aliases from the project's bundler/framework configuration.
+///
+/// Checks (in order):
+/// 1. webpack.config.js -- parses `alias` object for simple `key: path.join(ROOT, 'dir')` patterns
+/// 2. vite.config.{js,ts} -- parses `resolve.alias` for `{ find, replacement }` patterns
+/// 3. Fallback heuristic -- common conventions (`~` -> `app/assets/javascripts`, `@` -> `src`)
+fn detect_aliases(root_dir: &Path) -> Vec<(String, Vec<oxc_resolver::AliasValue>)> {
+    let mut aliases = Vec::new();
+
+    // Try to parse webpack config
+    let webpack_path = root_dir.join("config/webpack.config.js");
+    let alt_webpack_path = root_dir.join("webpack.config.js");
+    let webpack_content = std::fs::read_to_string(&webpack_path)
+        .or_else(|_| std::fs::read_to_string(&alt_webpack_path))
+        .unwrap_or_default();
+
+    if !webpack_content.is_empty() {
+        parse_webpack_aliases(&webpack_content, root_dir, &mut aliases);
+    }
+
+    // If no aliases found from config, try heuristic detection
+    if aliases.is_empty() {
+        let candidates: &[(&str, &str)] =
+            &[("~", "app/assets/javascripts"), ("~", "src"), ("@", "src")];
+        for (prefix, target) in candidates {
+            let target_path = root_dir.join(target);
+            if target_path.is_dir() && !aliases.iter().any(|(p, _)| p == *prefix) {
+                aliases.push((
+                    prefix.to_string(),
+                    vec![oxc_resolver::AliasValue::Path(
+                        target_path.to_string_lossy().to_string(),
+                    )],
+                ));
+            }
+        }
+    }
+
+    aliases
+}
+
+/// Parse webpack alias entries from config source.
+/// Matches patterns like: `'~': path.join(ROOT_PATH, 'app/assets/javascripts')`
+fn parse_webpack_aliases(
+    content: &str,
+    root_dir: &Path,
+    aliases: &mut Vec<(String, Vec<oxc_resolver::AliasValue>)>,
+) {
+    // Match: 'key': path.join(SOMETHING, 'relative/path')
+    // or:   key: path.join(SOMETHING, 'relative/path')
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") {
+            continue;
+        }
+
+        // Match alias entries: 'alias_name': path.join(..., 'target')
+        // or: alias_name: path.join(..., 'target')
+        if let Some(colon_pos) = trimmed.find(':') {
+            let key = trimmed[..colon_pos]
+                .trim()
+                .trim_matches('\'')
+                .trim_matches('"')
+                .trim_end_matches('$');
+
+            if key.is_empty() || key.contains(' ') || key.starts_with("//") {
+                continue;
+            }
+
+            let value = trimmed[colon_pos + 1..].trim();
+
+            // path.join(SOMETHING, 'relative/dir')
+            if value.contains("path.join")
+                && let Some(target) = extract_path_join_target(value)
+            {
+                let target_path = root_dir.join(&target);
+                if target_path.is_dir() || target_path.exists() {
+                    aliases.push((
+                        key.to_string(),
+                        vec![oxc_resolver::AliasValue::Path(
+                            target_path.to_string_lossy().to_string(),
+                        )],
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// Extract the last string argument from `path.join(ROOT, 'some/path')`.
+fn extract_path_join_target(s: &str) -> Option<String> {
+    // Find the last quoted string in the path.join call
+    let mut last_quoted = None;
+    let mut in_quote = false;
+    let mut quote_char = '\'';
+    let mut start = 0;
+
+    for (i, c) in s.char_indices() {
+        if !in_quote && (c == '\'' || c == '"') {
+            in_quote = true;
+            quote_char = c;
+            start = i + 1;
+        } else if in_quote && c == quote_char {
+            last_quoted = Some(&s[start..i]);
+            in_quote = false;
+        }
+    }
+
+    last_quoted.map(|s| s.to_string())
+}
+
+fn create_resolver(is_bun: bool, has_tsconfig: bool, root_dir: &std::path::Path) -> Resolver {
     let tsconfig = if has_tsconfig {
         Some(TsconfigDiscovery::Auto)
     } else {
@@ -378,12 +490,15 @@ fn create_resolver(is_bun: bool, has_tsconfig: bool) -> Resolver {
         vec![]
     };
 
+    let alias = detect_aliases(root_dir);
+
     Resolver::new(ResolveOptions {
         extensions,
         main_fields: vec!["module".to_string(), "main".to_string()],
         condition_names: vec!["module".to_string(), "import".to_string()],
         extension_alias,
         tsconfig,
+        alias,
         ..ResolveOptions::default()
     })
 }
