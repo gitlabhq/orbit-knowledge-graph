@@ -1,24 +1,22 @@
 use tracing::error;
 
+use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::languages::python::interfile::get_possible_symbol_locations;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
-    ImportType, ImportedSymbolLocation, ImportedSymbolNode, OptimizedFileTree,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
+    ImportedSymbolLocation, ImportedSymbolNode, OptimizedFileTree,
 };
 use crate::graph::{RelationshipKind, RelationshipType};
 use crate::parse_types::{FileProcessingResult, References};
+use code_graph_types::{Language, Range, ToCanonical};
 use internment::ArcIntern;
+use parser_core::definitions::DefinitionTypeInfo;
 use parser_core::python::types::PythonReferenceInfo;
-use parser_core::python::types::{Connector, PythonImportType, Symbol};
-use parser_core::python::{
-    fqn::python_fqn_to_string,
-    types::{
-        PartialResolution, PythonDefinitionType, PythonFqn, PythonImportedSymbolInfo,
-        PythonTargetResolution,
-    },
+use parser_core::python::types::{
+    Connector, PartialResolution, PythonDefinitionType, PythonFqn, PythonImportType,
+    PythonImportedSymbolInfo, PythonTargetResolution, Symbol,
 };
 use parser_core::references::ReferenceTarget;
-use parser_core::utils::Range;
 use std::collections::{HashMap, HashSet};
 
 /// Represents the result of resolving an imported symbol
@@ -54,11 +52,15 @@ impl PythonAnalyzer {
     ) {
         if let Some(defs) = file_result.definitions.iter_python() {
             for definition in defs {
-                let fqn = FqnType::Python(definition.fqn.clone());
+                let fqn = fqn_parts_to_canonical(
+                    definition.fqn.parts.as_ref(),
+                    Language::Python,
+                );
                 let path = ArcIntern::new(relative_file_path.to_string());
                 let definition_node = DefinitionNode::new(
                     fqn.clone(),
-                    DefinitionType::Python(definition.definition_type),
+                    definition.definition_type.as_str().to_string(),
+                    definition.definition_type.to_def_kind(),
                     definition.range,
                     path.clone(),
                 );
@@ -66,7 +68,7 @@ impl PythonAnalyzer {
                 if self.is_top_level_definition(&definition.fqn) {
                     let mut relationship =
                         ConsolidatedRelationship::file_to_definition(path.clone(), path.clone());
-                    relationship.source_range = ArcIntern::new(Range::empty()); // File source has no specific range
+                    relationship.source_range = ArcIntern::new(Range::empty());
                     relationship.target_range = ArcIntern::new(definition.range);
                     relationship.relationship_type = RelationshipType::FileDefines;
                     relationships.push(relationship);
@@ -82,13 +84,7 @@ impl PythonAnalyzer {
                     continue;
                 }
 
-                definition_map.insert(
-                    key,
-                    (
-                        definition_node.clone(),
-                        FqnType::Python(definition.fqn.clone()),
-                    ),
-                );
+                definition_map.insert(key, definition_node);
             }
         }
     }
@@ -740,7 +736,7 @@ impl PythonAnalyzer {
         imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
-        for ((child_fqn_string, child_file_path), (child_def, child_fqn)) in definition_map {
+        for ((child_fqn_string, child_file_path), child_def) in definition_map {
             // Handle definition-to-imported-symbol relationships
             if let Some(imported_symbol_nodes) =
                 imported_symbol_map.get(&(child_fqn_string.clone(), child_file_path.to_string()))
@@ -762,13 +758,14 @@ impl PythonAnalyzer {
             }
 
             // Handle definition-to-definition relationships
-            if let Some(parent_fqn_string) = self.get_parent_fqn_string(child_fqn)
-                && let Some((parent_def, _)) =
-                    definition_map.get(&(parent_fqn_string.clone(), child_file_path.to_string()))
-                && let Some(relationship_type) = self.get_definition_relationship_type(
-                    &parent_def.definition_type,
-                    &child_def.definition_type,
-                )
+            if let Some(parent_fqn) = child_def.fqn.parent()
+                && let Some(parent_def) =
+                    definition_map.get(&(parent_fqn.to_string(), child_file_path.to_string()))
+                && let Some(relationship_type) =
+                    crate::analysis::canonical_helpers::determine_relationship_type(
+                        parent_def.kind,
+                        child_def.kind,
+                    )
             {
                 let relationship = ConsolidatedRelationship {
                     source_path: Some(parent_def.file_path.clone()),
@@ -1029,101 +1026,6 @@ impl PythonAnalyzer {
     }
 
     /// Extract parent FQN string from a given FQN
-    fn get_parent_fqn_string(&self, fqn: &FqnType) -> Option<String> {
-        match fqn {
-            FqnType::Python(python_fqn) => {
-                let parts_len = python_fqn.parts.len();
-                if parts_len <= 1 {
-                    return None;
-                }
-
-                // Build parent string directly without creating new Vec
-                Some(
-                    python_fqn.parts[..parts_len - 1]
-                        .iter()
-                        .map(|part| part.node_name.replace('.', "#"))
-                        .collect::<Vec<_>>()
-                        .join("."),
-                )
-            }
-            _ => None,
-        }
-    }
-
-    fn simplify_definition_type(&self, definition_type: &DefinitionType) -> Option<DefinitionType> {
-        use PythonDefinitionType::*;
-
-        match definition_type {
-            DefinitionType::Python(Class) | DefinitionType::Python(DecoratedClass) => {
-                Some(DefinitionType::Python(Class))
-            }
-            DefinitionType::Python(Method)
-            | DefinitionType::Python(AsyncMethod)
-            | DefinitionType::Python(DecoratedMethod)
-            | DefinitionType::Python(DecoratedAsyncMethod) => Some(DefinitionType::Python(Method)),
-            DefinitionType::Python(Function)
-            | DefinitionType::Python(AsyncFunction)
-            | DefinitionType::Python(DecoratedFunction)
-            | DefinitionType::Python(DecoratedAsyncFunction) => {
-                Some(DefinitionType::Python(Function))
-            }
-            DefinitionType::Python(Lambda) => Some(DefinitionType::Python(Lambda)),
-            _ => None,
-        }
-    }
-
-    /// Determine the relationship type between parent and child definitions using proper types
-    fn get_definition_relationship_type(
-        &self,
-        parent_type: &DefinitionType,
-        child_type: &DefinitionType,
-    ) -> Option<RelationshipType> {
-        use PythonDefinitionType::*;
-
-        let parent_type = self.simplify_definition_type(parent_type)?;
-        let child_type = self.simplify_definition_type(child_type)?;
-
-        match (parent_type, child_type) {
-            (DefinitionType::Python(Class), DefinitionType::Python(Class)) => {
-                Some(RelationshipType::ClassToClass)
-            }
-            (DefinitionType::Python(Class), DefinitionType::Python(Method)) => {
-                Some(RelationshipType::ClassToMethod)
-            }
-            (DefinitionType::Python(Class), DefinitionType::Python(Lambda)) => {
-                Some(RelationshipType::ClassToLambda)
-            }
-            (DefinitionType::Python(Method), DefinitionType::Python(Class)) => {
-                Some(RelationshipType::MethodToClass)
-            }
-            (DefinitionType::Python(Method), DefinitionType::Python(Function)) => {
-                Some(RelationshipType::MethodToFunction)
-            }
-            (DefinitionType::Python(Method), DefinitionType::Python(Lambda)) => {
-                Some(RelationshipType::MethodToLambda)
-            }
-            (DefinitionType::Python(Function), DefinitionType::Python(Function)) => {
-                Some(RelationshipType::FunctionToFunction)
-            }
-            (DefinitionType::Python(Function), DefinitionType::Python(Class)) => {
-                Some(RelationshipType::FunctionToClass)
-            }
-            (DefinitionType::Python(Function), DefinitionType::Python(Lambda)) => {
-                Some(RelationshipType::FunctionToLambda)
-            }
-            (DefinitionType::Python(Lambda), DefinitionType::Python(Lambda)) => {
-                Some(RelationshipType::LambdaToLambda)
-            }
-            (DefinitionType::Python(Lambda), DefinitionType::Python(Class)) => {
-                Some(RelationshipType::LambdaToClass)
-            }
-            (DefinitionType::Python(Lambda), DefinitionType::Python(Function)) => {
-                Some(RelationshipType::LambdaToFunction)
-            }
-            _ => None, // Unknown or unsupported relationship
-        }
-    }
-
     fn is_top_level_definition(&self, fqn: &PythonFqn) -> bool {
         fqn.len() == 1
     }

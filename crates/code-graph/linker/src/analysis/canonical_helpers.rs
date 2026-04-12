@@ -49,27 +49,38 @@ fn convert_range(range: parser_core::utils::Range) -> Range {
 /// Language-agnostic relationship type determination from DefKind pairs.
 pub fn determine_relationship_type(parent: DefKind, child: DefKind) -> Option<RelationshipType> {
     match (parent, child) {
+        // Module contains anything
         (DefKind::Module, _) => Some(RelationshipType::ModuleToSingletonMethod),
+        // Class relationships
         (DefKind::Class, DefKind::Class) => Some(RelationshipType::ClassToClass),
         (DefKind::Class, DefKind::Interface) => Some(RelationshipType::ClassToInterface),
-        (DefKind::Class, DefKind::Method | DefKind::Function) => {
-            Some(RelationshipType::ClassToMethod)
-        }
+        (DefKind::Class, DefKind::Method) => Some(RelationshipType::ClassToMethod),
         (DefKind::Class, DefKind::Constructor) => Some(RelationshipType::ClassToConstructor),
         (DefKind::Class, DefKind::Property | DefKind::EnumEntry) => {
             Some(RelationshipType::ClassToProperty)
         }
         (DefKind::Class, DefKind::Lambda) => Some(RelationshipType::ClassToLambda),
+        (DefKind::Class, DefKind::Function) => Some(RelationshipType::ClassToMethod),
+        // Interface relationships
         (DefKind::Interface, DefKind::Interface) => Some(RelationshipType::InterfaceToInterface),
         (DefKind::Interface, DefKind::Class) => Some(RelationshipType::InterfaceToClass),
         (DefKind::Interface, DefKind::Method) => Some(RelationshipType::InterfaceToMethod),
         (DefKind::Interface, DefKind::Property) => Some(RelationshipType::InterfaceToProperty),
-        (DefKind::Method | DefKind::Function, DefKind::Method | DefKind::Function) => {
-            Some(RelationshipType::MethodToMethod)
-        }
-        (DefKind::Method | DefKind::Function, DefKind::Lambda) => {
-            Some(RelationshipType::MethodToLambda)
-        }
+        // Method relationships
+        (DefKind::Method, DefKind::Method) => Some(RelationshipType::MethodToMethod),
+        (DefKind::Method, DefKind::Function) => Some(RelationshipType::MethodToFunction),
+        (DefKind::Method, DefKind::Class) => Some(RelationshipType::MethodToClass),
+        (DefKind::Method, DefKind::Lambda) => Some(RelationshipType::MethodToLambda),
+        // Function relationships
+        (DefKind::Function, DefKind::Function) => Some(RelationshipType::FunctionToFunction),
+        (DefKind::Function, DefKind::Class) => Some(RelationshipType::FunctionToClass),
+        (DefKind::Function, DefKind::Method) => Some(RelationshipType::MethodToMethod),
+        (DefKind::Function, DefKind::Lambda) => Some(RelationshipType::FunctionToLambda),
+        // Lambda relationships
+        (DefKind::Lambda, DefKind::Lambda) => Some(RelationshipType::LambdaToLambda),
+        (DefKind::Lambda, DefKind::Class) => Some(RelationshipType::LambdaToClass),
+        (DefKind::Lambda, DefKind::Function) => Some(RelationshipType::LambdaToFunction),
+        // Impl blocks (Rust: DefKind::Other for impl)
         (DefKind::Other, DefKind::Method | DefKind::Function) => {
             Some(RelationshipType::ClassToMethod)
         }
