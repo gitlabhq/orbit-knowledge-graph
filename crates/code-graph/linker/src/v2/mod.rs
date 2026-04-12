@@ -4,4 +4,4 @@ mod resolver;
 
 pub use builder::{GraphBuilder, GraphData};
 pub use edges::Edge;
-pub use resolver::ReferenceResolver;
+pub use resolver::{GlobalBacktracker, NoResolver, ReferenceResolver};

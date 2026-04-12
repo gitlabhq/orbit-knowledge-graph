@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
 
-use crate::linker::v2::{GraphBuilder, GraphData};
+use crate::linker::v2::{GraphBuilder, GraphData, NoResolver, ReferenceResolver};
 
 /// Input to a language pipeline: file path + source bytes.
 pub type FileInput = (String, Vec<u8>);
@@ -18,8 +18,8 @@ pub type FileInput = (String, Vec<u8>);
 /// Trait for language-specific graph production.
 ///
 /// Two strategies:
-/// - **Generic**: `GenericPipeline<P>` for languages using the standard
-///   `CanonicalParser → GraphBuilder` flow.
+/// - **Generic**: `GenericPipeline<P, R>` for languages using the standard
+///   `CanonicalParser → Resolver → GraphBuilder` flow.
 /// - **Custom**: implement directly for languages that need full control
 ///   over parsing and linking (e.g. Ruby).
 ///
@@ -32,17 +32,25 @@ pub trait LanguagePipeline {
     ) -> Result<GraphData, Vec<PipelineError>>;
 }
 
-/// Generic pipeline for languages that use a `CanonicalParser`.
-/// Parses files in parallel, feeds results into `GraphBuilder`.
-pub struct GenericPipeline<P: CanonicalParser>(PhantomData<P>);
+/// Generic pipeline parameterized by parser `P` and resolver `R`.
+///
+/// - `P` produces `CanonicalResult` per file (parallel)
+/// - `R` resolves references across all results into edges (sync)
+/// - `GraphBuilder` constructs the final graph with structural + resolved edges
+pub struct GenericPipeline<P: CanonicalParser, R: ReferenceResolver>(PhantomData<(P, R)>);
 
-impl<P: CanonicalParser + Default + Sync + Send> LanguagePipeline for GenericPipeline<P> {
+impl<P, R> LanguagePipeline for GenericPipeline<P, R>
+where
+    P: CanonicalParser + Default + Sync + Send,
+    R: ReferenceResolver,
+{
     fn process_files(
         files: Vec<FileInput>,
         root_path: &str,
     ) -> Result<GraphData, Vec<PipelineError>> {
         let parser = P::default();
 
+        // Parse all files in parallel
         let results: Vec<_> = files
             .par_iter()
             .map(|(path, source)| {
@@ -66,12 +74,19 @@ impl<P: CanonicalParser + Default + Sync + Send> LanguagePipeline for GenericPip
             return Err(errors);
         }
 
+        // Resolve references across all parsed results
+        let resolved_edges = R::resolve(&canonical_results, root_path);
+
+        // Build the graph with structural edges + resolved edges
         let mut builder = GraphBuilder::new(root_path.to_string());
         for result in canonical_results {
             builder.add_result(result);
         }
 
-        Ok(builder.build())
+        let mut graph = builder.build();
+        graph.edges.extend(resolved_edges);
+
+        Ok(graph)
     }
 }
 
@@ -97,11 +112,12 @@ macro_rules! register_v2_pipelines {
     };
 }
 
+// TODO: replace NoResolver with per-language resolvers (PythonResolver, etc.)
 register_v2_pipelines! {
-    Python     => GenericPipeline<PythonCanonicalParser>,
-    Java       => GenericPipeline<JavaCanonicalParser>,
-    Kotlin     => GenericPipeline<KotlinCanonicalParser>,
-    CSharp     => GenericPipeline<CSharpCanonicalParser>,
+    Python  => GenericPipeline<PythonCanonicalParser, NoResolver>,
+    Java    => GenericPipeline<JavaCanonicalParser, NoResolver>,
+    Kotlin  => GenericPipeline<KotlinCanonicalParser, NoResolver>,
+    CSharp  => GenericPipeline<CSharpCanonicalParser, NoResolver>,
 }
 
 pub struct PipelineConfig {
