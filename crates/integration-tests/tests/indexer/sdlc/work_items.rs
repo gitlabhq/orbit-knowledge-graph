@@ -85,7 +85,7 @@ pub async fn processes_work_item_single_value_edges(ctx: &TestContext) {
         .await;
     assert_edges_have_traversal_path(ctx, "IN_GROUP", "WorkItem", "Group", "1/100/", 1).await;
     assert_edges_have_traversal_path(ctx, "IN_PROJECT", "WorkItem", "Project", "1/100/", 1).await;
-    assert_edges_have_traversal_path(ctx, "CLOSED_BY", "User", "WorkItem", "1/100/", 1).await;
+    assert_edges_have_traversal_path(ctx, "CLOSED", "User", "WorkItem", "1/100/", 1).await;
 }
 
 pub async fn processes_work_item_multi_target_edges(ctx: &TestContext) {

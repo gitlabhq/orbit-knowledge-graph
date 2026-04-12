@@ -56,7 +56,7 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
         .await;
     assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "MergeRequest", "1/100/", 2).await;
     assert_edges_have_traversal_path(ctx, "ASSIGNED", "User", "MergeRequest", "1/100/", 2).await;
-    assert_edges_have_traversal_path(ctx, "MERGED_BY", "User", "MergeRequest", "1/100/", 1).await;
+    assert_edges_have_traversal_path(ctx, "MERGED", "User", "MergeRequest", "1/100/", 1).await;
     assert_edges_have_traversal_path(
         ctx,
         "IN_MILESTONE",

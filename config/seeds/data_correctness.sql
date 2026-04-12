@@ -90,7 +90,7 @@
 --     AUTHORED:      User 1 -> WI 4000, User 2 -> WI 4001, User 1 -> WI 4002, User 3 -> WI 4003
 --     IN_GROUP:      WI 4000 -> Group 100, WI 4001 -> Group 100, WI 4002 -> Group 101, WI 4003 -> Group 102
 --     IN_PROJECT:    WI 4000 -> Project 1000, WI 4001 -> Project 1000
---     CLOSED_BY:     User 2 -> WI 4001
+--     CLOSED:        User 2 -> WI 4001
 --     IN_MILESTONE:  WI 4000 -> Milestone 6000, WI 4001 -> Milestone 6000
 --     ASSIGNED:      User 1 -> WI 4000, User 2 -> WI 4000, User 3 -> WI 4001
 --     HAS_LABEL:     WI 4000 -> Label 7000, WI 4000 -> Label 7001, WI 4001 -> Label 7002
@@ -198,7 +198,7 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
     ('1/100/', 4000, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
     ('1/100/', 4001, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
-    ('1/100/', 2, 'User', 'CLOSED_BY', 4001, 'WorkItem');
+    ('1/100/', 2, 'User', 'CLOSED', 4001, 'WorkItem');
 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
     ('1/100/1000/', 2, 'User', 'APPROVED', 2000, 'MergeRequest'),

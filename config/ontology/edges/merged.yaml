@@ -1,0 +1,6 @@
+description: User who merged a merge request
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "User merged a merge request."

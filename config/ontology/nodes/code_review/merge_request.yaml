@@ -134,7 +134,7 @@ etl:
       direction: incoming
     merge_user_id:
       to: User
-      as: MERGED_BY
+      as: MERGED
       direction: incoming
     milestone_id:
       to: Milestone

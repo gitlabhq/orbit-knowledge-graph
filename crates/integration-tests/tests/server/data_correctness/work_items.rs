@@ -212,7 +212,7 @@ pub(super) async fn traversal_user_closed_work_item_returns_correct_edges(ctx: &
                 {"id": "u", "entity": "User", "columns": ["username"]},
                 {"id": "w", "entity": "WorkItem", "columns": ["title", "state"]}
             ],
-            "relationships": [{"type": "CLOSED_BY", "from": "u", "to": "w"}],
+            "relationships": [{"type": "CLOSED", "from": "u", "to": "w"}],
             "limit": 20
         }"#,
         &allow_all(),
@@ -222,7 +222,7 @@ pub(super) async fn traversal_user_closed_work_item_returns_correct_edges(ctx: &
     resp.assert_node_count(2);
     resp.assert_referential_integrity();
 
-    resp.assert_edge_exists("User", 2, "WorkItem", 4001, "CLOSED_BY");
+    resp.assert_edge_exists("User", 2, "WorkItem", 4001, "CLOSED");
 
     resp.assert_node("User", 2, |n| n.prop_str("username") == Some("bob"));
     resp.assert_node("WorkItem", 4001, |n| {
