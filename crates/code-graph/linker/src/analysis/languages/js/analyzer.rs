@@ -4,21 +4,25 @@ use oxc::parser::Parser;
 use oxc::semantic::{AstNodes, Scoping, SemanticBuilder};
 use oxc::span::{GetSpan, SourceType, Span};
 use oxc::syntax::module_record::{ExportExportName, ExportImportName, ImportImportName};
-use oxc::syntax::scope::{ScopeFlags, ScopeId};
+use oxc::syntax::scope::ScopeFlags;
 use oxc::syntax::symbol::{SymbolFlags, SymbolId};
 use parser_core::utils::{Position, Range};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
+use super::calls::{build_class_hierarchy, build_variable_type_map, extract_call_edges};
+use super::cjs::{extract_cjs_exports, extract_cjs_imports};
 use super::types::{
-    CjsExport, ExportedBinding, ImportedName, JsCallConfidence, JsCallEdge, JsCallSite,
-    JsCallTarget, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsFileAnalysis, JsImport,
-    JsImportKind, JsMemberKind, JsModuleInfo, OwnedImportEntry,
+    ExportedBinding, ImportedName, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsFileAnalysis,
+    JsImport, JsImportKind, JsMemberKind, JsModuleInfo, OwnedImportEntry,
 };
+use super::vue::extract_vue_options_api;
 
-struct LineTable(Vec<usize>);
+pub(super) type NodeId = oxc::semantic::NodeId;
+
+pub(super) struct LineTable(Vec<usize>);
 
 impl LineTable {
-    fn build(source: &str) -> Self {
+    pub(super) fn build(source: &str) -> Self {
         let mut starts = vec![0];
         for (i, b) in source.bytes().enumerate() {
             if b == b'\n' {
@@ -34,7 +38,7 @@ impl LineTable {
         (line, offset.saturating_sub(self.0[line]))
     }
 
-    fn span_to_range(&self, span: Span) -> Range {
+    pub(super) fn span_to_range(&self, span: Span) -> Range {
         let (sl, sc) = self.offset_to_line_col(span.start as usize);
         let (el, ec) = self.offset_to_line_col(span.end as usize);
         Range::new(
@@ -47,18 +51,16 @@ impl LineTable {
 
 pub struct JsAnalyzer;
 
-type NodeId = oxc::semantic::NodeId;
-
-struct Ctx<'a> {
-    scoping: &'a Scoping,
-    nodes: &'a AstNodes<'a>,
-    lt: LineTable,
+pub(super) struct Ctx<'a> {
+    pub(super) scoping: &'a Scoping,
+    pub(super) nodes: &'a AstNodes<'a>,
+    pub(super) lt: LineTable,
     scope_defs: HashMap<NodeId, SymbolId>,
-    source: &'a str,
+    pub(super) source: &'a str,
 }
 
 impl<'a> Ctx<'a> {
-    fn build_fqn(&self, symbol_id: SymbolId) -> String {
+    pub(super) fn build_fqn(&self, symbol_id: SymbolId) -> String {
         let name = self.scoping.symbol_name(symbol_id).to_string();
         let mut parts = vec![name];
         for ancestor in self
@@ -77,7 +79,10 @@ impl<'a> Ctx<'a> {
         parts.join("::")
     }
 
-    fn find_enclosing_def(&self, scope_id: ScopeId) -> Option<(String, Range)> {
+    pub(super) fn find_enclosing_def(
+        &self,
+        scope_id: oxc::syntax::scope::ScopeId,
+    ) -> Option<(String, Range)> {
         let mut fqn_parts = Vec::new();
         let mut def_range = None;
         for ancestor in self.scoping.scope_ancestors(scope_id) {
@@ -153,245 +158,6 @@ fn classify_symbol_kind(
         return Some(JsDefKind::Variable);
     }
     None
-}
-
-fn build_class_hierarchy(nodes: &AstNodes) -> HashMap<String, Option<String>> {
-    let mut hierarchy = HashMap::new();
-    for node in nodes.iter() {
-        if let AstKind::Class(class) = node.kind()
-            && let Some(id) = &class.id
-        {
-            let parent = class.super_class.as_ref().and_then(|expr| {
-                if let oxc::ast::ast::Expression::Identifier(ident) = expr {
-                    Some(ident.name.to_string())
-                } else {
-                    None
-                }
-            });
-            hierarchy.insert(id.name.to_string(), parent);
-        }
-    }
-    hierarchy
-}
-
-fn find_method_in_defs<'a>(
-    class: &str,
-    method: &str,
-    hierarchy: &HashMap<String, Option<String>>,
-    defs: &'a [JsDef],
-) -> Option<&'a JsDef> {
-    let mut current = Some(class.to_string());
-    let mut seen = HashSet::new();
-    while let Some(cls) = current {
-        if !seen.insert(cls.clone()) {
-            break;
-        }
-        let fqn = format!("{cls}::{method}");
-        if let Some(d) = defs.iter().find(|d| d.fqn == fqn) {
-            return Some(d);
-        }
-        current = hierarchy.get(&cls).and_then(|p| p.clone());
-    }
-    None
-}
-
-fn build_variable_type_map(nodes: &AstNodes) -> HashMap<String, (String, JsCallConfidence)> {
-    let mut map = HashMap::new();
-    for node in nodes.iter() {
-        match node.kind() {
-            // P1: const x = new Foo() → x is Foo (Inferred)
-            AstKind::VariableDeclarator(decl) => {
-                if let Some(init) = &decl.init
-                    && let oxc::ast::ast::Expression::NewExpression(new_expr) = init
-                    && let oxc::ast::ast::Expression::Identifier(callee) = &new_expr.callee
-                    && let oxc::ast::ast::BindingPattern::BindingIdentifier(binding) = &decl.id
-                {
-                    map.insert(
-                        binding.name.to_string(),
-                        (callee.name.to_string(), JsCallConfidence::Inferred),
-                    );
-                }
-            }
-            // P2: function f(svc: Service) → svc is Service (Annotated)
-            AstKind::FormalParameter(param) => {
-                if let oxc::ast::ast::BindingPattern::BindingIdentifier(ident) = &param.pattern
-                    && let Some(type_ann) = &param.type_annotation
-                    && let oxc::ast::ast::TSType::TSTypeReference(type_ref) =
-                        &type_ann.type_annotation
-                    && let oxc::ast::ast::TSTypeName::IdentifierReference(id) = &type_ref.type_name
-                {
-                    map.insert(
-                        ident.name.to_string(),
-                        (id.name.to_string(), JsCallConfidence::Annotated),
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-    map
-}
-
-/// Extract Vue Options API component methods/computed as definitions.
-/// Scans `export default { name: '...', methods: { ... }, computed: { ... } }`.
-fn extract_vue_options_api(
-    nodes: &AstNodes,
-    lt: &LineTable,
-    relative_path: &str,
-    defs: &mut Vec<JsDef>,
-    class_hierarchy: &mut HashMap<String, Option<String>>,
-) {
-    for node in nodes.iter() {
-        let AstKind::ExportDefaultDeclaration(decl) = node.kind() else {
-            continue;
-        };
-        let oxc::ast::ast::ExportDefaultDeclarationKind::ObjectExpression(obj) = &decl.declaration
-        else {
-            continue;
-        };
-
-        // Extract component name from `name: 'ComponentName'` or derive from file
-        let component_name = obj
-            .properties
-            .iter()
-            .find_map(|prop| {
-                let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
-                    return None;
-                };
-                if p.key.static_name().as_deref() != Some("name") {
-                    return None;
-                }
-                if let oxc::ast::ast::Expression::StringLiteral(s) = &p.value {
-                    Some(s.value.to_string())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| {
-                std::path::Path::new(relative_path)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("Component")
-                    .to_string()
-            });
-
-        // Register virtual class in hierarchy
-        class_hierarchy.insert(component_name.clone(), None);
-
-        // Add virtual class definition
-        defs.push(JsDef {
-            name: component_name.clone(),
-            fqn: component_name.clone(),
-            kind: JsDefKind::Class,
-            range: lt.span_to_range(obj.span),
-            is_exported: true,
-            type_annotation: None,
-        });
-
-        // Extract methods and computed properties
-        for prop in &obj.properties {
-            let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
-                continue;
-            };
-            let key_name = p.key.static_name();
-            let is_methods = key_name.as_deref() == Some("methods");
-            let is_computed = key_name.as_deref() == Some("computed");
-            if !is_methods && !is_computed {
-                continue;
-            }
-            let oxc::ast::ast::Expression::ObjectExpression(methods_obj) = &p.value else {
-                continue;
-            };
-            for method_prop in &methods_obj.properties {
-                let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(mp) = method_prop else {
-                    continue;
-                };
-                let Some(method_name) = mp.key.static_name() else {
-                    continue;
-                };
-                let method_name = method_name.to_string();
-                let fqn = format!("{component_name}::{method_name}");
-                defs.push(JsDef {
-                    name: method_name,
-                    fqn,
-                    kind: JsDefKind::Method {
-                        class_fqn: component_name.clone(),
-                        is_static: false,
-                    },
-                    range: lt.span_to_range(mp.span),
-                    is_exported: false,
-                    type_annotation: None,
-                });
-            }
-        }
-    }
-}
-
-fn extract_cjs_imports(nodes: &AstNodes, lt: &LineTable, imports: &mut Vec<JsImport>) {
-    for node in nodes.iter() {
-        if let AstKind::CallExpression(call) = node.kind() {
-            let Some(str_lit) = call.common_js_require() else {
-                continue;
-            };
-            let specifier = str_lit.value.to_string();
-            let range = lt.span_to_range(call.span);
-
-            let Some(bindings) = nodes.ancestor_ids(node.id()).find_map(|aid| {
-                if let AstKind::VariableDeclarator(decl) = nodes.kind(aid) {
-                    let mut bindings = Vec::new();
-                    collect_cjs_bindings(&decl.id, &mut bindings, None);
-                    return Some(bindings);
-                }
-                None
-            }) else {
-                continue;
-            };
-
-            for (local_name, imported_name) in bindings {
-                imports.push(JsImport {
-                    specifier: specifier.clone(),
-                    kind: JsImportKind::CjsRequire { imported_name },
-                    local_name,
-                    range,
-                    is_type: false,
-                });
-            }
-        }
-    }
-}
-
-fn collect_cjs_bindings(
-    pattern: &oxc::ast::ast::BindingPattern<'_>,
-    bindings: &mut Vec<(String, Option<String>)>,
-    imported_name: Option<String>,
-) {
-    use oxc::ast::ast::BindingPattern;
-
-    match pattern {
-        BindingPattern::BindingIdentifier(ident) => {
-            bindings.push((ident.name.to_string(), imported_name));
-        }
-        BindingPattern::AssignmentPattern(assign) => {
-            collect_cjs_bindings(&assign.left, bindings, imported_name);
-        }
-        BindingPattern::ObjectPattern(object) => {
-            for property in &object.properties {
-                let property_name = property.key.static_name().map(|name| name.into_owned());
-                collect_cjs_bindings(&property.value, bindings, property_name);
-            }
-            if let Some(rest) = &object.rest {
-                collect_cjs_bindings(&rest.argument, bindings, None);
-            }
-        }
-        BindingPattern::ArrayPattern(array) => {
-            for element in array.elements.iter().flatten() {
-                collect_cjs_bindings(element, bindings, None);
-            }
-            if let Some(rest) = &array.rest {
-                collect_cjs_bindings(&rest.argument, bindings, None);
-            }
-        }
-    }
 }
 
 fn extract_type_annotation(nodes: &AstNodes, decl_node_id: NodeId, source: &str) -> Option<String> {
@@ -543,294 +309,8 @@ fn extract_imports(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> Vec<JsImpor
         });
     }
 
-    extract_cjs_imports(ctx.nodes, &ctx.lt, &mut imports);
+    extract_cjs_imports(ctx.nodes, |span| ctx.lt.span_to_range(span), &mut imports);
     imports
-}
-
-fn extract_call_edges(
-    ctx: &Ctx,
-    defs: &[JsDef],
-    imports: &[JsImport],
-    class_hierarchy: &HashMap<String, Option<String>>,
-    variable_type_map: &HashMap<String, (String, JsCallConfidence)>,
-) -> Vec<JsCallEdge> {
-    let mut calls = Vec::new();
-
-    let import_lookup: HashMap<&str, (&str, ImportedName)> = imports
-        .iter()
-        .map(|i| {
-            let imported_name = match &i.kind {
-                JsImportKind::Named { imported_name } => ImportedName::Named(imported_name.clone()),
-                JsImportKind::Default => ImportedName::Default,
-                JsImportKind::Namespace => ImportedName::Namespace,
-                JsImportKind::CjsRequire { imported_name } => imported_name
-                    .as_ref()
-                    .map_or(ImportedName::Namespace, |n| ImportedName::Named(n.clone())),
-            };
-            (i.local_name.as_str(), (i.specifier.as_str(), imported_name))
-        })
-        .collect();
-
-    for symbol_id in ctx.scoping.symbol_ids() {
-        for ref_id in ctx.scoping.get_resolved_reference_ids(symbol_id) {
-            let reference = ctx.scoping.get_reference(*ref_id);
-            if !reference.flags().is_read() {
-                continue;
-            }
-
-            let ref_node_id = reference.node_id();
-            let ref_span = ctx.nodes.get_node(ref_node_id).span();
-            let parent_kind = ctx.nodes.parent_kind(ref_node_id);
-
-            // Check if this reference is a direct callee or a callback argument
-            let (is_call, is_callback) = match parent_kind {
-                AstKind::CallExpression(call) => {
-                    let is_callee = matches!(
-                        &call.callee,
-                        oxc::ast::ast::Expression::Identifier(id) if id.span == ref_span
-                    );
-                    (is_callee, !is_callee)
-                }
-                AstKind::NewExpression(new_expr) => {
-                    let is_callee = matches!(
-                        &new_expr.callee,
-                        oxc::ast::ast::Expression::Identifier(id) if id.span == ref_span
-                    );
-                    (is_callee, !is_callee)
-                }
-                AstKind::TaggedTemplateExpression(_) | AstKind::JSXOpeningElement(_) => {
-                    (true, false)
-                }
-                _ => (false, false),
-            };
-
-            if !is_call && !is_callback {
-                // Member expression calls: obj.method() where obj is a known symbol
-                if let AstKind::StaticMemberExpression(member) = ctx.nodes.parent_kind(ref_node_id)
-                    && let Some(call_node_id) = ctx.nodes.ancestor_ids(ref_node_id).nth(1)
-                    && matches!(
-                        ctx.nodes.kind(call_node_id),
-                        AstKind::CallExpression(_) | AstKind::NewExpression(_)
-                    )
-                {
-                    let name = ctx.scoping.symbol_name(symbol_id);
-                    let method_name = member.property.name.as_str();
-                    let call_range = ctx
-                        .lt
-                        .span_to_range(ctx.nodes.get_node(call_node_id).span());
-
-                    // P0: namespace/CJS import — import * as ns; ns.foo() / var x = require('./m'); x.foo()
-                    if let Some((specifier, ImportedName::Namespace)) = import_lookup.get(name) {
-                        let caller_scope = reference.scope_id();
-                        let caller_info = ctx.find_enclosing_def(caller_scope);
-                        let caller = match caller_info {
-                            Some((fqn, range)) => JsCallSite::Definition { fqn, range },
-                            None => JsCallSite::ModuleLevel,
-                        };
-                        calls.push(JsCallEdge {
-                            caller,
-                            callee: JsCallTarget::ImportedCall {
-                                local_name: name.to_string(),
-                                specifier: specifier.to_string(),
-                                imported_name: ImportedName::Named(method_name.to_string()),
-                            },
-                            call_range,
-                            confidence: JsCallConfidence::Known,
-                        });
-                    }
-                    // P1: variable method — const x = new Foo(); x.bar()
-                    // P3: static method — MyClass.staticMethod()
-                    else {
-                        let resolved = variable_type_map
-                            .get(name)
-                            .map(|(cls, conf)| (cls.as_str(), *conf))
-                            .or_else(|| {
-                                class_hierarchy
-                                    .contains_key(name)
-                                    .then_some((name, JsCallConfidence::Known))
-                            });
-                        if let Some((class_name, confidence)) = resolved
-                            && let Some(target) =
-                                find_method_in_defs(class_name, method_name, class_hierarchy, defs)
-                        {
-                            let caller_scope = reference.scope_id();
-                            let caller_info = ctx.find_enclosing_def(caller_scope);
-                            let caller = match caller_info {
-                                Some((fqn, range)) => JsCallSite::Definition { fqn, range },
-                                None => JsCallSite::ModuleLevel,
-                            };
-                            calls.push(JsCallEdge {
-                                caller,
-                                callee: JsCallTarget::Direct {
-                                    fqn: target.fqn.clone(),
-                                    range: target.range,
-                                },
-                                call_range,
-                                confidence,
-                            });
-                        }
-                    }
-                }
-                continue;
-            }
-
-            let caller_scope = reference.scope_id();
-            let caller_info = ctx.find_enclosing_def(caller_scope);
-            let call_site_span = ctx.nodes.get_node(ref_node_id).span();
-            let call_site_range = ctx.lt.span_to_range(call_site_span);
-            // P4: callback-as-argument gets Guessed confidence
-            let base_confidence = if is_callback {
-                JsCallConfidence::Guessed
-            } else {
-                JsCallConfidence::Known
-            };
-
-            let caller = match caller_info {
-                Some((fqn, range)) => JsCallSite::Definition { fqn, range },
-                None => JsCallSite::ModuleLevel,
-            };
-
-            let callee_flags = ctx.scoping.symbol_flags(symbol_id);
-            if callee_flags.is_import() {
-                let callee_name = ctx.scoping.symbol_name(symbol_id);
-                if let Some((specifier, imported_name)) = import_lookup.get(callee_name) {
-                    calls.push(JsCallEdge {
-                        caller,
-                        callee: JsCallTarget::ImportedCall {
-                            local_name: callee_name.to_string(),
-                            specifier: specifier.to_string(),
-                            imported_name: imported_name.clone(),
-                        },
-                        call_range: call_site_range,
-                        confidence: base_confidence,
-                    });
-                }
-                continue;
-            }
-
-            let callee_span = ctx.scoping.symbol_span(symbol_id);
-            let callee_range = ctx.lt.span_to_range(callee_span);
-            let callee_fqn = ctx.build_fqn(symbol_id);
-
-            calls.push(JsCallEdge {
-                caller,
-                callee: JsCallTarget::Direct {
-                    fqn: callee_fqn,
-                    range: callee_range,
-                },
-                call_range: call_site_range,
-                confidence: base_confidence,
-            });
-        }
-    }
-
-    for node in ctx.nodes.iter() {
-        if let AstKind::CallExpression(call) = node.kind()
-            && let oxc::ast::ast::Expression::StaticMemberExpression(member) = &call.callee
-        {
-            let method_name = member.property.name.as_str();
-            let call_range = ctx.lt.span_to_range(call.span);
-
-            let is_this = matches!(&member.object, oxc::ast::ast::Expression::ThisExpression(_));
-            let is_super = matches!(&member.object, oxc::ast::ast::Expression::Super(_));
-
-            if !is_this && !is_super {
-                continue;
-            }
-
-            let mut enclosing_class: Option<String> = None;
-            let mut caller_method: Option<String> = None;
-            for aid in ctx.nodes.ancestor_ids(node.id()).skip(1) {
-                match ctx.nodes.kind(aid) {
-                    AstKind::MethodDefinition(method) if caller_method.is_none() => {
-                        if let Some(name) = method.key.static_name() {
-                            caller_method = Some(name.to_string());
-                        }
-                    }
-                    // Vue Options API: method shorthand in { methods: { handleClick() {} } }
-                    AstKind::ObjectProperty(prop) if caller_method.is_none() && prop.method => {
-                        if let Some(name) = prop.key.static_name() {
-                            caller_method = Some(name.to_string());
-                        }
-                    }
-                    AstKind::Class(class) => {
-                        if let Some(id) = &class.id {
-                            enclosing_class = Some(id.name.to_string());
-                        }
-                        break;
-                    }
-                    // Vue Options API: export default { ... } acts as a virtual class
-                    AstKind::ExportDefaultDeclaration(_)
-                        if enclosing_class.is_none() && caller_method.is_some() =>
-                    {
-                        // Find the component name from defs
-                        let method = caller_method.as_ref().unwrap();
-                        for def in defs.iter() {
-                            if let JsDefKind::Method { class_fqn, .. } = &def.kind
-                                && def.name == *method
-                            {
-                                enclosing_class = Some(class_fqn.clone());
-                                break;
-                            }
-                        }
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-
-            let Some(class_name) = enclosing_class else {
-                continue;
-            };
-
-            let target_def = if is_super {
-                class_hierarchy
-                    .get(&class_name)
-                    .and_then(|p| p.as_ref())
-                    .and_then(|parent_name| {
-                        find_method_in_defs(parent_name, method_name, class_hierarchy, defs)
-                    })
-            } else {
-                find_method_in_defs(&class_name, method_name, class_hierarchy, defs)
-            };
-
-            let caller_fqn_str = caller_method.map(|m| format!("{class_name}::{m}"));
-            let caller_def = caller_fqn_str
-                .as_ref()
-                .and_then(|fqn| defs.iter().find(|d| d.fqn == *fqn));
-
-            let caller = match caller_def {
-                Some(d) => JsCallSite::Definition {
-                    fqn: d.fqn.clone(),
-                    range: d.range,
-                },
-                None => continue,
-            };
-
-            let callee = if is_super {
-                JsCallTarget::SuperMethod {
-                    method_name: method_name.to_string(),
-                    resolved_fqn: target_def.map(|d| d.fqn.clone()),
-                    resolved_range: target_def.map(|d| d.range),
-                }
-            } else {
-                JsCallTarget::ThisMethod {
-                    method_name: method_name.to_string(),
-                    resolved_fqn: target_def.map(|d| d.fqn.clone()),
-                    resolved_range: target_def.map(|d| d.range),
-                }
-            };
-
-            calls.push(JsCallEdge {
-                caller,
-                callee,
-                call_range,
-                confidence: JsCallConfidence::Known,
-            });
-        }
-    }
-
-    calls
 }
 
 fn build_module_info(
@@ -935,61 +415,7 @@ fn build_module_info(
     }
 }
 
-fn extract_cjs_exports(nodes: &AstNodes, lt: &LineTable) -> Vec<CjsExport> {
-    use oxc::ast::ast::AssignmentTarget;
-
-    let mut exports = Vec::new();
-
-    for node in nodes.iter() {
-        if let AstKind::AssignmentExpression(assign) = node.kind() {
-            match &assign.left {
-                AssignmentTarget::AssignmentTargetIdentifier(_) => {}
-                _ => {
-                    if let AssignmentTarget::StaticMemberExpression(member) = &assign.left {
-                        let prop_name = member.property.name.as_str();
-
-                        if prop_name == "exports"
-                            && let oxc::ast::ast::Expression::Identifier(ident) = &member.object
-                            && ident.name == "module"
-                        {
-                            exports.push(CjsExport::Default {
-                                range: lt.span_to_range(assign.span),
-                            });
-                            continue;
-                        }
-
-                        if let oxc::ast::ast::Expression::Identifier(ident) = &member.object
-                            && ident.name == "exports"
-                        {
-                            exports.push(CjsExport::Named {
-                                name: prop_name.to_string(),
-                                range: lt.span_to_range(assign.span),
-                            });
-                        }
-
-                        if let oxc::ast::ast::Expression::StaticMemberExpression(inner) =
-                            &member.object
-                            && inner.property.name == "exports"
-                            && let oxc::ast::ast::Expression::Identifier(ident) = &inner.object
-                            && ident.name == "module"
-                        {
-                            exports.push(CjsExport::Named {
-                                name: prop_name.to_string(),
-                                range: lt.span_to_range(assign.span),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    exports
-}
-
 impl JsAnalyzer {
-    /// Max line length before we skip a file as likely generated/minified.
-    /// OXC's recursive descent parser overflows on deeply nested expressions in long lines.
     const MAX_LINE_LENGTH: usize = 50_000;
 
     pub fn analyze_file(
@@ -997,8 +423,6 @@ impl JsAnalyzer {
         file_path: &str,
         relative_path: &str,
     ) -> Result<JsFileAnalysis, String> {
-        // Skip files with extremely long lines (generated data, minified bundles).
-        // OXC's recursive descent parser overflows on deeply nested expressions in such lines.
         if let Some(line) = source.lines().find(|l| l.len() > Self::MAX_LINE_LENGTH) {
             return Err(format!(
                 "Skipping {file_path}: line too long ({} bytes, max {})",
@@ -1039,10 +463,9 @@ impl JsAnalyzer {
         let (method_defs, classes) = extract_class_members(&ctx, &semantic);
         defs.extend(method_defs);
 
-        // Extract Vue Options API methods/computed as definitions
         extract_vue_options_api(
             nodes,
-            &ctx.lt,
+            |span| ctx.lt.span_to_range(span),
             relative_path,
             &mut defs,
             &mut class_hierarchy,
@@ -1053,11 +476,10 @@ impl JsAnalyzer {
         let calls = extract_call_edges(&ctx, &defs, &imports, &class_hierarchy, &variable_type_map);
         let directive = super::frameworks::detect_directive(&parsed.program.directives);
 
-        let cjs_exports = extract_cjs_exports(nodes, &ctx.lt);
+        let cjs_exports = extract_cjs_exports(nodes, |span| ctx.lt.span_to_range(span));
         let mut module_info = build_module_info(&parsed, &defs, &ctx.lt);
         module_info.cjs_exports = cjs_exports;
 
-        // Add CJS require() imports to module_info so the cross-file resolver can see them
         for imp in &imports {
             if let JsImportKind::CjsRequire { imported_name } = &imp.kind {
                 module_info.imports.push(OwnedImportEntry {
