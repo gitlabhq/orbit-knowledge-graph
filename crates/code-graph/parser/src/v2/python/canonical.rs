@@ -1,7 +1,7 @@
 use code_graph_config::Language;
 use code_graph_types::{
-    CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind, Fqn,
-    Position, Range, ReferenceStatus,
+    CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind,
+    DefinitionMetadata, ExpressionStep, Fqn, Position, Range, ReferenceStatus,
 };
 use std::sync::Arc;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -180,6 +180,8 @@ fn extract_class(
         "Class"
     };
 
+    let metadata = extract_python_class_metadata(node);
+
     Some(CanonicalDefinition {
         definition_type: def_type,
         kind: DefKind::Class,
@@ -187,7 +189,7 @@ fn extract_class(
         fqn: build_fqn(scope_stack, &name),
         range: node_range(node),
         is_top_level: scope_stack.is_empty(),
-        metadata: None,
+        metadata,
     })
 }
 
@@ -207,6 +209,8 @@ fn extract_function(
         node_range(node)
     };
 
+    let metadata = extract_python_function_metadata(node);
+
     Some(CanonicalDefinition {
         definition_type: def_type,
         kind,
@@ -214,7 +218,7 @@ fn extract_function(
         fqn: build_fqn(scope_stack, &name),
         range,
         is_top_level: scope_stack.is_empty(),
-        metadata: None,
+        metadata,
     })
 }
 
@@ -377,13 +381,14 @@ fn extract_call_reference(
     scope_stack: &[Arc<str>],
 ) -> Option<CanonicalReference> {
     let function_node = node.field("function")?;
-    let name = match function_node.kind().as_ref() {
-        "identifier" => function_node.text().to_string(),
+    let (name, expression) = match function_node.kind().as_ref() {
+        "identifier" => (function_node.text().to_string(), None),
         "attribute" => {
-            // obj.method() — extract "method"
-            function_node
+            let attr_name = function_node
                 .field("attribute")
-                .map(|a| a.text().to_string())?
+                .map(|a| a.text().to_string())?;
+            let chain = build_python_expression_chain(&function_node);
+            (attr_name, chain)
         }
         _ => return None,
     };
@@ -395,8 +400,149 @@ fn extract_call_reference(
         scope_fqn: scope_fqn(scope_stack),
         status: ReferenceStatus::Unresolved,
         target_fqn: None,
-        expression: None,
+        expression,
     })
+}
+
+// ── Metadata extraction ─────────────────────────────────────────
+
+fn extract_python_class_metadata(
+    node: &Node<StrDoc<SupportLang>>,
+) -> Option<Box<DefinitionMetadata>> {
+    let mut super_types = Vec::new();
+
+    // superclasses: class Foo(Base, Mixin): → argument_list children
+    if let Some(superclasses) = node.field("superclasses") {
+        for child in superclasses.children() {
+            let kind = child.kind();
+            if kind == "identifier" || kind == "attribute" || kind == "call" {
+                // For `call` nodes like `Base(arg)`, extract the function name
+                let text = if kind == "call" {
+                    child
+                        .field("function")
+                        .map(|f| f.text().to_string())
+                        .unwrap_or_else(|| child.text().to_string())
+                } else {
+                    child.text().to_string()
+                };
+                if !text.is_empty() {
+                    super_types.push(text);
+                }
+            }
+        }
+    }
+
+    if super_types.is_empty() {
+        return None;
+    }
+
+    Some(Box::new(DefinitionMetadata {
+        super_types,
+        ..Default::default()
+    }))
+}
+
+fn extract_python_function_metadata(
+    node: &Node<StrDoc<SupportLang>>,
+) -> Option<Box<DefinitionMetadata>> {
+    let mut decorators = Vec::new();
+
+    // Check for decorated_definition parent
+    if let Some(parent) = node.parent()
+        && parent.kind() == "decorated_definition"
+    {
+        for child in parent.children() {
+            if child.kind() == "decorator" {
+                let text = child.text().to_string();
+                let name = text.trim_start_matches('@').trim().to_string();
+                decorators.push(name);
+            }
+        }
+    }
+
+    if decorators.is_empty() {
+        return None;
+    }
+
+    Some(Box::new(DefinitionMetadata {
+        decorators,
+        ..Default::default()
+    }))
+}
+
+fn build_python_expression_chain(
+    function_node: &Node<StrDoc<SupportLang>>,
+) -> Option<Vec<ExpressionStep>> {
+    // function_node is an "attribute" node: obj.method or obj.field.method
+    let mut steps = Vec::new();
+    flatten_python_expression(function_node, &mut steps);
+
+    if steps.len() <= 1 {
+        return None;
+    }
+
+    // The last step is the method being called — make it a Call
+    if let Some(last) = steps.last_mut() {
+        match last {
+            ExpressionStep::Ident(n) | ExpressionStep::Field(n) => {
+                *last = ExpressionStep::Call(n.clone());
+            }
+            _ => {}
+        }
+    }
+
+    Some(steps)
+}
+
+fn flatten_python_expression(
+    node: &Node<StrDoc<SupportLang>>,
+    steps: &mut Vec<ExpressionStep>,
+) {
+    match node.kind().as_ref() {
+        "identifier" => {
+            let text = node.text().to_string();
+            if text == "self" {
+                steps.push(ExpressionStep::This);
+            } else if text == "super" {
+                steps.push(ExpressionStep::Super);
+            } else if steps.is_empty() {
+                steps.push(ExpressionStep::Ident(text));
+            } else {
+                steps.push(ExpressionStep::Field(text));
+            }
+        }
+        "attribute" => {
+            if let Some(obj) = node.field("object") {
+                flatten_python_expression(&obj, steps);
+            }
+            if let Some(attr) = node.field("attribute") {
+                steps.push(ExpressionStep::Field(attr.text().to_string()));
+            }
+        }
+        "call" => {
+            if let Some(function) = node.field("function") {
+                flatten_python_expression(&function, steps);
+                // Mark the last step as a Call
+                if let Some(last) = steps.last_mut() {
+                    match last {
+                        ExpressionStep::Ident(n) | ExpressionStep::Field(n) => {
+                            *last = ExpressionStep::Call(n.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        "subscript" => {
+            if let Some(value) = node.field("value") {
+                flatten_python_expression(&value, steps);
+            }
+            steps.push(ExpressionStep::Index);
+        }
+        _ => {
+            steps.push(ExpressionStep::Ident(node.text().to_string()));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -516,5 +662,194 @@ def foo():
         assert_eq!(result.language, Language::Python);
         assert_eq!(result.extension, "py");
         assert_eq!(result.file_path, "test.py");
+    }
+
+    // ── Metadata tests ──────────────────────────────────────────
+
+    #[test]
+    fn class_super_types() {
+        let result = parse(
+            r#"
+class Dog(Animal, Serializable):
+    pass
+"#,
+        );
+
+        let dog = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "Dog")
+            .unwrap();
+        let meta = dog.metadata.as_ref().expect("Dog should have metadata");
+        assert_eq!(meta.super_types.len(), 2);
+        assert!(meta.super_types.contains(&"Animal".to_string()));
+        assert!(meta.super_types.contains(&"Serializable".to_string()));
+    }
+
+    #[test]
+    fn class_no_super_types() {
+        let result = parse("class Empty:\n    pass\n");
+        let empty = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "Empty")
+            .unwrap();
+        assert!(
+            empty.metadata.is_none(),
+            "Class with no bases should have no metadata"
+        );
+    }
+
+    #[test]
+    fn function_decorators() {
+        let result = parse(
+            r#"
+class Service:
+    @classmethod
+    def create(cls):
+        pass
+
+    @staticmethod
+    def version():
+        return "1.0"
+
+    @property
+    def name(self):
+        return self._name
+"#,
+        );
+
+        let create = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "create")
+            .unwrap();
+        let meta = create
+            .metadata
+            .as_ref()
+            .expect("create should have metadata");
+        assert!(
+            meta.decorators.iter().any(|d| d == "classmethod"),
+            "create should have @classmethod: {:?}",
+            meta.decorators
+        );
+
+        let version = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "version")
+            .unwrap();
+        let meta = version
+            .metadata
+            .as_ref()
+            .expect("version should have metadata");
+        assert!(
+            meta.decorators.iter().any(|d| d == "staticmethod"),
+            "version should have @staticmethod: {:?}",
+            meta.decorators
+        );
+    }
+
+    #[test]
+    fn function_no_decorators() {
+        let result = parse("def plain():\n    pass\n");
+        let plain = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "plain")
+            .unwrap();
+        assert!(
+            plain.metadata.is_none(),
+            "Undecorated function should have no metadata"
+        );
+    }
+
+    // ── Expression chain tests ──────────────────────────────────
+
+    #[test]
+    fn simple_call_no_chain() {
+        let result = parse("foo()\n");
+        let foo_ref = result
+            .references
+            .iter()
+            .find(|r| r.name == "foo")
+            .unwrap();
+        assert!(
+            foo_ref.expression.is_none(),
+            "Bare call should have no expression chain"
+        );
+    }
+
+    #[test]
+    fn attribute_call_chain() {
+        let result = parse("obj.method()\n");
+        let method_ref = result
+            .references
+            .iter()
+            .find(|r| r.name == "method")
+            .unwrap();
+        let chain = method_ref
+            .expression
+            .as_ref()
+            .expect("obj.method() should have chain");
+
+        assert_eq!(chain.len(), 2);
+        assert!(
+            matches!(&chain[0], ExpressionStep::Ident(n) if n == "obj"),
+            "First step should be Ident(obj): {chain:?}"
+        );
+        assert!(
+            matches!(&chain[1], ExpressionStep::Call(n) if n == "method"),
+            "Second step should be Call(method): {chain:?}"
+        );
+    }
+
+    #[test]
+    fn self_method_call() {
+        let result = parse(
+            r#"
+class A:
+    def run(self):
+        self.helper()
+"#,
+        );
+        let helper_ref = result
+            .references
+            .iter()
+            .find(|r| r.name == "helper")
+            .unwrap();
+        let chain = helper_ref
+            .expression
+            .as_ref()
+            .expect("self.helper() should have chain");
+
+        assert!(
+            matches!(&chain[0], ExpressionStep::This),
+            "First step should be This: {chain:?}"
+        );
+        assert!(
+            matches!(&chain[1], ExpressionStep::Call(n) if n == "helper"),
+            "Second step should be Call(helper): {chain:?}"
+        );
+    }
+
+    #[test]
+    fn deep_chain() {
+        let result = parse("a.b.c.d()\n");
+        let d_ref = result
+            .references
+            .iter()
+            .find(|r| r.name == "d")
+            .unwrap();
+        let chain = d_ref
+            .expression
+            .as_ref()
+            .expect("a.b.c.d() should have chain");
+
+        assert_eq!(chain.len(), 4, "Should have 4 steps: {chain:?}");
+        assert!(matches!(&chain[0], ExpressionStep::Ident(n) if n == "a"));
+        assert!(matches!(&chain[1], ExpressionStep::Field(n) if n == "b"));
+        assert!(matches!(&chain[2], ExpressionStep::Field(n) if n == "c"));
+        assert!(matches!(&chain[3], ExpressionStep::Call(n) if n == "d"));
     }
 }

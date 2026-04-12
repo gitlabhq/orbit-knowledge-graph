@@ -1,7 +1,7 @@
 use code_graph_config::Language;
 use code_graph_types::{
-    CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind, Fqn,
-    Position, Range, ReferenceStatus,
+    CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind,
+    DefinitionMetadata, ExpressionStep, Fqn, Position, Range, ReferenceStatus,
 };
 use std::sync::Arc;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -75,7 +75,8 @@ fn walk(
         "class_declaration" => {
             let (def_type, def_kind) = classify_class(node);
             if let Some(name) = find_type_identifier(node) {
-                let d = make_def(node, scope, &name, def_type, def_kind);
+                let mut d = make_def(node, scope, &name, def_type, def_kind);
+                d.metadata = extract_kotlin_class_metadata(node);
                 scope.push(Arc::from(name.as_str()));
                 pushed = true;
                 defs.push(d);
@@ -98,7 +99,8 @@ fn walk(
         }
         "function_declaration" => {
             if let Some(name) = find_simple_identifier(node) {
-                let d = make_def(node, scope, &name, "Function", DefKind::Function);
+                let mut d = make_def(node, scope, &name, "Function", DefKind::Function);
+                d.metadata = extract_kotlin_function_metadata(node);
                 scope.push(Arc::from(name.as_str()));
                 pushed = true;
                 defs.push(d);
@@ -313,6 +315,8 @@ fn extract_call(
         _ => return,
     };
 
+    let expression = build_kotlin_expression_chain(node);
+
     refs.push(CanonicalReference {
         reference_type: "Call",
         name,
@@ -320,8 +324,181 @@ fn extract_call(
         scope_fqn: Fqn::from_scope_only(scope, LANG.fqn_separator()),
         status: ReferenceStatus::Unresolved,
         target_fqn: None,
-        expression: None,
+        expression,
     });
+}
+
+// ── Metadata extraction ─────────────────────────────────────────
+
+fn extract_kotlin_class_metadata(
+    node: &Node<StrDoc<SupportLang>>,
+) -> Option<Box<DefinitionMetadata>> {
+    let mut super_types = Vec::new();
+
+    // delegation_specifiers contains super types: `: Base(), Interface`
+    for child in node.children() {
+        if child.kind() == "delegation_specifiers" {
+            for spec in child.children() {
+                let spec_kind = spec.kind();
+                if spec_kind == "delegation_specifier" || spec_kind == "constructor_invocation" {
+                    // Extract the type name (first user_type or type_identifier)
+                    let type_text = if let Some(user_type) =
+                        spec.children().find(|c| c.kind() == "user_type")
+                    {
+                        user_type.text().to_string()
+                    } else if let Some(ctor) = spec
+                        .children()
+                        .find(|c| c.kind() == "constructor_invocation")
+                    {
+                        ctor.children()
+                            .find(|c| c.kind() == "user_type")
+                            .map(|n| n.text().to_string())
+                            .unwrap_or_default()
+                    } else {
+                        spec.text().to_string()
+                    };
+                    if !type_text.is_empty() && type_text != "," {
+                        super_types.push(type_text);
+                    }
+                } else if spec_kind == "user_type" {
+                    super_types.push(spec.text().to_string());
+                }
+            }
+        }
+    }
+
+    if super_types.is_empty() {
+        return None;
+    }
+
+    Some(Box::new(DefinitionMetadata {
+        super_types,
+        ..Default::default()
+    }))
+}
+
+fn extract_kotlin_function_metadata(
+    node: &Node<StrDoc<SupportLang>>,
+) -> Option<Box<DefinitionMetadata>> {
+    let mut return_type = None;
+    let mut receiver_type = None;
+
+    // Return type: `: Type` after the parameters
+    for child in node.children() {
+        if child.kind() == "user_type" || child.kind() == "nullable_type" {
+            // This could be either receiver type or return type
+            // Receiver type comes before the name, return type comes after parameters
+            if return_type.is_none() {
+                // Check position relative to function_value_parameters
+                let params_pos = node
+                    .children()
+                    .find(|c| c.kind() == "function_value_parameters")
+                    .map(|c| c.range().end);
+
+                if params_pos.is_some_and(|p| child.range().start > p) {
+                    return_type = Some(child.text().to_string());
+                }
+            }
+        }
+    }
+
+    // Receiver type: `Type.functionName` — look for user_type before the simple_identifier
+    let name_pos = node
+        .children()
+        .find(|c| c.kind() == "simple_identifier")
+        .map(|c| c.range().start);
+    if let Some(name_start) = name_pos {
+        for child in node.children() {
+            if child.range().start < name_start
+                && (child.kind() == "user_type" || child.kind() == "nullable_type")
+            {
+                receiver_type = Some(child.text().to_string());
+                break;
+            }
+        }
+    }
+
+    if return_type.is_none() && receiver_type.is_none() {
+        return None;
+    }
+
+    Some(Box::new(DefinitionMetadata {
+        return_type,
+        receiver_type,
+        ..Default::default()
+    }))
+}
+
+fn build_kotlin_expression_chain(node: &Node<StrDoc<SupportLang>>) -> Option<Vec<ExpressionStep>> {
+    let callee = node.child(0)?;
+    if callee.kind() != "navigation_expression" {
+        return None; // bare call, no chain
+    }
+
+    let mut steps = Vec::new();
+    flatten_kotlin_expression(&callee, &mut steps);
+
+    if steps.len() <= 1 {
+        return None;
+    }
+
+    // The last step becomes a Call (since this is a call_expression)
+    if let Some(last) = steps.last_mut() {
+        match last {
+            ExpressionStep::Ident(n) | ExpressionStep::Field(n) => {
+                *last = ExpressionStep::Call(n.clone());
+            }
+            _ => {}
+        }
+    }
+
+    Some(steps)
+}
+
+fn flatten_kotlin_expression(node: &Node<StrDoc<SupportLang>>, steps: &mut Vec<ExpressionStep>) {
+    match node.kind().as_ref() {
+        "simple_identifier" => {
+            if steps.is_empty() {
+                steps.push(ExpressionStep::Ident(node.text().to_string()));
+            } else {
+                steps.push(ExpressionStep::Field(node.text().to_string()));
+            }
+        }
+        "this_expression" => {
+            steps.push(ExpressionStep::This);
+        }
+        "super_expression" => {
+            steps.push(ExpressionStep::Super);
+        }
+        "navigation_expression" => {
+            // Left side
+            if let Some(left) = node.child(0) {
+                flatten_kotlin_expression(&left, steps);
+            }
+            // Right side (after the `.`)
+            if let Some(right) = node.children().find(|c| c.kind() == "navigation_suffix") {
+                if let Some(id) = right.children().find(|c| c.kind() == "simple_identifier") {
+                    steps.push(ExpressionStep::Field(id.text().to_string()));
+                }
+            }
+        }
+        "call_expression" => {
+            if let Some(callee) = node.child(0) {
+                flatten_kotlin_expression(&callee, steps);
+                if let Some(last) = steps.last_mut() {
+                    match last {
+                        ExpressionStep::Ident(n) | ExpressionStep::Field(n) => {
+                            *last = ExpressionStep::Call(n.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        _ => {
+            steps.push(ExpressionStep::Ident(node.text().to_string()));
+        }
+    }
 }
 
 fn node_range(node: &Node<StrDoc<SupportLang>>) -> Range {
@@ -516,5 +693,110 @@ fun main() {
         let result = parse("class X");
         assert_eq!(result.language, Language::Kotlin);
         assert_eq!(result.extension, "kt");
+    }
+
+    // ── Metadata tests ──────────────────────────────────────────
+
+    #[test]
+    fn class_super_types() {
+        let result = parse(
+            r#"
+open class Animal
+interface Serializable
+
+class Dog : Animal(), Serializable {
+}
+"#,
+        );
+
+        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
+        if let Some(meta) = &dog.metadata {
+            assert!(
+                !meta.super_types.is_empty(),
+                "Dog should have super_types: {:?}",
+                meta.super_types
+            );
+        }
+    }
+
+    #[test]
+    fn function_return_type() {
+        let result = parse(
+            r#"
+class Service {
+    fun getName(): String = ""
+    fun doWork() {}
+}
+"#,
+        );
+
+        let get_name = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "getName")
+            .unwrap();
+        if let Some(meta) = &get_name.metadata {
+            assert_eq!(
+                meta.return_type.as_deref(),
+                Some("String"),
+                "getName return type should be String"
+            );
+        }
+    }
+
+    #[test]
+    fn no_metadata_for_simple_class() {
+        let result = parse("class Empty");
+        let empty = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "Empty")
+            .unwrap();
+        assert!(
+            empty.metadata.is_none(),
+            "Empty class should have no metadata"
+        );
+    }
+
+    // ── Expression chain tests ──────────────────────────────────
+
+    #[test]
+    fn simple_call_no_chain() {
+        let result = parse(
+            r#"
+fun main() {
+    println("hello")
+}
+"#,
+        );
+
+        let println_ref = result
+            .references
+            .iter()
+            .find(|r| r.name == "println")
+            .unwrap();
+        assert!(
+            println_ref.expression.is_none(),
+            "Bare call should have no expression chain"
+        );
+    }
+
+    #[test]
+    fn chained_method_call() {
+        let result = parse(
+            r#"
+fun main() {
+    listOf(1, 2, 3).map { it * 2 }
+}
+"#,
+        );
+
+        let map_ref = result.references.iter().find(|r| r.name == "map").unwrap();
+        if let Some(chain) = &map_ref.expression {
+            assert!(
+                chain.len() >= 2,
+                "Chain should have multiple steps: {chain:?}"
+            );
+        }
     }
 }
