@@ -311,4 +311,33 @@ impl crate::analysis::analyzer_trait::LanguageAnalyzer for TypeScriptAnalyzer {
             relationships,
         );
     }
+
+    fn process_references(
+        &mut self,
+        references: &Option<crate::parse_types::References>,
+        relative_path: &str,
+        _definition_map: &std::collections::HashMap<
+            (String, String),
+            crate::analysis::types::DefinitionNode,
+        >,
+        _imported_symbol_map: &std::collections::HashMap<
+            (String, String),
+            Vec<crate::analysis::types::ImportedSymbolNode>,
+        >,
+        relationships: &mut Vec<crate::analysis::types::ConsolidatedRelationship>,
+        _isis: &std::collections::HashMap<
+            crate::analysis::types::ImportedSymbolLocation,
+            Vec<crate::analysis::types::ImportedSymbolNode>,
+        >,
+        _isd: &std::collections::HashMap<
+            crate::analysis::types::ImportedSymbolLocation,
+            Vec<crate::analysis::types::DefinitionNode>,
+        >,
+        _isf: &std::collections::HashMap<
+            crate::analysis::types::ImportedSymbolLocation,
+            Vec<String>,
+        >,
+    ) {
+        TypeScriptAnalyzer::process_references(self, references, relative_path, relationships);
+    }
 }

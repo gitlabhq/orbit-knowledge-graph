@@ -377,52 +377,18 @@ impl AnalysisService {
         imported_symbol_to_definitions: &HashMap<ImportedSymbolLocation, Vec<DefinitionNode>>,
         imported_symbol_to_files: &HashMap<ImportedSymbolLocation, Vec<String>>,
     ) {
+        let analyzer = self.get_analyzer(language);
         for (relative_path, references) in file_references {
-            match language {
-                Language::Python => {
-                    self.python_analyzer.process_references(
-                        &references,
-                        &relative_path,
-                        definition_map,
-                        imported_symbol_map,
-                        relationships,
-                        imported_symbol_to_imported_symbols,
-                        imported_symbol_to_definitions,
-                        imported_symbol_to_files,
-                    );
-                }
-                Language::Ruby | Language::Java | Language::Kotlin => {
-                    if let Some(references) = references {
-                        if language == Language::Ruby {
-                            self.ruby_analyzer.process_references(
-                                &references,
-                                &relative_path,
-                                relationships,
-                            );
-                        } else if language == Language::Java {
-                            self.java_analyzer.process_references(
-                                &references,
-                                &relative_path,
-                                relationships,
-                            );
-                        } else if language == Language::Kotlin {
-                            self.kotlin_analyzer.process_references(
-                                &references,
-                                &relative_path,
-                                relationships,
-                            );
-                        }
-                    }
-                }
-                Language::TypeScript => {
-                    self.typescript_analyzer.process_references(
-                        &references,
-                        &relative_path,
-                        relationships,
-                    );
-                }
-                _ => {}
-            }
+            analyzer.process_references(
+                &references,
+                &relative_path,
+                definition_map,
+                imported_symbol_map,
+                relationships,
+                imported_symbol_to_imported_symbols,
+                imported_symbol_to_definitions,
+                imported_symbol_to_files,
+            );
         }
     }
 

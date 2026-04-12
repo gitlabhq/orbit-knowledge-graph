@@ -1,12 +1,10 @@
-use crate::analysis::types::{ConsolidatedRelationship, DefinitionNode, ImportedSymbolNode};
-use crate::parse_types::FileProcessingResult;
+use crate::analysis::types::{
+    ConsolidatedRelationship, DefinitionNode, ImportedSymbolLocation, ImportedSymbolNode,
+};
+use crate::parse_types::{FileProcessingResult, References};
 use std::collections::HashMap;
 
 /// Common interface for all language analyzers.
-///
-/// Every analyzer can extract definitions and build definition relationships.
-/// Import processing and reference resolution have default no-op implementations
-/// since not all languages support them.
 pub trait LanguageAnalyzer {
     fn process_definitions(
         &mut self,
@@ -23,7 +21,22 @@ pub trait LanguageAnalyzer {
         _imported_symbol_map: &mut HashMap<(String, String), Vec<ImportedSymbolNode>>,
         _relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
-        // Default: no import processing
+    }
+
+    fn process_references(
+        &mut self,
+        _references: &Option<References>,
+        _relative_path: &str,
+        _definition_map: &HashMap<(String, String), DefinitionNode>,
+        _imported_symbol_map: &HashMap<(String, String), Vec<ImportedSymbolNode>>,
+        _relationships: &mut Vec<ConsolidatedRelationship>,
+        _imported_symbol_to_imported_symbols: &HashMap<
+            ImportedSymbolLocation,
+            Vec<ImportedSymbolNode>,
+        >,
+        _imported_symbol_to_definitions: &HashMap<ImportedSymbolLocation, Vec<DefinitionNode>>,
+        _imported_symbol_to_files: &HashMap<ImportedSymbolLocation, Vec<String>>,
+    ) {
     }
 
     fn add_definition_relationships(

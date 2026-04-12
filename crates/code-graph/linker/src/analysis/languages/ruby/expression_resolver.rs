@@ -37,7 +37,6 @@ use crate::analysis::types::{ConsolidatedRelationship, DefinitionNode};
 use crate::graph::RelationshipType;
 use crate::parse_types::{References, RubyReference};
 use internment::ArcIntern;
-use parser_core::ruby::types::RubyDefinitionType;
 use parser_core::ruby::{
     fqn::ruby_fqn_to_string,
     references::{

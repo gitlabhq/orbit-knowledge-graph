@@ -14,8 +14,8 @@ use parser_core::definitions::DefinitionTypeInfo;
 use parser_core::python::fqn::python_fqn_to_string;
 use parser_core::python::types::PythonReferenceInfo;
 use parser_core::python::types::{
-    Connector, PartialResolution, PythonDefinitionType, PythonFqn, PythonImportType,
-    PythonImportedSymbolInfo, PythonTargetResolution, Symbol,
+    Connector, PartialResolution, PythonFqn, PythonImportType, PythonImportedSymbolInfo,
+    PythonTargetResolution, Symbol,
 };
 use parser_core::references::ReferenceTarget;
 use std::collections::{HashMap, HashSet};
@@ -1073,6 +1073,45 @@ impl crate::analysis::analyzer_trait::LanguageAnalyzer for PythonAnalyzer {
             definition_map,
             imported_symbol_map,
             relationships,
+        );
+    }
+
+    fn process_references(
+        &mut self,
+        references: &Option<crate::parse_types::References>,
+        relative_path: &str,
+        definition_map: &std::collections::HashMap<
+            (String, String),
+            crate::analysis::types::DefinitionNode,
+        >,
+        imported_symbol_map: &std::collections::HashMap<
+            (String, String),
+            Vec<crate::analysis::types::ImportedSymbolNode>,
+        >,
+        relationships: &mut Vec<crate::analysis::types::ConsolidatedRelationship>,
+        imported_symbol_to_imported_symbols: &std::collections::HashMap<
+            crate::analysis::types::ImportedSymbolLocation,
+            Vec<crate::analysis::types::ImportedSymbolNode>,
+        >,
+        imported_symbol_to_definitions: &std::collections::HashMap<
+            crate::analysis::types::ImportedSymbolLocation,
+            Vec<crate::analysis::types::DefinitionNode>,
+        >,
+        imported_symbol_to_files: &std::collections::HashMap<
+            crate::analysis::types::ImportedSymbolLocation,
+            Vec<String>,
+        >,
+    ) {
+        PythonAnalyzer::process_references(
+            self,
+            references,
+            relative_path,
+            definition_map,
+            imported_symbol_map,
+            relationships,
+            imported_symbol_to_imported_symbols,
+            imported_symbol_to_definitions,
+            imported_symbol_to_files,
         );
     }
 }
