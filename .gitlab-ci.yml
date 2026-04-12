@@ -438,12 +438,22 @@ e2e-gdk-test:
     - |
       # Wait for GDK service to be fully ready (entrypoint takes ~3-5 min)
       echo "Waiting for GDK service (may take 5+ min for entrypoint to complete)..."
+      echo "Checking connectivity to gdk.test..."
+      getent hosts gdk.test || echo "gdk.test not in DNS"
       for i in $(seq 1 600); do
-        if curl -sk https://gdk.test:3443/-/readiness 2>/dev/null | grep -q ok; then
-          echo "GDK ready after ${i}s"
+        RESP=$(curl -sk -o /dev/null -w "%{http_code}" https://gdk.test:3443/-/readiness 2>/dev/null || echo "000")
+        if [ "$RESP" = "200" ]; then
+          echo "GDK ready after ${i}s (HTTP $RESP)"
           break
         fi
-        [ "$((i % 30))" -eq 0 ] && echo "Still waiting... ${i}s"
+        if [ "$((i % 30))" -eq 0 ]; then
+          echo "Still waiting... ${i}s (HTTP $RESP)"
+          # Debug: check if any port is open
+          curl -sk -o /dev/null -w "HTTPS:3443=%{http_code} " https://gdk.test:3443/ 2>/dev/null || true
+          curl -s -o /dev/null -w "HTTP:3000=%{http_code} " http://gdk.test:3000/ 2>/dev/null || true
+          curl -s -o /dev/null -w "CH:8123=%{http_code}" http://gdk.test:8123/ 2>/dev/null || true
+          echo ""
+        fi
         [ "$i" -eq 600 ] && echo "WARNING: GDK not ready after 600s" && exit 1
         sleep 1
       done

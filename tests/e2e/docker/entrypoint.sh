@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Start all services via GDK's runit, seed data, then keep container alive.
-set -euo pipefail
+# No set -e: the container must stay alive even if setup steps fail,
+# so the main CI job can reach the services and debug.
 
 echo "=== gkg-e2e-base starting ==="
 
