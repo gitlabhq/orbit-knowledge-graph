@@ -4,43 +4,45 @@
 Run the full GKG stack (GDK + Siphon + NATS + ClickHouse + GKG components)
 in CI with HTTPS, test users, and Robot Framework e2e tests.
 
-## Status: IN PROGRESS -- Container verified working locally
+## Status: CONTAINER VERIFIED -- pushing image to registry
 
 ## What's Done
-- [x] Docker image built and tested locally (25.3GB)
-  - Base: GDK-in-a-box (full GDK with mise, Ruby, Node, etc.)
-  - ClickHouse installed via apt (system package)
-  - NATS installed as static binary
-  - mkcert for HTTPS certs (gdk.test)
-  - gdk.yml: HTTPS/nginx, ClickHouse, NATS, Siphon, knowledge_graph
-  - gdk reconfigure runs successfully during build
-- [x] Container startup verified -- all 14 services running:
-  - Rails (HTTPS at gdk.test:3443) -- readiness OK
-  - ClickHouse (port 8123) -- queries work
-  - NATS (port 4222) -- connected
-  - Siphon (producer + consumer) -- CDC replication active
-  - nginx, Workhorse, Gitaly, PostgreSQL, Redis, etc.
-- [x] Data seeding verified:
-  - EE Ultimate license installed
+- [x] Docker image built and ALL services verified running
+- [x] Robot Framework tests passing inside container (2/2 green)
+  - Services Are Running: ClickHouse, NATS, GDK all verified
+  - Seed Test Data: groups, projects, MRs, issues created via API
+- [x] Full service stack operational:
+  - Rails HTTPS at gdk.test:3443 (readiness OK)
+  - ClickHouse at port 8123 (queries working)
+  - NATS at port 4222 (connected)
+  - Siphon CDC (producer + consumer active, LSN tracking)
+  - nginx, Workhorse, Gitaly, PostgreSQL, Redis all up
+- [x] Data seeding:
+  - EE Ultimate license installed (expires +1 year)
   - Cloud Connector key created
   - knowledge_graph feature flag enabled
-  - Knowledge graph namespaces enabled for all root groups
-  - PAT created and saved to ~/.gdk_token
-- [x] Robot Framework test suite created (3 suites, 10+ tests)
-- [x] CI job added to .gitlab-ci.yml (manual trigger)
-- [x] Branch feat/e2e-ci-gdk-tests pushed
+  - KG namespaces enabled for all root groups
+  - Root password reset (prevents expiry-based 403)
+  - PAT created and saved
+- [x] CI job configured in .gitlab-ci.yml (manual trigger)
+- [x] Robot Framework test suite (3 files, 10+ tests)
+- [x] Branch pushed with 4 commits
+- [ ] Image push to GitLab Container Registry (in progress)
 
 ## Fixes Applied
-- ClickHouse memory limit increased to 8GB (default 3GB too low)
-- PostgreSQL wal_level set to 'logical' for Siphon CDC
-- ClickHouse databases created and migrations run at startup
-- click_house.yml config copied from example at startup
-- Seed script fixed: Namespace.root -> parent_id: nil
-- Seed script: removed gitlab:duo:setup (not available in this GDK)
+1. ClickHouse memory limit -> 8GB (default 3GB too low)
+2. PostgreSQL wal_level -> logical (for Siphon CDC)
+3. ClickHouse databases created + click_house.yml copied at startup
+4. ClickHouse migrations run at startup
+5. Root password reset (GDK default expires)
+6. Namespace.root -> parent_id:nil (API compatibility)
+7. Removed gitlab:duo:setup (not available)
+8. GDK_GITLAB_DIR env var for portable paths
+9. mise activation in shell commands for Rails runner
+10. Simplified suite setup (verify API instead of re-enabling flags)
 
 ## What Remains
-- [ ] Rebuild image with all entrypoint fixes
-- [ ] Run Robot Framework tests against the container
-- [ ] Push image to registry for CI use
-- [ ] Validate CI job end-to-end
-- [ ] Clean up and finalize MR
+- [ ] Wait for image push to complete
+- [ ] Validate CI job runs end-to-end
+- [ ] Run the full test suite (including CDC + indexing tests)
+- [ ] Update progress and finalize MR
