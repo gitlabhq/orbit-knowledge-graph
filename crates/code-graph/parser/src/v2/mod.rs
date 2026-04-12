@@ -7,5 +7,5 @@ pub mod python;
 
 pub use convert::CanonicalParser;
 pub use languages::{
-    detect_language_from_extension, detect_language_from_path, get_supported_extensions,
+    detect_language_from_extension, detect_language_from_path, get_supported_extensions, parse_file,
 };

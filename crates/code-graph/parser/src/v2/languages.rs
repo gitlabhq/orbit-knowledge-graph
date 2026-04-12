@@ -1,6 +1,12 @@
-use code_graph_types::Language;
+use code_graph_types::{CanonicalResult, Language};
 use once_cell::sync::Lazy;
 use rustc_hash::FxHashMap;
+
+use super::csharp::CSharpCanonicalParser;
+use super::java::JavaCanonicalParser;
+use super::kotlin::KotlinCanonicalParser;
+use super::python::PythonCanonicalParser;
+use super::CanonicalParser;
 
 /// Generates static lookup maps from the Language enum.
 /// All config (extensions, names, separators) lives on Language in code-graph-types.
@@ -49,6 +55,23 @@ pub fn detect_language_from_path(path: &str) -> Option<Language> {
         .extension()
         .and_then(|e| e.to_str())?;
     detect_language_from_extension(ext)
+}
+
+/// Parse a file using the v2 canonical parser for the given language.
+/// Returns None for languages not yet supported in v2.
+pub fn parse_file(
+    language: Language,
+    source: &[u8],
+    file_path: &str,
+) -> Option<crate::Result<CanonicalResult>> {
+    let result = match language {
+        Language::Python => PythonCanonicalParser.parse_file(source, file_path),
+        Language::Java => JavaCanonicalParser.parse_file(source, file_path),
+        Language::Kotlin => KotlinCanonicalParser.parse_file(source, file_path),
+        Language::CSharp => CSharpCanonicalParser.parse_file(source, file_path),
+        _ => return None,
+    };
+    Some(result)
 }
 
 pub fn get_supported_extensions() -> Vec<&'static str> {

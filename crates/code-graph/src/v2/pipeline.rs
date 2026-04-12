@@ -4,10 +4,7 @@ use rayon::prelude::*;
 use std::path::Path;
 
 use crate::linker::v2::{GraphBuilder, GraphData};
-use parser_core::v2::{
-    csharp::CSharpCanonicalParser, detect_language_from_extension, java::JavaCanonicalParser,
-    kotlin::KotlinCanonicalParser, python::PythonCanonicalParser,
-};
+use parser_core::v2::detect_language_from_extension;
 
 pub struct PipelineConfig {
     pub max_file_size: u64,
@@ -157,23 +154,16 @@ impl Pipeline {
             error: format!("Failed to read file: {e}"),
         })?;
 
-        let parser: &dyn parser_core::v2::CanonicalParser = match language {
-            Language::Python => &PythonCanonicalParser,
-            Language::Java => &JavaCanonicalParser,
-            Language::Kotlin => &KotlinCanonicalParser,
-            Language::CSharp => &CSharpCanonicalParser,
-            _ => {
-                return Err(PipelineError {
-                    file_path: path.to_string(),
-                    error: format!("Language {language} not yet supported in v2 pipeline"),
-                });
-            }
-        };
-
-        parser.parse_file(&source, path).map_err(|e| PipelineError {
-            file_path: path.to_string(),
-            error: format!("Parse error: {e}"),
-        })
+        parser_core::v2::parse_file(language, &source, path)
+            .unwrap_or_else(|| {
+                Err(crate::parser_core::Error::Parse(format!(
+                    "Language {language} not yet supported in v2 pipeline"
+                )))
+            })
+            .map_err(|e| PipelineError {
+                file_path: path.to_string(),
+                error: format!("Parse error: {e}"),
+            })
     }
 }
 
@@ -181,17 +171,16 @@ impl Pipeline {
 mod tests {
     use super::*;
     use code_graph_types::{DefKind, NodeKind};
-    use parser_core::v2::CanonicalParser;
 
     fn fixture_path(relative: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
         format!("{manifest}/parser/src/{relative}")
     }
 
-    fn parse_fixture_file(path: &str, parser: &dyn CanonicalParser) -> CanonicalResult {
+    fn parse_fixture_file(path: &str, language: Language) -> CanonicalResult {
         let source = std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
-        parser
-            .parse_file(&source, path)
+        parser_core::v2::parse_file(language, &source, path)
+            .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse {path}: {e}"))
     }
 
@@ -200,7 +189,7 @@ mod tests {
     #[test]
     fn python_definitions_fixture() {
         let path = fixture_path("python/fixtures/definitions.py");
-        let result = parse_fixture_file(&path, &PythonCanonicalParser);
+        let result = parse_fixture_file(&path, Language::Python);
 
         assert!(
             result.definitions.len() >= 10,
@@ -234,7 +223,7 @@ mod tests {
     #[test]
     fn java_comprehensive_fixture() {
         let path = fixture_path("java/fixtures/ComprehensiveJavaDefinitions.java");
-        let result = parse_fixture_file(&path, &JavaCanonicalParser);
+        let result = parse_fixture_file(&path, Language::Java);
 
         assert!(
             result.definitions.len() >= 5,
@@ -252,7 +241,7 @@ mod tests {
     #[test]
     fn kotlin_comprehensive_fixture() {
         let path = fixture_path("kotlin/fixtures/ComprehensiveKotlinDefinitions.kt");
-        let result = parse_fixture_file(&path, &KotlinCanonicalParser);
+        let result = parse_fixture_file(&path, Language::Kotlin);
 
         assert!(
             result.definitions.len() >= 5,
@@ -270,7 +259,7 @@ mod tests {
     #[test]
     fn csharp_comprehensive_fixture() {
         let path = fixture_path("csharp/fixtures/ComprehensiveCSharp.cs");
-        let result = parse_fixture_file(&path, &CSharpCanonicalParser);
+        let result = parse_fixture_file(&path, Language::CSharp);
 
         assert!(
             result.definitions.len() >= 5,
