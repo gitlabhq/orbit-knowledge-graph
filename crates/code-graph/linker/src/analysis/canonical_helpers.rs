@@ -73,6 +73,7 @@ pub fn determine_relationship_type(parent: DefKind, child: DefKind) -> Option<Re
         (DefKind::Method, DefKind::Class) => Some(RelationshipType::MethodToClass),
         (DefKind::Method, DefKind::Lambda) => Some(RelationshipType::MethodToLambda),
         (DefKind::Method, DefKind::Interface) => Some(RelationshipType::MethodToInterface),
+        (DefKind::Method, DefKind::Property) => Some(RelationshipType::MethodToProperty),
         // Function relationships
         (DefKind::Function, DefKind::Function) => Some(RelationshipType::FunctionToFunction),
         (DefKind::Function, DefKind::Class) => Some(RelationshipType::FunctionToClass),
@@ -84,6 +85,7 @@ pub fn determine_relationship_type(parent: DefKind, child: DefKind) -> Option<Re
         (DefKind::Lambda, DefKind::Function) => Some(RelationshipType::LambdaToFunction),
         (DefKind::Lambda, DefKind::Method) => Some(RelationshipType::LambdaToMethod),
         (DefKind::Lambda, DefKind::Interface) => Some(RelationshipType::LambdaToInterface),
+        (DefKind::Lambda, DefKind::Property) => Some(RelationshipType::LambdaToProperty),
         (DefKind::Class, DefKind::EnumEntry) => Some(RelationshipType::ClassToEnumEntry),
         // Impl blocks (Rust: DefKind::Other for impl)
         (DefKind::Other, DefKind::Method | DefKind::Function) => {
