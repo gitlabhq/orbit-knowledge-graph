@@ -5,19 +5,21 @@ use code_graph_types::{
 };
 use std::sync::Arc;
 use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::{Node, Root, SupportLang};
 
 use crate::v2::CanonicalParser;
 
 const LANG: Language = Language::Python;
 
+pub type PythonAst = Root<StrDoc<SupportLang>>;
+
 #[derive(Default)]
 pub struct PythonCanonicalParser;
 
 impl CanonicalParser for PythonCanonicalParser {
-    type Ast = ();
+    type Ast = PythonAst;
 
-    fn parse_file(&self, source: &[u8], file_path: &str) -> crate::Result<(CanonicalResult, ())> {
+    fn parse_file(&self, source: &[u8], file_path: &str) -> crate::Result<(CanonicalResult, PythonAst)> {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
@@ -49,7 +51,7 @@ impl CanonicalParser for PythonCanonicalParser {
             definitions,
             imports,
             references,
-        }, ()))
+        }, ast))
     }
 }
 
