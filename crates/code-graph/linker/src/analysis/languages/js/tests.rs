@@ -588,6 +588,43 @@ mod integration_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn test_js_cjs_cross_file_resolution() {
+        let setup = setup_js_fixture_pipeline("cross-file/cjs-cross-file").await;
+
+        // CJS imports should produce import nodes
+        let consumer_imports: Vec<_> = setup
+            .graph_data
+            .imported_symbol_nodes
+            .iter()
+            .filter(|n| n.location.file_path == "src/consumer.js")
+            .collect();
+        assert!(
+            !consumer_imports.is_empty(),
+            "consumer.js should have CJS require imports"
+        );
+
+        // Verify the call edges exist from consumer.js
+        let analysis = process_fixture_file("cross-file/cjs-cross-file", "src/consumer.js");
+        let js = analysis
+            .js_analysis
+            .expect("consumer.js should produce JS analysis");
+
+        // CJS require should produce namespace import call edges for utils.validate/utils.normalize
+        assert!(
+            js.calls.iter().any(|call| matches!(
+                &call.callee,
+                JsCallTarget::ImportedCall {
+                    specifier,
+                    imported_name: ImportedName::Named(name),
+                    ..
+                } if specifier == "./utils" && name == "validate"
+            )),
+            "utils.validate() via CJS require should emit ImportedCall"
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn test_js_inheritance_calls_use_fixture_repo() {
         let setup = setup_js_fixture_pipeline("cross-file/inheritance-calls").await;
 

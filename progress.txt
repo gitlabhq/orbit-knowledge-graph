@@ -1,30 +1,63 @@
-JS/TS Ecosystem Indexer - Call Graph Progress
-===============================================
+JS/TS Ecosystem Indexer - Test Matrix
+=======================================
 
-Baseline (before P0):
-  zod:     21,800 total rels
-  preact:  20,704 total rels
+## Repo Results (2026-04-12)
 
-P0: Namespace import calls (import * as ns; ns.foo()) -- DONE
-  Approach: Phase 1 extension, check SME parent + CallExpr grandparent for namespace imports
-  zod: +1,021 rels
+| Repo       | Files  | Defs    | Imports | Rels      | CALLS  | XFile | Skip | Err | Time   |
+|------------|--------|---------|---------|-----------|--------|-------|------|-----|--------|
+| zod        | 397    | 12,441  | 1,300   | 22,826    | 8,364  | 433   | 0    | 0   | 0.04s  |
+| preact     | 238    | 8,637   | 1,367   | 20,732    | 10,060 | 130   | 0    | 0   | 0.03s  |
+| express    | 141    | 5,763   | 392     | 11,653    | 5,195  | 0     | 0    | 0   | 0.01s  |
+| got        | 77     | 8,270   | 639     | 13,372    | 4,163  | 79    | 0    | 0   | 0.01s  |
+| pinia      | 149    | 2,248   | 831     | 5,425     | 1,936  | 77    | 7    | 0   | 0.02s  |
+| vue-core   | 528    | 22,954  | 5,403   | 61,270    | 29,561 | 1,185 | 7    | 0   | 0.07s  |
+| nest       | 1,709  | 20,404  | 8,289   | 49,201    | 14,771 | 4,201 | 0    | 0   | 0.13s  |
+| fastify    | 297    | 20,495  | 1,810   | 34,474    | 11,440 | 0     | 0    | 0   | 0.03s  |
+| cal.com    | 7,510  | 139,240 | 55,355  | 285,755   | 72,807 | 2,435 | 0    | 1   | 0.62s  |
+| gitlab     | 63,041 | 382,540 | 112,173 | 1,084,006 |345,583 |40,164 | 27   | 2   | 5.11s  |
 
-P1: Variable method calls (const x = new Foo(); x.bar()) -- DONE
-  Approach: build_variable_type_map from VariableDeclarator+NewExpression, Inferred confidence
+## Pattern Coverage Matrix
 
-P2: Parameter type method calls (svc: Service; svc.run()) -- DONE
-  Approach: extend type map with FormalParameter type annotations, Annotated confidence
+| Pattern                        | Confidence | Test Fixture? | zod | preact | express | vue-core | nest | gitlab |
+|--------------------------------|------------|---------------|-----|--------|---------|----------|------|--------|
+| Direct call: foo()             | Known      | via reexport  | YES | YES    | YES     | YES      | YES  | YES    |
+| Imported call: import{foo}     | Known      | reexport      | YES | YES    | -       | YES      | YES  | YES    |
+| Default import call            | Known      | default-import| YES | YES    | -       | YES      | YES  | YES    |
+| Namespace: ns.foo()            | Known      | namespace     | YES | YES    | -       | YES      | YES  | YES    |
+| this.method()                  | Known      | inheritance   | YES | YES    | -       | YES      | YES  | PARTIAL|
+| super.method()                 | Known      | inheritance   | YES | YES    | -       | -        | -    | -      |
+| Re-export chain                | Known      | reexport      | YES | YES    | -       | YES      | YES  | YES    |
+| JSX <Component />              | Known      | jsx-component | -   | YES    | -       | -        | -    | -      |
+| new ClassName()                | Known      | var-static    | YES | YES    | -       | -        | YES  | YES    |
+| Tagged template                | Known      | -             | -   | -      | -       | -        | -    | YES    |
+| Variable method: x.bar()      | Inferred   | var-static    | YES | YES    | -       | -        | YES  | YES    |
+| Param type: svc.run()         | Annotated  | var-static    | YES | -      | -       | YES      | YES  | -      |
+| Static: Class.method()        | Known      | var-static    | YES | -      | -       | -        | YES  | -      |
+| Callback: arr.map(fn)         | Guessed    | var-static    | YES | YES    | -       | YES      | YES  | YES    |
+| CJS require cross-file        | Known      | -             | -   | -      | NO(gap) | -        | -    | -      |
+| Vue Options API this.method() | -          | -             | -   | -      | -       | -        | -    | NO(gap)|
+| Vue <script setup> functions  | Known      | vue-merged    | -   | -      | -       | -        | -    | PARTIAL|
 
-P3: Static method calls (MyClass.staticMethod()) -- DONE
-  Approach: check class_hierarchy for object identifier, Known confidence
+## Identified Gaps
 
-P4: Callback-as-argument (arr.map(fn)) -- DONE
-  Approach: distinguish callee vs argument position via span comparison, Guessed confidence
+1. **CJS cross-file resolution (express, fastify)**: 0 cross-file edges despite CJS resolver wiring.
+   Root cause: OXC's `common_js_require()` may not recognize all require patterns in pure CJS files.
+   Impact: express (392 CJS imports, 0 resolved), fastify (1,216 CJS imports, 0 resolved)
 
-Final results (all P0-P4):
-  zod:     22,826 rels (+1,026), 8,364 CALLS, 433 cross-file, 0 errors
-  preact:  20,732 rels (+28),    10,060 CALLS, 130 cross-file, 0 errors
-  express: 11,527 rels,          5,195 CALLS,   0 cross-file, 0 errors (CJS)
-  got:     13,372 rels,          4,163 CALLS,  79 cross-file, 0 errors
+2. **Vue Options API this.method()**: GitLab has 4,480 Vue files but only 104 CALLS from them.
+   Root cause: Options API methods are object literal properties, not class methods.
+   Phase 2 only walks ancestors looking for Class nodes, not object literals.
+   Impact: ~4,000 Vue files with near-zero call graph coverage.
 
-  101 unit/integration tests passing, clippy clean
+3. **Prisma failed to index**: Empty results. Needs investigation.
+
+4. **1,406 Vue files with zero definitions**: 31% of GitLab Vue files.
+   Possible cause: template-only files or script extraction issues.
+
+## Remaining Test Fixtures Needed
+
+- CJS cross-file: require('./foo') -> module.exports resolution
+- Vue Options API: export default { methods: { handleClick() { this.fetchData() } } }
+- Vue Composition API: <script setup> with cross-file imports
+- Decorator class methods (NestJS pattern)
+- TSX component with props

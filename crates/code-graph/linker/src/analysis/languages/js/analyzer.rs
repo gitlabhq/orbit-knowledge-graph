@@ -470,7 +470,7 @@ fn extract_call_edges(
                 JsImportKind::Namespace => ImportedName::Namespace,
                 JsImportKind::CjsRequire { imported_name } => imported_name
                     .as_ref()
-                    .map_or(ImportedName::Default, |n| ImportedName::Named(n.clone())),
+                    .map_or(ImportedName::Namespace, |n| ImportedName::Named(n.clone())),
             };
             (i.local_name.as_str(), (i.specifier.as_str(), imported_name))
         })
@@ -518,34 +518,30 @@ fn extract_call_edges(
                         AstKind::CallExpression(_) | AstKind::NewExpression(_)
                     )
                 {
-                    let flags = ctx.scoping.symbol_flags(symbol_id);
                     let name = ctx.scoping.symbol_name(symbol_id);
                     let method_name = member.property.name.as_str();
                     let call_range = ctx
                         .lt
                         .span_to_range(ctx.nodes.get_node(call_node_id).span());
 
-                    // P0: namespace import — import * as ns from '...'; ns.foo()
-                    if flags.is_import() {
-                        if let Some((specifier, ImportedName::Namespace)) = import_lookup.get(name)
-                        {
-                            let caller_scope = reference.scope_id();
-                            let caller_info = ctx.find_enclosing_def(caller_scope);
-                            let caller = match caller_info {
-                                Some((fqn, range)) => JsCallSite::Definition { fqn, range },
-                                None => JsCallSite::ModuleLevel,
-                            };
-                            calls.push(JsCallEdge {
-                                caller,
-                                callee: JsCallTarget::ImportedCall {
-                                    local_name: name.to_string(),
-                                    specifier: specifier.to_string(),
-                                    imported_name: ImportedName::Named(method_name.to_string()),
-                                },
-                                call_range,
-                                confidence: JsCallConfidence::Known,
-                            });
-                        }
+                    // P0: namespace/CJS import — import * as ns; ns.foo() / var x = require('./m'); x.foo()
+                    if let Some((specifier, ImportedName::Namespace)) = import_lookup.get(name) {
+                        let caller_scope = reference.scope_id();
+                        let caller_info = ctx.find_enclosing_def(caller_scope);
+                        let caller = match caller_info {
+                            Some((fqn, range)) => JsCallSite::Definition { fqn, range },
+                            None => JsCallSite::ModuleLevel,
+                        };
+                        calls.push(JsCallEdge {
+                            caller,
+                            callee: JsCallTarget::ImportedCall {
+                                local_name: name.to_string(),
+                                specifier: specifier.to_string(),
+                                imported_name: ImportedName::Named(method_name.to_string()),
+                            },
+                            call_range,
+                            confidence: JsCallConfidence::Known,
+                        });
                     }
                     // P1: variable method — const x = new Foo(); x.bar()
                     // P3: static method — MyClass.staticMethod()
