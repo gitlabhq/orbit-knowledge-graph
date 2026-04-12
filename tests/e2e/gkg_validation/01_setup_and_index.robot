@@ -20,12 +20,10 @@ Services Are Running
     ...    timeout=10
     Should Contain    ${gdk.stdout}    ok    msg=GDK Rails not responding
 
-    # ClickHouse
-    ${ch}=    Run Process    bash    -c
-    ...    curl -s "${CLICKHOUSE_URL}/?query=SELECT+1" 2>/dev/null
-    ...    timeout=10
-    ${ch_out}=    Strip String    ${ch.stdout}
-    Should Be Equal    ${ch_out}    1    msg=ClickHouse not responding: ${ch.stdout}
+    # ClickHouse (use the shared keyword which handles escaping)
+    ${ch}=    ClickHouse Query    SELECT 1
+    ${ch}=    Strip String    ${ch}
+    Should Be Equal    ${ch}    1    msg=ClickHouse not responding: ${ch}
 
 Seed Test Data
     [Documentation]    Create groups, projects, MRs, issues via GitLab API

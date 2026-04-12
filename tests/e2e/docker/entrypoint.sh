@@ -4,13 +4,16 @@
 
 echo "=== gkg-e2e-base starting ==="
 
-# Increase ClickHouse memory limit and bind to all interfaces
+# Fix ClickHouse to listen on all interfaces (default is localhost only)
+CH_CONFIG="/gitlab-gdk/gitlab-development-kit/clickhouse/config.xml"
+sed -i 's|<!-- <listen_host>0.0.0.0</listen_host> -->|<listen_host>0.0.0.0</listen_host>|' "$CH_CONFIG"
+sed -i 's|<listen_host>::1</listen_host>|<!-- <listen_host>::1</listen_host> -->|' "$CH_CONFIG"
+sed -i 's|<listen_host>127.0.0.1</listen_host>|<!-- <listen_host>127.0.0.1</listen_host> -->|' "$CH_CONFIG"
+# Remove memory limit
 mkdir -p /gitlab-gdk/gitlab-development-kit/clickhouse/config.d
-# Override ClickHouse memory and bind address (must load AFTER gdk.xml alphabetically)
 cat > /gitlab-gdk/gitlab-development-kit/clickhouse/config.d/zz-e2e.xml <<'XML'
 <clickhouse>
   <max_server_memory_usage>0</max_server_memory_usage>
-  <listen_host>0.0.0.0</listen_host>
 </clickhouse>
 XML
 
