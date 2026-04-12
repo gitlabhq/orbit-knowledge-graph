@@ -570,13 +570,8 @@ impl ExpressionResolver {
     }
 
     /// Add definitions to the resolver (delegated to scope resolver)
-    pub fn add_definition(
-        &mut self,
-        fqn: String,
-        node: DefinitionNode,
-        fqn_type: &crate::analysis::types::FqnType,
-    ) {
-        self.scope_resolver.add_definition(fqn, node, fqn_type);
+    pub fn add_definition(&mut self, fqn: String, node: DefinitionNode) {
+        self.scope_resolver.add_definition(fqn, node);
     }
 
     /// Get performance statistics

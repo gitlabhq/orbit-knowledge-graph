@@ -95,34 +95,32 @@ impl DefinitionMap {
     }
 
     /// Add a definition with optimized indexing
-    pub fn add_definition(&mut self, fqn: String, node: DefinitionNode, fqn_type: &FqnType) {
+    pub fn add_definition(&mut self, fqn: String, node: DefinitionNode) {
         let fqn_arc: Arc<str> = fqn.into();
         let node_arc = Arc::new(node);
 
         self.definitions.insert(fqn_arc.clone(), node_arc.clone());
 
-        // Index by type for efficient lookups
-        if let FqnType::Ruby(ruby_fqn) = fqn_type {
-            match node_arc.definition_type {
-                crate::analysis::types::DefinitionType::Ruby(RubyDefinitionType::Method) => {
-                    self.index_method(ruby_fqn, node_arc.name(), false);
-                }
-                crate::analysis::types::DefinitionType::Ruby(
-                    RubyDefinitionType::SingletonMethod,
-                ) => {
-                    self.index_method(ruby_fqn, node_arc.name(), true);
-                }
-                crate::analysis::types::DefinitionType::Ruby(RubyDefinitionType::Class) => {
-                    self.index_class(ruby_fqn);
-                }
-                _ => {} // Handle other types as needed
+        match node_arc.kind {
+            code_graph_types::DefKind::Method => {
+                let is_singleton = node_arc.definition_type == "SingletonMethod";
+                self.index_method_from_canonical(&node_arc.fqn, node_arc.name(), is_singleton);
             }
+            code_graph_types::DefKind::Class => {
+                self.index_class_from_canonical(&node_arc.fqn);
+            }
+            _ => {}
         }
     }
 
-    /// Index a method for fast lookup
-    fn index_method(&mut self, ruby_fqn: &RubyFqn, method_name: &str, is_singleton: bool) {
-        if let Some(class_fqn) = self.get_class_fqn_from_method(ruby_fqn) {
+    fn index_method_from_canonical(
+        &mut self,
+        fqn: &code_graph_types::CanonicalFqn,
+        method_name: &str,
+        is_singleton: bool,
+    ) {
+        if let Some(parent) = fqn.parent() {
+            let class_fqn = parent.to_string();
             let class_fqn_arc: Arc<str> = class_fqn.into();
             let method_name_arc: Arc<str> = method_name.into();
 
@@ -139,12 +137,10 @@ impl DefinitionMap {
         }
     }
 
-    /// Index a class and its relationships
-    fn index_class(&mut self, ruby_fqn: &RubyFqn) {
-        // Extract parent class for inheritance tracking
-        if let Some(parent_fqn) = self.get_parent_class_fqn(ruby_fqn) {
-            let class_fqn: Arc<str> = self.ruby_fqn_to_string(ruby_fqn).into();
-            let parent_fqn_arc: Arc<str> = parent_fqn.into();
+    fn index_class_from_canonical(&mut self, fqn: &code_graph_types::CanonicalFqn) {
+        if let Some(parent) = fqn.parent() {
+            let class_fqn: Arc<str> = fqn.to_string().into();
+            let parent_fqn_arc: Arc<str> = parent.to_string().into();
             self.inheritance_chain.insert(class_fqn, parent_fqn_arc);
         }
     }
@@ -319,8 +315,8 @@ impl ScopeResolver {
     }
 
     /// Add a definition to the resolver
-    pub fn add_definition(&mut self, fqn: String, node: DefinitionNode, fqn_type: &FqnType) {
-        self.definition_map.add_definition(fqn, node, fqn_type);
+    pub fn add_definition(&mut self, fqn: String, node: DefinitionNode) {
+        self.definition_map.add_definition(fqn, node);
     }
 
     /// Set a variable's type in a scope

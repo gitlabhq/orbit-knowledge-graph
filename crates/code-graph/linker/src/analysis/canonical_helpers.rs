@@ -1,22 +1,25 @@
 use crate::graph::RelationshipType;
 use code_graph_types::{CanonicalFqn, DefKind, FqnPart, Language, Range};
-use parser_core::definitions::DefinitionTypeInfo;
 use parser_core::fqn::FQNPart;
 use smallvec::SmallVec;
+use std::fmt::Display;
 use std::hash::Hash;
 
 /// Convert any FQNPart-based FQN to CanonicalFqn.
 pub fn fqn_parts_to_canonical<T, M>(parts: &[FQNPart<T, M>], lang: Language) -> CanonicalFqn
 where
-    T: DefinitionTypeInfo + Eq + Hash + Send + Sync + 'static,
+    T: Display + Eq + Hash + Send + Sync + 'static,
     M: Eq + Hash + Send + Sync + 'static,
 {
     let canonical_parts: SmallVec<[FqnPart; 8]> = parts
         .iter()
-        .map(|part| FqnPart {
-            part_type: part.node_type().as_str(),
-            name: part.node_name().to_string(),
-            range: convert_range(part.range()),
+        .map(|part| {
+            let part_type_str = part.node_type().to_string();
+            FqnPart {
+                part_type: Box::leak(part_type_str.into_boxed_str()),
+                name: part.node_name().to_string(),
+                range: convert_range(part.range()),
+            }
         })
         .collect();
     CanonicalFqn::new(canonical_parts, lang.fqn_separator())
