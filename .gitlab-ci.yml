@@ -416,7 +416,7 @@ e2e-gdk-test:
     - name: ${CI_REGISTRY_IMAGE}/gkg-e2e-base:latest
       alias: gdk.test
   variables:
-    GDK_URL: "https://gdk.test:3443"
+    GDK_URL: "http://gdk.test:3000"
     CLICKHOUSE_URL: "http://gdk.test:8123"
     NATS_URL: "nats://gdk.test:4222"
   needs: []
@@ -438,34 +438,25 @@ e2e-gdk-test:
     - |
       # Wait for GDK service to be fully ready (entrypoint takes ~3-5 min)
       echo "Waiting for GDK service (may take 5+ min for entrypoint to complete)..."
-      echo "Checking connectivity to gdk.test..."
-      getent hosts gdk.test || echo "gdk.test not in DNS"
       for i in $(seq 1 600); do
-        RESP=$(curl -sk -o /dev/null -w "%{http_code}" https://gdk.test:3443/-/readiness 2>/dev/null || echo "000")
+        RESP=$(curl -s -o /dev/null -w "%{http_code}" http://gdk.test:3000/-/readiness 2>/dev/null || echo "000")
         if [ "$RESP" = "200" ]; then
-          echo "GDK ready after ${i}s (HTTP $RESP)"
+          echo "GDK ready after ${i}s"
           break
         fi
-        if [ "$((i % 30))" -eq 0 ]; then
-          echo "Still waiting... ${i}s (HTTP $RESP)"
-          # Debug: check if any port is open
-          curl -sk -o /dev/null -w "HTTPS:3443=%{http_code} " https://gdk.test:3443/ 2>/dev/null || true
-          curl -s -o /dev/null -w "HTTP:3000=%{http_code} " http://gdk.test:3000/ 2>/dev/null || true
-          curl -s -o /dev/null -w "CH:8123=%{http_code}" http://gdk.test:8123/ 2>/dev/null || true
-          echo ""
-        fi
+        [ "$((i % 60))" -eq 0 ] && echo "Still waiting... ${i}s (HTTP $RESP)"
         [ "$i" -eq 600 ] && echo "WARNING: GDK not ready after 600s" && exit 1
         sleep 1
       done
     - |
       # Create a PAT via the API (seed-data.rb runs inside the service container)
-      PAT=$(curl -sk -X POST "https://gdk.test:3443/oauth/token" \
+      PAT=$(curl -sk -X POST "http://gdk.test:3000/oauth/token" \
         -d "grant_type=password&username=root&password=5iveL!fe" 2>/dev/null \
         | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
       if [ -z "$PAT" ]; then
         # Fallback: use API to create PAT with default creds
-        PAT=$(curl -sk -X POST "https://gdk.test:3443/api/v4/users/1/personal_access_tokens" \
-          -H "PRIVATE-TOKEN: $(curl -sk -X POST 'https://gdk.test:3443/oauth/token' \
+        PAT=$(curl -sk -X POST "http://gdk.test:3000/api/v4/users/1/personal_access_tokens" \
+          -H "PRIVATE-TOKEN: $(curl -sk -X POST 'http://gdk.test:3000/oauth/token' \
             -d 'grant_type=password&username=root&password=5iveL!fe' 2>/dev/null \
             | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)" \
           -d 'name=e2e-ci&scopes[]=api&scopes[]=read_api' 2>/dev/null \
@@ -475,7 +466,7 @@ e2e-gdk-test:
       echo "PAT created (length: ${#PAT})"
     - |
       # Start GKG processes connected to the GDK service
-      export GKG__GITLAB__BASE_URL=https://gdk.test:3443
+      export GKG__GITLAB__BASE_URL=http://gdk.test:3000
       export GKG__NATS__URL=gdk.test:4222
       export GKG__GRAPH__URL=http://gdk.test:8123
       export GKG__GRAPH__DATABASE=gitlab_clickhouse_main_development

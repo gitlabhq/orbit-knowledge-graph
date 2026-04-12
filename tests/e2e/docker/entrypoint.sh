@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 # Start all services via GDK's runit, seed data, then keep container alive.
-# No set -e: the container must stay alive even if setup steps fail,
-# so the main CI job can reach the services and debug.
+# No set -e: the container must stay alive even if setup steps fail.
 
 echo "=== gkg-e2e-base starting ==="
 
-grep -q gdk.test /etc/hosts || echo "127.0.0.1 gdk.test" | sudo tee -a /etc/hosts
-
-# Increase ClickHouse memory limit (default 3GB is too low alongside GDK)
+# Increase ClickHouse memory limit and bind to all interfaces
 mkdir -p /gitlab-gdk/gitlab-development-kit/clickhouse/config.d
 cat > /gitlab-gdk/gitlab-development-kit/clickhouse/config.d/e2e.xml <<'XML'
 <clickhouse>
@@ -24,15 +21,7 @@ fi
 
 eval "$(~/.local/bin/mise activate bash)"
 cd /gitlab-gdk/gitlab-development-kit
-
 mise x -- gdk start
-
-# Patch nginx to listen on 0.0.0.0 AFTER gdk start (which may regenerate configs)
-sed -i 's/listen gdk\.test:/listen 0.0.0.0:/g' nginx/conf/nginx.conf
-# Also patch workhorse to listen on 0.0.0.0
-sed -i 's/listenAddr = "gdk\.test:/listenAddr = "0.0.0.0:/g' gitlab-workhorse/config.toml 2>/dev/null || true
-# Reload nginx with the patched config
-sv restart services/nginx || true
 
 echo "=== Waiting for ClickHouse ==="
 for i in $(seq 1 60); do
@@ -54,7 +43,7 @@ RAILS_ENV=development bundle exec rake gitlab:clickhouse:migrate 2>&1 || echo "W
 echo "=== Waiting for Rails ==="
 cd /gitlab-gdk/gitlab-development-kit
 for i in $(seq 1 300); do
-    if curl -sk https://gdk.test:3443/-/readiness 2>/dev/null | grep -q '"status":"ok"'; then
+    if curl -s http://127.0.0.1:3000/-/readiness 2>/dev/null | grep -q '"status":"ok"'; then
         echo "Rails ready after ${i}s"
         break
     fi
@@ -73,8 +62,8 @@ GITLAB_SIMULATE_SAAS=1 RAILS_ENV=development bundle exec rails runner /home/gdk/
 echo "=== All services ready ==="
 cd /gitlab-gdk/gitlab-development-kit
 mise x -- gdk status
-echo "  GitLab:     https://gdk.test:3443"
-echo "  ClickHouse: http://localhost:8123"
-echo "  NATS:       nats://localhost:4222"
+echo "  GitLab:     http://0.0.0.0:3000"
+echo "  ClickHouse: http://0.0.0.0:8123"
+echo "  NATS:       nats://0.0.0.0:4222"
 
 sleep 720d

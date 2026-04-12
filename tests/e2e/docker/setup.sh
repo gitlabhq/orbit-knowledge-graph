@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure GDK with HTTPS, ClickHouse, NATS, and Siphon.
+# Configure GDK with ClickHouse, NATS, and Siphon (HTTP, no nginx).
 # ClickHouse and NATS are pre-installed as system packages.
 set -euo pipefail
 

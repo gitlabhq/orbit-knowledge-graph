@@ -7,7 +7,7 @@ Library     String
 
 
 *** Variables ***
-${GDK_URL}                  %{GDK_URL=https://gdk.test:3443}
+${GDK_URL}                  %{GDK_URL=http://gdk.test:3000}
 ${API_BASE}                 ${GDK_URL}/api/v4
 ${CLICKHOUSE_URL}           %{CLICKHOUSE_URL=http://127.0.0.1:8123}
 ${GRAPH_DB}                 gitlab_clickhouse_main_development
