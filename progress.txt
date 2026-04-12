@@ -5,16 +5,26 @@ Baseline (before P0):
   zod:     21,800 total rels
   preact:  20,704 total rels
 
-P0: Namespace import calls (import * as ns; ns.foo())
-  Status: DONE
-  Lines: +20 net (collapsed let-chains)
-  zod:     22,821 total rels (+1,021), 8,359 CALLS, 433 cross-file CALLS
-  preact:  20,697 total rels, 10,025 CALLS, 130 cross-file CALLS
-  express: 11,527 total rels, 5,195 CALLS, 0 cross-file (CJS not wired)
-  Errors:  0 across all repos
+P0: Namespace import calls (import * as ns; ns.foo()) -- DONE
+  Approach: Phase 1 extension, check SME parent + CallExpr grandparent for namespace imports
+  zod: +1,021 rels
 
-Remaining:
-  P1: Variable method calls (const x = new Foo(); x.bar()) -- 15%
-  P2: Parameter type method calls (svc: Service; svc.run()) -- 8%
-  P3: Static method calls (MyClass.staticMethod()) -- 3%
-  P4: Callback-as-argument (arr.map(fn)) -- 2-3%
+P1: Variable method calls (const x = new Foo(); x.bar()) -- DONE
+  Approach: build_variable_type_map from VariableDeclarator+NewExpression, Inferred confidence
+
+P2: Parameter type method calls (svc: Service; svc.run()) -- DONE
+  Approach: extend type map with FormalParameter type annotations, Annotated confidence
+
+P3: Static method calls (MyClass.staticMethod()) -- DONE
+  Approach: check class_hierarchy for object identifier, Known confidence
+
+P4: Callback-as-argument (arr.map(fn)) -- DONE
+  Approach: distinguish callee vs argument position via span comparison, Guessed confidence
+
+Final results (all P0-P4):
+  zod:     22,826 rels (+1,026), 8,364 CALLS, 433 cross-file, 0 errors
+  preact:  20,732 rels (+28),    10,060 CALLS, 130 cross-file, 0 errors
+  express: 11,527 rels,          5,195 CALLS,   0 cross-file, 0 errors (CJS)
+  got:     13,372 rels,          4,163 CALLS,  79 cross-file, 0 errors
+
+  101 unit/integration tests passing, clippy clean
