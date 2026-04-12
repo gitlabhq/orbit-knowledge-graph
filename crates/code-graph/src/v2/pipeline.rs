@@ -13,6 +13,7 @@ use std::path::Path;
 use crate::linker::v2::{
     GraphBuilder, GraphData, NoResolver, ReferenceResolver, ResolutionContext,
 };
+use crate::v2::resolvers::java::JavaResolver;
 use crate::v2::resolvers::python::PythonResolver;
 
 /// Input to a language pipeline: file path + source bytes.
@@ -126,7 +127,7 @@ macro_rules! register_v2_pipelines {
 
 register_v2_pipelines! {
     Python  => GenericPipeline<PythonCanonicalParser, PythonResolver>,
-    Java    => GenericPipeline<JavaCanonicalParser, NoResolver>,
+    Java    => GenericPipeline<JavaCanonicalParser, JavaResolver>,
     Kotlin  => GenericPipeline<KotlinCanonicalParser, NoResolver>,
     CSharp  => GenericPipeline<CSharpCanonicalParser, NoResolver>,
 }
