@@ -7,5 +7,6 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+intervaltree = { workspace = true }
 serde = { workspace = true }
 smallvec = { workspace = true }

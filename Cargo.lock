@@ -1251,6 +1251,7 @@ dependencies = [
 name = "code-graph-types"
 version = "0.1.0"
 dependencies = [
+ "intervaltree",
  "serde",
  "smallvec",
 ]
@@ -3838,6 +3839,15 @@ dependencies = [
  "dashmap 5.5.3",
  "hashbrown 0.15.5",
  "once_cell",
+]
+
+[[package]]
+name = "intervaltree"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "270bc34e57047cab801a8c871c124d9dc7132f6473c6401f645524f4e6edd111"
+dependencies = [
+ "smallvec",
 ]
 
 [[package]]

@@ -2,6 +2,7 @@ mod fqn;
 mod lang;
 mod node;
 mod range;
+mod scope;
 
 pub use fqn::Fqn;
 pub use lang::Language;
@@ -10,3 +11,4 @@ pub use node::{
     ReferenceStatus, ToCanonical,
 };
 pub use range::{Position, Range};
+pub use scope::{HasRange, ScopeIndex};
