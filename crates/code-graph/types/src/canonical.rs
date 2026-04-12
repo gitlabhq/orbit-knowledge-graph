@@ -110,7 +110,7 @@ pub struct CanonicalFileResult {
     pub file_path: String,
     pub extension: String,
     pub file_size: u64,
-    pub language: String,
+    pub language: crate::Language,
     pub definitions: Vec<CanonicalDefinition>,
     pub imports: Vec<CanonicalImport>,
     pub references: Vec<CanonicalReference>,
