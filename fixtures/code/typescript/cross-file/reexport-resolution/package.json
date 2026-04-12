@@ -1,0 +1,5 @@
+{
+  "name": "js-cross-file-reexport-resolution",
+  "private": true,
+  "type": "module"
+}
