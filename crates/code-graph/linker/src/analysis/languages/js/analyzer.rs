@@ -484,15 +484,32 @@ fn extract_call_edges(
             }
 
             let ref_node_id = reference.node_id();
-            let is_call = matches!(
-                ctx.nodes.parent_kind(ref_node_id),
-                AstKind::CallExpression(_)
-                    | AstKind::NewExpression(_)
-                    | AstKind::TaggedTemplateExpression(_)
-                    | AstKind::JSXOpeningElement(_)
-            );
+            let ref_span = ctx.nodes.get_node(ref_node_id).span();
+            let parent_kind = ctx.nodes.parent_kind(ref_node_id);
 
-            if !is_call {
+            // Check if this reference is a direct callee or a callback argument
+            let (is_call, is_callback) = match parent_kind {
+                AstKind::CallExpression(call) => {
+                    let is_callee = matches!(
+                        &call.callee,
+                        oxc::ast::ast::Expression::Identifier(id) if id.span == ref_span
+                    );
+                    (is_callee, !is_callee)
+                }
+                AstKind::NewExpression(new_expr) => {
+                    let is_callee = matches!(
+                        &new_expr.callee,
+                        oxc::ast::ast::Expression::Identifier(id) if id.span == ref_span
+                    );
+                    (is_callee, !is_callee)
+                }
+                AstKind::TaggedTemplateExpression(_) | AstKind::JSXOpeningElement(_) => {
+                    (true, false)
+                }
+                _ => (false, false),
+            };
+
+            if !is_call && !is_callback {
                 // Member expression calls: obj.method() where obj is a known symbol
                 if let AstKind::StaticMemberExpression(member) = ctx.nodes.parent_kind(ref_node_id)
                     && let Some(call_node_id) = ctx.nodes.ancestor_ids(ref_node_id).nth(1)
@@ -570,6 +587,12 @@ fn extract_call_edges(
             let caller_info = ctx.find_enclosing_def(caller_scope);
             let call_site_span = ctx.nodes.get_node(ref_node_id).span();
             let call_site_range = ctx.lt.span_to_range(call_site_span);
+            // P4: callback-as-argument gets Guessed confidence
+            let base_confidence = if is_callback {
+                JsCallConfidence::Guessed
+            } else {
+                JsCallConfidence::Known
+            };
 
             let caller = match caller_info {
                 Some((fqn, range)) => JsCallSite::Definition { fqn, range },
@@ -588,7 +611,7 @@ fn extract_call_edges(
                             imported_name: imported_name.clone(),
                         },
                         call_range: call_site_range,
-                        confidence: JsCallConfidence::Known,
+                        confidence: base_confidence,
                     });
                 }
                 continue;
@@ -605,7 +628,7 @@ fn extract_call_edges(
                     range: callee_range,
                 },
                 call_range: call_site_range,
-                confidence: JsCallConfidence::Known,
+                confidence: base_confidence,
             });
         }
     }

@@ -20,3 +20,11 @@ export function createParser(): Parser {
 export function runWithService(svc: Parser): string[] {
   return svc.parse("a,b,c");
 }
+
+function transform(input: string): string {
+  return input.toUpperCase();
+}
+
+export function mapItems(items: string[]): string[] {
+  return items.map(transform);
+}

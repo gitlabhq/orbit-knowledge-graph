@@ -575,6 +575,15 @@ mod integration_tests {
             ) && call.confidence == JsCallConfidence::Annotated),
             "svc.parse() with typed param should resolve to Parser::parse with Annotated confidence"
         );
+
+        // P4: items.map(transform) → transform is called as callback
+        assert!(
+            js.calls.iter().any(|call| matches!(
+                &call.callee,
+                JsCallTarget::Direct { fqn, .. } if fqn == "transform"
+            ) && call.confidence == JsCallConfidence::Guessed),
+            "items.map(transform) should produce a Guessed call edge to transform"
+        );
     }
 
     #[traced_test]
