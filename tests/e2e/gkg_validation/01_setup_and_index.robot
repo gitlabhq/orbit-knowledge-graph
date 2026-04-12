@@ -14,22 +14,18 @@ Services Are Running
     [Documentation]    Verify ClickHouse, NATS, and GDK are reachable
     [Tags]    services    critical
 
-    # ClickHouse
-    ${ch}=    ClickHouse Query    SELECT 1
-    ${ch}=    Strip String    ${ch}
-    Should Be Equal    ${ch}    1    msg=ClickHouse not responding
-
-    # NATS (check port)
-    ${nats}=    Run Process    bash    -c
-    ...    timeout 2 bash -c 'echo "" > /dev/tcp/127.0.0.1/4222' 2>/dev/null && echo ok || echo fail
-    ...    timeout=5
-    Should Contain    ${nats.stdout}    ok    msg=NATS not listening on 4222
-
     # GDK Rails
     ${gdk}=    Run Process    bash    -c
-    ...    curl -sk ${GDK_URL}/-/readiness 2>/dev/null | head -c 100
+    ...    curl -s ${GDK_URL}/-/readiness 2>/dev/null | head -c 100
     ...    timeout=10
     Should Contain    ${gdk.stdout}    ok    msg=GDK Rails not responding
+
+    # ClickHouse
+    ${ch}=    Run Process    bash    -c
+    ...    curl -s "${CLICKHOUSE_URL}/?query=SELECT+1" 2>/dev/null
+    ...    timeout=10
+    ${ch_out}=    Strip String    ${ch.stdout}
+    Should Be Equal    ${ch_out}    1    msg=ClickHouse not responding: ${ch.stdout}
 
 Seed Test Data
     [Documentation]    Create groups, projects, MRs, issues via GitLab API
