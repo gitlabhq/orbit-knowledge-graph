@@ -96,6 +96,35 @@ fn options_api_this_resolves_to_computed() {
 }
 
 #[test]
+fn vue_default_export_has_binding() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default {
+            name: 'TestWidget',
+            methods: { click() {} }
+        };"#,
+        "test.vue.js",
+        "test.vue.js",
+    )
+    .unwrap();
+
+    // The default export should have a binding pointing to the virtual class
+    let default_binding = analysis
+        .module_info
+        .exports
+        .get("default")
+        .expect("should have default export binding");
+    assert!(default_binding.is_default, "should be marked as default");
+    assert_eq!(
+        default_binding.local_fqn, "TestWidget",
+        "default export local_fqn should be the component name, not 'default'"
+    );
+    assert!(
+        default_binding.definition_range.is_some(),
+        "default export should have a definition_range pointing to the virtual class"
+    );
+}
+
+#[test]
 fn non_vue_export_default_object_ignored() {
     let analysis = JsAnalyzer::analyze_file(
         r#"export default { key: "value" };"#,

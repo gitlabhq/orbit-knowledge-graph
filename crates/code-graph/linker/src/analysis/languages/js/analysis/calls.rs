@@ -242,6 +242,17 @@ pub(super) fn extract_call_edges(
             };
 
             let callee_flags = ctx.scoping.symbol_flags(symbol_id);
+
+            // Skip callback arguments that reference non-callable symbols (constants, data variables).
+            // Only functions, classes, and imports are valid callback targets.
+            if is_callback
+                && !callee_flags.is_import()
+                && !callee_flags.is_function()
+                && !callee_flags.is_class()
+            {
+                continue;
+            }
+
             if callee_flags.is_import() {
                 let callee_name = ctx.scoping.symbol_name(symbol_id);
                 if let Some((specifier, imported_name)) = import_lookup.get(callee_name) {

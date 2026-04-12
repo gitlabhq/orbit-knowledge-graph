@@ -480,15 +480,32 @@ impl JsAnalyzer {
         let mut module_info = build_module_info(&parsed, &defs, &ctx.lt);
         module_info.cjs_exports = cjs_exports;
 
-        // Fix Vue SFC default export: point it to the virtual component class
-        if let Some(default_binding) = module_info.exports.get_mut("default")
-            && default_binding.local_fqn == "default"
-            && let Some(vc) = defs
-                .iter()
-                .find(|d| d.kind == JsDefKind::Class && d.is_exported)
+        // Ensure Vue SFC default export binding exists and points to the virtual class.
+        // OXC's module_record may not include `export default { ... }` for anonymous
+        // object expressions, so we synthesize the binding if a Vue virtual class exists.
+        if let Some(vc) = defs
+            .iter()
+            .find(|d| d.kind == JsDefKind::Class && d.is_exported)
         {
-            default_binding.local_fqn = vc.fqn.clone();
-            default_binding.definition_range = Some(vc.range);
+            module_info
+                .exports
+                .entry("default".to_string())
+                .or_insert_with(|| ExportedBinding {
+                    local_fqn: vc.fqn.clone(),
+                    range: vc.range,
+                    definition_range: Some(vc.range),
+                    is_type: false,
+                    is_default: true,
+                    reexport_source: None,
+                    reexport_name: None,
+                });
+            // Also patch existing default binding if it has stale "default" fqn
+            if let Some(binding) = module_info.exports.get_mut("default")
+                && binding.local_fqn == "default"
+            {
+                binding.local_fqn = vc.fqn.clone();
+                binding.definition_range = Some(vc.range);
+            }
         }
 
         for imp in &imports {
