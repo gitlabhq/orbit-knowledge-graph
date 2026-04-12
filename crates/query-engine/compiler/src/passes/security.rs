@@ -152,10 +152,10 @@ fn should_apply_security_filter(table: &str) -> bool {
         .expect("valid regex")
     });
 
-    let Some(caps) = re.captures(table) else {
-        return false;
+    let unprefixed = match re.captures(table).and_then(|c| c.get(1)) {
+        Some(m) => m.as_str(),
+        None => return false,
     };
-    let unprefixed = caps.get(1).unwrap().as_str();
 
     // The skip list uses unprefixed names from the embedded ontology.
     !skip_security_filter_tables()
