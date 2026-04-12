@@ -2,15 +2,13 @@ use code_graph_types::{
     CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind, Fqn,
     Language, Position, Range, ReferenceStatus,
 };
-use smallvec::SmallVec;
 use std::sync::Arc;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
 use crate::v2::CanonicalParser;
 
-const SEPARATOR: &str = ".";
+const LANG: Language = Language::Python;
 
 pub struct PythonCanonicalParser;
 
@@ -19,8 +17,7 @@ impl CanonicalParser for PythonCanonicalParser {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
-        let parser = GenericParser::new(SupportedLanguage::Python);
-        let parse_result = parser.parse(source_str, Some(file_path))?;
+        let ast = LANG.parse_ast(source_str);
 
         let mut definitions = Vec::new();
         let mut imports = Vec::new();
@@ -28,7 +25,7 @@ impl CanonicalParser for PythonCanonicalParser {
         let mut scope_stack: Vec<Arc<str>> = Vec::new();
 
         walk_node(
-            &parse_result.ast.root(),
+            &ast.root(),
             &mut scope_stack,
             &mut definitions,
             &mut imports,
@@ -110,18 +107,11 @@ fn walk_node(
 }
 
 fn build_fqn(scope_stack: &[Arc<str>], name: &str) -> Fqn {
-    let mut parts: SmallVec<[Arc<str>; 4]> = scope_stack.iter().cloned().collect();
-    parts.push(Arc::from(name));
-    Fqn::new(parts, SEPARATOR)
+    Fqn::from_scope(scope_stack, name, LANG.fqn_separator())
 }
 
 fn scope_fqn(scope_stack: &[Arc<str>]) -> Option<Fqn> {
-    if scope_stack.is_empty() {
-        None
-    } else {
-        let parts: SmallVec<[Arc<str>; 4]> = scope_stack.iter().cloned().collect();
-        Some(Fqn::new(parts, SEPARATOR))
-    }
+    Fqn::from_scope_only(scope_stack, LANG.fqn_separator())
 }
 
 fn node_range(node: &Node<StrDoc<SupportLang>>) -> Range {

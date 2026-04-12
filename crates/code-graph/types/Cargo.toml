@@ -11,3 +11,4 @@ intervaltree = { workspace = true }
 serde = { workspace = true }
 smallvec = { workspace = true }
 strum = { workspace = true }
+treesitter-visit = { path = "../treesitter-visit", features = ["builtin-parser"] }

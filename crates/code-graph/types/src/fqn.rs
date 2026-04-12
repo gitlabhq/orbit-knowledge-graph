@@ -56,6 +56,24 @@ impl Fqn {
     pub fn is_empty(&self) -> bool {
         self.parts.is_empty()
     }
+
+    /// Build an FQN from a scope stack plus a leaf name.
+    pub fn from_scope(scope: &[Arc<str>], name: &str, separator: &'static str) -> Self {
+        let mut parts: SmallVec<[Arc<str>; 4]> = scope.iter().cloned().collect();
+        parts.push(Arc::from(name));
+        Self::new(parts, separator)
+    }
+
+    /// Build an FQN from just a scope stack (no additional leaf).
+    /// Returns None if the scope is empty.
+    pub fn from_scope_only(scope: &[Arc<str>], separator: &'static str) -> Option<Self> {
+        if scope.is_empty() {
+            None
+        } else {
+            let parts: SmallVec<[Arc<str>; 4]> = scope.iter().cloned().collect();
+            Some(Self::new(parts, separator))
+        }
+    }
 }
 
 impl std::fmt::Display for Fqn {

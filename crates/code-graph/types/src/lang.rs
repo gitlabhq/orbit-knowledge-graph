@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, Display, EnumIter, EnumString};
+use treesitter_visit::{LanguageExt, SupportLang};
 
 #[derive(
     Debug,
@@ -63,5 +64,24 @@ impl Language {
             Self::Java => &["java"],
             Self::Rust => &["rust"],
         }
+    }
+
+    pub const fn to_support_lang(&self) -> SupportLang {
+        match self {
+            Self::Ruby => SupportLang::Ruby,
+            Self::Python => SupportLang::Python,
+            Self::TypeScript => SupportLang::TypeScript,
+            Self::Kotlin => SupportLang::Kotlin,
+            Self::CSharp => SupportLang::CSharp,
+            Self::Java => SupportLang::Java,
+            Self::Rust => SupportLang::Rust,
+        }
+    }
+
+    pub fn parse_ast(
+        &self,
+        code: &str,
+    ) -> treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>> {
+        self.to_support_lang().ast_grep(code)
     }
 }
