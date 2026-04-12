@@ -1,3 +1,4 @@
+pub mod canonical_helpers;
 pub mod files;
 pub mod languages;
 pub mod types;

@@ -4,7 +4,6 @@ pub use code_graph_types::{Position, Range};
 use rust_lapper::{Interval, Lapper};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
-}
 
 pub fn compare_positions(p1: &Position, p2: &Position) -> std::cmp::Ordering {
     p1.line

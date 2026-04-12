@@ -230,7 +230,7 @@ impl RustAnalyzer {
             .find(|def| def.fqn.to_string() == parent_fqn_string)
         {
             if let Some(rel_type) =
-                determine_relationship_type(parent_node.kind, node.kind)
+                crate::analysis::canonical_helpers::determine_relationship_type(parent_node.kind, node.kind)
             {
                 let mut relationship = ConsolidatedRelationship::definition_to_definition(
                     parent_node.file_path.clone(),
@@ -242,29 +242,5 @@ impl RustAnalyzer {
                 relationships.push(relationship);
             }
         }
-    }
-}
-
-use code_graph_types::DefKind;
-
-/// Determine relationship type from canonical DefKind pairs.
-/// This is language-agnostic — works for any language.
-fn determine_relationship_type(
-    parent: DefKind,
-    child: DefKind,
-) -> Option<RelationshipType> {
-    match (parent, child) {
-        (DefKind::Module, _) => Some(RelationshipType::ModuleToSingletonMethod),
-        (DefKind::Class | DefKind::Interface, DefKind::Method | DefKind::Constructor) => {
-            Some(RelationshipType::ClassToMethod)
-        }
-        (DefKind::Class, DefKind::Property | DefKind::EnumEntry) => {
-            Some(RelationshipType::ClassToMethod)
-        }
-        (DefKind::Other, DefKind::Method) => {
-            // Impl blocks (DefKind::Other) containing methods
-            Some(RelationshipType::ClassToMethod)
-        }
-        _ => None,
     }
 }

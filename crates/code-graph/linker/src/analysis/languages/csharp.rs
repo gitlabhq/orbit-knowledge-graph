@@ -1,17 +1,16 @@
-use crate::graph::RelationshipType;
-use internment::ArcIntern;
-use parser_core::utils::Range;
-use parser_core::{
-    csharp::types::{CSharpDefinitionType, CSharpFqn, CSharpFqnPartType, CSharpImportType},
-    imports::ImportedSymbolInfo,
-};
-use std::collections::HashMap;
-
+use crate::analysis::canonical_helpers::fqn_parts_to_canonical;
 use crate::analysis::types::{
-    ConsolidatedRelationship, DefinitionNode, DefinitionType, FqnType, ImportIdentifier,
-    ImportType, ImportedSymbolLocation, ImportedSymbolNode,
+    ConsolidatedRelationship, DefinitionNode, ImportIdentifier, ImportType,
+    ImportedSymbolLocation, ImportedSymbolNode,
 };
+use crate::graph::RelationshipType;
 use crate::parse_types::FileProcessingResult;
+use code_graph_types::{Language, Range, ToCanonical};
+use internment::ArcIntern;
+use parser_core::csharp::types::{CSharpFqn, CSharpFqnPartType, CSharpImportType};
+use parser_core::definitions::DefinitionTypeInfo;
+use parser_core::imports::ImportedSymbolInfo;
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct CSharpAnalyzer;
@@ -30,11 +29,12 @@ impl CSharpAnalyzer {
     ) {
         if let Some(defs) = file_result.definitions.iter_csharp() {
             for definition in defs {
-                let fqn = FqnType::CSharp(definition.fqn.clone());
+                let fqn = fqn_parts_to_canonical(&definition.fqn, Language::CSharp);
                 let path = ArcIntern::new(relative_file_path.to_string());
                 let definition_node = DefinitionNode::new(
                     fqn.clone(),
-                    DefinitionType::CSharp(definition.definition_type),
+                    definition.definition_type.as_str().to_string(),
+                    definition.definition_type.to_def_kind(),
                     definition.range,
                     path.clone(),
                 );
@@ -59,13 +59,7 @@ impl CSharpAnalyzer {
                     relationships.push(relationship);
                 }
 
-                definition_map.insert(
-                    key,
-                    (
-                        definition_node.clone(),
-                        FqnType::CSharp(definition.fqn.clone()),
-                    ),
-                );
+                definition_map.insert(key, definition_node);
             }
         }
     }
@@ -117,14 +111,12 @@ impl CSharpAnalyzer {
         definition_map: &HashMap<(String, String), DefinitionNode>,
         relationships: &mut Vec<ConsolidatedRelationship>,
     ) {
-        for ((_child_fqn_string, child_file_path), (child_def, child_fqn)) in definition_map {
-            if let Some(parent_fqn_string) = self.get_parent_fqn_string(child_fqn)
-                && let Some((parent_def, _)) =
-                    definition_map.get(&(parent_fqn_string.clone(), child_file_path.to_string()))
-                && let Some(relationship_type) = self.get_definition_relationship_type(
-                    &parent_def.definition_type,
-                    &child_def.definition_type,
-                )
+        for ((_child_fqn_string, child_file_path), child_def) in definition_map {
+            if let Some(parent_fqn) = child_def.fqn.parent()
+                && let Some(parent_def) =
+                    definition_map.get(&(parent_fqn.to_string(), child_file_path.to_string()))
+                && let Some(relationship_type) =
+                    crate::analysis::canonical_helpers::determine_relationship_type(parent_def.kind, child_def.kind)
             {
                 let mut relationship = ConsolidatedRelationship::definition_to_definition(
                     parent_def.file_path.clone(),
@@ -135,161 +127,6 @@ impl CSharpAnalyzer {
                 relationship.target_range = ArcIntern::new(child_def.range);
                 relationships.push(relationship);
             }
-        }
-    }
-
-    fn get_parent_fqn_string(&self, fqn: &FqnType) -> Option<String> {
-        match fqn {
-            FqnType::CSharp(csharp_fqn) => {
-                if csharp_fqn.len() <= 1 {
-                    return None;
-                }
-
-                let parent_parts: Vec<String> = csharp_fqn[..csharp_fqn.len() - 1]
-                    .iter()
-                    .map(|part| part.node_name.clone())
-                    .collect();
-
-                if parent_parts.is_empty() {
-                    None
-                } else {
-                    Some(parent_parts.join("."))
-                }
-            }
-            _ => None,
-        }
-    }
-
-    fn get_definition_relationship_type(
-        &self,
-        parent_type: &DefinitionType,
-        child_type: &DefinitionType,
-    ) -> Option<RelationshipType> {
-        let parent_type = self.simplify_definition_type(parent_type)?;
-        let child_type = self.simplify_definition_type(child_type)?;
-
-        match (parent_type, child_type) {
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-            ) => Some(RelationshipType::ClassToClass),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-                DefinitionType::CSharp(CSharpDefinitionType::Interface),
-            ) => Some(RelationshipType::ClassToInterface),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-                DefinitionType::CSharp(CSharpDefinitionType::InstanceMethod),
-            ) => Some(RelationshipType::ClassToMethod),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-                DefinitionType::CSharp(CSharpDefinitionType::StaticMethod),
-            ) => Some(RelationshipType::ClassToMethod),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-                DefinitionType::CSharp(CSharpDefinitionType::Property),
-            ) => Some(RelationshipType::ClassToProperty),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-                DefinitionType::CSharp(CSharpDefinitionType::Constructor),
-            ) => Some(RelationshipType::ClassToConstructor),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-                DefinitionType::CSharp(CSharpDefinitionType::Enum),
-            ) => Some(RelationshipType::ClassToClass),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-                DefinitionType::CSharp(CSharpDefinitionType::Lambda),
-            ) => Some(RelationshipType::ClassToLambda),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Interface),
-                DefinitionType::CSharp(CSharpDefinitionType::Interface),
-            ) => Some(RelationshipType::InterfaceToInterface),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Interface),
-                DefinitionType::CSharp(CSharpDefinitionType::Class),
-            ) => Some(RelationshipType::InterfaceToClass),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Interface),
-                DefinitionType::CSharp(CSharpDefinitionType::InstanceMethod),
-            ) => Some(RelationshipType::InterfaceToMethod),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::Interface),
-                DefinitionType::CSharp(CSharpDefinitionType::Property),
-            ) => Some(RelationshipType::InterfaceToProperty),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::InstanceMethod),
-                DefinitionType::CSharp(CSharpDefinitionType::InstanceMethod),
-            ) => Some(RelationshipType::MethodToMethod),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::StaticMethod),
-                DefinitionType::CSharp(CSharpDefinitionType::StaticMethod),
-            ) => Some(RelationshipType::MethodToMethod),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::InstanceMethod),
-                DefinitionType::CSharp(CSharpDefinitionType::Lambda),
-            ) => Some(RelationshipType::MethodToLambda),
-            (
-                DefinitionType::CSharp(CSharpDefinitionType::StaticMethod),
-                DefinitionType::CSharp(CSharpDefinitionType::Lambda),
-            ) => Some(RelationshipType::MethodToLambda),
-            _ => None,
-        }
-    }
-
-    fn simplify_definition_type(&self, definition_type: &DefinitionType) -> Option<DefinitionType> {
-        match definition_type {
-            DefinitionType::CSharp(CSharpDefinitionType::Class) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Class))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Struct) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Class))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Record) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Class))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Enum) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Class))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Interface) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Interface))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::InstanceMethod) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::InstanceMethod))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::StaticMethod) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::StaticMethod))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::ExtensionMethod) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::StaticMethod))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Property) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Property))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Constructor) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Constructor))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Lambda) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Lambda))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Field) => None,
-            DefinitionType::CSharp(CSharpDefinitionType::Delegate) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Class))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Finalizer) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::InstanceMethod))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Operator) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::StaticMethod))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Indexer) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Property))
-            }
-            DefinitionType::CSharp(CSharpDefinitionType::Event) => None,
-            DefinitionType::CSharp(CSharpDefinitionType::AnonymousType) => {
-                Some(DefinitionType::CSharp(CSharpDefinitionType::Class))
-            }
-            _ => None,
         }
     }
 

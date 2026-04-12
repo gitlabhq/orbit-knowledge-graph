@@ -1,11 +1,9 @@
-use code_graph_types::{CanonicalFqn, DefKind, FqnPart, Language, Range, ToCanonical};
+use crate::graph::RelationshipType;
+use code_graph_types::{CanonicalFqn, DefKind, FqnPart, Language, Range};
 use parser_core::definitions::DefinitionTypeInfo;
 use parser_core::fqn::FQNPart;
 use smallvec::SmallVec;
 use std::hash::Hash;
-
-use super::types::DefinitionNode;
-use internment::ArcIntern;
 
 /// Convert any FQNPart-based FQN to CanonicalFqn.
 pub fn fqn_parts_to_canonical<T, M>(parts: &[FQNPart<T, M>], lang: Language) -> CanonicalFqn
@@ -46,4 +44,35 @@ fn convert_range(range: parser_core::utils::Range) -> Range {
         code_graph_types::Position::new(range.end.line, range.end.column),
         range.byte_offset,
     )
+}
+
+/// Language-agnostic relationship type determination from DefKind pairs.
+pub fn determine_relationship_type(parent: DefKind, child: DefKind) -> Option<RelationshipType> {
+    match (parent, child) {
+        (DefKind::Module, _) => Some(RelationshipType::ModuleToSingletonMethod),
+        (DefKind::Class, DefKind::Class) => Some(RelationshipType::ClassToClass),
+        (DefKind::Class, DefKind::Interface) => Some(RelationshipType::ClassToInterface),
+        (DefKind::Class, DefKind::Method | DefKind::Function) => {
+            Some(RelationshipType::ClassToMethod)
+        }
+        (DefKind::Class, DefKind::Constructor) => Some(RelationshipType::ClassToConstructor),
+        (DefKind::Class, DefKind::Property | DefKind::EnumEntry) => {
+            Some(RelationshipType::ClassToProperty)
+        }
+        (DefKind::Class, DefKind::Lambda) => Some(RelationshipType::ClassToLambda),
+        (DefKind::Interface, DefKind::Interface) => Some(RelationshipType::InterfaceToInterface),
+        (DefKind::Interface, DefKind::Class) => Some(RelationshipType::InterfaceToClass),
+        (DefKind::Interface, DefKind::Method) => Some(RelationshipType::InterfaceToMethod),
+        (DefKind::Interface, DefKind::Property) => Some(RelationshipType::InterfaceToProperty),
+        (DefKind::Method | DefKind::Function, DefKind::Method | DefKind::Function) => {
+            Some(RelationshipType::MethodToMethod)
+        }
+        (DefKind::Method | DefKind::Function, DefKind::Lambda) => {
+            Some(RelationshipType::MethodToLambda)
+        }
+        (DefKind::Other, DefKind::Method | DefKind::Function) => {
+            Some(RelationshipType::ClassToMethod)
+        }
+        _ => None,
+    }
 }
