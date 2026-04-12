@@ -935,6 +935,21 @@ impl JsAnalyzer {
         let mut module_info = build_module_info(&parsed, &defs, &ctx.lt);
         module_info.cjs_exports = cjs_exports;
 
+        // Add CJS require() imports to module_info so the cross-file resolver can see them
+        for imp in &imports {
+            if let JsImportKind::CjsRequire { imported_name } = &imp.kind {
+                module_info.imports.push(OwnedImportEntry {
+                    specifier: imp.specifier.clone(),
+                    imported_name: imported_name
+                        .as_ref()
+                        .map_or(ImportedName::Default, |n| ImportedName::Named(n.clone())),
+                    local_name: imp.local_name.clone(),
+                    is_type: false,
+                    range: imp.range,
+                });
+            }
+        }
+
         Ok(JsFileAnalysis {
             relative_path: relative_path.to_string(),
             defs,

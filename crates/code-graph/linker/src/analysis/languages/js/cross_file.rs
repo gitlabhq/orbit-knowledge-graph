@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use super::types::{
-    ExportedBinding, ImportedName, JsCallEdge, JsCallSite, JsCallTarget, JsModuleInfo,
+    CjsExport, ExportedBinding, ImportedName, JsCallEdge, JsCallSite, JsCallTarget, JsModuleInfo,
 };
 
 pub struct JsCrossFileResolver {
@@ -276,12 +276,52 @@ impl JsCrossFileResolver {
             return Some((module_path.to_string(), binding.clone()));
         }
 
-        match imported_name {
-            ImportedName::Named(name) => {
+        // Fall through to star exports, then CJS exports
+        if let ImportedName::Named(name) = imported_name
+            && let Some(result) =
                 self.resolve_star_export(name, module_path, modules, &mut HashSet::new(), 0)
-            }
-            ImportedName::Default | ImportedName::Namespace => None,
+        {
+            return Some(result);
         }
+
+        // CJS fallback: module.exports = ... or exports.name = ...
+        let cjs_binding = match imported_name {
+            ImportedName::Named(name) => target_module.cjs_exports.iter().find_map(|e| {
+                if let CjsExport::Named { name: n, range, .. } = e
+                    && n == name
+                {
+                    Some(ExportedBinding {
+                        local_fqn: name.clone(),
+                        range: *range,
+                        definition_range: target_module.definition_fqns.get(name.as_str()).copied(),
+                        is_type: false,
+                        is_default: false,
+                        reexport_source: None,
+                        reexport_name: None,
+                    })
+                } else {
+                    None
+                }
+            }),
+            ImportedName::Default => target_module.cjs_exports.iter().find_map(|e| {
+                if let CjsExport::Default { range } = e {
+                    Some(ExportedBinding {
+                        local_fqn: "default".to_string(),
+                        range: *range,
+                        definition_range: Some(*range),
+                        is_type: false,
+                        is_default: true,
+                        reexport_source: None,
+                        reexport_name: None,
+                    })
+                } else {
+                    None
+                }
+            }),
+            ImportedName::Namespace => None,
+        };
+
+        cjs_binding.map(|b| (module_path.to_string(), b))
     }
 
     fn binding_definition_range(
