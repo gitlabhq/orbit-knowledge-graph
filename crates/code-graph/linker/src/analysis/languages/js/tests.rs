@@ -166,8 +166,8 @@ mod integration_tests {
         setup_js_fixture_pipeline,
     };
     use crate::analysis::languages::js::{
-        ImportedName, JsCallTarget, JsDirective, JsImportKind, detect_workspaces, extract_scripts,
-        is_bun_project,
+        ImportedName, JsCallConfidence, JsCallTarget, JsDirective, JsImportKind, detect_workspaces,
+        extract_scripts, is_bun_project,
     };
     use tracing_test::traced_test;
 
@@ -537,6 +537,34 @@ mod integration_tests {
         assert!(
             process_calls.iter().any(|fqn| fqn == "normalize"),
             "process should call normalize across files via namespace import"
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_js_variable_and_static_calls_use_fixture_repo() {
+        let analysis =
+            process_fixture_file("cross-file/variable-and-static-calls", "src/consumer.ts");
+        let js = analysis
+            .js_analysis
+            .expect("consumer.ts should produce JS analysis");
+
+        // P1: const p = new Parser(); p.parse(input) → Parser::parse
+        assert!(
+            js.calls.iter().any(|call| matches!(
+                &call.callee,
+                JsCallTarget::Direct { fqn, .. } if fqn == "Parser::parse"
+            ) && call.confidence == JsCallConfidence::Inferred),
+            "p.parse() should resolve to Parser::parse with Inferred confidence"
+        );
+
+        // P3: Parser.fromConfig("default") → Parser::fromConfig
+        assert!(
+            js.calls.iter().any(|call| matches!(
+                &call.callee,
+                JsCallTarget::Direct { fqn, .. } if fqn == "Parser::fromConfig"
+            ) && call.confidence == JsCallConfidence::Known),
+            "Parser.fromConfig() should resolve to Parser::fromConfig with Known confidence"
         );
     }
 
