@@ -613,13 +613,13 @@ mod tests {
                 RubyFqnPart::new(RubyFqnPartType::Class, class_name.to_string(), range),
                 RubyFqnPart::new(RubyFqnPartType::Method, method_name.to_string(), range),
             ],
-            code_graph_types::Language::Ruby,
+            parser_core::canonical::Language::Ruby,
         );
 
         DefinitionNode::new(
             fqn,
             "Method".to_string(),
-            code_graph_types::DefKind::Method,
+            parser_core::canonical::DefKind::Method,
             range,
             ArcIntern::new(file_path.to_string()),
         )
