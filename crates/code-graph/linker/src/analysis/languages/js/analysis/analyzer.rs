@@ -480,6 +480,17 @@ impl JsAnalyzer {
         let mut module_info = build_module_info(&parsed, &defs, &ctx.lt);
         module_info.cjs_exports = cjs_exports;
 
+        // Fix Vue SFC default export: point it to the virtual component class
+        if let Some(default_binding) = module_info.exports.get_mut("default")
+            && default_binding.local_fqn == "default"
+            && let Some(vc) = defs
+                .iter()
+                .find(|d| d.kind == JsDefKind::Class && d.is_exported)
+        {
+            default_binding.local_fqn = vc.fqn.clone();
+            default_binding.definition_range = Some(vc.range);
+        }
+
         for imp in &imports {
             if let JsImportKind::CjsRequire { imported_name } = &imp.kind {
                 module_info.imports.push(OwnedImportEntry {

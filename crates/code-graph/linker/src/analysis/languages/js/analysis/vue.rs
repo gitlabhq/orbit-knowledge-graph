@@ -45,15 +45,34 @@ pub(super) fn extract_vue_options_api(
                     .to_string()
             });
 
-        // Only create virtual class if the object has methods or computed
-        let has_component_methods = obj.properties.iter().any(|prop| {
+        // Only create virtual class if the object has Vue component structure
+        let vue_keys: &[&str] = &[
+            "methods",
+            "computed",
+            "watch",
+            "data",
+            "mounted",
+            "created",
+            "beforeDestroy",
+            "destroyed",
+            "beforeMount",
+            "updated",
+            "beforeCreate",
+            "beforeUnmount",
+            "unmounted",
+            "activated",
+            "deactivated",
+            "errorCaptured",
+        ];
+        let has_component_structure = obj.properties.iter().any(|prop| {
             let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
                 return false;
             };
-            let name = p.key.static_name();
-            name.as_deref() == Some("methods") || name.as_deref() == Some("computed")
+            p.key
+                .static_name()
+                .is_some_and(|n| vue_keys.contains(&n.as_ref()))
         });
-        if !has_component_methods {
+        if !has_component_structure {
             continue;
         }
 

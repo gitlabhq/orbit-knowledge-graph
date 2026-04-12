@@ -215,7 +215,18 @@ pub(super) fn extract_call_edges(
             }
 
             let caller_scope = reference.scope_id();
-            let caller_info = ctx.find_enclosing_def(caller_scope);
+            let caller_info = ctx.find_enclosing_def(caller_scope).or_else(|| {
+                // Fallback: find the smallest def whose byte range contains this call site.
+                // Catches Vue method shorthands, arrow function bodies, watchers, data(),
+                // lifecycle hooks -- any call inside a known definition's range.
+                let call_offset = ref_span.start as usize;
+                defs.iter()
+                    .filter(|d| {
+                        d.range.byte_offset.0 <= call_offset && call_offset < d.range.byte_offset.1
+                    })
+                    .min_by_key(|d| d.range.byte_offset.1 - d.range.byte_offset.0)
+                    .map(|d| (d.fqn.clone(), d.range))
+            });
             let call_site_span = ctx.nodes.get_node(ref_node_id).span();
             let call_site_range = ctx.lt.span_to_range(call_site_span);
             // P4: callback-as-argument gets Guessed confidence
@@ -305,11 +316,15 @@ pub(super) fn extract_call_edges(
                         if enclosing_class.is_none() && caller_method.is_some() =>
                     {
                         let method = caller_method.as_ref().unwrap();
+                        let watch_name = format!("watch_{method}");
                         for def in defs.iter() {
                             if let JsDefKind::Method { class_fqn, .. } = &def.kind
-                                && def.name == *method
+                                && (def.name == *method || def.name == watch_name)
                             {
                                 enclosing_class = Some(class_fqn.clone());
+                                if def.name == watch_name {
+                                    caller_method = Some(watch_name.clone());
+                                }
                                 break;
                             }
                         }
