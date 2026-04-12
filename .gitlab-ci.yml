@@ -431,9 +431,8 @@ e2e-gdk-test:
       allow_failure: true
   before_script:
     - !reference [.sccache-template, before_script]
-    - apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv procps
+    - apt-get update -qq && apt-get install -y -qq python3 python3-pip procps
     - python3 -m pip install --break-system-packages -r tests/e2e/requirements.txt
-    - cargo build --release -p gkg-server
   script:
     - |
       # Wait for GDK service to be fully ready (entrypoint takes ~3-5 min)
@@ -449,35 +448,39 @@ e2e-gdk-test:
         sleep 1
       done
     - |
-      # Get OAuth token, then use it to create a real Personal Access Token
-      OAUTH=$(curl -s -X POST "http://gdk.test:3000/oauth/token" \
-        -d "grant_type=password&username=root&password=5iveL!fe" 2>/dev/null \
-        | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
-      echo "OAuth token length: ${#OAUTH}"
-      PAT=$(curl -s -X POST "http://gdk.test:3000/api/v4/users/1/personal_access_tokens" \
-        -H "Authorization: Bearer $OAUTH" \
+      # The seed-data.rb inside the service container creates a PAT and saves
+      # it at /home/gdk/.gdk_token. We can't access the service filesystem,
+      # so we create our own PAT via the API using the root password.
+      # First try: direct PAT creation endpoint (GitLab 16.0+)
+      PAT=$(curl -s --max-time 30 -X POST "http://gdk.test:3000/api/v4/users/1/personal_access_tokens" \
         -H "Content-Type: application/json" \
-        -d '{"name":"e2e-ci","scopes":["api","read_api","read_user","read_repository"]}' 2>/dev/null \
-        | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+        --user "root:5iveL!fe" \
+        -d '{"name":"e2e-ci-'$$'","scopes":["api","read_api","read_user","read_repository"],"expires_at":"2027-01-01"}' 2>/dev/null \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token',''))" 2>/dev/null || echo "")
+      if [ -z "$PAT" ]; then
+        # Fallback: use OAuth resource owner flow
+        OAUTH=$(curl -s --max-time 30 -X POST "http://gdk.test:3000/oauth/token" \
+          -d "grant_type=password&username=root&password=5iveL!fe" 2>/dev/null \
+          | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || echo "")
+        if [ -n "$OAUTH" ]; then
+          PAT=$(curl -s --max-time 30 -X POST "http://gdk.test:3000/api/v4/users/1/personal_access_tokens" \
+            -H "Authorization: Bearer $OAUTH" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"e2e-ci-'$$'","scopes":["api","read_api","read_user","read_repository"],"expires_at":"2027-01-01"}' 2>/dev/null \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || echo "")
+        fi
+      fi
       echo "$PAT" > ~/.gdk_token
       echo "PAT created (length: ${#PAT})"
+      if [ -z "$PAT" ]; then
+        echo "ERROR: Failed to create PAT. Checking API connectivity..."
+        curl -s --max-time 10 "http://gdk.test:3000/api/v4/version" 2>/dev/null | head -c 200
+        echo ""
+      fi
     - |
-      # Start GKG processes connected to the GDK service
-      export GKG__GITLAB__BASE_URL=http://gdk.test:3000
-      export GKG__NATS__URL=gdk.test:4222
-      export GKG__GRAPH__URL=http://gdk.test:8123
-      export GKG__GRAPH__DATABASE=gitlab_clickhouse_main_development
-      export GKG__DATALAKE__URL=http://gdk.test:8123
-      export GKG__DATALAKE__DATABASE=gitlab_clickhouse_development
-      export GKG__BIND_ADDRESS=0.0.0.0:4200
-      export GKG__GRPC_BIND_ADDRESS=0.0.0.0:50054
-      export RUST_LOG=info
-      target/release/gkg-server --mode=webserver &
-      target/release/gkg-server --mode=indexer &
-      export GKG__SCHEDULE__TASKS__GLOBAL__CRON='* * * * * *'
-      export GKG__SCHEDULE__TASKS__NAMESPACE__CRON='* * * * * *'
-      target/release/gkg-server --mode=dispatch-indexing &
-      sleep 5
+      # Export vars for Robot Framework tests
+      export GDK_URL="http://gdk.test:3000"
+      export CLICKHOUSE_URL="http://gdk.test:8123"
     - robot --outputdir results tests/e2e/gkg_validation/
   after_script:
     - killall gkg-server 2>/dev/null || true
