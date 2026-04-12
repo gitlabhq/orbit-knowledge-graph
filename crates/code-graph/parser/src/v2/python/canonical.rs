@@ -187,6 +187,7 @@ fn extract_class(
         fqn: build_fqn(scope_stack, &name),
         range: node_range(node),
         is_top_level: scope_stack.is_empty(),
+        metadata: None,
     })
 }
 
@@ -213,6 +214,7 @@ fn extract_function(
         fqn: build_fqn(scope_stack, &name),
         range,
         is_top_level: scope_stack.is_empty(),
+        metadata: None,
     })
 }
 
@@ -241,6 +243,7 @@ fn extract_lambda_assignment(
         fqn: build_fqn(scope_stack, &name),
         range: node_range(node),
         is_top_level: scope_stack.is_empty(),
+        metadata: None,
     })
 }
 
@@ -392,6 +395,7 @@ fn extract_call_reference(
         scope_fqn: scope_fqn(scope_stack),
         status: ReferenceStatus::Unresolved,
         target_fqn: None,
+        expression: None,
     })
 }
 

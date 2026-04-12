@@ -66,6 +66,37 @@ pub struct CanonicalDefinition {
     /// Whether this is a top-level definition (not nested inside another definition).
     /// Replaces the old `fqn[0].node_type == Package/Namespace` checks.
     pub is_top_level: bool,
+    /// Language-neutral metadata for resolution. Parsers populate whichever
+    /// fields are relevant to the language. The resolver reads them generically.
+    /// `None` for definitions that carry no resolution-relevant metadata
+    /// (lambdas, enum entries, packages, etc.).
+    /// Boxed to keep CanonicalDefinition small — most definitions have no metadata.
+    pub metadata: Option<Box<DefinitionMetadata>>,
+}
+
+/// Resolution-relevant metadata extracted by the parser.
+///
+/// Flat struct with optional fields rather than a per-language enum.
+/// Each parser fills in what its language provides. The resolver reads
+/// whichever fields are present without knowing the source language.
+#[derive(Debug, Clone, Default)]
+pub struct DefinitionMetadata {
+    /// Super types (class parents, implemented interfaces).
+    /// e.g. `["Animal", "Serializable"]` for `class Dog extends Animal implements Serializable`.
+    pub super_types: Vec<String>,
+    /// Return type of a method/function. `None` for void/untyped.
+    /// e.g. `Some("String")` for `public String getName()`.
+    pub return_type: Option<String>,
+    /// Type annotation on a field, parameter, or local variable.
+    /// e.g. `Some("int")` for `int x = 5`. `None` for `var x = 5` or Python's untyped.
+    pub type_annotation: Option<String>,
+    /// Receiver type for extension functions/properties (Kotlin).
+    /// e.g. `Some("String")` for `fun String.isBlank(): Boolean`.
+    pub receiver_type: Option<String>,
+    /// Decorators/annotations on the definition (Python's `@classmethod`, etc.).
+    pub decorators: Vec<String>,
+    /// If this definition is a companion object, the FQN of the class it belongs to.
+    pub companion_of: Option<String>,
 }
 
 /// A parsed import, language-agnostic.
@@ -91,6 +122,41 @@ pub struct CanonicalReference {
     pub status: ReferenceStatus,
     /// FQN of the resolved target, if any.
     pub target_fqn: Option<Fqn>,
+    /// Linearized expression chain for member access resolution.
+    /// e.g. `obj.getService().process()` →
+    ///   `[Ident("obj"), Field("getService"), Call, Field("process"), Call]`
+    ///
+    /// `None` for simple name references (bare `foo()` calls).
+    /// Parsers flatten recursive expression trees into this linear form.
+    pub expression: Option<Vec<ExpressionStep>>,
+}
+
+/// A single step in a linearized expression chain.
+///
+/// Chains are read left-to-right. The resolver resolves the base (first element)
+/// then applies each subsequent step, threading the resolved type through.
+///
+/// Example: `this.field.method(arg).prop`
+/// → `[This, Field("field"), Call("method"), Field("prop")]`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ExpressionStep {
+    /// Bare identifier — the base of the chain. e.g. `foo` in `foo.bar()`.
+    Ident(String),
+    /// Field/attribute access. e.g. `bar` in `foo.bar`.
+    Field(String),
+    /// Method/function call. e.g. `bar` in `foo.bar()`.
+    /// For bare calls, this is the only step: `[Call("foo")]`.
+    Call(String),
+    /// Constructor invocation. e.g. `new Foo()` → `[New("Foo")]`.
+    New(String),
+    /// `this` or `self` reference.
+    This,
+    /// `super` reference.
+    Super,
+    /// Array/index access. Result type is the element type.
+    Index,
+    /// Method reference (Java `Foo::bar`, Kotlin `Foo::bar`).
+    MethodRef(String),
 }
 
 /// A directory in the code graph.

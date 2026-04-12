@@ -196,6 +196,7 @@ fn make_def(
         fqn: Fqn::from_scope(scope, name, LANG.fqn_separator()),
         range: node_range(node),
         is_top_level: scope.is_empty() || (scope.len() == 1 && scope[0].contains('.')),
+        metadata: None,
     }
 }
 
@@ -319,6 +320,7 @@ fn extract_call(
         scope_fqn: Fqn::from_scope_only(scope, LANG.fqn_separator()),
         status: ReferenceStatus::Unresolved,
         target_fqn: None,
+        expression: None,
     });
 }
 
@@ -337,14 +339,12 @@ fn node_range(node: &Node<StrDoc<SupportLang>>) -> Range {
 mod tests {
     use super::*;
 
-    
-        fn parse(code: &str) -> CanonicalResult {
-            KotlinCanonicalParser
-                .parse_file(code.as_bytes(), "Test.kt")
-                .unwrap()
-                .0
-        }
-    
+    fn parse(code: &str) -> CanonicalResult {
+        KotlinCanonicalParser
+            .parse_file(code.as_bytes(), "Test.kt")
+            .unwrap()
+            .0
+    }
 
     #[test]
     fn class_with_methods() {

@@ -293,6 +293,7 @@ mod tests {
             fqn: Fqn::from_parts(fqn_parts, "."),
             range: Range::new(Position::new(0, 0), Position::new(10, 0), (0, 100)),
             is_top_level: fqn_parts.len() == 1,
+            metadata: None,
         }
     }
 

@@ -141,6 +141,7 @@ fn walk(
                 fqn: Fqn::from_scope(scope, &name, LANG.fqn_separator()),
                 range: node_range(node),
                 is_top_level: false,
+                metadata: None,
             });
         }
 
@@ -183,6 +184,7 @@ fn extract_named(
         fqn: Fqn::from_scope(scope, &name, LANG.fqn_separator()),
         range: node_range(node),
         is_top_level: scope.is_empty() || (scope.len() == 1 && is_package_scope(scope)),
+        metadata: None,
     })
 }
 
@@ -259,6 +261,7 @@ fn extract_method_invocation(
         scope_fqn: Fqn::from_scope_only(scope, LANG.fqn_separator()),
         status: ReferenceStatus::Unresolved,
         target_fqn: None,
+        expression: None,
     });
 }
 
@@ -281,6 +284,7 @@ fn extract_object_creation(
         scope_fqn: Fqn::from_scope_only(scope, LANG.fqn_separator()),
         status: ReferenceStatus::Unresolved,
         target_fqn: None,
+        expression: None,
     });
 }
 
@@ -306,14 +310,12 @@ fn node_range(node: &Node<StrDoc<SupportLang>>) -> Range {
 mod tests {
     use super::*;
 
-    
-        fn parse(code: &str) -> CanonicalResult {
-            JavaCanonicalParser
-                .parse_file(code.as_bytes(), "Test.java")
-                .unwrap()
-                .0
-        }
-    
+    fn parse(code: &str) -> CanonicalResult {
+        JavaCanonicalParser
+            .parse_file(code.as_bytes(), "Test.java")
+            .unwrap()
+            .0
+    }
 
     #[test]
     fn class_with_methods() {

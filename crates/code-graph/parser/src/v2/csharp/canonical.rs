@@ -174,6 +174,7 @@ fn walk(
                 fqn: Fqn::from_scope(scope, "indexer", LANG.fqn_separator()),
                 range: node_range(node),
                 is_top_level: false,
+                metadata: None,
             });
         }
         "variable_declarator" => {
@@ -188,6 +189,7 @@ fn walk(
                         fqn: Fqn::from_scope(scope, &name, LANG.fqn_separator()),
                         range: node_range(node),
                         is_top_level: false,
+                        metadata: None,
                     });
                 }
             }
@@ -232,6 +234,7 @@ fn extract_named(
         fqn: Fqn::from_scope(scope, &name, LANG.fqn_separator()),
         range: node_range(node),
         is_top_level: scope.is_empty() || scope.iter().all(|s| s.contains('.')),
+        metadata: None,
     })
 }
 
@@ -272,6 +275,7 @@ fn extract_method(
         fqn: Fqn::from_scope(scope, &name, LANG.fqn_separator()),
         range: node_range(node),
         is_top_level: false,
+        metadata: None,
     })
 }
 
@@ -295,6 +299,7 @@ fn extract_field(
         fqn: Fqn::from_scope(scope, &name, LANG.fqn_separator()),
         range: node_range(node),
         is_top_level: false,
+        metadata: None,
     })
 }
 
@@ -314,6 +319,7 @@ fn extract_operator(
         fqn: Fqn::from_scope(scope, &name, LANG.fqn_separator()),
         range: node_range(node),
         is_top_level: false,
+        metadata: None,
     })
 }
 
@@ -400,6 +406,7 @@ fn extract_invocation(
         scope_fqn: Fqn::from_scope_only(scope, LANG.fqn_separator()),
         status: ReferenceStatus::Unresolved,
         target_fqn: None,
+        expression: None,
     });
 }
 
@@ -424,6 +431,7 @@ fn extract_object_creation(
         scope_fqn: Fqn::from_scope_only(scope, LANG.fqn_separator()),
         status: ReferenceStatus::Unresolved,
         target_fqn: None,
+        expression: None,
     });
 }
 
@@ -442,14 +450,12 @@ fn node_range(node: &Node<StrDoc<SupportLang>>) -> Range {
 mod tests {
     use super::*;
 
-    
-        fn parse(code: &str) -> CanonicalResult {
-            CSharpCanonicalParser
-                .parse_file(code.as_bytes(), "Test.cs")
-                .unwrap()
-                .0
-        }
-    
+    fn parse(code: &str) -> CanonicalResult {
+        CSharpCanonicalParser
+            .parse_file(code.as_bytes(), "Test.cs")
+            .unwrap()
+            .0
+    }
 
     #[test]
     fn class_with_methods() {
