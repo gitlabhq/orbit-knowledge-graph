@@ -30,8 +30,8 @@ use crate::constants::{
 use crate::input::{Input, InputNode, QueryType};
 
 use ontology::constants::{
-    DEFAULT_PRIMARY_KEY, EDGE_TABLE, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
-    SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
+    DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
+    TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
 };
 
 const ROOT_SIP_CTE: &str = "_root_ids";
@@ -452,7 +452,7 @@ fn build_cascade_for_node(
             Expr::col(alias, select_col),
             DEFAULT_PRIMARY_KEY,
         )],
-        from: TableRef::scan(EDGE_TABLE, alias),
+        from: TableRef::scan(&input.compiler.default_edge_table, alias),
         where_clause: Expr::and_all([Some(parent_filter), Some(rel_filter), kind_filter]),
         ..Default::default()
     })
@@ -895,6 +895,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
     let backward_depth = max_depth / 2;
 
     // Build hop frontier CTEs and inject SIP into frontier arms.
+    let et = &input.compiler.default_edge_table;
     let mut new_ctes = Vec::new();
     inject_hop_frontiers(
         q,
@@ -903,6 +904,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
         forward_depth,
         true,
         &mut new_ctes,
+        et,
     );
     if backward_depth > 0 {
         inject_hop_frontiers(
@@ -912,6 +914,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
             backward_depth,
             false,
             &mut new_ctes,
+            et,
         );
     }
 
@@ -929,6 +932,7 @@ fn inject_hop_frontiers(
     max_depth: u32,
     is_forward: bool,
     new_ctes: &mut Vec<Cte>,
+    edge_table: &str,
 ) {
     let prefix = if is_forward { "_fwd_hop" } else { "_bwd_hop" };
     let anchor_col = if is_forward {
@@ -978,7 +982,7 @@ fn inject_hop_frontiers(
                     Expr::col(alias, next_col),
                     DEFAULT_PRIMARY_KEY,
                 )],
-                from: TableRef::scan(EDGE_TABLE, alias),
+                from: TableRef::scan(edge_table, alias),
                 where_clause: anchor_filter,
                 ..Default::default()
             },
