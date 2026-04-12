@@ -232,6 +232,101 @@ fn build_variable_type_map(nodes: &AstNodes) -> HashMap<String, (String, JsCallC
     map
 }
 
+/// Extract Vue Options API component methods/computed as definitions.
+/// Scans `export default { name: '...', methods: { ... }, computed: { ... } }`.
+fn extract_vue_options_api(
+    nodes: &AstNodes,
+    lt: &LineTable,
+    relative_path: &str,
+    defs: &mut Vec<JsDef>,
+    class_hierarchy: &mut HashMap<String, Option<String>>,
+) {
+    for node in nodes.iter() {
+        let AstKind::ExportDefaultDeclaration(decl) = node.kind() else {
+            continue;
+        };
+        let oxc::ast::ast::ExportDefaultDeclarationKind::ObjectExpression(obj) = &decl.declaration
+        else {
+            continue;
+        };
+
+        // Extract component name from `name: 'ComponentName'` or derive from file
+        let component_name = obj
+            .properties
+            .iter()
+            .find_map(|prop| {
+                let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
+                    return None;
+                };
+                if p.key.static_name().as_deref() != Some("name") {
+                    return None;
+                }
+                if let oxc::ast::ast::Expression::StringLiteral(s) = &p.value {
+                    Some(s.value.to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                std::path::Path::new(relative_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Component")
+                    .to_string()
+            });
+
+        // Register virtual class in hierarchy
+        class_hierarchy.insert(component_name.clone(), None);
+
+        // Add virtual class definition
+        defs.push(JsDef {
+            name: component_name.clone(),
+            fqn: component_name.clone(),
+            kind: JsDefKind::Class,
+            range: lt.span_to_range(obj.span),
+            is_exported: true,
+            type_annotation: None,
+        });
+
+        // Extract methods and computed properties
+        for prop in &obj.properties {
+            let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
+                continue;
+            };
+            let key_name = p.key.static_name();
+            let is_methods = key_name.as_deref() == Some("methods");
+            let is_computed = key_name.as_deref() == Some("computed");
+            if !is_methods && !is_computed {
+                continue;
+            }
+            let oxc::ast::ast::Expression::ObjectExpression(methods_obj) = &p.value else {
+                continue;
+            };
+            for method_prop in &methods_obj.properties {
+                let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(mp) = method_prop else {
+                    continue;
+                };
+                let Some(method_name) = mp.key.static_name() else {
+                    continue;
+                };
+                let method_name = method_name.to_string();
+                let fqn = format!("{component_name}::{method_name}");
+                defs.push(JsDef {
+                    name: method_name,
+                    fqn,
+                    kind: JsDefKind::Method {
+                        class_fqn: component_name.clone(),
+                        is_static: false,
+                    },
+                    range: lt.span_to_range(mp.span),
+                    is_exported: false,
+                    type_annotation: None,
+                });
+            }
+        }
+    }
+}
+
 fn extract_cjs_imports(nodes: &AstNodes, lt: &LineTable, imports: &mut Vec<JsImport>) {
     for node in nodes.iter() {
         if let AstKind::CallExpression(call) = node.kind() {
@@ -652,9 +747,31 @@ fn extract_call_edges(
                             caller_method = Some(name.to_string());
                         }
                     }
+                    // Vue Options API: method shorthand in { methods: { handleClick() {} } }
+                    AstKind::ObjectProperty(prop) if caller_method.is_none() && prop.method => {
+                        if let Some(name) = prop.key.static_name() {
+                            caller_method = Some(name.to_string());
+                        }
+                    }
                     AstKind::Class(class) => {
                         if let Some(id) = &class.id {
                             enclosing_class = Some(id.name.to_string());
+                        }
+                        break;
+                    }
+                    // Vue Options API: export default { ... } acts as a virtual class
+                    AstKind::ExportDefaultDeclaration(_)
+                        if enclosing_class.is_none() && caller_method.is_some() =>
+                    {
+                        // Find the component name from defs
+                        let method = caller_method.as_ref().unwrap();
+                        for def in defs.iter() {
+                            if let JsDefKind::Method { class_fqn, .. } = &def.kind
+                                && def.name == *method
+                            {
+                                enclosing_class = Some(class_fqn.clone());
+                                break;
+                            }
                         }
                         break;
                     }
@@ -908,7 +1025,7 @@ impl JsAnalyzer {
 
         let lt = LineTable::build(source);
         let scope_defs = build_scope_def_map(scoping);
-        let class_hierarchy = build_class_hierarchy(nodes);
+        let mut class_hierarchy = build_class_hierarchy(nodes);
 
         let ctx = Ctx {
             scoping,
@@ -921,6 +1038,15 @@ impl JsAnalyzer {
         let mut defs = extract_definitions(&ctx, &parsed);
         let (method_defs, classes) = extract_class_members(&ctx, &semantic);
         defs.extend(method_defs);
+
+        // Extract Vue Options API methods/computed as definitions
+        extract_vue_options_api(
+            nodes,
+            &ctx.lt,
+            relative_path,
+            &mut defs,
+            &mut class_hierarchy,
+        );
 
         let imports = extract_imports(&ctx, &parsed);
         let variable_type_map = build_variable_type_map(nodes);

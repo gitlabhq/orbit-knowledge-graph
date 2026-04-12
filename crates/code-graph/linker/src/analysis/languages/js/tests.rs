@@ -625,6 +625,48 @@ mod integration_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn test_js_vue_options_api_methods() {
+        let setup = setup_js_fixture_pipeline("cross-file/vue-options-api").await;
+
+        // Vue Options API should create virtual class + method definitions
+        let component_defs: Vec<_> = setup
+            .graph_data
+            .definition_nodes
+            .iter()
+            .filter(|n| n.fqn.to_string() == "MyComponent")
+            .collect();
+        assert!(
+            !component_defs.is_empty(),
+            "Vue Options API should create a virtual class definition for MyComponent"
+        );
+
+        let method_defs: Vec<_> = setup
+            .graph_data
+            .definition_nodes
+            .iter()
+            .filter(|n| {
+                let fqn = n.fqn.to_string();
+                fqn == "MyComponent::handleClick" || fqn == "MyComponent::submitForm"
+            })
+            .collect();
+        assert_eq!(
+            method_defs.len(),
+            2,
+            "Vue Options API methods should produce method definitions"
+        );
+
+        // this.submitForm() in handleClick should resolve
+        let handle_click_calls = setup.find_calls_from_method("MyComponent::handleClick");
+        assert!(
+            handle_click_calls
+                .iter()
+                .any(|fqn| fqn == "MyComponent::submitForm"),
+            "this.submitForm() should resolve to MyComponent::submitForm in Options API"
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn test_js_inheritance_calls_use_fixture_repo() {
         let setup = setup_js_fixture_pipeline("cross-file/inheritance-calls").await;
 
