@@ -41,14 +41,7 @@ Feature.enable(:knowledge_graph)
 Feature.enable(:knowledge_graph_infra)
 puts "knowledge_graph: #{Feature.enabled?(:knowledge_graph)}"
 
-puts "--- Running Duo setup ---"
-# Create gitlab-duo group with Duo Enterprise add-on
-begin
-  Rake::Task["gitlab:duo:setup"].invoke
-  puts "Duo setup complete"
-rescue => e
-  puts "Duo setup skipped: #{e.message}"
-end
+puts "--- Duo setup skipped (not needed for GKG e2e) ---"
 
 puts "--- Setting AI Gateway URL ---"
 begin
@@ -60,7 +53,7 @@ rescue => e
 end
 
 puts "--- Enabling knowledge graph namespaces ---"
-Namespace.where(type: "Group").root.each do |ns|
+Namespace.where(type: "Group", parent_id: nil).each do |ns|
   ActiveRecord::Base.connection.execute(
     "INSERT INTO knowledge_graph_enabled_namespaces (root_namespace_id, created_at, updated_at) " \
     "VALUES (#{ns.id}, NOW(), NOW()) ON CONFLICT DO NOTHING"

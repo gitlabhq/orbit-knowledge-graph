@@ -1,0 +1,46 @@
+# E2E GDK CI Test Infrastructure -- Progress
+
+## Goal
+Run the full GKG stack (GDK + Siphon + NATS + ClickHouse + GKG components)
+in CI with HTTPS, test users, and Robot Framework e2e tests.
+
+## Status: IN PROGRESS -- Container verified working locally
+
+## What's Done
+- [x] Docker image built and tested locally (25.3GB)
+  - Base: GDK-in-a-box (full GDK with mise, Ruby, Node, etc.)
+  - ClickHouse installed via apt (system package)
+  - NATS installed as static binary
+  - mkcert for HTTPS certs (gdk.test)
+  - gdk.yml: HTTPS/nginx, ClickHouse, NATS, Siphon, knowledge_graph
+  - gdk reconfigure runs successfully during build
+- [x] Container startup verified -- all 14 services running:
+  - Rails (HTTPS at gdk.test:3443) -- readiness OK
+  - ClickHouse (port 8123) -- queries work
+  - NATS (port 4222) -- connected
+  - Siphon (producer + consumer) -- CDC replication active
+  - nginx, Workhorse, Gitaly, PostgreSQL, Redis, etc.
+- [x] Data seeding verified:
+  - EE Ultimate license installed
+  - Cloud Connector key created
+  - knowledge_graph feature flag enabled
+  - Knowledge graph namespaces enabled for all root groups
+  - PAT created and saved to ~/.gdk_token
+- [x] Robot Framework test suite created (3 suites, 10+ tests)
+- [x] CI job added to .gitlab-ci.yml (manual trigger)
+- [x] Branch feat/e2e-ci-gdk-tests pushed
+
+## Fixes Applied
+- ClickHouse memory limit increased to 8GB (default 3GB too low)
+- PostgreSQL wal_level set to 'logical' for Siphon CDC
+- ClickHouse databases created and migrations run at startup
+- click_house.yml config copied from example at startup
+- Seed script fixed: Namespace.root -> parent_id: nil
+- Seed script: removed gitlab:duo:setup (not available in this GDK)
+
+## What Remains
+- [ ] Rebuild image with all entrypoint fixes
+- [ ] Run Robot Framework tests against the container
+- [ ] Push image to registry for CI use
+- [ ] Validate CI job end-to-end
+- [ ] Clean up and finalize MR
