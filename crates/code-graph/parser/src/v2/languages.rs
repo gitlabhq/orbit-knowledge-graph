@@ -2,16 +2,19 @@ use code_graph_types::{CanonicalResult, Language};
 use once_cell::sync::Lazy;
 use rustc_hash::FxHashMap;
 
-use super::csharp::CSharpCanonicalParser;
-use super::java::JavaCanonicalParser;
-use super::kotlin::KotlinCanonicalParser;
-use super::python::PythonCanonicalParser;
 use super::CanonicalParser;
 
-/// Generates static lookup maps from the Language enum.
-/// All config (extensions, names, separators) lives on Language in code-graph-types.
+/// Single declaration that registers all v2-supported languages.
+///
+/// Generates:
+/// - `ALL_LANGUAGES` — slice of all registered Language variants
+/// - `EXTENSION_MAP` — static file extension → Language lookup
+/// - `LANGUAGE_NAME_MAP` — static language name → Language lookup
+/// - `parse_file()` — static dispatch to the right parser
+///
+/// Adding a new language to v2: implement `CanonicalParser`, add one line here.
 macro_rules! register_languages {
-    ($($variant:ident),+ $(,)?) => {
+    ($( $variant:ident => $parser:expr ),+ $(,)?) => {
         pub const ALL_LANGUAGES: &[Language] = &[$(Language::$variant),+];
 
         static EXTENSION_MAP: Lazy<FxHashMap<&'static str, Language>> = Lazy::new(|| {
@@ -24,6 +27,7 @@ macro_rules! register_languages {
             map
         });
 
+        #[allow(dead_code)]
         static LANGUAGE_NAME_MAP: Lazy<FxHashMap<&'static str, Language>> = Lazy::new(|| {
             let mut map = FxHashMap::default();
             for lang in ALL_LANGUAGES {
@@ -33,17 +37,28 @@ macro_rules! register_languages {
             }
             map
         });
+
+        /// Parse a file using the v2 canonical parser for the given language.
+        /// Returns None for languages not yet registered.
+        pub fn parse_file(
+            language: Language,
+            source: &[u8],
+            file_path: &str,
+        ) -> Option<crate::Result<CanonicalResult>> {
+            let result = match language {
+                $(Language::$variant => $parser.parse_file(source, file_path),)+
+                _ => return None,
+            };
+            Some(result)
+        }
     };
 }
 
 register_languages! {
-    Ruby,
-    Python,
-    TypeScript,
-    Kotlin,
-    CSharp,
-    Java,
-    Rust,
+    Python  => super::python::PythonCanonicalParser,
+    Java    => super::java::JavaCanonicalParser,
+    Kotlin  => super::kotlin::KotlinCanonicalParser,
+    CSharp  => super::csharp::CSharpCanonicalParser,
 }
 
 pub fn detect_language_from_extension(extension: &str) -> Option<Language> {
@@ -55,23 +70,6 @@ pub fn detect_language_from_path(path: &str) -> Option<Language> {
         .extension()
         .and_then(|e| e.to_str())?;
     detect_language_from_extension(ext)
-}
-
-/// Parse a file using the v2 canonical parser for the given language.
-/// Returns None for languages not yet supported in v2.
-pub fn parse_file(
-    language: Language,
-    source: &[u8],
-    file_path: &str,
-) -> Option<crate::Result<CanonicalResult>> {
-    let result = match language {
-        Language::Python => PythonCanonicalParser.parse_file(source, file_path),
-        Language::Java => JavaCanonicalParser.parse_file(source, file_path),
-        Language::Kotlin => KotlinCanonicalParser.parse_file(source, file_path),
-        Language::CSharp => CSharpCanonicalParser.parse_file(source, file_path),
-        _ => return None,
-    };
-    Some(result)
 }
 
 pub fn get_supported_extensions() -> Vec<&'static str> {
@@ -98,10 +96,12 @@ mod tests {
             Some(Language::Java)
         );
         assert_eq!(
-            detect_language_from_path("lib/foo.rb"),
-            Some(Language::Ruby)
+            detect_language_from_path("src/app.py"),
+            Some(Language::Python)
         );
         assert_eq!(detect_language_from_path("README.md"), None);
+        // Ruby not yet registered in v2
+        assert_eq!(detect_language_from_path("lib/foo.rb"), None);
     }
 
     #[test]
@@ -109,10 +109,23 @@ mod tests {
         let exts = get_supported_extensions();
         assert!(exts.contains(&"py"));
         assert!(exts.contains(&"java"));
-        assert!(exts.contains(&"rb"));
         assert!(exts.contains(&"kt"));
         assert!(exts.contains(&"cs"));
-        assert!(exts.contains(&"rs"));
-        assert!(exts.contains(&"ts"));
+    }
+
+    #[test]
+    fn parse_file_dispatches() {
+        let source = b"class Foo:\n    pass\n";
+        let result = parse_file(Language::Python, source, "test.py");
+        assert!(result.is_some());
+        let result = result.unwrap().unwrap();
+        assert_eq!(result.language, Language::Python);
+        assert!(!result.definitions.is_empty());
+    }
+
+    #[test]
+    fn parse_file_unsupported_returns_none() {
+        let source = b"puts 'hello'";
+        assert!(parse_file(Language::Ruby, source, "test.rb").is_none());
     }
 }
