@@ -8,6 +8,7 @@ pub mod clickhouse;
 pub mod clickhouse_ddl;
 pub mod ddl_generator;
 pub mod duckdb;
+pub mod duckdb_ddl;
 
 use gkg_server_config::QueryConfig;
 

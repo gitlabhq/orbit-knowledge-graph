@@ -30,5 +30,4 @@ pre-commit:
       run: bash ./scripts/check-schema-version.sh
       glob:
         - "config/graph.sql"
-        - "config/graph_local.sql"
         - "config/ontology/**/*.yaml"

@@ -6,7 +6,6 @@ use duckdb::params;
 
 use crate::converter::LocalGraphData;
 use crate::error::{DuckDbError, Result};
-use crate::schema::{CODE_GRAPH_TABLES, SCHEMA_DDL};
 
 const MAX_OPEN_RETRIES: u32 = 10;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
@@ -79,17 +78,30 @@ impl DuckDbClient {
         Ok(Self { conn })
     }
 
-    pub fn initialize_schema(&self) -> Result<()> {
+    /// Create all graph tables and the manifest table from the given DDL.
+    ///
+    /// The DDL is typically generated from the ontology via
+    /// `generate_local_tables` + `emit_duckdb_create_table`, with the
+    /// manifest DDL (`MANIFEST_DDL`) appended.
+    pub fn initialize_schema(&self, ddl: &str) -> Result<()> {
         self.conn
-            .execute_batch(SCHEMA_DDL)
+            .execute_batch(ddl)
             .map_err(|e| DuckDbError::Schema(e.to_string()))?;
         Ok(())
     }
 
     /// Bulk insert via DuckDB's Appender, which converts Arrow RecordBatch
     /// directly to DuckDB DataChunks — no SQL parsing, no vtab overhead.
-    pub fn insert_arrow(&self, table: &str, batch: RecordBatch) -> Result<()> {
-        if !CODE_GRAPH_TABLES.contains(&table) {
+    ///
+    /// `allowed_tables` is an allowlist of valid table names. Pass the
+    /// table names derived from the ontology's `local_db` config.
+    pub fn insert_arrow(
+        &self,
+        table: &str,
+        batch: RecordBatch,
+        allowed_tables: &[&str],
+    ) -> Result<()> {
+        if !allowed_tables.contains(&table) {
             return Err(DuckDbError::Schema(format!("unknown table: {table}")));
         }
         if batch.num_rows() == 0 {
@@ -119,11 +131,11 @@ impl DuckDbClient {
         Ok(batches)
     }
 
-    /// Deletes all data across all tables. In local mode each DB file is
-    /// one project, so a full truncate is the correct reset before re-indexing.
-    /// Delete all data from all code graph tables.
-    pub fn delete_all_data(&self) -> Result<()> {
-        for table in CODE_GRAPH_TABLES {
+    /// Deletes all data across all graph tables. In local mode each DB file
+    /// is one project, so a full truncate is the correct reset before
+    /// re-indexing. The manifest table is preserved.
+    pub fn delete_all_data(&self, tables: &[&str]) -> Result<()> {
+        for table in tables {
             self.conn
                 .execute(&format!("DELETE FROM {table}"), params![])?;
         }
@@ -222,6 +234,38 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use std::sync::Arc;
 
+    /// Test DDL covering only the tables these tests exercise.
+    const TEST_DDL: &str = "\
+CREATE TABLE IF NOT EXISTS gl_directory (
+    id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    branch VARCHAR NOT NULL,
+    commit_sha VARCHAR NOT NULL,
+    path VARCHAR NOT NULL,
+    name VARCHAR NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gl_file (
+    id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    branch VARCHAR NOT NULL,
+    commit_sha VARCHAR NOT NULL,
+    path VARCHAR NOT NULL,
+    name VARCHAR NOT NULL,
+    extension VARCHAR,
+    language VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS gl_edge (
+    source_id BIGINT NOT NULL,
+    source_kind VARCHAR NOT NULL,
+    relationship_kind VARCHAR NOT NULL,
+    target_id BIGINT NOT NULL,
+    target_kind VARCHAR NOT NULL
+);";
+
+    const TEST_TABLES: &[&str] = &["gl_directory", "gl_file", "gl_edge"];
+
     fn file_schema() -> Arc<Schema> {
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int64, false),
@@ -256,7 +300,7 @@ mod tests {
     #[test]
     fn schema_creation_and_sql_roundtrip() {
         let client = DuckDbClient::open_in_memory().unwrap();
-        client.initialize_schema().unwrap();
+        client.initialize_schema(TEST_DDL).unwrap();
 
         client
             .conn
@@ -291,10 +335,10 @@ mod tests {
     #[test]
     fn appender_insert_and_query() {
         let client = DuckDbClient::open_in_memory().unwrap();
-        client.initialize_schema().unwrap();
+        client.initialize_schema(TEST_DDL).unwrap();
 
         let batch = make_file_batch(&[10, 11], &["a.rs", "b.rs"]);
-        client.insert_arrow("gl_file", batch).unwrap();
+        client.insert_arrow("gl_file", batch, TEST_TABLES).unwrap();
 
         let result = client
             .query_arrow("SELECT id, name FROM gl_file ORDER BY id")
@@ -314,7 +358,7 @@ mod tests {
     #[test]
     fn large_batch_appender() {
         let client = DuckDbClient::open_in_memory().unwrap();
-        client.initialize_schema().unwrap();
+        client.initialize_schema(TEST_DDL).unwrap();
 
         let n = 5000;
         let ids: Vec<i64> = (0..n).collect();
@@ -322,7 +366,7 @@ mod tests {
         let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
 
         let batch = make_file_batch(&ids, &name_refs);
-        client.insert_arrow("gl_file", batch).unwrap();
+        client.insert_arrow("gl_file", batch, TEST_TABLES).unwrap();
 
         let result = client
             .query_arrow("SELECT count(*) as cnt FROM gl_file")
@@ -338,7 +382,7 @@ mod tests {
     #[test]
     fn delete_all_data_truncates() {
         let client = DuckDbClient::open_in_memory().unwrap();
-        client.initialize_schema().unwrap();
+        client.initialize_schema(TEST_DDL).unwrap();
 
         client
             .conn
@@ -355,7 +399,7 @@ mod tests {
             )
             .unwrap();
 
-        client.delete_all_data().unwrap();
+        client.delete_all_data(TEST_TABLES).unwrap();
 
         let batches = client
             .query_arrow("SELECT count(*) as cnt FROM gl_file")
@@ -374,7 +418,7 @@ mod tests {
         let db_path = dir.path().join("test.duckdb");
 
         let client = DuckDbClient::open(&db_path).unwrap();
-        client.initialize_schema().unwrap();
+        client.initialize_schema(TEST_DDL).unwrap();
         client
             .conn
             .execute(
@@ -401,20 +445,22 @@ mod tests {
     #[test]
     fn insert_arrow_rejects_unknown_table() {
         let client = DuckDbClient::open_in_memory().unwrap();
-        client.initialize_schema().unwrap();
+        client.initialize_schema(TEST_DDL).unwrap();
 
         let batch = make_file_batch(&[1], &["a.rs"]);
-        let err = client.insert_arrow("evil_table", batch).unwrap_err();
+        let err = client
+            .insert_arrow("evil_table", batch, TEST_TABLES)
+            .unwrap_err();
         assert!(err.to_string().contains("unknown table"));
     }
 
     #[test]
     fn insert_empty_batch_is_noop() {
         let client = DuckDbClient::open_in_memory().unwrap();
-        client.initialize_schema().unwrap();
+        client.initialize_schema(TEST_DDL).unwrap();
 
         let batch = make_file_batch(&[], &[]);
-        client.insert_arrow("gl_file", batch).unwrap();
+        client.insert_arrow("gl_file", batch, TEST_TABLES).unwrap();
 
         let result = client
             .query_arrow("SELECT count(*) as cnt FROM gl_file")
