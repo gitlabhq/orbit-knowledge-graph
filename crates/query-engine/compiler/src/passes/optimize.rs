@@ -447,12 +447,17 @@ fn build_cascade_for_node(
         )
     });
 
+    let edge_table = input
+        .compiler
+        .resolve_edge_table(rel_types)
+        .unwrap_or(&input.compiler.default_edge_table);
+
     Some(Query {
         select: vec![SelectExpr::new(
             Expr::col(alias, select_col),
             DEFAULT_PRIMARY_KEY,
         )],
-        from: TableRef::scan(&input.compiler.default_edge_table, alias),
+        from: TableRef::scan(edge_table, alias),
         where_clause: Expr::and_all([Some(parent_filter), Some(rel_filter), kind_filter]),
         ..Default::default()
     })
@@ -895,7 +900,10 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
     let backward_depth = max_depth / 2;
 
     // Build hop frontier CTEs and inject SIP into frontier arms.
-    let et = &input.compiler.default_edge_table;
+    let et = input
+        .compiler
+        .resolve_edge_table(&path.rel_types)
+        .unwrap_or(&input.compiler.default_edge_table);
     let mut new_ctes = Vec::new();
     inject_hop_frontiers(
         q,

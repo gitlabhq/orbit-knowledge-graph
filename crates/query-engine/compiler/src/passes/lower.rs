@@ -152,9 +152,16 @@ fn lower_search(input: &Input) -> Result<Node> {
 /// Multi-hop: UNION ALL of edge self-joins.
 /// Multi-rel: secondary edges JOINed on shared columns.
 fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
-    let et = input.compiler.default_edge_table.as_str();
+    // Pre-resolve edge tables for each relationship from the ontology mapping.
+    let rel_tables: Vec<String> = input
+        .relationships
+        .iter()
+        .map(|rel| resolve_rel_edge_table(&input.compiler, &rel.types))
+        .collect::<Result<_>>()?;
+
     let first_rel = input.relationships.first().unwrap();
     let (start_col, end_col) = first_rel.direction.edge_columns();
+    let et = &rel_tables[0];
 
     let mut select = Vec::new();
     let mut where_parts: Vec<Expr> = Vec::new();
@@ -215,6 +222,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 continue;
             };
 
+        let rel_et = &rel_tables[i];
         if rel.max_hops > 1 {
             let alias = format!("hop_e{i}");
             let (from_col, to_col) = rel.direction.union_columns();
@@ -228,7 +236,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 Expr::col(&shared_alias, &shared_col),
                 Expr::col(&alias, sec_shared_col),
             );
-            let union = build_hop_union_all(rel, &alias, et);
+            let union = build_hop_union_all(rel, &alias, rel_et);
             from = TableRef::join(JoinType::Inner, from, union, join_cond);
             select.extend(edge_select_exprs(&alias));
             select.push(edge_depth_select_expr(&alias));
@@ -267,7 +275,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 join_cond = Expr::and(join_cond, tf);
             }
 
-            let (sec_scan, _) = edge_scan(et, &alias, &None);
+            let (sec_scan, _) = edge_scan(rel_et, &alias, &None);
             from = TableRef::join(JoinType::Inner, from, sec_scan, join_cond);
             select.extend(edge_select_exprs(&alias));
 
@@ -481,11 +489,16 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         let table = resolve_table(node)?;
         (TableRef::scan(&table, &node.id), HashMap::new())
     } else {
+        let rel_tables: Vec<String> = input
+            .relationships
+            .iter()
+            .map(|rel| resolve_rel_edge_table(&input.compiler, &rel.types))
+            .collect::<Result<_>>()?;
         build_joins(
             &input.nodes,
             &input.relationships,
             &edge_only_targets,
-            &input.compiler.default_edge_table,
+            &rel_tables,
         )?
     };
 
@@ -690,7 +703,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let forward_depth = max_depth.div_ceil(2); // ceil(max_depth / 2)
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
-    let et = &input.compiler.default_edge_table;
+    let et = resolve_rel_edge_table(&input.compiler, &path.rel_types)?;
     let forward_cte = Cte::new(
         FORWARD_CTE,
         build_frontier(
@@ -699,7 +712,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             &rel_type_filter,
             true,
             Some(start_entity),
-            et,
+            &et,
         ),
     );
     let backward_cte = if backward_depth > 0 {
@@ -711,7 +724,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 &rel_type_filter,
                 false,
                 Some(end_entity),
-                et,
+                &et,
             ),
         ))
     } else {
@@ -1057,11 +1070,11 @@ fn build_frontier_arm(
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_neighbors(input: &mut Input) -> Result<Node> {
-    let et = input.compiler.default_edge_table.clone();
     let neighbors_config = input
         .neighbors
         .as_ref()
         .ok_or_else(|| QueryError::Lowering("neighbors config missing".into()))?;
+    let et = resolve_rel_edge_table(&input.compiler, &neighbors_config.rel_types)?;
 
     let center_node = find_node(&input.nodes, &neighbors_config.node)?;
     let center_table = resolve_table(center_node)?;
@@ -1439,6 +1452,23 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
     }
 }
 
+/// Resolve the edge table for a set of relationship types using the
+/// ontology-derived mapping. Falls back to `default_edge_table` for
+/// wildcards or unknown types. Errors if the types span multiple tables.
+fn resolve_rel_edge_table(
+    compiler: &crate::input::CompilerMetadata,
+    types: &[String],
+) -> Result<String> {
+    match compiler.resolve_edge_table(types) {
+        Ok(table) => Ok(table.to_string()),
+        Err(tables) => Err(QueryError::Lowering(format!(
+            "relationship types {:?} span multiple edge tables {:?}; \
+             a single edge scan cannot query across tables",
+            types, tables,
+        ))),
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Join Building
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1446,11 +1476,13 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
 /// Build a FROM tree that JOINs node tables and edge tables.
 /// Nodes in `skip_nodes` are omitted from the tree — they are handled
 /// edge-only via `node_edge_col` + `_nf_*` CTEs instead.
+///
+/// `rel_tables` maps each relationship (by index) to its resolved edge table.
 fn build_joins(
     nodes: &[InputNode],
     rels: &[InputRelationship],
     skip_nodes: &HashSet<String>,
-    edge_table: &str,
+    rel_tables: &[String],
 ) -> Result<(TableRef, HashMap<usize, String>)> {
     // Find the first non-skipped node to start the FROM tree.
     let first_rel = rels
@@ -1464,7 +1496,7 @@ fn build_joins(
     } else {
         // Both nodes skipped — start from edge.
         let alias = "e0".to_string();
-        let (edge, _) = edge_scan(edge_table, &alias, &type_filter(&first_rel.types));
+        let (edge, _) = edge_scan(&rel_tables[0], &alias, &type_filter(&first_rel.types));
         let mut edge_aliases = HashMap::new();
         edge_aliases.insert(0, alias);
         return Ok((edge, edge_aliases));
@@ -1478,6 +1510,7 @@ fn build_joins(
     joined.insert(start.id.clone());
 
     for (i, rel) in rels.iter().enumerate() {
+        let edge_table = &rel_tables[i];
         // Multi-hop: use UNION ALL pattern with hop_e{i} alias.
         if rel.max_hops > 1 {
             let alias = format!("hop_e{i}");

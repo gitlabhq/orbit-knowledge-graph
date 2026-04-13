@@ -609,6 +609,23 @@ impl Ontology {
         self.edge_table_configs.contains_key(table)
     }
 
+    /// Returns the destination table for a given relationship kind.
+    ///
+    /// Uses the first variant's `destination_table`. This is correct because
+    /// `EdgeYaml::to_entities()` assigns the same table to all variants of a
+    /// relationship kind — per-variant table routing is not supported.
+    ///
+    /// Falls back to the default edge table if the relationship kind is
+    /// unknown (e.g. wildcard queries).
+    #[must_use]
+    pub fn edge_table_for_relationship(&self, relationship_kind: &str) -> &str {
+        self.edges
+            .get(relationship_kind)
+            .and_then(|variants| variants.first())
+            .map(|e| e.destination_table.as_str())
+            .unwrap_or(&self.default_edge_table)
+    }
+
     /// Prefix for internal columns injected by the compiler.
     #[must_use]
     pub fn internal_column_prefix(&self) -> &str {

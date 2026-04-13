@@ -95,6 +95,10 @@ pub struct CompilerMetadata {
     pub edge_tables: HashSet<String>,
     /// Default edge table name for creating new edge scans.
     pub default_edge_table: String,
+    /// Maps relationship kind → edge table name. Populated by normalize from
+    /// `EdgeEntity.destination_table`. Used by lower/optimize to route each
+    /// relationship's scan to the correct physical table.
+    pub edge_table_for_rel: HashMap<String, String>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -105,7 +109,50 @@ impl Default for CompilerMetadata {
             node_edge_col: HashMap::new(),
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
+            edge_table_for_rel: HashMap::new(),
         }
+    }
+}
+
+impl CompilerMetadata {
+    /// Resolve the edge table for a relationship's type list.
+    ///
+    /// Returns `Ok(table)` when all types in the filter map to the same
+    /// physical table, or for wildcard/empty type lists (default table).
+    ///
+    /// Returns `Err` if the types span multiple tables — the caller must
+    /// reject the query or emit a UNION ALL (not yet implemented).
+    pub fn resolve_edge_table(&self, types: &[String]) -> Result<&str, Vec<String>> {
+        if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+            return Ok(&self.default_edge_table);
+        }
+        let first = self
+            .edge_table_for_rel
+            .get(&types[0])
+            .map(|s| s.as_str())
+            .unwrap_or(&self.default_edge_table);
+        for t in &types[1..] {
+            let table = self
+                .edge_table_for_rel
+                .get(t)
+                .map(|s| s.as_str())
+                .unwrap_or(&self.default_edge_table);
+            if table != first {
+                let tables: Vec<String> = types
+                    .iter()
+                    .map(|t| {
+                        self.edge_table_for_rel
+                            .get(t)
+                            .cloned()
+                            .unwrap_or_else(|| self.default_edge_table.clone())
+                    })
+                    .collect::<std::collections::HashSet<_>>()
+                    .into_iter()
+                    .collect();
+                return Err(tables);
+            }
+        }
+        Ok(first)
     }
 }
 
