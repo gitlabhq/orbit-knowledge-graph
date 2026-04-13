@@ -14,7 +14,6 @@ pub struct FixtureFile {
 pub struct TestSuite {
     pub name: String,
     /// Source files that make up the fixture graph.
-    /// Parsed by the v2 pipeline to produce the CodeGraph under test.
     #[serde(default)]
     pub fixtures: Vec<FixtureFile>,
     pub tests: Vec<TestCase>,
@@ -23,39 +22,96 @@ pub struct TestSuite {
 #[derive(Debug, Deserialize)]
 pub struct TestCase {
     pub name: String,
+    /// Optional longer description.
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(default)]
     pub severity: Severity,
-    pub query: String,
+    /// Skip this test (expected failure / not yet implemented).
+    #[serde(default)]
+    pub skip: bool,
+    /// Single query (simple form).
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Assertions for the single query.
+    #[serde(default)]
     pub assert: Vec<Assert>,
+    /// Multiple queries, each with their own assertions (extended form).
+    #[serde(default)]
+    pub queries: Vec<QueryBlock>,
     #[serde(default)]
     pub params: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+impl TestCase {
+    /// Iterate over all query blocks — merges `query`+`assert` and `queries`.
+    pub fn all_queries(&self) -> Vec<QueryBlock> {
+        let mut blocks = Vec::new();
+        if let Some(q) = &self.query {
+            blocks.push(QueryBlock {
+                query: q.clone(),
+                assert: self.assert.clone(),
+            });
+        }
+        blocks.extend(self.queries.iter().cloned());
+        blocks
+    }
+}
+
+/// A single query with its assertions.
+#[derive(Debug, Clone, Deserialize)]
+pub struct QueryBlock {
+    pub query: String,
+    pub assert: Vec<Assert>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
-#[derive(Default)]
 pub enum Severity {
     #[default]
     Error,
     Warning,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum Assert {
-    Empty { empty: bool },
-    NonEmpty { non_empty: bool },
-    CountEquals { count_equals: CountEqualsArgs },
-    AllMatch { all_match: AllMatchArgs },
+    Empty {
+        empty: bool,
+    },
+    NonEmpty {
+        non_empty: bool,
+    },
+    CountEquals {
+        count_equals: CountEqualsArgs,
+    },
+    CountGte {
+        count_gte: CountGteArgs,
+    },
+    RowCount {
+        row_count: i64,
+    },
+    AllMatch {
+        all_match: AllMatchArgs,
+    },
+    ContainsRow {
+        contains_row: std::collections::HashMap<String, String>,
+    },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct CountEqualsArgs {
     pub field: String,
     pub value: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct CountGteArgs {
+    pub field: String,
+    pub value: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct AllMatchArgs {
     pub field: String,
     pub pattern: String,

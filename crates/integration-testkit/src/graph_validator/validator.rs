@@ -4,7 +4,7 @@ use arrow_56::array::{Array, Int64Array, StringArray};
 use arrow_56::record_batch::RecordBatch;
 use lance_graph::{CypherQuery, GraphConfig};
 
-use super::assertions::{Assert, Severity, TestCase, TestSuite};
+use super::assertions::{Assert, QueryBlock, Severity, TestCase, TestSuite};
 use super::datasets::LanceDatasets;
 
 #[derive(Debug)]
@@ -14,7 +14,6 @@ pub struct Failure {
     pub message: String,
 }
 
-/// Run all tests in a suite against the given datasets.
 pub async fn run_suite(
     suite: &TestSuite,
     datasets: &LanceDatasets,
@@ -22,18 +21,50 @@ pub async fn run_suite(
 ) -> Vec<Failure> {
     let mut failures = Vec::new();
     for test in &suite.tests {
+        if test.skip {
+            eprintln!("  [SKIP] \"{}\"", test.name);
+            continue;
+        }
         failures.extend(run_test(test, datasets, config).await);
     }
     failures
 }
 
-async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfig) -> Vec<Failure> {
-    let query = match CypherQuery::new(&test.query) {
+async fn run_test(
+    test: &TestCase,
+    datasets: &LanceDatasets,
+    config: &GraphConfig,
+) -> Vec<Failure> {
+    let mut failures = Vec::new();
+
+    for (i, block) in test.all_queries().iter().enumerate() {
+        let label = if test.all_queries().len() == 1 {
+            test.name.clone()
+        } else {
+            format!("{} [query {}]", test.name, i + 1)
+        };
+
+        failures.extend(
+            run_query_block(&label, test.severity, block, datasets, config).await,
+        );
+    }
+
+    failures
+}
+
+async fn run_query_block(
+    label: &str,
+    severity: Severity,
+    block: &QueryBlock,
+    datasets: &LanceDatasets,
+    config: &GraphConfig,
+) -> Vec<Failure> {
+    let query = match CypherQuery::new(&block.query) {
         Ok(q) => q.with_config(config.clone()),
         Err(e) => {
             return vec![Failure {
-                test: test.name.clone(),
-                severity: test.severity,
+                test: label.to_string(),
+                severity,
                 message: format!("Cypher parse error: {e}"),
             }];
         }
@@ -44,16 +75,23 @@ async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfi
         Ok(b) => b,
         Err(e) => {
             return vec![Failure {
-                test: test.name.clone(),
-                severity: test.severity,
+                test: label.to_string(),
+                severity,
                 message: format!("Query execution error: {e}"),
             }];
         }
     };
 
-    // Print query + results for full visibility
-    eprintln!("  ┌─ TEST: \"{}\"", test.name);
-    eprintln!("  │ query: {}", test.query.trim().replace('\n', "\n  │        "));
+    print_result(label, &block.query, &batch);
+    check_assertions(label, severity, &block.assert, &batch)
+}
+
+fn print_result(label: &str, query: &str, batch: &RecordBatch) {
+    eprintln!("  ┌─ TEST: \"{label}\"");
+    eprintln!(
+        "  │ query: {}",
+        query.trim().replace('\n', "\n  │        ")
+    );
     eprintln!("  │ result: {} rows", batch.num_rows());
     if batch.num_rows() > 0 {
         let schema = batch.schema();
@@ -69,11 +107,12 @@ async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfi
         if batch.num_rows() > 20 {
             eprintln!("  │ │ ... +{} more rows │", batch.num_rows() - 20);
         }
-        eprintln!("  │ └{}┘", "─".repeat(col_names.join("──┬──").len() + 4));
+        eprintln!(
+            "  │ └{}┘",
+            "─".repeat(col_names.join("──┬──").len() + 4)
+        );
     }
     eprintln!("  └─");
-
-    check_assertions(test, &batch)
 }
 
 fn format_cell(array: &dyn Array, row: usize) -> String {
@@ -89,12 +128,17 @@ fn format_cell(array: &dyn Array, row: usize) -> String {
     "<?>".to_string()
 }
 
-fn check_assertions(test: &TestCase, batch: &RecordBatch) -> Vec<Failure> {
+fn check_assertions(
+    label: &str,
+    severity: Severity,
+    assertions: &[Assert],
+    batch: &RecordBatch,
+) -> Vec<Failure> {
     let mut failures = Vec::new();
     let total_rows = batch.num_rows();
 
-    for assertion in &test.assert {
-        if let Some(f) = check_one(test, assertion, batch, total_rows) {
+    for assertion in assertions {
+        if let Some(f) = check_one(label, severity, assertion, batch, total_rows) {
             failures.push(f);
         }
     }
@@ -103,7 +147,8 @@ fn check_assertions(test: &TestCase, batch: &RecordBatch) -> Vec<Failure> {
 }
 
 fn check_one(
-    test: &TestCase,
+    label: &str,
+    severity: Severity,
     assertion: &Assert,
     batch: &RecordBatch,
     total_rows: usize,
@@ -111,28 +156,28 @@ fn check_one(
     match assertion {
         Assert::Empty { empty } => {
             if *empty && total_rows > 0 {
-                Some(Failure {
-                    test: test.name.clone(),
-                    severity: test.severity,
-                    message: format!("Expected empty result, got {total_rows} rows"),
-                })
+                Some(fail(label, severity, format!("Expected empty result, got {total_rows} rows")))
             } else if !*empty && total_rows == 0 {
-                Some(Failure {
-                    test: test.name.clone(),
-                    severity: test.severity,
-                    message: "Expected non-empty result, got 0 rows".into(),
-                })
+                Some(fail(label, severity, "Expected non-empty result, got 0 rows".into()))
             } else {
                 None
             }
         }
         Assert::NonEmpty { non_empty } => {
             if *non_empty && total_rows == 0 {
-                Some(Failure {
-                    test: test.name.clone(),
-                    severity: test.severity,
-                    message: "Expected non-empty result, got 0 rows".into(),
-                })
+                Some(fail(label, severity, "Expected non-empty result, got 0 rows".into()))
+            } else {
+                None
+            }
+        }
+        Assert::RowCount { row_count } => {
+            let expected = *row_count as usize;
+            if total_rows != expected {
+                Some(fail(
+                    label,
+                    severity,
+                    format!("Expected {expected} rows, got {total_rows}"),
+                ))
             } else {
                 None
             }
@@ -143,17 +188,31 @@ fn check_one(
                 && !arr.is_empty()
                 && arr.value(0) != count_equals.value
             {
-                return Some(Failure {
-                    test: test.name.clone(),
-                    severity: test.severity,
-                    message: format!(
+                return Some(fail(
+                    label,
+                    severity,
+                    format!(
                         "Expected {}={}, got {}={}",
-                        count_equals.field,
-                        count_equals.value,
-                        count_equals.field,
-                        arr.value(0)
+                        count_equals.field, count_equals.value, count_equals.field, arr.value(0)
                     ),
-                });
+                ));
+            }
+            None
+        }
+        Assert::CountGte { count_gte } => {
+            if let Some(col) = batch.column_by_name(&count_gte.field)
+                && let Some(arr) = col.as_any().downcast_ref::<Int64Array>()
+                && !arr.is_empty()
+                && arr.value(0) < count_gte.value
+            {
+                return Some(fail(
+                    label,
+                    severity,
+                    format!(
+                        "Expected {}>={}, got {}={}",
+                        count_gte.field, count_gte.value, count_gte.field, arr.value(0)
+                    ),
+                ));
             }
             None
         }
@@ -161,11 +220,11 @@ fn check_one(
             let glob = match globset::Glob::new(&all_match.pattern) {
                 Ok(g) => g.compile_matcher(),
                 Err(e) => {
-                    return Some(Failure {
-                        test: test.name.clone(),
-                        severity: test.severity,
-                        message: format!("Invalid glob pattern '{}': {e}", all_match.pattern),
-                    });
+                    return Some(fail(
+                        label,
+                        severity,
+                        format!("Invalid glob pattern '{}': {e}", all_match.pattern),
+                    ));
                 }
             };
 
@@ -174,20 +233,55 @@ fn check_one(
             {
                 for i in 0..arr.len() {
                     if !arr.is_null(i) && !glob.is_match(arr.value(i)) {
-                        return Some(Failure {
-                            test: test.name.clone(),
-                            severity: test.severity,
-                            message: format!(
+                        return Some(fail(
+                            label,
+                            severity,
+                            format!(
                                 "Row {i}: {}='{}' does not match '{}'",
-                                all_match.field,
-                                arr.value(i),
-                                all_match.pattern
+                                all_match.field, arr.value(i), all_match.pattern
                             ),
-                        });
+                        ));
                     }
                 }
             }
             None
         }
+        Assert::ContainsRow { contains_row } => {
+            for row in 0..total_rows {
+                let mut all_match = true;
+                for (field, expected) in contains_row {
+                    let actual = batch
+                        .column_by_name(field)
+                        .map(|col| format_cell(col.as_ref(), row));
+                    if actual.as_deref() != Some(expected.as_str()) {
+                        all_match = false;
+                        break;
+                    }
+                }
+                if all_match {
+                    return None; // found the row
+                }
+            }
+            let expected_str: Vec<String> = contains_row
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect();
+            Some(fail(
+                label,
+                severity,
+                format!(
+                    "No row matching {{{}}} in {total_rows} rows",
+                    expected_str.join(", ")
+                ),
+            ))
+        }
+    }
+}
+
+fn fail(test: &str, severity: Severity, message: String) -> Failure {
+    Failure {
+        test: test.to_string(),
+        severity,
+        message,
     }
 }
