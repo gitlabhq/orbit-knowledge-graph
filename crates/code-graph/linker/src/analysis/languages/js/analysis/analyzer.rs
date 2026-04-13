@@ -11,7 +11,8 @@ use std::collections::HashMap;
 
 use super::super::types::{
     ExportedBinding, ImportedName, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsFileAnalysis,
-    JsImport, JsImportKind, JsMemberKind, JsModuleInfo, OwnedImportEntry,
+    JsImport, JsImportKind, JsInvocationSupport, JsMemberKind, JsModuleInfo, JsResolutionMode,
+    OwnedImportEntry,
 };
 use super::calls::{build_class_hierarchy, build_variable_type_map, extract_call_edges};
 use super::cjs::{extract_cjs_exports, extract_cjs_imports};
@@ -60,8 +61,71 @@ pub(super) struct Ctx<'a> {
 }
 
 impl<'a> Ctx<'a> {
+    fn scoped_variable_owner_parts(&self, decl_node_id: NodeId) -> Vec<String> {
+        let mut owners = Vec::new();
+
+        for ancestor in self.nodes.ancestor_ids(decl_node_id).skip(1) {
+            match self.nodes.kind(ancestor) {
+                AstKind::MethodDefinition(method) => {
+                    if let Some(name) = method.key.static_name() {
+                        owners.push(name.to_string());
+                    }
+                }
+                AstKind::ObjectProperty(property) if property.method => {
+                    if let Some(name) = property.key.static_name() {
+                        owners.push(name.to_string());
+                    }
+                }
+                AstKind::Function(function) => {
+                    if let Some(id) = &function.id {
+                        owners.push(id.name.to_string());
+                    }
+                }
+                AstKind::VariableDeclarator(decl) => {
+                    if let oxc::ast::ast::BindingPattern::BindingIdentifier(binding) = &decl.id
+                        && decl.init.as_ref().is_some_and(|init| {
+                            matches!(
+                                init.get_inner_expression(),
+                                oxc::ast::ast::Expression::ArrowFunctionExpression(_)
+                                    | oxc::ast::ast::Expression::FunctionExpression(_)
+                            )
+                        })
+                    {
+                        owners.push(binding.name.to_string());
+                    }
+                }
+                AstKind::Class(class) => {
+                    if let Some(id) = &class.id {
+                        owners.push(id.name.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        owners.reverse();
+        owners
+    }
+
     pub(super) fn build_fqn(&self, symbol_id: SymbolId) -> String {
         let name = self.scoping.symbol_name(symbol_id).to_string();
+        let decl_node_id = self.scoping.symbol_declaration(symbol_id);
+        let flags = self.scoping.symbol_flags(symbol_id);
+
+        if flags.is_variable()
+            && !flags.is_import()
+            && !matches!(
+                self.nodes.parent_kind(decl_node_id),
+                AstKind::FormalParameter(_)
+            )
+        {
+            let owners = self.scoped_variable_owner_parts(decl_node_id);
+            if !owners.is_empty() {
+                let range = self.lt.span_to_range(self.scoping.symbol_span(symbol_id));
+                return format!("{}::{}@{}", owners.join("::"), name, range.byte_offset.0);
+            }
+        }
+
         let mut parts = vec![name];
         for ancestor in self
             .scoping
@@ -102,15 +166,31 @@ impl<'a> Ctx<'a> {
     }
 }
 
-fn build_scope_def_map(scoping: &Scoping) -> HashMap<NodeId, SymbolId> {
+fn build_scope_def_map(scoping: &Scoping, nodes: &AstNodes) -> HashMap<NodeId, SymbolId> {
     let mut map = HashMap::new();
     for symbol_id in scoping.symbol_ids() {
         let flags = scoping.symbol_flags(symbol_id);
+        let decl_node_id = scoping.symbol_declaration(symbol_id);
         if flags.is_function()
             || flags.is_class()
             || flags.intersects(SymbolFlags::NamespaceModule | SymbolFlags::ValueModule)
         {
-            map.insert(scoping.symbol_declaration(symbol_id), symbol_id);
+            map.insert(decl_node_id, symbol_id);
+            continue;
+        }
+
+        if flags.is_variable()
+            && !flags.is_import()
+            && let AstKind::VariableDeclarator(decl) = nodes.kind(decl_node_id)
+            && let Some(init) = &decl.init
+            && let Some(init_node_id) = match init.get_inner_expression() {
+                oxc::ast::ast::Expression::ArrowFunctionExpression(expr) => Some(expr.node_id()),
+                oxc::ast::ast::Expression::FunctionExpression(expr) => Some(expr.node_id()),
+                oxc::ast::ast::Expression::ClassExpression(expr) => Some(expr.node_id()),
+                _ => None,
+            }
+        {
+            map.insert(init_node_id, symbol_id);
         }
     }
     map
@@ -182,6 +262,90 @@ fn extract_type_annotation(nodes: &AstNodes, decl_node_id: NodeId, source: &str)
         }
         _ => None,
     }
+}
+
+fn invocation_support_for_expression(
+    expr: &oxc::ast::ast::Expression,
+) -> Option<JsInvocationSupport> {
+    match expr.get_inner_expression() {
+        oxc::ast::ast::Expression::ArrowFunctionExpression(_) => {
+            Some(JsInvocationSupport::arrow_function())
+        }
+        oxc::ast::ast::Expression::FunctionExpression(_) => Some(JsInvocationSupport::function()),
+        oxc::ast::ast::Expression::ClassExpression(_) => Some(JsInvocationSupport::class()),
+        _ => None,
+    }
+}
+
+fn invocation_support_for_symbol(
+    flags: SymbolFlags,
+    nodes: &AstNodes,
+    decl_node_id: NodeId,
+) -> Option<JsInvocationSupport> {
+    if flags.is_class() {
+        return Some(JsInvocationSupport::class());
+    }
+    if flags.is_function() {
+        if matches!(
+            nodes.parent_kind(decl_node_id),
+            AstKind::MethodDefinition(_)
+        ) {
+            return None;
+        }
+        return Some(JsInvocationSupport::function());
+    }
+    if !flags.is_variable()
+        || matches!(nodes.parent_kind(decl_node_id), AstKind::FormalParameter(_))
+    {
+        return None;
+    }
+
+    match nodes.kind(decl_node_id) {
+        AstKind::VariableDeclarator(decl) => decl
+            .init
+            .as_ref()
+            .and_then(invocation_support_for_expression),
+        _ => None,
+    }
+}
+
+fn build_invocation_support_maps(
+    ctx: &Ctx,
+) -> (
+    HashMap<String, JsInvocationSupport>,
+    HashMap<(usize, usize), JsInvocationSupport>,
+) {
+    let mut by_name = HashMap::new();
+    let mut by_range = HashMap::new();
+
+    for symbol_id in ctx.scoping.symbol_ids() {
+        let flags = ctx.scoping.symbol_flags(symbol_id);
+        if flags.is_import() {
+            continue;
+        }
+
+        let scope_id = ctx.scoping.symbol_scope_id(symbol_id);
+        if !ctx.scoping.scope_flags(scope_id).contains(ScopeFlags::Top) {
+            continue;
+        }
+
+        let decl_node_id = ctx.scoping.symbol_declaration(symbol_id);
+        let Some(invocation_support) =
+            invocation_support_for_symbol(flags, ctx.nodes, decl_node_id)
+        else {
+            continue;
+        };
+
+        let name = ctx.scoping.symbol_name(symbol_id).to_string();
+        let range = ctx.lt.span_to_range(ctx.scoping.symbol_span(symbol_id));
+        by_name.insert(name, invocation_support);
+        by_range.insert(
+            (range.byte_offset.0, range.byte_offset.1),
+            invocation_support,
+        );
+    }
+
+    (by_name, by_range)
 }
 
 fn extract_definitions(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> Vec<JsDef> {
@@ -327,16 +491,207 @@ fn extract_imports(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> Vec<JsImpor
     imports
 }
 
+type ExportMemberBindingsByLocal = HashMap<String, HashMap<String, ExportedBinding>>;
+type ExportMemberBindingsByRange = HashMap<(usize, usize), HashMap<String, ExportedBinding>>;
+
+fn build_export_member_bindings(
+    parsed: &oxc::parser::ParserReturn,
+    defs: &[JsDef],
+    definition_fqns: &HashMap<String, Range>,
+    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
+) -> (ExportMemberBindingsByLocal, ExportMemberBindingsByRange) {
+    let mut by_local = HashMap::new();
+    let mut by_range = HashMap::new();
+
+    for def in defs {
+        let JsDefKind::Method {
+            class_fqn,
+            is_static: true,
+        } = &def.kind
+        else {
+            continue;
+        };
+
+        let member_binding = ExportedBinding {
+            local_fqn: def.fqn.clone(),
+            range: def.range,
+            definition_range: Some(def.range),
+            invocation_support: Some(JsInvocationSupport::function()),
+            member_bindings: HashMap::new(),
+            is_type: false,
+            is_default: false,
+            reexport_source: None,
+            reexport_imported_name: None,
+        };
+
+        by_local
+            .entry(class_fqn.clone())
+            .or_insert_with(HashMap::new)
+            .insert(def.name.clone(), member_binding.clone());
+    }
+
+    for def in defs {
+        if let Some(members) = by_local.get(&def.fqn) {
+            by_range.insert(
+                (def.range.byte_offset.0, def.range.byte_offset.1),
+                members.clone(),
+            );
+        }
+    }
+
+    for statement in &parsed.program.body {
+        match statement {
+            oxc::ast::ast::Statement::VariableDeclaration(variable_declaration) => {
+                collect_variable_declaration_member_bindings(
+                    variable_declaration,
+                    definition_fqns,
+                    invocation_support_by_name,
+                    &mut by_local,
+                );
+            }
+            oxc::ast::ast::Statement::ExportNamedDeclaration(export_named) => {
+                if let Some(oxc::ast::ast::Declaration::VariableDeclaration(variable_declaration)) =
+                    &export_named.declaration
+                {
+                    collect_variable_declaration_member_bindings(
+                        variable_declaration,
+                        definition_fqns,
+                        invocation_support_by_name,
+                        &mut by_local,
+                    );
+                }
+            }
+            oxc::ast::ast::Statement::ExportDefaultDeclaration(export_default) => {
+                if let oxc::ast::ast::ExportDefaultDeclarationKind::ObjectExpression(object) =
+                    &export_default.declaration
+                    && let Some(members) = collect_object_member_bindings(
+                        object,
+                        definition_fqns,
+                        invocation_support_by_name,
+                    )
+                {
+                    by_local.insert("default".to_string(), members);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    (by_local, by_range)
+}
+
+fn collect_variable_declaration_member_bindings(
+    variable_declaration: &oxc::ast::ast::VariableDeclaration<'_>,
+    definition_fqns: &HashMap<String, Range>,
+    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
+    by_local: &mut ExportMemberBindingsByLocal,
+) {
+    for declarator in &variable_declaration.declarations {
+        let oxc::ast::ast::BindingPattern::BindingIdentifier(binding) = &declarator.id else {
+            continue;
+        };
+        let Some(init) = &declarator.init else {
+            continue;
+        };
+        let oxc::ast::ast::Expression::ObjectExpression(object) = init.get_inner_expression()
+        else {
+            continue;
+        };
+        let Some(members) =
+            collect_object_member_bindings(object, definition_fqns, invocation_support_by_name)
+        else {
+            continue;
+        };
+        by_local.insert(binding.name.to_string(), members);
+    }
+}
+
+fn collect_object_member_bindings(
+    object: &oxc::ast::ast::ObjectExpression<'_>,
+    definition_fqns: &HashMap<String, Range>,
+    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
+) -> Option<HashMap<String, ExportedBinding>> {
+    let mut members = HashMap::new();
+
+    for property in &object.properties {
+        let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(property) = property else {
+            continue;
+        };
+        let Some(member_name) = property.key.static_name() else {
+            continue;
+        };
+        let Some(binding) = exported_binding_from_expression(
+            &property.value,
+            definition_fqns,
+            invocation_support_by_name,
+        ) else {
+            continue;
+        };
+        members.insert(member_name.to_string(), binding);
+    }
+
+    (!members.is_empty()).then_some(members)
+}
+
+fn default_export_identifier(parsed: &oxc::parser::ParserReturn) -> Option<String> {
+    parsed.program.body.iter().find_map(|statement| {
+        let oxc::ast::ast::Statement::ExportDefaultDeclaration(export_default) = statement else {
+            return None;
+        };
+        let oxc::ast::ast::ExportDefaultDeclarationKind::Identifier(identifier) =
+            &export_default.declaration
+        else {
+            return None;
+        };
+        Some(identifier.name.to_string())
+    })
+}
+
+fn exported_binding_from_expression(
+    expression: &oxc::ast::ast::Expression<'_>,
+    definition_fqns: &HashMap<String, Range>,
+    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
+) -> Option<ExportedBinding> {
+    let expression = expression.get_inner_expression();
+    match expression {
+        oxc::ast::ast::Expression::Identifier(identifier) => {
+            let support = invocation_support_by_name
+                .get(identifier.name.as_str())
+                .copied()?;
+            let definition_range = definition_fqns.get(identifier.name.as_str()).copied()?;
+            Some(ExportedBinding {
+                local_fqn: identifier.name.to_string(),
+                range: definition_range,
+                definition_range: Some(definition_range),
+                invocation_support: Some(support),
+                member_bindings: HashMap::new(),
+                is_type: false,
+                is_default: false,
+                reexport_source: None,
+                reexport_imported_name: None,
+            })
+        }
+        oxc::ast::ast::Expression::ArrowFunctionExpression(_)
+        | oxc::ast::ast::Expression::FunctionExpression(_)
+        | oxc::ast::ast::Expression::ClassExpression(_) => None,
+        _ => None,
+    }
+}
+
 fn build_module_info(
     parsed: &oxc::parser::ParserReturn,
     defs: &[JsDef],
     lt: &LineTable,
+    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
+    invocation_support_by_range: &HashMap<(usize, usize), JsInvocationSupport>,
 ) -> JsModuleInfo {
     let mut exports = HashMap::new();
     let mut imports = Vec::new();
     let mut star_export_sources = Vec::new();
     let definition_fqns: HashMap<String, Range> =
         defs.iter().map(|d| (d.fqn.clone(), d.range)).collect();
+    let (export_member_bindings_by_local, export_member_bindings_by_range) =
+        build_export_member_bindings(parsed, defs, &definition_fqns, invocation_support_by_name);
 
     let find_definition_range = |local_fqn: &str, binding_range: Range| {
         definition_fqns.get(local_fqn).copied().or_else(|| {
@@ -359,18 +714,74 @@ fn build_module_info(
         };
         let is_default = matches!(entry.export_name, ExportExportName::Default(_));
         let export_range = lt.span_to_range(entry.span);
+        let definition_range = find_definition_range(&local_fqn, export_range);
+        let invocation_support = invocation_support_by_name
+            .get(local_fqn.as_str())
+            .copied()
+            .or_else(|| {
+                definition_range.and_then(|range| {
+                    invocation_support_by_range
+                        .get(&(range.byte_offset.0, range.byte_offset.1))
+                        .copied()
+                })
+            });
+        let member_bindings = export_member_bindings_by_local
+            .get(local_fqn.as_str())
+            .cloned()
+            .or_else(|| {
+                definition_range.and_then(|range| {
+                    export_member_bindings_by_range
+                        .get(&(range.byte_offset.0, range.byte_offset.1))
+                        .cloned()
+                })
+            })
+            .unwrap_or_default();
         exports.insert(
             export_name,
             ExportedBinding {
-                definition_range: find_definition_range(&local_fqn, export_range),
+                definition_range,
                 local_fqn,
                 range: export_range,
+                invocation_support,
+                member_bindings,
                 is_type: entry.is_type,
                 is_default,
                 reexport_source: None,
-                reexport_name: None,
+                reexport_imported_name: None,
             },
         );
+    }
+
+    if let Some(binding) = exports.get_mut("default")
+        && binding.local_fqn == "default"
+        && let Some(identifier_name) = default_export_identifier(parsed)
+        && let Some(definition_range) = definition_fqns.get(identifier_name.as_str()).copied()
+    {
+        binding.local_fqn = identifier_name.clone();
+        binding.definition_range = Some(definition_range);
+        binding.invocation_support = invocation_support_by_name
+            .get(identifier_name.as_str())
+            .copied()
+            .or_else(|| {
+                invocation_support_by_range
+                    .get(&(
+                        definition_range.byte_offset.0,
+                        definition_range.byte_offset.1,
+                    ))
+                    .copied()
+            });
+        binding.member_bindings = export_member_bindings_by_local
+            .get(identifier_name.as_str())
+            .cloned()
+            .or_else(|| {
+                export_member_bindings_by_range
+                    .get(&(
+                        definition_range.byte_offset.0,
+                        definition_range.byte_offset.1,
+                    ))
+                    .cloned()
+            })
+            .unwrap_or_default();
     }
 
     for entry in &parsed.module_record.indirect_export_entries {
@@ -380,9 +791,13 @@ fn build_module_info(
                 ExportExportName::Default(_) => "default".to_string(),
                 ExportExportName::Null => continue,
             };
-            let reexport_name = match &entry.import_name {
-                ExportImportName::Name(n) => Some(n.name.to_string()),
-                _ => None,
+            let reexport_imported_name = match &entry.import_name {
+                ExportImportName::Name(n) if n.name.as_str() == "default" => {
+                    Some(ImportedName::Default)
+                }
+                ExportImportName::Name(n) => Some(ImportedName::Named(n.name.to_string())),
+                ExportImportName::All => Some(ImportedName::Namespace),
+                ExportImportName::AllButDefault | ExportImportName::Null => None,
             };
             exports.insert(
                 export_name,
@@ -390,10 +805,12 @@ fn build_module_info(
                     local_fqn: format!("reexport:{}", module_request.name),
                     range: lt.span_to_range(entry.span),
                     definition_range: None,
+                    invocation_support: None,
+                    member_bindings: HashMap::new(),
                     is_type: entry.is_type,
                     is_default: false,
                     reexport_source: Some(module_request.name.to_string()),
-                    reexport_name,
+                    reexport_imported_name,
                 },
             );
         }
@@ -414,6 +831,7 @@ fn build_module_info(
                 ImportImportName::NamespaceObject => ImportedName::Namespace,
             },
             local_name: entry.local_name.name.to_string(),
+            resolution_mode: JsResolutionMode::Import,
             is_type: entry.is_type,
             range: lt.span_to_range(entry.module_request.span),
         });
@@ -473,7 +891,7 @@ impl JsAnalyzer {
         let nodes = semantic.nodes();
 
         let lt = LineTable::build(source);
-        let scope_defs = build_scope_def_map(scoping);
+        let scope_defs = build_scope_def_map(scoping, nodes);
         let mut class_hierarchy = build_class_hierarchy(nodes);
 
         let ctx = Ctx {
@@ -500,9 +918,21 @@ impl JsAnalyzer {
         let variable_type_map = build_variable_type_map(nodes);
         let calls = extract_call_edges(&ctx, &defs, &imports, &class_hierarchy, &variable_type_map);
         let directive = super::super::frameworks::detect_directive(&parsed.program.directives);
+        let (invocation_support_by_name, invocation_support_by_range) =
+            build_invocation_support_maps(&ctx);
 
-        let cjs_exports = extract_cjs_exports(nodes, |span| ctx.lt.span_to_range(span));
-        let mut module_info = build_module_info(&parsed, &defs, &ctx.lt);
+        let cjs_exports = extract_cjs_exports(
+            nodes,
+            |span| ctx.lt.span_to_range(span),
+            &invocation_support_by_name,
+        );
+        let mut module_info = build_module_info(
+            &parsed,
+            &defs,
+            &ctx.lt,
+            &invocation_support_by_name,
+            &invocation_support_by_range,
+        );
         module_info.cjs_exports = cjs_exports;
 
         // Ensure Vue SFC default export binding exists and points to the virtual class.
@@ -519,10 +949,12 @@ impl JsAnalyzer {
                     local_fqn: vc.fqn.clone(),
                     range: vc.range,
                     definition_range: Some(vc.range),
+                    invocation_support: Some(JsInvocationSupport::class()),
+                    member_bindings: HashMap::new(),
                     is_type: false,
                     is_default: true,
                     reexport_source: None,
-                    reexport_name: None,
+                    reexport_imported_name: None,
                 });
             // Also patch existing default binding if it has stale "default" fqn
             if let Some(binding) = module_info.exports.get_mut("default")
@@ -530,6 +962,7 @@ impl JsAnalyzer {
             {
                 binding.local_fqn = vc.fqn.clone();
                 binding.definition_range = Some(vc.range);
+                binding.invocation_support = Some(JsInvocationSupport::class());
             }
         }
 
@@ -541,6 +974,7 @@ impl JsAnalyzer {
                         .as_ref()
                         .map_or(ImportedName::Default, |n| ImportedName::Named(n.clone())),
                     local_name: imp.local_name.clone(),
+                    resolution_mode: JsResolutionMode::Require,
                     is_type: false,
                     range: imp.range,
                 });

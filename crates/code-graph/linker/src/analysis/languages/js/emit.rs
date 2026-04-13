@@ -51,6 +51,10 @@ impl JsFileAnalysis {
         }
 
         for child in &self.defs {
+            if matches!(child.kind, JsDefKind::Variable) {
+                continue;
+            }
+
             if let Some(parent_fqn) = child.fqn.rsplit_once("::").map(|(p, _)| p)
                 && let Some(parent) = self.defs.iter().find(|d| d.fqn == parent_fqn)
             {
@@ -146,22 +150,26 @@ impl JsFileAnalysis {
                 end_col: imp.range.end.column as i32,
             };
 
+            let imported_symbol = ImportedSymbolNode::new(
+                ImportType::Js(import_type_str),
+                imp.specifier.clone(),
+                identifier,
+                location,
+            );
+            let imported_symbol_key = imported_symbol.lookup_key();
+
             relationships.push(ConsolidatedRelationship {
                 source_path: Some(path.clone()),
                 target_path: Some(ArcIntern::new(self.relative_path.clone())),
                 kind: RelationshipKind::FileToImportedSymbol,
                 relationship_type: RelationshipType::FileImports,
                 source_range: ArcIntern::new(Range::empty()),
-                target_range: ArcIntern::new(location.range()),
+                target_range: ArcIntern::new(imported_symbol.location.range()),
+                target_imported_symbol_key: Some(imported_symbol_key),
                 ..Default::default()
             });
 
-            imported_symbols.push(ImportedSymbolNode::new(
-                ImportType::Js(import_type_str),
-                imp.specifier.clone(),
-                identifier,
-                location,
-            ));
+            imported_symbols.push(imported_symbol);
         }
 
         for call in &self.calls {

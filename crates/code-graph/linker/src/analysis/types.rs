@@ -58,6 +58,10 @@ pub struct ConsolidatedRelationship {
     pub source_definition_range: Option<ArcIntern<Range>>,
     /// Definition location for target node (used for ID lookup)
     pub target_definition_range: Option<ArcIntern<Range>>,
+    /// Imported symbol identity for source node when location alone is ambiguous
+    pub source_imported_symbol_key: Option<ImportedSymbolKey>,
+    /// Imported symbol identity for target node when location alone is ambiguous
+    pub target_imported_symbol_key: Option<ImportedSymbolKey>,
 }
 
 impl Default for ConsolidatedRelationship {
@@ -73,6 +77,8 @@ impl Default for ConsolidatedRelationship {
             target_range: ArcIntern::new(Range::empty()),
             source_definition_range: None,
             target_definition_range: None,
+            source_imported_symbol_key: None,
+            target_imported_symbol_key: None,
         }
     }
 }
@@ -229,6 +235,7 @@ impl GraphData {
         let mut file_lookup: HashMap<String, u32> = HashMap::new();
         let mut definition_lookup: HashMap<(String, usize, usize), u32> = HashMap::new();
         let mut imported_symbol_lookup: HashMap<(String, usize, usize), u32> = HashMap::new();
+        let mut imported_symbol_key_lookup: HashMap<ImportedSymbolKey, u32> = HashMap::new();
 
         for (index, node) in self.directory_nodes.iter_mut().enumerate() {
             node.assign_id(project_id, branch);
@@ -258,6 +265,7 @@ impl GraphData {
                 node.location.end_byte as usize,
             );
             imported_symbol_lookup.insert(key, index as u32);
+            imported_symbol_key_lookup.insert(node.lookup_key(), index as u32);
         }
 
         for rel in &mut self.relationships {
@@ -288,12 +296,18 @@ impl GraphData {
                 }
                 RelationshipKind::FileToImportedSymbol => {
                     rel.source_id = file_lookup.get(from_path).copied();
-                    let target_key = (
-                        to_path.to_string(),
-                        rel.target_range.byte_offset.0,
-                        rel.target_range.byte_offset.1,
-                    );
-                    rel.target_id = imported_symbol_lookup.get(&target_key).copied();
+                    rel.target_id = rel
+                        .target_imported_symbol_key
+                        .as_ref()
+                        .and_then(|key| imported_symbol_key_lookup.get(key).copied())
+                        .or_else(|| {
+                            let target_key = (
+                                to_path.to_string(),
+                                rel.target_range.byte_offset.0,
+                                rel.target_range.byte_offset.1,
+                            );
+                            imported_symbol_lookup.get(&target_key).copied()
+                        });
                 }
                 RelationshipKind::DefinitionToDefinition => {
                     let (source_start, source_end) =
@@ -332,34 +346,47 @@ impl GraphData {
                         };
 
                     let source_key = (from_path.to_string(), source_start, source_end);
-                    let target_key = (
-                        to_path.to_string(),
-                        rel.target_range.byte_offset.0,
-                        rel.target_range.byte_offset.1,
-                    );
                     rel.source_id = definition_lookup.get(&source_key).copied();
-                    rel.target_id = imported_symbol_lookup.get(&target_key).copied();
+                    rel.target_id = rel
+                        .target_imported_symbol_key
+                        .as_ref()
+                        .and_then(|key| imported_symbol_key_lookup.get(key).copied())
+                        .or_else(|| {
+                            let target_key = (
+                                to_path.to_string(),
+                                rel.target_range.byte_offset.0,
+                                rel.target_range.byte_offset.1,
+                            );
+                            imported_symbol_lookup.get(&target_key).copied()
+                        });
                 }
                 RelationshipKind::ImportedSymbolToImportedSymbol => {
-                    let source_key = (
-                        from_path.to_string(),
-                        rel.source_range.byte_offset.0,
-                        rel.source_range.byte_offset.1,
-                    );
-                    let target_key = (
-                        to_path.to_string(),
-                        rel.target_range.byte_offset.0,
-                        rel.target_range.byte_offset.1,
-                    );
-                    rel.source_id = imported_symbol_lookup.get(&source_key).copied();
-                    rel.target_id = imported_symbol_lookup.get(&target_key).copied();
+                    rel.source_id = rel
+                        .source_imported_symbol_key
+                        .as_ref()
+                        .and_then(|key| imported_symbol_key_lookup.get(key).copied())
+                        .or_else(|| {
+                            let source_key = (
+                                from_path.to_string(),
+                                rel.source_range.byte_offset.0,
+                                rel.source_range.byte_offset.1,
+                            );
+                            imported_symbol_lookup.get(&source_key).copied()
+                        });
+                    rel.target_id = rel
+                        .target_imported_symbol_key
+                        .as_ref()
+                        .and_then(|key| imported_symbol_key_lookup.get(key).copied())
+                        .or_else(|| {
+                            let target_key = (
+                                to_path.to_string(),
+                                rel.target_range.byte_offset.0,
+                                rel.target_range.byte_offset.1,
+                            );
+                            imported_symbol_lookup.get(&target_key).copied()
+                        });
                 }
                 RelationshipKind::ImportedSymbolToDefinition => {
-                    let source_key = (
-                        from_path.to_string(),
-                        rel.source_range.byte_offset.0,
-                        rel.source_range.byte_offset.1,
-                    );
                     let (target_start, target_end) =
                         if let Some(def_range) = &rel.target_definition_range {
                             (def_range.byte_offset.0, def_range.byte_offset.1)
@@ -370,16 +397,33 @@ impl GraphData {
                             )
                         };
                     let target_key = (to_path.to_string(), target_start, target_end);
-                    rel.source_id = imported_symbol_lookup.get(&source_key).copied();
+                    rel.source_id = rel
+                        .source_imported_symbol_key
+                        .as_ref()
+                        .and_then(|key| imported_symbol_key_lookup.get(key).copied())
+                        .or_else(|| {
+                            let source_key = (
+                                from_path.to_string(),
+                                rel.source_range.byte_offset.0,
+                                rel.source_range.byte_offset.1,
+                            );
+                            imported_symbol_lookup.get(&source_key).copied()
+                        });
                     rel.target_id = definition_lookup.get(&target_key).copied();
                 }
                 RelationshipKind::ImportedSymbolToFile => {
-                    let source_key = (
-                        from_path.to_string(),
-                        rel.source_range.byte_offset.0,
-                        rel.source_range.byte_offset.1,
-                    );
-                    rel.source_id = imported_symbol_lookup.get(&source_key).copied();
+                    rel.source_id = rel
+                        .source_imported_symbol_key
+                        .as_ref()
+                        .and_then(|key| imported_symbol_key_lookup.get(key).copied())
+                        .or_else(|| {
+                            let source_key = (
+                                from_path.to_string(),
+                                rel.source_range.byte_offset.0,
+                                rel.source_range.byte_offset.1,
+                            );
+                            imported_symbol_lookup.get(&source_key).copied()
+                        });
                     rel.target_id = file_lookup.get(to_path).copied();
                 }
                 RelationshipKind::Empty => {}
@@ -689,6 +733,17 @@ pub struct ImportedSymbolLocation {
     pub end_col: i32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
+pub struct ImportedSymbolKey {
+    pub file_path: String,
+    pub start_byte: i64,
+    pub end_byte: i64,
+    pub import_type: String,
+    pub import_path: String,
+    pub identifier_name: Option<String>,
+    pub identifier_alias: Option<String>,
+}
+
 impl ImportedSymbolLocation {
     pub fn range(&self) -> Range {
         let start_pos = Position::new(self.start_line as usize, self.start_col as usize);
@@ -776,6 +831,18 @@ impl ImportedSymbolNode {
         ]);
         self.id = Some(id);
         id
+    }
+
+    pub fn lookup_key(&self) -> ImportedSymbolKey {
+        ImportedSymbolKey {
+            file_path: self.location.file_path.clone(),
+            start_byte: self.location.start_byte,
+            end_byte: self.location.end_byte,
+            import_type: self.import_type.as_str().to_string(),
+            import_path: self.import_path.clone(),
+            identifier_name: self.identifier.as_ref().map(|i| i.name.clone()),
+            identifier_alias: self.identifier.as_ref().and_then(|i| i.alias.clone()),
+        }
     }
 }
 
@@ -956,5 +1023,38 @@ mod tests {
         let second_id = second.assign_id(1, "main");
 
         assert_ne!(first_id, second_id);
+    }
+
+    #[test]
+    fn imported_symbol_lookup_key_includes_identifier_identity() {
+        let shared_location = ImportedSymbolLocation {
+            file_path: "main.ts".to_string(),
+            start_byte: 0,
+            end_byte: 20,
+            start_line: 0,
+            end_line: 0,
+            start_col: 0,
+            end_col: 20,
+        };
+        let first = ImportedSymbolNode::new(
+            ImportType::Js("NamedImport"),
+            "./dep".to_string(),
+            Some(ImportIdentifier {
+                name: "foo".to_string(),
+                alias: None,
+            }),
+            shared_location.clone(),
+        );
+        let second = ImportedSymbolNode::new(
+            ImportType::Js("NamedImport"),
+            "./dep".to_string(),
+            Some(ImportIdentifier {
+                name: "bar".to_string(),
+                alias: Some("baz".to_string()),
+            }),
+            shared_location,
+        );
+
+        assert_ne!(first.lookup_key(), second.lookup_key());
     }
 }

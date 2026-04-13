@@ -1,4 +1,5 @@
 use gitalisk_core::repository::testing::local::LocalGitRepository;
+use std::collections::HashMap;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -98,6 +99,97 @@ impl JsFixtureTestSetup {
             .collect()
     }
 
+    pub fn imported_definition_targets_by_local_name_from(
+        &self,
+        file_path: &str,
+    ) -> HashMap<String, Vec<(String, String)>> {
+        let mut grouped: HashMap<String, Vec<(String, String)>> = HashMap::new();
+
+        for rel in self
+            .graph_data
+            .relationships
+            .iter()
+            .filter(|rel| rel.relationship_type == RelationshipType::ImportedSymbolToDefinition)
+            .filter(|rel| rel.source_path.as_ref().map(|p| p.as_ref().as_str()) == Some(file_path))
+        {
+            let Some(imported_symbol) = rel
+                .source_id
+                .and_then(|id| self.graph_data.imported_symbol_nodes.get(id as usize))
+            else {
+                continue;
+            };
+            let Some(target_path) = rel.target_path.as_ref().map(|path| path.to_string()) else {
+                continue;
+            };
+            let Some(target_fqn) = rel
+                .target_id
+                .and_then(|id| self.get_definition_fqn_by_id(id))
+            else {
+                continue;
+            };
+
+            let local_name = imported_symbol
+                .identifier
+                .as_ref()
+                .and_then(|identifier| {
+                    identifier
+                        .alias
+                        .as_ref()
+                        .or(Some(&identifier.name))
+                        .map(ToOwned::to_owned)
+                })
+                .unwrap_or_else(|| imported_symbol.import_path.clone());
+
+            grouped
+                .entry(local_name)
+                .or_default()
+                .push((target_path, target_fqn));
+        }
+
+        grouped
+    }
+
+    pub fn imported_file_targets_by_local_name_from(
+        &self,
+        file_path: &str,
+    ) -> HashMap<String, Vec<String>> {
+        let mut grouped: HashMap<String, Vec<String>> = HashMap::new();
+
+        for rel in self
+            .graph_data
+            .relationships
+            .iter()
+            .filter(|rel| rel.relationship_type == RelationshipType::ImportedSymbolToFile)
+            .filter(|rel| rel.source_path.as_ref().map(|p| p.as_ref().as_str()) == Some(file_path))
+        {
+            let Some(imported_symbol) = rel
+                .source_id
+                .and_then(|id| self.graph_data.imported_symbol_nodes.get(id as usize))
+            else {
+                continue;
+            };
+            let Some(target_path) = rel.target_path.as_ref().map(|path| path.to_string()) else {
+                continue;
+            };
+
+            let local_name = imported_symbol
+                .identifier
+                .as_ref()
+                .and_then(|identifier| {
+                    identifier
+                        .alias
+                        .as_ref()
+                        .or(Some(&identifier.name))
+                        .map(ToOwned::to_owned)
+                })
+                .unwrap_or_else(|| imported_symbol.import_path.clone());
+
+            grouped.entry(local_name).or_default().push(target_path);
+        }
+
+        grouped
+    }
+
     pub fn find_calls_from_method(&self, method_fqn: &str) -> Vec<String> {
         self.graph_data
             .relationships
@@ -111,6 +203,17 @@ impl JsFixtureTestSetup {
                     None
                 }
             })
+            .collect()
+    }
+
+    pub fn find_calls_from_file(&self, file_path: &str) -> Vec<String> {
+        self.graph_data
+            .relationships
+            .iter()
+            .filter(|rel| rel.relationship_type == RelationshipType::Calls)
+            .filter(|rel| rel.kind == crate::graph::RelationshipKind::FileToDefinition)
+            .filter(|rel| rel.source_path.as_ref().map(|p| p.as_ref().as_str()) == Some(file_path))
+            .filter_map(|rel| self.get_definition_fqn_by_id(rel.target_id?))
             .collect()
     }
 

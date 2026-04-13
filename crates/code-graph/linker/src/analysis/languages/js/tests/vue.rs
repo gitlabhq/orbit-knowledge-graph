@@ -125,6 +125,62 @@ fn vue_default_export_has_binding() {
 }
 
 #[test]
+fn wrapped_options_api_creates_virtual_class() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default normalizeRender({
+            name: 'WrappedWidget',
+            methods: { click() {} }
+        });"#,
+        "wrapped.vue.js",
+        "wrapped.vue.js",
+    )
+    .unwrap();
+
+    assert!(analysis.defs.iter().any(|d| d.fqn == "WrappedWidget"));
+    assert!(
+        analysis
+            .defs
+            .iter()
+            .any(|d| d.fqn == "WrappedWidget::click")
+    );
+}
+
+#[test]
+fn props_only_wrapped_component_still_creates_component_definition() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default defineComponent({
+            name: 'PropsOnly',
+            props: { message: String }
+        });"#,
+        "props_only.vue.js",
+        "props_only.vue.js",
+    )
+    .unwrap();
+
+    assert!(
+        analysis
+            .defs
+            .iter()
+            .any(|d| d.fqn == "PropsOnly" && d.kind == JsDefKind::Class)
+    );
+}
+
+#[test]
+fn wrapped_component_extracts_setup_method() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default normalizeRender({
+            name: 'SetupWidget',
+            setup() { return {}; }
+        });"#,
+        "setup_widget.vue.js",
+        "setup_widget.vue.js",
+    )
+    .unwrap();
+
+    assert!(analysis.defs.iter().any(|d| d.fqn == "SetupWidget::setup"));
+}
+
+#[test]
 fn non_vue_export_default_object_ignored() {
     let analysis = JsAnalyzer::analyze_file(
         r#"export default { key: "value" };"#,
@@ -136,5 +192,97 @@ fn non_vue_export_default_object_ignored() {
     assert!(
         analysis.defs.iter().all(|d| d.kind != JsDefKind::Class),
         "plain object export should not create virtual class"
+    );
+}
+
+#[test]
+fn non_vue_export_default_object_with_vue_like_keys_is_ignored() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default {
+            methods: { save() {} },
+            data() { return {}; }
+        };"#,
+        "component.ts",
+        "component.ts",
+    )
+    .unwrap();
+
+    assert!(
+        analysis.defs.iter().all(|d| d.kind != JsDefKind::Class),
+        "non-.vue files should not infer Vue components from plain object exports alone"
+    );
+}
+
+#[test]
+fn explicit_define_component_in_non_vue_file_is_detected() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default defineComponent({
+            name: 'Widget',
+            methods: { save() {} }
+        });"#,
+        "component.ts",
+        "component.ts",
+    )
+    .unwrap();
+
+    assert!(
+        analysis
+            .defs
+            .iter()
+            .any(|d| d.fqn == "Widget" && d.kind == JsDefKind::Class)
+    );
+    assert!(analysis.defs.iter().any(|d| d.fqn == "Widget::save"));
+}
+
+#[test]
+fn wrapped_props_only_component_requires_explicit_name() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default defineComponent({
+            props: { message: String }
+        });"#,
+        "component.ts",
+        "component.ts",
+    )
+    .unwrap();
+
+    assert!(
+        analysis.defs.iter().all(|d| d.kind != JsDefKind::Class),
+        "contract-only wrapped components should require an explicit name"
+    );
+}
+
+#[test]
+fn wrapped_component_requires_single_object_argument() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"const options = { methods: { save() {} } };
+export default defineComponent(options, {
+  methods: { save() {} }
+});"#,
+        "component.ts",
+        "component.ts",
+    )
+    .unwrap();
+
+    assert!(
+        analysis.defs.iter().all(|d| d.kind != JsDefKind::Class),
+        "wrappers should only unwrap a single direct options object argument"
+    );
+}
+
+#[test]
+fn invalid_vue_option_value_shapes_are_ignored() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default {
+            methods: 1,
+            setup: true
+        };"#,
+        "component.vue.js",
+        "component.vue.js",
+    )
+    .unwrap();
+
+    assert!(
+        analysis.defs.iter().all(|d| d.kind != JsDefKind::Class),
+        "invalid value shapes should not classify a file as a Vue component"
     );
 }

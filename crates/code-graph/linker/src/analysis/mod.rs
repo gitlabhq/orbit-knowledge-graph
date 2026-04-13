@@ -305,7 +305,7 @@ impl AnalysisService {
             .any(|name| root_dir.join(name).is_file());
         let is_bun = is_bun_project(root_dir, &discovered_paths);
         let mut resolver = JsCrossFileResolver::new(root_dir.to_path_buf(), is_bun, has_tsconfig);
-        resolver.apply_inferred_aliases(is_bun, has_tsconfig, &modules);
+        resolver.apply_project_resolution_hints(is_bun, has_tsconfig, &modules);
 
         relationships.extend(resolver.resolve(&modules));
         relationships.extend(resolver.resolve_calls(&imported_calls, &modules));
@@ -455,7 +455,10 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
+            SupportedLanguage::Js
+            | SupportedLanguage::Vue
+            | SupportedLanguage::Svelte
+            | SupportedLanguage::GraphQL => {
                 // TODO: OXC-based analysis handles definitions and imports directly
             }
         }
@@ -657,7 +660,10 @@ impl AnalysisService {
                     relationships,
                 );
             }
-            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
+            SupportedLanguage::Js
+            | SupportedLanguage::Vue
+            | SupportedLanguage::Svelte
+            | SupportedLanguage::GraphQL => {
                 // TODO: OXC-based definition relationships
             }
         }

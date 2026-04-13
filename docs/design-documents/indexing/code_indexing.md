@@ -193,19 +193,22 @@ After acquiring the lock, the service resolves the repository using a three-tier
 
 ##### Parser architecture
 
-The code parser supports seven languages using three parser backends:
+The code parser supports Ruby, JavaScript/TypeScript, Vue, Svelte, GraphQL, Python, Kotlin, Java, C#, and Rust using three parser backends:
 
 - **Ruby** uses native Prism bindings for high-fidelity AST parsing.
-- **TypeScript and JavaScript** use the SWC parser. Minified files are skipped.
+- **TypeScript and JavaScript** use OXC for parsing and semantic analysis, with Vue/Svelte files contributing their extracted script blocks to the same JS pipeline. The JS linker distinguishes true invocation sites from plain identifier reads, keeps imported-symbol provenance attached to the correct imported binding even when multiple names share one statement span, records namespace imports as file-backed provenance edges, resolves nested namespace/member chains through re-export barrels, and skips minified files. Vue Options API extraction runs for `.vue`-like files and explicit wrapper APIs such as `defineComponent(...)` or `Vue.extend(...)`; wrapper normalization only unwraps a single direct options-object argument, and contract-only components require an explicit `name`.
+- **GraphQL** files are indexed as file-backed documents so JavaScript imports like `import query from "./query.graphql"` resolve to the GraphQL file node even though the current graph does not extract GraphQL-internal definitions yet.
 - **Python, Kotlin, Java, C#, and Rust** use tree-sitter grammars.
 
-Language detection is extension-based (12 extensions across the seven languages). Ruby, TypeScript/JavaScript, Python, Kotlin, and Java support full reference extraction. C# and Rust currently support definitions and imports only.
+Language detection is extension-based. Ruby, TypeScript/JavaScript, Python, Kotlin, and Java support full reference extraction. C# and Rust currently support definitions and imports only. GraphQL currently participates as a file-backed import target.
 
 For each file, the parser extracts three categories of information:
 
 - **Definitions** such as classes, modules, methods, functions, constants, and interfaces. Each carries a fully qualified name (FQN), source range, and language-specific type.
 - **Imported symbols** with their import path, identifier, optional alias, and scope.
 - **References** including call sites and property accesses. A reference can be resolved to a single target, ambiguous across multiple candidates, or unresolved.
+
+For JavaScript and TypeScript, cross-file import resolution uses `oxc_resolver`. The resolver honors `tsconfig.json`/`jsconfig.json` path mappings first, then explicit webpack alias objects discovered by statically evaluating repository config modules and their local `require()` dependencies. That evaluator handles local CommonJS/JSON modules, `path.join`/`path.resolve`, `fs.existsSync`, `JSON.parse`, `process.env`, `module.exports`, `exports.*`, and `Object.assign` merges, but it does not guess aliases from observed imports. ESM `import` and CommonJS `require()` edges use separate resolver condition sets so package `exports` conditions are evaluated with the correct runtime mode.
 
 ##### Streaming indexing pipeline
 

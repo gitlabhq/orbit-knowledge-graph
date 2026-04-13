@@ -246,6 +246,12 @@ define_languages! {
         extensions: ["svelte"],
         names: ["svelte"],
         exclude_extensions: []
+    },
+    GraphQL {
+        name: "graphql",
+        extensions: ["graphql", "gql"],
+        names: ["graphql"],
+        exclude_extensions: []
     }
 }
 
@@ -261,7 +267,10 @@ impl SupportedLanguage {
             SupportedLanguage::CSharp => SupportLang::CSharp,
             SupportedLanguage::Java => SupportLang::Java,
             SupportedLanguage::Rust => SupportLang::Rust,
-            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
+            SupportedLanguage::Js
+            | SupportedLanguage::Vue
+            | SupportedLanguage::Svelte
+            | SupportedLanguage::GraphQL => {
                 panic!("{self} does not use tree-sitter")
             }
         }
@@ -421,9 +430,10 @@ impl ParserType {
     pub fn for_language(language: SupportedLanguage) -> Self {
         match language {
             SupportedLanguage::Ruby => Self::Ruby(create_ruby_parser()),
-            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
-                Self::JsOxc(language)
-            }
+            SupportedLanguage::Js
+            | SupportedLanguage::Vue
+            | SupportedLanguage::Svelte
+            | SupportedLanguage::GraphQL => Self::JsOxc(language),
             _ => Self::TreeSitter(GenericParser::new(language)),
         }
     }

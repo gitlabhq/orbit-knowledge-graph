@@ -87,10 +87,10 @@ function run() { utils.doStuff(); }"#,
         analysis.calls.iter().any(|c| matches!(
             &c.callee,
             JsCallTarget::ImportedCall {
-                specifier,
-                imported_name: ImportedName::Named(name),
-                ..
-            } if specifier == "./utils" && name == "doStuff"
+                imported_call,
+            } if imported_call.binding.specifier == "./utils"
+                && imported_call.binding.imported_name == ImportedName::Named("doStuff".to_string())
+                && imported_call.member_path.is_empty()
         )),
         "utils.doStuff() via require should produce ImportedCall"
     );

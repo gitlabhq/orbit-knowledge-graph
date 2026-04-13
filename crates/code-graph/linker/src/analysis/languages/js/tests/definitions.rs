@@ -160,6 +160,42 @@ fn nested_function_fqn() {
 }
 
 #[test]
+fn local_variables_get_scoped_unique_fqns() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"
+class Widget {
+    render() {
+        const canEdit = 1;
+        if (canEdit) {
+            const canEdit = 2;
+            return canEdit;
+        }
+        return canEdit;
+    }
+}
+"#,
+        "test.ts",
+        "test.ts",
+    )
+    .unwrap();
+
+    let can_edit_fqns: Vec<_> = analysis
+        .defs
+        .iter()
+        .filter(|d| d.name == "canEdit" && d.kind == JsDefKind::Variable)
+        .map(|d| d.fqn.as_str())
+        .collect();
+
+    assert_eq!(can_edit_fqns.len(), 2);
+    assert!(
+        can_edit_fqns
+            .iter()
+            .all(|fqn| fqn.starts_with("Widget::render::canEdit@")),
+    );
+    assert_ne!(can_edit_fqns[0], can_edit_fqns[1]);
+}
+
+#[test]
 fn exported_flag_set_correctly() {
     let analysis = JsAnalyzer::analyze_file(
         "export function pub_fn() {}\nfunction priv_fn() {}",

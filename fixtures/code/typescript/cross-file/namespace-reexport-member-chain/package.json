@@ -1,0 +1,5 @@
+{
+  "name": "namespace-reexport-member-chain",
+  "private": true,
+  "type": "module"
+}

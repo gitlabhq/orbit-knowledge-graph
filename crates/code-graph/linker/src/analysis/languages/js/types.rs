@@ -3,6 +3,66 @@ use std::collections::HashMap;
 
 use super::frameworks::JsDirective;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsInvocationKind {
+    Call,
+    Construct,
+    TaggedTemplate,
+    Jsx,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsResolutionMode {
+    Import,
+    Require,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JsInvocationSupport {
+    pub call: bool,
+    pub construct: bool,
+    pub tagged_template: bool,
+    pub jsx: bool,
+}
+
+impl JsInvocationSupport {
+    pub const fn function() -> Self {
+        Self {
+            call: true,
+            construct: true,
+            tagged_template: true,
+            jsx: true,
+        }
+    }
+
+    pub const fn arrow_function() -> Self {
+        Self {
+            call: true,
+            construct: false,
+            tagged_template: true,
+            jsx: true,
+        }
+    }
+
+    pub const fn class() -> Self {
+        Self {
+            call: false,
+            construct: true,
+            tagged_template: false,
+            jsx: true,
+        }
+    }
+
+    pub const fn supports(self, kind: JsInvocationKind) -> bool {
+        match kind {
+            JsInvocationKind::Call => self.call,
+            JsInvocationKind::Construct => self.construct,
+            JsInvocationKind::TaggedTemplate => self.tagged_template,
+            JsInvocationKind::Jsx => self.jsx,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct JsModuleInfo {
     pub exports: HashMap<String, ExportedBinding>,
@@ -29,10 +89,12 @@ pub struct ExportedBinding {
     pub local_fqn: String,
     pub range: Range,
     pub definition_range: Option<Range>,
+    pub invocation_support: Option<JsInvocationSupport>,
+    pub member_bindings: HashMap<String, ExportedBinding>,
     pub is_type: bool,
     pub is_default: bool,
     pub reexport_source: Option<String>,
-    pub reexport_name: Option<String>,
+    pub reexport_imported_name: Option<ImportedName>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +102,7 @@ pub struct OwnedImportEntry {
     pub specifier: String,
     pub imported_name: ImportedName,
     pub local_name: String,
+    pub resolution_mode: JsResolutionMode,
     pub is_type: bool,
     pub range: Range,
 }
@@ -51,10 +114,46 @@ pub enum ImportedName {
     Namespace,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsImportedBinding {
+    pub specifier: String,
+    pub imported_name: ImportedName,
+    pub resolution_mode: JsResolutionMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsImportedCall {
+    pub binding: JsImportedBinding,
+    pub member_path: Vec<String>,
+    pub invocation_kind: JsInvocationKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsImportedMemberBinding {
+    pub binding: JsImportedBinding,
+    pub member_name: String,
+}
+
+impl JsImportedBinding {
+    pub fn member(&self, member_name: impl Into<String>) -> JsImportedMemberBinding {
+        JsImportedMemberBinding {
+            binding: self.clone(),
+            member_name: member_name.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum CjsExport {
-    Default { range: Range },
-    Named { name: String, range: Range },
+    Default {
+        range: Range,
+        invocation_support: Option<JsInvocationSupport>,
+    },
+    Named {
+        name: String,
+        range: Range,
+        invocation_support: Option<JsInvocationSupport>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -207,9 +306,7 @@ pub enum JsCallTarget {
         resolved_range: Option<Range>,
     },
     ImportedCall {
-        local_name: String,
-        specifier: String,
-        imported_name: ImportedName,
+        imported_call: JsImportedCall,
     },
 }
 

@@ -208,6 +208,7 @@ impl<'a> FileProcessor<'a> {
                 | SupportedLanguage::Js
                 | SupportedLanguage::Vue
                 | SupportedLanguage::Svelte
+                | SupportedLanguage::GraphQL
         );
         if !is_supported {
             return ProcessingResult::Skipped(SkippedFile {
@@ -236,6 +237,10 @@ impl<'a> FileProcessor<'a> {
             SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte
         ) {
             return self.process_js(language, start_time);
+        }
+
+        if language == SupportedLanguage::GraphQL {
+            return self.process_graphql(language, start_time);
         }
 
         // Use unified pipeline for all languages (ParserType + rules + analyzer)
@@ -404,6 +409,33 @@ impl<'a> FileProcessor<'a> {
         }))
     }
 
+    fn process_graphql(
+        &self,
+        language: SupportedLanguage,
+        start_time: Instant,
+    ) -> ProcessingResult {
+        ProcessingResult::Success(Box::new(FileProcessingResult {
+            file_path: self.path.clone(),
+            extension: self.extension.clone(),
+            file_size: self.size(),
+            language,
+            definitions: Definitions::GraphQL,
+            imported_symbols: None,
+            references: None,
+            js_analysis: None,
+            stats: ProcessingStats {
+                total_time: start_time.elapsed(),
+                parse_time: Duration::ZERO,
+                rules_time: Duration::ZERO,
+                analysis_time: Duration::ZERO,
+                rule_matches: 0,
+                definitions_count: 0,
+                imported_symbols_count: 0,
+            },
+            is_supported: true,
+        }))
+    }
+
     fn analyze_file(
         &self,
         language: SupportedLanguage,
@@ -556,10 +588,21 @@ impl<'a> FileProcessor<'a> {
                     ))
                 }
             }
-            SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte => {
+            SupportedLanguage::Js
+            | SupportedLanguage::Vue
+            | SupportedLanguage::Svelte
+            | SupportedLanguage::GraphQL => {
                 // OXC-based analysis handled directly in the linker, not through parser-core.
                 // TODO: Wire JsAnalyzer::analyze_file() here
-                Ok((Definitions::JsOxc, None, None))
+                Ok((
+                    if language == SupportedLanguage::GraphQL {
+                        Definitions::GraphQL
+                    } else {
+                        Definitions::JsOxc
+                    },
+                    None,
+                    None,
+                ))
             }
         };
         debug!("Finished analyzing file {}.", self.path);
@@ -578,6 +621,8 @@ pub enum Definitions {
     Rust(Vec<RustDefinitionInfo>),
     /// Placeholder for JS/TS files analyzed by OXC directly in the linker.
     JsOxc,
+    /// Placeholder for GraphQL files that are indexed as file-backed documents.
+    GraphQL,
     Unknown(Vec<DefinitionInfo<(), ()>>),
 }
 
@@ -592,6 +637,7 @@ impl Definitions {
             Definitions::CSharp(defs) => defs.len(),
             Definitions::Rust(defs) => defs.len(),
             Definitions::JsOxc => 0,
+            Definitions::GraphQL => 0,
             Definitions::Unknown(defs) => defs.len(),
         }
     }
@@ -629,6 +675,7 @@ impl Definitions {
                     .map(|def| def.definition_type.as_str().to_string()),
             ),
             Definitions::JsOxc => Box::new(std::iter::empty()),
+            Definitions::GraphQL => Box::new(std::iter::empty()),
             Definitions::Unknown(_) => Box::new(std::iter::empty()),
         }
     }

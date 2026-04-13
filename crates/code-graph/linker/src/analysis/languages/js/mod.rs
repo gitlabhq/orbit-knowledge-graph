@@ -19,5 +19,6 @@ pub use workspace::{WorkspacePackage, detect_workspaces, is_bun_project};
 pub use types::{
     CjsExport, ExportedBinding, ImportedName, JsCallConfidence, JsCallEdge, JsCallSite,
     JsCallTarget, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsImport, JsImportKind,
-    JsMemberKind, JsModuleInfo, OwnedImportEntry,
+    JsImportedBinding, JsImportedCall, JsImportedMemberBinding, JsInvocationKind,
+    JsInvocationSupport, JsMemberKind, JsModuleInfo, JsResolutionMode, OwnedImportEntry,
 };

@@ -2,8 +2,9 @@ use oxc::ast::AstKind;
 use oxc::semantic::AstNodes;
 use oxc::span::Span;
 use parser_core::utils::Range;
+use std::collections::HashMap;
 
-use super::super::types::{CjsExport, JsImport, JsImportKind};
+use super::super::types::{CjsExport, JsImport, JsImportKind, JsInvocationSupport};
 
 pub(super) fn extract_cjs_imports(
     nodes: &AstNodes,
@@ -79,6 +80,7 @@ fn collect_cjs_bindings(
 pub(super) fn extract_cjs_exports(
     nodes: &AstNodes,
     span_to_range: impl Fn(Span) -> Range,
+    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
 ) -> Vec<CjsExport> {
     use oxc::ast::ast::AssignmentTarget;
 
@@ -86,6 +88,9 @@ pub(super) fn extract_cjs_exports(
 
     for node in nodes.iter() {
         if let AstKind::AssignmentExpression(assign) = node.kind() {
+            let invocation_support =
+                invocation_support_for_assignment_rhs(&assign.right, invocation_support_by_name);
+
             match &assign.left {
                 AssignmentTarget::AssignmentTargetIdentifier(_) => {}
                 _ => {
@@ -98,6 +103,7 @@ pub(super) fn extract_cjs_exports(
                         {
                             exports.push(CjsExport::Default {
                                 range: span_to_range(assign.span),
+                                invocation_support,
                             });
                             continue;
                         }
@@ -108,6 +114,7 @@ pub(super) fn extract_cjs_exports(
                             exports.push(CjsExport::Named {
                                 name: prop_name.to_string(),
                                 range: span_to_range(assign.span),
+                                invocation_support,
                             });
                         }
 
@@ -120,6 +127,7 @@ pub(super) fn extract_cjs_exports(
                             exports.push(CjsExport::Named {
                                 name: prop_name.to_string(),
                                 range: span_to_range(assign.span),
+                                invocation_support,
                             });
                         }
                     }
@@ -129,4 +137,21 @@ pub(super) fn extract_cjs_exports(
     }
 
     exports
+}
+
+fn invocation_support_for_assignment_rhs(
+    expr: &oxc::ast::ast::Expression,
+    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
+) -> Option<JsInvocationSupport> {
+    match expr.get_inner_expression() {
+        oxc::ast::ast::Expression::ArrowFunctionExpression(_) => {
+            Some(JsInvocationSupport::arrow_function())
+        }
+        oxc::ast::ast::Expression::FunctionExpression(_) => Some(JsInvocationSupport::function()),
+        oxc::ast::ast::Expression::ClassExpression(_) => Some(JsInvocationSupport::class()),
+        oxc::ast::ast::Expression::Identifier(ident) => {
+            invocation_support_by_name.get(ident.name.as_str()).copied()
+        }
+        _ => None,
+    }
 }

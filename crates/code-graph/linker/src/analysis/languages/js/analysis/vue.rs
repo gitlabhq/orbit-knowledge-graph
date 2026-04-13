@@ -1,9 +1,121 @@
 use oxc::ast::AstKind;
+use oxc::ast::ast::{
+    CallExpression, ExportDefaultDeclarationKind, Expression, ObjectExpression, ObjectPropertyKind,
+};
 use oxc::semantic::AstNodes;
 use parser_core::utils::Range;
 use std::collections::HashMap;
 
 use super::super::types::{JsDef, JsDefKind};
+
+fn vue_component_object<'a>(
+    declaration: &'a ExportDefaultDeclarationKind<'a>,
+    allow_loose_detection: bool,
+) -> Option<(&'a ObjectExpression<'a>, bool)> {
+    match declaration {
+        ExportDefaultDeclarationKind::ObjectExpression(object) => {
+            allow_loose_detection.then_some((object, false))
+        }
+        ExportDefaultDeclarationKind::CallExpression(call) => {
+            vue_component_object_from_call(call, allow_loose_detection).map(|object| (object, true))
+        }
+        _ => None,
+    }
+}
+
+fn vue_component_object_from_call<'a>(
+    call: &'a CallExpression<'a>,
+    allow_loose_detection: bool,
+) -> Option<&'a ObjectExpression<'a>> {
+    if !allow_loose_detection && !is_known_vue_component_wrapper(call) {
+        return None;
+    }
+    (call.arguments.len() == 1)
+        .then_some(call.arguments.first()?.as_expression()?)
+        .and_then(|expression| match expression.get_inner_expression() {
+            Expression::ObjectExpression(object) => Some(object),
+            _ => None,
+        })
+        .map(|object| &**object)
+}
+
+fn is_vue_like_path(relative_path: &str) -> bool {
+    relative_path.ends_with(".vue") || relative_path.contains(".vue.")
+}
+
+fn is_known_vue_component_wrapper(call: &CallExpression<'_>) -> bool {
+    match call.callee.get_inner_expression() {
+        Expression::Identifier(identifier) => matches!(
+            identifier.name.as_str(),
+            "defineComponent" | "defineAsyncComponent" | "defineNuxtComponent"
+        ),
+        Expression::StaticMemberExpression(member) => {
+            matches!(member.object.get_inner_expression(), Expression::Identifier(identifier) if identifier.name == "Vue")
+                && member.property.name == "extend"
+        }
+        _ => false,
+    }
+}
+
+fn explicit_component_name(obj: &ObjectExpression<'_>) -> Option<String> {
+    obj.properties.iter().find_map(|prop| {
+        let ObjectPropertyKind::ObjectProperty(p) = prop else {
+            return None;
+        };
+        if p.key.static_name().as_deref() != Some("name") {
+            return None;
+        }
+        if let oxc::ast::ast::Expression::StringLiteral(s) = &p.value {
+            Some(s.value.to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn is_function_like(expression: &Expression<'_>) -> bool {
+    matches!(
+        expression.get_inner_expression(),
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+    )
+}
+
+fn is_contract_value(expression: &Expression<'_>) -> bool {
+    matches!(
+        expression.get_inner_expression(),
+        Expression::ObjectExpression(_)
+            | Expression::ArrayExpression(_)
+            | Expression::ArrowFunctionExpression(_)
+            | Expression::FunctionExpression(_)
+    )
+}
+
+fn is_executable_vue_option(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool {
+    match property.key.static_name().as_deref() {
+        Some("methods" | "computed" | "watch") => {
+            matches!(
+                property.value.get_inner_expression(),
+                Expression::ObjectExpression(_)
+            )
+        }
+        Some("data" | "setup" | "render") => is_function_like(&property.value),
+        Some(
+            "beforeCreate" | "created" | "beforeMount" | "mounted" | "beforeUpdate" | "updated"
+            | "beforeDestroy" | "destroyed" | "beforeUnmount" | "unmounted" | "activated"
+            | "deactivated" | "errorCaptured",
+        ) => is_function_like(&property.value),
+        _ => false,
+    }
+}
+
+fn is_contract_vue_option(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool {
+    match property.key.static_name().as_deref() {
+        Some("props" | "emits" | "inject" | "provide" | "components") => {
+            is_contract_value(&property.value)
+        }
+        _ => false,
+    }
+}
 
 pub(super) fn extract_vue_options_api(
     nodes: &AstNodes,
@@ -12,69 +124,48 @@ pub(super) fn extract_vue_options_api(
     defs: &mut Vec<JsDef>,
     class_hierarchy: &mut HashMap<String, Option<String>>,
 ) {
+    let allow_loose_detection = is_vue_like_path(relative_path);
+
     for node in nodes.iter() {
         let AstKind::ExportDefaultDeclaration(decl) = node.kind() else {
             continue;
         };
-        let oxc::ast::ast::ExportDefaultDeclarationKind::ObjectExpression(obj) = &decl.declaration
+        let Some((obj, is_wrapped)) =
+            vue_component_object(&decl.declaration, allow_loose_detection)
         else {
             continue;
         };
 
-        let component_name = obj
+        let explicit_name = explicit_component_name(obj);
+        let has_executable_options = obj
             .properties
             .iter()
-            .find_map(|prop| {
-                let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
-                    return None;
-                };
-                if p.key.static_name().as_deref() != Some("name") {
-                    return None;
-                }
-                if let oxc::ast::ast::Expression::StringLiteral(s) = &p.value {
-                    Some(s.value.to_string())
-                } else {
-                    None
-                }
+            .filter_map(|prop| match prop {
+                ObjectPropertyKind::ObjectProperty(property) => Some(property),
+                _ => None,
             })
-            .unwrap_or_else(|| {
-                std::path::Path::new(relative_path)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("Component")
-                    .to_string()
-            });
-
-        // Only create virtual class if the object has Vue component structure
-        let vue_keys: &[&str] = &[
-            "methods",
-            "computed",
-            "watch",
-            "data",
-            "mounted",
-            "created",
-            "beforeDestroy",
-            "destroyed",
-            "beforeMount",
-            "updated",
-            "beforeCreate",
-            "beforeUnmount",
-            "unmounted",
-            "activated",
-            "deactivated",
-            "errorCaptured",
-        ];
-        let has_component_structure = obj.properties.iter().any(|prop| {
-            let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
-                return false;
-            };
-            p.key
-                .static_name()
-                .is_some_and(|n| vue_keys.contains(&n.as_ref()))
-        });
-        if !has_component_structure {
+            .any(|property| is_executable_vue_option(property));
+        let has_contract_options = obj
+            .properties
+            .iter()
+            .filter_map(|prop| match prop {
+                ObjectPropertyKind::ObjectProperty(property) => Some(property),
+                _ => None,
+            })
+            .any(|property| is_contract_vue_option(property));
+        let allows_contract_only = explicit_name.is_some()
+            && has_contract_options
+            && (is_wrapped || allow_loose_detection);
+        if !has_executable_options && !allows_contract_only {
             continue;
         }
+        let component_name = explicit_name.unwrap_or_else(|| {
+            std::path::Path::new(relative_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Component")
+                .to_string()
+        });
 
         class_hierarchy.insert(component_name.clone(), None);
 
@@ -104,7 +195,7 @@ pub(super) fn extract_vue_options_api(
         ];
 
         for prop in &obj.properties {
-            let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
+            let ObjectPropertyKind::ObjectProperty(p) = prop else {
                 continue;
             };
             let Some(key_name) = p.key.static_name() else {
@@ -114,11 +205,11 @@ pub(super) fn extract_vue_options_api(
 
             // methods: { ... } -- extract each child as a Method
             if key == "methods" {
-                let oxc::ast::ast::Expression::ObjectExpression(methods_obj) = &p.value else {
+                let Expression::ObjectExpression(methods_obj) = &p.value else {
                     continue;
                 };
                 for method_prop in &methods_obj.properties {
-                    let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(mp) = method_prop else {
+                    let ObjectPropertyKind::ObjectProperty(mp) = method_prop else {
                         continue;
                     };
                     let Some(method_name) = mp.key.static_name() else {
@@ -141,11 +232,11 @@ pub(super) fn extract_vue_options_api(
             }
             // computed: { ... } -- extract each child as ComputedProperty
             else if key == "computed" {
-                let oxc::ast::ast::Expression::ObjectExpression(computed_obj) = &p.value else {
+                let Expression::ObjectExpression(computed_obj) = &p.value else {
                     continue;
                 };
                 for cp in &computed_obj.properties {
-                    let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(mp) = cp else {
+                    let ObjectPropertyKind::ObjectProperty(mp) = cp else {
                         continue;
                     };
                     let Some(prop_name) = mp.key.static_name() else {
@@ -167,11 +258,11 @@ pub(super) fn extract_vue_options_api(
             }
             // watch: { ... } -- extract each watcher as Watcher
             else if key == "watch" {
-                let oxc::ast::ast::Expression::ObjectExpression(watch_obj) = &p.value else {
+                let Expression::ObjectExpression(watch_obj) = &p.value else {
                     continue;
                 };
                 for watch_prop in &watch_obj.properties {
-                    let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(wp) = watch_prop else {
+                    let ObjectPropertyKind::ObjectProperty(wp) = watch_prop else {
                         continue;
                     };
                     let Some(watcher_name) = wp.key.static_name() else {
@@ -191,8 +282,8 @@ pub(super) fn extract_vue_options_api(
                     });
                 }
             }
-            // data() -- extract as Method (it's a function returning reactive state)
-            else if key == "data" {
+            // data(), setup(), render() -- extract as Method-style definitions.
+            else if matches!(key, "data" | "setup" | "render") {
                 let fqn = format!("{component_name}::{key}");
                 defs.push(JsDef {
                     name: key.to_string(),
