@@ -152,6 +152,13 @@ impl DslLanguage for PythonDsl {
                 .path_from(field("module_name"))
                 .multi(&["dotted_name", "identifier"])
                 .alias_child("aliased_import"),
+            // `from __future__ import annotations`
+            // The path is always "__future__" — use ChildOfKind to find the keyword token
+            import("future_import_statement")
+                .label("FutureImport")
+                .path_from(Extract::ChildOfKind("__future__"))
+                .multi(&["dotted_name", "identifier"])
+                .alias_child("aliased_import"),
         ]
     }
 
@@ -244,5 +251,17 @@ mod tests {
     fn language() {
         let result = parse("x = 1\n");
         assert_eq!(result.language, Language::Python);
+    }
+
+    #[test]
+    fn bindings_extracted() {
+        let result = parse(
+            "def option1():\n    pass\n\ndef option2():\n    pass\n\ndef caller():\n    x = option1\n    x = option2\n    x()\n",
+        );
+        eprintln!("bindings: {:?}", result.bindings.iter().map(|b| (&b.name, &b.value)).collect::<Vec<_>>());
+        eprintln!("refs: {:?}", result.references.iter().map(|r| &r.name).collect::<Vec<_>>());
+        assert!(!result.bindings.is_empty(), "should have bindings");
+        assert!(result.bindings.iter().any(|b| b.name == "x" && b.value.as_deref() == Some("option1")));
+        assert!(result.bindings.iter().any(|b| b.name == "x" && b.value.as_deref() == Some("option2")));
     }
 }

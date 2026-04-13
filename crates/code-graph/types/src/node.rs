@@ -186,6 +186,8 @@ pub struct CanonicalBinding {
     /// What the name is bound to (RHS). `None` for opaque bindings (parameters, deletions).
     pub value: Option<String>,
     pub range: Range,
+    /// FQN of the enclosing scope (function/class/module).
+    pub scope_fqn: Option<Fqn>,
 }
 
 /// The complete output of parsing a single file. This is the boundary

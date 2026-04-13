@@ -142,7 +142,17 @@ impl LanguageSpec {
         }
 
         // Extract bindings (assignments, parameters, etc.)
-        self.evaluate_binding(node, &node_kind, bindings);
+        if let Some(rule) = self.bindings.iter().find(|r| r.matches(node, &node_kind)) {
+            if let Some(name) = rule.extract_name(node) {
+                let value = rule.extract_value(node);
+                bindings.push(code_graph_types::CanonicalBinding {
+                    name,
+                    value,
+                    range: canonical_range(&node_to_range(node)),
+                    scope_fqn: Fqn::from_scope_only(scope_stack, sep),
+                });
+            }
+        }
 
         for child in node.children() {
             self.walk(&child, scope_stack, defs, refs, imports, bindings, sep);
@@ -187,26 +197,6 @@ impl LanguageSpec {
         let rule = self.refs.iter().find(|r| r.matches(node, node_kind))?;
         let name = rule.extract_name(node)?;
         Some((name, node_to_range(node)))
-    }
-
-    fn evaluate_binding(
-        &self,
-        node: &Node<StrDoc<SupportLang>>,
-        node_kind: &str,
-        bindings: &mut Vec<code_graph_types::CanonicalBinding>,
-    ) {
-        let Some(rule) = self.bindings.iter().find(|r| r.matches(node, node_kind)) else {
-            return;
-        };
-        let Some(name) = rule.extract_name(node) else {
-            return;
-        };
-        let value = rule.extract_value(node);
-        bindings.push(code_graph_types::CanonicalBinding {
-            name,
-            value,
-            range: canonical_range(&node_to_range(node)),
-        });
     }
 
     fn evaluate_imports(

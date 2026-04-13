@@ -54,6 +54,24 @@ yaml_test!(
     python_interfile_resolution,
     "python/interfile_resolution.yaml"
 );
+yaml_test!(
+    python_unresolved_and_edge_cases,
+    "python/unresolved_and_edge_cases.yaml"
+);
+yaml_test!(
+    python_conditional_bindings,
+    "python/conditional_bindings.yaml"
+);
+yaml_test!(
+    python_chained_and_callable,
+    "python/chained_and_callable.yaml"
+);
+yaml_test!(python_import_extraction, "python/import_extraction.yaml");
+yaml_test!(python_interfile_imports, "python/interfile_imports.yaml");
+yaml_test!(
+    python_aliased_and_partial,
+    "python/aliased_and_partial.yaml"
+);
 yaml_test!(python_call_resolution, "python_resolution.yaml");
 
 // ── Java ────────────────────────────────────────────────────────

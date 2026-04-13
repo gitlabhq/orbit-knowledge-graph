@@ -83,11 +83,12 @@ impl AsAst for treesitter_visit::Root<StrDoc<SupportLang>> {
     }
 }
 
-// ── Flat walker (no AST) ────────────────────────────────────────
+// ── Scoped walker (no AST) ───────────────────────────────────────
 
-/// Walk canonical data without an AST. All definitions and imports are
-/// written to a single block. References are read from that block.
-/// Resolution relies entirely on import strategies and FQN matching.
+/// Walk canonical data without an AST. Creates one SSA block per scope
+/// (function/class) so that local bindings don't leak across scopes.
+/// Each scope's block has an edge from its parent scope, so names
+/// defined in outer scopes are visible via SSA's recursive lookup.
 fn walk_flat(
     _rules: &ResolutionRules,
     ssa: &mut SsaResolver,
@@ -95,26 +96,84 @@ fn walk_flat(
     file_idx: usize,
     result: &CanonicalResult,
 ) {
-    let block = ssa.add_block();
-    ssa.seal_block(block);
+    // Build scope hierarchy: scope_fqn → SSA block
+    let mut scope_blocks: FxHashMap<String, BlockId> = FxHashMap::default();
 
-    // Write all definitions
+    // Module-level block (root scope)
+    let module_block = ssa.add_block();
+    ssa.seal_block(module_block);
+    scope_blocks.insert(String::new(), module_block);
+
+    // Create a block for each definition that creates a scope (functions, classes)
+    // ordered by FQN depth so parents are created before children
+    let mut scoped_defs: Vec<(usize, &code_graph_types::CanonicalDefinition)> = result
+        .definitions
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| matches!(
+            d.kind,
+            code_graph_types::DefKind::Function
+                | code_graph_types::DefKind::Method
+                | code_graph_types::DefKind::Class
+                | code_graph_types::DefKind::Constructor
+        ))
+        .collect();
+    scoped_defs.sort_by_key(|(_, d)| d.fqn.parts().len());
+
+    for (_def_idx, def) in &scoped_defs {
+        let fqn_str = def.fqn.to_string();
+        let parent_fqn: String = def
+            .fqn
+            .parent()
+            .map(|p| p.to_string())
+            .unwrap_or_default();
+
+        let parent_block = scope_blocks
+            .get(&parent_fqn)
+            .copied()
+            .unwrap_or(module_block);
+
+        let block = ssa.add_block();
+        ssa.add_predecessor(block, parent_block);
+        ssa.seal_block(block);
+        scope_blocks.insert(fqn_str, block);
+    }
+
+    // Write definitions to their scope's block
     for (def_idx, def) in result.definitions.iter().enumerate() {
+        let parent_fqn = def
+            .fqn
+            .parent()
+            .map(|p| p.to_string())
+            .unwrap_or_default();
+        let block = scope_blocks
+            .get(&parent_fqn)
+            .copied()
+            .unwrap_or(module_block);
         ssa.write_variable(&def.name, block, Value::Def(file_idx, def_idx));
     }
 
-    // Write all imports (bind the imported name)
+    // Write imports to module block
     for (import_idx, imp) in result.imports.iter().enumerate() {
         let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
         if !name.is_empty() && name != "*" {
-            ssa.write_variable(name, block, Value::Import(file_idx, import_idx));
+            ssa.write_variable(name, module_block, Value::Import(file_idx, import_idx));
         }
     }
 
-    // Process bindings (assignments create aliases in the SSA)
+    // Process bindings in their scope's block
     for binding in &result.bindings {
+        let scope_fqn = binding
+            .scope_fqn
+            .as_ref()
+            .map(|f| f.to_string())
+            .unwrap_or_default();
+        let block = scope_blocks
+            .get(&scope_fqn)
+            .copied()
+            .unwrap_or(module_block);
+
         let value = if let Some(ref val_name) = binding.value {
-            // Try to resolve the RHS name
             let reaching = ssa.read_variable_stateless(val_name, block);
             if !reaching.values.is_empty() {
                 reaching.values[0].clone()
@@ -127,8 +186,18 @@ fn walk_flat(
         ssa.write_variable(&binding.name, block, value);
     }
 
-    // Read all references
+    // Read references in their scope's block
     for (ref_idx, reference) in result.references.iter().enumerate() {
+        let scope_fqn = reference
+            .scope_fqn
+            .as_ref()
+            .map(|f| f.to_string())
+            .unwrap_or_default();
+        let block = scope_blocks
+            .get(&scope_fqn)
+            .copied()
+            .unwrap_or(module_block);
+
         reads.push(RecordedRead {
             file_idx,
             ref_idx,
