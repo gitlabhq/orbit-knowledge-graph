@@ -1303,8 +1303,13 @@ dependencies = [
 name = "code-graph"
 version = "0.1.0"
 dependencies = [
+ "code-graph-config",
  "code-graph-linker",
+ "code-graph-types",
+ "ignore",
  "parser-core",
+ "rayon",
+ "rustc-hash",
  "treesitter-visit",
 ]
 
