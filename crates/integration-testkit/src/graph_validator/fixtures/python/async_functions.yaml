@@ -1,0 +1,39 @@
+name: "Python: async function definitions and calls"
+fixtures:
+  - path: main.py
+    content: |
+      async def async_func():
+          pass
+
+      async def async_caller():
+          await async_func()
+          async_func()
+
+      async def async_generator():
+          yield 1
+          yield 2
+
+tests:
+  - name: Async function definition exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'async_func'
+      RETURN d.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: Async caller calls async_func
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'async_caller' AND callee.name = 'async_func'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: Async generator exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'async_generator'
+      RETURN d.fqn AS fqn
+    assert:
+      - { non_empty: true }

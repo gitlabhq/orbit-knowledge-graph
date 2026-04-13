@@ -1,0 +1,67 @@
+name: "Python: multi-file import patterns"
+fixtures:
+  - path: models.py
+    content: |
+      class User:
+          def __init__(self, name):
+              self.name = name
+
+      class Project:
+          def __init__(self, title):
+              self.title = title
+  - path: services.py
+    content: |
+      from models import User, Project
+
+      class UserService:
+          def create_user(self, name):
+              return User(name)
+
+          def get_project(self):
+              return Project("test")
+  - path: main.py
+    content: |
+      from services import UserService
+
+      def run():
+          svc = UserService()
+          svc.create_user("alice")
+
+tests:
+  - name: UserService.create_user calls User
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'create_user' AND callee.name = 'User'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }
+
+  - name: main calls UserService across files
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'UserService'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }
+
+  - name: Three files in the graph
+    query: |
+      MATCH (f:File)
+      RETURN count(f) AS n
+    assert:
+      - { count_equals: { field: n, value: 3 } }
+
+  - name: User and Project exist in models.py
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'User'
+          RETURN d.file_path AS file
+        assert:
+          - { all_match: { field: file, pattern: "models.py" } }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'Project'
+          RETURN d.file_path AS file
+        assert:
+          - { all_match: { field: file, pattern: "models.py" } }

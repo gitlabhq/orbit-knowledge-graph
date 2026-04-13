@@ -1,0 +1,50 @@
+name: "Python: conditional and try/except bindings"
+fixtures:
+  - path: main.py
+    content: |
+      # D9/D24: conditional binding
+      def option_a():
+          pass
+
+      def option_b():
+          pass
+
+      def conditional_caller():
+          if True:
+              chosen = option_a
+          else:
+              chosen = option_b
+          chosen()
+
+      # D15: try/except binding
+      def foo():
+          pass
+
+      def bar():
+          pass
+
+      def try_caller():
+          try:
+              x = foo
+          except:
+              x = bar
+          x()
+
+tests:
+  - name: "D9: conditional binding produces call edge(s)"
+    description: "chosen() may resolve to option_a, option_b, or both (ambiguous)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'conditional_caller'
+      RETURN callee.name AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: "D15: try/except binding produces call edge(s)"
+    description: "x() may resolve to foo, bar, or both (ambiguous)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'try_caller'
+      RETURN callee.name AS callee
+    assert:
+      - { non_empty: true }

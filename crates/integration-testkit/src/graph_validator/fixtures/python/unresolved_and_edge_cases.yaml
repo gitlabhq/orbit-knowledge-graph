@@ -1,0 +1,98 @@
+name: "Python: unresolved refs, shadowing, walrus, f-strings"
+fixtures:
+  - path: main.py
+    content: |
+      # D3: unresolved reference
+      def call_undefined():
+          undefined_function()
+
+      # D13: reassignment latest wins
+      def option1():
+          pass
+
+      def option2():
+          pass
+
+      def reassignment_caller():
+          x = option1
+          x = option2
+          x()
+
+      # D19: import shadowing
+      from module1 import func
+      from module2 import func
+
+      def import_shadow_caller():
+          func()
+
+      # D20/D39: walrus operator
+      def get_value():
+          return 42
+
+      def process(x):
+          pass
+
+      def walrus_caller():
+          if (x := get_value()) > 0:
+              process(x)
+
+      # D40: function calls in f-strings
+      def get_name():
+          return "alice"
+
+      def get_age():
+          return 30
+
+      def fstring_caller():
+          f"Name: {get_name()}, Age: {get_age()}"
+
+tests:
+  - name: "D3: undefined_function produces no call edge"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_undefined'
+      RETURN callee.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: "D13: reassignment resolves to latest (option2)"
+    description: "x = option1; x = option2; x() should resolve to option2 not option1"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'reassignment_caller'
+      RETURN callee.name AS callee
+    assert:
+      - { non_empty: true }
+      - { contains_row: { callee: "option2" } }
+
+  - name: "D20: walrus caller calls get_value"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'walrus_caller' AND callee.name = 'get_value'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: "D20: walrus caller calls process"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'walrus_caller' AND callee.name = 'process'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: "D40: f-string calls get_name"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'fstring_caller' AND callee.name = 'get_name'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: "D40: f-string calls get_age"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'fstring_caller' AND callee.name = 'get_age'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
