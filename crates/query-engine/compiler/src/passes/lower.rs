@@ -157,7 +157,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
     let rel_tables: Vec<Vec<String>> = input
         .relationships
         .iter()
-        .map(|rel| resolve_rel_edge_tables(&input.compiler, &rel.types))
+        .map(|rel| input.compiler.resolve_edge_tables(&rel.types))
         .collect();
 
     let first_rel = input.relationships.first().unwrap();
@@ -494,7 +494,7 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         let rel_tables: Vec<Vec<String>> = input
             .relationships
             .iter()
-            .map(|rel| resolve_rel_edge_tables(&input.compiler, &rel.types))
+            .map(|rel| input.compiler.resolve_edge_tables(&rel.types))
             .collect();
         build_joins(
             &input.nodes,
@@ -705,7 +705,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let forward_depth = max_depth.div_ceil(2); // ceil(max_depth / 2)
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
-    let et = resolve_rel_edge_tables(&input.compiler, &path.rel_types);
+    let et = input.compiler.resolve_edge_tables(&path.rel_types);
     let forward_cte = Cte::new(
         FORWARD_CTE,
         build_frontier(
@@ -1076,7 +1076,9 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
         .neighbors
         .as_ref()
         .ok_or_else(|| QueryError::Lowering("neighbors config missing".into()))?;
-    let et = resolve_rel_edge_tables(&input.compiler, &neighbors_config.rel_types);
+    let et = input
+        .compiler
+        .resolve_edge_tables(&neighbors_config.rel_types);
 
     let center_node = find_node(&input.nodes, &neighbors_config.node)?;
     let center_table = resolve_table(center_node)?;
@@ -1452,17 +1454,6 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
     } else {
         Some(types.to_vec())
     }
-}
-
-/// Resolve the edge table(s) for a set of relationship types.
-///
-/// Returns a single table name when all types live in the same physical
-/// table, or a sorted list of tables for wildcards / mixed-table queries.
-fn resolve_rel_edge_tables(
-    compiler: &crate::input::CompilerMetadata,
-    types: &[String],
-) -> Vec<String> {
-    compiler.resolve_edge_tables(types)
 }
 
 /// Build an edge scan that may span multiple physical tables.
