@@ -16,3 +16,10 @@ macro_rules! yaml_test {
 // ── Structural ──────────────────────────────────────────────────
 yaml_test!(structural_invariants, "structural.yaml");
 yaml_test!(containment_hierarchy, "containment.yaml");
+
+// ── Kotlin ──────────────────────────────────────────────────────
+yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");
+yaml_test!(
+    kotlin_intrafile_resolution,
+    "kotlin/intrafile_resolution.yaml"
+);
