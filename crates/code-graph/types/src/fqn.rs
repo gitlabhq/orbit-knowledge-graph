@@ -78,13 +78,11 @@ impl Fqn {
 
 impl std::fmt::Display for Fqn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut first = true;
-        for part in self.parts.iter() {
-            if !first {
+        for (i, part) in self.parts.iter().enumerate() {
+            if i > 0 {
                 f.write_str(self.separator)?;
             }
             f.write_str(part)?;
-            first = false;
         }
         Ok(())
     }

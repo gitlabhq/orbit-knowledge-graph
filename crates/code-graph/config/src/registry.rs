@@ -1,19 +1,9 @@
 use crate::lang::Language;
-use once_cell::sync::Lazy;
 use rustc_hash::FxHashMap;
+use std::sync::LazyLock;
 use strum::IntoEnumIterator;
 
-pub const ALL_LANGUAGES: &[Language] = &[
-    Language::Ruby,
-    Language::Python,
-    Language::TypeScript,
-    Language::Kotlin,
-    Language::CSharp,
-    Language::Java,
-    Language::Rust,
-];
-
-static EXTENSION_MAP: Lazy<FxHashMap<&'static str, Language>> = Lazy::new(|| {
+static EXTENSION_MAP: LazyLock<FxHashMap<&'static str, Language>> = LazyLock::new(|| {
     let mut map = FxHashMap::default();
     for lang in Language::iter() {
         for ext in lang.file_extensions() {
@@ -23,7 +13,7 @@ static EXTENSION_MAP: Lazy<FxHashMap<&'static str, Language>> = Lazy::new(|| {
     map
 });
 
-static LANGUAGE_NAME_MAP: Lazy<FxHashMap<&'static str, Language>> = Lazy::new(|| {
+static LANGUAGE_NAME_MAP: LazyLock<FxHashMap<&'static str, Language>> = LazyLock::new(|| {
     let mut map = FxHashMap::default();
     for lang in Language::iter() {
         for name in lang.names() {
@@ -48,9 +38,8 @@ pub fn detect_language_from_path(path: &str) -> Option<Language> {
     detect_language_from_extension(ext)
 }
 
-pub fn get_supported_extensions() -> Vec<&'static str> {
-    ALL_LANGUAGES
-        .iter()
+pub fn supported_extensions() -> Vec<&'static str> {
+    Language::iter()
         .flat_map(|lang| lang.file_extensions())
         .copied()
         .collect()
@@ -96,13 +85,11 @@ mod tests {
 
     #[test]
     fn supported_extensions_complete() {
-        let exts = get_supported_extensions();
-        assert!(exts.contains(&"py"));
-        assert!(exts.contains(&"java"));
-        assert!(exts.contains(&"rb"));
-        assert!(exts.contains(&"kt"));
-        assert!(exts.contains(&"cs"));
-        assert!(exts.contains(&"rs"));
-        assert!(exts.contains(&"ts"));
+        let exts = supported_extensions();
+        for lang in Language::iter() {
+            for ext in lang.file_extensions() {
+                assert!(exts.contains(ext), "missing extension: {ext}");
+            }
+        }
     }
 }

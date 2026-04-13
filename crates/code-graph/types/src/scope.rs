@@ -68,12 +68,17 @@ impl<T: Clone> ScopeIndex<T> {
     where
         T: HasRange,
     {
-        self.find_containing(start, end)
-            .into_iter()
-            .min_by_key(|item| {
-                let r = item.range();
+        self.tree
+            .query(start..end)
+            .filter(|entry| {
+                let r = entry.value.range();
+                r.byte_offset.0 <= start && r.byte_offset.1 >= end
+            })
+            .min_by_key(|entry| {
+                let r = entry.value.range();
                 r.byte_offset.1 - r.byte_offset.0
             })
+            .map(|entry| &entry.value)
     }
 }
 
