@@ -1,0 +1,72 @@
+[package]
+name = "gkg-fuzz"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+compiler = { path = "../query-engine/compiler" }
+parser-core = { path = "../code-graph/parser" }
+indexer = { path = "../indexer" }
+bolero = "0.13.4"
+serde_json.workspace = true
+
+[dev-dependencies]
+
+[[test]]
+name = "fuzz_compile"
+path = "tests/fuzz_compile/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_compile_structured"
+path = "tests/fuzz_compile_structured/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_ruby"
+path = "tests/fuzz_ruby/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_python"
+path = "tests/fuzz_python/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_typescript"
+path = "tests/fuzz_typescript/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_java"
+path = "tests/fuzz_java/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_kotlin"
+path = "tests/fuzz_kotlin/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_csharp"
+path = "tests/fuzz_csharp/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_rust_parser"
+path = "tests/fuzz_rust_parser/fuzz_target.rs"
+harness = false
+
+[[test]]
+name = "fuzz_indexer_messages"
+path = "tests/fuzz_indexer_messages/fuzz_target.rs"
+harness = false
+
+# Override workspace lint: bolero's libfuzzer harness requires unsafe glue.
+[lints.rust]
+unsafe_code = "allow"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(bolero_should_panic)'] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

@@ -1,0 +1,4 @@
+
+tests/*/corpus
+tests/*/crashes
+tests/*/artifacts
