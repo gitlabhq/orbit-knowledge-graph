@@ -100,8 +100,6 @@ async fn main() -> anyhow::Result<()> {
         Mode::Webserver => {
             config.schema.validate()?;
             let graph = config.graph.build_client();
-            info!("initializing schema version table");
-            schema::version::init(&graph).await?;
             let active_version = schema::version::read_active_version(&graph)
                 .await?
                 .unwrap_or(0);
