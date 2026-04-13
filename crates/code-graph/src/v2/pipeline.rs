@@ -163,10 +163,14 @@ macro_rules! register_v2_pipelines {
 }
 
 register_v2_pipelines! {
+    // Generic: DSL parser + SSA resolver
     Python  => GenericPipeline<DslParser<PythonDsl>, RulesResolver<PythonRules>>,
     Java    => GenericPipeline<DslParser<JavaDsl>, RulesResolver<JavaRules>>,
     Kotlin  => GenericPipeline<DslParser<KotlinDsl>, RulesResolver<KotlinRules>>,
     CSharp  => GenericPipeline<DslParser<CSharpDsl>, NoResolver>,
+
+    // Custom: full control over parse + link
+    Ruby    => crate::v2::custom::ruby::RubyPipeline,
 }
 
 pub struct PipelineConfig {
