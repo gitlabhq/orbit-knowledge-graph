@@ -5170,6 +5170,8 @@ dependencies = [
 name = "parser-core"
 version = "0.1.0"
 dependencies = [
+ "code-graph-config",
+ "code-graph-types",
  "internment",
  "mimalloc",
  "once_cell",
