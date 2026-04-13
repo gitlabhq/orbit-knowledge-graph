@@ -28,7 +28,7 @@ impl LanguagePipeline for RubyPipeline {
         files: Vec<FileInput>,
         root_path: &str,
     ) -> Result<CodeGraph, Vec<PipelineError>> {
-        let mut builder = GraphBuilder::new(root_path.to_string());
+        let builder = GraphBuilder::new(root_path.to_string());
 
         // TODO: for each file:
         // 1. Parse with ruby-prism → AST
