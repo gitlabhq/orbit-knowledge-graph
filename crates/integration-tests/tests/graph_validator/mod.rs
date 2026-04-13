@@ -36,6 +36,16 @@ yaml_test!(
     python_comprehensive_imports,
     "python/comprehensive_imports.yaml"
 );
+yaml_test!(python_scope_resolution, "python/scope_resolution.yaml");
+yaml_test!(python_async_functions, "python/async_functions.yaml");
+yaml_test!(python_higher_order, "python/higher_order.yaml");
+yaml_test!(python_class_patterns, "python/class_patterns.yaml");
+yaml_test!(python_match_statement, "python/match_statement.yaml");
+yaml_test!(
+    python_static_classmethod,
+    "python/static_classmethod_calls.yaml"
+);
+yaml_test!(python_multi_file_imports, "python/multi_file_imports.yaml");
 yaml_test!(python_call_resolution, "python_resolution.yaml");
 
 // ── Java ────────────────────────────────────────────────────────

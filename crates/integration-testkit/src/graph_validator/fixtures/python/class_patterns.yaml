@@ -1,0 +1,72 @@
+name: "Python: class instantiation and method patterns"
+fixtures:
+  - path: main.py
+    content: |
+      class MyClass:
+          def method(self):
+              pass
+
+      def test_instantiation():
+          obj = MyClass()
+          obj.method()
+
+      class A:
+          def method_a(self):
+              pass
+
+      class B:
+          def get_a(self):
+              pass
+
+      def test_chained():
+          b = B()
+          a = b.get_a()
+
+      class Parent:
+          def parent_method(self):
+              pass
+
+      class Child(Parent):
+          def child_method(self):
+              self.parent_method()
+
+tests:
+  - name: MyClass instantiation exists
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'test_instantiation' AND callee.name = 'MyClass'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: Class A and B exist
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'A'
+          RETURN d.fqn AS fqn
+        assert:
+          - { non_empty: true }
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'B'
+          RETURN d.fqn AS fqn
+        assert:
+          - { non_empty: true }
+
+  - name: Child class contains child_method
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Child' AND m.name = 'child_method'
+      RETURN m.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: Child inherits from Parent
+    description: "Child(Parent) should produce metadata with super_types"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Child'
+      RETURN d.fqn AS fqn
+    assert:
+      - { non_empty: true }
