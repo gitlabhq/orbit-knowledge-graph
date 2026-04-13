@@ -5662,6 +5662,7 @@ name = "integration-testkit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow 56.2.0",
  "arrow 58.0.0",
  "clickhouse-client",
  "code-graph",
@@ -5677,6 +5678,7 @@ dependencies = [
  "parser-core",
  "petgraph 0.8.3",
  "query-engine",
+ "rustc-hash",
  "rustls",
  "serde",
  "serde_json",

@@ -1,7 +1,7 @@
 //! Execution engine: runs test suites against lance-graph datasets.
 
-use arrow::array::{Int64Array, StringArray};
-use arrow::record_batch::RecordBatch;
+use arrow_56::array::{Array, Int64Array, StringArray};
+use arrow_56::record_batch::RecordBatch;
 use lance_graph::{CypherQuery, GraphConfig};
 
 use super::assertions::{Assert, Severity, TestCase, TestSuite};
@@ -21,11 +21,9 @@ pub async fn run_suite(
     config: &GraphConfig,
 ) -> Vec<Failure> {
     let mut failures = Vec::new();
-
     for test in &suite.tests {
         failures.extend(run_test(test, datasets, config).await);
     }
-
     failures
 }
 
@@ -46,9 +44,8 @@ async fn run_test(
     };
 
     let ds = datasets.clone();
-
-    let batches = match query.execute(ds, None).await {
-        Ok(batches) => batches,
+    let batch = match query.execute(ds, None).await {
+        Ok(b) => b,
         Err(e) => {
             return vec![Failure {
                 test: test.name.clone(),
@@ -58,15 +55,15 @@ async fn run_test(
         }
     };
 
-    check_assertions(test, &batches)
+    check_assertions(test, &batch)
 }
 
-fn check_assertions(test: &TestCase, batches: &[RecordBatch]) -> Vec<Failure> {
+fn check_assertions(test: &TestCase, batch: &RecordBatch) -> Vec<Failure> {
     let mut failures = Vec::new();
-    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    let total_rows = batch.num_rows();
 
     for assertion in &test.assert {
-        if let Some(f) = check_one(test, assertion, batches, total_rows) {
+        if let Some(f) = check_one(test, assertion, batch, total_rows) {
             failures.push(f);
         }
     }
@@ -77,7 +74,7 @@ fn check_assertions(test: &TestCase, batches: &[RecordBatch]) -> Vec<Failure> {
 fn check_one(
     test: &TestCase,
     assertion: &Assert,
-    batches: &[RecordBatch],
+    batch: &RecordBatch,
     total_rows: usize,
 ) -> Option<Failure> {
     match assertion {
@@ -105,19 +102,17 @@ fn check_one(
         }
         Assert::NonEmpty(false) => None,
         Assert::CountEquals { field, value } => {
-            for batch in batches {
-                if let Some(col) = batch.column_by_name(field) {
-                    if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
-                        if !arr.is_empty() && arr.value(0) != *value {
-                            return Some(Failure {
-                                test: test.name.clone(),
-                                severity: test.severity,
-                                message: format!(
-                                    "Expected {field}={value}, got {field}={}",
-                                    arr.value(0)
-                                ),
-                            });
-                        }
+            if let Some(col) = batch.column_by_name(field) {
+                if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
+                    if !arr.is_empty() && arr.value(0) != *value {
+                        return Some(Failure {
+                            test: test.name.clone(),
+                            severity: test.severity,
+                            message: format!(
+                                "Expected {field}={value}, got {field}={}",
+                                arr.value(0)
+                            ),
+                        });
                     }
                 }
             }
@@ -135,20 +130,18 @@ fn check_one(
                 }
             };
 
-            for batch in batches {
-                if let Some(col) = batch.column_by_name(field) {
-                    if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
-                        for i in 0..arr.len() {
-                            if !arr.is_null(i) && !glob.is_match(arr.value(i)) {
-                                return Some(Failure {
-                                    test: test.name.clone(),
-                                    severity: test.severity,
-                                    message: format!(
-                                        "Row {i}: {field}='{}' does not match '{pattern}'",
-                                        arr.value(i)
-                                    ),
-                                });
-                            }
+            if let Some(col) = batch.column_by_name(field) {
+                if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
+                    for i in 0..arr.len() {
+                        if !arr.is_null(i) && !glob.is_match(arr.value(i)) {
+                            return Some(Failure {
+                                test: test.name.clone(),
+                                severity: test.severity,
+                                message: format!(
+                                    "Row {i}: {field}='{}' does not match '{pattern}'",
+                                    arr.value(i)
+                                ),
+                            });
                         }
                     }
                 }
