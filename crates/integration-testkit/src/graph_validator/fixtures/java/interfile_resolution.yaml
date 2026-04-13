@@ -1,0 +1,95 @@
+name: "Java: inter-file resolution"
+fixtures:
+  - path: com/example/model/User.java
+    content: |
+      package com.example.model;
+
+      public class User {
+          private String name;
+          public User(String name) { this.name = name; }
+          public String getName() { return name; }
+      }
+
+  - path: com/example/model/Project.java
+    content: |
+      package com.example.model;
+
+      public class Project {
+          private String title;
+          public Project(String title) { this.title = title; }
+      }
+
+  - path: com/example/service/UserService.java
+    content: |
+      package com.example.service;
+
+      import com.example.model.User;
+
+      public class UserService {
+          public void createUser(String name) {
+              new User(name);
+          }
+      }
+
+  - path: com/example/App.java
+    content: |
+      package com.example;
+
+      import com.example.service.UserService;
+      import com.example.model.*;
+
+      public class App {
+          public void run() {
+              new UserService();
+              new User("test");
+              new Project("proj");
+          }
+      }
+
+tests:
+  - name: "UserService.createUser → new User (cross-package)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'createUser' AND callee.name = 'User'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }
+
+  - name: "App.run → new UserService (explicit import)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'UserService'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }
+
+  - name: "App.run → new User (wildcard import)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'User'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }
+
+  - name: "App.run → new Project (wildcard import)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'Project'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }
+
+  - name: "User FQN is correct"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'User' AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { contains_row: { fqn: "com.example.model.User" } }
+
+  - name: "4 files in the graph"
+    query: |
+      MATCH (f:File)
+      RETURN count(f) AS n
+    assert:
+      - { count_equals: { field: n, value: 4 } }

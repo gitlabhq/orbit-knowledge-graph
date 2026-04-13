@@ -111,6 +111,22 @@ fn walk_flat(
         }
     }
 
+    // Process bindings (assignments create aliases in the SSA)
+    for binding in &result.bindings {
+        let value = if let Some(ref val_name) = binding.value {
+            // Try to resolve the RHS name
+            let reaching = ssa.read_variable_stateless(val_name, block);
+            if !reaching.values.is_empty() {
+                reaching.values[0].clone()
+            } else {
+                Value::Opaque
+            }
+        } else {
+            Value::Opaque
+        };
+        ssa.write_variable(&binding.name, block, value);
+    }
+
     // Read all references
     for (ref_idx, reference) in result.references.iter().enumerate() {
         reads.push(RecordedRead {

@@ -176,6 +176,18 @@ pub struct CanonicalFile {
     pub size: u64,
 }
 
+/// A variable binding (assignment, parameter, for-target, deletion).
+/// Produced by the parser when it sees `x = expr` or `for x in iter`.
+/// The resolver uses these to track what names are bound to at each program point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalBinding {
+    /// The name being bound (LHS of assignment).
+    pub name: String,
+    /// What the name is bound to (RHS). `None` for opaque bindings (parameters, deletions).
+    pub value: Option<String>,
+    pub range: Range,
+}
+
 /// The complete output of parsing a single file. This is the boundary
 /// type between the parser and the linker — the parser produces this,
 /// the linker consumes it. Nothing language-specific crosses this boundary.
@@ -188,4 +200,8 @@ pub struct CanonicalResult {
     pub definitions: Vec<CanonicalDefinition>,
     pub imports: Vec<CanonicalImport>,
     pub references: Vec<CanonicalReference>,
+    /// Variable bindings (assignments, parameters, for-targets, deletions).
+    /// Sorted by byte offset. The resolver uses these to track what names
+    /// resolve to at each program point.
+    pub bindings: Vec<CanonicalBinding>,
 }

@@ -1,0 +1,50 @@
+name: "Kotlin: intra-file resolution"
+fixtures:
+  - path: com/example/App.kt
+    content: |
+      package com.example
+
+      class App {
+          private fun helper() {}
+
+          fun run() {
+              helper()
+          }
+
+          companion object {
+              fun create(): App = App()
+          }
+      }
+
+      fun topLevel() {}
+
+      fun caller() {
+          topLevel()
+          App()
+      }
+
+tests:
+  - name: "run() calls helper()"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'helper'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: "caller() calls topLevel()"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'caller' AND callee.name = 'topLevel'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: "App methods have correct FQN"
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'App' AND cls.definition_type = 'Class'
+      RETURN m.fqn AS fqn
+    assert:
+      - { non_empty: true }
+      - { all_match: { field: fqn, pattern: "com.example.App.*" } }

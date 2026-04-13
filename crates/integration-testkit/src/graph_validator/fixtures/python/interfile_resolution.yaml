@@ -1,0 +1,120 @@
+name: "Python: inter-file resolution"
+fixtures:
+  # ── Layer 1: base models ──────────────────
+  - path: models/user.py
+    content: |
+      class User:
+          def __init__(self, name):
+              self.name = name
+
+          def greet(self):
+              return f"Hello {self.name}"
+
+  - path: models/project.py
+    content: |
+      class Project:
+          def __init__(self, title):
+              self.title = title
+
+          def describe(self):
+              return self.title
+
+  - path: models/__init__.py
+    content: |
+      from models.user import User
+      from models.project import Project
+
+  # ── Layer 2: services that use models ─────
+  - path: services/user_service.py
+    content: |
+      from models.user import User
+
+      class UserService:
+          def create(self, name):
+              return User(name)
+
+          def greet_user(self, user):
+              user.greet()
+
+  - path: services/project_service.py
+    content: |
+      from models.project import Project
+
+      class ProjectService:
+          def create(self, title):
+              return Project(title)
+
+  # ── Layer 3: main that uses services ──────
+  - path: main.py
+    content: |
+      from services.user_service import UserService
+      from services.project_service import ProjectService
+
+      def run():
+          user_svc = UserService()
+          proj_svc = ProjectService()
+          user_svc.create("alice")
+          proj_svc.create("my project")
+
+tests:
+  # ── Cross-layer resolution ────────────────
+  - name: "Layer 3→2: main.run calls UserService"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'UserService'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }
+      - { all_match: { field: src, pattern: "main.py" } }
+
+  - name: "Layer 2→1: UserService.create calls User"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'create' AND callee.name = 'User'
+            AND caller.file_path <> callee.file_path
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }
+
+  - name: "Layer 2→1: ProjectService.create calls Project"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'create' AND callee.name = 'Project'
+            AND caller.file_path <> callee.file_path
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }
+
+  # ── File structure ────────────────────────
+  - name: "All 6 files exist"
+    query: |
+      MATCH (f:File)
+      RETURN count(f) AS n
+    assert:
+      - { count_equals: { field: n, value: 6 } }
+
+  - name: "User is in models/user.py"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'User' AND d.definition_type = 'Class'
+      RETURN d.file_path AS file
+    assert:
+      - { all_match: { field: file, pattern: "*user.py" } }
+
+  - name: "UserService is in services/user_service.py"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'UserService'
+      RETURN d.file_path AS file
+    assert:
+      - { all_match: { field: file, pattern: "*user_service.py" } }
+
+  # ── No orphan edges ──────────────────────
+  - name: "All cross-file call edges connect different files"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path <> callee.file_path
+      RETURN caller.name AS caller, callee.name AS callee,
+             caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { non_empty: true }

@@ -318,6 +318,10 @@ pub trait DslLanguage: Send + Sync + Default {
         vec![]
     }
 
+    fn bindings() -> Vec<ParseBindingRule> {
+        vec![]
+    }
+
     /// Custom import extraction for languages with complex import syntax.
     /// Called for every AST node. Return `true` if the node was handled
     /// (skips the declarative import rules for this node).
@@ -332,6 +336,7 @@ pub trait DslLanguage: Send + Sync + Default {
     fn spec() -> LanguageSpec {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
+                .bindings(Self::bindings())
                 .auto(Self::auto_scopes())
                 .auto_refs(Self::auto_refs())
                 .auto_imports(Self::auto_imports())
@@ -369,6 +374,69 @@ impl<L: DslLanguage> code_graph_types::CanonicalParser for DslParser<L> {
     }
 }
 
+// ── Binding rule ────────────────────────────────────────────────
+
+/// Declarative rule for extracting variable bindings (assignments, parameters).
+pub struct ParseBindingRule {
+    kind: &'static str,
+    condition: Option<Pred>,
+    name: Extract,
+    value: Option<Extract>,
+}
+
+impl Rule for ParseBindingRule {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    fn condition(&self) -> Option<&Pred> {
+        self.condition.as_ref()
+    }
+
+    fn extract(&self) -> &Extract {
+        &self.name
+    }
+
+    fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        self.name.extract_name(node)
+    }
+}
+
+impl ParseBindingRule {
+    pub fn when(mut self, pred: Pred) -> Self {
+        self.condition = Some(pred);
+        self
+    }
+
+    pub fn name_from(mut self, extract: Extract) -> Self {
+        self.name = extract;
+        self
+    }
+
+    pub fn value_from(mut self, extract: Extract) -> Self {
+        self.value = Some(extract);
+        self
+    }
+
+    pub fn no_value(mut self) -> Self {
+        self.value = None;
+        self
+    }
+
+    pub(crate) fn extract_value(&self, node: &N<'_>) -> Option<String> {
+        self.value.as_ref()?.extract_name(node)
+    }
+}
+
+pub fn parse_binding(kind: &'static str) -> ParseBindingRule {
+    ParseBindingRule {
+        kind,
+        condition: None,
+        name: Extract::Field("left"),
+        value: Some(Extract::Field("right")),
+    }
+}
+
 /// Function type for custom import handling.
 pub type CustomImportFn = fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool;
 
@@ -377,6 +445,7 @@ pub struct LanguageSpec {
     pub scopes: Vec<ScopeRule>,
     pub refs: Vec<ReferenceRule>,
     pub imports: Vec<ImportRule>,
+    pub bindings: Vec<ParseBindingRule>,
     pub(crate) scope_kinds: FxHashSet<&'static str>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,
@@ -395,10 +464,16 @@ impl LanguageSpec {
             scopes,
             refs,
             imports,
+            bindings: Vec::new(),
             scope_kinds,
             package_node: None,
             custom_import_fn: None,
         }
+    }
+
+    pub fn bindings(mut self, rules: Vec<ParseBindingRule>) -> Self {
+        self.bindings = rules;
+        self
     }
 
     /// Declare the node kind for package/namespace declarations.

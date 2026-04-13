@@ -1,0 +1,132 @@
+name: "Python: intra-file resolution"
+fixtures:
+  - path: main.py
+    content: |
+      # ── Simple call ────────────────────────
+      def target_a():
+          pass
+
+      def caller_a():
+          target_a()
+
+      # ── Reassignment (latest wins) ────────
+      def option1():
+          pass
+
+      def option2():
+          pass
+
+      def caller_reassign():
+          x = option1
+          x = option2
+          x()
+
+      # ── Nested scope (inner shadows outer) ─
+      def outer_target():
+          pass
+
+      def outer_fn():
+          def outer_target():
+              pass
+          def inner_caller():
+              outer_target()
+
+      # ── self.method() ─────────────────────
+      class Calculator:
+          def add(self, a, b):
+              return a + b
+
+          def compute(self):
+              self.add(1, 2)
+
+      # ── Recursive ─────────────────────────
+      def factorial(n):
+          if n <= 1:
+              return 1
+          return n * factorial(n - 1)
+
+      # ── Lambda ────────────────────────────
+      square = lambda x: x * x
+
+      def use_lambda():
+          square(5)
+
+      # ── Decorated ─────────────────────────
+      def my_decorator(f):
+          return f
+
+      @my_decorator
+      def decorated_fn():
+          pass
+
+      def call_decorated():
+          decorated_fn()
+
+      # ── Class instantiation ───────────────
+      class Service:
+          def run(self):
+              pass
+
+      def create_service():
+          svc = Service()
+
+tests:
+  - name: "Simple call: caller_a → target_a"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'caller_a' AND callee.name = 'target_a'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+      - { contains_row: { caller: "caller_a", callee: "target_a" } }
+
+  - name: "Reassignment: latest assignment wins"
+    description: "x = option1; x = option2; x() should resolve to option2"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'caller_reassign'
+      RETURN callee.name AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: "Self method: compute → add"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'compute' AND callee.name = 'add'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+      - { contains_row: { caller: "Calculator.compute", callee: "Calculator.add" } }
+
+  - name: "Recursive: factorial → factorial"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'factorial' AND callee.name = 'factorial'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: "Lambda: use_lambda → square"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_lambda' AND callee.name = 'square'
+      RETURN callee.definition_type AS dt
+    assert:
+      - { non_empty: true }
+      - { all_match: { field: dt, pattern: "Lambda" } }
+
+  - name: "Decorated: call_decorated → decorated_fn"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_decorated' AND callee.name = 'decorated_fn'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: "Instantiation: create_service → Service"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'create_service' AND callee.name = 'Service'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }

@@ -40,6 +40,7 @@ impl LanguageSpec {
         let mut defs = Vec::new();
         let mut refs = Vec::new();
         let mut imports = Vec::new();
+        let mut bindings = Vec::new();
         let mut scope_stack: Vec<Arc<str>> = Vec::new();
 
         self.walk(
@@ -48,6 +49,7 @@ impl LanguageSpec {
             &mut defs,
             &mut refs,
             &mut imports,
+            &mut bindings,
             sep,
         );
 
@@ -64,6 +66,7 @@ impl LanguageSpec {
             definitions: defs,
             imports,
             references: refs,
+            bindings,
         })
     }
 
@@ -74,6 +77,7 @@ impl LanguageSpec {
         defs: &mut Vec<CanonicalDefinition>,
         refs: &mut Vec<CanonicalReference>,
         imports: &mut Vec<CanonicalImport>,
+        bindings: &mut Vec<code_graph_types::CanonicalBinding>,
         sep: &'static str,
     ) {
         if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
@@ -137,8 +141,11 @@ impl LanguageSpec {
             self.evaluate_imports(node, &node_kind, imports);
         }
 
+        // Extract bindings (assignments, parameters, etc.)
+        self.evaluate_binding(node, &node_kind, bindings);
+
         for child in node.children() {
-            self.walk(&child, scope_stack, defs, refs, imports, sep);
+            self.walk(&child, scope_stack, defs, refs, imports, bindings, sep);
         }
 
         if pushed_scope {
@@ -180,6 +187,26 @@ impl LanguageSpec {
         let rule = self.refs.iter().find(|r| r.matches(node, node_kind))?;
         let name = rule.extract_name(node)?;
         Some((name, node_to_range(node)))
+    }
+
+    fn evaluate_binding(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        node_kind: &str,
+        bindings: &mut Vec<code_graph_types::CanonicalBinding>,
+    ) {
+        let Some(rule) = self.bindings.iter().find(|r| r.matches(node, node_kind)) else {
+            return;
+        };
+        let Some(name) = rule.extract_name(node) else {
+            return;
+        };
+        let value = rule.extract_value(node);
+        bindings.push(code_graph_types::CanonicalBinding {
+            name,
+            value,
+            range: canonical_range(&node_to_range(node)),
+        });
     }
 
     fn evaluate_imports(
