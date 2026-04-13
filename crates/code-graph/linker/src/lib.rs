@@ -8,6 +8,7 @@ pub mod indexer;
 pub mod loading;
 pub mod parsing;
 pub mod stats;
+pub mod v2;
 
 #[cfg(test)]
 mod tests;
