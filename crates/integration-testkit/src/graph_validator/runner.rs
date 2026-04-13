@@ -21,12 +21,11 @@ use super::validator::run_suite;
 
 /// Run a YAML test suite from a string. Panics on any error-severity failure.
 pub async fn run_yaml_suite(yaml: &str) {
-    let suite: TestSuite = serde_yaml::from_str(yaml)
-        .unwrap_or_else(|e| panic!("Failed to parse YAML suite: {e}"));
+    let suite: TestSuite =
+        serde_yaml::from_str(yaml).unwrap_or_else(|e| panic!("Failed to parse YAML suite: {e}"));
 
     // Write fixtures to a temp directory
-    let tmp = tempfile::tempdir()
-        .unwrap_or_else(|e| panic!("Failed to create temp dir: {e}"));
+    let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("Failed to create temp dir: {e}"));
 
     for fixture in &suite.fixtures {
         let path = tmp.path().join(&fixture.path);
@@ -53,8 +52,8 @@ pub async fn run_yaml_suite(yaml: &str) {
     let datasets = to_lance_datasets(&result.graph, &ctx)
         .unwrap_or_else(|e| panic!("Failed to convert graph to datasets: {e}"));
 
-    let config = make_graph_config()
-        .unwrap_or_else(|e| panic!("Failed to build graph config: {e}"));
+    let config =
+        make_graph_config().unwrap_or_else(|e| panic!("Failed to build graph config: {e}"));
 
     // Run the Cypher test suite
     let failures = run_suite(&suite, &datasets, &config).await;
@@ -70,10 +69,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                 Severity::Error => "ERROR",
                 Severity::Warning => "WARN",
             };
-            msg.push_str(&format!(
-                "  [{severity}] \"{}\" — {}\n",
-                f.test, f.message
-            ));
+            msg.push_str(&format!("  [{severity}] \"{}\" — {}\n", f.test, f.message));
         }
 
         let has_errors = failures.iter().any(|f| f.severity == Severity::Error);
@@ -83,11 +79,7 @@ pub async fn run_yaml_suite(yaml: &str) {
             eprintln!("{msg}");
         }
     } else {
-        eprintln!(
-            "[PASS] Suite: {} ({} tests)",
-            suite.name,
-            suite.tests.len()
-        );
+        eprintln!("[PASS] Suite: {} ({} tests)", suite.name, suite.tests.len());
     }
 }
 

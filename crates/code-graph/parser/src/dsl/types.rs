@@ -270,10 +270,10 @@ impl ImportRule {
     }
 
     pub(crate) fn split_path_name(&self, full: &str) -> (String, Option<String>) {
-        if let Some(sep) = self.split_last {
-            if let Some((path, name)) = full.rsplit_once(sep) {
-                return (path.to_string(), Some(name.to_string()));
-            }
+        if let Some(sep) = self.split_last
+            && let Some((path, name)) = full.rsplit_once(sep)
+        {
+            return (path.to_string(), Some(name.to_string()));
         }
         (full.to_string(), None)
     }

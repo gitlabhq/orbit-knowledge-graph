@@ -6,14 +6,13 @@
 //! definitions via import strategies and chain resolution.
 
 use code_graph_types::{CanonicalImport, CanonicalResult, EdgeKind, NodeKind, Relationship};
-use rustc_hash::FxHashMap;
 
 use super::context::{DefRef, ResolutionContext};
 use super::edges::ResolvedEdge;
 use super::resolver::ReferenceResolver;
-use super::rules::{ChainMode, ImportStrategy, ResolutionRules};
-use super::ssa::{ReachingDefs, SsaResolver, Value};
-use super::walker::{walk_files, AsAst, RecordedRead};
+use super::rules::{ImportStrategy, ResolutionRules};
+use super::ssa::{ReachingDefs, Value};
+use super::walker::{AsAst, walk_files};
 
 /// Trait to get rules from the type parameter.
 /// Each language implements this on a zero-sized struct.
@@ -210,10 +209,10 @@ fn apply_import_strategies<A>(
 
 /// Resolve an import to terminal definitions.
 fn resolve_import<A>(
-    rules: &ResolutionRules,
+    _rules: &ResolutionRules,
     ctx: &ResolutionContext<A>,
     import: &CanonicalImport,
-    importing_file: &str,
+    _importing_file: &str,
 ) -> Vec<DefRef> {
     let symbol_name = import
         .alias

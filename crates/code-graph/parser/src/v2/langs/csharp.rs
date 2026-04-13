@@ -1,8 +1,7 @@
 use code_graph_config::Language;
 use code_graph_types::DefKind;
 
-use crate::dsl::extractors::{field, Extract};
-use crate::dsl::predicates::*;
+use crate::dsl::extractors::{Extract, field};
 use crate::dsl::types::*;
 
 #[derive(Default)]

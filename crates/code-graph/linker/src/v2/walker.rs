@@ -301,10 +301,10 @@ impl<'a> FileWalker<'a> {
         let pre_block = self.current_block;
 
         // Walk the condition in the current block (if there is one)
-        if let Some(cond_field) = branch_rule.condition_field {
-            if let Some(cond_node) = node.field(cond_field) {
-                self.walk_node(&cond_node);
-            }
+        if let Some(cond_field) = branch_rule.condition_field
+            && let Some(cond_node) = node.field(cond_field)
+        {
+            self.walk_node(&cond_node);
         }
 
         // Create a block for each branch
@@ -357,10 +357,10 @@ impl<'a> FileWalker<'a> {
         let pre_block = self.current_block;
 
         // Walk iteration expression in pre_block (e.g. the iterable in `for x in iter`)
-        if let Some(iter_field) = loop_rule.iter_field {
-            if let Some(iter_node) = node.field(iter_field) {
-                self.walk_node(&iter_node);
-            }
+        if let Some(iter_field) = loop_rule.iter_field
+            && let Some(iter_node) = node.field(iter_field)
+        {
+            self.walk_node(&iter_node);
         }
 
         // Create loop header (unsealed — back edge will come from body)

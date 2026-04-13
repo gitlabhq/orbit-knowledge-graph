@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow_56::array::{Int64Array, Int64Builder, StringArray, StringBuilder};
+use arrow_56::array::{Int64Builder, StringBuilder};
 use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
 use code_graph_linker::v2::graph::*;

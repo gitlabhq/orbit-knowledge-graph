@@ -1,6 +1,6 @@
 use code_graph_types::{
-    containment_relationship, CanonicalDefinition, CanonicalDirectory, CanonicalFile,
-    CanonicalImport, CanonicalResult, EdgeKind, NodeKind, Range, Relationship,
+    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalResult, EdgeKind, NodeKind,
+    Relationship, containment_relationship,
 };
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashSet;
@@ -184,26 +184,25 @@ impl GraphBuilder {
         // Dir → Dir containment edges
         for pair in ancestors.windows(2) {
             let key = (pair[0].clone(), pair[1].clone());
-            if seen_dir_edges.insert(key) {
-                if let (Some(&src), Some(&tgt)) =
+            if seen_dir_edges.insert(key)
+                && let (Some(&src), Some(&tgt)) =
                     (cg.dir_index.get(&pair[0]), cg.dir_index.get(&pair[1]))
-                {
-                    cg.graph.add_edge(
-                        src,
-                        tgt,
-                        GraphEdge {
-                            relationship: Relationship {
-                                edge_kind: EdgeKind::Contains,
-                                source_node: NodeKind::Directory,
-                                target_node: NodeKind::Directory,
-                                source_def_kind: None,
-                                target_def_kind: None,
-                            },
-                            source_definition_range: None,
-                            target_definition_range: None,
+            {
+                cg.graph.add_edge(
+                    src,
+                    tgt,
+                    GraphEdge {
+                        relationship: Relationship {
+                            edge_kind: EdgeKind::Contains,
+                            source_node: NodeKind::Directory,
+                            target_node: NodeKind::Directory,
+                            source_def_kind: None,
+                            target_def_kind: None,
                         },
-                    );
-                }
+                        source_definition_range: None,
+                        target_definition_range: None,
+                    },
+                );
             }
         }
 
@@ -237,18 +236,18 @@ impl GraphBuilder {
                 .enumerate()
                 .find(|(_, d)| d.fqn.to_string() == parent_fqn_str);
 
-            if let Some((parent_idx, parent_def)) = parent {
-                if let Some(rel) = containment_relationship(parent_def.kind, def.kind) {
-                    cg.graph.add_edge(
-                        def_indices[parent_idx],
-                        def_indices[i],
-                        GraphEdge {
-                            relationship: rel,
-                            source_definition_range: None,
-                            target_definition_range: None,
-                        },
-                    );
-                }
+            if let Some((parent_idx, parent_def)) = parent
+                && let Some(rel) = containment_relationship(parent_def.kind, def.kind)
+            {
+                cg.graph.add_edge(
+                    def_indices[parent_idx],
+                    def_indices[i],
+                    GraphEdge {
+                        relationship: rel,
+                        source_definition_range: None,
+                        target_definition_range: None,
+                    },
+                );
             }
         }
     }
@@ -312,7 +311,7 @@ mod tests {
 
         let dir_dir: Vec<_> = cg
             .edges()
-            .filter(|(s, t, e)| {
+            .filter(|(_s, _t, e)| {
                 e.relationship.source_node == NodeKind::Directory
                     && e.relationship.target_node == NodeKind::Directory
             })

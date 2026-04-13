@@ -1,4 +1,4 @@
-use code_graph_config::{detect_language_from_extension, Language};
+use code_graph_config::{Language, detect_language_from_extension};
 use code_graph_types::CanonicalParser;
 use ignore::WalkBuilder;
 use parser_core::dsl::types::DslParser;
@@ -268,10 +268,10 @@ impl Pipeline {
 
             let path = entry.path();
 
-            if let Ok(metadata) = path.metadata() {
-                if metadata.len() > self.config.max_file_size {
-                    continue;
-                }
+            if let Ok(metadata) = path.metadata()
+                && metadata.len() > self.config.max_file_size
+            {
+                continue;
             }
 
             let Some(ext) = path.extension().and_then(|e| e.to_str()) else {

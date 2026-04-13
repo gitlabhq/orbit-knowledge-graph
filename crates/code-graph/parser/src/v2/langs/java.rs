@@ -3,8 +3,7 @@ use code_graph_types::DefKind;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::dsl::extractors::{field, metadata, Extract, ExtractList};
-use crate::dsl::predicates::*;
+use crate::dsl::extractors::{Extract, ExtractList, field, metadata};
 use crate::dsl::types::*;
 
 #[derive(Default)]
@@ -102,9 +101,11 @@ impl DslLanguage for JavaDsl {
             }
         }
 
-        vec![import("import_declaration")
-            .classify(java_import_classify)
-            .split_last(".")]
+        vec![
+            import("import_declaration")
+                .classify(java_import_classify)
+                .split_last("."),
+        ]
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {

@@ -198,10 +198,10 @@ impl SsaResolver {
 
     fn read_variable_internal(&mut self, variable: &str, block: BlockId) -> Value {
         // Local value numbering: check current block first
-        if let Some(block_defs) = self.current_def.get(variable) {
-            if let Some(value) = block_defs.get(&block) {
-                return value.clone();
-            }
+        if let Some(block_defs) = self.current_def.get(variable)
+            && let Some(value) = block_defs.get(&block)
+        {
+            return value.clone();
         }
 
         // Global value numbering
@@ -284,10 +284,10 @@ impl SsaResolver {
         let block = self.phis[phi_id.0].block;
 
         // Update current_def if it points to this phi
-        if let Some(block_defs) = self.current_def.get_mut(&variable) {
-            if block_defs.get(&block) == Some(&Value::Phi(phi_id)) {
-                block_defs.insert(block, replacement.clone());
-            }
+        if let Some(block_defs) = self.current_def.get_mut(&variable)
+            && block_defs.get(&block) == Some(&Value::Phi(phi_id))
+        {
+            block_defs.insert(block, replacement.clone());
         }
 
         // Check if any other phis using this one become trivial

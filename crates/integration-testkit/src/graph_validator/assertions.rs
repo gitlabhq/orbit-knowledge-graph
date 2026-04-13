@@ -33,15 +33,11 @@ pub struct TestCase {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Severity {
+    #[default]
     Error,
     Warning,
-}
-
-impl Default for Severity {
-    fn default() -> Self {
-        Self::Error
-    }
 }
 
 #[derive(Debug, Deserialize)]

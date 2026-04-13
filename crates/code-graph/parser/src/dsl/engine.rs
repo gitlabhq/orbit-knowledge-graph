@@ -84,12 +84,11 @@ impl LanguageSpec {
         let mut pushed_scope = false;
 
         // Check for package/namespace node (pushes scope, no definition)
-        if let Some((pkg_kind, ref pkg_extract)) = self.package_node {
-            if node_kind.as_ref() == pkg_kind {
-                if let Some(name) = pkg_extract.extract_name(node) {
-                    scope_stack.push(Arc::from(name.as_str()));
-                }
-            }
+        if let Some((pkg_kind, ref pkg_extract)) = self.package_node
+            && node_kind.as_ref() == pkg_kind
+            && let Some(name) = pkg_extract.extract_name(node)
+        {
+            scope_stack.push(Arc::from(name.as_str()));
         }
 
         if let Some(m) = self.evaluate_scope(node, &node_kind) {

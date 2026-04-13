@@ -3,8 +3,7 @@ use code_graph_types::DefKind;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::dsl::extractors::{field, metadata, Extract, ExtractList};
-use crate::dsl::predicates::*;
+use crate::dsl::extractors::{Extract, ExtractList, metadata};
 use crate::dsl::types::*;
 
 #[derive(Default)]
@@ -47,14 +46,14 @@ fn classify_kotlin_class(node: &N<'_>) -> &'static str {
             return "Interface";
         }
     }
-    if let Some(modifiers) = node.children().find(|c| c.kind() == "modifiers") {
-        if let Some(class_mod) = modifiers.children().find(|c| c.kind() == "class_modifier") {
-            match class_mod.text().as_ref() {
-                "data" => return "DataClass",
-                "value" => return "ValueClass",
-                "annotation" => return "AnnotationClass",
-                _ => {}
-            }
+    if let Some(modifiers) = node.children().find(|c| c.kind() == "modifiers")
+        && let Some(class_mod) = modifiers.children().find(|c| c.kind() == "class_modifier")
+    {
+        match class_mod.text().as_ref() {
+            "data" => return "DataClass",
+            "value" => return "ValueClass",
+            "annotation" => return "AnnotationClass",
+            _ => {}
         }
     }
     "Class"
@@ -128,9 +127,11 @@ impl DslLanguage for KotlinDsl {
             "Import"
         }
 
-        vec![import("import_header")
-            .classify(kotlin_import_classify)
-            .split_last(".")]
+        vec![
+            import("import_header")
+                .classify(kotlin_import_classify)
+                .split_last("."),
+        ]
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {

@@ -157,12 +157,7 @@ impl ExtractList {
                     parent
                         .children()
                         .filter(|c| c.kind().as_ref() == *decorator_kind)
-                        .map(|c| {
-                            c.text()
-                                .trim_start_matches('@')
-                                .trim()
-                                .to_string()
-                        })
+                        .map(|c| c.text().trim_start_matches('@').trim().to_string())
                         .collect()
                 } else {
                     vec![]
@@ -189,6 +184,12 @@ pub struct MetadataRule {
     pub decorators: Option<ExtractList>,
     /// How to extract companion_of.
     pub companion_of: Option<Extract>,
+}
+
+impl Default for MetadataRule {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MetadataRule {
@@ -243,10 +244,7 @@ impl MetadataRule {
             .as_ref()
             .map(|e| e.extract(node))
             .unwrap_or_default();
-        let return_type = self
-            .return_type
-            .as_ref()
-            .and_then(|e| e.extract_name(node));
+        let return_type = self.return_type.as_ref().and_then(|e| e.extract_name(node));
         let type_annotation = self
             .type_annotation
             .as_ref()

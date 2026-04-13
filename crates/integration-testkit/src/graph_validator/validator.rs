@@ -27,11 +27,7 @@ pub async fn run_suite(
     failures
 }
 
-async fn run_test(
-    test: &TestCase,
-    datasets: &LanceDatasets,
-    config: &GraphConfig,
-) -> Vec<Failure> {
+async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfig) -> Vec<Failure> {
     let query = match CypherQuery::new(&test.query) {
         Ok(q) => q.with_config(config.clone()),
         Err(e) => {
@@ -107,20 +103,22 @@ fn check_one(
             }
         }
         Assert::CountEquals { count_equals } => {
-            if let Some(col) = batch.column_by_name(&count_equals.field) {
-                if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
-                    if !arr.is_empty() && arr.value(0) != count_equals.value {
-                        return Some(Failure {
-                            test: test.name.clone(),
-                            severity: test.severity,
-                            message: format!(
-                                "Expected {}={}, got {}={}",
-                                count_equals.field, count_equals.value,
-                                count_equals.field, arr.value(0)
-                            ),
-                        });
-                    }
-                }
+            if let Some(col) = batch.column_by_name(&count_equals.field)
+                && let Some(arr) = col.as_any().downcast_ref::<Int64Array>()
+                && !arr.is_empty()
+                && arr.value(0) != count_equals.value
+            {
+                return Some(Failure {
+                    test: test.name.clone(),
+                    severity: test.severity,
+                    message: format!(
+                        "Expected {}={}, got {}={}",
+                        count_equals.field,
+                        count_equals.value,
+                        count_equals.field,
+                        arr.value(0)
+                    ),
+                });
             }
             None
         }
@@ -136,19 +134,21 @@ fn check_one(
                 }
             };
 
-            if let Some(col) = batch.column_by_name(&all_match.field) {
-                if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
-                    for i in 0..arr.len() {
-                        if !arr.is_null(i) && !glob.is_match(arr.value(i)) {
-                            return Some(Failure {
-                                test: test.name.clone(),
-                                severity: test.severity,
-                                message: format!(
-                                    "Row {i}: {}='{}' does not match '{}'",
-                                    all_match.field, arr.value(i), all_match.pattern
-                                ),
-                            });
-                        }
+            if let Some(col) = batch.column_by_name(&all_match.field)
+                && let Some(arr) = col.as_any().downcast_ref::<StringArray>()
+            {
+                for i in 0..arr.len() {
+                    if !arr.is_null(i) && !glob.is_match(arr.value(i)) {
+                        return Some(Failure {
+                            test: test.name.clone(),
+                            severity: test.severity,
+                            message: format!(
+                                "Row {i}: {}='{}' does not match '{}'",
+                                all_match.field,
+                                arr.value(i),
+                                all_match.pattern
+                            ),
+                        });
                     }
                 }
             }

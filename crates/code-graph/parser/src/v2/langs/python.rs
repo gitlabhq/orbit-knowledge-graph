@@ -3,7 +3,7 @@ use code_graph_types::DefKind;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::dsl::extractors::{field, metadata, Extract, ExtractList};
+use crate::dsl::extractors::{Extract, ExtractList, field, metadata};
 use crate::dsl::predicates::*;
 use crate::dsl::types::*;
 
@@ -54,13 +54,13 @@ fn classify_python_function(node: &N<'_>) -> &'static str {
     let has_decorator = node
         .parent()
         .is_some_and(|p| p.kind() == "decorated_definition");
-    let is_method = node
-        .parent()
-        .and_then(|p| p.parent())
-        .is_some_and(|gp| {
-            gp.kind() == "class_definition" || gp.kind() == "block"
-                && gp.parent().is_some_and(|ggp| ggp.kind() == "class_definition")
-        });
+    let is_method = node.parent().and_then(|p| p.parent()).is_some_and(|gp| {
+        gp.kind() == "class_definition"
+            || gp.kind() == "block"
+                && gp
+                    .parent()
+                    .is_some_and(|ggp| ggp.kind() == "class_definition")
+    });
 
     match (is_method, is_async, has_decorator) {
         (true, true, true) => "DecoratedAsyncMethod",
@@ -121,7 +121,7 @@ impl DslLanguage for PythonDsl {
 
     fn imports() -> Vec<ImportRule> {
         fn python_import_classify(node: &N<'_>) -> &'static str {
-            let text = node.text().to_string();
+            let _text = node.text().to_string();
             if node.children().any(|c| c.kind() == "wildcard_import") {
                 return "WildcardImport";
             }
@@ -170,9 +170,7 @@ mod tests {
 
     #[test]
     fn classes_and_methods() {
-        let result = parse(
-            "class Calculator:\n    def add(self, a, b):\n        return a + b\n",
-        );
+        let result = parse("class Calculator:\n    def add(self, a, b):\n        return a + b\n");
 
         assert_eq!(result.definitions.len(), 2);
         assert_eq!(result.definitions[0].name, "Calculator");
@@ -193,10 +191,12 @@ mod tests {
 
     #[test]
     fn decorators() {
-        let result = parse(
-            "class A:\n    @classmethod\n    def create(cls):\n        pass\n",
-        );
-        let create = result.definitions.iter().find(|d| d.name == "create").unwrap();
+        let result = parse("class A:\n    @classmethod\n    def create(cls):\n        pass\n");
+        let create = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "create")
+            .unwrap();
         if let Some(meta) = &create.metadata {
             assert!(meta.decorators.iter().any(|d| d == "classmethod"));
         }
@@ -205,9 +205,18 @@ mod tests {
     #[test]
     fn imports() {
         let result = parse("import os\nfrom pathlib import Path\n");
-        assert!(result.imports.len() >= 2, "got {} imports", result.imports.len());
+        assert!(
+            result.imports.len() >= 2,
+            "got {} imports",
+            result.imports.len()
+        );
         assert!(result.imports.iter().any(|i| i.path == "os"));
-        assert!(result.imports.iter().any(|i| i.name.as_deref() == Some("Path")));
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.name.as_deref() == Some("Path"))
+        );
     }
 
     #[test]

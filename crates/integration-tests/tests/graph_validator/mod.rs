@@ -2,12 +2,14 @@ use integration_testkit::graph_validator::run_yaml_suite;
 
 const STRUCTURAL: &str =
     include_str!("../../../integration-testkit/src/graph_validator/fixtures/structural.yaml");
-const PYTHON_RESOLUTION: &str =
-    include_str!("../../../integration-testkit/src/graph_validator/fixtures/python_resolution.yaml");
+const PYTHON_RESOLUTION: &str = include_str!(
+    "../../../integration-testkit/src/graph_validator/fixtures/python_resolution.yaml"
+);
 const JAVA_RESOLUTION: &str =
     include_str!("../../../integration-testkit/src/graph_validator/fixtures/java_resolution.yaml");
-const KOTLIN_RESOLUTION: &str =
-    include_str!("../../../integration-testkit/src/graph_validator/fixtures/kotlin_resolution.yaml");
+const KOTLIN_RESOLUTION: &str = include_str!(
+    "../../../integration-testkit/src/graph_validator/fixtures/kotlin_resolution.yaml"
+);
 const CONTAINMENT: &str =
     include_str!("../../../integration-testkit/src/graph_validator/fixtures/containment.yaml");
 

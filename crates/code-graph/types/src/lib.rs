@@ -4,7 +4,7 @@ mod node;
 mod range;
 mod scope;
 
-pub use edge::{containment_edge_kind, containment_relationship, EdgeKind, NodeKind, Relationship};
+pub use edge::{EdgeKind, NodeKind, Relationship, containment_edge_kind, containment_relationship};
 pub use fqn::Fqn;
 pub use node::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, CanonicalReference,
