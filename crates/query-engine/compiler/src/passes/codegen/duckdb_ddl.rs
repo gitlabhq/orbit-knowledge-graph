@@ -6,6 +6,16 @@
 
 use crate::ast::ddl::{ColumnType, CreateTable};
 
+/// Recursively checks whether a column type is nullable, handling
+/// wrappers like `LowCardinality(Nullable(String))`.
+fn is_nullable(ct: &ColumnType) -> bool {
+    match ct {
+        ColumnType::Nullable(_) => true,
+        ColumnType::LowCardinality(inner) => is_nullable(inner),
+        _ => false,
+    }
+}
+
 fn emit_column_type(ct: &ColumnType) -> String {
     match ct {
         ColumnType::Int64 => "BIGINT".into(),
@@ -31,7 +41,7 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     let mut col_defs: Vec<String> = Vec::new();
 
     for col in &table.columns {
-        let not_null = !matches!(col.data_type, ColumnType::Nullable(_));
+        let not_null = !is_nullable(&col.data_type);
         let mut parts = vec![format!(
             "    {} {}",
             &col.name,
@@ -153,6 +163,38 @@ mod tests {
         assert!(
             sql.contains("lang VARCHAR NOT NULL"),
             "LowCardinality should unwrap to plain type: {sql}"
+        );
+    }
+
+    #[test]
+    fn lowcardinality_nullable_is_nullable() {
+        let table = CreateTable {
+            name: "test".into(),
+            columns: vec![ColumnDef::new(
+                "visibility",
+                ColumnType::LowCardinality(Box::new(ColumnType::Nullable(Box::new(
+                    ColumnType::String,
+                )))),
+            )],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "ignored".into(),
+                args: vec![],
+            },
+            order_by: vec![],
+            primary_key: None,
+            settings: vec![],
+        };
+
+        let sql = emit_create_table(&table);
+        assert!(
+            !sql.contains("NOT NULL"),
+            "LowCardinality(Nullable(String)) must not emit NOT NULL: {sql}"
+        );
+        assert!(
+            sql.contains("visibility VARCHAR"),
+            "should unwrap to VARCHAR: {sql}"
         );
     }
 
