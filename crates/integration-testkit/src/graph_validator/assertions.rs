@@ -45,10 +45,22 @@ impl Default for Severity {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(untagged)]
 pub enum Assert {
-    Empty(bool),
-    NonEmpty(bool),
-    CountEquals { field: String, value: i64 },
-    AllMatch { field: String, pattern: String },
+    Empty { empty: bool },
+    NonEmpty { non_empty: bool },
+    CountEquals { count_equals: CountEqualsArgs },
+    AllMatch { all_match: AllMatchArgs },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CountEqualsArgs {
+    pub field: String,
+    pub value: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AllMatchArgs {
+    pub field: String,
+    pub pattern: String,
 }

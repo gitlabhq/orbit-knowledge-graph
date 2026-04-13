@@ -78,19 +78,14 @@ fn check_one(
     total_rows: usize,
 ) -> Option<Failure> {
     match assertion {
-        Assert::Empty(true) => {
-            if total_rows > 0 {
+        Assert::Empty { empty } => {
+            if *empty && total_rows > 0 {
                 Some(Failure {
                     test: test.name.clone(),
                     severity: test.severity,
                     message: format!("Expected empty result, got {total_rows} rows"),
                 })
-            } else {
-                None
-            }
-        }
-        Assert::Empty(false) | Assert::NonEmpty(true) => {
-            if total_rows == 0 {
+            } else if !*empty && total_rows == 0 {
                 Some(Failure {
                     test: test.name.clone(),
                     severity: test.severity,
@@ -100,17 +95,28 @@ fn check_one(
                 None
             }
         }
-        Assert::NonEmpty(false) => None,
-        Assert::CountEquals { field, value } => {
-            if let Some(col) = batch.column_by_name(field) {
+        Assert::NonEmpty { non_empty } => {
+            if *non_empty && total_rows == 0 {
+                Some(Failure {
+                    test: test.name.clone(),
+                    severity: test.severity,
+                    message: "Expected non-empty result, got 0 rows".into(),
+                })
+            } else {
+                None
+            }
+        }
+        Assert::CountEquals { count_equals } => {
+            if let Some(col) = batch.column_by_name(&count_equals.field) {
                 if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
-                    if !arr.is_empty() && arr.value(0) != *value {
+                    if !arr.is_empty() && arr.value(0) != count_equals.value {
                         return Some(Failure {
                             test: test.name.clone(),
                             severity: test.severity,
                             message: format!(
-                                "Expected {field}={value}, got {field}={}",
-                                arr.value(0)
+                                "Expected {}={}, got {}={}",
+                                count_equals.field, count_equals.value,
+                                count_equals.field, arr.value(0)
                             ),
                         });
                     }
@@ -118,19 +124,19 @@ fn check_one(
             }
             None
         }
-        Assert::AllMatch { field, pattern } => {
-            let glob = match globset::Glob::new(pattern) {
+        Assert::AllMatch { all_match } => {
+            let glob = match globset::Glob::new(&all_match.pattern) {
                 Ok(g) => g.compile_matcher(),
                 Err(e) => {
                     return Some(Failure {
                         test: test.name.clone(),
                         severity: test.severity,
-                        message: format!("Invalid glob pattern '{pattern}': {e}"),
+                        message: format!("Invalid glob pattern '{}': {e}", all_match.pattern),
                     });
                 }
             };
 
-            if let Some(col) = batch.column_by_name(field) {
+            if let Some(col) = batch.column_by_name(&all_match.field) {
                 if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
                     for i in 0..arr.len() {
                         if !arr.is_null(i) && !glob.is_match(arr.value(i)) {
@@ -138,8 +144,8 @@ fn check_one(
                                 test: test.name.clone(),
                                 severity: test.severity,
                                 message: format!(
-                                    "Row {i}: {field}='{}' does not match '{pattern}'",
-                                    arr.value(i)
+                                    "Row {i}: {}='{}' does not match '{}'",
+                                    all_match.field, arr.value(i), all_match.pattern
                                 ),
                             });
                         }

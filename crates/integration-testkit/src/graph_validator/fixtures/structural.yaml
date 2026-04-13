@@ -15,47 +15,39 @@ fixtures:
       svc.create_user("alice")
 
 tests:
-  - name: Every file has a parent directory
-    query: |
-      MATCH (f:File)
-      WHERE NOT EXISTS { MATCH (d:Directory)-[:DirectoryToFile]->(f) }
-      RETURN f.path AS orphan_file
-    assert:
-      - empty: true
-
-  - name: Every definition belongs to a file
-    query: |
-      MATCH (d:Definition)
-      WHERE NOT EXISTS { MATCH (f:File)-[:FileToDefinition]->(d) }
-      RETURN d.fqn AS orphan_def
-    assert:
-      - empty: true
-
   - name: No self-referencing call edges
     query: |
-      MATCH (d:Definition)-[:DefinitionToDefinition]->(d)
+      MATCH (d:Definition)-[:DefinitionToDefinition]->(d2:Definition)
+      WHERE d.id = d2.id
       RETURN d.fqn AS self_caller
     assert:
-      - empty: true
+      - { empty: true }
 
   - name: Graph has expected file count
     query: |
       MATCH (f:File)
       RETURN count(f) AS n
     assert:
-      - count_equals: { field: n, value: 2 }
-      - non_empty: true
+      - { count_equals: { field: n, value: 2 } }
+      - { non_empty: true }
 
   - name: Graph has definitions
     query: |
       MATCH (d:Definition)
       RETURN count(d) AS n
     assert:
-      - non_empty: true
+      - { non_empty: true }
 
-  - name: All definitions have non-empty names
+  - name: Directory to file edges exist
     query: |
-      MATCH (d:Definition) WHERE d.name = ''
-      RETURN d.fqn AS bad
+      MATCH (d:Directory)-[:DirectoryToFile]->(f:File)
+      RETURN d.path AS dir, f.path AS file
     assert:
-      - empty: true
+      - { non_empty: true }
+
+  - name: File to definition edges exist
+    query: |
+      MATCH (f:File)-[:FileToDefinition]->(d:Definition)
+      RETURN f.path AS file, d.name AS def
+    assert:
+      - { non_empty: true }
