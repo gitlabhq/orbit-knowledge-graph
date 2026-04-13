@@ -1,39 +1,45 @@
 use integration_testkit::graph_validator::run_yaml_suite;
 
-const STRUCTURAL: &str =
-    include_str!("../../../integration-testkit/src/graph_validator/fixtures/structural.yaml");
-const PYTHON_RESOLUTION: &str = include_str!(
-    "../../../integration-testkit/src/graph_validator/fixtures/python_resolution.yaml"
+macro_rules! yaml_test {
+    ($name:ident, $path:expr) => {
+        #[tokio::test]
+        async fn $name() {
+            run_yaml_suite(include_str!(concat!(
+                "../../../integration-testkit/src/graph_validator/fixtures/",
+                $path
+            )))
+            .await;
+        }
+    };
+}
+
+// ── Structural ──────────────────────────────────────────────────
+yaml_test!(structural_invariants, "structural.yaml");
+yaml_test!(containment_hierarchy, "containment.yaml");
+
+// ── Python ──────────────────────────────────────────────────────
+yaml_test!(python_simple_call, "python/simple_call.yaml");
+yaml_test!(python_self_method_call, "python/self_method_call.yaml");
+yaml_test!(python_cross_file_import, "python/cross_file_import.yaml");
+yaml_test!(python_nested_functions, "python/nested_functions.yaml");
+yaml_test!(python_lambda_call, "python/lambda_call.yaml");
+yaml_test!(python_decorated_function, "python/decorated_function.yaml");
+yaml_test!(python_class_methods, "python/class_methods.yaml");
+yaml_test!(python_nested_classes, "python/nested_classes.yaml");
+yaml_test!(python_recursive_call, "python/recursive_call.yaml");
+yaml_test!(python_class_inheritance, "python/class_inheritance.yaml");
+yaml_test!(
+    python_comprehensive_definitions,
+    "python/comprehensive_definitions.yaml"
 );
-const JAVA_RESOLUTION: &str =
-    include_str!("../../../integration-testkit/src/graph_validator/fixtures/java_resolution.yaml");
-const KOTLIN_RESOLUTION: &str = include_str!(
-    "../../../integration-testkit/src/graph_validator/fixtures/kotlin_resolution.yaml"
+yaml_test!(
+    python_comprehensive_imports,
+    "python/comprehensive_imports.yaml"
 );
-const CONTAINMENT: &str =
-    include_str!("../../../integration-testkit/src/graph_validator/fixtures/containment.yaml");
+yaml_test!(python_call_resolution, "python_resolution.yaml");
 
-#[tokio::test]
-async fn structural_invariants() {
-    run_yaml_suite(STRUCTURAL).await;
-}
+// ── Java ────────────────────────────────────────────────────────
+yaml_test!(java_call_resolution, "java_resolution.yaml");
 
-#[tokio::test]
-async fn python_call_resolution() {
-    run_yaml_suite(PYTHON_RESOLUTION).await;
-}
-
-#[tokio::test]
-async fn java_call_resolution() {
-    run_yaml_suite(JAVA_RESOLUTION).await;
-}
-
-#[tokio::test]
-async fn kotlin_call_resolution() {
-    run_yaml_suite(KOTLIN_RESOLUTION).await;
-}
-
-#[tokio::test]
-async fn containment_hierarchy() {
-    run_yaml_suite(CONTAINMENT).await;
-}
+// ── Kotlin ──────────────────────────────────────────────────────
+yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");

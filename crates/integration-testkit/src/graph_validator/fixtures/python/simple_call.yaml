@@ -1,0 +1,17 @@
+name: "Python: simple function call"
+fixtures:
+  - path: main.py
+    content: |
+      def foo():
+          pass
+
+      foo()
+
+tests:
+  - name: foo() resolves to foo definition
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'foo'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }

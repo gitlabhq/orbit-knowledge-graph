@@ -1,0 +1,35 @@
+name: "Python: nested function scope"
+fixtures:
+  - path: main.py
+    content: |
+      def outer():
+          def inner():
+              pass
+          inner()
+
+      outer()
+
+tests:
+  - name: inner() resolves within outer
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'inner'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: outer() resolves at module level
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'outer'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: inner has correct FQN nesting
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'inner'
+      RETURN d.fqn AS fqn
+    assert:
+      - { all_match: { field: fqn, pattern: "outer.*" } }
