@@ -70,6 +70,7 @@ impl LanguageSpec {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn walk(
         &self,
         node: &Node<StrDoc<SupportLang>>,
