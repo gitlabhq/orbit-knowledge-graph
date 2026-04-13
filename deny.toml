@@ -43,6 +43,8 @@ allow = [
     "LicenseRef-EE",
     "OpenSSL", # aws-lc-sys via testcontainers (dev dependency)
     "bzip2-1.0.6", # libbz2-rs-sys via datafusion -> async-compression
+    "0BSD", # mock_instant via lance-graph
+    "BSL-1.0", # xxhash-rust via lance-graph
 ]
 confidence-threshold = 0.8
 

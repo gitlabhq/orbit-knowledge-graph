@@ -109,6 +109,10 @@ description = "Run local integration tests — compiler + querying pipeline (no 
 run = "cargo build -p orbit && cargo nextest run --test cli --no-fail-fast"
 description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
+[tasks."test:graph-validator"]
+run = "cargo nextest run --test containers graph_validator --no-capture --no-fail-fast"
+description = "Run graph validator YAML Cypher test suites (v2 code-graph)"
+
 [tasks."test:integration"]
 run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }

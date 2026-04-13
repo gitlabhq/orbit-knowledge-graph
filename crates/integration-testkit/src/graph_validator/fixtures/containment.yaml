@@ -1,0 +1,35 @@
+name: Containment hierarchy
+fixtures:
+  - path: app.py
+    content: |
+      class Outer:
+          class Inner:
+              def method(self):
+                  pass
+          def outer_method(self):
+              pass
+
+tests:
+  - name: Nested class produces containment edge
+    query: |
+      MATCH (outer:Definition)-[:DefinitionToDefinition]->(inner:Definition)
+      WHERE outer.name = 'Outer' AND inner.name = 'Inner'
+      RETURN outer.fqn AS parent, inner.fqn AS child
+    assert:
+      - non_empty: true
+
+  - name: Method belongs to its class
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Outer' AND m.name = 'outer_method'
+      RETURN cls.fqn AS parent, m.fqn AS child
+    assert:
+      - non_empty: true
+
+  - name: FQN hierarchy is correct
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'method'
+      RETURN d.fqn AS fqn
+    assert:
+      - all_match: { field: fqn, pattern: "Outer.Inner.*" }
