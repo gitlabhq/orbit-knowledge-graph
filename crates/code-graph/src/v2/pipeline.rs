@@ -1,6 +1,8 @@
 use code_graph_config::{Language, detect_language_from_extension};
 use code_graph_types::CanonicalParser;
 use ignore::WalkBuilder;
+use parser_core::dsl::types::DslParser;
+use parser_core::v2::langs::java::JavaDsl;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
@@ -10,6 +12,7 @@ use crate::linker::v2::{
     CodeGraph, GraphBuilder, GraphEdge, NoResolver, ReferenceResolver, ResolutionContext,
     RulesResolver,
 };
+use crate::v2::lang_rules::java::JavaRules;
 
 /// Input to a language pipeline: file path + source bytes.
 pub type FileInput = (String, Vec<u8>);
@@ -155,17 +158,8 @@ macro_rules! register_v2_pipelines {
     };
 }
 
-// No languages registered yet — individual language MRs add entries here.
-// Example:
-//   register_v2_pipelines! {
-//       Python => GenericPipeline<DslParser<PythonDsl>, RulesResolver<PythonRules>>,
-//   }
-fn dispatch_language(
-    _language: Language,
-    _files: Vec<FileInput>,
-    _root_path: &str,
-) -> Option<Result<CodeGraph, Vec<PipelineError>>> {
-    None
+register_v2_pipelines! {
+    Java => GenericPipeline<DslParser<JavaDsl>, RulesResolver<JavaRules>>,
 }
 
 pub struct PipelineConfig {
