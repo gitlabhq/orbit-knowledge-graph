@@ -447,17 +447,47 @@ fn build_cascade_for_node(
         )
     });
 
-    let edge_table = input
-        .compiler
-        .resolve_edge_table(rel_types)
-        .unwrap_or(&input.compiler.default_edge_table);
+    let tables = input.compiler.resolve_edge_tables(rel_types);
+    let from = if tables.len() == 1 {
+        TableRef::scan(&tables[0], alias)
+    } else {
+        // Cascade across multiple edge tables via UNION ALL.
+        let inner = format!("_{alias}");
+        let queries = tables
+            .iter()
+            .map(|t| Query {
+                select: vec![SelectExpr::new(Expr::col(&inner, select_col), select_col)],
+                from: TableRef::scan(t, &inner),
+                where_clause: Expr::and_all([
+                    Some(Expr::InSubquery {
+                        expr: Box::new(Expr::col(&inner, filter_col)),
+                        cte_name: parent_cte.to_string(),
+                        column: DEFAULT_PRIMARY_KEY.to_string(),
+                    }),
+                    Some(rel_filter.clone()),
+                    kind_filter.clone(),
+                ]),
+                ..Default::default()
+            })
+            .collect();
+        // For multi-table cascades the filters are pushed into each arm,
+        // so we return early with the UNION ALL directly.
+        return Some(Query {
+            select: vec![SelectExpr::new(
+                Expr::col(alias, select_col),
+                DEFAULT_PRIMARY_KEY,
+            )],
+            from: TableRef::union_all(queries, alias),
+            ..Default::default()
+        });
+    };
 
     Some(Query {
         select: vec![SelectExpr::new(
             Expr::col(alias, select_col),
             DEFAULT_PRIMARY_KEY,
         )],
-        from: TableRef::scan(edge_table, alias),
+        from,
         where_clause: Expr::and_all([Some(parent_filter), Some(rel_filter), kind_filter]),
         ..Default::default()
     })
@@ -900,10 +930,12 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
     let backward_depth = max_depth / 2;
 
     // Build hop frontier CTEs and inject SIP into frontier arms.
-    let et = input
-        .compiler
-        .resolve_edge_table(&path.rel_types)
-        .unwrap_or(&input.compiler.default_edge_table);
+    let edge_tables = input.compiler.resolve_edge_tables(&path.rel_types);
+    // Hop frontiers create simple scans — use the first table for single-table
+    // cases, or default for multi-table (hop frontiers filter by type anyway).
+    let et = edge_tables
+        .first()
+        .map_or(input.compiler.default_edge_table.as_str(), |t| t.as_str());
     let mut new_ctes = Vec::new();
     inject_hop_frontiers(
         q,

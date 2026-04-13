@@ -115,44 +115,29 @@ impl Default for CompilerMetadata {
 }
 
 impl CompilerMetadata {
-    /// Resolve the edge table for a relationship's type list.
+    /// Resolve the edge table(s) for a relationship's type list.
     ///
-    /// Returns `Ok(table)` when all types in the filter map to the same
-    /// physical table, or for wildcard/empty type lists (default table).
+    /// Returns a deduplicated list of physical tables that need to be scanned.
+    /// - Single table → caller emits a normal `edge_scan`
+    /// - Multiple tables → caller emits a UNION ALL across tables
     ///
-    /// Returns `Err` if the types span multiple tables — the caller must
-    /// reject the query or emit a UNION ALL (not yet implemented).
-    pub fn resolve_edge_table(&self, types: &[String]) -> Result<&str, Vec<String>> {
+    /// Wildcards and empty type lists resolve to all declared edge tables.
+    pub fn resolve_edge_tables(&self, types: &[String]) -> Vec<String> {
         if types.is_empty() || (types.len() == 1 && types[0] == "*") {
-            return Ok(&self.default_edge_table);
+            let mut tables: Vec<String> = self.edge_tables.iter().cloned().collect();
+            tables.sort();
+            return tables;
         }
-        let first = self
-            .edge_table_for_rel
-            .get(&types[0])
-            .map(|s| s.as_str())
-            .unwrap_or(&self.default_edge_table);
-        for t in &types[1..] {
+        let mut seen = std::collections::BTreeSet::new();
+        for t in types {
             let table = self
                 .edge_table_for_rel
                 .get(t)
                 .map(|s| s.as_str())
                 .unwrap_or(&self.default_edge_table);
-            if table != first {
-                let tables: Vec<String> = types
-                    .iter()
-                    .map(|t| {
-                        self.edge_table_for_rel
-                            .get(t)
-                            .cloned()
-                            .unwrap_or_else(|| self.default_edge_table.clone())
-                    })
-                    .collect::<std::collections::HashSet<_>>()
-                    .into_iter()
-                    .collect();
-                return Err(tables);
-            }
+            seen.insert(table.to_string());
         }
-        Ok(first)
+        seen.into_iter().collect()
     }
 }
 
