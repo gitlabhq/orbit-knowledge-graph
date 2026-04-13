@@ -1,11 +1,17 @@
+use std::sync::Arc;
+
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, Root, SupportLang};
+
+use code_graph_config::Language;
+use code_graph_types::{
+    CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind,
+    DefinitionMetadata, Fqn, ReferenceStatus,
+};
 
 use crate::definitions::DefinitionInfo;
 use crate::parser::ParseResult;
 use crate::utils::node_to_range;
-
-use code_graph_types::{DefKind, DefinitionMetadata};
 
 use super::types::{
     DslDefinitionInfo, DslDefinitionType, DslFqn, DslImport, DslRawReference, LanguageSpec, Rule,
@@ -61,6 +67,136 @@ impl LanguageSpec {
             def_kinds,
             def_metadata,
         })
+    }
+
+    /// Parse source bytes into a `CanonicalResult` directly.
+    ///
+    /// This is the v2 entry point — no V1 types involved.
+    pub fn parse_canonical(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+    ) -> crate::Result<CanonicalResult> {
+        let source_str = std::str::from_utf8(source)
+            .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
+
+        let ast = language.parse_ast(source_str);
+        let root = ast.root();
+        let sep = language.fqn_separator();
+
+        let mut defs = Vec::new();
+        let mut refs = Vec::new();
+        let mut imports = Vec::new();
+        let mut scope_stack: Vec<Arc<str>> = Vec::new();
+
+        self.walk_canonical(
+            &root,
+            &mut scope_stack,
+            &mut defs,
+            &mut refs,
+            &mut imports,
+            sep,
+        );
+
+        let extension = file_path
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_string())
+            .unwrap_or_default();
+
+        Ok(CanonicalResult {
+            file_path: file_path.to_string(),
+            extension,
+            file_size: source.len() as u64,
+            language,
+            definitions: defs,
+            imports,
+            references: refs,
+        })
+    }
+
+    fn walk_canonical(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        scope_stack: &mut Vec<Arc<str>>,
+        defs: &mut Vec<CanonicalDefinition>,
+        refs: &mut Vec<CanonicalReference>,
+        imports: &mut Vec<CanonicalImport>,
+        sep: &'static str,
+    ) {
+        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
+            return;
+        }
+
+        let node_kind = node.kind();
+        let mut pushed_scope = false;
+
+        // Check for package/namespace node (pushes scope, no definition)
+        if let Some((pkg_kind, ref pkg_extract)) = self.package_node {
+            if node_kind.as_ref() == pkg_kind {
+                if let Some(name) = pkg_extract.extract_name(node) {
+                    scope_stack.push(Arc::from(name.as_str()));
+                    // Don't set pushed_scope — package scope persists for the whole file
+                }
+            }
+        }
+
+        if let Some(m) = self.evaluate_scope(node, &node_kind) {
+            // Check is_top_level BEFORE pushing scope
+            let is_top_level =
+                scope_stack.is_empty() || (scope_stack.len() == 1 && scope_stack[0].contains('.'));
+
+            if m.creates_scope {
+                scope_stack.push(Arc::from(m.name.as_str()));
+                pushed_scope = true;
+            }
+
+            let fqn = if m.creates_scope {
+                Fqn::from_parts(
+                    &scope_stack.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
+                    sep,
+                )
+            } else {
+                Fqn::from_scope(scope_stack, &m.name, sep)
+            };
+
+            defs.push(CanonicalDefinition {
+                definition_type: m.label,
+                kind: m.def_kind,
+                name: m.name,
+                fqn,
+                range: canonical_range(&m.range),
+                is_top_level,
+                metadata: m.metadata,
+            });
+        }
+
+        if let Some((name, range)) = self.evaluate_reference(node, &node_kind) {
+            refs.push(CanonicalReference {
+                reference_type: "Call",
+                name,
+                range: canonical_range(&range),
+                scope_fqn: Fqn::from_scope_only(scope_stack, sep),
+                status: ReferenceStatus::Unresolved,
+                target_fqn: None,
+                expression: None,
+            });
+        }
+
+        // Try custom import handler first, fall back to declarative rules
+        let handled = self.custom_import_fn.is_some_and(|f| f(node, imports));
+
+        if !handled {
+            self.evaluate_canonical_imports(node, &node_kind, imports);
+        }
+
+        for child in node.children() {
+            self.walk_canonical(&child, scope_stack, defs, refs, imports, sep);
+        }
+
+        if pushed_scope {
+            scope_stack.pop();
+        }
     }
 
     fn walk_node(
@@ -165,6 +301,87 @@ impl LanguageSpec {
         Some((name, node_to_range(node)))
     }
 
+    fn evaluate_canonical_imports(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        node_kind: &str,
+        imports: &mut Vec<CanonicalImport>,
+    ) {
+        let Some(rule) = self.imports.iter().find(|r| r.matches(node, node_kind)) else {
+            return;
+        };
+
+        let range = canonical_range(&node_to_range(node));
+        let label = rule.resolve_label(node);
+
+        if let Some(child_kinds) = rule.multi_child_kinds {
+            let base_path = rule.extract_name(node).unwrap_or_default();
+            let alias_kind = rule.alias_child_kind;
+
+            for child in node.children() {
+                let ck = child.kind();
+
+                // Check for alias child (e.g. `aliased_import`)
+                if alias_kind.is_some_and(|ak| ak == ck.as_ref()) {
+                    if let Some(name_node) = child.field("name") {
+                        let alias = child.field("alias").map(|a| a.text().to_string());
+                        imports.push(CanonicalImport {
+                            import_type: label,
+                            path: base_path.clone(),
+                            name: Some(name_node.text().to_string()),
+                            alias,
+                            scope_fqn: None,
+                            range,
+                        });
+                    }
+                } else if child_kinds.iter().any(|&k| k == ck.as_ref()) {
+                    let child_text = child.text().to_string();
+                    // Skip if this child is the path source (e.g. module_name field)
+                    if !base_path.is_empty() && child_text == base_path {
+                        continue;
+                    }
+                    // If no base_path, this child IS the path (e.g. `import os`)
+                    let (path, name) = if base_path.is_empty() {
+                        (child_text, None)
+                    } else {
+                        (base_path.clone(), Some(child_text))
+                    };
+                    imports.push(CanonicalImport {
+                        import_type: label,
+                        path,
+                        name,
+                        alias: None,
+                        scope_fqn: None,
+                        range,
+                    });
+                } else if ck == "wildcard_import" {
+                    imports.push(CanonicalImport {
+                        import_type: "WildcardImport",
+                        path: base_path.clone(),
+                        name: Some("*".to_string()),
+                        alias: None,
+                        scope_fqn: None,
+                        range,
+                    });
+                }
+            }
+        } else if let Some(full_path) = rule.extract_name(node) {
+            let (path, name) = if rule.should_split() {
+                rule.split_path_name(&full_path)
+            } else {
+                (full_path, rule.extract_symbol(node))
+            };
+            imports.push(CanonicalImport {
+                import_type: label,
+                path,
+                name,
+                alias: rule.extract_alias(node),
+                scope_fqn: None,
+                range,
+            });
+        }
+    }
+
     fn evaluate_import(
         &self,
         node: &Node<StrDoc<SupportLang>>,
@@ -179,6 +396,14 @@ impl LanguageSpec {
             range: node_to_range(node),
         })
     }
+}
+
+fn canonical_range(r: &crate::utils::Range) -> code_graph_types::Range {
+    code_graph_types::Range::new(
+        code_graph_types::Position::new(r.start.line, r.start.column),
+        code_graph_types::Position::new(r.end.line, r.end.column),
+        r.byte_offset,
+    )
 }
 
 #[cfg(test)]

@@ -4,7 +4,9 @@
 
 #[cfg(test)]
 mod tests {
-    use code_graph_types::{CanonicalResult, EdgeKind, ExpressionStep, NodeKind};
+    use code_graph_types::{CanonicalResult, EdgeKind, NodeKind};
+    use parser_core::dsl::types::DslParser;
+    use parser_core::v2::langs::{java::JavaDsl, kotlin::KotlinDsl, python::PythonDsl};
     use parser_core::v2::CanonicalParser;
     use rustc_hash::FxHashMap;
 
@@ -13,7 +15,7 @@ mod tests {
     // ── Helpers ─────────────────────────────────────────────────
 
     fn parse_python(files: &[(&str, &str)]) -> Vec<CanonicalResult> {
-        let parser = parser_core::v2::python::PythonCanonicalParser;
+        let parser = DslParser::<PythonDsl>::default();
         files
             .iter()
             .map(|(path, source)| parser.parse_file(source.as_bytes(), path).unwrap().0)
@@ -21,7 +23,7 @@ mod tests {
     }
 
     fn parse_java(files: &[(&str, &str)]) -> Vec<CanonicalResult> {
-        let parser = parser_core::v2::java::JavaCanonicalParser;
+        let parser = DslParser::<JavaDsl>::default();
         files
             .iter()
             .map(|(path, source)| parser.parse_file(source.as_bytes(), path).unwrap().0)
@@ -29,7 +31,7 @@ mod tests {
     }
 
     fn parse_kotlin(files: &[(&str, &str)]) -> Vec<CanonicalResult> {
-        let parser = parser_core::v2::kotlin::KotlinCanonicalParser;
+        let parser = DslParser::<KotlinDsl>::default();
         files
             .iter()
             .map(|(path, source)| parser.parse_file(source.as_bytes(), path).unwrap().0)

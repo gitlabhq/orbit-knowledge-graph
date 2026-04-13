@@ -1,7 +1,4 @@
 mod convert;
-pub mod csharp;
-pub mod java;
-pub mod kotlin;
-pub mod python;
+pub mod langs;
 
 pub use convert::CanonicalParser;

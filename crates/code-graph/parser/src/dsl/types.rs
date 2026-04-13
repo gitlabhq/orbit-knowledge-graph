@@ -208,6 +208,21 @@ pub struct ImportRule {
     symbol: Option<Extract>,
     /// Extracts the alias. None = no aliasing.
     alias: Option<Extract>,
+    /// Static label for import_type (default: "Import").
+    pub(crate) label: &'static str,
+    /// Classify import type from the node (overrides label if Some).
+    pub(crate) classify: Option<fn(&N<'_>) -> &'static str>,
+    /// If set, walk children of these kinds and produce one import per child.
+    /// The path is extracted from the parent, name from each child.
+    /// For `aliased_import` children, the alias is extracted from the `alias` field
+    /// and the name from the `name` field.
+    pub(crate) multi_child_kinds: Option<&'static [&'static str]>,
+    /// Node kind for aliased children (e.g. "aliased_import").
+    /// When a child matches this kind, name comes from `name` field, alias from `alias` field.
+    pub(crate) alias_child_kind: Option<&'static str>,
+    /// If set, split a scoped name at this separator into (path, name).
+    /// e.g. `"."` splits `java.util.List` → path=`java.util`, name=`List`.
+    pub(crate) split_last: Option<&'static str>,
 }
 
 impl Rule for ImportRule {
@@ -246,12 +261,57 @@ impl ImportRule {
         self
     }
 
+    pub fn label(mut self, label: &'static str) -> Self {
+        self.label = label;
+        self
+    }
+
+    pub fn classify(mut self, f: fn(&N<'_>) -> &'static str) -> Self {
+        self.classify = Some(f);
+        self
+    }
+
+    /// Walk children of these kinds to produce one import per child.
+    pub fn multi(mut self, child_kinds: &'static [&'static str]) -> Self {
+        self.multi_child_kinds = Some(child_kinds);
+        self
+    }
+
+    /// Split the extracted path at the last occurrence of `sep` into (path, name).
+    pub fn split_last(mut self, sep: &'static str) -> Self {
+        self.split_last = Some(sep);
+        self
+    }
+
+    /// Set the node kind for aliased import children (e.g. "aliased_import").
+    pub fn alias_child(mut self, kind: &'static str) -> Self {
+        self.alias_child_kind = Some(kind);
+        self
+    }
+
+    pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
+        self.classify.map_or(self.label, |f| f(node))
+    }
+
     pub(crate) fn extract_symbol(&self, node: &N<'_>) -> Option<String> {
         self.symbol.as_ref()?.extract_name(node)
     }
 
     pub(crate) fn extract_alias(&self, node: &N<'_>) -> Option<String> {
         self.alias.as_ref()?.extract_name(node)
+    }
+
+    pub(crate) fn should_split(&self) -> bool {
+        self.split_last.is_some()
+    }
+
+    pub(crate) fn split_path_name(&self, full: &str) -> (String, Option<String>) {
+        if let Some(sep) = self.split_last {
+            if let Some((path, name)) = full.rsplit_once(sep) {
+                return (path.to_string(), Some(name.to_string()));
+            }
+        }
+        (full.to_string(), None)
     }
 }
 
@@ -262,11 +322,17 @@ pub fn import(kind: &'static str) -> ImportRule {
         path: Extract::Default,
         symbol: None,
         alias: None,
+        label: "Import",
+        classify: None,
+        multi_child_kinds: None,
+        alias_child_kind: None,
+        split_last: None,
     }
 }
 
-pub trait DslLanguage {
+pub trait DslLanguage: Send + Sync + Default {
     fn name() -> &'static str;
+    fn language() -> code_graph_config::Language;
 
     fn auto_scopes() -> &'static [(&'static str, &'static str)] {
         &[]
@@ -288,13 +354,59 @@ pub trait DslLanguage {
         vec![]
     }
 
+    /// Custom import extraction for languages with complex import syntax.
+    /// Called for every AST node. Return `true` if the node was handled
+    /// (skips the declarative import rules for this node).
+    fn custom_import(_node: &N<'_>, _imports: &mut Vec<code_graph_types::CanonicalImport>) -> bool {
+        false
+    }
+
+    fn package_node() -> Option<(&'static str, Extract)> {
+        None
+    }
+
     fn spec() -> LanguageSpec {
-        LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
-            .auto(Self::auto_scopes())
-            .auto_refs(Self::auto_refs())
-            .auto_imports(Self::auto_imports())
+        let mut spec =
+            LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
+                .auto(Self::auto_scopes())
+                .auto_refs(Self::auto_refs())
+                .auto_imports(Self::auto_imports())
+                .custom_import(Self::custom_import);
+        if let Some((kind, extract)) = Self::package_node() {
+            spec = spec.package(kind, extract);
+        }
+        spec
     }
 }
+
+/// Generic DSL-based canonical parser.
+///
+/// Wraps a `DslLanguage` impl and provides `CanonicalParser` functionality.
+/// No hand-written AST walking — everything is driven by declarative rules.
+pub struct DslParser<L: DslLanguage>(std::marker::PhantomData<L>);
+
+impl<L: DslLanguage> Default for DslParser<L> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<L: DslLanguage> crate::v2::CanonicalParser for DslParser<L> {
+    type Ast = ();
+
+    fn parse_file(
+        &self,
+        source: &[u8],
+        file_path: &str,
+    ) -> crate::Result<(code_graph_types::CanonicalResult, ())> {
+        let spec = L::spec();
+        let result = spec.parse_canonical(source, file_path, L::language())?;
+        Ok((result, ()))
+    }
+}
+
+/// Function type for custom import handling.
+pub type CustomImportFn = fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool;
 
 pub struct LanguageSpec {
     pub name: &'static str,
@@ -302,6 +414,8 @@ pub struct LanguageSpec {
     pub refs: Vec<ReferenceRule>,
     pub imports: Vec<ImportRule>,
     pub(crate) scope_kinds: FxHashSet<&'static str>,
+    pub(crate) package_node: Option<(&'static str, Extract)>,
+    pub(crate) custom_import_fn: Option<CustomImportFn>,
 }
 
 impl LanguageSpec {
@@ -318,7 +432,21 @@ impl LanguageSpec {
             refs,
             imports,
             scope_kinds,
+            package_node: None,
+            custom_import_fn: None,
         }
+    }
+
+    /// Declare the node kind for package/namespace declarations.
+    /// These push a file-wide scope but don't produce a definition.
+    pub fn package(mut self, kind: &'static str, name: Extract) -> Self {
+        self.package_node = Some((kind, name));
+        self
+    }
+
+    pub fn custom_import(mut self, f: CustomImportFn) -> Self {
+        self.custom_import_fn = Some(f);
+        self
     }
 
     /// Register node kinds that automatically create scopes using

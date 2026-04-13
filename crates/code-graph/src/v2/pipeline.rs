@@ -1,10 +1,10 @@
 use code_graph_config::{detect_language_from_extension, Language};
 use ignore::WalkBuilder;
-use parser_core::v2::CanonicalParser;
-use parser_core::v2::{
-    csharp::CSharpCanonicalParser, java::JavaCanonicalParser, kotlin::KotlinCanonicalParser,
-    python::PythonCanonicalParser,
+use parser_core::dsl::types::DslParser;
+use parser_core::v2::langs::{
+    csharp::CSharpDsl, java::JavaDsl, kotlin::KotlinDsl, python::PythonDsl,
 };
+use parser_core::v2::CanonicalParser;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
@@ -127,10 +127,10 @@ macro_rules! register_v2_pipelines {
 }
 
 register_v2_pipelines! {
-    Python  => GenericPipeline<PythonCanonicalParser, RulesResolver<PythonRules>>,
-    Java    => GenericPipeline<JavaCanonicalParser, RulesResolver<JavaRules>>,
-    Kotlin  => GenericPipeline<KotlinCanonicalParser, RulesResolver<KotlinRules>>,
-    CSharp  => GenericPipeline<CSharpCanonicalParser, NoResolver>,
+    Python  => GenericPipeline<DslParser<PythonDsl>, RulesResolver<PythonRules>>,
+    Java    => GenericPipeline<DslParser<JavaDsl>, RulesResolver<JavaRules>>,
+    Kotlin  => GenericPipeline<DslParser<KotlinDsl>, RulesResolver<KotlinRules>>,
+    CSharp  => GenericPipeline<DslParser<CSharpDsl>, NoResolver>,
 }
 
 pub struct PipelineConfig {

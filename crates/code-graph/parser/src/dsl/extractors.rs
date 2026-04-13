@@ -7,8 +7,12 @@ type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub enum Extract {
     /// Look for a `name` field, then fall back to first identifier child.
     Default,
-    /// Extract text from a specific field.
+    /// Always returns None. Used when the parent node has no path/name to extract.
+    None,
+    /// Extract text from a named field (e.g. `node.field("name")`).
     Field(&'static str),
+    /// Extract text from the first child of this node kind.
+    ChildOfKind(&'static str),
     /// Follow a chain of fields and extract the final node's text.
     FieldChain(&'static [&'static str]),
     /// C-style: follow `declarator` -> `declarator` chain to find the name.
@@ -19,7 +23,12 @@ impl Extract {
     pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
         match self {
             Extract::Default => default_name(node),
+            Extract::None => None,
             Extract::Field(name) => node.field(name).map(|n| n.text().to_string()),
+            Extract::ChildOfKind(kind) => node
+                .children()
+                .find(|c| c.kind().as_ref() == *kind)
+                .map(|n| n.text().to_string()),
             Extract::FieldChain(fields) => {
                 let mut current = node.clone();
                 for f in *fields {
@@ -50,6 +59,7 @@ fn is_identifier_kind(kind: &str) -> bool {
         "identifier"
             | "type_identifier"
             | "simple_identifier"
+            | "scoped_identifier"
             | "name"
             | "field_identifier"
             | "property_identifier"
@@ -76,6 +86,10 @@ pub fn field(name: &'static str) -> Extract {
 
 pub fn field_chain(fields: &'static [&'static str]) -> Extract {
     Extract::FieldChain(fields)
+}
+
+pub fn child_of_kind(kind: &'static str) -> Extract {
+    Extract::ChildOfKind(kind)
 }
 
 pub fn declarator() -> Extract {
