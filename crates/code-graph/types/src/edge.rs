@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::node::DefKind;
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
@@ -22,68 +20,69 @@ pub enum NodeKind {
     ImportedSymbol,
 }
 
-/// A fully described relationship in the graph. Combines the structural
-/// relationship (which node kinds are connected) with the semantic detail
-/// (which DefKinds, for definition-to-definition edges).
+/// A fully described relationship in the graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Relationship {
     pub edge_kind: EdgeKind,
     pub source_node: NodeKind,
     pub target_node: NodeKind,
-    /// For definition-to-definition containment edges, the source's DefKind.
     pub source_def_kind: Option<DefKind>,
-    /// For definition-to-definition containment edges, the target's DefKind.
     pub target_def_kind: Option<DefKind>,
 }
 
+/// V1-compatible labels for structural (non-def-to-def) edges.
+const STRUCTURAL_LABELS: &[(NodeKind, NodeKind, &str)] = &[
+    (NodeKind::Directory, NodeKind::Directory, "DIR_CONTAINS_DIR"),
+    (NodeKind::Directory, NodeKind::File, "DIR_CONTAINS_FILE"),
+    (NodeKind::File, NodeKind::Definition, "FILE_DEFINES"),
+    (NodeKind::File, NodeKind::ImportedSymbol, "FILE_IMPORTS"),
+    (
+        NodeKind::Definition,
+        NodeKind::ImportedSymbol,
+        "DEFINES_IMPORTED_SYMBOL",
+    ),
+    (
+        NodeKind::ImportedSymbol,
+        NodeKind::ImportedSymbol,
+        "IMPORTED_SYMBOL_TO_IMPORTED_SYMBOL",
+    ),
+    (
+        NodeKind::ImportedSymbol,
+        NodeKind::Definition,
+        "IMPORTED_SYMBOL_TO_DEFINITION",
+    ),
+    (
+        NodeKind::ImportedSymbol,
+        NodeKind::File,
+        "IMPORTED_SYMBOL_TO_FILE",
+    ),
+];
+
 impl Relationship {
-    /// Fine-grained label for the edge (e.g. "CLASS_TO_METHOD").
-    pub fn label(&self) -> Cow<'static, str> {
-        match (self.source_def_kind, self.target_def_kind) {
-            (Some(src), Some(tgt)) => {
-                format!("{}_TO_{}", src.as_upper_str(), tgt.as_upper_str()).into()
-            }
-            _ => match (self.source_node, self.target_node, self.edge_kind) {
-                (NodeKind::Directory, NodeKind::Directory, _) => "DIR_CONTAINS_DIR".into(),
-                (NodeKind::Directory, NodeKind::File, _) => "DIR_CONTAINS_FILE".into(),
-                (NodeKind::File, NodeKind::Definition, EdgeKind::Defines) => "FILE_DEFINES".into(),
-                (NodeKind::File, NodeKind::ImportedSymbol, EdgeKind::Imports) => {
-                    "FILE_IMPORTS".into()
-                }
-                (NodeKind::Definition, NodeKind::ImportedSymbol, _) => {
-                    "DEFINES_IMPORTED_SYMBOL".into()
-                }
-                (NodeKind::ImportedSymbol, NodeKind::ImportedSymbol, _) => {
-                    "IMPORTED_SYMBOL_TO_IMPORTED_SYMBOL".into()
-                }
-                (NodeKind::ImportedSymbol, NodeKind::Definition, _) => {
-                    "IMPORTED_SYMBOL_TO_DEFINITION".into()
-                }
-                (NodeKind::ImportedSymbol, NodeKind::File, _) => "IMPORTED_SYMBOL_TO_FILE".into(),
-                _ => self.edge_kind.to_string().into(),
-            },
+    /// Fine-grained label (e.g. "CLASS_TO_METHOD", "DIR_CONTAINS_FILE").
+    pub fn label(&self) -> String {
+        if let (Some(src), Some(tgt)) = (self.source_def_kind, self.target_def_kind) {
+            return format!("{}_TO_{}", src.as_upper_str(), tgt.as_upper_str());
         }
+        STRUCTURAL_LABELS
+            .iter()
+            .find(|(s, t, _)| *s == self.source_node && *t == self.target_node)
+            .map(|(_, _, label)| label.to_string())
+            .unwrap_or_else(|| self.edge_kind.to_string())
     }
 }
 
-/// Declarative table of valid (parent DefKind, child DefKind) containment
-/// relationships. The macro generates `containment_edge_kind()` and
-/// `containment_relationship()` which the linker calls when building
-/// definition-to-definition edges.
+// ── Containment rules ───────────────────────────────────────────
+
 macro_rules! define_containment_rules {
     ( $( $parent:ident => [ $( $child:ident ),+ $(,)? ] ; )+ ) => {
-        /// Given a parent and child DefKind, returns the EdgeKind if this
-        /// is a valid containment relationship, or None if not.
         pub fn containment_edge_kind(parent: DefKind, child: DefKind) -> Option<EdgeKind> {
             match (parent, child) {
-                $(
-                    $( (DefKind::$parent, DefKind::$child) => Some(EdgeKind::Defines), )+
-                )+
+                $( $( (DefKind::$parent, DefKind::$child) => Some(EdgeKind::Defines), )+ )+
                 _ => None,
             }
         }
 
-        /// Build a full Relationship for a definition-to-definition containment edge.
         pub fn containment_relationship(parent: DefKind, child: DefKind) -> Option<Relationship> {
             containment_edge_kind(parent, child).map(|edge_kind| Relationship {
                 edge_kind,
@@ -96,39 +95,19 @@ macro_rules! define_containment_rules {
 
         #[cfg(test)]
         fn all_valid_containment_pairs() -> Vec<(DefKind, DefKind)> {
-            vec![
-                $(
-                    $( (DefKind::$parent, DefKind::$child), )+
-                )+
-            ]
+            vec![$( $( (DefKind::$parent, DefKind::$child), )+ )+]
         }
     };
 }
 
 define_containment_rules! {
-    Module => [
-        Class, Interface, Module, Function, Method, Constructor,
-        Lambda, Property, EnumEntry, Other,
-    ];
-    Class => [
-        Class, Interface, Method, Function, Constructor,
-        Lambda, Property, EnumEntry, Other,
-    ];
-    Interface => [
-        Interface, Class, Method, Function, Property, Lambda,
-    ];
-    Method => [
-        Method, Function, Class, Lambda, Interface, Property,
-    ];
-    Function => [
-        Function, Class, Method, Lambda,
-    ];
-    Lambda => [
-        Lambda, Class, Function, Method, Interface, Property,
-    ];
-    Other => [
-        Method, Function, Class, Property, Lambda,
-    ];
+    Module => [Class, Interface, Module, Function, Method, Constructor, Lambda, Property, EnumEntry, Other];
+    Class => [Class, Interface, Method, Function, Constructor, Lambda, Property, EnumEntry, Other];
+    Interface => [Interface, Class, Method, Function, Property, Lambda];
+    Method => [Method, Function, Class, Lambda, Interface, Property];
+    Function => [Function, Class, Method, Lambda];
+    Lambda => [Lambda, Class, Function, Method, Interface, Property];
+    Other => [Method, Function, Class, Property, Lambda];
 }
 
 #[cfg(test)]
@@ -144,12 +123,8 @@ mod tests {
     }
 
     #[test]
-    fn edge_kind_as_ref() {
+    fn edge_kind_roundtrip() {
         assert_eq!(EdgeKind::Contains.as_ref(), "CONTAINS");
-    }
-
-    #[test]
-    fn edge_kind_from_str() {
         assert_eq!("CONTAINS".parse::<EdgeKind>().unwrap(), EdgeKind::Contains);
         assert_eq!("CALLS".parse::<EdgeKind>().unwrap(), EdgeKind::Calls);
     }
@@ -161,7 +136,7 @@ mod tests {
     }
 
     #[test]
-    fn basic_containment() {
+    fn containment_valid() {
         assert_eq!(
             containment_edge_kind(DefKind::Class, DefKind::Method),
             Some(EdgeKind::Defines)
@@ -173,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_containment_returns_none() {
+    fn containment_invalid() {
         assert_eq!(
             containment_edge_kind(DefKind::Property, DefKind::Class),
             None
@@ -185,14 +160,13 @@ mod tests {
     }
 
     #[test]
-    fn relationship_label_for_containment() {
+    fn label_for_containment() {
         let rel = containment_relationship(DefKind::Class, DefKind::Method).unwrap();
         assert_eq!(rel.label(), "CLASS_TO_METHOD");
-        assert_eq!(rel.edge_kind, EdgeKind::Defines);
     }
 
     #[test]
-    fn relationship_label_for_structural() {
+    fn label_for_structural() {
         let rel = Relationship {
             edge_kind: EdgeKind::Contains,
             source_node: NodeKind::Directory,
@@ -204,23 +178,12 @@ mod tests {
     }
 
     #[test]
-    fn module_contains_everything() {
-        for kind in [
-            DefKind::Class,
-            DefKind::Interface,
-            DefKind::Module,
-            DefKind::Function,
-            DefKind::Method,
-            DefKind::Constructor,
-            DefKind::Lambda,
-            DefKind::Property,
-            DefKind::EnumEntry,
-            DefKind::Other,
-        ] {
+    fn module_contains_all_def_kinds() {
+        use strum::IntoEnumIterator;
+        for kind in DefKind::iter() {
             assert!(
                 containment_edge_kind(DefKind::Module, kind).is_some(),
-                "Module should contain {:?}",
-                kind
+                "Module should contain {kind:?}",
             );
         }
     }
@@ -231,9 +194,7 @@ mod tests {
             assert_eq!(
                 containment_edge_kind(parent, child),
                 Some(EdgeKind::Defines),
-                "{:?} -> {:?} should be Defines",
-                parent,
-                child
+                "{parent:?} -> {child:?} should be Defines",
             );
         }
     }
