@@ -3712,4 +3712,186 @@ mod tests {
             "direct query should filter f.end_kind = 'Project', got: {direct_where:?}"
         );
     }
+
+    // ── Multi-edge-table tests ──────────────────────────────────────────
+
+    fn multi_table_ontology() -> Ontology {
+        use ontology::DataType;
+        Ontology::new()
+            .with_nodes(["User", "Project", "File", "Definition"])
+            .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
+            .with_edge_table("gl_code_edge")
+            .with_edge_for_table("DEFINES", "gl_code_edge")
+            .with_edge_for_table("IMPORTS", "gl_code_edge")
+            .with_fields("User", [("username", DataType::String)])
+            .with_default_columns("User", ["username"])
+            .with_fields("Project", [("name", DataType::String)])
+            .with_default_columns("Project", ["name"])
+            .with_fields("File", [("path", DataType::String)])
+            .with_default_columns("File", ["path"])
+            .with_fields("Definition", [("name", DataType::String)])
+            .with_default_columns("Definition", ["name"])
+    }
+
+    fn validated_input_with(json: &str, ontology: &Ontology) -> Input {
+        let input = parse_input(json).unwrap();
+        validate::Validator::new(ontology)
+            .check_references(&input)
+            .unwrap();
+        normalize::normalize(input, ontology).unwrap()
+    }
+
+    fn has_union(t: &TableRef) -> bool {
+        matches!(t, TableRef::Union { .. })
+    }
+
+    fn collect_scanned_tables(t: &TableRef) -> Vec<String> {
+        match t {
+            TableRef::Scan { table, .. } => vec![table.clone()],
+            TableRef::Join { left, right, .. } => {
+                let mut v = collect_scanned_tables(left);
+                v.extend(collect_scanned_tables(right));
+                v
+            }
+            TableRef::Union { queries, .. } => queries
+                .iter()
+                .flat_map(|q| collect_scanned_tables(&q.from))
+                .collect(),
+            TableRef::Subquery { query, .. } => collect_scanned_tables(&query.from),
+        }
+    }
+
+    #[test]
+    fn single_table_edge_routes_to_default() {
+        let ontology = multi_table_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        assert!(
+            has_scan(&q.from, "gl_edge"),
+            "AUTHORED should route to gl_edge"
+        );
+        assert!(
+            !has_scan(&q.from, "gl_code_edge"),
+            "AUTHORED should not touch gl_code_edge"
+        );
+    }
+
+    #[test]
+    fn edge_routes_to_code_table() {
+        let ontology = multi_table_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "f", "entity": "File"},
+                    {"id": "d", "entity": "Definition"}
+                ],
+                "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        assert!(
+            has_scan(&q.from, "gl_code_edge"),
+            "DEFINES should route to gl_code_edge"
+        );
+        assert!(
+            !has_scan(&q.from, "gl_edge"),
+            "DEFINES should not touch gl_edge"
+        );
+    }
+
+    #[test]
+    fn wildcard_scans_all_edge_tables() {
+        let ontology = multi_table_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "*", "from": "u", "to": "p"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        let tables = collect_scanned_tables(&q.from);
+        assert!(
+            tables.contains(&"gl_edge".to_string()),
+            "wildcard should scan gl_edge, got: {tables:?}"
+        );
+        assert!(
+            tables.contains(&"gl_code_edge".to_string()),
+            "wildcard should scan gl_code_edge, got: {tables:?}"
+        );
+    }
+
+    #[test]
+    fn mixed_types_across_tables_produces_union() {
+        let ontology = multi_table_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        let tables = collect_scanned_tables(&q.from);
+        assert!(
+            tables.contains(&"gl_edge".to_string()) && tables.contains(&"gl_code_edge".to_string()),
+            "mixed types should scan both tables, got: {tables:?}"
+        );
+    }
+
+    #[test]
+    fn single_table_no_union_all() {
+        let ontology = test_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        assert!(
+            !has_union(&q.from),
+            "single-table ontology should not produce UNION ALL in FROM"
+        );
+    }
 }

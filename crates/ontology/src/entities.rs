@@ -228,7 +228,7 @@ impl fmt::Display for NodeEntity {
 }
 
 /// An edge entity representing a relationship between nodes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeEntity {
     /// The name of the relationship (e.g., "AUTHORED", "CONTAINS").
     pub relationship_kind: String,
