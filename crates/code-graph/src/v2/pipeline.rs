@@ -1,10 +1,10 @@
 use code_graph_config::{detect_language_from_extension, Language};
+use code_graph_types::CanonicalParser;
 use ignore::WalkBuilder;
 use parser_core::dsl::types::DslParser;
 use parser_core::v2::langs::{
     csharp::CSharpDsl, java::JavaDsl, kotlin::KotlinDsl, python::PythonDsl,
 };
-use parser_core::v2::CanonicalParser;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;

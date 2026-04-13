@@ -1273,6 +1273,7 @@ dependencies = [
 name = "code-graph-types"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "code-graph-config",
  "intervaltree",
  "serde",
@@ -5075,6 +5076,7 @@ dependencies = [
 name = "parser-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "code-graph-config",
  "code-graph-types",
  "internment",

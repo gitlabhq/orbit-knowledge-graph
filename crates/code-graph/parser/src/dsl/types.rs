@@ -391,14 +391,14 @@ impl<L: DslLanguage> Default for DslParser<L> {
     }
 }
 
-impl<L: DslLanguage> crate::v2::CanonicalParser for DslParser<L> {
+impl<L: DslLanguage> code_graph_types::CanonicalParser for DslParser<L> {
     type Ast = ();
 
     fn parse_file(
         &self,
         source: &[u8],
         file_path: &str,
-    ) -> crate::Result<(code_graph_types::CanonicalResult, ())> {
+    ) -> anyhow::Result<(code_graph_types::CanonicalResult, ())> {
         let spec = L::spec();
         let result = spec.parse_canonical(source, file_path, L::language())?;
         Ok((result, ()))

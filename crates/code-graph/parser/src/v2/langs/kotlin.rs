@@ -141,7 +141,7 @@ impl DslLanguage for KotlinDsl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::CanonicalParser;
+    use code_graph_types::CanonicalParser;
 
     fn parse(code: &str) -> code_graph_types::CanonicalResult {
         DslParser::<KotlinDsl>::default()

@@ -4,10 +4,10 @@
 
 #[cfg(test)]
 mod tests {
+    use code_graph_types::CanonicalParser;
     use code_graph_types::{CanonicalResult, EdgeKind, NodeKind};
     use parser_core::dsl::types::DslParser;
     use parser_core::v2::langs::{java::JavaDsl, kotlin::KotlinDsl, python::PythonDsl};
-    use parser_core::v2::CanonicalParser;
     use rustc_hash::FxHashMap;
 
     use crate::linker::v2::{Edge, ReferenceResolver, ResolutionContext, RulesResolver};
