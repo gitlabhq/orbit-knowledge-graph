@@ -80,6 +80,8 @@ schedule:
       cron: "0 0 3 * * *"             # daily at 03:00 UTC
     namespace-deletion:
       cron: "0 0 3 * * *"             # daily at 03:00 UTC
+    migration-completion:
+      cron: "0 */1 * * * *"           # every 5 minutes
 
 health_check:
   bind_address: "0.0.0.0:4201"
