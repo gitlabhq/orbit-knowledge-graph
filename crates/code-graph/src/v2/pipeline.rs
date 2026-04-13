@@ -105,9 +105,10 @@ where
             use crate::linker::v2::EdgeSource;
 
             let src_node = match edge.source {
-                EdgeSource::Definition(def_ref) => {
-                    graph.def_index.get(&(def_ref.file_idx, def_ref.def_idx)).copied()
-                }
+                EdgeSource::Definition(def_ref) => graph
+                    .def_index
+                    .get(&(def_ref.file_idx, def_ref.def_idx))
+                    .copied(),
                 EdgeSource::File(file_idx) => {
                     let file_path = &ctx.results[file_idx].file_path;
                     let relative: &str = file_path

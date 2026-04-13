@@ -142,16 +142,16 @@ impl LanguageSpec {
         }
 
         // Extract bindings (assignments, parameters, etc.)
-        if let Some(rule) = self.bindings.iter().find(|r| r.matches(node, &node_kind)) {
-            if let Some(name) = rule.extract_name(node) {
-                let value = rule.extract_value(node);
-                bindings.push(code_graph_types::CanonicalBinding {
-                    name,
-                    value,
-                    range: canonical_range(&node_to_range(node)),
-                    scope_fqn: Fqn::from_scope_only(scope_stack, sep),
-                });
-            }
+        if let Some(rule) = self.bindings.iter().find(|r| r.matches(node, &node_kind))
+            && let Some(name) = rule.extract_name(node)
+        {
+            let value = rule.extract_value(node);
+            bindings.push(code_graph_types::CanonicalBinding {
+                name,
+                value,
+                range: canonical_range(&node_to_range(node)),
+                scope_fqn: Fqn::from_scope_only(scope_stack, sep),
+            });
         }
 
         for child in node.children() {

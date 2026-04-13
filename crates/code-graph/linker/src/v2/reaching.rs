@@ -12,7 +12,7 @@ use super::edges::{EdgeSource, ResolvedEdge};
 use super::resolver::ReferenceResolver;
 use super::rules::{ImportStrategy, ResolutionRules};
 use super::ssa::{ReachingDefs, Value};
-use super::walker::{walk_files, AsAst};
+use super::walker::{AsAst, walk_files};
 
 /// Trait to get rules from the type parameter.
 /// Each language implements this on a zero-sized struct.

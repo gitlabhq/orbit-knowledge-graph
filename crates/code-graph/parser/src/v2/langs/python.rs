@@ -258,10 +258,34 @@ mod tests {
         let result = parse(
             "def option1():\n    pass\n\ndef option2():\n    pass\n\ndef caller():\n    x = option1\n    x = option2\n    x()\n",
         );
-        eprintln!("bindings: {:?}", result.bindings.iter().map(|b| (&b.name, &b.value)).collect::<Vec<_>>());
-        eprintln!("refs: {:?}", result.references.iter().map(|r| &r.name).collect::<Vec<_>>());
+        eprintln!(
+            "bindings: {:?}",
+            result
+                .bindings
+                .iter()
+                .map(|b| (&b.name, &b.value))
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "refs: {:?}",
+            result
+                .references
+                .iter()
+                .map(|r| &r.name)
+                .collect::<Vec<_>>()
+        );
         assert!(!result.bindings.is_empty(), "should have bindings");
-        assert!(result.bindings.iter().any(|b| b.name == "x" && b.value.as_deref() == Some("option1")));
-        assert!(result.bindings.iter().any(|b| b.name == "x" && b.value.as_deref() == Some("option2")));
+        assert!(
+            result
+                .bindings
+                .iter()
+                .any(|b| b.name == "x" && b.value.as_deref() == Some("option1"))
+        );
+        assert!(
+            result
+                .bindings
+                .iter()
+                .any(|b| b.name == "x" && b.value.as_deref() == Some("option2"))
+        );
     }
 }

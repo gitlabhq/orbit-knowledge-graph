@@ -110,23 +110,21 @@ fn walk_flat(
         .definitions
         .iter()
         .enumerate()
-        .filter(|(_, d)| matches!(
-            d.kind,
-            code_graph_types::DefKind::Function
-                | code_graph_types::DefKind::Method
-                | code_graph_types::DefKind::Class
-                | code_graph_types::DefKind::Constructor
-        ))
+        .filter(|(_, d)| {
+            matches!(
+                d.kind,
+                code_graph_types::DefKind::Function
+                    | code_graph_types::DefKind::Method
+                    | code_graph_types::DefKind::Class
+                    | code_graph_types::DefKind::Constructor
+            )
+        })
         .collect();
     scoped_defs.sort_by_key(|(_, d)| d.fqn.parts().len());
 
     for (_def_idx, def) in &scoped_defs {
         let fqn_str = def.fqn.to_string();
-        let parent_fqn: String = def
-            .fqn
-            .parent()
-            .map(|p| p.to_string())
-            .unwrap_or_default();
+        let parent_fqn: String = def.fqn.parent().map(|p| p.to_string()).unwrap_or_default();
 
         let parent_block = scope_blocks
             .get(&parent_fqn)
@@ -141,11 +139,7 @@ fn walk_flat(
 
     // Write definitions to their scope's block
     for (def_idx, def) in result.definitions.iter().enumerate() {
-        let parent_fqn = def
-            .fqn
-            .parent()
-            .map(|p| p.to_string())
-            .unwrap_or_default();
+        let parent_fqn = def.fqn.parent().map(|p| p.to_string()).unwrap_or_default();
         let block = scope_blocks
             .get(&parent_fqn)
             .copied()

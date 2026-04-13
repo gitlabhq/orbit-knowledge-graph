@@ -30,11 +30,7 @@ pub async fn run_suite(
     failures
 }
 
-async fn run_test(
-    test: &TestCase,
-    datasets: &LanceDatasets,
-    config: &GraphConfig,
-) -> Vec<Failure> {
+async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfig) -> Vec<Failure> {
     let mut failures = Vec::new();
 
     for (i, block) in test.all_queries().iter().enumerate() {
@@ -44,9 +40,7 @@ async fn run_test(
             format!("{} [query {}]", test.name, i + 1)
         };
 
-        failures.extend(
-            run_query_block(&label, test.severity, block, datasets, config).await,
-        );
+        failures.extend(run_query_block(&label, test.severity, block, datasets, config).await);
     }
 
     failures
@@ -88,10 +82,7 @@ async fn run_query_block(
 
 fn print_result(label: &str, query: &str, batch: &RecordBatch) {
     eprintln!("  ┌─ TEST: \"{label}\"");
-    eprintln!(
-        "  │ query: {}",
-        query.trim().replace('\n', "\n  │        ")
-    );
+    eprintln!("  │ query: {}", query.trim().replace('\n', "\n  │        "));
     eprintln!("  │ result: {} rows", batch.num_rows());
     if batch.num_rows() > 0 {
         let schema = batch.schema();
@@ -107,10 +98,7 @@ fn print_result(label: &str, query: &str, batch: &RecordBatch) {
         if batch.num_rows() > 20 {
             eprintln!("  │ │ ... +{} more rows │", batch.num_rows() - 20);
         }
-        eprintln!(
-            "  │ └{}┘",
-            "─".repeat(col_names.join("──┬──").len() + 4)
-        );
+        eprintln!("  │ └{}┘", "─".repeat(col_names.join("──┬──").len() + 4));
     }
     eprintln!("  └─");
 }
@@ -156,16 +144,28 @@ fn check_one(
     match assertion {
         Assert::Empty { empty } => {
             if *empty && total_rows > 0 {
-                Some(fail(label, severity, format!("Expected empty result, got {total_rows} rows")))
+                Some(fail(
+                    label,
+                    severity,
+                    format!("Expected empty result, got {total_rows} rows"),
+                ))
             } else if !*empty && total_rows == 0 {
-                Some(fail(label, severity, "Expected non-empty result, got 0 rows".into()))
+                Some(fail(
+                    label,
+                    severity,
+                    "Expected non-empty result, got 0 rows".into(),
+                ))
             } else {
                 None
             }
         }
         Assert::NonEmpty { non_empty } => {
             if *non_empty && total_rows == 0 {
-                Some(fail(label, severity, "Expected non-empty result, got 0 rows".into()))
+                Some(fail(
+                    label,
+                    severity,
+                    "Expected non-empty result, got 0 rows".into(),
+                ))
             } else {
                 None
             }
@@ -193,7 +193,10 @@ fn check_one(
                     severity,
                     format!(
                         "Expected {}={}, got {}={}",
-                        count_equals.field, count_equals.value, count_equals.field, arr.value(0)
+                        count_equals.field,
+                        count_equals.value,
+                        count_equals.field,
+                        arr.value(0)
                     ),
                 ));
             }
@@ -210,7 +213,10 @@ fn check_one(
                     severity,
                     format!(
                         "Expected {}>={}, got {}={}",
-                        count_gte.field, count_gte.value, count_gte.field, arr.value(0)
+                        count_gte.field,
+                        count_gte.value,
+                        count_gte.field,
+                        arr.value(0)
                     ),
                 ));
             }
@@ -238,7 +244,9 @@ fn check_one(
                             severity,
                             format!(
                                 "Row {i}: {}='{}' does not match '{}'",
-                                all_match.field, arr.value(i), all_match.pattern
+                                all_match.field,
+                                arr.value(i),
+                                all_match.pattern
                             ),
                         ));
                     }

@@ -59,7 +59,6 @@ fn classify_kotlin_class(node: &N<'_>) -> &'static str {
     "Class"
 }
 
-
 impl DslLanguage for KotlinDsl {
     fn name() -> &'static str {
         "kotlin"
