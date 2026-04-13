@@ -61,6 +61,16 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "code-graph-config"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
+name = "code-graph-types"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "ontology"
 expression = "LicenseRef-EE"
 license-files = []

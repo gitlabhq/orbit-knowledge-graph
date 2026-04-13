@@ -1,0 +1,15 @@
+[package]
+name = "code-graph-types"
+version.workspace = true
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+code-graph-config = { path = "../config" }
+anyhow = { workspace = true }
+intervaltree = { workspace = true }
+serde = { workspace = true }
+smallvec = { workspace = true }
+strum = { workspace = true }
