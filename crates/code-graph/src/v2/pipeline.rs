@@ -155,17 +155,8 @@ macro_rules! register_v2_pipelines {
     };
 }
 
-// No languages registered yet — individual language MRs add entries here.
-// Example:
-//   register_v2_pipelines! {
-//       Python => GenericPipeline<DslParser<PythonDsl>, RulesResolver<PythonRules>>,
-//   }
-fn dispatch_language(
-    _language: Language,
-    _files: Vec<FileInput>,
-    _root_path: &str,
-) -> Option<Result<CodeGraph, Vec<PipelineError>>> {
-    None
+register_v2_pipelines! {
+    Ruby => crate::v2::custom::ruby::RubyPipeline,
 }
 
 pub struct PipelineConfig {

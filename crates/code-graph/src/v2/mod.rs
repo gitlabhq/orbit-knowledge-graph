@@ -1,3 +1,4 @@
+pub mod custom;
 mod pipeline;
 pub mod resolvers;
 
