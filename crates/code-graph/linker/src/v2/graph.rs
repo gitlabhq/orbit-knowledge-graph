@@ -1,10 +1,12 @@
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use code_graph_types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, Range, Relationship,
 };
+use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
 use petgraph::graph::{DiGraph, NodeIndex};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHasher};
 
 /// A node in the code graph.
 #[derive(Debug, Clone)]
@@ -157,5 +159,194 @@ impl CodeGraph {
 impl Default for CodeGraph {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Arrow serialization ─────────────────────────────────────────
+
+/// Context for `AsRecordBatch` implementations on v2 graph types.
+pub struct RowContext<'a> {
+    pub project_id: i64,
+    pub branch: &'a str,
+    pub commit_sha: &'a str,
+}
+
+impl<'a> RowContext<'a> {
+    pub fn empty() -> Self {
+        Self {
+            project_id: 0,
+            branch: "",
+            commit_sha: "",
+        }
+    }
+}
+
+fn compute_id(components: &[&str]) -> i64 {
+    let mut hasher = FxHasher::default();
+    components.hash(&mut hasher);
+    hasher.finish() as i64
+}
+
+/// Directory node with assigned ID for Arrow serialization.
+pub struct DirectoryRow<'a> {
+    pub dir: &'a CanonicalDirectory,
+    pub id: i64,
+}
+
+impl AsRecordBatch<RowContext<'_>> for DirectoryRow<'_> {
+    fn write_row(
+        &self,
+        b: &mut BatchBuilder,
+        ctx: &RowContext<'_>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        b.col("id")?.push_int(self.id)?;
+        b.col("project_id")?.push_int(ctx.project_id)?;
+        b.col("branch")?.push_str(ctx.branch)?;
+        b.col("commit_sha")?.push_str(ctx.commit_sha)?;
+        b.col("path")?.push_str(&self.dir.path)?;
+        b.col("name")?.push_str(&self.dir.name)?;
+        Ok(())
+    }
+}
+
+/// File node with assigned ID for Arrow serialization.
+pub struct FileRow<'a> {
+    pub file: &'a CanonicalFile,
+    pub id: i64,
+}
+
+impl AsRecordBatch<RowContext<'_>> for FileRow<'_> {
+    fn write_row(
+        &self,
+        b: &mut BatchBuilder,
+        ctx: &RowContext<'_>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        b.col("id")?.push_int(self.id)?;
+        b.col("project_id")?.push_int(ctx.project_id)?;
+        b.col("branch")?.push_str(ctx.branch)?;
+        b.col("commit_sha")?.push_str(ctx.commit_sha)?;
+        b.col("path")?.push_str(&self.file.path)?;
+        b.col("name")?.push_str(&self.file.name)?;
+        b.col("extension")?.push_str(&self.file.extension)?;
+        b.col("language")?.push_str(self.file.language.names()[0])?;
+        Ok(())
+    }
+}
+
+/// Definition node with assigned ID for Arrow serialization.
+pub struct DefinitionRow<'a> {
+    pub file_path: &'a str,
+    pub def: &'a CanonicalDefinition,
+    pub id: i64,
+}
+
+impl AsRecordBatch<RowContext<'_>> for DefinitionRow<'_> {
+    fn write_row(
+        &self,
+        b: &mut BatchBuilder,
+        ctx: &RowContext<'_>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        b.col("id")?.push_int(self.id)?;
+        b.col("project_id")?.push_int(ctx.project_id)?;
+        b.col("branch")?.push_str(ctx.branch)?;
+        b.col("commit_sha")?.push_str(ctx.commit_sha)?;
+        b.col("file_path")?.push_str(self.file_path)?;
+        b.col("fqn")?.push_str(self.def.fqn.to_string())?;
+        b.col("name")?.push_str(&self.def.name)?;
+        b.col("definition_type")?
+            .push_str(self.def.definition_type)?;
+        b.col("start_line")?
+            .push_int(self.def.range.start.line as i64)?;
+        b.col("end_line")?
+            .push_int(self.def.range.end.line as i64)?;
+        b.col("start_byte")?
+            .push_int(self.def.range.byte_offset.0 as i64)?;
+        b.col("end_byte")?
+            .push_int(self.def.range.byte_offset.1 as i64)?;
+        Ok(())
+    }
+}
+
+/// Import node with assigned ID for Arrow serialization.
+pub struct ImportRow<'a> {
+    pub file_path: &'a str,
+    pub import: &'a CanonicalImport,
+    pub id: i64,
+}
+
+impl AsRecordBatch<RowContext<'_>> for ImportRow<'_> {
+    fn write_row(
+        &self,
+        b: &mut BatchBuilder,
+        ctx: &RowContext<'_>,
+    ) -> Result<(), arrow::error::ArrowError> {
+        b.col("id")?.push_int(self.id)?;
+        b.col("project_id")?.push_int(ctx.project_id)?;
+        b.col("branch")?.push_str(ctx.branch)?;
+        b.col("commit_sha")?.push_str(ctx.commit_sha)?;
+        b.col("file_path")?.push_str(self.file_path)?;
+        b.col("import_type")?.push_str(self.import.import_type)?;
+        b.col("path")?.push_str(&self.import.path)?;
+        b.col("name")?.push_opt_str(self.import.name.as_deref())?;
+        b.col("alias")?.push_opt_str(self.import.alias.as_deref())?;
+        Ok(())
+    }
+}
+
+/// Edge row for Arrow serialization.
+pub struct EdgeRow {
+    pub source_id: i64,
+    pub target_id: i64,
+    pub edge_kind: String,
+    pub source_node_kind: String,
+    pub target_node_kind: String,
+}
+
+impl AsRecordBatch for EdgeRow {
+    fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), arrow::error::ArrowError> {
+        b.col("source_id")?.push_int(self.source_id)?;
+        b.col("target_id")?.push_int(self.target_id)?;
+        b.col("edge_kind")?.push_str(&self.edge_kind)?;
+        b.col("source_node_kind")?
+            .push_str(&self.source_node_kind)?;
+        b.col("target_node_kind")?
+            .push_str(&self.target_node_kind)?;
+        Ok(())
+    }
+}
+
+impl CodeGraph {
+    /// Assign stable IDs to all nodes for Arrow serialization.
+    /// Returns a map from NodeIndex → i64 ID.
+    pub fn assign_ids(&self, project_id: i64, branch: &str) -> FxHashMap<NodeIndex, i64> {
+        let mut ids = FxHashMap::default();
+        for idx in self.graph.node_indices() {
+            let node = &self.graph[idx];
+            let id = match node {
+                GraphNode::Directory(d) => {
+                    compute_id(&[&project_id.to_string(), branch, "dir", &d.path])
+                }
+                GraphNode::File(f) => {
+                    compute_id(&[&project_id.to_string(), branch, "file", &f.path])
+                }
+                GraphNode::Definition { file_path, def } => compute_id(&[
+                    &project_id.to_string(),
+                    branch,
+                    "def",
+                    file_path,
+                    &def.fqn.to_string(),
+                ]),
+                GraphNode::Import { file_path, import } => compute_id(&[
+                    &project_id.to_string(),
+                    branch,
+                    "import",
+                    file_path,
+                    &import.path,
+                    import.name.as_deref().unwrap_or("*"),
+                ]),
+            };
+            ids.insert(idx, id);
+        }
+        ids
     }
 }
