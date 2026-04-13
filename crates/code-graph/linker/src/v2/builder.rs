@@ -269,6 +269,7 @@ mod tests {
             definitions: defs,
             imports: vec![],
             references: vec![],
+            bindings: vec![],
         }
     }
 
