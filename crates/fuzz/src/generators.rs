@@ -30,8 +30,8 @@ fn pick<'a, T>(driver: &mut impl Driver, items: &'a [T]) -> Option<&'a T> {
     if items.is_empty() {
         return None;
     }
-    let idx: usize = driver.produce()?;
-    Some(&items[idx % items.len()])
+    let idx: u8 = driver.produce()?;
+    Some(&items[idx as usize % items.len()])
 }
 
 /// Pick either a valid ontology name or a random garbage string.

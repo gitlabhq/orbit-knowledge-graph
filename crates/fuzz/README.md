@@ -50,7 +50,7 @@ Or directly with cargo-bolero:
 
 ```sh
 cargo bolero +nightly test <target_name> -p gkg-fuzz
-```
+cargo +nightly bolero test <target_name> -p gkg-fuzz
 
 If toolchain is already defaulted to nightly, you can omit the `+nightly`.
 
