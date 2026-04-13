@@ -111,3 +111,37 @@ async fn cjs_cross_file_imports_present() {
         "consumer.js should have CJS imports"
     );
 }
+
+#[traced_test]
+#[tokio::test]
+async fn cjs_destructured_require_resolves_named_exports_to_definitions() {
+    let setup = setup_js_fixture_pipeline("cross-file/cjs-local-require-resolution").await;
+    let definition_targets = setup.imported_definition_targets_by_local_name_from("src/main.js");
+
+    assert_eq!(
+        definition_targets.get("ROOT_PATH"),
+        Some(&vec![(
+            "src/config.js".to_string(),
+            "ROOT_PATH".to_string()
+        )]),
+        "destructured require should resolve named exports to their originating definitions"
+    );
+    assert_eq!(
+        definition_targets.get("IS_EE"),
+        Some(&vec![("src/config.js".to_string(), "IS_EE".to_string())]),
+        "shorthand object exports should preserve definition-backed provenance"
+    );
+}
+
+#[traced_test]
+#[tokio::test]
+async fn cjs_namespace_require_falls_back_to_module_file() {
+    let setup = setup_js_fixture_pipeline("cross-file/cjs-local-require-resolution").await;
+    let file_targets = setup.imported_file_targets_by_local_name_from("src/main.js");
+
+    assert_eq!(
+        file_targets.get("cfg"),
+        Some(&vec!["src/config.js".to_string()]),
+        "namespace-style require should keep file-backed provenance when the module exports an object surface"
+    );
+}

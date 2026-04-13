@@ -146,11 +146,13 @@ impl JsImportedBinding {
 #[derive(Debug, Clone)]
 pub enum CjsExport {
     Default {
+        local_fqn: Option<String>,
         range: Range,
         invocation_support: Option<JsInvocationSupport>,
     },
     Named {
         name: String,
+        local_fqn: Option<String>,
         range: Range,
         invocation_support: Option<JsInvocationSupport>,
     },

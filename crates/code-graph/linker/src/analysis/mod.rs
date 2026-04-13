@@ -93,7 +93,12 @@ impl AnalysisService {
             file_results.into_iter().partition(|file_result| {
                 matches!(
                     file_result.language,
-                    SupportedLanguage::Js | SupportedLanguage::Vue | SupportedLanguage::Svelte
+                    SupportedLanguage::Js
+                        | SupportedLanguage::Vue
+                        | SupportedLanguage::Svelte
+                        | SupportedLanguage::GraphQL
+                        | SupportedLanguage::Json
+                        | SupportedLanguage::Svg
                 )
             });
 
@@ -458,7 +463,9 @@ impl AnalysisService {
             SupportedLanguage::Js
             | SupportedLanguage::Vue
             | SupportedLanguage::Svelte
-            | SupportedLanguage::GraphQL => {
+            | SupportedLanguage::GraphQL
+            | SupportedLanguage::Json
+            | SupportedLanguage::Svg => {
                 // TODO: OXC-based analysis handles definitions and imports directly
             }
         }
@@ -663,7 +670,9 @@ impl AnalysisService {
             SupportedLanguage::Js
             | SupportedLanguage::Vue
             | SupportedLanguage::Svelte
-            | SupportedLanguage::GraphQL => {
+            | SupportedLanguage::GraphQL
+            | SupportedLanguage::Json
+            | SupportedLanguage::Svg => {
                 // TODO: OXC-based definition relationships
             }
         }

@@ -79,7 +79,7 @@ fn collect_cjs_bindings(
 
 pub(super) fn extract_cjs_exports(
     nodes: &AstNodes,
-    span_to_range: impl Fn(Span) -> Range,
+    span_to_range: impl Fn(Span) -> Range + Copy,
     invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
 ) -> Vec<CjsExport> {
     use oxc::ast::ast::AssignmentTarget;
@@ -90,6 +90,7 @@ pub(super) fn extract_cjs_exports(
         if let AstKind::AssignmentExpression(assign) = node.kind() {
             let invocation_support =
                 invocation_support_for_assignment_rhs(&assign.right, invocation_support_by_name);
+            let local_fqn = local_fqn_for_expression(&assign.right);
 
             match &assign.left {
                 AssignmentTarget::AssignmentTargetIdentifier(_) => {}
@@ -102,9 +103,20 @@ pub(super) fn extract_cjs_exports(
                             && ident.name == "module"
                         {
                             exports.push(CjsExport::Default {
+                                local_fqn: local_fqn.clone(),
                                 range: span_to_range(assign.span),
                                 invocation_support,
                             });
+                            if let oxc::ast::ast::Expression::ObjectExpression(object) =
+                                assign.right.get_inner_expression()
+                            {
+                                collect_cjs_object_exports(
+                                    object,
+                                    invocation_support_by_name,
+                                    span_to_range,
+                                    &mut exports,
+                                );
+                            }
                             continue;
                         }
 
@@ -113,6 +125,7 @@ pub(super) fn extract_cjs_exports(
                         {
                             exports.push(CjsExport::Named {
                                 name: prop_name.to_string(),
+                                local_fqn: local_fqn.clone(),
                                 range: span_to_range(assign.span),
                                 invocation_support,
                             });
@@ -126,6 +139,7 @@ pub(super) fn extract_cjs_exports(
                         {
                             exports.push(CjsExport::Named {
                                 name: prop_name.to_string(),
+                                local_fqn: local_fqn.clone(),
                                 range: span_to_range(assign.span),
                                 invocation_support,
                             });
@@ -137,6 +151,41 @@ pub(super) fn extract_cjs_exports(
     }
 
     exports
+}
+
+fn collect_cjs_object_exports(
+    object: &oxc::ast::ast::ObjectExpression<'_>,
+    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
+    span_to_range: impl Fn(Span) -> Range + Copy,
+    exports: &mut Vec<CjsExport>,
+) {
+    use oxc::ast::ast::ObjectPropertyKind;
+
+    for property in &object.properties {
+        let ObjectPropertyKind::ObjectProperty(property) = property else {
+            continue;
+        };
+        let Some(name) = property.key.static_name() else {
+            continue;
+        };
+
+        exports.push(CjsExport::Named {
+            name: name.to_string(),
+            local_fqn: local_fqn_for_expression(&property.value),
+            range: span_to_range(property.span),
+            invocation_support: invocation_support_for_assignment_rhs(
+                &property.value,
+                invocation_support_by_name,
+            ),
+        });
+    }
+}
+
+fn local_fqn_for_expression(expr: &oxc::ast::ast::Expression<'_>) -> Option<String> {
+    match expr.get_inner_expression() {
+        oxc::ast::ast::Expression::Identifier(ident) => Some(ident.name.to_string()),
+        _ => None,
+    }
 }
 
 fn invocation_support_for_assignment_rhs(

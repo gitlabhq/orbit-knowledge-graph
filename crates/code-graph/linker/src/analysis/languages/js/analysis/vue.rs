@@ -117,6 +117,39 @@ fn is_contract_vue_option(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool 
     }
 }
 
+fn is_known_vue_option_key(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool {
+    matches!(
+        property.key.static_name().as_deref(),
+        Some(
+            "name"
+                | "methods"
+                | "computed"
+                | "watch"
+                | "data"
+                | "setup"
+                | "render"
+                | "beforeCreate"
+                | "created"
+                | "beforeMount"
+                | "mounted"
+                | "beforeUpdate"
+                | "updated"
+                | "beforeDestroy"
+                | "destroyed"
+                | "beforeUnmount"
+                | "unmounted"
+                | "activated"
+                | "deactivated"
+                | "errorCaptured"
+                | "props"
+                | "emits"
+                | "inject"
+                | "provide"
+                | "components"
+        )
+    )
+}
+
 pub(super) fn extract_vue_options_api(
     nodes: &AstNodes,
     span_to_range: impl Fn(oxc::span::Span) -> Range,
@@ -124,7 +157,8 @@ pub(super) fn extract_vue_options_api(
     defs: &mut Vec<JsDef>,
     class_hierarchy: &mut HashMap<String, Option<String>>,
 ) {
-    let allow_loose_detection = is_vue_like_path(relative_path);
+    let is_vue_sfc = is_vue_like_path(relative_path);
+    let allow_loose_detection = is_vue_sfc;
 
     for node in nodes.iter() {
         let AstKind::ExportDefaultDeclaration(decl) = node.kind() else {
@@ -137,26 +171,35 @@ pub(super) fn extract_vue_options_api(
         };
 
         let explicit_name = explicit_component_name(obj);
-        let has_executable_options = obj
+        let object_properties: Vec<_> = obj
             .properties
             .iter()
             .filter_map(|prop| match prop {
-                ObjectPropertyKind::ObjectProperty(property) => Some(property),
+                ObjectPropertyKind::ObjectProperty(property) => Some(property.as_ref()),
                 _ => None,
             })
-            .any(|property| is_executable_vue_option(property));
-        let has_contract_options = obj
-            .properties
+            .collect();
+        let has_executable_options = object_properties
             .iter()
-            .filter_map(|prop| match prop {
-                ObjectPropertyKind::ObjectProperty(property) => Some(property),
-                _ => None,
-            })
-            .any(|property| is_contract_vue_option(property));
+            .copied()
+            .any(is_executable_vue_option);
+        let has_contract_options = object_properties
+            .iter()
+            .copied()
+            .any(is_contract_vue_option);
+        let has_known_option_keys = object_properties
+            .iter()
+            .copied()
+            .any(is_known_vue_option_key);
         let allows_contract_only = explicit_name.is_some()
             && has_contract_options
             && (is_wrapped || allow_loose_detection);
-        if !has_executable_options && !allows_contract_only {
+        let is_sfc_options_object = is_vue_sfc
+            && (!has_known_option_keys
+                || explicit_name.is_some()
+                || has_executable_options
+                || has_contract_options);
+        if !has_executable_options && !allows_contract_only && !is_sfc_options_object {
             continue;
         }
         let component_name = explicit_name.unwrap_or_else(|| {

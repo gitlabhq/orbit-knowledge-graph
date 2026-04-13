@@ -181,6 +181,40 @@ fn wrapped_component_extracts_setup_method() {
 }
 
 #[test]
+fn vue_sfc_plain_options_object_creates_component_definition() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default { emits: ['close'] };"#,
+        "component.js",
+        "Component.vue",
+    )
+    .unwrap();
+
+    assert!(
+        analysis
+            .defs
+            .iter()
+            .any(|d| d.fqn == "Component" && d.kind == JsDefKind::Class)
+    );
+}
+
+#[test]
+fn vue_sfc_props_only_component_uses_filename_fallback() {
+    let analysis = JsAnalyzer::analyze_file(
+        r#"export default { props: { message: String } };"#,
+        "widget.js",
+        "PropsOnly.vue",
+    )
+    .unwrap();
+
+    assert!(
+        analysis
+            .defs
+            .iter()
+            .any(|d| d.fqn == "PropsOnly" && d.kind == JsDefKind::Class)
+    );
+}
+
+#[test]
 fn non_vue_export_default_object_ignored() {
     let analysis = JsAnalyzer::analyze_file(
         r#"export default { key: "value" };"#,

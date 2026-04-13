@@ -457,6 +457,40 @@ async fn cross_file_graphql_import_resolves_to_file() {
 
 #[traced_test]
 #[tokio::test]
+async fn cross_file_asset_imports_resolve_to_files() {
+    let setup = setup_js_fixture_pipeline("cross-file/file-backed-assets-resolution").await;
+    let import_targets = setup.imported_file_targets_by_local_name_from("src/consumer.ts");
+
+    assert_eq!(
+        import_targets.get("schema"),
+        Some(&vec!["src/schema.json".to_string()]),
+        "JSON imports should resolve to the underlying file"
+    );
+    assert_eq!(
+        import_targets.get("icon"),
+        Some(&vec!["src/icon.svg".to_string()]),
+        "SVG imports should resolve to the underlying file"
+    );
+    assert!(
+        setup
+            .graph_data
+            .file_nodes
+            .iter()
+            .any(|file| file.path == "src/schema.json" && file.language == "Json"),
+        "JSON assets should be indexed as file nodes"
+    );
+    assert!(
+        setup
+            .graph_data
+            .file_nodes
+            .iter()
+            .any(|file| file.path == "src/icon.svg" && file.language == "Svg"),
+        "SVG assets should be indexed as file nodes"
+    );
+}
+
+#[traced_test]
+#[tokio::test]
 async fn cross_file_default_component_import_falls_back_to_file() {
     let setup = setup_js_fixture_pipeline("cross-file/vue-file-fallback").await;
     let import_targets = setup.imported_file_targets_by_local_name_from("src/consumer.ts");

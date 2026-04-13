@@ -252,6 +252,18 @@ define_languages! {
         extensions: ["graphql", "gql"],
         names: ["graphql"],
         exclude_extensions: []
+    },
+    Json {
+        name: "json",
+        extensions: ["json"],
+        names: ["json"],
+        exclude_extensions: []
+    },
+    Svg {
+        name: "svg",
+        extensions: ["svg"],
+        names: ["svg"],
+        exclude_extensions: []
     }
 }
 
@@ -270,7 +282,9 @@ impl SupportedLanguage {
             SupportedLanguage::Js
             | SupportedLanguage::Vue
             | SupportedLanguage::Svelte
-            | SupportedLanguage::GraphQL => {
+            | SupportedLanguage::GraphQL
+            | SupportedLanguage::Json
+            | SupportedLanguage::Svg => {
                 panic!("{self} does not use tree-sitter")
             }
         }
@@ -433,7 +447,9 @@ impl ParserType {
             SupportedLanguage::Js
             | SupportedLanguage::Vue
             | SupportedLanguage::Svelte
-            | SupportedLanguage::GraphQL => Self::JsOxc(language),
+            | SupportedLanguage::GraphQL
+            | SupportedLanguage::Json
+            | SupportedLanguage::Svg => Self::JsOxc(language),
             _ => Self::TreeSitter(GenericParser::new(language)),
         }
     }
@@ -736,8 +752,8 @@ mod tests {
     fn test_get_supported_extensions() {
         let extensions = get_supported_extensions();
 
-        // 4 Ruby + 1 Python + 2 Kotlin + 1 CSharp + 1 Java + 1 Rust + 8 Js + 1 Vue + 1 Svelte = 20
-        assert_eq!(extensions.len(), 20);
+        // 4 Ruby + 1 Python + 2 Kotlin + 1 CSharp + 1 Java + 1 Rust + 8 Js + 1 Vue + 1 Svelte + 2 GraphQL + 1 Json + 1 Svg = 24
+        assert_eq!(extensions.len(), 24);
 
         assert!(extensions.contains(&"rb"));
         assert!(extensions.contains(&"rbw"));
@@ -759,6 +775,10 @@ mod tests {
         assert!(extensions.contains(&"cts"));
         assert!(extensions.contains(&"vue"));
         assert!(extensions.contains(&"svelte"));
+        assert!(extensions.contains(&"graphql"));
+        assert!(extensions.contains(&"gql"));
+        assert!(extensions.contains(&"json"));
+        assert!(extensions.contains(&"svg"));
     }
 
     #[test]

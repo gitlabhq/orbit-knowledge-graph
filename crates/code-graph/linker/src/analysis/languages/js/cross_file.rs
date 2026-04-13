@@ -426,13 +426,22 @@ impl JsCrossFileResolver {
         // CJS fallback: module.exports = ... or exports.name = ...
         let cjs_binding = match imported_name {
             ImportedName::Named(name) => target_module.cjs_exports.iter().find_map(|e| {
-                if let CjsExport::Named { name: n, range, .. } = e
+                if let CjsExport::Named {
+                    name: n,
+                    local_fqn,
+                    range,
+                    ..
+                } = e
                     && n == name
                 {
+                    let local_fqn = local_fqn.clone().unwrap_or_else(|| name.clone());
                     Some(ExportedBinding {
-                        local_fqn: name.clone(),
+                        local_fqn: local_fqn.clone(),
                         range: *range,
-                        definition_range: target_module.definition_fqns.get(name.as_str()).copied(),
+                        definition_range: target_module
+                            .definition_fqns
+                            .get(local_fqn.as_str())
+                            .copied(),
                         invocation_support: cjs_export_invocation_support(e),
                         member_bindings: HashMap::new(),
                         is_type: false,
@@ -445,11 +454,17 @@ impl JsCrossFileResolver {
                 }
             }),
             ImportedName::Default => target_module.cjs_exports.iter().find_map(|e| {
-                if let CjsExport::Default { range, .. } = e {
+                if let CjsExport::Default {
+                    local_fqn, range, ..
+                } = e
+                {
+                    let definition_range = local_fqn
+                        .as_deref()
+                        .and_then(|fqn| target_module.definition_fqns.get(fqn).copied());
                     Some(ExportedBinding {
-                        local_fqn: "default".to_string(),
+                        local_fqn: local_fqn.clone().unwrap_or_else(|| "default".to_string()),
                         range: *range,
-                        definition_range: Some(*range),
+                        definition_range,
                         invocation_support: cjs_export_invocation_support(e),
                         member_bindings: HashMap::new(),
                         is_type: false,
