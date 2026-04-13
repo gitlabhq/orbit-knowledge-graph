@@ -169,7 +169,7 @@ AUTHORED:
   "User -> MergeRequest": 1
 
 # Per-source: For each MR, maybe link a User  
-MERGED_BY:
+MERGED:
   "User -> MergeRequest":
     ratio: 0.3
     per: target
@@ -186,7 +186,7 @@ If queries return empty for User-related edges, check:
 
 ### Edge direction in ontology vs queries
 
-Queries specify edge direction: `{"type": "MERGED_BY", "from": "merger", "to": "mr"}`
+Queries specify edge direction: `{"type": "MERGED", "from": "merger", "to": "mr"}`
 
 This translates to: `merger.id = edge.source_id AND edge.target_id = mr.id`
 

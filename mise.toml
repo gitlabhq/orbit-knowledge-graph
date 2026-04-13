@@ -28,6 +28,7 @@ DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.21.5"
 "cargo:ast-grep" = "0.42.0"
+"cargo:cargo-bolero" = "0.13.4"
 "sccache" = "0.13.0"
 "tilt" = "0.36.1"
 "zig" = "0.15.2"
@@ -47,6 +48,46 @@ hyperfine = "1.20.0"
 [tasks."hooks:install"]
 run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
 description = "Install git hooks (lefthook + worktree support)"
+
+[tasks."fuzz:compile"]
+run = "cargo +nightly bolero test fuzz_compile -p gkg-fuzz"
+description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
+
+[tasks."fuzz:compile-structured"]
+run = "cargo +nightly bolero test fuzz_compile_structured -p gkg-fuzz"
+description = "Fuzz the query compiler with structured JSON query generation"
+
+[tasks."fuzz:ruby"]
+run = "cargo +nightly bolero test fuzz_ruby -p gkg-fuzz"
+description = "Fuzz the Ruby code parser"
+
+[tasks."fuzz:python"]
+run = "cargo +nightly bolero test fuzz_python -p gkg-fuzz"
+description = "Fuzz the Python code parser"
+
+[tasks."fuzz:typescript"]
+run = "cargo +nightly bolero test fuzz_typescript -p gkg-fuzz"
+description = "Fuzz the TypeScript/JavaScript code parser"
+
+[tasks."fuzz:java"]
+run = "cargo +nightly bolero test fuzz_java -p gkg-fuzz"
+description = "Fuzz the Java code parser"
+
+[tasks."fuzz:kotlin"]
+run = "cargo +nightly bolero test fuzz_kotlin -p gkg-fuzz"
+description = "Fuzz the Kotlin code parser"
+
+[tasks."fuzz:csharp"]
+run = "cargo +nightly bolero test fuzz_csharp -p gkg-fuzz"
+description = "Fuzz the C# code parser"
+
+[tasks."fuzz:rust-parser"]
+run = "cargo +nightly bolero test fuzz_rust_parser -p gkg-fuzz"
+description = "Fuzz the Rust code parser"
+
+[tasks."fuzz:indexer-messages"]
+run = "cargo +nightly bolero test fuzz_indexer_messages -p gkg-fuzz"
+description = "Fuzz indexer message deserialization"
 
 [tasks.build]
 run = "cargo build --release"

@@ -1,3 +1,42 @@
+## [0.26.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.26.0...v0.26.1) (2026-04-13)
+
+### Fixes
+
+* **server:** skip schema table creation in webserver mode ([f813ea1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f813ea18a51023e59ffb01e3075e7947d40487ca)) by Bohdan Parkhomchuk
+
+## [0.26.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.25.0...v0.26.0) (2026-04-13)
+
+### Features
+
+* **benchmark:** add code indexing benchmark CI pipeline ([df0562c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/df0562c265554caa0af27290f229e67f63394f27)) by Michael Angelo Rivera
+* **benchmark:** per-language scenarios with per-repo timing ([ef92ab4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ef92ab4e52ca4efda647b583ce461de1b3596270)) by Michael Angelo Rivera
+* **ci:** add semver tagging for dev images ([5b2c103](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5b2c10333163ee208cd02d28db776677c5a2382b)) by Bohdan Parkhomchuk
+* **compiler:** add DDL AST and ClickHouse DDL codegen ([272afec](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/272afecc1fa5592860552142bc4c71b71643494c)) by Michael Usachenko
+* **compiler:** extend AST and codegen for schema version statements ([3211e61](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3211e6180342374ae3dcd3a80c80c489df810532)) by Michael Usachenko
+* **health-check:** multi-namespace targets with StatefulSet support ([43eac29](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/43eac29a5cf0dd165f05ec4be3631f7fecc71cae)) by Bohdan Parkhomchuk
+* **indexer:** add migration completion detection and table cleanup ([f77dee1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f77dee12a685295b0b82266a5b94b0ef88d932ac)) by Dmitry Gruzd
+* **indexer:** add schema version tracking with table prefix support ([2285c82](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2285c8243687c3f4cc8b9b2be01fa8e5e5dd2701)) by Dmitry Gruzd
+* **indexer:** add table-prefix-aware migration orchestrator ([5f576dc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5f576dcdcfa04cd2e095b3141053093957327b4c)) by Dmitry Gruzd
+* **mcp:** add format argument to tool parameter schemas ([e838f4b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e838f4b47ad9e40e82846ab68b64a64a761d07a2)) by Michael Angelo Rivera
+* **ontology:** inject schema version table prefix at load time ([8217061](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8217061a4f25d22d9510abd0f77788f23e7f4e78)) by Michael Usachenko
+* **ontology:** ontology-driven DDL generation with 1:1 graph.sql match ([1b43a07](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1b43a07176145cd3398d1896600bb51cedcbcfb3)) by Michael Usachenko
+
+### Fixes
+
+* **ci:** fall back to direct registry pulls in security fork ([76427c7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/76427c7a42471dc57b7a3e425a1ac0aef33eea92)) by John Skarbek
+* **code-graph:** add stacker guard to Java resolve_expression ([b2273b3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b2273b3893d92b92c94c0cdd5d582385d055dbaa)) by Michael Angelo Rivera
+* **compiler:** use correct FINAL placement for ClickHouse 26.2 ([5464620](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/54646202941a23beea9901d1806f2524444eab2b)) by Michael Angelo Rivera
+* **helm:** camelCase statefulSets in local values ([79f3f84](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/79f3f84c933e28e5e7c4e4eb95a9e3412d968200)) by Bohdan Parkhomchuk
+* **ontology:** rename person-action edges to active-verb form ([83eb66c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/83eb66cdf9a5851a3605f46405dc3270fa3653d2)) by Lyle Kozloff
+* **parser:** guard against tree-sitter-python infinite recursion on missing colon ([293b0d2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/293b0d20fd9abd7f7e164234c48190fa990e0712)) by Michael Angelo Rivera
+* **parser:** harden Python and Ruby stack handling ([920bea3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/920bea3cbbae6b366a0a343a8547e28a8dee71ec)) by Michael Angelo Rivera
+
+### Other
+
+* add query Orbit docs ([f119bbf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f119bbfe16c9080f31519e2cf86bfc1d6c40a20c)) by Phillip Wells
+* **deps:** update rust crate hmac to 0.13.0 ([a8ab7a4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a8ab7a486da32b5a0fe3936aab7699f3a6786eca)) by GitLab Renovate Bot
+* **helm:** bump charts, remove dispatcher patch ([4a76cfe](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a76cfe117c836158a31a95c08796999f9253ea9)) by Bohdan Parkhomchuk
+
 ## [0.25.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.24.0...v0.25.0) (2026-04-10)
 
 ### Features

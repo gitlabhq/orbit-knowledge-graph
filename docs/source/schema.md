@@ -118,9 +118,9 @@ The following relationships are available by default:
 | `ASSIGNED`         | `User`                     | `MergeRequest`               |
 |                    | `User`                     | `WorkItem`                   |
 | `REVIEWER`         | `User`                     | `MergeRequest`               |
-| `MERGED_BY`        | `User`                     | `MergeRequest`               |
+| `MERGED`           | `User`                     | `MergeRequest`               |
 | `APPROVED`         | `User`                     | `MergeRequest`               |
-| `CLOSED_BY`        | `User`                     | `WorkItem`                   |
+| `CLOSED`           | `User`                     | `WorkItem`                   |
 | `CREATOR`          | `User`                     | `Project`                    |
 | `OWNER`            | `User`                     | `Group`                      |
 | `MEMBER_OF`        | `User`                     | `Group`                      |

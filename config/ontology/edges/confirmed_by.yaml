@@ -1,6 +1,6 @@
 # config/ontology/edges/confirmed_by.yaml
 
-description: User who confirmed an entity
+description: User who confirmed a vulnerability
 
 variants:
   - from_node: { type: User, id: id }

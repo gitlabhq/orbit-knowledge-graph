@@ -215,7 +215,7 @@ generation:
     OWNER:
       "User -> Group": 1
 
-    MERGED_BY:
+    MERGED:
       "User -> MergeRequest":
         ratio: 1
         per: target
