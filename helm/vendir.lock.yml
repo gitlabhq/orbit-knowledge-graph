@@ -2,10 +2,10 @@ apiVersion: vendir.k14s.io/v1alpha1
 directories:
 - contents:
   - git:
-      commitTitle: Merge branch 'renovate/common-ci-tasks' into 'main'...
-      sha: 2e1b2aef7b3e8a9c988d68bdccd317476b823f61
+      commitTitle: 'feat: add migration-completion schedule default'
+      sha: 72c0521839db11b27b68fe6d8fdea1d7e3c922e3
       tags:
-      - v0.15.0-2-g2e1b2ae
+      - v0.18.0-1-g72c0521
     path: .
   path: gkg
 - contents:
