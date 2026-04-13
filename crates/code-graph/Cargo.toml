@@ -11,6 +11,7 @@ parser-core = { path = "parser" }
 code-graph-linker = { path = "linker" }
 ignore = { workspace = true }
 log = { workspace = true }
+petgraph = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
 stacker = { workspace = true }

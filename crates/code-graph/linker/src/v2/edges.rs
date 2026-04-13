@@ -1,19 +1,17 @@
 use code_graph_types::{Range, Relationship};
-use std::sync::Arc;
 
-/// A resolved edge in the code graph.
+use super::context::DefRef;
+
+/// A resolved edge produced by reference resolution.
 ///
-/// Combines the relationship metadata (edge kind, source/target node kinds,
-/// optional def kinds) with the concrete source and target locations.
+/// References source and target definitions by index (file_idx + def_idx)
+/// rather than by path strings. The pipeline maps these to petgraph
+/// NodeIndex values when adding to the CodeGraph.
 #[derive(Debug, Clone)]
-pub struct Edge {
+pub struct ResolvedEdge {
     pub relationship: Relationship,
-    pub source_path: Arc<str>,
-    pub target_path: Arc<str>,
-    pub source_range: Range,
-    pub target_range: Range,
-    /// For call edges: the range of the enclosing definition at the call site.
-    pub source_definition_range: Option<Range>,
-    /// For call edges: the range of the target definition.
-    pub target_definition_range: Option<Range>,
+    pub source: DefRef,
+    pub target: DefRef,
+    /// Range of the reference site (call expression).
+    pub reference_range: Range,
 }

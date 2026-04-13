@@ -10,7 +10,7 @@ mod tests {
     use parser_core::v2::langs::{java::JavaDsl, kotlin::KotlinDsl, python::PythonDsl};
     use rustc_hash::FxHashMap;
 
-    use crate::linker::v2::{Edge, ReferenceResolver, ResolutionContext, RulesResolver};
+    use crate::linker::v2::{ReferenceResolver, ResolutionContext, ResolvedEdge, RulesResolver};
 
     // ── Helpers ─────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ mod tests {
             .collect()
     }
 
-    fn resolve_python(files: &[(&str, &str)]) -> Vec<Edge> {
+    fn resolve_python(files: &[(&str, &str)]) -> Vec<ResolvedEdge> {
         use crate::v2::lang_rules::python::PythonRules;
         let results = parse_python(files);
         let ctx: ResolutionContext<()> =
@@ -46,7 +46,7 @@ mod tests {
         RulesResolver::<PythonRules>::resolve(&ctx)
     }
 
-    fn resolve_java(files: &[(&str, &str)]) -> Vec<Edge> {
+    fn resolve_java(files: &[(&str, &str)]) -> Vec<ResolvedEdge> {
         use crate::v2::lang_rules::java::JavaRules;
         let results = parse_java(files);
         let ctx: ResolutionContext<()> =
@@ -54,7 +54,7 @@ mod tests {
         RulesResolver::<JavaRules>::resolve(&ctx)
     }
 
-    fn resolve_kotlin(files: &[(&str, &str)]) -> Vec<Edge> {
+    fn resolve_kotlin(files: &[(&str, &str)]) -> Vec<ResolvedEdge> {
         use crate::v2::lang_rules::kotlin::KotlinRules;
         let results = parse_kotlin(files);
         let ctx: ResolutionContext<()> =
@@ -62,19 +62,19 @@ mod tests {
         RulesResolver::<KotlinRules>::resolve(&ctx)
     }
 
-    fn call_edges(edges: &[Edge]) -> Vec<&Edge> {
+    fn call_edges(edges: &[ResolvedEdge]) -> Vec<&ResolvedEdge> {
         edges
             .iter()
             .filter(|e| e.relationship.edge_kind == EdgeKind::Calls)
             .collect()
     }
 
-    fn cross_file_calls(edges: &[Edge]) -> Vec<&Edge> {
+    fn cross_file_calls(edges: &[ResolvedEdge]) -> Vec<&ResolvedEdge> {
         edges
             .iter()
             .filter(|e| {
                 e.relationship.edge_kind == EdgeKind::Calls
-                    && e.source_path.as_ref() != e.target_path.as_ref()
+                    && e.source.file_idx != e.target.file_idx
             })
             .collect()
     }
@@ -99,7 +99,10 @@ greet()
             "Should resolve greet() call. Edges: {:?}",
             edges
                 .iter()
-                .map(|e| format!("{}→{}", e.source_path, e.target_path))
+                .map(|e| format!(
+                    "{},{}→{},{}",
+                    e.source.file_idx, e.source.def_idx, e.target.file_idx, e.target.def_idx
+                ))
                 .collect::<Vec<_>>()
         );
     }
@@ -130,7 +133,10 @@ helper()
             "Should resolve helper() across files via import. All edges: {:?}",
             edges
                 .iter()
-                .map(|e| format!("{}→{}", e.source_path, e.target_path))
+                .map(|e| format!(
+                    "{},{}→{},{}",
+                    e.source.file_idx, e.source.def_idx, e.target.file_idx, e.target.def_idx
+                ))
                 .collect::<Vec<_>>()
         );
     }
@@ -173,8 +179,8 @@ def bar():
         if let Some(edge) = calls.first() {
             assert_eq!(edge.relationship.source_node, NodeKind::Definition);
             assert_eq!(edge.relationship.target_node, NodeKind::Definition);
-            assert_eq!(edge.source_path.as_ref(), "main.py");
-            assert_eq!(edge.target_path.as_ref(), "main.py");
+            // Source and target are in the same file
+            assert_eq!(edge.source.file_idx, edge.target.file_idx);
         }
     }
 
@@ -253,7 +259,10 @@ public class App {
             "Should resolve new Service() across files. All edges: {:?}",
             edges
                 .iter()
-                .map(|e| format!("{}→{}", e.source_path, e.target_path))
+                .map(|e| format!(
+                    "{},{}→{},{}",
+                    e.source.file_idx, e.source.def_idx, e.target.file_idx, e.target.def_idx
+                ))
                 .collect::<Vec<_>>()
         );
     }
@@ -386,7 +395,10 @@ class App {
             "Should resolve Service() across files. All edges: {:?}",
             edges
                 .iter()
-                .map(|e| format!("{}→{}", e.source_path, e.target_path))
+                .map(|e| format!(
+                    "{},{}→{},{}",
+                    e.source.file_idx, e.source.def_idx, e.target.file_idx, e.target.def_idx
+                ))
                 .collect::<Vec<_>>()
         );
     }
@@ -429,11 +441,15 @@ svc.create_user("alice")
         assert_eq!(result.errors.len(), 0);
         assert_eq!(result.stats.files_parsed, 2);
 
-        let calls = call_edges(&result.graph.edges);
+        let call_count = result
+            .graph
+            .edges()
+            .filter(|(_, _, e)| e.relationship.edge_kind == EdgeKind::Calls)
+            .count();
         assert!(
-            !calls.is_empty(),
-            "Pipeline should produce call edges. Total edges: {}",
-            result.graph.edges.len()
+            call_count > 0,
+            "Pipeline should produce call edges. Total graph edges: {}",
+            result.graph.edge_count()
         );
     }
 
@@ -478,11 +494,15 @@ public class App {
         assert_eq!(result.errors.len(), 0);
         assert_eq!(result.stats.files_parsed, 2);
 
-        let calls = call_edges(&result.graph.edges);
+        let call_count = result
+            .graph
+            .edges()
+            .filter(|(_, _, e)| e.relationship.edge_kind == EdgeKind::Calls)
+            .count();
         assert!(
-            !calls.is_empty(),
-            "Pipeline should produce call edges. Total edges: {}",
-            result.graph.edges.len()
+            call_count > 0,
+            "Pipeline should produce call edges. Total graph edges: {}",
+            result.graph.edge_count()
         );
     }
 
@@ -510,11 +530,15 @@ class Service {
         assert_eq!(result.errors.len(), 0);
         assert_eq!(result.stats.files_parsed, 1);
 
-        let calls = call_edges(&result.graph.edges);
+        let call_count = result
+            .graph
+            .edges()
+            .filter(|(_, _, e)| e.relationship.edge_kind == EdgeKind::Calls)
+            .count();
         assert!(
-            !calls.is_empty(),
-            "Pipeline should produce call edges. Total edges: {}",
-            result.graph.edges.len()
+            call_count > 0,
+            "Pipeline should produce call edges. Total graph edges: {}",
+            result.graph.edge_count()
         );
     }
 }

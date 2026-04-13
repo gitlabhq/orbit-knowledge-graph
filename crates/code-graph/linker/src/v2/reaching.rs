@@ -5,15 +5,11 @@
 //! then for each reference, resolves the reaching definitions to concrete
 //! definitions via import strategies and chain resolution.
 
-use std::sync::Arc;
-
-use code_graph_types::{
-    CanonicalImport, CanonicalResult, DefKind, EdgeKind, ExpressionStep, NodeKind, Relationship,
-};
+use code_graph_types::{CanonicalImport, CanonicalResult, EdgeKind, NodeKind, Relationship};
 use rustc_hash::FxHashMap;
 
 use super::context::{DefRef, ResolutionContext};
-use super::edges::Edge;
+use super::edges::ResolvedEdge;
 use super::resolver::ReferenceResolver;
 use super::rules::{ChainMode, ImportStrategy, ResolutionRules};
 use super::ssa::{ReachingDefs, SsaResolver, Value};
@@ -39,21 +35,19 @@ where
     A: AsAst + Send + Sync,
     R: HasRules + Send + Sync,
 {
-    fn resolve(ctx: &ResolutionContext<A>) -> Vec<Edge> {
+    fn resolve(ctx: &ResolutionContext<A>) -> Vec<ResolvedEdge> {
         let rules = R::default_rules();
         resolve_with_rules(&rules, ctx)
     }
 }
 
 /// Core resolution logic, shared by all resolver wrappers.
-fn resolve_with_rules<A: AsAst>(rules: &ResolutionRules, ctx: &ResolutionContext<A>) -> Vec<Edge> {
-    // Phase 1: Walk all files, build SSA graph
+fn resolve_with_rules<A: AsAst>(
+    rules: &ResolutionRules,
+    ctx: &ResolutionContext<A>,
+) -> Vec<ResolvedEdge> {
     let mut walk_result = walk_files(rules, &ctx.results, &ctx.asts);
-
-    // Phase 2: For each recorded read, resolve to edges
     let mut edges = Vec::new();
-
-    // Clone reads to avoid borrow conflict with mutable ssa access
     let reads = std::mem::take(&mut walk_result.reads);
 
     for read in &reads {
@@ -66,7 +60,6 @@ fn resolve_with_rules<A: AsAst>(rules: &ResolutionRules, ctx: &ResolutionContext
         let result = &ctx.results[read.file_idx];
         let reference = &result.references[read.ref_idx];
 
-        // Find the enclosing definition at the call site
         let source_enclosing = ctx.scopes.enclosing_scope(
             &result.file_path,
             reference.range.byte_offset.0,
@@ -81,10 +74,20 @@ fn resolve_with_rules<A: AsAst>(rules: &ResolutionRules, ctx: &ResolutionContext
             def.kind
         });
 
-        for def_ref in resolved_defs {
-            let (target_def, target_path) = ctx.resolve_def(def_ref);
+        let source = source_enclosing
+            .map(|s| DefRef {
+                file_idx: s.file_idx,
+                def_idx: s.def_idx,
+            })
+            .unwrap_or(DefRef {
+                file_idx: read.file_idx,
+                def_idx: 0,
+            });
 
-            edges.push(Edge {
+        for target in resolved_defs {
+            let (target_def, _) = ctx.resolve_def(target);
+
+            edges.push(ResolvedEdge {
                 relationship: Relationship {
                     edge_kind: EdgeKind::Calls,
                     source_node: NodeKind::Definition,
@@ -92,12 +95,9 @@ fn resolve_with_rules<A: AsAst>(rules: &ResolutionRules, ctx: &ResolutionContext
                     source_def_kind,
                     target_def_kind: Some(target_def.kind),
                 },
-                source_path: Arc::from(result.file_path.as_str()),
-                target_path: Arc::from(target_path),
-                source_range: reference.range,
-                target_range: target_def.range,
-                source_definition_range: source_enclosing.map(|s| s.range),
-                target_definition_range: Some(target_def.range),
+                source,
+                target,
+                reference_range: reference.range,
             });
         }
     }

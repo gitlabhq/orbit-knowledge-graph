@@ -11,7 +11,8 @@ use std::marker::PhantomData;
 use std::path::Path;
 
 use crate::linker::v2::{
-    GraphBuilder, GraphData, NoResolver, ReferenceResolver, ResolutionContext, RulesResolver,
+    CodeGraph, GraphBuilder, GraphEdge, NoResolver, ReferenceResolver, ResolutionContext,
+    RulesResolver,
 };
 use crate::v2::lang_rules::java::JavaRules;
 use crate::v2::lang_rules::kotlin::KotlinRules;
@@ -29,12 +30,12 @@ pub type FileInput = (String, Vec<u8>);
 ///   over parsing and linking (e.g. Ruby).
 ///
 /// Each pipeline receives all files for its language at once (needed
-/// for cross-file resolution) and produces a `GraphData`.
+/// for cross-file resolution) and produces a `CodeGraph`.
 pub trait LanguagePipeline {
     fn process_files(
         files: Vec<FileInput>,
         root_path: &str,
-    ) -> Result<GraphData, Vec<PipelineError>>;
+    ) -> Result<CodeGraph, Vec<PipelineError>>;
 }
 
 /// Generic pipeline parameterized by parser `P` and resolver `R`.
@@ -53,7 +54,7 @@ where
     fn process_files(
         files: Vec<FileInput>,
         root_path: &str,
-    ) -> Result<GraphData, Vec<PipelineError>> {
+    ) -> Result<CodeGraph, Vec<PipelineError>> {
         let parser = P::default();
 
         // Parse all files in parallel
@@ -98,7 +99,26 @@ where
         }
 
         let mut graph = builder.build();
-        graph.edges.extend(resolved_edges);
+
+        // Add resolved edges to the petgraph
+        for edge in resolved_edges {
+            let src_key = (edge.source.file_idx, edge.source.def_idx);
+            let tgt_key = (edge.target.file_idx, edge.target.def_idx);
+
+            if let (Some(&src_node), Some(&tgt_node)) =
+                (graph.def_index.get(&src_key), graph.def_index.get(&tgt_key))
+            {
+                graph.graph.add_edge(
+                    src_node,
+                    tgt_node,
+                    GraphEdge {
+                        relationship: edge.relationship,
+                        source_definition_range: None,
+                        target_definition_range: None,
+                    },
+                );
+            }
+        }
 
         Ok(graph)
     }
@@ -117,7 +137,7 @@ macro_rules! register_v2_pipelines {
             language: Language,
             files: Vec<FileInput>,
             root_path: &str,
-        ) -> Option<Result<GraphData, Vec<PipelineError>>> {
+        ) -> Option<Result<CodeGraph, Vec<PipelineError>>> {
             Some(match language {
                 $(Language::$variant => <$pipeline>::process_files(files, root_path),)+
                 _ => return None,
@@ -148,7 +168,7 @@ impl Default for PipelineConfig {
 }
 
 pub struct PipelineResult {
-    pub graph: GraphData,
+    pub graph: CodeGraph,
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
 }
@@ -184,7 +204,7 @@ impl Pipeline {
         let files_by_language = self.walk_and_group(root);
 
         // 2. Process each language through its pipeline
-        let mut all_graphs: Vec<GraphData> = Vec::new();
+        let mut all_graphs: Vec<CodeGraph> = Vec::new();
         let mut all_errors: Vec<PipelineError> = Vec::new();
         let mut files_parsed = 0usize;
         let mut files_skipped = 0usize;
@@ -214,10 +234,10 @@ impl Pipeline {
         // 3. Merge all per-language graphs
         let graph = Self::merge_graphs(all_graphs);
 
-        let definitions_count = graph.definitions.len();
-        let imports_count = graph.imports.len();
-        let references_count = 0; // TODO: track when reference resolution is added
-        let edges_count = graph.edges.len();
+        let definitions_count = graph.definitions().count();
+        let imports_count = graph.imports().count();
+        let references_count = 0;
+        let edges_count = graph.edge_count();
 
         PipelineResult {
             graph,
@@ -283,21 +303,48 @@ impl Pipeline {
         groups
     }
 
-    fn merge_graphs(graphs: Vec<GraphData>) -> GraphData {
-        let mut merged = GraphData {
-            directories: Vec::new(),
-            files: Vec::new(),
-            definitions: Vec::new(),
-            imports: Vec::new(),
-            edges: Vec::new(),
-        };
+    fn merge_graphs(graphs: Vec<CodeGraph>) -> CodeGraph {
+        use crate::linker::v2::graph::GraphNode;
+        use petgraph::graph::NodeIndex;
+        use rustc_hash::FxHashMap;
+
+        let mut merged = CodeGraph::new();
 
         for g in graphs {
-            merged.directories.extend(g.directories);
-            merged.files.extend(g.files);
-            merged.definitions.extend(g.definitions);
-            merged.imports.extend(g.imports);
-            merged.edges.extend(g.edges);
+            // Map old node indices to new ones
+            let mut index_map: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
+
+            for old_idx in g.graph.node_indices() {
+                let node = g.graph[old_idx].clone();
+                let new_idx = merged.graph.add_node(node.clone());
+                index_map.insert(old_idx, new_idx);
+
+                // Update quick-lookup indexes
+                match &node {
+                    GraphNode::Directory(d) => {
+                        merged.dir_index.insert(d.path.clone(), new_idx);
+                    }
+                    GraphNode::File(f) => {
+                        merged.file_index.insert(f.path.clone(), new_idx);
+                    }
+                    _ => {}
+                }
+            }
+
+            // Remap def_index
+            for (key, old_idx) in &g.def_index {
+                if let Some(&new_idx) = index_map.get(old_idx) {
+                    merged.def_index.insert(*key, new_idx);
+                }
+            }
+
+            for old_edge in g.graph.edge_indices() {
+                let (src, tgt) = g.graph.edge_endpoints(old_edge).unwrap();
+                let weight = g.graph[old_edge].clone();
+                merged
+                    .graph
+                    .add_edge(index_map[&src], index_map[&tgt], weight);
+            }
         }
 
         merged
@@ -314,7 +361,7 @@ mod tests {
         format!("{manifest}/parser/src/{relative}")
     }
 
-    fn parse_fixture_file(path: &str, language: Language) -> GraphData {
+    fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
         let source = std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
         dispatch_language(language, vec![(path.to_string(), source)], "/")
             .unwrap_or_else(|| panic!("Language {language} not supported"))
@@ -326,30 +373,26 @@ mod tests {
     #[test]
     fn python_definitions_fixture() {
         let path = fixture_path("python/fixtures/definitions.py");
-        let graph = parse_fixture_file(&path, Language::Python);
+        let cg = parse_fixture_file(&path, Language::Python);
 
+        let defs: Vec<_> = cg.definitions().collect();
         assert!(
-            graph.definitions.len() >= 10,
+            defs.len() >= 10,
             "Expected at least 10 definitions, got {}",
-            graph.definitions.len()
+            defs.len()
         );
 
-        let names: Vec<&str> = graph
-            .definitions
-            .iter()
-            .map(|(_, d)| d.name.as_str())
-            .collect();
+        let names: Vec<&str> = defs.iter().map(|(_, _, d)| d.name.as_str()).collect();
         assert!(names.contains(&"simple_function"));
         assert!(names.contains(&"module_lambda"));
         assert!(names.contains(&"SimpleClass"));
         assert!(names.contains(&"decorated_function"));
 
-        let class_defs: Vec<_> = graph
-            .definitions
+        let class_count = defs
             .iter()
-            .filter(|(_, d)| d.kind == DefKind::Class)
-            .collect();
-        assert!(!class_defs.is_empty(), "Should find at least one class");
+            .filter(|(_, _, d)| d.kind == DefKind::Class)
+            .count();
+        assert!(class_count > 0, "Should find at least one class");
     }
 
     // ── Java fixture ────────────────────────────────────────────────
@@ -357,15 +400,16 @@ mod tests {
     #[test]
     fn java_comprehensive_fixture() {
         let path = fixture_path("java/fixtures/ComprehensiveJavaDefinitions.java");
-        let graph = parse_fixture_file(&path, Language::Java);
+        let cg = parse_fixture_file(&path, Language::Java);
 
+        let defs: Vec<_> = cg.definitions().collect();
         assert!(
-            graph.definitions.len() >= 5,
+            defs.len() >= 5,
             "Expected at least 5 definitions, got {}",
-            graph.definitions.len()
+            defs.len()
         );
 
-        let kinds: Vec<DefKind> = graph.definitions.iter().map(|(_, d)| d.kind).collect();
+        let kinds: Vec<DefKind> = defs.iter().map(|(_, _, d)| d.kind).collect();
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
         assert!(kinds.contains(&DefKind::Method), "Should have a method");
     }
@@ -375,15 +419,16 @@ mod tests {
     #[test]
     fn kotlin_comprehensive_fixture() {
         let path = fixture_path("kotlin/fixtures/ComprehensiveKotlinDefinitions.kt");
-        let graph = parse_fixture_file(&path, Language::Kotlin);
+        let cg = parse_fixture_file(&path, Language::Kotlin);
 
+        let defs: Vec<_> = cg.definitions().collect();
         assert!(
-            graph.definitions.len() >= 5,
+            defs.len() >= 5,
             "Expected at least 5 definitions, got {}",
-            graph.definitions.len()
+            defs.len()
         );
 
-        let kinds: Vec<DefKind> = graph.definitions.iter().map(|(_, d)| d.kind).collect();
+        let kinds: Vec<DefKind> = defs.iter().map(|(_, _, d)| d.kind).collect();
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
         assert!(kinds.contains(&DefKind::Function), "Should have a function");
     }
@@ -393,15 +438,16 @@ mod tests {
     #[test]
     fn csharp_comprehensive_fixture() {
         let path = fixture_path("csharp/fixtures/ComprehensiveCSharp.cs");
-        let graph = parse_fixture_file(&path, Language::CSharp);
+        let cg = parse_fixture_file(&path, Language::CSharp);
 
+        let defs: Vec<_> = cg.definitions().collect();
         assert!(
-            graph.definitions.len() >= 5,
+            defs.len() >= 5,
             "Expected at least 5 definitions, got {}",
-            graph.definitions.len()
+            defs.len()
         );
 
-        let kinds: Vec<DefKind> = graph.definitions.iter().map(|(_, d)| d.kind).collect();
+        let kinds: Vec<DefKind> = defs.iter().map(|(_, _, d)| d.kind).collect();
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
     }
 
@@ -484,15 +530,14 @@ namespace MyApp {
             result.stats.definitions_count
         );
 
-        assert_eq!(result.graph.files.len(), 4);
-        assert!(!result.graph.directories.is_empty());
-        assert!(!result.graph.edges.is_empty());
+        assert_eq!(result.graph.files().count(), 4);
+        assert!(result.graph.directories().count() > 0);
+        assert!(result.graph.edge_count() > 0);
 
         let def_to_def = result
             .graph
-            .edges
-            .iter()
-            .filter(|e| {
+            .edges()
+            .filter(|(_, _, e)| {
                 e.relationship.source_node == NodeKind::Definition
                     && e.relationship.target_node == NodeKind::Definition
             })
@@ -504,9 +549,8 @@ namespace MyApp {
 
         let file_to_def = result
             .graph
-            .edges
-            .iter()
-            .filter(|e| {
+            .edges()
+            .filter(|(_, _, e)| {
                 e.relationship.source_node == NodeKind::File
                     && e.relationship.target_node == NodeKind::Definition
             })
