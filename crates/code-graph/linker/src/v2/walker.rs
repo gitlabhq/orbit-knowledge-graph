@@ -43,7 +43,6 @@ where
 {
     let mut ssa = SsaResolver::new();
     let mut reads = Vec::new();
-    let interesting = rules.interesting_kinds();
 
     for (file_idx, result) in results.iter().enumerate() {
         let ast = asts.get(&result.file_path);
@@ -51,7 +50,7 @@ where
         match ast.and_then(|a| a.as_root()) {
             Some(root) => {
                 // Full AST walk with control flow
-                let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result, &interesting);
+                let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result);
                 walker.walk_node(&root);
                 walker.finalize();
                 reads.extend(walker.reads);
@@ -130,16 +129,11 @@ struct FileWalker<'a> {
     ssa: &'a mut SsaResolver,
     file_idx: usize,
     result: &'a CanonicalResult,
-    interesting: &'a rustc_hash::FxHashSet<&'static str>,
 
     /// Current SSA block we're writing into.
     current_block: BlockId,
     /// Stack of (scope_block, scope_kind) for nested scopes.
     scope_stack: Vec<(BlockId, ScopeKind)>,
-    /// Definitions indexed by byte-offset start for matching AST nodes.
-    def_by_range_start: FxHashMap<usize, usize>,
-    /// Imports indexed by byte-offset start.
-    import_by_range_start: FxHashMap<usize, Vec<usize>>,
     /// References indexed by byte-offset start.
     ref_by_range_start: FxHashMap<usize, Vec<usize>>,
 
@@ -153,7 +147,6 @@ impl<'a> FileWalker<'a> {
         ssa: &'a mut SsaResolver,
         file_idx: usize,
         result: &'a CanonicalResult,
-        interesting: &'a rustc_hash::FxHashSet<&'static str>,
     ) -> Self {
         // Create the module-level block
         let module_block = ssa.add_block();
@@ -172,20 +165,7 @@ impl<'a> FileWalker<'a> {
             }
         }
 
-        // Build indexes for matching AST nodes to canonical data
-        let mut def_by_range_start = FxHashMap::default();
-        for (idx, def) in result.definitions.iter().enumerate() {
-            def_by_range_start.insert(def.range.byte_offset.0, idx);
-        }
-
-        let mut import_by_range_start: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
-        for (idx, imp) in result.imports.iter().enumerate() {
-            import_by_range_start
-                .entry(imp.range.byte_offset.0)
-                .or_default()
-                .push(idx);
-        }
-
+        // Build index for matching AST nodes to canonical references
         let mut ref_by_range_start: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
         for (idx, r) in result.references.iter().enumerate() {
             ref_by_range_start
@@ -199,11 +179,8 @@ impl<'a> FileWalker<'a> {
             ssa,
             file_idx,
             result,
-            interesting,
             current_block: module_block,
             scope_stack: vec![(module_block, ScopeKind::Module)],
-            def_by_range_start,
-            import_by_range_start,
             ref_by_range_start,
             reads: Vec::new(),
         }

@@ -59,13 +59,6 @@ fn classify_kotlin_class(node: &N<'_>) -> &'static str {
     "Class"
 }
 
-fn classify_kotlin_class_kind(node: &N<'_>) -> DefKind {
-    let label = classify_kotlin_class(node);
-    match label {
-        "Interface" | "AnnotationClass" => DefKind::Interface,
-        _ => DefKind::Class,
-    }
-}
 
 impl DslLanguage for KotlinDsl {
     fn name() -> &'static str {
