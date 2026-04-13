@@ -2,10 +2,6 @@ use rustc_hash::FxHashSet;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::definitions::{DefinitionInfo, DefinitionTypeInfo};
-use crate::fqn::Fqn;
-use crate::utils::Range;
-
 use code_graph_types::{DefKind, DefinitionMetadata};
 
 use super::extractors::{Extract, MetadataRule};
@@ -14,38 +10,6 @@ use super::predicates::Pred;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 pub type LabelFn = fn(&N<'_>) -> &'static str;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DslDefinitionType {
-    pub label: &'static str,
-}
-
-impl DefinitionTypeInfo for DslDefinitionType {
-    fn as_str(&self) -> &str {
-        self.label
-    }
-}
-
-pub type DslFqn = Fqn<String>;
-pub type DslDefinitionInfo = DefinitionInfo<DslDefinitionType, DslFqn>;
-
-pub fn dsl_fqn_to_string(fqn: &DslFqn) -> String {
-    fqn.parts.join(".")
-}
-
-#[derive(Debug, Clone)]
-pub struct DslRawReference {
-    pub name: String,
-    pub range: Range,
-}
-
-#[derive(Debug, Clone)]
-pub struct DslImport {
-    pub path: String,
-    pub name: Option<String>,
-    pub alias: Option<String>,
-    pub range: Range,
-}
 
 /// Shared behavior for scope and reference rules.
 pub trait Rule {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, Root, SupportLang};
+use treesitter_visit::{Node, SupportLang};
 
 use code_graph_config::Language;
 use code_graph_types::{
@@ -9,23 +9,9 @@ use code_graph_types::{
     DefinitionMetadata, Fqn, ReferenceStatus,
 };
 
-use crate::definitions::DefinitionInfo;
-use crate::parser::ParseResult;
 use crate::utils::node_to_range;
 
-use super::types::{
-    DslDefinitionInfo, DslDefinitionType, DslFqn, DslImport, DslRawReference, LanguageSpec, Rule,
-};
-
-pub struct DslParseOutput {
-    pub definitions: Vec<DslDefinitionInfo>,
-    pub references: Vec<DslRawReference>,
-    pub imports: Vec<DslImport>,
-    /// DefKind for each definition (parallel to definitions vec).
-    pub def_kinds: Vec<DefKind>,
-    /// Metadata for each definition (parallel to definitions vec).
-    pub def_metadata: Vec<Option<Box<DefinitionMetadata>>>,
-}
+use super::types::{LanguageSpec, Rule};
 
 struct ScopeMatch {
     name: String,
@@ -37,41 +23,7 @@ struct ScopeMatch {
 }
 
 impl LanguageSpec {
-    pub fn analyze(
-        &self,
-        parse_result: &ParseResult<'_, Root<StrDoc<SupportLang>>>,
-    ) -> crate::Result<DslParseOutput> {
-        let root_node = parse_result.ast.root();
-
-        let mut definitions: Vec<DslDefinitionInfo> = Vec::new();
-        let mut references: Vec<DslRawReference> = Vec::new();
-        let mut imports: Vec<DslImport> = Vec::new();
-        let mut def_kinds: Vec<DefKind> = Vec::new();
-        let mut def_metadata: Vec<Option<Box<DefinitionMetadata>>> = Vec::new();
-        let mut scope_stack: Vec<String> = Vec::new();
-
-        self.walk_node(
-            &root_node,
-            &mut scope_stack,
-            &mut definitions,
-            &mut references,
-            &mut imports,
-            &mut def_kinds,
-            &mut def_metadata,
-        );
-
-        Ok(DslParseOutput {
-            definitions,
-            references,
-            imports,
-            def_kinds,
-            def_metadata,
-        })
-    }
-
-    /// Parse source bytes into a `CanonicalResult` directly.
-    ///
-    /// This is the v2 entry point — no V1 types involved.
+    /// Parse source bytes into a `CanonicalResult`.
     pub fn parse_canonical(
         &self,
         source: &[u8],
@@ -90,7 +42,7 @@ impl LanguageSpec {
         let mut imports = Vec::new();
         let mut scope_stack: Vec<Arc<str>> = Vec::new();
 
-        self.walk_canonical(
+        self.walk(
             &root,
             &mut scope_stack,
             &mut defs,
@@ -115,7 +67,7 @@ impl LanguageSpec {
         })
     }
 
-    fn walk_canonical(
+    fn walk(
         &self,
         node: &Node<StrDoc<SupportLang>>,
         scope_stack: &mut Vec<Arc<str>>,
@@ -136,13 +88,11 @@ impl LanguageSpec {
             if node_kind.as_ref() == pkg_kind {
                 if let Some(name) = pkg_extract.extract_name(node) {
                     scope_stack.push(Arc::from(name.as_str()));
-                    // Don't set pushed_scope — package scope persists for the whole file
                 }
             }
         }
 
         if let Some(m) = self.evaluate_scope(node, &node_kind) {
-            // Check is_top_level BEFORE pushing scope
             let is_top_level =
                 scope_stack.is_empty() || (scope_stack.len() == 1 && scope_stack[0].contains('.'));
 
@@ -183,81 +133,13 @@ impl LanguageSpec {
             });
         }
 
-        // Try custom import handler first, fall back to declarative rules
         let handled = self.custom_import_fn.is_some_and(|f| f(node, imports));
-
         if !handled {
-            self.evaluate_canonical_imports(node, &node_kind, imports);
+            self.evaluate_imports(node, &node_kind, imports);
         }
 
         for child in node.children() {
-            self.walk_canonical(&child, scope_stack, defs, refs, imports, sep);
-        }
-
-        if pushed_scope {
-            scope_stack.pop();
-        }
-    }
-
-    fn walk_node(
-        &self,
-        node: &Node<StrDoc<SupportLang>>,
-        scope_stack: &mut Vec<String>,
-        definitions: &mut Vec<DslDefinitionInfo>,
-        references: &mut Vec<DslRawReference>,
-        imports: &mut Vec<DslImport>,
-        def_kinds: &mut Vec<DefKind>,
-        def_metadata: &mut Vec<Option<Box<DefinitionMetadata>>>,
-    ) {
-        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
-            return;
-        }
-
-        let node_kind = node.kind();
-        let mut pushed_scope = false;
-
-        if let Some(m) = self.evaluate_scope(node, &node_kind) {
-            if m.creates_scope {
-                scope_stack.push(m.name.clone());
-                pushed_scope = true;
-            }
-
-            let fqn = if m.creates_scope {
-                DslFqn::new(scope_stack.clone())
-            } else {
-                let mut parts = scope_stack.clone();
-                parts.push(m.name.clone());
-                DslFqn::new(parts)
-            };
-
-            definitions.push(DefinitionInfo::new(
-                DslDefinitionType { label: m.label },
-                m.name,
-                fqn,
-                m.range,
-            ));
-            def_kinds.push(m.def_kind);
-            def_metadata.push(m.metadata);
-        }
-
-        if let Some((name, range)) = self.evaluate_reference(node, &node_kind) {
-            references.push(DslRawReference { name, range });
-        }
-
-        if let Some(imp) = self.evaluate_import(node, &node_kind) {
-            imports.push(imp);
-        }
-
-        for child in node.children() {
-            self.walk_node(
-                &child,
-                scope_stack,
-                definitions,
-                references,
-                imports,
-                def_kinds,
-                def_metadata,
-            );
+            self.walk(&child, scope_stack, defs, refs, imports, sep);
         }
 
         if pushed_scope {
@@ -301,7 +183,7 @@ impl LanguageSpec {
         Some((name, node_to_range(node)))
     }
 
-    fn evaluate_canonical_imports(
+    fn evaluate_imports(
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
@@ -321,7 +203,6 @@ impl LanguageSpec {
             for child in node.children() {
                 let ck = child.kind();
 
-                // Check for alias child (e.g. `aliased_import`)
                 if alias_kind.is_some_and(|ak| ak == ck.as_ref()) {
                     if let Some(name_node) = child.field("name") {
                         let alias = child.field("alias").map(|a| a.text().to_string());
@@ -336,11 +217,9 @@ impl LanguageSpec {
                     }
                 } else if child_kinds.iter().any(|&k| k == ck.as_ref()) {
                     let child_text = child.text().to_string();
-                    // Skip if this child is the path source (e.g. module_name field)
                     if !base_path.is_empty() && child_text == base_path {
                         continue;
                     }
-                    // If no base_path, this child IS the path (e.g. `import os`)
                     let (path, name) = if base_path.is_empty() {
                         (child_text, None)
                     } else {
@@ -381,21 +260,6 @@ impl LanguageSpec {
             });
         }
     }
-
-    fn evaluate_import(
-        &self,
-        node: &Node<StrDoc<SupportLang>>,
-        node_kind: &str,
-    ) -> Option<DslImport> {
-        let rule = self.imports.iter().find(|r| r.matches(node, node_kind))?;
-        let path = rule.extract_name(node)?;
-        Some(DslImport {
-            path,
-            name: rule.extract_symbol(node),
-            alias: rule.extract_alias(node),
-            range: node_to_range(node),
-        })
-    }
 }
 
 fn canonical_range(r: &crate::utils::Range) -> code_graph_types::Range {
@@ -412,10 +276,14 @@ mod tests {
     use crate::dsl::extractors::field;
     use crate::dsl::predicates::*;
     use crate::dsl::types::*;
-    use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
+
+    fn parse_with(spec: &LanguageSpec, code: &str) -> CanonicalResult {
+        spec.parse_canonical(code.as_bytes(), "test.py", Language::Python)
+            .unwrap()
+    }
 
     #[test]
-    fn test_scope_matching_and_fqn() {
+    fn scope_matching_and_fqn() {
         let spec = LanguageSpec::new(
             "test",
             vec![
@@ -426,41 +294,35 @@ mod tests {
             vec![],
             vec![],
         );
-        let parser = GenericParser::new(SupportedLanguage::Python);
-        let code = "class A:\n    def b(self): pass\ndef c(): pass";
-        let result = parser.parse(code, Some("test.py")).unwrap();
-        let output = spec.analyze(&result).unwrap();
+        let result = parse_with(&spec, "class A:\n    def b(self): pass\ndef c(): pass");
 
-        assert_eq!(output.definitions.len(), 3);
+        assert_eq!(result.definitions.len(), 3);
 
-        let b = output.definitions.iter().find(|d| d.name == "b").unwrap();
-        assert_eq!(b.definition_type.label, "Method");
-        assert_eq!(dsl_fqn_to_string(&b.fqn), "A.b");
+        let b = result.definitions.iter().find(|d| d.name == "b").unwrap();
+        assert_eq!(b.definition_type, "Method");
+        assert_eq!(b.fqn.to_string(), "A.b");
 
-        let c = output.definitions.iter().find(|d| d.name == "c").unwrap();
-        assert_eq!(c.definition_type.label, "Function");
-        assert_eq!(dsl_fqn_to_string(&c.fqn), "c");
+        let c = result.definitions.iter().find(|d| d.name == "c").unwrap();
+        assert_eq!(c.definition_type, "Function");
+        assert_eq!(c.fqn.to_string(), "c");
     }
 
     #[test]
-    fn test_reference_extraction() {
+    fn reference_extraction() {
         let spec = LanguageSpec::new(
             "test",
             vec![scope("function_definition", "Function")],
             vec![reference("call").name_from(field("function"))],
             vec![],
         );
-        let parser = GenericParser::new(SupportedLanguage::Python);
-        let code = "def foo(): pass\nfoo()";
-        let result = parser.parse(code, Some("test.py")).unwrap();
-        let output = spec.analyze(&result).unwrap();
+        let result = parse_with(&spec, "def foo(): pass\nfoo()");
 
-        assert_eq!(output.references.len(), 1);
-        assert_eq!(output.references[0].name, "foo");
+        assert_eq!(result.references.len(), 1);
+        assert_eq!(result.references[0].name, "foo");
     }
 
     #[test]
-    fn test_no_scope_definition() {
+    fn no_scope_definition() {
         let spec = LanguageSpec::new(
             "test",
             vec![
@@ -473,25 +335,21 @@ mod tests {
             vec![],
             vec![],
         );
-        let parser = GenericParser::new(SupportedLanguage::Python);
-        let code = "class A:\n    def method(self): pass";
-        let result = parser.parse(code, Some("test.py")).unwrap();
-        let output = spec.analyze(&result).unwrap();
+        let result = parse_with(&spec, "class A:\n    def method(self): pass");
 
-        let method = output
+        let method = result
             .definitions
             .iter()
             .find(|d| d.name == "method")
             .unwrap();
-        assert_eq!(dsl_fqn_to_string(&method.fqn), "A.method");
-        assert_eq!(method.definition_type.label, "FlatMethod");
+        assert_eq!(method.fqn.to_string(), "A.method");
+        assert_eq!(method.definition_type, "FlatMethod");
     }
 
     #[test]
-    fn test_auto_with_override() {
+    fn auto_with_override() {
         let spec = LanguageSpec::new(
             "test",
-            // Override: methods inside classes get a different label
             vec![scope("function_definition", "Method").when(grandparent_is("class_definition"))],
             vec![],
             vec![],
@@ -500,20 +358,17 @@ mod tests {
             ("class_definition", "Class"),
             ("function_definition", "Function"),
         ]);
-        let parser = GenericParser::new(SupportedLanguage::Python);
-        let code = "class A:\n    def b(self): pass\ndef c(): pass";
-        let result = parser.parse(code, Some("test.py")).unwrap();
-        let output = spec.analyze(&result).unwrap();
+        let result = parse_with(&spec, "class A:\n    def b(self): pass\ndef c(): pass");
 
-        assert_eq!(output.definitions.len(), 3);
+        assert_eq!(result.definitions.len(), 3);
 
-        let a = output.definitions.iter().find(|d| d.name == "A").unwrap();
-        assert_eq!(a.definition_type.label, "Class");
+        let a = result.definitions.iter().find(|d| d.name == "A").unwrap();
+        assert_eq!(a.definition_type, "Class");
 
-        let b = output.definitions.iter().find(|d| d.name == "b").unwrap();
-        assert_eq!(b.definition_type.label, "Method");
+        let b = result.definitions.iter().find(|d| d.name == "b").unwrap();
+        assert_eq!(b.definition_type, "Method");
 
-        let c = output.definitions.iter().find(|d| d.name == "c").unwrap();
-        assert_eq!(c.definition_type.label, "Function");
+        let c = result.definitions.iter().find(|d| d.name == "c").unwrap();
+        assert_eq!(c.definition_type, "Function");
     }
 }
