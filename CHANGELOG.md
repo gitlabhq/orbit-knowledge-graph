@@ -1,3 +1,9 @@
+## [0.26.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.26.0...v0.26.1) (2026-04-13)
+
+### Fixes
+
+* **server:** skip schema table creation in webserver mode ([f813ea1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f813ea18a51023e59ffb01e3075e7947d40487ca)) by Bohdan Parkhomchuk
+
 ## [0.26.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.25.0...v0.26.0) (2026-04-13)
 
 ### Features
