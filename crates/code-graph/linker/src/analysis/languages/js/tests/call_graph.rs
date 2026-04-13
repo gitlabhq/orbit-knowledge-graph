@@ -457,6 +457,27 @@ async fn cross_file_graphql_import_resolves_to_file() {
 
 #[traced_test]
 #[tokio::test]
+async fn cross_file_default_component_import_falls_back_to_file() {
+    let setup = setup_js_fixture_pipeline("cross-file/vue-file-fallback").await;
+    let import_targets = setup.imported_file_targets_by_local_name_from("src/consumer.ts");
+
+    assert_eq!(
+        import_targets.get("Widget"),
+        Some(&vec!["src/Widget.vue".to_string()]),
+        "default imports should retain module-level provenance when the target file has no static export binding"
+    );
+    assert!(
+        setup
+            .graph_data
+            .file_nodes
+            .iter()
+            .any(|file| file.path == "src/Widget.vue" && file.language == "Vue"),
+        "Vue component files should still be indexed as file nodes"
+    );
+}
+
+#[traced_test]
+#[tokio::test]
 async fn cross_file_namespace_reexport_member_chain() {
     let setup = setup_js_fixture_pipeline("cross-file/namespace-reexport-member-chain").await;
     let import_targets = setup.imported_file_targets_by_local_name_from("src/consumer.ts");

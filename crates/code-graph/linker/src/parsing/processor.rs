@@ -317,11 +317,36 @@ impl<'a> FileProcessor<'a> {
                 };
                 let blocks = extract_scripts(self.content, ext);
                 if blocks.is_empty() {
-                    return ProcessingResult::Skipped(SkippedFile {
+                    let js_analysis = JsFileAnalysis {
+                        relative_path: self.path.clone(),
+                        defs: vec![],
+                        imports: vec![],
+                        calls: vec![],
+                        classes: vec![],
+                        directive: None,
+                        module_info: crate::analysis::languages::js::JsModuleInfo::default(),
+                    };
+
+                    return ProcessingResult::Success(Box::new(FileProcessingResult {
                         file_path: self.path.clone(),
-                        reason: "No <script> blocks found".to_string(),
-                        file_size: Some(self.size()),
-                    });
+                        extension: self.extension.clone(),
+                        file_size: self.size(),
+                        language,
+                        definitions: Definitions::JsOxc,
+                        imported_symbols: None,
+                        references: None,
+                        js_analysis: Some(js_analysis),
+                        stats: ProcessingStats {
+                            total_time: start_time.elapsed(),
+                            parse_time: Duration::ZERO,
+                            rules_time: Duration::ZERO,
+                            analysis_time: analysis_start.elapsed(),
+                            rule_matches: 0,
+                            definitions_count: 0,
+                            imported_symbols_count: 0,
+                        },
+                        is_supported: true,
+                    }));
                 }
                 blocks
                     .into_iter()

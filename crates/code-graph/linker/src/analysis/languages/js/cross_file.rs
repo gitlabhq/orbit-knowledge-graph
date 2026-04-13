@@ -120,68 +120,45 @@ impl JsCrossFileResolver {
                 };
 
                 if matches!(import_entry.imported_name, ImportedName::Namespace) {
-                    relationships.push(ConsolidatedRelationship {
-                        source_path: Some(ArcIntern::new(file_path.clone())),
-                        target_path: Some(ArcIntern::new(relative_resolved)),
-                        kind: RelationshipKind::ImportedSymbolToFile,
-                        relationship_type: RelationshipType::ImportedSymbolToFile,
-                        source_range: ArcIntern::new(import_entry.range),
-                        target_range: ArcIntern::new(Range::empty()),
-                        source_imported_symbol_key: Some(imported_symbol_key(
-                            file_path,
-                            import_entry,
-                        )),
-                        ..Default::default()
-                    });
+                    relationships.push(imported_symbol_to_file_relationship(
+                        file_path,
+                        import_entry,
+                        relative_resolved,
+                    ));
                     continue;
                 }
 
-                if is_file_backed_module(&relative_resolved) {
-                    relationships.push(ConsolidatedRelationship {
-                        source_path: Some(ArcIntern::new(file_path.clone())),
-                        target_path: Some(ArcIntern::new(relative_resolved)),
-                        kind: RelationshipKind::ImportedSymbolToFile,
-                        relationship_type: RelationshipType::ImportedSymbolToFile,
-                        source_range: ArcIntern::new(import_entry.range),
-                        target_range: ArcIntern::new(Range::empty()),
-                        source_imported_symbol_key: Some(imported_symbol_key(
-                            file_path,
-                            import_entry,
-                        )),
-                        ..Default::default()
-                    });
-                    continue;
-                }
+                let definition_relationship = modules
+                    .contains_key(&relative_resolved)
+                    .then(|| {
+                        let (final_path, final_binding) = self.resolve_binding(
+                            &import_entry.imported_name,
+                            &relative_resolved,
+                            modules,
+                        )?;
+                        let definition_range =
+                            self.binding_definition_range(&final_path, &final_binding, modules)?;
 
-                if !modules.contains_key(&relative_resolved) {
-                    continue;
-                }
+                        Some(ConsolidatedRelationship {
+                            source_path: Some(ArcIntern::new(file_path.clone())),
+                            target_path: Some(ArcIntern::new(final_path)),
+                            kind: RelationshipKind::ImportedSymbolToDefinition,
+                            relationship_type: RelationshipType::ImportedSymbolToDefinition,
+                            source_range: ArcIntern::new(import_entry.range),
+                            target_range: ArcIntern::new(definition_range),
+                            target_definition_range: Some(ArcIntern::new(definition_range)),
+                            source_imported_symbol_key: Some(imported_symbol_key(
+                                file_path,
+                                import_entry,
+                            )),
+                            ..Default::default()
+                        })
+                    })
+                    .flatten();
 
-                let Some((final_path, final_binding)) =
-                    self.resolve_binding(&import_entry.imported_name, &relative_resolved, modules)
-                else {
-                    continue;
-                };
-                let Some(definition_range) =
-                    self.binding_definition_range(&final_path, &final_binding, modules)
-                else {
-                    continue;
-                };
-
-                let source_path = ArcIntern::new(file_path.clone());
-                let target_path = ArcIntern::new(final_path);
-
-                relationships.push(ConsolidatedRelationship {
-                    source_path: Some(source_path),
-                    target_path: Some(target_path),
-                    kind: RelationshipKind::ImportedSymbolToDefinition,
-                    relationship_type: RelationshipType::ImportedSymbolToDefinition,
-                    source_range: ArcIntern::new(import_entry.range),
-                    target_range: ArcIntern::new(definition_range),
-                    target_definition_range: Some(ArcIntern::new(definition_range)),
-                    source_imported_symbol_key: Some(imported_symbol_key(file_path, import_entry)),
-                    ..Default::default()
-                });
+                relationships.push(definition_relationship.unwrap_or_else(|| {
+                    imported_symbol_to_file_relationship(file_path, import_entry, relative_resolved)
+                }));
             }
         }
 
@@ -611,15 +588,6 @@ fn imported_symbol_key(file_path: &str, import_entry: &OwnedImportEntry) -> Impo
         identifier_name: identifier.as_ref().map(|value| value.name.clone()),
         identifier_alias: identifier.and_then(|value| value.alias),
     }
-}
-
-fn is_file_backed_module(relative_path: &str) -> bool {
-    matches!(
-        Path::new(relative_path)
-            .extension()
-            .and_then(|ext| ext.to_str()),
-        Some("graphql" | "gql")
-    )
 }
 
 fn binding_supports_invocation(
@@ -1527,55 +1495,30 @@ fn evaluate_argument_string(
     state: &AliasEvalState,
     cache: &mut ModuleEvalCache,
 ) -> Option<String> {
-    match argument {
-        oxc::ast::ast::Argument::SpreadElement(_) => None,
-        oxc::ast::ast::Argument::StringLiteral(string) => Some(string.value.to_string()),
-        oxc::ast::ast::Argument::TemplateLiteral(template) if template.expressions.is_empty() => {
-            Some(template.quasis.first()?.value.cooked?.to_string())
-        }
-        oxc::ast::ast::Argument::Identifier(identifier) => {
-            match evaluate_identifier(identifier.name.as_str(), context, state)? {
-                EvaluatedValue::String(value) => Some(value),
-                _ => None,
-            }
-        }
-        oxc::ast::ast::Argument::StaticMemberExpression(member) => {
-            match evaluate_static_member_expression(member, context, state, cache)? {
-                EvaluatedValue::String(value) => Some(value),
-                _ => None,
-            }
-        }
-        oxc::ast::ast::Argument::ComputedMemberExpression(member) => {
-            match evaluate_computed_member_expression(member, context, state, cache)? {
-                EvaluatedValue::String(value) => Some(value),
-                _ => None,
-            }
-        }
-        oxc::ast::ast::Argument::CallExpression(call) => {
-            match evaluate_call_expression(call, context, state, cache)? {
-                EvaluatedValue::String(value) => Some(value),
-                _ => None,
-            }
-        }
-        oxc::ast::ast::Argument::ParenthesizedExpression(expr) => {
-            evaluate_string(&expr.expression, context, state, cache)
-        }
-        oxc::ast::ast::Argument::TSAsExpression(expr) => {
-            evaluate_string(&expr.expression, context, state, cache)
-        }
-        oxc::ast::ast::Argument::TSSatisfiesExpression(expr) => {
-            evaluate_string(&expr.expression, context, state, cache)
-        }
-        oxc::ast::ast::Argument::TSTypeAssertion(expr) => {
-            evaluate_string(&expr.expression, context, state, cache)
-        }
-        oxc::ast::ast::Argument::TSNonNullExpression(expr) => {
-            evaluate_string(&expr.expression, context, state, cache)
-        }
-        oxc::ast::ast::Argument::TSInstantiationExpression(expr) => {
-            evaluate_string(&expr.expression, context, state, cache)
-        }
+    let expression = match argument {
+        oxc::ast::ast::Argument::SpreadElement(_) => return None,
+        argument => argument.as_expression()?,
+    };
+    match evaluate_value(expression, context, state, cache)? {
+        EvaluatedValue::String(value) => Some(value),
         _ => None,
+    }
+}
+
+fn imported_symbol_to_file_relationship(
+    file_path: &str,
+    import_entry: &OwnedImportEntry,
+    relative_resolved: String,
+) -> ConsolidatedRelationship {
+    ConsolidatedRelationship {
+        source_path: Some(ArcIntern::new(file_path.to_string())),
+        target_path: Some(ArcIntern::new(relative_resolved)),
+        kind: RelationshipKind::ImportedSymbolToFile,
+        relationship_type: RelationshipType::ImportedSymbolToFile,
+        source_range: ArcIntern::new(import_entry.range),
+        target_range: ArcIntern::new(Range::empty()),
+        source_imported_symbol_key: Some(imported_symbol_key(file_path, import_entry)),
+        ..Default::default()
     }
 }
 
