@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::node::DefKind;
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 
@@ -35,35 +37,30 @@ pub struct Relationship {
 }
 
 impl Relationship {
-    /// The fine-grained label for the edge (e.g. "CLASS_TO_METHOD").
-    /// For structural edges this is derived from the node kinds.
-    pub fn label(&self) -> String {
+    /// Fine-grained label for the edge (e.g. "CLASS_TO_METHOD").
+    pub fn label(&self) -> Cow<'static, str> {
         match (self.source_def_kind, self.target_def_kind) {
             (Some(src), Some(tgt)) => {
-                format!("{}_TO_{}", src.as_upper_str(), tgt.as_upper_str())
+                format!("{}_TO_{}", src.as_upper_str(), tgt.as_upper_str()).into()
             }
             _ => match (self.source_node, self.target_node, self.edge_kind) {
-                (NodeKind::Directory, NodeKind::Directory, _) => "DIR_CONTAINS_DIR".to_string(),
-                (NodeKind::Directory, NodeKind::File, _) => "DIR_CONTAINS_FILE".to_string(),
-                (NodeKind::File, NodeKind::Definition, EdgeKind::Defines) => {
-                    "FILE_DEFINES".to_string()
-                }
+                (NodeKind::Directory, NodeKind::Directory, _) => "DIR_CONTAINS_DIR".into(),
+                (NodeKind::Directory, NodeKind::File, _) => "DIR_CONTAINS_FILE".into(),
+                (NodeKind::File, NodeKind::Definition, EdgeKind::Defines) => "FILE_DEFINES".into(),
                 (NodeKind::File, NodeKind::ImportedSymbol, EdgeKind::Imports) => {
-                    "FILE_IMPORTS".to_string()
+                    "FILE_IMPORTS".into()
                 }
                 (NodeKind::Definition, NodeKind::ImportedSymbol, _) => {
-                    "DEFINES_IMPORTED_SYMBOL".to_string()
+                    "DEFINES_IMPORTED_SYMBOL".into()
                 }
                 (NodeKind::ImportedSymbol, NodeKind::ImportedSymbol, _) => {
-                    "IMPORTED_SYMBOL_TO_IMPORTED_SYMBOL".to_string()
+                    "IMPORTED_SYMBOL_TO_IMPORTED_SYMBOL".into()
                 }
                 (NodeKind::ImportedSymbol, NodeKind::Definition, _) => {
-                    "IMPORTED_SYMBOL_TO_DEFINITION".to_string()
+                    "IMPORTED_SYMBOL_TO_DEFINITION".into()
                 }
-                (NodeKind::ImportedSymbol, NodeKind::File, _) => {
-                    "IMPORTED_SYMBOL_TO_FILE".to_string()
-                }
-                _ => self.edge_kind.as_ref().to_string(),
+                (NodeKind::ImportedSymbol, NodeKind::File, _) => "IMPORTED_SYMBOL_TO_FILE".into(),
+                _ => self.edge_kind.to_string().into(),
             },
         }
     }

@@ -46,63 +46,50 @@ pub enum ReferenceStatus {
     Unresolved,
 }
 
-/// Trait for converting language-specific definition type enums to DefKind.
-/// Implemented by each parser language module.
-pub trait ToCanonical {
-    fn to_def_kind(&self) -> DefKind;
-}
-
 /// A parsed definition, language-agnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalDefinition {
-    /// The language-specific type string (e.g. "DecoratedAsyncMethod", "SingletonMethod").
-    /// Preserved for output fidelity — the Arrow column `definition_type` gets this value.
+    /// Language-specific type string preserved for output fidelity.
+    /// e.g. "DecoratedAsyncMethod", "SingletonMethod".
+    /// The Arrow column `definition_type` gets this value.
     pub definition_type: &'static str,
-    /// The canonical category for relationship logic.
+    /// Canonical category for containment and relationship logic.
     pub kind: DefKind,
     pub name: String,
     pub fqn: Fqn,
     pub range: Range,
-    /// Whether this is a top-level definition (not nested inside another definition).
-    /// Replaces the old `fqn[0].node_type == Package/Namespace` checks.
+    /// Whether this is a top-level (not nested inside another definition).
     pub is_top_level: bool,
-    /// Language-neutral metadata for resolution. Parsers populate whichever
-    /// fields are relevant to the language. The resolver reads them generically.
-    /// `None` for definitions that carry no resolution-relevant metadata
-    /// (lambdas, enum entries, packages, etc.).
-    /// Boxed to keep CanonicalDefinition small — most definitions have no metadata.
+    /// Language-neutral metadata for resolution. Boxed because most
+    /// definitions carry none, keeping the common case small.
     pub metadata: Option<Box<DefinitionMetadata>>,
 }
 
 /// Resolution-relevant metadata extracted by the parser.
 ///
-/// Flat struct with optional fields rather than a per-language enum.
-/// Each parser fills in what its language provides. The resolver reads
-/// whichever fields are present without knowing the source language.
+/// Flat struct with optional fields — each parser fills in what its
+/// language provides. The resolver reads whichever fields are present
+/// without knowing the source language.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefinitionMetadata {
     /// Super types (class parents, implemented interfaces).
-    /// e.g. `["Animal", "Serializable"]` for `class Dog extends Animal implements Serializable`.
     pub super_types: Vec<String>,
     /// Return type of a method/function. `None` for void/untyped.
-    /// e.g. `Some("String")` for `public String getName()`.
     pub return_type: Option<String>,
-    /// Type annotation on a field, parameter, or local variable.
-    /// e.g. `Some("int")` for `int x = 5`. `None` for `var x = 5` or Python's untyped.
+    /// Type annotation on a field/parameter/variable.
     pub type_annotation: Option<String>,
-    /// Receiver type for extension functions/properties (Kotlin).
-    /// e.g. `Some("String")` for `fun String.isBlank(): Boolean`.
+    /// Receiver type for extension functions (Kotlin).
     pub receiver_type: Option<String>,
-    /// Decorators/annotations on the definition (Python's `@classmethod`, etc.).
+    /// Decorators/annotations (Python's `@classmethod`, etc.).
     pub decorators: Vec<String>,
-    /// If this definition is a companion object, the FQN of the class it belongs to.
+    /// If this is a companion object, the FQN of the owning class.
     pub companion_of: Option<String>,
 }
 
 /// A parsed import, language-agnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalImport {
-    /// The language-specific import type string (e.g. "RequireRelative", "WildcardImport").
+    /// Language-specific import type (e.g. "RequireRelative", "WildcardImport").
     pub import_type: &'static str,
     pub path: String,
     pub name: Option<String>,
@@ -114,7 +101,7 @@ pub struct CanonicalImport {
 /// A parsed reference (call site / usage), language-agnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalReference {
-    /// The language-specific reference type string (e.g. "Call", "PropertyAccess").
+    /// Language-specific reference type (e.g. "Call", "PropertyAccess").
     pub reference_type: &'static str,
     pub name: String,
     pub range: Range,
@@ -123,39 +110,32 @@ pub struct CanonicalReference {
     /// FQN of the resolved target, if any.
     pub target_fqn: Option<Fqn>,
     /// Linearized expression chain for member access resolution.
-    /// e.g. `obj.getService().process()` →
+    /// e.g. `obj.getService().process()` becomes
     ///   `[Ident("obj"), Field("getService"), Call, Field("process"), Call]`
-    ///
-    /// `None` for simple name references (bare `foo()` calls).
-    /// Parsers flatten recursive expression trees into this linear form.
     pub expression: Option<Vec<ExpressionStep>>,
 }
 
 /// A single step in a linearized expression chain.
 ///
-/// Chains are read left-to-right. The resolver resolves the base (first element)
+/// Chains are read left-to-right. The resolver resolves the base
 /// then applies each subsequent step, threading the resolved type through.
-///
-/// Example: `this.field.method(arg).prop`
-/// → `[This, Field("field"), Call("method"), Field("prop")]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExpressionStep {
-    /// Bare identifier — the base of the chain. e.g. `foo` in `foo.bar()`.
+    /// Bare identifier — the base of the chain.
     Ident(String),
-    /// Field/attribute access. e.g. `bar` in `foo.bar`.
+    /// Field/attribute access.
     Field(String),
-    /// Method/function call. e.g. `bar` in `foo.bar()`.
-    /// For bare calls, this is the only step: `[Call("foo")]`.
+    /// Method/function call.
     Call(String),
-    /// Constructor invocation. e.g. `new Foo()` → `[New("Foo")]`.
+    /// Constructor invocation (`new Foo()`).
     New(String),
     /// `this` or `self` reference.
     This,
     /// `super` reference.
     Super,
-    /// Array/index access. Result type is the element type.
+    /// Array/index access.
     Index,
-    /// Method reference (Java `Foo::bar`, Kotlin `Foo::bar`).
+    /// Method reference (`Foo::bar`).
     MethodRef(String),
 }
 
@@ -176,23 +156,26 @@ pub struct CanonicalFile {
     pub size: u64,
 }
 
-/// A variable binding (assignment, parameter, for-target, deletion).
-/// Produced by the parser when it sees `x = expr` or `for x in iter`.
-/// The resolver uses these to track what names are bound to at each program point.
+/// A variable binding (assignment, parameter, for-target).
+///
+/// The resolver uses these to track what names are bound to at each
+/// program point via the SSA engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalBinding {
     /// The name being bound (LHS of assignment).
     pub name: String,
-    /// What the name is bound to (RHS). `None` for opaque bindings (parameters, deletions).
+    /// What the name is bound to (RHS). `None` for opaque bindings
+    /// (parameters, deletions).
     pub value: Option<String>,
     pub range: Range,
-    /// FQN of the enclosing scope (function/class/module).
+    /// FQN of the enclosing scope.
     pub scope_fqn: Option<Fqn>,
 }
 
-/// The complete output of parsing a single file. This is the boundary
-/// type between the parser and the linker — the parser produces this,
-/// the linker consumes it. Nothing language-specific crosses this boundary.
+/// The complete output of parsing a single file.
+///
+/// Boundary type between parser and linker — nothing language-specific
+/// crosses this boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalResult {
     pub file_path: String,
@@ -202,8 +185,6 @@ pub struct CanonicalResult {
     pub definitions: Vec<CanonicalDefinition>,
     pub imports: Vec<CanonicalImport>,
     pub references: Vec<CanonicalReference>,
-    /// Variable bindings (assignments, parameters, for-targets, deletions).
-    /// Sorted by byte offset. The resolver uses these to track what names
-    /// resolve to at each program point.
+    /// Variable bindings sorted by byte offset.
     pub bindings: Vec<CanonicalBinding>,
 }

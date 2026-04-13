@@ -2137,7 +2137,6 @@ dependencies = [
 name = "code-graph-config"
 version = "0.1.0"
 dependencies = [
- "once_cell",
  "rustc-hash",
  "serde",
  "strum 0.28.0",

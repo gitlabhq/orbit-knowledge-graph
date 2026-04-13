@@ -10,6 +10,10 @@ impl Position {
     pub const fn new(line: usize, column: usize) -> Self {
         Self { line, column }
     }
+
+    const fn as_tuple(&self) -> (usize, usize) {
+        (self.line, self.column)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -28,7 +32,7 @@ impl Range {
         }
     }
 
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
             start: Position::new(0, 0),
             end: Position::new(0, 0),
@@ -37,21 +41,8 @@ impl Range {
     }
 
     pub fn contains(&self, pos: &Position) -> bool {
-        use std::cmp::Ordering;
-
-        let starts_before_or_eq = match self.start.line.cmp(&pos.line) {
-            Ordering::Less => true,
-            Ordering::Equal => self.start.column <= pos.column,
-            Ordering::Greater => false,
-        };
-
-        let ends_after_or_eq = match self.end.line.cmp(&pos.line) {
-            Ordering::Greater => true,
-            Ordering::Equal => self.end.column >= pos.column,
-            Ordering::Less => false,
-        };
-
-        starts_before_or_eq && ends_after_or_eq
+        let p = pos.as_tuple();
+        self.start.as_tuple() <= p && p <= self.end.as_tuple()
     }
 
     pub const fn line_span(&self) -> usize {
