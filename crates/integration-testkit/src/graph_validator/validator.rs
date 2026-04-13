@@ -23,9 +23,7 @@ pub async fn run_suite(
     let mut failures = Vec::new();
 
     for test in &suite.tests {
-        if let Some(failure) = run_test(test, datasets, config).await {
-            failures.push(failure);
-        }
+        failures.extend(run_test(test, datasets, config).await);
     }
 
     failures
@@ -35,39 +33,54 @@ async fn run_test(
     test: &TestCase,
     datasets: &LanceDatasets,
     config: &GraphConfig,
-) -> Option<Failure> {
+) -> Vec<Failure> {
     let query = match CypherQuery::new(&test.query) {
         Ok(q) => q.with_config(config.clone()),
         Err(e) => {
-            return Some(Failure {
+            return vec![Failure {
                 test: test.name.clone(),
                 severity: test.severity,
                 message: format!("Cypher parse error: {e}"),
-            });
+            }];
         }
     };
 
-    // Clone datasets since execute consumes them
     let ds = datasets.clone();
 
-    let result = match query.execute(ds, None).await {
+    let batches = match query.execute(ds, None).await {
         Ok(batches) => batches,
         Err(e) => {
-            return Some(Failure {
+            return vec![Failure {
                 test: test.name.clone(),
                 severity: test.severity,
                 message: format!("Query execution error: {e}"),
-            });
+            }];
         }
     };
 
-    check_assertion(test, &result)
+    check_assertions(test, &batches)
 }
 
-fn check_assertion(test: &TestCase, batches: &[RecordBatch]) -> Option<Failure> {
+fn check_assertions(test: &TestCase, batches: &[RecordBatch]) -> Vec<Failure> {
+    let mut failures = Vec::new();
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
 
-    match &test.assert {
+    for assertion in &test.assert {
+        if let Some(f) = check_one(test, assertion, batches, total_rows) {
+            failures.push(f);
+        }
+    }
+
+    failures
+}
+
+fn check_one(
+    test: &TestCase,
+    assertion: &Assert,
+    batches: &[RecordBatch],
+    total_rows: usize,
+) -> Option<Failure> {
+    match assertion {
         Assert::Empty(true) => {
             if total_rows > 0 {
                 Some(Failure {
@@ -90,12 +103,12 @@ fn check_assertion(test: &TestCase, batches: &[RecordBatch]) -> Option<Failure> 
                 None
             }
         }
-        Assert::NonEmpty(false) => None, // vacuously true
+        Assert::NonEmpty(false) => None,
         Assert::CountEquals { field, value } => {
             for batch in batches {
                 if let Some(col) = batch.column_by_name(field) {
                     if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
-                        if arr.len() > 0 && arr.value(0) != *value {
+                        if !arr.is_empty() && arr.value(0) != *value {
                             return Some(Failure {
                                 test: test.name.clone(),
                                 severity: test.severity,
@@ -131,7 +144,7 @@ fn check_assertion(test: &TestCase, batches: &[RecordBatch]) -> Option<Failure> 
                                     test: test.name.clone(),
                                     severity: test.severity,
                                     message: format!(
-                                        "Row {i}: {field}='{}' does not match pattern '{pattern}'",
+                                        "Row {i}: {field}='{}' does not match '{pattern}'",
                                         arr.value(i)
                                     ),
                                 });

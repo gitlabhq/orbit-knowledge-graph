@@ -3,9 +3,20 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
+/// A source file to be parsed into the graph before running tests.
+#[derive(Debug, Deserialize)]
+pub struct FixtureFile {
+    pub path: String,
+    pub content: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TestSuite {
     pub name: String,
+    /// Source files that make up the fixture graph.
+    /// Parsed by the v2 pipeline to produce the CodeGraph under test.
+    #[serde(default)]
+    pub fixtures: Vec<FixtureFile>,
     pub tests: Vec<TestCase>,
 }
 
@@ -15,7 +26,7 @@ pub struct TestCase {
     #[serde(default)]
     pub severity: Severity,
     pub query: String,
-    pub assert: Assert,
+    pub assert: Vec<Assert>,
     #[serde(default)]
     pub params: HashMap<String, serde_json::Value>,
 }
