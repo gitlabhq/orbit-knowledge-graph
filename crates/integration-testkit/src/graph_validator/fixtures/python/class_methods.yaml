@@ -17,13 +17,13 @@ fixtures:
       obj = MyClass()
 
 tests:
-  - name: Class has 4 members (3 methods + 1 lambda)
+  - name: Class has exactly 3 method members
     query: |
       MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'MyClass'
       RETURN count(m) AS n
     assert:
-      - { count_equals: { field: n, value: 4 } }
+      - { count_equals: { field: n, value: 3 } }
 
   - name: instance_method exists in class
     query: |

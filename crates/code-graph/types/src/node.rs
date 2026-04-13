@@ -53,7 +53,7 @@ pub trait ToCanonical {
 }
 
 /// A parsed definition, language-agnostic.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalDefinition {
     /// The language-specific type string (e.g. "DecoratedAsyncMethod", "SingletonMethod").
     /// Preserved for output fidelity — the Arrow column `definition_type` gets this value.
@@ -79,7 +79,7 @@ pub struct CanonicalDefinition {
 /// Flat struct with optional fields rather than a per-language enum.
 /// Each parser fills in what its language provides. The resolver reads
 /// whichever fields are present without knowing the source language.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefinitionMetadata {
     /// Super types (class parents, implemented interfaces).
     /// e.g. `["Animal", "Serializable"]` for `class Dog extends Animal implements Serializable`.
@@ -100,7 +100,7 @@ pub struct DefinitionMetadata {
 }
 
 /// A parsed import, language-agnostic.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalImport {
     /// The language-specific import type string (e.g. "RequireRelative", "WildcardImport").
     pub import_type: &'static str,
@@ -112,7 +112,7 @@ pub struct CanonicalImport {
 }
 
 /// A parsed reference (call site / usage), language-agnostic.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalReference {
     /// The language-specific reference type string (e.g. "Call", "PropertyAccess").
     pub reference_type: &'static str,
@@ -160,14 +160,14 @@ pub enum ExpressionStep {
 }
 
 /// A directory in the code graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalDirectory {
     pub path: String,
     pub name: String,
 }
 
 /// A file in the code graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalFile {
     pub path: String,
     pub name: String,
@@ -179,7 +179,7 @@ pub struct CanonicalFile {
 /// The complete output of parsing a single file. This is the boundary
 /// type between the parser and the linker — the parser produces this,
 /// the linker consumes it. Nothing language-specific crosses this boundary.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalResult {
     pub file_path: String,
     pub extension: String,

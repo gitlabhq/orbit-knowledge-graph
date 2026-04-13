@@ -2,16 +2,29 @@ use code_graph_types::{Range, Relationship};
 
 use super::context::DefRef;
 
+/// Source of a resolved edge — either a definition or a file (for module-level calls).
+#[derive(Debug, Clone, Copy)]
+pub enum EdgeSource {
+    /// Call from within a definition (method, function, etc.)
+    Definition(DefRef),
+    /// Call at module/file level (no enclosing definition)
+    File(usize),
+}
+
+impl EdgeSource {
+    pub fn file_idx(&self) -> usize {
+        match self {
+            EdgeSource::Definition(d) => d.file_idx,
+            EdgeSource::File(f) => *f,
+        }
+    }
+}
+
 /// A resolved edge produced by reference resolution.
-///
-/// References source and target definitions by index (file_idx + def_idx)
-/// rather than by path strings. The pipeline maps these to petgraph
-/// NodeIndex values when adding to the CodeGraph.
 #[derive(Debug, Clone)]
 pub struct ResolvedEdge {
     pub relationship: Relationship,
-    pub source: DefRef,
+    pub source: EdgeSource,
     pub target: DefRef,
-    /// Range of the reference site (call expression).
     pub reference_range: Range,
 }

@@ -10,7 +10,7 @@ pub mod walker;
 
 pub use builder::GraphBuilder;
 pub use context::{DefRef, ImportRef, ResolutionContext, ScopedDef};
-pub use edges::ResolvedEdge;
+pub use edges::{EdgeSource, ResolvedEdge};
 pub use graph::{CodeGraph, GraphEdge, GraphNode};
 pub use reaching::{HasRules, RulesResolver};
 pub use resolver::{GlobalBacktracker, NoResolver, ReferenceResolver};

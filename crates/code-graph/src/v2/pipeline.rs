@@ -102,15 +102,30 @@ where
 
         // Add resolved edges to the petgraph
         for edge in resolved_edges {
-            let src_key = (edge.source.file_idx, edge.source.def_idx);
-            let tgt_key = (edge.target.file_idx, edge.target.def_idx);
+            use crate::linker::v2::EdgeSource;
 
-            if let (Some(&src_node), Some(&tgt_node)) =
-                (graph.def_index.get(&src_key), graph.def_index.get(&tgt_key))
-            {
+            let src_node = match edge.source {
+                EdgeSource::Definition(def_ref) => {
+                    graph.def_index.get(&(def_ref.file_idx, def_ref.def_idx)).copied()
+                }
+                EdgeSource::File(file_idx) => {
+                    let file_path = &ctx.results[file_idx].file_path;
+                    let relative: &str = file_path
+                        .strip_prefix(root_path)
+                        .map(|p: &str| p.strip_prefix('/').unwrap_or(p))
+                        .unwrap_or(file_path);
+                    graph.file_index.get(relative).copied()
+                }
+            };
+            let tgt_node = graph
+                .def_index
+                .get(&(edge.target.file_idx, edge.target.def_idx))
+                .copied();
+
+            if let (Some(src), Some(tgt)) = (src_node, tgt_node) {
                 graph.graph.add_edge(
-                    src_node,
-                    tgt_node,
+                    src,
+                    tgt,
                     GraphEdge {
                         relationship: edge.relationship,
                         source_definition_range: None,

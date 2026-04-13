@@ -8,11 +8,11 @@
 use code_graph_types::{CanonicalImport, CanonicalResult, EdgeKind, NodeKind, Relationship};
 
 use super::context::{DefRef, ResolutionContext};
-use super::edges::ResolvedEdge;
+use super::edges::{EdgeSource, ResolvedEdge};
 use super::resolver::ReferenceResolver;
 use super::rules::{ImportStrategy, ResolutionRules};
 use super::ssa::{ReachingDefs, Value};
-use super::walker::{AsAst, walk_files};
+use super::walker::{walk_files, AsAst};
 
 /// Trait to get rules from the type parameter.
 /// Each language implements this on a zero-sized struct.
@@ -65,23 +65,21 @@ fn resolve_with_rules<A: AsAst>(
             reference.range.byte_offset.1,
         );
 
-        let source_def_kind = source_enclosing.map(|s| {
-            let (def, _) = ctx.resolve_def(DefRef {
-                file_idx: s.file_idx,
-                def_idx: s.def_idx,
-            });
-            def.kind
-        });
-
-        let source = source_enclosing
-            .map(|s| DefRef {
-                file_idx: s.file_idx,
-                def_idx: s.def_idx,
-            })
-            .unwrap_or(DefRef {
-                file_idx: read.file_idx,
-                def_idx: 0,
-            });
+        let (source, source_node, source_def_kind) = match source_enclosing {
+            Some(s) => {
+                let def_ref = DefRef {
+                    file_idx: s.file_idx,
+                    def_idx: s.def_idx,
+                };
+                let (def, _) = ctx.resolve_def(def_ref);
+                (
+                    EdgeSource::Definition(def_ref),
+                    NodeKind::Definition,
+                    Some(def.kind),
+                )
+            }
+            None => (EdgeSource::File(read.file_idx), NodeKind::File, None),
+        };
 
         for target in resolved_defs {
             let (target_def, _) = ctx.resolve_def(target);
@@ -89,7 +87,7 @@ fn resolve_with_rules<A: AsAst>(
             edges.push(ResolvedEdge {
                 relationship: Relationship {
                     edge_kind: EdgeKind::Calls,
-                    source_node: NodeKind::Definition,
+                    source_node,
                     target_node: NodeKind::Definition,
                     source_def_kind,
                     target_def_kind: Some(target_def.kind),

@@ -74,7 +74,7 @@ mod tests {
             .iter()
             .filter(|e| {
                 e.relationship.edge_kind == EdgeKind::Calls
-                    && e.source.file_idx != e.target.file_idx
+                    && e.source.file_idx() != e.target.file_idx
             })
             .collect()
     }
@@ -101,7 +101,7 @@ greet()
                 .iter()
                 .map(|e| format!(
                     "{},{}→{},{}",
-                    e.source.file_idx, e.source.def_idx, e.target.file_idx, e.target.def_idx
+                    e.source.file_idx(), 0, e.target.file_idx, e.target.def_idx
                 ))
                 .collect::<Vec<_>>()
         );
@@ -135,7 +135,7 @@ helper()
                 .iter()
                 .map(|e| format!(
                     "{},{}→{},{}",
-                    e.source.file_idx, e.source.def_idx, e.target.file_idx, e.target.def_idx
+                    e.source.file_idx(), 0, e.target.file_idx, e.target.def_idx
                 ))
                 .collect::<Vec<_>>()
         );
@@ -180,7 +180,7 @@ def bar():
             assert_eq!(edge.relationship.source_node, NodeKind::Definition);
             assert_eq!(edge.relationship.target_node, NodeKind::Definition);
             // Source and target are in the same file
-            assert_eq!(edge.source.file_idx, edge.target.file_idx);
+            assert_eq!(edge.source.file_idx()(), edge.target.file_idx);
         }
     }
 
@@ -261,7 +261,7 @@ public class App {
                 .iter()
                 .map(|e| format!(
                     "{},{}→{},{}",
-                    e.source.file_idx, e.source.def_idx, e.target.file_idx, e.target.def_idx
+                    e.source.file_idx(), 0, e.target.file_idx, e.target.def_idx
                 ))
                 .collect::<Vec<_>>()
         );
@@ -397,7 +397,7 @@ class App {
                 .iter()
                 .map(|e| format!(
                     "{},{}→{},{}",
-                    e.source.file_idx, e.source.def_idx, e.target.file_idx, e.target.def_idx
+                    e.source.file_idx(), 0, e.target.file_idx, e.target.def_idx
                 ))
                 .collect::<Vec<_>>()
         );

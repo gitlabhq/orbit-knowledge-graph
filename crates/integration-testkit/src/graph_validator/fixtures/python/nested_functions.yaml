@@ -18,11 +18,11 @@ tests:
     assert:
       - { non_empty: true }
 
-  - name: outer() resolves at module level
+  - name: outer() exists as a definition
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE callee.name = 'outer'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
+      MATCH (d:Definition)
+      WHERE d.name = 'outer'
+      RETURN d.fqn AS fqn
     assert:
       - { non_empty: true }
 

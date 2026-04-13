@@ -237,6 +237,7 @@ impl GraphBuilder {
                 .find(|(_, d)| d.fqn.to_string() == parent_fqn_str);
 
             if let Some((parent_idx, parent_def)) = parent
+                && parent_idx != i
                 && let Some(rel) = containment_relationship(parent_def.kind, def.kind)
             {
                 cg.graph.add_edge(

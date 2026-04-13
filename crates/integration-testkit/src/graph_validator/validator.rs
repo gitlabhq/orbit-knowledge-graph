@@ -51,7 +51,42 @@ async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfi
         }
     };
 
+    // Print query + results for full visibility
+    eprintln!("  ┌─ TEST: \"{}\"", test.name);
+    eprintln!("  │ query: {}", test.query.trim().replace('\n', "\n  │        "));
+    eprintln!("  │ result: {} rows", batch.num_rows());
+    if batch.num_rows() > 0 {
+        let schema = batch.schema();
+        let col_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        eprintln!("  │ ┌──{}──┐", col_names.join("──┬──"));
+        let max_rows = batch.num_rows().min(20);
+        for row in 0..max_rows {
+            let vals: Vec<String> = (0..batch.num_columns())
+                .map(|col| format_cell(batch.column(col).as_ref(), row))
+                .collect();
+            eprintln!("  │ │ {} │", vals.join(" │ "));
+        }
+        if batch.num_rows() > 20 {
+            eprintln!("  │ │ ... +{} more rows │", batch.num_rows() - 20);
+        }
+        eprintln!("  │ └{}┘", "─".repeat(col_names.join("──┬──").len() + 4));
+    }
+    eprintln!("  └─");
+
     check_assertions(test, &batch)
+}
+
+fn format_cell(array: &dyn Array, row: usize) -> String {
+    if array.is_null(row) {
+        return "NULL".to_string();
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
+        return arr.value(row).to_string();
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
+        return arr.value(row).to_string();
+    }
+    "<?>".to_string()
 }
 
 fn check_assertions(test: &TestCase, batch: &RecordBatch) -> Vec<Failure> {

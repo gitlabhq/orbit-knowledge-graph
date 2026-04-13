@@ -8,10 +8,18 @@ fixtures:
       foo()
 
 tests:
-  - name: foo() resolves to foo definition
+  - name: foo definition exists
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE callee.name = 'foo'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
+      MATCH (d:Definition)
+      WHERE d.name = 'foo'
+      RETURN d.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: File has edge to foo (structural + call)
+    query: |
+      MATCH (f:File)-[:FileToDefinition]->(d:Definition)
+      WHERE d.name = 'foo'
+      RETURN f.path AS file, d.fqn AS target
     assert:
       - { non_empty: true }
