@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 pub(in crate::modules::sdlc) struct PlanInput {
-    pub edge_table: String,
     pub node_plans: Vec<NodePlan>,
     pub standalone_edge_plans: Vec<StandaloneEdgePlan>,
 }
@@ -43,6 +42,8 @@ pub(in crate::modules::sdlc) struct FkEdgeTransform {
     pub target_kind: EdgeKind,
     pub filters: Vec<EdgeFilter>,
     pub namespaced: bool,
+    /// Resolved edge table for this relationship kind (prefixed).
+    pub destination_table: String,
 }
 
 /// A standalone edge has its own dedicated source table and extraction.
@@ -112,10 +113,6 @@ pub(in crate::modules::sdlc) enum ExtractSource {
 }
 
 pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput {
-    // Apply the schema-version prefix at the boundary where ontology names
-    // enter the SDLC plan layer. All downstream write paths use these prefixed
-    // names via Transformation::destination_table → ClickHouseDestination.
-    let edge_table = prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION);
     let mut node_plans = Vec::new();
     let mut standalone_edge_plans = Vec::new();
 
@@ -125,16 +122,10 @@ pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput 
     }
 
     for (relationship_kind, config) in ontology.edge_etl_configs() {
-        standalone_edge_plans.push(resolve_standalone_edge(
-            relationship_kind,
-            config,
-            ontology,
-            &edge_table,
-        ));
+        standalone_edge_plans.push(resolve_standalone_edge(relationship_kind, config, ontology));
     }
 
     PlanInput {
-        edge_table: edge_table.to_string(),
         node_plans,
         standalone_edge_plans,
     }
@@ -297,6 +288,10 @@ fn resolve_fk_edges(
                 }
             }
 
+            let edge_dest = prefixed_table_name(
+                ontology.edge_table_for_relationship(&mapping.relationship_kind),
+                *SCHEMA_VERSION,
+            );
             FkEdgeTransform {
                 relationship_kind: mapping.relationship_kind.clone(),
                 source_id,
@@ -305,6 +300,7 @@ fn resolve_fk_edges(
                 target_kind,
                 filters,
                 namespaced,
+                destination_table: edge_dest,
             }
         })
         .collect()
@@ -316,8 +312,11 @@ fn resolve_standalone_edge(
     relationship_kind: &str,
     config: &EdgeSourceEtlConfig,
     ontology: &Ontology,
-    edge_table: &str,
 ) -> StandaloneEdgePlan {
+    let edge_table = prefixed_table_name(
+        ontology.edge_table_for_relationship(relationship_kind),
+        *SCHEMA_VERSION,
+    );
     let scope = config.scope;
     let namespaced = scope == EtlScope::Namespaced;
 
@@ -362,7 +361,7 @@ fn resolve_standalone_edge(
         filters,
         namespaced,
         extract: ExtractPlan {
-            destination_table: edge_table.to_string(),
+            destination_table: edge_table,
             columns: extract_columns,
             source: ExtractSource::Table(config.source.clone()),
             watermark: config.watermark.clone(),

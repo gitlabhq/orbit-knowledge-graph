@@ -44,14 +44,18 @@ pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionS
         statements.push(statement);
     }
 
-    let edge_table = ontology.edge_table();
-    let edge_sort_key = ontology.edge_sort_key();
-    let edge_select = build_select_from_sort_key(edge_sort_key);
-    let edge_columns = build_destination_columns(edge_sort_key);
-    let prefixed_edge = prefixed_table_name(edge_table, *SCHEMA_VERSION);
-    let edge_statement =
-        build_deletion_insert(edge_table, &prefixed_edge, edge_columns, edge_select);
-    statements.push(edge_statement);
+    for edge_table in ontology.edge_tables() {
+        let config = ontology
+            .edge_table_config(edge_table)
+            .expect("edge_tables() only returns keys present in edge_table_configs");
+        let edge_sort_key = &config.sort_key;
+        let edge_select = build_select_from_sort_key(edge_sort_key);
+        let edge_columns = build_destination_columns(edge_sort_key);
+        let prefixed_edge = prefixed_table_name(edge_table, *SCHEMA_VERSION);
+        let edge_statement =
+            build_deletion_insert(edge_table, &prefixed_edge, edge_columns, edge_select);
+        statements.push(edge_statement);
+    }
 
     statements
 }

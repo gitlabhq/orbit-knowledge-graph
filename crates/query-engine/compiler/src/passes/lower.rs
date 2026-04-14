@@ -152,9 +152,16 @@ fn lower_search(input: &Input) -> Result<Node> {
 /// Multi-hop: UNION ALL of edge self-joins.
 /// Multi-rel: secondary edges JOINed on shared columns.
 fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
-    let et = input.compiler.default_edge_table.as_str();
+    // Pre-resolve edge tables for each relationship from the ontology mapping.
+    let rel_tables: Vec<Vec<String>> = input
+        .relationships
+        .iter()
+        .map(|rel| input.compiler.resolve_edge_tables(&rel.types))
+        .collect();
+
     let first_rel = input.relationships.first().unwrap();
     let (start_col, end_col) = first_rel.direction.edge_columns();
+    let et = &rel_tables[0];
 
     let mut select = Vec::new();
     let mut where_parts: Vec<Expr> = Vec::new();
@@ -187,7 +194,8 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
         all_edge_aliases.push((edge_alias.to_string(), start_col, end_col, true));
     } else {
         edge_alias = "e0";
-        let (edge, edge_type_cond) = edge_scan(et, edge_alias, &type_filter(&first_rel.types));
+        let (edge, edge_type_cond) =
+            multi_edge_scan(et, edge_alias, &type_filter(&first_rel.types));
         from = edge;
         select.extend(edge_select_exprs(edge_alias));
         if let Some(tc) = edge_type_cond {
@@ -215,6 +223,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 continue;
             };
 
+        let rel_et = &rel_tables[i];
         if rel.max_hops > 1 {
             let alias = format!("hop_e{i}");
             let (from_col, to_col) = rel.direction.union_columns();
@@ -228,7 +237,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 Expr::col(&shared_alias, &shared_col),
                 Expr::col(&alias, sec_shared_col),
             );
-            let union = build_hop_union_all(rel, &alias, et);
+            let union = build_hop_union_all(rel, &alias, rel_et);
             from = TableRef::join(JoinType::Inner, from, union, join_cond);
             select.extend(edge_select_exprs(&alias));
             select.push(edge_depth_select_expr(&alias));
@@ -267,7 +276,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 join_cond = Expr::and(join_cond, tf);
             }
 
-            let (sec_scan, _) = edge_scan(et, &alias, &None);
+            let (sec_scan, _) = multi_edge_scan(rel_et, &alias, &None);
             from = TableRef::join(JoinType::Inner, from, sec_scan, join_cond);
             select.extend(edge_select_exprs(&alias));
 
@@ -481,11 +490,16 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         let table = resolve_table(node)?;
         (TableRef::scan(&table, &node.id), HashMap::new())
     } else {
+        let rel_tables: Vec<Vec<String>> = input
+            .relationships
+            .iter()
+            .map(|rel| input.compiler.resolve_edge_tables(&rel.types))
+            .collect();
         build_joins(
             &input.nodes,
             &input.relationships,
             &edge_only_targets,
-            &input.compiler.default_edge_table,
+            &rel_tables,
         )?
     };
 
@@ -690,7 +704,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let forward_depth = max_depth.div_ceil(2); // ceil(max_depth / 2)
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
-    let et = &input.compiler.default_edge_table;
+    let et = input.compiler.resolve_edge_tables(&path.rel_types);
     let forward_cte = Cte::new(
         FORWARD_CTE,
         build_frontier(
@@ -699,7 +713,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             &rel_type_filter,
             true,
             Some(start_entity),
-            et,
+            &et,
         ),
     );
     let backward_cte = if backward_depth > 0 {
@@ -711,7 +725,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 &rel_type_filter,
                 false,
                 Some(end_entity),
-                et,
+                &et,
             ),
         ))
     } else {
@@ -906,7 +920,7 @@ fn build_frontier(
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
     anchor_entity: Option<&str>,
-    edge_table: &str,
+    edge_tables: &[String],
 ) -> Query {
     let arms: Vec<Query> = (1..=max_depth)
         .map(|depth| {
@@ -916,7 +930,7 @@ fn build_frontier(
                 rel_type_filter,
                 is_forward,
                 anchor_entity,
-                edge_table,
+                edge_tables,
             )
         })
         .collect();
@@ -949,7 +963,7 @@ fn build_frontier_arm(
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
     anchor_entity: Option<&str>,
-    edge_table: &str,
+    edge_tables: &[String],
 ) -> Query {
     // Column naming: forward traverses source→target, backward target→source.
     let (anchor_col, next_col, next_kind_col) = if is_forward {
@@ -961,11 +975,11 @@ fn build_frontier_arm(
     let last = format!("e{depth}");
 
     // Build join chain: e1 JOIN e2 ON e1.next = e2.anchor JOIN e3 ...
-    let (mut from, first_type_cond) = edge_scan(edge_table, "e1", rel_type_filter);
+    let (mut from, first_type_cond) = multi_edge_scan(edge_tables, "e1", rel_type_filter);
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
-        let (edge_tbl, edge_type_cond) = edge_scan(edge_table, &curr, rel_type_filter);
+        let (edge_tbl, edge_type_cond) = multi_edge_scan(edge_tables, &curr, rel_type_filter);
         let mut join_cond = Expr::eq(Expr::col(&prev, next_col), Expr::col(&curr, anchor_col));
         if let Some(tc) = edge_type_cond {
             join_cond = Expr::and(join_cond, tc);
@@ -1057,11 +1071,13 @@ fn build_frontier_arm(
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn lower_neighbors(input: &mut Input) -> Result<Node> {
-    let et = input.compiler.default_edge_table.clone();
     let neighbors_config = input
         .neighbors
         .as_ref()
         .ok_or_else(|| QueryError::Lowering("neighbors config missing".into()))?;
+    let et = input
+        .compiler
+        .resolve_edge_tables(&neighbors_config.rel_types);
 
     let center_node = find_node(&input.nodes, &neighbors_config.node)?;
     let center_table = resolve_table(center_node)?;
@@ -1132,7 +1148,7 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
 
     // Edge-only: scan gl_edge directly, filter by center node IDs via IN subquery.
     let build_arm = |dir: Direction| -> Query {
-        let (edge_table, edge_type_cond) = edge_scan(&et, edge_alias, &rel_type_filter);
+        let (edge_table, edge_type_cond) = multi_edge_scan(&et, edge_alias, &rel_type_filter);
         let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
         {
             Direction::Outgoing => (
@@ -1317,11 +1333,11 @@ fn build_hydration_arm(node: &InputNode) -> Result<Query> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Build a UNION ALL subquery for multi-hop traversal (1 to max_hops).
-fn build_hop_union_all(rel: &InputRelationship, alias: &str, edge_table: &str) -> TableRef {
+fn build_hop_union_all(rel: &InputRelationship, alias: &str, edge_tables: &[String]) -> TableRef {
     let rel_type_filter = type_filter(&rel.types);
     let start = rel.min_hops.max(1);
     let queries = (start..=rel.max_hops)
-        .map(|depth| build_hop_arm(depth, &rel_type_filter, rel.direction, edge_table))
+        .map(|depth| build_hop_arm(depth, &rel_type_filter, rel.direction, edge_tables))
         .collect();
     TableRef::union_all(queries, alias)
 }
@@ -1331,7 +1347,7 @@ fn build_hop_arm(
     depth: u32,
     type_filter: &Option<Vec<String>>,
     direction: Direction,
-    edge_table: &str,
+    edge_tables: &[String],
 ) -> Query {
     let (start_col, end_col) = direction.edge_columns();
     let end_type_col = match direction {
@@ -1341,7 +1357,7 @@ fn build_hop_arm(
     let last = format!("e{depth}");
 
     // Build chain: e1 -> e2 -> e3 -> ...
-    let (mut from, first_type_cond) = edge_scan(edge_table, "e1", type_filter);
+    let (mut from, first_type_cond) = multi_edge_scan(edge_tables, "e1", type_filter);
 
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
@@ -1349,7 +1365,7 @@ fn build_hop_arm(
         // No traversal_path condition between consecutive edges: cross-namespace
         // relationships (e.g. RELATED_TO, CLOSES) can link entities in different
         // namespaces, so consecutive edges may have different paths.
-        let (edge_tbl, edge_type_cond) = edge_scan(edge_table, &curr, type_filter);
+        let (edge_tbl, edge_type_cond) = multi_edge_scan(edge_tables, &curr, type_filter);
         let mut join_cond = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
         if let Some(tc) = edge_type_cond {
             join_cond = Expr::and(join_cond, tc);
@@ -1439,6 +1455,36 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
     }
 }
 
+/// Build an edge scan that may span multiple physical tables.
+///
+/// Single table → delegates to `edge_scan`.
+/// Multiple tables → `UNION ALL` of per-table `edge_scan` arms.
+/// Type filters and `_deleted` handling are per-arm; the dedup pass
+/// recurses into UNION arms to inject soft-delete filters.
+fn multi_edge_scan(
+    tables: &[String],
+    alias: &str,
+    type_filter: &Option<Vec<String>>,
+) -> (TableRef, Option<Expr>) {
+    if tables.len() == 1 {
+        return edge_scan(&tables[0], alias, type_filter);
+    }
+    let queries: Vec<Query> = tables
+        .iter()
+        .map(|table| {
+            let arm_alias = format!("_{alias}");
+            let (from, type_cond) = edge_scan(table, &arm_alias, type_filter);
+            Query {
+                select: vec![SelectExpr::star()],
+                from,
+                where_clause: type_cond,
+                ..Default::default()
+            }
+        })
+        .collect();
+    (TableRef::union_all(queries, alias), None)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Join Building
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1446,11 +1492,13 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
 /// Build a FROM tree that JOINs node tables and edge tables.
 /// Nodes in `skip_nodes` are omitted from the tree — they are handled
 /// edge-only via `node_edge_col` + `_nf_*` CTEs instead.
+///
+/// `rel_tables` maps each relationship (by index) to its resolved edge table(s).
 fn build_joins(
     nodes: &[InputNode],
     rels: &[InputRelationship],
     skip_nodes: &HashSet<String>,
-    edge_table: &str,
+    rel_tables: &[Vec<String>],
 ) -> Result<(TableRef, HashMap<usize, String>)> {
     // Find the first non-skipped node to start the FROM tree.
     let first_rel = rels
@@ -1464,7 +1512,7 @@ fn build_joins(
     } else {
         // Both nodes skipped — start from edge.
         let alias = "e0".to_string();
-        let (edge, _) = edge_scan(edge_table, &alias, &type_filter(&first_rel.types));
+        let (edge, _) = multi_edge_scan(&rel_tables[0], &alias, &type_filter(&first_rel.types));
         let mut edge_aliases = HashMap::new();
         edge_aliases.insert(0, alias);
         return Ok((edge, edge_aliases));
@@ -1478,6 +1526,7 @@ fn build_joins(
     joined.insert(start.id.clone());
 
     for (i, rel) in rels.iter().enumerate() {
+        let edge_table = &rel_tables[i];
         // Multi-hop: use UNION ALL pattern with hop_e{i} alias.
         if rel.max_hops > 1 {
             let alias = format!("hop_e{i}");
@@ -1550,7 +1599,7 @@ fn build_joins(
         let alias = format!("e{i}");
         edge_aliases.insert(i, alias.clone());
 
-        let (edge, edge_type_cond) = edge_scan(edge_table, &alias, &type_filter(&rel.types));
+        let (edge, edge_type_cond) = multi_edge_scan(edge_table, &alias, &type_filter(&rel.types));
         let source_cond = source_join_cond(&rel.from, &alias, rel.direction);
         let target_cond = target_join_cond(&alias, &rel.to, rel.direction);
 
@@ -3618,6 +3667,188 @@ mod tests {
         assert!(
             has_column_eq(direct_where, FORWARD_ALIAS, END_KIND_COLUMN, "Project"),
             "direct query should filter f.end_kind = 'Project', got: {direct_where:?}"
+        );
+    }
+
+    // ── Multi-edge-table tests ──────────────────────────────────────────
+
+    fn multi_table_ontology() -> Ontology {
+        use ontology::DataType;
+        Ontology::new()
+            .with_nodes(["User", "Project", "File", "Definition"])
+            .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
+            .with_edge_table("gl_code_edge")
+            .with_edge_for_table("DEFINES", "gl_code_edge")
+            .with_edge_for_table("IMPORTS", "gl_code_edge")
+            .with_fields("User", [("username", DataType::String)])
+            .with_default_columns("User", ["username"])
+            .with_fields("Project", [("name", DataType::String)])
+            .with_default_columns("Project", ["name"])
+            .with_fields("File", [("path", DataType::String)])
+            .with_default_columns("File", ["path"])
+            .with_fields("Definition", [("name", DataType::String)])
+            .with_default_columns("Definition", ["name"])
+    }
+
+    fn validated_input_with(json: &str, ontology: &Ontology) -> Input {
+        let input = parse_input(json).unwrap();
+        validate::Validator::new(ontology)
+            .check_references(&input)
+            .unwrap();
+        normalize::normalize(input, ontology).unwrap()
+    }
+
+    fn has_union(t: &TableRef) -> bool {
+        matches!(t, TableRef::Union { .. })
+    }
+
+    fn collect_scanned_tables(t: &TableRef) -> Vec<String> {
+        match t {
+            TableRef::Scan { table, .. } => vec![table.clone()],
+            TableRef::Join { left, right, .. } => {
+                let mut v = collect_scanned_tables(left);
+                v.extend(collect_scanned_tables(right));
+                v
+            }
+            TableRef::Union { queries, .. } => queries
+                .iter()
+                .flat_map(|q| collect_scanned_tables(&q.from))
+                .collect(),
+            TableRef::Subquery { query, .. } => collect_scanned_tables(&query.from),
+        }
+    }
+
+    #[test]
+    fn single_table_edge_routes_to_default() {
+        let ontology = multi_table_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        assert!(
+            has_scan(&q.from, "gl_edge"),
+            "AUTHORED should route to gl_edge"
+        );
+        assert!(
+            !has_scan(&q.from, "gl_code_edge"),
+            "AUTHORED should not touch gl_code_edge"
+        );
+    }
+
+    #[test]
+    fn edge_routes_to_code_table() {
+        let ontology = multi_table_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "f", "entity": "File"},
+                    {"id": "d", "entity": "Definition"}
+                ],
+                "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        assert!(
+            has_scan(&q.from, "gl_code_edge"),
+            "DEFINES should route to gl_code_edge"
+        );
+        assert!(
+            !has_scan(&q.from, "gl_edge"),
+            "DEFINES should not touch gl_edge"
+        );
+    }
+
+    #[test]
+    fn wildcard_scans_all_edge_tables() {
+        let ontology = multi_table_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "*", "from": "u", "to": "p"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        let tables = collect_scanned_tables(&q.from);
+        assert!(
+            tables.contains(&"gl_edge".to_string()),
+            "wildcard should scan gl_edge, got: {tables:?}"
+        );
+        assert!(
+            tables.contains(&"gl_code_edge".to_string()),
+            "wildcard should scan gl_code_edge, got: {tables:?}"
+        );
+    }
+
+    #[test]
+    fn mixed_types_across_tables_produces_union() {
+        let ontology = multi_table_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        let tables = collect_scanned_tables(&q.from);
+        assert!(
+            tables.contains(&"gl_edge".to_string()) && tables.contains(&"gl_code_edge".to_string()),
+            "mixed types should scan both tables, got: {tables:?}"
+        );
+    }
+
+    #[test]
+    fn single_table_no_union_all() {
+        let ontology = test_ontology();
+        let mut input = validated_input_with(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+                "limit": 25
+            }"#,
+            &ontology,
+        );
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+        assert!(
+            !has_union(&q.from),
+            "single-table ontology should not produce UNION ALL in FROM"
         );
     }
 }

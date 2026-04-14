@@ -447,12 +447,27 @@ fn build_cascade_for_node(
         )
     });
 
+    let tables = input.compiler.resolve_edge_tables(rel_types);
+    let from = if tables.len() == 1 {
+        TableRef::scan(&tables[0], alias)
+    } else {
+        let queries = tables
+            .iter()
+            .map(|t| Query {
+                select: vec![SelectExpr::star()],
+                from: TableRef::scan(t, alias),
+                ..Default::default()
+            })
+            .collect();
+        TableRef::union_all(queries, alias)
+    };
+
     Some(Query {
         select: vec![SelectExpr::new(
             Expr::col(alias, select_col),
             DEFAULT_PRIMARY_KEY,
         )],
-        from: TableRef::scan(&input.compiler.default_edge_table, alias),
+        from,
         where_clause: Expr::and_all([Some(parent_filter), Some(rel_filter), kind_filter]),
         ..Default::default()
     })
@@ -895,7 +910,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
     let backward_depth = max_depth / 2;
 
     // Build hop frontier CTEs and inject SIP into frontier arms.
-    let et = &input.compiler.default_edge_table;
+    let edge_tables = input.compiler.resolve_edge_tables(&path.rel_types);
     let mut new_ctes = Vec::new();
     inject_hop_frontiers(
         q,
@@ -904,7 +919,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
         forward_depth,
         true,
         &mut new_ctes,
-        et,
+        &edge_tables,
     );
     if backward_depth > 0 {
         inject_hop_frontiers(
@@ -914,7 +929,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
             backward_depth,
             false,
             &mut new_ctes,
-            et,
+            &edge_tables,
         );
     }
 
@@ -932,7 +947,7 @@ fn inject_hop_frontiers(
     max_depth: u32,
     is_forward: bool,
     new_ctes: &mut Vec<Cte>,
-    edge_table: &str,
+    edge_tables: &[String],
 ) {
     let prefix = if is_forward { "_fwd_hop" } else { "_bwd_hop" };
     let anchor_col = if is_forward {
@@ -975,6 +990,19 @@ fn inject_hop_frontiers(
             )
         };
 
+        let from = if edge_tables.len() == 1 {
+            TableRef::scan(&edge_tables[0], alias)
+        } else {
+            let queries = edge_tables
+                .iter()
+                .map(|t| Query {
+                    select: vec![SelectExpr::star()],
+                    from: TableRef::scan(t, alias),
+                    ..Default::default()
+                })
+                .collect();
+            TableRef::union_all(queries, alias)
+        };
         new_ctes.push(Cte::new(
             &hop_name,
             Query {
@@ -982,7 +1010,7 @@ fn inject_hop_frontiers(
                     Expr::col(alias, next_col),
                     DEFAULT_PRIMARY_KEY,
                 )],
-                from: TableRef::scan(edge_table, alias),
+                from,
                 where_clause: anchor_filter,
                 ..Default::default()
             },

@@ -20,7 +20,7 @@ The Knowledge Graph data is stored in ClickHouse graph tables that are separate 
 
 ## Concepts to Know
 
-- **Unified ontology and shared graph primitives**: Both the Code Graph and the SDLC Graph use the same ontology-driven entity and relationship model defined in `config/ontology/`, the same shared edge table (`gl_edge`), and the same ClickHouse graph schema in `config/graph.sql`. This allows linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` from the Code Graph).
+- **Unified ontology and shared graph primitives**: Both the Code Graph and the SDLC Graph use the same ontology-driven entity and relationship model defined in `config/ontology/` and the same ClickHouse graph schema in `config/graph.sql`. Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`); each edge YAML can set a `table:` field to route specific relationship types to dedicated tables. This allows linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` from the Code Graph).
 - **Entity as Node**: Every entity in the GitLab ecosystem (e.g., Project, Issue, File, Function Definition) is represented as a node.
 - **Interaction as Edge**: Relationships between these entities (e.g., a User `COMMENTS_ON` an Issue, a `File` `CONTAINS` a `Definition`) are represented as directed edges.
 
@@ -171,4 +171,4 @@ graph TD
 
 ## Cross-Graph Relationships
 
-The `Project` and `Branch` nodes bridge the SDLC and Code graphs. A `Project` exists in the SDLC graph, while a `Branch` belongs to that project via `IN_PROJECT` and contains the root-level `Directory` and `File` nodes via `CONTAINS`. Because the current schema stores both SDLC and code relationships in the same `gl_edge` table, cross-graph queries can traverse shared project, branch, and review entities without switching storage systems.
+The `Project` and `Branch` nodes bridge the SDLC and Code graphs. A `Project` exists in the SDLC graph, while a `Branch` belongs to that project via `IN_PROJECT` and contains the root-level `Directory` and `File` nodes via `CONTAINS`. Cross-graph queries can traverse shared project, branch, and review entities even when edges live in different physical tables, because the compiler emits `UNION ALL` across all relevant edge tables for wildcard and multi-table relationship queries.

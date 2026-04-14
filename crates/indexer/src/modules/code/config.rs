@@ -35,6 +35,8 @@ impl CodeTableNames {
                 ontology.table_name("ImportedSymbol")?,
                 *SCHEMA_VERSION,
             ),
+            // TODO(multi-edge-tables, #454): switch to
+            // ontology.edge_table_for_relationship("DEFINES") when gl_code_edge is declared
             edge: prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION),
         })
     }

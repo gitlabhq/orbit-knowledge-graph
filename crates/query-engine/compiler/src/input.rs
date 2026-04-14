@@ -95,6 +95,10 @@ pub struct CompilerMetadata {
     pub edge_tables: HashSet<String>,
     /// Default edge table name for creating new edge scans.
     pub default_edge_table: String,
+    /// Maps relationship kind → edge table name. Populated by normalize from
+    /// `EdgeEntity.destination_table`. Used by lower/optimize to route each
+    /// relationship's scan to the correct physical table.
+    pub edge_table_for_rel: HashMap<String, String>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -105,7 +109,35 @@ impl Default for CompilerMetadata {
             node_edge_col: HashMap::new(),
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
+            edge_table_for_rel: HashMap::new(),
         }
+    }
+}
+
+impl CompilerMetadata {
+    /// Resolve the edge table(s) for a relationship's type list.
+    ///
+    /// Returns a deduplicated list of physical tables that need to be scanned.
+    /// - Single table → caller emits a normal `edge_scan`
+    /// - Multiple tables → caller emits a UNION ALL across tables
+    ///
+    /// Wildcards and empty type lists resolve to all declared edge tables.
+    pub fn resolve_edge_tables(&self, types: &[String]) -> Vec<String> {
+        if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+            let mut tables: Vec<String> = self.edge_tables.iter().cloned().collect();
+            tables.sort();
+            return tables;
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for t in types {
+            let table = self
+                .edge_table_for_rel
+                .get(t)
+                .map(|s| s.as_str())
+                .unwrap_or(&self.default_edge_table);
+            seen.insert(table.to_string());
+        }
+        seen.into_iter().collect()
     }
 }
 
