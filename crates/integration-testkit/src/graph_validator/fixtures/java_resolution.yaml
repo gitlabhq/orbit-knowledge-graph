@@ -1,0 +1,47 @@
+name: Java call resolution
+fixtures:
+  - path: com/example/Service.java
+    content: |
+      package com.example;
+
+      public class Service {
+          public void process() {}
+          public void run() {
+              process();
+          }
+      }
+  - path: com/example/App.java
+    content: |
+      package com.example;
+
+      public class App {
+          public void main() {
+              new Service();
+          }
+      }
+
+tests:
+  - name: Same-class method call resolves
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'process'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - non_empty: true
+
+  - name: Cross-file constructor call resolves
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path <> callee.file_path
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - non_empty: true
+
+  - name: Package scoping produces correct FQNs
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Service'
+      RETURN d.fqn AS fqn
+    assert:
+      - non_empty: true
+      - all_match: { field: fqn, pattern: "com.example.*" }

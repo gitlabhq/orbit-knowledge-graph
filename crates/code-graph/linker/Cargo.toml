@@ -13,8 +13,12 @@ path = "src/lib.rs"
 test-utils = []
 
 [dependencies]
+code-graph-config = { path = "../config" }
+code-graph-types = { path = "../types" }
+treesitter-visit = { path = "../treesitter-visit" }
 parser-core = { path = "../parser" }
 gkg-utils = { path = "../../utils" }
+petgraph = { workspace = true }
 arrow = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }

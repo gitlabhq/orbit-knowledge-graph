@@ -1,0 +1,28 @@
+name: "Python: self.method() intra-class call"
+fixtures:
+  - path: main.py
+    content: |
+      class MyClass:
+          def method1(self):
+              self.method2()
+
+          def method2(self):
+              pass
+
+tests:
+  - name: self.method2() resolves within class
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'method1' AND callee.name = 'method2'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: Both methods in same file
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'method1' AND callee.name = 'method2'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { all_match: { field: src, pattern: "main.py" } }
+      - { all_match: { field: tgt, pattern: "main.py" } }

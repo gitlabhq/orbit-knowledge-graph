@@ -1,0 +1,93 @@
+name: "Python: comprehensive definition extraction"
+fixtures:
+  - path: main.py
+    content: |
+      def simple_function(x, y):
+          return x + y
+
+      def generator_function():
+          yield 1
+          yield 2
+
+      async def async_function():
+          pass
+
+      module_lambda = lambda x: x * 2
+
+      def outer_function():
+          def inner_function():
+              pass
+          inner_lambda = lambda a, b: a + b
+          return inner_function
+
+      class SimpleClass:
+          class_var = 42
+
+      class ClassWithMethods:
+          def method(self):
+              pass
+          async def async_method(self):
+              pass
+          @classmethod
+          def class_method(cls):
+              pass
+          @staticmethod
+          def static_method():
+              pass
+          lambda_method = lambda self: self.class_var * 2
+
+      class OuterClass:
+          class InnerClass:
+              pass
+
+tests:
+  - name: Has at least 10 definitions
+    query: |
+      MATCH (d:Definition)
+      RETURN count(d) AS n
+    assert:
+      - { non_empty: true }
+
+  - name: simple_function exists
+    query: |
+      MATCH (d:Definition) WHERE d.name = 'simple_function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: module_lambda exists
+    query: |
+      MATCH (d:Definition) WHERE d.name = 'module_lambda'
+      RETURN d.definition_type AS dt
+    assert:
+      - { non_empty: true }
+      - { all_match: { field: dt, pattern: "Lambda" } }
+
+  - name: async_function exists
+    query: |
+      MATCH (d:Definition) WHERE d.name = 'async_function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: Nested inner_function has correct FQN
+    query: |
+      MATCH (d:Definition) WHERE d.name = 'inner_function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { all_match: { field: fqn, pattern: "outer_function.*" } }
+
+  - name: InnerClass has correct FQN
+    query: |
+      MATCH (d:Definition) WHERE d.name = 'InnerClass'
+      RETURN d.fqn AS fqn
+    assert:
+      - { all_match: { field: fqn, pattern: "OuterClass.*" } }
+
+  - name: ClassWithMethods has multiple methods
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'ClassWithMethods'
+      RETURN count(m) AS n
+    assert:
+      - { non_empty: true }

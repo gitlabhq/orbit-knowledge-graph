@@ -1,0 +1,53 @@
+name: Structural invariants
+fixtures:
+  - path: service.py
+    content: |
+      class UserService:
+          def get_user(self, id):
+              return id
+          def create_user(self, name):
+              user = self.get_user(name)
+              return user
+  - path: main.py
+    content: |
+      from service import UserService
+      svc = UserService()
+      svc.create_user("alice")
+
+tests:
+  - name: No self-referencing call edges
+    query: |
+      MATCH (d:Definition)-[:DefinitionToDefinition]->(d2:Definition)
+      WHERE d.id = d2.id
+      RETURN d.fqn AS self_caller
+    assert:
+      - { empty: true }
+
+  - name: Graph has expected file count
+    query: |
+      MATCH (f:File)
+      RETURN count(f) AS n
+    assert:
+      - { count_equals: { field: n, value: 2 } }
+      - { non_empty: true }
+
+  - name: Graph has definitions
+    query: |
+      MATCH (d:Definition)
+      RETURN count(d) AS n
+    assert:
+      - { non_empty: true }
+
+  - name: Directory to file edges exist
+    query: |
+      MATCH (d:Directory)-[:DirectoryToFile]->(f:File)
+      RETURN d.path AS dir, f.path AS file
+    assert:
+      - { non_empty: true }
+
+  - name: File to definition edges exist
+    query: |
+      MATCH (f:File)-[:FileToDefinition]->(d:Definition)
+      RETURN f.path AS file, d.name AS def
+    assert:
+      - { non_empty: true }

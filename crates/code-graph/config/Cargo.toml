@@ -1,0 +1,13 @@
+[package]
+name = "code-graph-config"
+version.workspace = true
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+strum = { workspace = true }
+treesitter-visit = { path = "../treesitter-visit", features = ["builtin-parser"] }

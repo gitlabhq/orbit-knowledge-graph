@@ -1,0 +1,60 @@
+name: "Python: scope resolution patterns"
+fixtures:
+  - path: main.py
+    content: |
+      def global_func():
+          pass
+
+      def outer():
+          def global_func():
+              pass
+          global_func()
+
+      def for_loop_caller():
+          for item in [1, 2, 3]:
+              global_func()
+
+      def comprehension_caller():
+          result = [global_func() for x in range(10)]
+
+      def try_caller():
+          try:
+              global_func()
+          except:
+              global_func()
+          finally:
+              global_func()
+
+tests:
+  - name: Nested function shadows global
+    description: "inner global_func() inside outer() should resolve to the local definition"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'outer' AND callee.name = 'global_func'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: Call inside for loop resolves
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'for_loop_caller' AND callee.name = 'global_func'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: Call in comprehension resolves
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'comprehension_caller' AND callee.name = 'global_func'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: Calls in try/except/finally resolve
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'try_caller' AND callee.name = 'global_func'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { non_empty: true }

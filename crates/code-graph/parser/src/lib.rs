@@ -10,6 +10,7 @@ pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024; // 128 KiB
 pub mod analyzer;
 pub mod csharp;
 pub mod definitions;
+pub mod dsl;
 pub mod fqn;
 pub mod imports;
 pub mod java;
@@ -21,6 +22,7 @@ pub mod ruby;
 pub mod rust;
 pub mod typescript;
 pub mod utils;
+pub mod v2;
 
 // Re-export commonly used types
 pub use analyzer::{AnalysisResult, Analyzer};

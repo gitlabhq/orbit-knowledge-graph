@@ -1,0 +1,33 @@
+name: Python call resolution
+fixtures:
+  - path: utils.py
+    content: |
+      def helper():
+          pass
+
+      def unused():
+          pass
+  - path: main.py
+    content: |
+      from utils import helper
+
+      def run():
+          helper()
+
+tests:
+  - name: Cross-file call edge exists
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path <> callee.file_path
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - non_empty: true
+
+  - name: helper() resolves to utils.helper
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'helper'
+      RETURN callee.file_path AS file
+    assert:
+      - non_empty: true
+      - all_match: { field: file, pattern: "utils.py" }
