@@ -14,7 +14,7 @@ regenerate-protos = []
 testkit = ["clickhouse-client/testkit"]
 
 [dependencies]
-mimalloc = { workspace = true, features = ["secure", "v3"] }
+mimalloc = { workspace = true, features = ["secure"] }
 anyhow = { workspace = true }
 arrow = { workspace = true }
 base64 = { workspace = true }
