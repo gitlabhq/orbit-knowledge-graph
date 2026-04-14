@@ -1,6 +1,7 @@
 use code_graph_config::{Language, detect_language_from_extension};
 use code_graph_types::CanonicalParser;
 use ignore::WalkBuilder;
+use indicatif::{ProgressBar, ProgressStyle};
 use parser_core::dsl::types::{DslLanguage, DslParser};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -11,6 +12,25 @@ use crate::linker::v2::walker::{FileWalkResult, HasRoot};
 use crate::linker::v2::{
     CodeGraph, GraphBuilder, GraphEdge, HasRules, ResolutionContext, build_edges,
 };
+
+fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
+    let pb = ProgressBar::new(len);
+    pb.set_style(
+        ProgressStyle::with_template("{prefix} [{bar:40}] {pos}/{len} ({per_sec}, {eta})")
+            .unwrap()
+            .progress_chars("█▓░"),
+    );
+    pb.set_prefix(prefix.to_string());
+    pb
+}
+
+fn spinner(msg: &str) -> ProgressBar {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
+    pb.set_message(msg.to_string());
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+    pb
+}
 use crate::v2::langs::csharp::CSharpDsl;
 use crate::v2::langs::java::{JavaDsl, JavaRules};
 use crate::v2::langs::kotlin::{KotlinDsl, KotlinRules};
@@ -52,12 +72,10 @@ where
     ) -> Result<CodeGraph, Vec<PipelineError>> {
         let parser = P::default();
         let rules = R::rules();
+        let file_count = files.len();
 
         // ── Parallel phase: parse + walk each file, drop AST ────
-        //
-        // Each rayon task: parse → walk AST → return (CanonicalResult, FileWalkResult).
-        // AST is dropped at end of closure. Only the canonical data and SSA
-        // state survive for the sequential phase.
+        let pb = progress_bar(file_count as u64, "Parse + walk");
         let file_outputs: Vec<_> = files
             .par_iter()
             .enumerate()
@@ -72,11 +90,12 @@ where
                 } else {
                     FileWalkResult::empty()
                 };
-                // AST dropped here
 
+                pb.inc(1);
                 Ok((result, walk))
             })
             .collect();
+        pb.finish_with_message(format!("Parsed {file_count} files"));
 
         // ── Collect results ─────────────────────────────────────
         let mut results = Vec::with_capacity(file_outputs.len());
@@ -98,8 +117,17 @@ where
         }
 
         // ── Sequential phase: indexes + resolution + graph ──────
+        let pb_resolve = spinner("Building indexes + resolving...");
         let ctx = ResolutionContext::build(results, root_path.to_string());
         let resolved_edges = build_edges(&rules, &ctx, &mut walks);
+        pb_resolve.finish_with_message(format!(
+            "Resolved {} edges from {} definitions",
+            resolved_edges.len(),
+            ctx.results
+                .iter()
+                .map(|r| r.definitions.len())
+                .sum::<usize>()
+        ));
 
         let mut builder = GraphBuilder::new(root_path.to_string());
         for result in &ctx.results {
@@ -251,7 +279,17 @@ impl Pipeline {
         let root_str = root.to_string_lossy().to_string();
 
         // 1. Walk filesystem, group files by language
+        let pb_discover = spinner("Discovering files...");
         let files_by_language = self.walk_and_group(root);
+        let total_files: usize = files_by_language.values().map(|f| f.len()).sum();
+        let lang_summary: Vec<String> = files_by_language
+            .iter()
+            .map(|(l, f)| format!("{l}: {}", f.len()))
+            .collect();
+        pb_discover.finish_with_message(format!(
+            "Found {total_files} files ({})",
+            lang_summary.join(", ")
+        ));
 
         // 2. Process each language through its pipeline
         let mut all_graphs: Vec<CodeGraph> = Vec::new();
@@ -273,10 +311,6 @@ impl Pipeline {
                 }
                 None => {
                     files_skipped += file_count;
-                    all_errors.push(PipelineError {
-                        file_path: String::new(),
-                        error: format!("Language {language} not yet supported in v2 pipeline"),
-                    });
                 }
             }
         }

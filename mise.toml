@@ -200,7 +200,7 @@ description = "Run code indexing benchmark"
 depends = ["bench:download-repos"]
 run = """
 cargo build --bin orbit --release --features duckdb-client/bundled
-for repo in temp/*/; do
+for repo in output/repos/*/; do
   name=$(basename "$repo")
   echo "=== Indexing $name with v2 ==="
   ./target/release/orbit index "$repo" --v2 --stats 2>&1 || echo "FAILED: $name"

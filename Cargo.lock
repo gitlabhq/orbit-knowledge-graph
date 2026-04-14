@@ -2123,6 +2123,7 @@ dependencies = [
  "code-graph-linker",
  "code-graph-types",
  "ignore",
+ "indicatif",
  "log",
  "parser-core",
  "petgraph 0.8.3",
