@@ -6,7 +6,7 @@ use treesitter_visit::{Node, SupportLang};
 use code_graph_config::Language;
 use code_graph_types::{
     CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind,
-    DefinitionMetadata, Fqn, ReferenceStatus,
+    DefinitionMetadata, ExpressionStep, Fqn, ReferenceStatus,
 };
 
 use crate::utils::node_to_range;
@@ -23,13 +23,16 @@ struct ScopeMatch {
 }
 
 impl LanguageSpec {
-    /// Parse source bytes into a `CanonicalResult`.
+    /// Parse source bytes into a `CanonicalResult` and the retained AST.
     pub fn parse_canonical(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
-    ) -> crate::Result<CanonicalResult> {
+    ) -> crate::Result<(
+        CanonicalResult,
+        treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>,
+    )> {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
@@ -58,7 +61,7 @@ impl LanguageSpec {
             .map(|(_, ext)| ext.to_string())
             .unwrap_or_default();
 
-        Ok(CanonicalResult {
+        let result = CanonicalResult {
             file_path: file_path.to_string(),
             extension,
             file_size: source.len() as u64,
@@ -67,7 +70,9 @@ impl LanguageSpec {
             imports,
             references: refs,
             bindings,
-        })
+        };
+
+        Ok((result, ast))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -125,7 +130,7 @@ impl LanguageSpec {
             });
         }
 
-        if let Some((name, range)) = self.evaluate_reference(node, &node_kind) {
+        if let Some((name, range, expression)) = self.evaluate_reference(node, &node_kind) {
             refs.push(CanonicalReference {
                 reference_type: "Call",
                 name,
@@ -133,7 +138,7 @@ impl LanguageSpec {
                 scope_fqn: Fqn::from_scope_only(scope_stack, sep),
                 status: ReferenceStatus::Unresolved,
                 target_fqn: None,
-                expression: None,
+                expression,
             });
         }
 
@@ -194,10 +199,117 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-    ) -> Option<(String, crate::utils::Range)> {
+    ) -> Option<(String, crate::utils::Range, Option<Vec<ExpressionStep>>)> {
         let rule = self.refs.iter().find(|r| r.matches(node, node_kind))?;
         let name = rule.extract_name(node)?;
-        Some((name, node_to_range(node)))
+
+        // Build expression chain if the rule declares an object field
+        // and the spec has a ChainConfig
+        let expression = rule
+            .receiver_extract
+            .as_ref()
+            .zip(self.chain_config.as_ref())
+            .and_then(|(extract, cc)| {
+                let receiver_node = match extract {
+                    crate::dsl::types::ReceiverExtract::Field(f) => node.field(f),
+                    crate::dsl::types::ReceiverExtract::FieldChain(fields) => {
+                        let mut current = Some(node.clone());
+                        for &f in fields.iter() {
+                            current = current.and_then(|n| n.field(f));
+                        }
+                        current
+                    }
+                }?;
+                let mut chain = Vec::new();
+                self.build_expression_chain(&receiver_node, &mut chain, cc);
+                chain.push(ExpressionStep::Call(name.clone()));
+                if chain.len() > 1 { Some(chain) } else { None }
+            });
+
+        Some((name, node_to_range(node), expression))
+    }
+
+    /// Recursively walk a receiver expression, building the chain
+    /// from innermost (base) to outermost (final call).
+    /// All node kind recognition is driven by `ChainConfig`.
+    fn build_expression_chain(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        chain: &mut Vec<ExpressionStep>,
+        cc: &crate::dsl::types::ChainConfig,
+    ) {
+        let kind = node.kind();
+        let kind_ref = kind.as_ref();
+
+        // Identifier base
+        if cc.ident_kinds.contains(&kind_ref) {
+            chain.push(ExpressionStep::Ident(node.text().to_string()));
+            return;
+        }
+
+        // this/self
+        if cc.this_kinds.contains(&kind_ref) {
+            chain.push(ExpressionStep::This);
+            return;
+        }
+
+        // super
+        if cc.super_kinds.contains(&kind_ref) {
+            chain.push(ExpressionStep::Super);
+            return;
+        }
+
+        // Constructor (new Foo())
+        for &(ctor_kind, type_field) in cc.constructor {
+            if kind_ref == ctor_kind {
+                if let Some(type_node) = node.field(type_field) {
+                    chain.push(ExpressionStep::New(type_node.text().to_string()));
+                }
+                return;
+            }
+        }
+
+        // Field access (obj.field)
+        for &(fa_kind, obj_field, member_field) in cc.field_access {
+            if kind_ref == fa_kind {
+                if let Some(obj) = node.field(obj_field) {
+                    self.build_expression_chain(&obj, chain, cc);
+                }
+                if let Some(field) = node.field(member_field) {
+                    chain.push(ExpressionStep::Field(field.text().to_string()));
+                }
+                return;
+            }
+        }
+
+        // Call expression with object field (method_invocation, call_expression)
+        if let Some(rule) = self.refs.iter().find(|r| r.kind() == kind_ref) {
+            if let Some(extract) = &rule.receiver_extract {
+                let receiver_node = match extract {
+                    crate::dsl::types::ReceiverExtract::Field(f) => node.field(f),
+                    crate::dsl::types::ReceiverExtract::FieldChain(fields) => {
+                        let mut current = Some(node.clone());
+                        for &f in fields.iter() {
+                            current = current.and_then(|n| n.field(f));
+                        }
+                        current
+                    }
+                };
+                if let Some(recv) = receiver_node {
+                    self.build_expression_chain(&recv, chain, cc);
+                }
+            }
+            if let Some(name) = rule.extract_name(node) {
+                chain.push(ExpressionStep::Call(name));
+            }
+            return;
+        }
+
+        // Fallback: treat as identifier
+        let text = node.text().to_string();
+        if !text.is_empty() {
+            chain.push(ExpressionStep::Ident(text));
+        }
     }
 
     fn evaluate_imports(
@@ -230,6 +342,7 @@ impl LanguageSpec {
                             alias,
                             scope_fqn: None,
                             range,
+                            wildcard: false,
                         });
                     }
                 } else if child_kinds.iter().any(|&k| k == ck.as_ref()) {
@@ -249,15 +362,17 @@ impl LanguageSpec {
                         alias: None,
                         scope_fqn: None,
                         range,
+                        wildcard: false,
                     });
-                } else if ck == "wildcard_import" {
+                } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
                     imports.push(CanonicalImport {
-                        import_type: "WildcardImport",
+                        import_type: label,
                         path: base_path.clone(),
-                        name: Some("*".to_string()),
+                        name: Some(rule.wildcard_symbol.to_string()),
                         alias: None,
                         scope_fqn: None,
                         range,
+                        wildcard: true,
                     });
                 }
             }
@@ -267,6 +382,7 @@ impl LanguageSpec {
             } else {
                 (full_path, rule.extract_symbol(node))
             };
+            let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
             imports.push(CanonicalImport {
                 import_type: label,
                 path,
@@ -274,6 +390,7 @@ impl LanguageSpec {
                 alias: rule.extract_alias(node),
                 scope_fqn: None,
                 range,
+                wildcard: is_wildcard,
             });
         }
     }
@@ -297,6 +414,7 @@ mod tests {
     fn parse_with(spec: &LanguageSpec, code: &str) -> CanonicalResult {
         spec.parse_canonical(code.as_bytes(), "test.py", Language::Python)
             .unwrap()
+            .0
     }
 
     #[test]

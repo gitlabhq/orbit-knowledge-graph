@@ -1,10 +1,12 @@
 use crate::linker::v2::reaching::HasRules;
 use crate::linker::v2::rules::*;
+use parser_core::dsl::types::DslLanguage;
+use parser_core::v2::langs::python::PythonDsl;
 
 pub struct PythonRules;
 
 impl HasRules for PythonRules {
-    fn default_rules() -> ResolutionRules {
+    fn rules() -> ResolutionRules {
         ResolutionRules {
             name: "python",
 
@@ -27,7 +29,7 @@ impl HasRules for PythonRules {
                 ]),
                 branch("match_statement")
                     .branches(&["case_clause"])
-                    .catch_all("case_clause"), // default case detected by `_` pattern
+                    .catch_all("case_clause"),
                 branch("conditional_expression").branches(&[]),
             ],
 
@@ -42,22 +44,23 @@ impl HasRules for PythonRules {
 
             bindings: vec![
                 binding("assignment", BindingKind::Assignment)
-                    .name_from("left")
-                    .value_from("right"),
+                    .name_from(&["left"])
+                    .value_from("right")
+                    .instance_attrs(&["self."]),
                 binding("augmented_assignment", BindingKind::Assignment)
-                    .name_from("left")
+                    .name_from(&["left"])
                     .no_value(),
                 binding("named_expression", BindingKind::Assignment)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .value_from("value"),
                 binding("delete_statement", BindingKind::Deletion)
-                    .name_from("argument")
+                    .name_from(&["argument"])
                     .no_value(),
                 binding("for_in_clause", BindingKind::ForTarget)
-                    .name_from("left")
+                    .name_from(&["left"])
                     .no_value(),
                 binding("with_item", BindingKind::WithAlias)
-                    .name_from("value")
+                    .name_from(&["value"])
                     .no_value(),
             ],
 
@@ -78,6 +81,10 @@ impl HasRules for PythonRules {
                 staticmethod_decorators: &["staticmethod"],
             },
             fqn_separator: ".",
+            self_names: &["self"],
+            super_name: Some("super"),
+            implicit_member_lookup: false,
+            language_spec: Some(PythonDsl::spec()),
         }
     }
 }

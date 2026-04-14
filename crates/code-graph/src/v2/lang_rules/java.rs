@@ -1,10 +1,12 @@
 use crate::linker::v2::reaching::HasRules;
 use crate::linker::v2::rules::*;
+use parser_core::dsl::types::DslLanguage;
+use parser_core::v2::langs::java::JavaDsl;
 
 pub struct JavaRules;
 
 impl HasRules for JavaRules {
-    fn default_rules() -> ResolutionRules {
+    fn rules() -> ResolutionRules {
         ResolutionRules {
             name: "java",
 
@@ -32,6 +34,10 @@ impl HasRules for JavaRules {
                 ]),
                 branch("switch_expression")
                     .branches(&["switch_block_statement_group", "switch_rule"]),
+                branch("switch_statement").branches(&["switch_block_statement_group"]),
+                branch("ternary_expression")
+                    .branches(&["consequence", "alternative"])
+                    .catch_all("alternative"),
             ],
 
             loops: vec![
@@ -43,15 +49,21 @@ impl HasRules for JavaRules {
 
             bindings: vec![
                 binding("local_variable_declaration", BindingKind::Assignment)
-                    .name_from("declarator"),
+                    .name_from(&["declarator", "name"]),
+                binding("field_declaration", BindingKind::Assignment)
+                    .name_from(&["declarator", "name"])
+                    .instance_attrs(&["this."]),
                 binding("formal_parameter", BindingKind::Parameter)
-                    .name_from("name")
+                    .name_from(&["name"])
+                    .no_value(),
+                binding("catch_formal_parameter", BindingKind::Parameter)
+                    .name_from(&["name"])
                     .no_value(),
                 binding("resource", BindingKind::Assignment)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .value_from("value"),
                 binding("assignment_expression", BindingKind::Assignment)
-                    .name_from("left")
+                    .name_from(&["left"])
                     .value_from("right"),
             ],
 
@@ -69,9 +81,19 @@ impl HasRules for JavaRules {
                 ImportStrategy::GlobalName { max_candidates: 3 },
             ],
 
-            chain_mode: ChainMode::TypeFlow,
+            chain_mode: ChainMode::TypeFlow {
+                type_fields: &["type"],
+                skip_types: &[
+                    "int", "long", "short", "byte", "float", "double", "boolean", "char", "void",
+                    "String",
+                ],
+            },
             receiver: ReceiverMode::Keyword,
             fqn_separator: ".",
+            self_names: &["this", "self"],
+            super_name: Some("super"),
+            implicit_member_lookup: true,
+            language_spec: Some(JavaDsl::spec()),
         }
     }
 }

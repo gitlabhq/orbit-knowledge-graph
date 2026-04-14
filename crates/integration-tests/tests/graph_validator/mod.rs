@@ -73,11 +73,14 @@ yaml_test!(
     "python/aliased_and_partial.yaml"
 );
 yaml_test!(python_call_resolution, "python_resolution.yaml");
+yaml_test!(python_type_flow, "python/type_flow.yaml");
 
 // ── Java ────────────────────────────────────────────────────────
 yaml_test!(java_call_resolution, "java_resolution.yaml");
 yaml_test!(java_intrafile_resolution, "java/intrafile_resolution.yaml");
 yaml_test!(java_interfile_resolution, "java/interfile_resolution.yaml");
+yaml_test!(java_type_flow, "java/type_flow.yaml");
+yaml_test!(java_cross_file_type_flow, "java/cross_file_type_flow.yaml");
 
 // ── Kotlin ──────────────────────────────────────────────────────
 yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");

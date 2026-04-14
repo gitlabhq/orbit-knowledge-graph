@@ -1,50 +1,239 @@
-name: "Python: conditional and try/except bindings"
+name: "Python: conditional bindings — phi nodes at branch merge points"
 fixtures:
   - path: main.py
     content: |
-      # D9/D24: conditional binding
       def option_a():
           pass
 
       def option_b():
           pass
 
-      def conditional_caller():
-          if True:
-              chosen = option_a
-          else:
-              chosen = option_b
-          chosen()
+      def option_c():
+          pass
 
-      # D15: try/except binding
       def foo():
           pass
 
       def bar():
           pass
 
-      def try_caller():
+      # ── if/else: phi with two distinct values ──────────────
+      def if_else_caller():
+          if True:
+              chosen = option_a
+          else:
+              chosen = option_b
+          chosen()
+
+      # ── try/except: phi with two distinct values ───────────
+      def try_except_caller():
           try:
               x = foo
           except:
               x = bar
           x()
 
-tests:
-  - name: "D9: conditional binding produces call edge(s)"
-    description: "chosen() may resolve to option_a, option_b, or both (ambiguous)"
-    query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'conditional_caller'
-      RETURN callee.name AS callee
-    assert:
-      - { non_empty: true }
+      # ── trivial phi: same value both branches → collapse ───
+      def trivial_phi_caller():
+          if True:
+              y = foo
+          else:
+              y = foo
+          y()
 
-  - name: "D15: try/except binding produces call edge(s)"
-    description: "x() may resolve to foo, bar, or both (ambiguous)"
-    query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'try_caller'
-      RETURN callee.name AS callee
-    assert:
-      - { non_empty: true }
+      # ── if without else (no catch-all): pre-block also flows
+      # to merge, so if x was defined before, it's still reachable
+      def no_else_caller():
+          x = foo
+          if True:
+              x = bar
+          x()
+
+      # ── reassignment after branch kills the phi ────────────
+      def reassign_after_branch():
+          if True:
+              z = option_a
+          else:
+              z = option_b
+          z = option_c
+          z()
+
+      # ── nested if/else: three-way phi ──────────────────────
+      def nested_caller():
+          if True:
+              w = option_a
+          else:
+              if True:
+                  w = option_b
+              else:
+                  w = option_c
+          w()
+
+      # ── elif chain ─────────────────────────────────────────
+      def elif_caller():
+          if True:
+              v = option_a
+          elif True:
+              v = option_b
+          else:
+              v = option_c
+          v()
+
+      # ── unrelated function should have zero edges ──────────
+      def no_calls():
+          x = 42
+
+tests:
+  # ── if/else phi ────────────────────────────────────────────
+  - name: "if/else: exactly 2 edges, both correct"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'if_else_caller'
+          RETURN caller.fqn AS caller_fqn, callee.name AS callee, callee.fqn AS callee_fqn
+          ORDER BY callee
+        assert:
+          - { row_count: 2 }
+          - { contains_row: { caller_fqn: "if_else_caller", callee: "option_a", callee_fqn: "option_a" } }
+          - { contains_row: { caller_fqn: "if_else_caller", callee: "option_b", callee_fqn: "option_b" } }
+      # false positive: no edge to option_c, foo, bar, or any other def
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'if_else_caller'
+            AND NOT callee.name IN ['option_a', 'option_b']
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  # ── try/except phi ────────────────────────────────────────
+  - name: "try/except: exactly 2 edges, both correct"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'try_except_caller'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+          ORDER BY callee
+        assert:
+          - { row_count: 2 }
+          - { contains_row: { callee: "bar", callee_fqn: "bar" } }
+          - { contains_row: { callee: "foo", callee_fqn: "foo" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'try_except_caller'
+            AND NOT callee.name IN ['foo', 'bar']
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  # ── trivial phi collapse ──────────────────────────────────
+  - name: "trivial phi: exactly 1 edge (collapsed)"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'trivial_phi_caller'
+          RETURN callee.name AS callee
+        assert:
+          - { row_count: 1 }
+          - { contains_row: { callee: "foo" } }
+
+  # ── if without else ───────────────────────────────────────
+  - name: "no else: exactly 2 edges (pre-branch + if-branch)"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'no_else_caller'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row_count: 2 }
+          - { contains_row: { callee: "bar" } }
+          - { contains_row: { callee: "foo" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'no_else_caller'
+            AND NOT callee.name IN ['foo', 'bar']
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  # ── reassignment after branch ─────────────────────────────
+  - name: "reassignment kills phi: exactly 1 edge to final value"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'reassign_after_branch'
+          RETURN callee.name AS callee
+        assert:
+          - { row_count: 1 }
+          - { contains_row: { callee: "option_c" } }
+      # false positive: phi targets should NOT survive reassignment
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'reassign_after_branch'
+            AND callee.name IN ['option_a', 'option_b']
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  # ── nested if/else ────────────────────────────────────────
+  - name: "nested: exactly 3 edges (outer-if + inner-if + inner-else)"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'nested_caller'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row_count: 3 }
+          - { contains_row: { callee: "option_a" } }
+          - { contains_row: { callee: "option_b" } }
+          - { contains_row: { callee: "option_c" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'nested_caller'
+            AND NOT callee.name IN ['option_a', 'option_b', 'option_c']
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  # ── elif chain ─────────────────────────────────────────────
+  - name: "elif: exactly 3 edges"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'elif_caller'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row_count: 3 }
+          - { contains_row: { callee: "option_a" } }
+          - { contains_row: { callee: "option_b" } }
+          - { contains_row: { callee: "option_c" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'elif_caller'
+            AND NOT callee.name IN ['option_a', 'option_b', 'option_c']
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  # ── no-call function ───────────────────────────────────────
+  - name: "no_calls: zero outgoing edges"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'no_calls'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  # ── global: no duplicate edges anywhere in the file ────────
+  - name: "no duplicate edges in entire file"
+    queries:
+      - query: |
+          MATCH (src:Definition)-[e:DefinitionToDefinition]->(tgt:Definition)
+          WITH src.name AS caller, tgt.name AS callee, count(*) AS cnt
+          WHERE cnt > 1
+          RETURN caller, callee, cnt
+        assert:
+          - { empty: true }
