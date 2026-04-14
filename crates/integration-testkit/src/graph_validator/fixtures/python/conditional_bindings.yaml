@@ -1,8 +1,7 @@
-name: "Python: conditional and try/except bindings"
+name: "Python: conditional and try/except bindings (phi nodes)"
 fixtures:
   - path: main.py
     content: |
-      # D9/D24: conditional binding
       def option_a():
           pass
 
@@ -16,7 +15,6 @@ fixtures:
               chosen = option_b
           chosen()
 
-      # D15: try/except binding
       def foo():
           pass
 
@@ -30,21 +28,44 @@ fixtures:
               x = bar
           x()
 
-tests:
-  - name: "D9: conditional binding produces call edge(s)"
-    description: "chosen() may resolve to option_a, option_b, or both (ambiguous)"
-    query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'conditional_caller'
-      RETURN callee.name AS callee
-    assert:
-      - { non_empty: true }
+      def same_both_branches():
+          if True:
+              y = foo
+          else:
+              y = foo
+          y()
 
-  - name: "D15: try/except binding produces call edge(s)"
-    description: "x() may resolve to foo, bar, or both (ambiguous)"
-    query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'try_caller'
-      RETURN callee.name AS callee
-    assert:
-      - { non_empty: true }
+tests:
+  - name: "if/else: chosen() resolves to BOTH option_a and option_b via phi"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'conditional_caller'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row_count: 2 }
+          - { contains_row: { callee: "option_a" } }
+          - { contains_row: { callee: "option_b" } }
+
+  - name: "try/except: x() resolves to BOTH foo and bar via phi"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'try_caller'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row_count: 2 }
+          - { contains_row: { callee: "bar" } }
+          - { contains_row: { callee: "foo" } }
+
+  - name: "trivial phi: same value in both branches collapses to single edge"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'same_both_branches'
+          RETURN callee.name AS callee
+        assert:
+          - { row_count: 1 }
+          - { contains_row: { callee: "foo" } }

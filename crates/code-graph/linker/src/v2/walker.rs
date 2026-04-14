@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use super::rules::{BindingKind, ResolutionRules, ScopeKind};
+use super::rules::{AstWalkerRules, BindingKind, ScopeKind};
 use super::ssa::{BlockId, SsaResolver, Value};
 
 /// A recorded reference read, linking back to the canonical data.
@@ -28,13 +28,13 @@ pub struct WalkResult {
     pub reads: Vec<RecordedRead>,
 }
 
-/// Walk all files using the given rules and build the SSA graph.
+/// Walk all files and build the SSA graph.
 ///
-/// For files with a retained AST, walks the AST to discover control flow.
-/// For files without an AST, uses a flat single-block model where all
-/// definitions are visible everywhere.
+/// For files with a retained AST, walks the AST using `ast_rules` to
+/// discover control flow. For files without an AST, uses `CanonicalResult`
+/// data directly (definitions, bindings, branches, references).
 pub fn walk_files<A>(
-    rules: &ResolutionRules,
+    ast_rules: Option<&AstWalkerRules>,
     results: &[CanonicalResult],
     asts: &FxHashMap<String, A>,
 ) -> WalkResult
@@ -47,17 +47,15 @@ where
     for (file_idx, result) in results.iter().enumerate() {
         let ast = asts.get(&result.file_path);
 
-        match ast.and_then(|a| a.as_root()) {
-            Some(root) => {
-                // Full AST walk with control flow
+        match (ast.and_then(|a| a.as_root()), ast_rules) {
+            (Some(root), Some(rules)) => {
                 let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result);
                 walker.walk_node(&root);
                 walker.finalize();
                 reads.extend(walker.reads);
             }
-            None => {
-                // No AST: flat model from canonical data
-                walk_flat(rules, &mut ssa, &mut reads, file_idx, result);
+            _ => {
+                walk_flat(&mut ssa, &mut reads, file_idx, result);
             }
         }
     }
@@ -89,14 +87,15 @@ impl AsAst for treesitter_visit::Root<StrDoc<SupportLang>> {
 /// (function/class) so that local bindings don't leak across scopes.
 /// Each scope's block has an edge from its parent scope, so names
 /// defined in outer scopes are visible via SSA's recursive lookup.
+///
+/// When `CanonicalBranch` entries are present, creates separate SSA blocks
+/// for each branch arm and a merge block with phi nodes at the join point.
 fn walk_flat(
-    _rules: &ResolutionRules,
     ssa: &mut SsaResolver,
     reads: &mut Vec<RecordedRead>,
     file_idx: usize,
     result: &CanonicalResult,
 ) {
-    // Build scope hierarchy: scope_fqn → SSA block
     let mut scope_blocks: FxHashMap<String, BlockId> = FxHashMap::default();
 
     // Module-level block (root scope)
@@ -104,8 +103,7 @@ fn walk_flat(
     ssa.seal_block(module_block);
     scope_blocks.insert(String::new(), module_block);
 
-    // Create a block for each definition that creates a scope (functions, classes)
-    // ordered by FQN depth so parents are created before children
+    // Create a block for each definition that creates a scope
     let mut scoped_defs: Vec<(usize, &code_graph_types::CanonicalDefinition)> = result
         .definitions
         .iter()
@@ -124,8 +122,7 @@ fn walk_flat(
 
     for (_def_idx, def) in &scoped_defs {
         let fqn_str = def.fqn.to_string();
-        let parent_fqn: String = def.fqn.parent().map(|p| p.to_string()).unwrap_or_default();
-
+        let parent_fqn = def.fqn.parent().map(|p| p.to_string()).unwrap_or_default();
         let parent_block = scope_blocks
             .get(&parent_fqn)
             .copied()
@@ -155,17 +152,101 @@ fn walk_flat(
         }
     }
 
-    // Process bindings in their scope's block
-    for binding in &result.bindings {
-        let scope_fqn = binding
+    // Build branch blocks for each scope.
+    // branch_blocks maps (scope_fqn, branch_byte_range) → (arm_blocks, merge_block).
+    // After a branch, the scope's "current block" becomes the merge block so that
+    // subsequent bindings/references read from it (picking up phi nodes).
+    //
+    // We track the current block per scope — it starts as the scope block and
+    // advances to merge blocks as we process branches in byte order.
+    let mut current_blocks: FxHashMap<String, BlockId> = scope_blocks.clone();
+
+    // Arm blocks: for each branch, maps arm byte range → arm block
+    struct BranchInfo {
+        arm_ranges: Vec<(usize, usize, BlockId)>, // (start, end, block)
+        merge_block: BlockId,
+        range_end: usize,
+    }
+
+    // Process branches sorted by byte offset, creating blocks
+    let mut branch_infos: Vec<(String, BranchInfo)> = Vec::new();
+    for branch in &result.branches {
+        let scope_key = branch
             .scope_fqn
             .as_ref()
             .map(|f| f.to_string())
             .unwrap_or_default();
-        let block = scope_blocks
-            .get(&scope_fqn)
+        let pre_block = current_blocks
+            .get(&scope_key)
             .copied()
             .unwrap_or(module_block);
+
+        let mut arm_blocks = Vec::new();
+        for arm_range in &branch.arm_ranges {
+            let arm_block = ssa.add_block();
+            ssa.add_predecessor(arm_block, pre_block);
+            ssa.seal_block(arm_block);
+            arm_blocks.push((arm_range.byte_offset.0, arm_range.byte_offset.1, arm_block));
+        }
+
+        let merge_block = ssa.add_block();
+        for &(_, _, arm_block) in &arm_blocks {
+            ssa.add_predecessor(merge_block, arm_block);
+        }
+        // If no catch-all, pre_block also flows to merge (condition might not match)
+        if !branch.has_catch_all {
+            ssa.add_predecessor(merge_block, pre_block);
+        }
+        ssa.seal_block(merge_block);
+
+        // Advance current block for this scope past the branch
+        current_blocks.insert(scope_key.clone(), merge_block);
+
+        branch_infos.push((
+            scope_key,
+            BranchInfo {
+                arm_ranges: arm_blocks,
+                merge_block,
+                range_end: branch.range.byte_offset.1,
+            },
+        ));
+    }
+
+    // Helper: find the correct block for a byte offset within a scope.
+    // Checks if the offset falls inside any branch arm; otherwise uses
+    // the scope's current block (which may be a merge block if after a branch).
+    let find_block =
+        |scope_key: &str, byte_start: usize, scope_blocks: &FxHashMap<String, BlockId>| -> BlockId {
+            // Check if inside a branch arm
+            for (key, info) in &branch_infos {
+                if key != scope_key {
+                    continue;
+                }
+                for &(arm_start, arm_end, arm_block) in &info.arm_ranges {
+                    if byte_start >= arm_start && byte_start < arm_end {
+                        return arm_block;
+                    }
+                }
+                // After the branch but in the same scope → use merge block
+                if byte_start >= info.range_end {
+                    return info.merge_block;
+                }
+            }
+            // Not inside any branch — use the scope's base block
+            scope_blocks
+                .get(scope_key)
+                .copied()
+                .unwrap_or(BlockId(0))
+        };
+
+    // Process bindings — assign each to the correct block based on byte offset
+    for binding in &result.bindings {
+        let scope_key = binding
+            .scope_fqn
+            .as_ref()
+            .map(|f| f.to_string())
+            .unwrap_or_default();
+        let block = find_block(&scope_key, binding.range.byte_offset.0, &scope_blocks);
 
         let value = if let Some(ref val_name) = binding.value {
             let reaching = ssa.read_variable_stateless(val_name, block);
@@ -180,17 +261,14 @@ fn walk_flat(
         ssa.write_variable(&binding.name, block, value);
     }
 
-    // Read references in their scope's block
+    // Read references — assign each to the correct block based on byte offset
     for (ref_idx, reference) in result.references.iter().enumerate() {
-        let scope_fqn = reference
+        let scope_key = reference
             .scope_fqn
             .as_ref()
             .map(|f| f.to_string())
             .unwrap_or_default();
-        let block = scope_blocks
-            .get(&scope_fqn)
-            .copied()
-            .unwrap_or(module_block);
+        let block = find_block(&scope_key, reference.range.byte_offset.0, &scope_blocks);
 
         reads.push(RecordedRead {
             file_idx,
@@ -204,7 +282,7 @@ fn walk_flat(
 // ── AST walker ──────────────────────────────────────────────────
 
 struct FileWalker<'a> {
-    rules: &'a ResolutionRules,
+    rules: &'a AstWalkerRules,
     ssa: &'a mut SsaResolver,
     file_idx: usize,
     result: &'a CanonicalResult,
@@ -222,7 +300,7 @@ struct FileWalker<'a> {
 
 impl<'a> FileWalker<'a> {
     fn new(
-        rules: &'a ResolutionRules,
+        rules: &'a AstWalkerRules,
         ssa: &'a mut SsaResolver,
         file_idx: usize,
         result: &'a CanonicalResult,

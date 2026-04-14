@@ -14,5 +14,5 @@ pub use edges::{EdgeSource, ResolvedEdge};
 pub use graph::{CodeGraph, GraphEdge, GraphNode};
 pub use reaching::{HasRules, RulesResolver};
 pub use resolver::{GlobalBacktracker, NoResolver, ReferenceResolver};
-pub use rules::ResolutionRules;
+pub use rules::{AstWalkerRules, ResolutionConfig};
 pub use ssa::{BlockId, ReachingDefs, SsaResolver, Value};

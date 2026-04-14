@@ -10,14 +10,14 @@ use code_graph_types::{CanonicalImport, CanonicalResult, EdgeKind, NodeKind, Rel
 use super::context::{DefRef, ResolutionContext};
 use super::edges::{EdgeSource, ResolvedEdge};
 use super::resolver::ReferenceResolver;
-use super::rules::{ImportStrategy, ResolutionRules};
+use super::rules::{ImportStrategy, ResolutionConfig};
 use super::ssa::{ReachingDefs, Value};
-use super::walker::{AsAst, walk_files};
+use super::walker::{walk_files, AsAst};
 
 /// Trait to get rules from the type parameter.
 /// Each language implements this on a zero-sized struct.
 pub trait HasRules {
-    fn default_rules() -> ResolutionRules;
+    fn resolution_config() -> ResolutionConfig;
 }
 
 /// Generic resolver parameterized by a `HasRules` type.
@@ -35,17 +35,17 @@ where
     R: HasRules + Send + Sync,
 {
     fn resolve(ctx: &ResolutionContext<A>) -> Vec<ResolvedEdge> {
-        let rules = R::default_rules();
-        resolve_with_rules(&rules, ctx)
+        let config = R::resolution_config();
+        resolve_with_config(&config, ctx)
     }
 }
 
 /// Core resolution logic, shared by all resolver wrappers.
-fn resolve_with_rules<A: AsAst>(
-    rules: &ResolutionRules,
+fn resolve_with_config<A: AsAst>(
+    config: &ResolutionConfig,
     ctx: &ResolutionContext<A>,
 ) -> Vec<ResolvedEdge> {
-    let mut walk_result = walk_files(rules, &ctx.results, &ctx.asts);
+    let mut walk_result = walk_files(None, &ctx.results, &ctx.asts);
     let mut edges = Vec::new();
     let reads = std::mem::take(&mut walk_result.reads);
 
@@ -54,7 +54,8 @@ fn resolve_with_rules<A: AsAst>(
             .ssa
             .read_variable_stateless(&read.name, read.block);
 
-        let resolved_defs = resolve_reaching_defs(rules, ctx, read.file_idx, &read.name, &reaching);
+        let resolved_defs =
+            resolve_reaching_defs(config, ctx, read.file_idx, &read.name, &reaching);
 
         let result = &ctx.results[read.file_idx];
         let reference = &result.references[read.ref_idx];
@@ -108,7 +109,7 @@ fn resolve_with_rules<A: AsAst>(
 /// For Import values, chase through import strategies.
 /// For Type values, look up by FQN.
 fn resolve_reaching_defs<A>(
-    rules: &ResolutionRules,
+    config: &ResolutionConfig,
     ctx: &ResolutionContext<A>,
     file_idx: usize,
     name: &str,
@@ -127,7 +128,7 @@ fn resolve_reaching_defs<A>(
             Value::Import(f, i) => {
                 // Chase the import to find terminal definitions
                 let import = &ctx.results[*f].imports[*i];
-                let import_defs = resolve_import(rules, ctx, import, &ctx.results[*f].file_path);
+                let import_defs = resolve_import(ctx, import);
                 result.extend(import_defs);
             }
             Value::Type(type_name) => {
@@ -142,7 +143,7 @@ fn resolve_reaching_defs<A>(
 
     // If SSA didn't find anything, fall back to import strategies
     if result.is_empty() {
-        result = apply_import_strategies(rules, ctx, file_idx, name);
+        result = apply_import_strategies(config, ctx, file_idx, name);
     }
 
     // Deduplicate
@@ -154,14 +155,14 @@ fn resolve_reaching_defs<A>(
 
 /// Apply the language's import resolution strategies in order.
 fn apply_import_strategies<A>(
-    rules: &ResolutionRules,
+    config: &ResolutionConfig,
     ctx: &ResolutionContext<A>,
     file_idx: usize,
     name: &str,
 ) -> Vec<DefRef> {
     let result = &ctx.results[file_idx];
 
-    for strategy in &rules.import_strategies {
+    for strategy in &config.import_strategies {
         let candidates = match strategy {
             ImportStrategy::ScopeFqnWalk => {
                 // Walk up the scope FQN trying scope.name at each level
@@ -206,12 +207,7 @@ fn apply_import_strategies<A>(
 }
 
 /// Resolve an import to terminal definitions.
-fn resolve_import<A>(
-    _rules: &ResolutionRules,
-    ctx: &ResolutionContext<A>,
-    import: &CanonicalImport,
-    _importing_file: &str,
-) -> Vec<DefRef> {
+fn resolve_import<A>(ctx: &ResolutionContext<A>, import: &CanonicalImport) -> Vec<DefRef> {
     let symbol_name = import
         .alias
         .as_deref()

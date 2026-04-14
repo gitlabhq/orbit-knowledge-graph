@@ -322,6 +322,10 @@ pub trait DslLanguage: Send + Sync + Default {
         vec![]
     }
 
+    fn branch_decls() -> Vec<BranchDecl> {
+        vec![]
+    }
+
     /// Custom import extraction for languages with complex import syntax.
     /// Called for every AST node. Return `true` if the node was handled
     /// (skips the declarative import rules for this node).
@@ -337,6 +341,7 @@ pub trait DslLanguage: Send + Sync + Default {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
                 .bindings(Self::bindings())
+                .branches(Self::branch_decls())
                 .auto(Self::auto_scopes())
                 .auto_refs(Self::auto_refs())
                 .auto_imports(Self::auto_imports())
@@ -440,13 +445,43 @@ pub fn parse_binding(kind: &'static str) -> ParseBindingRule {
 /// Function type for custom import handling.
 pub type CustomImportFn = fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool;
 
+/// Declares a control flow branch for extracting `CanonicalBranch` entries.
+/// Purely structural — the linker's `ResolutionRules` decides SSA semantics.
+pub struct BranchDecl {
+    pub node_kind: &'static str,
+    pub arm_kinds: &'static [&'static str],
+    pub catch_all_kind: Option<&'static str>,
+}
+
+pub fn branch_decl(node_kind: &'static str) -> BranchDecl {
+    BranchDecl {
+        node_kind,
+        arm_kinds: &[],
+        catch_all_kind: None,
+    }
+}
+
+impl BranchDecl {
+    pub fn arms(mut self, kinds: &'static [&'static str]) -> Self {
+        self.arm_kinds = kinds;
+        self
+    }
+
+    pub fn catch_all(mut self, kind: &'static str) -> Self {
+        self.catch_all_kind = Some(kind);
+        self
+    }
+}
+
 pub struct LanguageSpec {
     pub name: &'static str,
     pub scopes: Vec<ScopeRule>,
     pub refs: Vec<ReferenceRule>,
     pub imports: Vec<ImportRule>,
     pub bindings: Vec<ParseBindingRule>,
+    pub branch_decls: Vec<BranchDecl>,
     pub(crate) scope_kinds: FxHashSet<&'static str>,
+    pub(crate) branch_kinds: FxHashSet<&'static str>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,
 }
@@ -465,7 +500,9 @@ impl LanguageSpec {
             refs,
             imports,
             bindings: Vec::new(),
+            branch_decls: Vec::new(),
             scope_kinds,
+            branch_kinds: FxHashSet::default(),
             package_node: None,
             custom_import_fn: None,
         }
@@ -473,6 +510,12 @@ impl LanguageSpec {
 
     pub fn bindings(mut self, rules: Vec<ParseBindingRule>) -> Self {
         self.bindings = rules;
+        self
+    }
+
+    pub fn branches(mut self, decls: Vec<BranchDecl>) -> Self {
+        self.branch_kinds = decls.iter().map(|d| d.node_kind).collect();
+        self.branch_decls = decls;
         self
     }
 

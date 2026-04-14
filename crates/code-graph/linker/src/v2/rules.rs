@@ -1,230 +1,145 @@
-//! Declarative per-language resolution rules.
+//! Declarative per-language resolution and walking rules.
 //!
-//! Each language provides a `ResolutionRules` that declares:
-//! - Which AST node kinds create isolated scopes (class, function)
-//! - Which AST node kinds create conditional branches (if/else, try/except)
-//! - Which AST node kinds create loops (for, while)
-//! - Which AST node kinds create variable bindings (assignment, parameter)
-//! - Import resolution strategy ordering
-//! - Chain resolution mode (value-flow vs type-flow)
-//! - Receiver/self/this handling
+//! Two concerns, two structs:
 //!
-//! The generic SSA walker interprets these rules to build the SSA graph.
-//! The generic chain resolver interprets the import/chain rules to produce edges.
+//! - [`ResolutionConfig`]: how the resolver interprets SSA values — import
+//!   strategy ordering, chain mode, receiver handling. Language-agnostic
+//!   once the SSA graph is built.
+//!
+//! - [`AstWalkerRules`]: how the AST walker drives the SSA engine — which
+//!   tree-sitter node kinds create scopes, branches, loops, bindings, and
+//!   references. Only used when the parser retains the AST (`Ast != ()`).
+//!   For DSL-parsed languages (`Ast = ()`), the parser extracts all this
+//!   into `CanonicalResult` and the flat walker consumes it directly.
 
 use rustc_hash::FxHashSet;
 
-// ── Scope rules ─────────────────────────────────────────────────
+// ── Resolution config (used by reaching resolver) ───────────────
 
-/// A node kind that creates an isolated scope (names inside aren't
-/// visible to the parent scope without explicit receiver access).
-#[derive(Debug, Clone)]
-pub struct IsolatedScopeRule {
-    /// Tree-sitter node kind (e.g. "function_definition", "class_definition").
-    pub node_kind: &'static str,
-    /// What kind of scope this creates — affects resolution behavior.
-    pub scope_kind: ScopeKind,
-    /// How to extract the scope's name from the AST node.
-    pub name_field: &'static str,
-}
-
-/// Classification of scope-creating constructs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ScopeKind {
-    /// Class/interface/struct — members accessible via receiver (self/this).
-    /// Names defined inside are NOT visible to enclosing scopes.
-    Class,
-    /// Function/method/lambda — parameters and locals are isolated.
-    Function,
-    /// Module/file-level scope.
-    Module,
-}
-
-// ── Branch rules ────────────────────────────────────────────────
-
-/// A node kind that creates conditional branches (if/else, try/except, match).
-/// Each branch gets its own SSA block; they merge at the join point.
-#[derive(Debug, Clone)]
-pub struct BranchRule {
-    /// Tree-sitter node kind for the overall statement (e.g. "if_statement").
-    pub node_kind: &'static str,
-    /// Tree-sitter node kinds for the individual branches.
-    pub branch_kinds: &'static [&'static str],
-    /// Tree-sitter field name for the condition (evaluated in parent scope).
-    pub condition_field: Option<&'static str>,
-    /// Whether this has a catch-all branch (else, default, bare except).
-    /// If true, the name is guaranteed to be defined after the branch.
-    pub catch_all_kind: Option<&'static str>,
-}
-
-/// A node kind that creates a loop (for, while).
-/// Loop body gets its own block with a back-edge to the header.
-#[derive(Debug, Clone)]
-pub struct LoopRule {
-    /// Tree-sitter node kind (e.g. "for_statement", "while_statement").
-    pub node_kind: &'static str,
-    /// Tree-sitter field name for the loop body.
-    pub body_field: &'static str,
-    /// Tree-sitter field name for the iteration target/condition.
-    pub iter_field: Option<&'static str>,
-}
-
-// ── Binding rules ───────────────────────────────────────────────
-
-/// A node kind that creates a variable binding (assignment, parameter, etc.).
-/// The walker calls `write_variable` for each binding.
-#[derive(Debug, Clone)]
-pub struct BindingRule {
-    /// Tree-sitter node kind (e.g. "assignment", "formal_parameter").
-    pub node_kind: &'static str,
-    /// What kind of binding this creates.
-    pub binding_kind: BindingKind,
-    /// How to extract the bound name.
-    pub name_field: &'static str,
-    /// How to extract the value (for alias tracking in value-flow languages).
-    pub value_field: Option<&'static str>,
-}
-
-/// What a binding represents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BindingKind {
-    /// Assignment: `x = expr` (Python, JS). The value may be an alias.
-    Assignment,
-    /// Parameter: `def f(x)`. Always a dead-end (opaque value).
-    Parameter,
-    /// Deletion: `del x` (Python). Shadows the name with a dead-end.
-    Deletion,
-    /// For-loop variable: `for x in iter`. Dead-end.
-    ForTarget,
-    /// With-statement alias: `with expr as x`. May be an alias.
-    WithAlias,
-}
-
-// ── Reference rules ─────────────────────────────────────────────
-
-/// A node kind that creates a reference (call site, attribute access).
-/// The walker calls `read_variable` for each reference.
-#[derive(Debug, Clone)]
-pub struct ReferenceRule {
-    /// Tree-sitter node kind (e.g. "call", "method_invocation").
-    pub node_kind: &'static str,
-    /// How to extract the referenced name.
-    pub name_field: &'static str,
-}
-
-// ── Import resolution ───────────────────────────────────────────
-
-/// Strategy for resolving imported names to definitions.
+/// Import resolution strategy ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportStrategy {
-    /// Check explicit imports: simple name → full FQN via import map.
     ExplicitImport,
-    /// Check wildcard imports: try `prefix.name` for each wildcard prefix.
     WildcardImport,
-    /// Check same-package definitions: try `package.name`.
     SamePackage,
-    /// Check same-file definitions by name.
     SameFile,
-    /// Walk up the scope FQN trying `scope.name` at each level.
     ScopeFqnWalk,
-    /// Global name lookup with an ambiguity cap.
     GlobalName { max_candidates: usize },
-    /// File-path-based import resolution (Python: module path → file path).
     FilePath,
 }
-
-// ── Chain resolution ────────────────────────────────────────────
 
 /// How expression chains (a.b.c()) are resolved step-by-step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChainMode {
-    /// Follow value aliases: `x = y` → `x` resolves to whatever `y` resolves to.
-    /// Used by Python. No type tracking — chains through function calls are dead-ends.
+    /// Follow value aliases. Used by Python.
     ValueFlow,
-    /// Follow type annotations: `Type x` → `x.member` looks up `member` on `Type`.
-    /// Used by Java/Kotlin. Requires DefinitionMetadata.return_type, .type_annotation, .super_types.
+    /// Follow type annotations. Used by Java/Kotlin.
     TypeFlow,
 }
-
-// ── Receiver config ─────────────────────────────────────────────
 
 /// How self/this/receiver is handled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReceiverMode {
-    /// No special receiver handling.
     None,
-    /// Convention-based: first parameter of methods in class scope.
-    /// `self_name` is the conventional name (e.g. "self" for Python).
-    /// Method type determined by decorators.
     Convention {
         instance_decorators: &'static [&'static str],
         classmethod_decorators: &'static [&'static str],
         staticmethod_decorators: &'static [&'static str],
     },
-    /// Keyword-based: `this` and `super` are language keywords.
     Keyword,
 }
 
-// ── Top-level config ────────────────────────────────────────────
-
-/// Complete declarative resolution configuration for a language.
+/// Resolution-time configuration for a language.
 ///
-/// The generic SSA walker and chain resolver interpret this config
-/// without any language-specific code. Adding a new language is just
-/// filling in a new `ResolutionRules` struct.
+/// Controls how the resolver interprets SSA values and chases imports.
+/// No tree-sitter node kinds — those belong in [`AstWalkerRules`] or
+/// the parser's `LanguageSpec`.
 #[derive(Debug, Clone)]
-pub struct ResolutionRules {
+pub struct ResolutionConfig {
     pub name: &'static str,
-
-    /// AST node kinds that create isolated scopes.
-    pub scopes: Vec<IsolatedScopeRule>,
-    /// AST node kinds that create conditional branches.
-    pub branches: Vec<BranchRule>,
-    /// AST node kinds that create loops.
-    pub loops: Vec<LoopRule>,
-    /// AST node kinds that create variable bindings.
-    pub bindings: Vec<BindingRule>,
-    /// AST node kinds that create references.
-    pub references: Vec<ReferenceRule>,
-
-    /// Import resolution strategies, tried in order.
     pub import_strategies: Vec<ImportStrategy>,
-    /// How expression chains are resolved.
     pub chain_mode: ChainMode,
-    /// How self/this is handled.
     pub receiver: ReceiverMode,
-
-    /// FQN separator for this language (e.g. "." for Java, "::" for Ruby).
     pub fqn_separator: &'static str,
 }
 
-impl ResolutionRules {
-    /// Quick lookup: is this node kind relevant for scope creation?
-    pub fn is_scope_kind(&self, kind: &str) -> bool {
-        self.scopes.iter().any(|s| s.node_kind == kind)
-    }
+// ── AST walker rules (used by FileWalker only) ──────────────────
 
-    /// Quick lookup: is this node kind a branch statement?
-    pub fn is_branch_kind(&self, kind: &str) -> bool {
-        self.branches.iter().any(|b| b.node_kind == kind)
-    }
+/// Classification of scope-creating constructs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScopeKind {
+    Class,
+    Function,
+    Module,
+}
 
-    /// Quick lookup: is this node kind a loop statement?
-    pub fn is_loop_kind(&self, kind: &str) -> bool {
-        self.loops.iter().any(|l| l.node_kind == kind)
-    }
+/// A node kind that creates an isolated scope.
+#[derive(Debug, Clone)]
+pub struct IsolatedScopeRule {
+    pub node_kind: &'static str,
+    pub scope_kind: ScopeKind,
+    pub name_field: &'static str,
+}
 
-    /// Quick lookup: is this node kind a binding?
-    pub fn is_binding_kind(&self, kind: &str) -> bool {
-        self.bindings.iter().any(|b| b.node_kind == kind)
-    }
+/// A node kind that creates conditional branches.
+#[derive(Debug, Clone)]
+pub struct BranchRule {
+    pub node_kind: &'static str,
+    pub branch_kinds: &'static [&'static str],
+    pub condition_field: Option<&'static str>,
+    pub catch_all_kind: Option<&'static str>,
+}
 
-    /// Quick lookup: is this node kind a reference?
-    pub fn is_reference_kind(&self, kind: &str) -> bool {
-        self.references.iter().any(|r| r.node_kind == kind)
-    }
+/// A node kind that creates a loop.
+#[derive(Debug, Clone)]
+pub struct LoopRule {
+    pub node_kind: &'static str,
+    pub body_field: &'static str,
+    pub iter_field: Option<&'static str>,
+}
 
-    /// Build a set of all node kinds that the walker should pay attention to.
+/// What a binding represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingKind {
+    Assignment,
+    Parameter,
+    Deletion,
+    ForTarget,
+    WithAlias,
+}
+
+/// A node kind that creates a variable binding.
+#[derive(Debug, Clone)]
+pub struct BindingRule {
+    pub node_kind: &'static str,
+    pub binding_kind: BindingKind,
+    pub name_field: &'static str,
+    pub value_field: Option<&'static str>,
+}
+
+/// A node kind that creates a reference.
+#[derive(Debug, Clone)]
+pub struct ReferenceRule {
+    pub node_kind: &'static str,
+    pub name_field: &'static str,
+}
+
+/// AST walker rules for the retained-AST path (`FileWalker`).
+///
+/// Only used when `CanonicalParser::Ast != ()`. For DSL-parsed languages,
+/// the parser extracts all this information into `CanonicalResult` fields
+/// (definitions, imports, references, bindings, branches) and the flat
+/// walker consumes them directly.
+#[derive(Debug, Clone)]
+pub struct AstWalkerRules {
+    pub scopes: Vec<IsolatedScopeRule>,
+    pub branches: Vec<BranchRule>,
+    pub loops: Vec<LoopRule>,
+    pub bindings: Vec<BindingRule>,
+    pub references: Vec<ReferenceRule>,
+}
+
+impl AstWalkerRules {
     pub fn interesting_kinds(&self) -> FxHashSet<&'static str> {
         let mut kinds = FxHashSet::default();
         for s in &self.scopes {

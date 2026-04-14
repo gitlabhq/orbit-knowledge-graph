@@ -162,6 +162,22 @@ impl DslLanguage for PythonDsl {
         ]
     }
 
+    fn branch_decls() -> Vec<BranchDecl> {
+        vec![
+            branch_decl("if_statement")
+                .arms(&["block", "elif_clause", "else_clause"])
+                .catch_all("else_clause"),
+            branch_decl("try_statement")
+                .arms(&["block", "except_clause", "except_group_clause", "finally_clause"]),
+            branch_decl("match_statement")
+                .arms(&["case_clause"]),
+            branch_decl("for_statement")
+                .arms(&["block"]),
+            branch_decl("while_statement")
+                .arms(&["block"]),
+        ]
+    }
+
     fn bindings() -> Vec<ParseBindingRule> {
         vec![
             parse_binding("assignment")
@@ -251,6 +267,22 @@ mod tests {
     fn language() {
         let result = parse("x = 1\n");
         assert_eq!(result.language, Language::Python);
+    }
+
+    #[test]
+    fn branches_extracted() {
+        let result = parse(
+            "def caller():\n    if True:\n        x = 1\n    else:\n        x = 2\n    x\n",
+        );
+        assert!(!result.branches.is_empty(), "should extract branches");
+        let branch = &result.branches[0];
+        assert_eq!(branch.node_kind, "if_statement");
+        assert!(branch.has_catch_all, "if/else has catch-all");
+        assert!(
+            branch.arm_ranges.len() >= 2,
+            "should have at least 2 arms, got {}",
+            branch.arm_ranges.len()
+        );
     }
 
     #[test]
