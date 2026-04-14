@@ -32,10 +32,9 @@ pub struct WalkResult {
 
 /// Walk all files and build the SSA graph.
 ///
-/// For files with a retained AST, walks the AST using `rules` to discover
+/// Walks each file's retained tree-sitter AST using `rules` to discover
 /// control flow (branches, loops, scopes) per Braun et al.
-/// For files without an AST (custom pipelines), falls back to a flat
-/// single-block-per-scope model from `CanonicalResult` data.
+/// Files without an AST entry in `asts` are skipped.
 pub fn walk_files<A>(
     rules: &ResolutionRules,
     results: &[CanonicalResult],
@@ -48,19 +47,14 @@ where
     let mut reads = Vec::new();
 
     for (file_idx, result) in results.iter().enumerate() {
-        let ast = asts.get(&result.file_path);
+        let Some(root) = asts.get(&result.file_path).and_then(|a| a.as_root()) else {
+            continue;
+        };
 
-        match ast.and_then(|a| a.as_root()) {
-            Some(root) => {
-                let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result);
-                walker.walk_node(&root);
-                walker.finalize();
-                reads.extend(walker.reads);
-            }
-            None => {
-                walk_flat(&mut ssa, &mut reads, file_idx, result);
-            }
-        }
+        let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result);
+        walker.walk_node(&root);
+        walker.finalize();
+        reads.extend(walker.reads);
     }
 
     WalkResult { ssa, reads }
@@ -71,122 +65,9 @@ pub trait AsAst {
     fn as_root(&self) -> Option<Node<'_, StrDoc<SupportLang>>>;
 }
 
-impl AsAst for () {
-    fn as_root(&self) -> Option<Node<'_, StrDoc<SupportLang>>> {
-        None
-    }
-}
-
 impl AsAst for treesitter_visit::Root<StrDoc<SupportLang>> {
     fn as_root(&self) -> Option<Node<'_, StrDoc<SupportLang>>> {
         Some(self.root())
-    }
-}
-
-// ── Flat walker (fallback for custom pipelines without AST) ─────
-
-/// Minimal fallback when no AST is available. One block per scope,
-/// no control flow modeling. Used only by custom pipelines (e.g. Ruby)
-/// that implement `LanguagePipeline` directly with `Ast = ()`.
-fn walk_flat(
-    ssa: &mut SsaResolver,
-    reads: &mut Vec<RecordedRead>,
-    file_idx: usize,
-    result: &CanonicalResult,
-) {
-    let mut scope_blocks: FxHashMap<String, BlockId> = FxHashMap::default();
-
-    let module_block = ssa.add_block();
-    ssa.seal_block(module_block);
-    scope_blocks.insert(String::new(), module_block);
-
-    let mut scoped_defs: Vec<(usize, &code_graph_types::CanonicalDefinition)> = result
-        .definitions
-        .iter()
-        .enumerate()
-        .filter(|(_, d)| {
-            matches!(
-                d.kind,
-                code_graph_types::DefKind::Function
-                    | code_graph_types::DefKind::Method
-                    | code_graph_types::DefKind::Class
-                    | code_graph_types::DefKind::Constructor
-            )
-        })
-        .collect();
-    scoped_defs.sort_by_key(|(_, d)| d.fqn.parts().len());
-
-    for (_def_idx, def) in &scoped_defs {
-        let fqn_str = def.fqn.to_string();
-        let parent_fqn = def.fqn.parent().map(|p| p.to_string()).unwrap_or_default();
-        let parent_block = scope_blocks
-            .get(&parent_fqn)
-            .copied()
-            .unwrap_or(module_block);
-
-        let block = ssa.add_block();
-        ssa.add_predecessor(block, parent_block);
-        ssa.seal_block(block);
-        scope_blocks.insert(fqn_str, block);
-    }
-
-    for (def_idx, def) in result.definitions.iter().enumerate() {
-        let parent_fqn = def.fqn.parent().map(|p| p.to_string()).unwrap_or_default();
-        let block = scope_blocks
-            .get(&parent_fqn)
-            .copied()
-            .unwrap_or(module_block);
-        ssa.write_variable(&def.name, block, Value::Def(file_idx, def_idx));
-    }
-
-    for (import_idx, imp) in result.imports.iter().enumerate() {
-        let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-        if !name.is_empty() && name != "*" {
-            ssa.write_variable(name, module_block, Value::Import(file_idx, import_idx));
-        }
-    }
-
-    for binding in &result.bindings {
-        let scope_fqn = binding
-            .scope_fqn
-            .as_ref()
-            .map(|f| f.to_string())
-            .unwrap_or_default();
-        let block = scope_blocks
-            .get(&scope_fqn)
-            .copied()
-            .unwrap_or(module_block);
-
-        let value = if let Some(ref val_name) = binding.value {
-            let reaching = ssa.read_variable_stateless(val_name, block);
-            if !reaching.values.is_empty() {
-                reaching.values[0].clone()
-            } else {
-                Value::Opaque
-            }
-        } else {
-            Value::Opaque
-        };
-        ssa.write_variable(&binding.name, block, value);
-    }
-
-    for (ref_idx, reference) in result.references.iter().enumerate() {
-        let scope_fqn = reference
-            .scope_fqn
-            .as_ref()
-            .map(|f| f.to_string())
-            .unwrap_or_default();
-        let block = scope_blocks
-            .get(&scope_fqn)
-            .copied()
-            .unwrap_or(module_block);
-
-        reads.push(RecordedRead {
-            file_idx,
-            ref_idx,
-            block,
-            name: reference.name.clone(),
-        });
     }
 }
 
