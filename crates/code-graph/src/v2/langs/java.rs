@@ -5,7 +5,7 @@ use parser_core::dsl::types::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::linker::v2::reaching::HasRules;
+use crate::linker::v2::HasRules;
 use crate::linker::v2::rules::*;
 
 // ── DSL parser spec ─────────────────────────────────────────────
