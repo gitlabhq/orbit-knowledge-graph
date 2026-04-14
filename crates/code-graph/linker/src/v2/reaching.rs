@@ -301,11 +301,13 @@ fn resolve_expression_chain<A: AsAst>(
         ExpressionStep::Ident(n) => n.clone(),
         ExpressionStep::This => {
             // Use the first self_name as the compound key base
-            rules.self_names.first().map(|s| s.to_string()).unwrap_or_default()
+            rules
+                .self_names
+                .first()
+                .map(|s| s.to_string())
+                .unwrap_or_default()
         }
-        ExpressionStep::Super => {
-            rules.super_name.map(|s| s.to_string()).unwrap_or_default()
-        }
+        ExpressionStep::Super => rules.super_name.map(|s| s.to_string()).unwrap_or_default(),
         _ => String::new(),
     };
 
@@ -431,18 +433,15 @@ fn apply_import_strategies<A>(
         let candidates = match strategy {
             ImportStrategy::ScopeFqnWalk => scope_fqn_walk(ctx, result, name, sep),
             ImportStrategy::ExplicitImport => explicit_import_lookup(ctx, file_idx, name, sep),
-            ImportStrategy::WildcardImport => {
-                wildcard_import_lookup(ctx, file_idx, name, sep)
-            }
+            ImportStrategy::WildcardImport => wildcard_import_lookup(ctx, file_idx, name, sep),
             ImportStrategy::SamePackage => same_package_lookup(ctx, result, name, sep),
-            ImportStrategy::SameFile => {
-                ctx.definitions
-                    .lookup_name(name)
-                    .iter()
-                    .filter(|r| r.file_idx == file_idx)
-                    .copied()
-                    .collect()
-            }
+            ImportStrategy::SameFile => ctx
+                .definitions
+                .lookup_name(name)
+                .iter()
+                .filter(|r| r.file_idx == file_idx)
+                .copied()
+                .collect(),
             ImportStrategy::GlobalName { max_candidates } => {
                 let candidates = ctx.definitions.lookup_name(name);
                 if candidates.len() <= *max_candidates {

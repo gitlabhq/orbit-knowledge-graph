@@ -66,6 +66,8 @@ pub struct DefinitionIndex {
     by_fqn: FxHashMap<String, Vec<DefRef>>,
     by_name: FxHashMap<String, Vec<DefRef>>,
     by_file: FxHashMap<String, Vec<usize>>,
+    /// (file_idx, def_idx) → FQN string, for reverse lookup.
+    fqns: FxHashMap<(usize, usize), String>,
 }
 
 impl DefinitionIndex {
@@ -73,6 +75,7 @@ impl DefinitionIndex {
         let mut by_fqn: FxHashMap<String, Vec<DefRef>> = FxHashMap::default();
         let mut by_name: FxHashMap<String, Vec<DefRef>> = FxHashMap::default();
         let mut by_file: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+        let mut fqns: FxHashMap<(usize, usize), String> = FxHashMap::default();
 
         for (file_idx, result) in results.iter().enumerate() {
             by_file
@@ -82,8 +85,10 @@ impl DefinitionIndex {
 
             for (def_idx, def) in result.definitions.iter().enumerate() {
                 let r = DefRef { file_idx, def_idx };
-                by_fqn.entry(def.fqn.to_string()).or_default().push(r);
+                let fqn_str = def.fqn.to_string();
+                by_fqn.entry(fqn_str.clone()).or_default().push(r);
                 by_name.entry(def.name.clone()).or_default().push(r);
+                fqns.insert((file_idx, def_idx), fqn_str);
             }
         }
 
@@ -91,6 +96,7 @@ impl DefinitionIndex {
             by_fqn,
             by_name,
             by_file,
+            fqns,
         }
     }
 
@@ -100,6 +106,14 @@ impl DefinitionIndex {
 
     pub fn lookup_name(&self, name: &str) -> &[DefRef] {
         self.by_name.get(name).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Get the FQN string for a definition reference.
+    pub fn def_fqn(&self, def_ref: &DefRef) -> String {
+        self.fqns
+            .get(&(def_ref.file_idx, def_ref.def_idx))
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn file_indices(&self, file_path: &str) -> &[usize] {
@@ -164,6 +178,8 @@ impl MemberIndex {
     }
 
     /// Look up a member, walking the super_types chain if not found directly.
+    /// Uses BFS to find the closest ancestor's member first (matches MRO
+    /// semantics of most languages).
     pub fn lookup_member_with_supers(
         &self,
         class_fqn: &str,
@@ -176,19 +192,20 @@ impl MemberIndex {
             return direct;
         }
 
-        // Walk supers (BFS, bounded depth to prevent cycles)
+        // BFS through super_types chain
         let mut visited = FxHashSet::default();
-        let mut queue = vec![class_fqn.to_string()];
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(class_fqn.to_string());
         visited.insert(class_fqn.to_string());
 
-        while let Some(current) = queue.pop() {
+        while let Some(current) = queue.pop_front() {
             if let Some(super_names) = self.supers.get(&current) {
                 for super_name in super_names {
-                    // Try to resolve super name to a FQN
+                    // Resolve bare super name to full FQNs via the definition index
                     let super_fqns: Vec<String> = def_index
                         .lookup_name(super_name)
                         .iter()
-                        .map(|_| super_name.clone())
+                        .map(|def_ref| def_index.def_fqn(def_ref))
                         .collect();
 
                     for super_fqn in &super_fqns {
@@ -197,7 +214,7 @@ impl MemberIndex {
                             if !found.is_empty() {
                                 return found;
                             }
-                            queue.push(super_fqn.clone());
+                            queue.push_back(super_fqn.clone());
                         }
                     }
                 }

@@ -13,8 +13,6 @@ use crate::utils::node_to_range;
 
 use super::types::{LanguageSpec, Rule};
 
-
-
 struct ScopeMatch {
     name: String,
     label: &'static str,
