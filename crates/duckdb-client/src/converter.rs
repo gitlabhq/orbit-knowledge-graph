@@ -97,6 +97,107 @@ pub fn convert_graph_data(
     Ok(LocalGraphData { tables })
 }
 
+/// Convert a v2 `CodeGraph` into `LocalGraphData` ready for DuckDB insert.
+pub fn convert_v2_graph(
+    graph: &code_graph::linker::v2::CodeGraph,
+    project_id: i64,
+    branch: &str,
+    commit_sha: &str,
+    ontology: &Ontology,
+) -> Result<LocalGraphData> {
+    use code_graph::linker::v2::graph::{
+        DefinitionRow, DirectoryRow, EdgeRow, FileRow, ImportRow, RowContext as V2RowContext,
+    };
+
+    let ctx = V2RowContext {
+        project_id,
+        branch,
+        commit_sha,
+    };
+    let ids = graph.assign_ids(project_id, branch);
+    let mut tables = Vec::new();
+
+    for entity_name in ontology.local_entity_names() {
+        let dest_table = ontology
+            .get_node(entity_name)
+            .expect("local entity must exist in nodes")
+            .destination_table
+            .clone();
+
+        let specs = entity_specs(ontology, entity_name);
+        let batch = match entity_name {
+            "Directory" => {
+                let rows: Vec<_> = graph
+                    .directories()
+                    .map(|(idx, dir)| DirectoryRow { dir, id: ids[&idx] })
+                    .collect();
+                DirectoryRow::to_record_batch(&rows, &specs, &ctx)?
+            }
+            "File" => {
+                let rows: Vec<_> = graph
+                    .files()
+                    .map(|(idx, file)| FileRow {
+                        file,
+                        id: ids[&idx],
+                    })
+                    .collect();
+                FileRow::to_record_batch(&rows, &specs, &ctx)?
+            }
+            "Definition" => {
+                let rows: Vec<_> = graph
+                    .definitions()
+                    .map(|(idx, file_path, def)| DefinitionRow {
+                        file_path,
+                        def,
+                        id: ids[&idx],
+                    })
+                    .collect();
+                DefinitionRow::to_record_batch(&rows, &specs, &ctx)?
+            }
+            "ImportedSymbol" => {
+                let rows: Vec<_> = graph
+                    .imports()
+                    .map(|(idx, file_path, import)| ImportRow {
+                        file_path,
+                        import,
+                        id: ids[&idx],
+                    })
+                    .collect();
+                ImportRow::to_record_batch(&rows, &specs, &ctx)?
+            }
+            other => panic!("no v2 converter for local entity '{other}'"),
+        };
+
+        tables.push((dest_table, batch));
+    }
+
+    // Edges
+    let edge_table = ontology
+        .local_edge_table_name()
+        .expect("local_db.edge_table.name must be configured")
+        .to_string();
+
+    let edge_rows: Vec<_> = graph
+        .graph
+        .edge_indices()
+        .map(|ei| {
+            let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
+            let edge = &graph.graph[ei];
+            EdgeRow {
+                source_id: ids.get(&src).copied().unwrap_or(0),
+                target_id: ids.get(&tgt).copied().unwrap_or(0),
+                edge_kind: edge.relationship.edge_kind.to_string(),
+                source_node_kind: edge.relationship.source_node.to_string(),
+                target_node_kind: edge.relationship.target_node.to_string(),
+            }
+        })
+        .collect();
+    let edge_batch = EdgeRow::to_record_batch(&edge_rows, &edge_specs(ontology), &())?;
+    tables.push((edge_table, edge_batch));
+
+    Ok(LocalGraphData { tables })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
