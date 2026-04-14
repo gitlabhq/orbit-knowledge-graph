@@ -495,6 +495,9 @@ impl<'a> FileWalker<'a> {
     }
 
     /// Resolve a binding's RHS value through the SSA (value-flow).
+    /// For TypeFlow, if the resolved value is a Def with return_type
+    /// metadata, promote to Value::Type so downstream member access
+    /// chains resolve through the return type.
     fn resolve_binding_value(
         &mut self,
         node: &Node<StrDoc<SupportLang>>,
@@ -505,7 +508,8 @@ impl<'a> FileWalker<'a> {
                 let value_text = value_node.text().to_string();
                 let reaching = self.ssa.read_variable(&value_text, self.current_block);
                 if !reaching.values.is_empty() {
-                    reaching.values[0].clone()
+                    let value = reaching.values[0].clone();
+                    self.maybe_promote_to_type(value)
                 } else {
                     Value::Opaque
                 }
@@ -514,6 +518,28 @@ impl<'a> FileWalker<'a> {
             }
         } else {
             Value::Opaque
+        }
+    }
+
+    /// For TypeFlow: if a value is Def and the definition has return_type
+    /// metadata, promote to Value::Type(return_type). This allows
+    /// `x = getService(); x.query()` to resolve through the return type.
+    fn maybe_promote_to_type(&self, value: Value) -> Value {
+        if !matches!(self.rules.chain_mode, ChainMode::TypeFlow { .. }) {
+            return value;
+        }
+        match &value {
+            Value::Def(file_idx, def_idx) if *file_idx == self.file_idx => {
+                if let Some(def) = self.result.definitions.get(*def_idx) {
+                    if let Some(meta) = &def.metadata {
+                        if let Some(return_type) = &meta.return_type {
+                            return Value::Type(return_type.clone());
+                        }
+                    }
+                }
+                value
+            }
+            _ => value,
         }
     }
 

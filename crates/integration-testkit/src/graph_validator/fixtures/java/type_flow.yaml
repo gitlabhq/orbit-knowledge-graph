@@ -36,6 +36,19 @@ fixtures:
           }
       }
 
+  - path: Factory.java
+    content: |
+      public class Factory {
+          public UserService getService() {
+              return new UserService();
+          }
+
+          public void useReturnType() {
+              UserService svc = getService();
+              svc.query();
+          }
+      }
+
   - path: ThisCall.java
     content: |
       public class ThisCall {
@@ -74,6 +87,22 @@ tests:
         assert:
           - { contains_row: { callee: "fetch" } }
           - { contains_row: { callee: "speak" } }
+
+  - name: "return type propagation: getService().query() resolves"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'useReturnType'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "query", callee_fqn: "UserService.query" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'useReturnType' AND callee.name = 'save'
+          RETURN callee.name
+        assert:
+          - { empty: true }
 
   - name: "this.helper() resolves to ThisCall.helper"
     queries:
