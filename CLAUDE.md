@@ -54,7 +54,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Query test fixtures | `fixtures/queries/` |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
 | Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |
-| Graph DDL (local DuckDB) | `config/graph_local.sql` |
+| Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
 | Server config structure | `crates/gkg-server/src/config.rs` |

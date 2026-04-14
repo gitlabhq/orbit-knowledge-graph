@@ -17,6 +17,19 @@ use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
+/// Generate the full DuckDB DDL (graph tables + manifest) from the ontology.
+fn generate_local_ddl(ontology: &Ontology) -> String {
+    let tables = query_engine::compiler::generate_local_tables(ontology);
+    let mut ddl = tables
+        .iter()
+        .map(|t| format!("{};\n", query_engine::compiler::emit_duckdb_create_table(t)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    ddl.push('\n');
+    ddl.push_str(duckdb_client::MANIFEST_DDL);
+    ddl
+}
+
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
 enum OutputFormat {
     #[default]
@@ -393,8 +406,9 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         let db_path = store.db_path();
         let client =
             duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
+        let ddl = generate_local_ddl(&ontology);
         client
-            .initialize_schema()
+            .initialize_schema(&ddl)
             .context("failed to create schema")?;
     }
 
