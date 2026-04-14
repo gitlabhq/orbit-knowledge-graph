@@ -152,92 +152,174 @@ fn walk_flat(
         }
     }
 
-    // Build branch blocks for each scope.
-    // branch_blocks maps (scope_fqn, branch_byte_range) → (arm_blocks, merge_block).
-    // After a branch, the scope's "current block" becomes the merge block so that
-    // subsequent bindings/references read from it (picking up phi nodes).
+    // Build branch blocks. Each arm gets its own SSA block; arms merge into
+    // a join block with predecessor edges from all arms. Nested branches use
+    // the enclosing arm block as their predecessor (not the scope block).
     //
-    // We track the current block per scope — it starts as the scope block and
-    // advances to merge blocks as we process branches in byte order.
-    let mut current_blocks: FxHashMap<String, BlockId> = scope_blocks.clone();
+    // All arm blocks are collected into a flat list keyed by (scope, byte range).
+    // `find_block` returns the innermost matching arm for any byte offset.
 
-    // Arm blocks: for each branch, maps arm byte range → arm block
+    struct ArmEntry {
+        start: usize,
+        end: usize,
+        block: BlockId,
+    }
     struct BranchInfo {
-        arm_ranges: Vec<(usize, usize, BlockId)>, // (start, end, block)
+        arms: Vec<ArmEntry>,
         merge_block: BlockId,
+        has_catch_all: bool,
+        pre_block: BlockId,
+        #[allow(dead_code)]
+        range_start: usize,
         range_end: usize,
     }
 
-    // Process branches sorted by byte offset, creating blocks
     let mut branch_infos: Vec<(String, BranchInfo)> = Vec::new();
+
+    // Pass 1: create arm blocks (top-down / byte order).
+    // Each arm block's predecessor is the innermost existing arm that
+    // contains the branch, or the scope block if not nested.
     for branch in &result.branches {
         let scope_key = branch
             .scope_fqn
             .as_ref()
             .map(|f| f.to_string())
             .unwrap_or_default();
-        let pre_block = current_blocks
-            .get(&scope_key)
-            .copied()
-            .unwrap_or(module_block);
 
-        let mut arm_blocks = Vec::new();
+        let pre_block = find_innermost_block(
+            &scope_key,
+            branch.range.byte_offset.0,
+            &branch_infos,
+            &scope_blocks,
+            module_block,
+        );
+
+        let mut arms = Vec::new();
         for arm_range in &branch.arm_ranges {
             let arm_block = ssa.add_block();
             ssa.add_predecessor(arm_block, pre_block);
             ssa.seal_block(arm_block);
-            arm_blocks.push((arm_range.byte_offset.0, arm_range.byte_offset.1, arm_block));
+            arms.push(ArmEntry {
+                start: arm_range.byte_offset.0,
+                end: arm_range.byte_offset.1,
+                block: arm_block,
+            });
         }
-
-        let merge_block = ssa.add_block();
-        for &(_, _, arm_block) in &arm_blocks {
-            ssa.add_predecessor(merge_block, arm_block);
-        }
-        // If no catch-all, pre_block also flows to merge (condition might not match)
-        if !branch.has_catch_all {
-            ssa.add_predecessor(merge_block, pre_block);
-        }
-        ssa.seal_block(merge_block);
-
-        // Advance current block for this scope past the branch
-        current_blocks.insert(scope_key.clone(), merge_block);
 
         branch_infos.push((
             scope_key,
             BranchInfo {
-                arm_ranges: arm_blocks,
-                merge_block,
+                arms,
+                merge_block: BlockId(0), // placeholder — filled in pass 2
+                has_catch_all: branch.has_catch_all,
+                pre_block,
+                #[allow(dead_code)]
+                range_start: branch.range.byte_offset.0,
                 range_end: branch.range.byte_offset.1,
             },
         ));
     }
 
-    // Helper: find the correct block for a byte offset within a scope.
-    // Checks if the offset falls inside any branch arm; otherwise uses
-    // the scope's current block (which may be a merge block if after a branch).
-    let find_block =
-        |scope_key: &str, byte_start: usize, scope_blocks: &FxHashMap<String, BlockId>| -> BlockId {
-            // Check if inside a branch arm
-            for (key, info) in &branch_infos {
-                if key != scope_key {
-                    continue;
-                }
-                for &(arm_start, arm_end, arm_block) in &info.arm_ranges {
-                    if byte_start >= arm_start && byte_start < arm_end {
-                        return arm_block;
-                    }
-                }
-                // After the branch but in the same scope → use merge block
-                if byte_start >= info.range_end {
-                    return info.merge_block;
+    // Pass 2: create merge blocks (bottom-up / reverse byte order).
+    // Inner merges are created first, so when an outer arm contains an inner
+    // branch, the inner merge exists and can be used as the outer arm's
+    // "effective exit block" via find_innermost_block.
+    let indices: Vec<usize> = (0..branch_infos.len()).rev().collect();
+    for &i in &indices {
+        let (ref scope_key, ref info) = branch_infos[i];
+
+        // For each arm, find the latest block inside it. If the arm contains
+        // an inner branch, the inner merge is that block. Otherwise it's the
+        // arm block itself.
+        let mut arm_exit_blocks: Vec<BlockId> = Vec::new();
+        for arm in &info.arms {
+            let exit = find_innermost_exit(scope_key, arm.start, arm.end, &branch_infos, arm.block);
+            arm_exit_blocks.push(exit);
+        }
+
+        let merge_block = ssa.add_block();
+        for &exit in &arm_exit_blocks {
+            ssa.add_predecessor(merge_block, exit);
+        }
+        if !info.has_catch_all {
+            ssa.add_predecessor(merge_block, info.pre_block);
+        }
+        ssa.seal_block(merge_block);
+
+        branch_infos[i].1.merge_block = merge_block;
+    }
+
+    // Find the exit block for an arm: if the arm contains inner branches,
+    // the last inner merge block (by byte position) is the effective exit.
+    fn find_innermost_exit(
+        scope_key: &str,
+        arm_start: usize,
+        arm_end: usize,
+        branch_infos: &[(String, BranchInfo)],
+        arm_block: BlockId,
+    ) -> BlockId {
+        let mut latest_merge: Option<(usize, BlockId)> = None;
+        for (key, info) in branch_infos {
+            if key != scope_key {
+                continue;
+            }
+            // Inner branch is fully inside this arm
+            if info.range_end > 0
+                && info.range_end <= arm_end
+                && info.arms.first().is_some_and(|a| a.start >= arm_start)
+                && info.merge_block != BlockId(0)
+            {
+                if latest_merge.is_none_or(|(pos, _)| info.range_end > pos) {
+                    latest_merge = Some((info.range_end, info.merge_block));
                 }
             }
-            // Not inside any branch — use the scope's base block
-            scope_blocks
-                .get(scope_key)
-                .copied()
-                .unwrap_or(BlockId(0))
-        };
+        }
+        latest_merge.map(|(_, b)| b).unwrap_or(arm_block)
+    }
+
+    // Find the correct SSA block for a byte offset: innermost arm containing
+    // the offset, or the latest merge block before it, or the scope block.
+    fn find_innermost_block(
+        scope_key: &str,
+        byte_start: usize,
+        branch_infos: &[(String, BranchInfo)],
+        scope_blocks: &FxHashMap<String, BlockId>,
+        fallback: BlockId,
+    ) -> BlockId {
+        let mut best: Option<(usize, BlockId)> = None; // (range_size, block)
+
+        for (key, info) in branch_infos {
+            if key != scope_key {
+                continue;
+            }
+            // Check arms — find the smallest containing arm
+            for arm in &info.arms {
+                if byte_start >= arm.start && byte_start < arm.end {
+                    let size = arm.end - arm.start;
+                    if best.is_none_or(|(best_size, _)| size < best_size) {
+                        best = Some((size, arm.block));
+                    }
+                }
+            }
+            // After the branch → use merge block (but only if not inside a
+            // smaller arm from another branch)
+            if byte_start >= info.range_end {
+                // Merge blocks don't have a "size" — they're point-like.
+                // Only use if no arm matched.
+                if best.is_none() {
+                    best = Some((usize::MAX, info.merge_block));
+                }
+            }
+        }
+
+        best.map(|(_, block)| block)
+            .unwrap_or_else(|| {
+                scope_blocks
+                    .get(scope_key)
+                    .copied()
+                    .unwrap_or(fallback)
+            })
+    }
 
     // Process bindings — assign each to the correct block based on byte offset
     for binding in &result.bindings {
@@ -246,7 +328,13 @@ fn walk_flat(
             .as_ref()
             .map(|f| f.to_string())
             .unwrap_or_default();
-        let block = find_block(&scope_key, binding.range.byte_offset.0, &scope_blocks);
+        let block = find_innermost_block(
+            &scope_key,
+            binding.range.byte_offset.0,
+            &branch_infos,
+            &scope_blocks,
+            module_block,
+        );
 
         let value = if let Some(ref val_name) = binding.value {
             let reaching = ssa.read_variable_stateless(val_name, block);
@@ -268,7 +356,13 @@ fn walk_flat(
             .as_ref()
             .map(|f| f.to_string())
             .unwrap_or_default();
-        let block = find_block(&scope_key, reference.range.byte_offset.0, &scope_blocks);
+        let block = find_innermost_block(
+            &scope_key,
+            reference.range.byte_offset.0,
+            &branch_infos,
+            &scope_blocks,
+            module_block,
+        );
 
         reads.push(RecordedRead {
             file_idx,
