@@ -446,17 +446,18 @@ mod tests {
     }
 
     #[test]
-    fn auto_with_override() {
+    fn conditional_scope_rules() {
         let spec = LanguageSpec::new(
             "test",
-            vec![scope("function_definition", "Method").when(grandparent_is("class_definition"))],
+            vec![
+                scope("class_definition", "Class"),
+                scope("function_definition", "Function"),
+                scope("function_definition", "Method")
+                    .when(grandparent_is("class_definition")),
+            ],
             vec![],
             vec![],
-        )
-        .auto(&[
-            ("class_definition", "Class"),
-            ("function_definition", "Function"),
-        ]);
+        );
         let result = parse_with(&spec, "class A:\n    def b(self): pass\ndef c(): pass");
 
         assert_eq!(result.definitions.len(), 3);
