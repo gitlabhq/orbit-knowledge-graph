@@ -142,7 +142,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 
 | Chart | Repository | Purpose |
 |---|---|---|
-| GKG (official) | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Production Helm chart for GKG. Vendored into `helm/gkg/` via [vendir](https://carvel.dev/vendir/) with local patches for siphon/NATS. |
+| GKG (official) | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Production Helm chart for GKG (v1.0.0, application chart). |
 | Siphon (standalone) | [`siphon/helm/siphon/`](https://gitlab.com/gitlab-org/analytics-section/siphon/-/tree/main/helm/siphon) | Minimal standalone chart (v0.0.1). Superseded by the GKG dev chart for GKG deployments. |
 | Siphon (production) | [siphon-helm-charts](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts) | v1.0.1, deployed via [gitlab-helmfiles](https://ops.gitlab.net/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles) on ops.gitlab.net |
 
