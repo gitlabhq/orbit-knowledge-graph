@@ -17,9 +17,8 @@ use crate::input::{
     InputRelationship, OrderDirection, QueryType,
 };
 use ontology::constants::{
-    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, RELATIONSHIP_KIND_COLUMN,
-    SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
-    TRAVERSAL_PATH_COLUMN,
+    DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
+    SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -1458,10 +1457,10 @@ fn type_filter(types: &[String]) -> Option<Vec<String>> {
 
 /// Build an edge scan that may span multiple physical tables.
 ///
-/// Single table → plain `TableRef::scan`.
-/// Multiple tables → `TableRef::union_all` with one SELECT per table,
-/// each arm selecting the standard edge columns so downstream passes
-/// see a uniform schema.
+/// Single table → delegates to `edge_scan`.
+/// Multiple tables → `UNION ALL` of per-table `edge_scan` arms.
+/// Type filters and `_deleted` handling are per-arm; the dedup pass
+/// recurses into UNION arms to inject soft-delete filters.
 fn multi_edge_scan(
     tables: &[String],
     alias: &str,
@@ -1470,52 +1469,19 @@ fn multi_edge_scan(
     if tables.len() == 1 {
         return edge_scan(&tables[0], alias, type_filter);
     }
-
-    // Build one SELECT per table with columns in a fixed order so the
-    // UNION ALL arms are schema-compatible.
-    let columns = &[
-        TRAVERSAL_PATH_COLUMN,
-        SOURCE_ID_COLUMN,
-        SOURCE_KIND_COLUMN,
-        RELATIONSHIP_KIND_COLUMN,
-        TARGET_ID_COLUMN,
-        TARGET_KIND_COLUMN,
-    ];
     let queries: Vec<Query> = tables
         .iter()
         .map(|table| {
-            let inner_alias = format!("_{alias}");
-            let select = columns
-                .iter()
-                .map(|&col| SelectExpr::new(Expr::col(&inner_alias, col), col))
-                .collect();
-            let mut where_clause = type_filter.as_ref().and_then(|types| {
-                Expr::col_in(
-                    &inner_alias,
-                    RELATIONSHIP_KIND_COLUMN,
-                    ChType::String,
-                    types.iter().map(|t| Value::String(t.clone())).collect(),
-                )
-            });
-            // Soft-delete filter is added by deduplicate pass, but each
-            // UNION arm needs its own _deleted = false since dedup recurses
-            // into union arms.
-            let deleted_filter =
-                Expr::eq(Expr::col(&inner_alias, DELETED_COLUMN), Expr::lit(false));
-            where_clause = Some(match where_clause {
-                Some(existing) => Expr::and(existing, deleted_filter),
-                None => deleted_filter,
-            });
+            let arm_alias = format!("_{alias}");
+            let (from, type_cond) = edge_scan(table, &arm_alias, type_filter);
             Query {
-                select,
-                from: TableRef::scan(table, &inner_alias),
-                where_clause,
+                select: vec![SelectExpr::star()],
+                from,
+                where_clause: type_cond,
                 ..Default::default()
             }
         })
         .collect();
-
-    // No separate type_filter condition — it's folded into each arm.
     (TableRef::union_all(queries, alias), None)
 }
 

@@ -451,35 +451,15 @@ fn build_cascade_for_node(
     let from = if tables.len() == 1 {
         TableRef::scan(&tables[0], alias)
     } else {
-        // Cascade across multiple edge tables via UNION ALL.
-        let inner = format!("_{alias}");
         let queries = tables
             .iter()
             .map(|t| Query {
-                select: vec![SelectExpr::new(Expr::col(&inner, select_col), select_col)],
-                from: TableRef::scan(t, &inner),
-                where_clause: Expr::and_all([
-                    Some(Expr::InSubquery {
-                        expr: Box::new(Expr::col(&inner, filter_col)),
-                        cte_name: parent_cte.to_string(),
-                        column: DEFAULT_PRIMARY_KEY.to_string(),
-                    }),
-                    Some(rel_filter.clone()),
-                    kind_filter.clone(),
-                ]),
+                select: vec![SelectExpr::star()],
+                from: TableRef::scan(t, alias),
                 ..Default::default()
             })
             .collect();
-        // For multi-table cascades the filters are pushed into each arm,
-        // so we return early with the UNION ALL directly.
-        return Some(Query {
-            select: vec![SelectExpr::new(
-                Expr::col(alias, select_col),
-                DEFAULT_PRIMARY_KEY,
-            )],
-            from: TableRef::union_all(queries, alias),
-            ..Default::default()
-        });
+        TableRef::union_all(queries, alias)
     };
 
     Some(Query {
