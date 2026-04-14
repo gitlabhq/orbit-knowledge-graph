@@ -177,26 +177,51 @@ impl MemberIndex {
             .unwrap_or_default()
     }
 
+    /// Resolve a type name (possibly bare) to its full FQN(s).
+    /// If the name is already a key in the member index, return it as-is.
+    /// Otherwise look up by bare name and return all matching FQNs.
+    fn resolve_type_fqns(&self, type_name: &str, def_index: &DefinitionIndex) -> Vec<String> {
+        if self.members.contains_key(type_name) || self.supers.contains_key(type_name) {
+            return vec![type_name.to_string()];
+        }
+        // Bare name → resolve to full FQNs
+        def_index
+            .lookup_name(type_name)
+            .iter()
+            .map(|def_ref| def_index.def_fqn(def_ref))
+            .collect()
+    }
+
     /// Look up a member, walking the super_types chain if not found directly.
     /// Uses BFS to find the closest ancestor's member first (matches MRO
     /// semantics of most languages).
+    ///
+    /// Handles bare type names (e.g. `"PackagedDog"`) by resolving them to
+    /// full FQNs (e.g. `"com.example.PackagedDog"`) via the definition index.
     pub fn lookup_member_with_supers(
         &self,
         class_fqn: &str,
         member_name: &str,
         def_index: &DefinitionIndex,
     ) -> Vec<DefRef> {
-        // Direct lookup
-        let direct = self.lookup_member(class_fqn, member_name);
-        if !direct.is_empty() {
-            return direct;
+        // Resolve bare type name to full FQN(s)
+        let resolved_fqns = self.resolve_type_fqns(class_fqn, def_index);
+
+        // Direct lookup on each resolved FQN
+        for fqn in &resolved_fqns {
+            let direct = self.lookup_member(fqn, member_name);
+            if !direct.is_empty() {
+                return direct;
+            }
         }
 
         // BFS through super_types chain
         let mut visited = FxHashSet::default();
         let mut queue = std::collections::VecDeque::new();
-        queue.push_back(class_fqn.to_string());
-        visited.insert(class_fqn.to_string());
+        for fqn in &resolved_fqns {
+            queue.push_back(fqn.clone());
+            visited.insert(fqn.clone());
+        }
 
         while let Some(current) = queue.pop_front() {
             if let Some(super_names) = self.supers.get(&current) {

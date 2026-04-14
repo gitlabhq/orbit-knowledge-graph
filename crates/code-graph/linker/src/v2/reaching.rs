@@ -66,6 +66,7 @@ fn resolve_with_rules<A: AsAst>(
 
         // If the reference has an expression chain, walk it to resolve
         // through types. Otherwise fall back to bare name resolution.
+
         let resolved_defs = if let Some(ref chain) = reference.expression {
             resolve_expression_chain(
                 rules,

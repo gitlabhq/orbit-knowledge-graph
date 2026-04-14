@@ -376,7 +376,15 @@ impl<'a> FileWalker<'a> {
         binding_rule: &super::rules::BindingRule,
     ) {
         let name = match node.field(binding_rule.name_field) {
-            Some(name_node) => name_node.text().to_string(),
+            Some(name_node) => {
+                // For compound nodes (e.g. Java's variable_declarator), drill
+                // into the `name` sub-field to get the actual identifier.
+                name_node
+                    .field("name")
+                    .unwrap_or(name_node)
+                    .text()
+                    .to_string()
+            }
             None => return,
         };
 
