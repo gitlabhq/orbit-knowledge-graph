@@ -85,10 +85,18 @@ pub enum ImportStrategy {
 
 // ── Chain / receiver ────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChainMode {
+    /// Follow value aliases: `x = y` → resolve through SSA.
     ValueFlow,
-    TypeFlow,
+    /// Follow declared types: `Type x = ...` → `x.member` looks up on `Type`.
+    TypeFlow {
+        /// Tree-sitter field names holding the type annotation on a
+        /// declaration node (e.g. `["type"]` for Java, `["user_type"]` for Kotlin).
+        type_fields: &'static [&'static str],
+        /// Type names to skip (no member lookup). Primitives, builtins.
+        skip_types: &'static [&'static str],
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

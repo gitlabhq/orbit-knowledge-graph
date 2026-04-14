@@ -3,7 +3,7 @@ use code_graph_types::DefKind;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::dsl::extractors::{Extract, ExtractList, field, metadata};
+use crate::dsl::extractors::{field, metadata, Extract, ExtractList};
 use crate::dsl::types::*;
 
 #[derive(Default)]
@@ -101,10 +101,21 @@ impl DslLanguage for JavaDsl {
             }
         }
 
+        vec![import("import_declaration")
+            .classify(java_import_classify)
+            .split_last(".")]
+    }
+
+    fn bindings() -> Vec<ParseBindingRule> {
         vec![
-            import("import_declaration")
-                .classify(java_import_classify)
-                .split_last("."),
+            // int x = getValue();
+            parse_binding("local_variable_declaration")
+                .name_from(Extract::Declarator)
+                .value_from(Extract::Declarator),
+            // x = newValue;
+            parse_binding("assignment_expression")
+                .name_from(field("left"))
+                .value_from(field("right")),
         ]
     }
 

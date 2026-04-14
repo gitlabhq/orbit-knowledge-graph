@@ -3,7 +3,7 @@ use code_graph_types::DefKind;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::dsl::extractors::{Extract, ExtractList, metadata};
+use crate::dsl::extractors::{Extract, ExtractList, field, metadata};
 use crate::dsl::types::*;
 
 #[derive(Default)]
@@ -123,6 +123,19 @@ impl DslLanguage for KotlinDsl {
             import("import_header")
                 .classify(kotlin_import_classify)
                 .split_last("."),
+        ]
+    }
+
+    fn bindings() -> Vec<ParseBindingRule> {
+        vec![
+            // val x = getValue()
+            parse_binding("property_declaration")
+                .name_from(Extract::ChildOfKind("simple_identifier"))
+                .value_from(Extract::Field("expression")),
+            // x = newValue
+            parse_binding("assignment")
+                .name_from(field("directly_assignable_expression"))
+                .value_from(Extract::Field("expression")),
         ]
     }
 

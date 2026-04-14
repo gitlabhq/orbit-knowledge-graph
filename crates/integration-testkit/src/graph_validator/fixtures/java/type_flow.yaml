@@ -1,0 +1,86 @@
+name: "Java: type-flow chain resolution"
+fixtures:
+  - path: UserService.java
+    content: |
+      public class UserService {
+          public void query() {}
+          public void save() {}
+      }
+
+  - path: App.java
+    content: |
+      public class App {
+          public void run() {
+              UserService svc = new UserService();
+              svc.query();
+          }
+      }
+
+  - path: Inheritance.java
+    content: |
+      public class Animal {
+          public void speak() {}
+      }
+
+      public class Dog extends Animal {
+          public void fetch() {}
+      }
+
+  - path: InheritanceUser.java
+    content: |
+      public class InheritanceUser {
+          public void test() {
+              Dog d = new Dog();
+              d.speak();
+              d.fetch();
+          }
+      }
+
+  - path: ThisCall.java
+    content: |
+      public class ThisCall {
+          public void helper() {}
+          public void run() {
+              this.helper();
+          }
+      }
+
+tests:
+  - name: "typed local: svc.query() resolves to UserService.query"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "query", callee_fqn: "UserService.query" } }
+      # no false positive to save()
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+            AND callee.name = 'save'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "inherited method: d.speak() resolves to Animal.speak"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'test'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "fetch" } }
+          - { contains_row: { callee: "speak" } }
+
+  - name: "this.helper() resolves to ThisCall.helper"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ThisCall'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+        assert:
+          - { row_count: 1 }
+          - { contains_row: { callee: "helper", callee_fqn: "ThisCall.helper" } }

@@ -131,9 +131,20 @@ fn resolve_reaching_defs<A>(
                 result.extend(import_defs);
             }
             Value::Type(type_name) => {
-                // Look up the type by FQN
-                for def_ref in ctx.definitions.lookup_fqn(type_name) {
-                    result.push(*def_ref);
+                // Type-flow: look up `name` as a member of the type.
+                // e.g., if reaching def is Type("UserService") and ref name
+                // is "query", look up UserService.query in the member index.
+                let member_defs =
+                    ctx.members
+                        .lookup_member_with_supers(type_name, name, &ctx.definitions);
+                if !member_defs.is_empty() {
+                    result.extend(member_defs);
+                } else {
+                    // Fallback: try FQN lookup (type_name.name)
+                    let fqn = format!("{}.{}", type_name, name);
+                    for def_ref in ctx.definitions.lookup_fqn(&fqn) {
+                        result.push(*def_ref);
+                    }
                 }
             }
             _ => {}

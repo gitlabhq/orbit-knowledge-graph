@@ -1,5 +1,5 @@
 use code_graph_types::{CanonicalDefinition, CanonicalImport, CanonicalResult, Range, ScopeIndex};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Shared resolution context built from all parsed results for a language.
 ///
@@ -13,6 +13,7 @@ pub struct ResolutionContext<A = ()> {
     pub root_path: String,
     pub results: Vec<CanonicalResult>,
     pub definitions: DefinitionIndex,
+    pub members: MemberIndex,
     pub imports: ImportIndex,
     pub scopes: FileScopes,
     pub asts: FxHashMap<String, A>,
@@ -25,6 +26,7 @@ impl<A> ResolutionContext<A> {
         root_path: String,
     ) -> Self {
         let definitions = DefinitionIndex::build(&results);
+        let members = MemberIndex::build(&results);
         let imports = ImportIndex::build(&results);
         let scopes = FileScopes::build(&results);
 
@@ -32,6 +34,7 @@ impl<A> ResolutionContext<A> {
             root_path,
             results,
             definitions,
+            members,
             imports,
             scopes,
             asts,
@@ -104,6 +107,104 @@ impl DefinitionIndex {
             .get(file_path)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
+    }
+}
+
+/// Index of class/interface members: class FQN → member definitions.
+///
+/// Built from the FQN hierarchy: if a definition's FQN is `Foo.bar`,
+/// then `bar` is a member of `Foo`. Also indexes super_types for
+/// inherited member lookup.
+pub struct MemberIndex {
+    /// class_fqn → [(member_name, DefRef)]
+    members: FxHashMap<String, Vec<(String, DefRef)>>,
+    /// class_fqn → [super_type_name]
+    supers: FxHashMap<String, Vec<String>>,
+}
+
+impl MemberIndex {
+    fn build(results: &[CanonicalResult]) -> Self {
+        let mut members: FxHashMap<String, Vec<(String, DefRef)>> = FxHashMap::default();
+        let mut supers: FxHashMap<String, Vec<String>> = FxHashMap::default();
+
+        for (file_idx, result) in results.iter().enumerate() {
+            for (def_idx, def) in result.definitions.iter().enumerate() {
+                // Record parent→child membership via FQN
+                if let Some(parent_fqn) = def.fqn.parent() {
+                    let parent_str = parent_fqn.to_string();
+                    members
+                        .entry(parent_str)
+                        .or_default()
+                        .push((def.name.clone(), DefRef { file_idx, def_idx }));
+                }
+
+                // Record super_types for hierarchy walking
+                if let Some(meta) = &def.metadata {
+                    if !meta.super_types.is_empty() {
+                        supers.insert(def.fqn.to_string(), meta.super_types.clone());
+                    }
+                }
+            }
+        }
+
+        Self { members, supers }
+    }
+
+    /// Look up direct members of a class/interface by name.
+    pub fn lookup_member(&self, class_fqn: &str, member_name: &str) -> Vec<DefRef> {
+        self.members
+            .get(class_fqn)
+            .map(|ms| {
+                ms.iter()
+                    .filter(|(name, _)| name == member_name)
+                    .map(|(_, r)| *r)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Look up a member, walking the super_types chain if not found directly.
+    pub fn lookup_member_with_supers(
+        &self,
+        class_fqn: &str,
+        member_name: &str,
+        def_index: &DefinitionIndex,
+    ) -> Vec<DefRef> {
+        // Direct lookup
+        let direct = self.lookup_member(class_fqn, member_name);
+        if !direct.is_empty() {
+            return direct;
+        }
+
+        // Walk supers (BFS, bounded depth to prevent cycles)
+        let mut visited = FxHashSet::default();
+        let mut queue = vec![class_fqn.to_string()];
+        visited.insert(class_fqn.to_string());
+
+        while let Some(current) = queue.pop() {
+            if let Some(super_names) = self.supers.get(&current) {
+                for super_name in super_names {
+                    // Try to resolve super name to a FQN
+                    let super_fqns: Vec<String> = def_index
+                        .lookup_name(super_name)
+                        .iter()
+                        .map(|_| super_name.clone())
+                        .collect();
+
+                    for super_fqn in &super_fqns {
+                        if visited.insert(super_fqn.clone()) {
+                            let found = self.lookup_member(super_fqn, member_name);
+                            if !found.is_empty() {
+                                return found;
+                            }
+                            queue.push(super_fqn.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        vec![]
     }
 }
 

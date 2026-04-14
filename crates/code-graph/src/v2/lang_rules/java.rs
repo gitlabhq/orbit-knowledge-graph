@@ -69,7 +69,13 @@ impl HasRules for JavaRules {
                 ImportStrategy::GlobalName { max_candidates: 3 },
             ],
 
-            chain_mode: ChainMode::TypeFlow,
+            chain_mode: ChainMode::TypeFlow {
+                type_fields: &["type"],
+                skip_types: &[
+                    "int", "long", "short", "byte", "float", "double", "boolean", "char", "void",
+                    "String",
+                ],
+            },
             receiver: ReceiverMode::Keyword,
             fqn_separator: ".",
         }

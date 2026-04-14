@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use super::rules::{BindingKind, ResolutionRules, ScopeKind};
+use super::rules::{BindingKind, ChainMode, ResolutionRules, ScopeKind};
 use super::ssa::{BlockId, SsaResolver, Value};
 
 /// A recorded reference read, linking back to the canonical data.
@@ -305,13 +305,36 @@ impl<'a> FileWalker<'a> {
         }
     }
 
-    fn enter_scope(&mut self, _node: &Node<StrDoc<SupportLang>>, scope_kind: ScopeKind) {
+    fn enter_scope(&mut self, node: &Node<StrDoc<SupportLang>>, scope_kind: ScopeKind) {
         let new_block = self.ssa.add_block();
         self.ssa.add_predecessor(new_block, self.current_block);
         self.ssa.seal_block(new_block);
 
+        // For class scopes, write `this`/`self` so method bodies can
+        // resolve `this.member()` via type-flow.
+        if scope_kind == ScopeKind::Class {
+            if let Some(name_node) = node.field("name") {
+                let class_name = name_node.text().to_string();
+                // Build FQN from scope stack + class name
+                let class_fqn = self.build_fqn(&class_name);
+                self.ssa
+                    .write_variable("this", new_block, Value::Type(class_fqn.clone()));
+                self.ssa
+                    .write_variable("self", new_block, Value::Type(class_fqn));
+            }
+        }
+
         self.scope_stack.push((new_block, scope_kind));
         self.current_block = new_block;
+    }
+
+    /// Build a dotted FQN from the current scope stack + a name.
+    fn build_fqn(&self, name: &str) -> String {
+        // Walk the scope stack to find enclosing definitions by matching
+        // canonical definitions that contain this byte range.
+        // For now, just use the name — type-flow will resolve via the
+        // DefinitionIndex which does FQN and name lookup.
+        name.to_string()
     }
 
     fn exit_scope(&mut self) {
@@ -435,29 +458,63 @@ impl<'a> FileWalker<'a> {
         };
 
         let value = match binding_rule.binding_kind {
-            BindingKind::Parameter | BindingKind::Deletion | BindingKind::ForTarget => {
-                Value::Opaque
+            BindingKind::Parameter => {
+                self.extract_type_value(node).unwrap_or(Value::Opaque)
             }
+            BindingKind::Deletion | BindingKind::ForTarget => Value::Opaque,
             BindingKind::Assignment | BindingKind::WithAlias => {
-                if let Some(value_field) = binding_rule.value_field {
-                    if let Some(value_node) = node.field(value_field) {
-                        let value_text = value_node.text().to_string();
-                        let reaching = self.ssa.read_variable(&value_text, self.current_block);
-                        if !reaching.values.is_empty() {
-                            reaching.values[0].clone()
-                        } else {
-                            Value::Opaque
-                        }
-                    } else {
-                        Value::Opaque
-                    }
-                } else {
-                    Value::Opaque
-                }
+                self.extract_type_value(node)
+                    .unwrap_or_else(|| self.resolve_binding_value(node, binding_rule))
             }
         };
 
         self.ssa.write_variable(&name, self.current_block, value);
+    }
+
+    /// Extract a type annotation from a node, producing `Value::Type`.
+    /// Only active for `ChainMode::TypeFlow` — reads field names and
+    /// skip list from the per-language config.
+    fn extract_type_value(&self, node: &Node<StrDoc<SupportLang>>) -> Option<Value> {
+        let (type_fields, skip_types) = match &self.rules.chain_mode {
+            ChainMode::TypeFlow {
+                type_fields,
+                skip_types,
+            } => (type_fields, skip_types),
+            ChainMode::ValueFlow => return None,
+        };
+
+        for &field_name in type_fields.iter() {
+            if let Some(type_node) = node.field(field_name) {
+                let type_text = type_node.text().to_string();
+                if !skip_types.iter().any(|&s| s == type_text) {
+                    return Some(Value::Type(type_text));
+                }
+            }
+        }
+        None
+    }
+
+    /// Resolve a binding's RHS value through the SSA (value-flow).
+    fn resolve_binding_value(
+        &mut self,
+        node: &Node<StrDoc<SupportLang>>,
+        binding_rule: &super::rules::BindingRule,
+    ) -> Value {
+        if let Some(value_field) = binding_rule.value_field {
+            if let Some(value_node) = node.field(value_field) {
+                let value_text = value_node.text().to_string();
+                let reaching = self.ssa.read_variable(&value_text, self.current_block);
+                if !reaching.values.is_empty() {
+                    reaching.values[0].clone()
+                } else {
+                    Value::Opaque
+                }
+            } else {
+                Value::Opaque
+            }
+        } else {
+            Value::Opaque
+        }
     }
 
     fn finalize(&mut self) {

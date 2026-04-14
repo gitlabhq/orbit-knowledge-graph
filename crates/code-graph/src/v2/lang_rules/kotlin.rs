@@ -62,7 +62,13 @@ impl HasRules for KotlinRules {
                 ImportStrategy::GlobalName { max_candidates: 3 },
             ],
 
-            chain_mode: ChainMode::TypeFlow,
+            chain_mode: ChainMode::TypeFlow {
+                type_fields: &["user_type", "type"],
+                skip_types: &[
+                    "Int", "Long", "Short", "Byte", "Float", "Double", "Boolean", "Char", "Unit",
+                    "Nothing", "String",
+                ],
+            },
             receiver: ReceiverMode::Keyword,
             fqn_separator: ".",
         }
