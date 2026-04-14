@@ -336,6 +336,81 @@ applies `config/graph.sql` to the configured ClickHouse instance.
 This lightweight path assumes NATS, ClickHouse, Siphon, PostgreSQL, and Gitaly
 come from GDK.
 
+### HTTPS and nginx GDK setups
+
+The dev script reads `hostname`, `port`, and `https.enabled` from `gdk.yml` to
+derive `GKG_GITLAB__BASE_URL`. If your GDK has HTTPS enabled (for example
+`https.enabled: true` with `hostname: gdk.test` and `port: 3443`), the script
+automatically sets `GKG_GITLAB__BASE_URL=https://gdk.test:3443`.
+
+For HTTPS to work, the GKG server's TLS stack (`rustls` via `reqwest`) must
+trust the certificate. If you used `mkcert` to generate GDK certificates, run
+`mkcert -install` to add the root CA to your system trust store.
+
+### PostgreSQL: TCP required for Siphon
+
+Siphon requires PostgreSQL on TCP for logical replication. GDK defaults to Unix
+sockets, which causes Siphon to crash-loop with connection errors. Add
+`postgresql.host: localhost` to `gdk.yml`, then:
+
+```shell
+gdk reconfigure && gdk restart postgresql
+```
+
+The dev script detects both Unix sockets and TCP automatically for its own
+health checks.
+
+### Siphon prometheus port conflict
+
+Siphon's default prometheus port (8081) often conflicts with Elasticsearch. If
+Siphon crash-loops with `listen tcp :8081: bind: address already in use`, change
+the port in `$GDK_ROOT/siphon/config.yml`:
+
+```yaml
+prometheus:
+  port: 8082
+```
+
+Protect the file from being overwritten by adding `siphon/config.yml` to
+`gdk.protected_config_files` in `gdk.yml`, then `gdk restart siphon`.
+
+### Enabling the Knowledge Graph in GitLab
+
+To access the Knowledge Graph UI in your GDK:
+
+1. Add to `$GDK_ROOT/gitlab/config/gitlab.yml` under the `development:` block:
+
+   ```yaml
+     knowledge_graph:
+       enabled: true
+   ```
+
+1. Protect `gitlab.yml` by adding `gitlab/config/gitlab.yml` to
+   `gdk.protected_config_files` in `gdk.yml`.
+
+1. Restart Rails:
+
+   ```shell
+   gdk restart rails-web rails-background-jobs
+   ```
+
+1. Enable feature flags:
+
+   ```shell
+   cd $GDK_ROOT/gitlab
+   bundle exec rails runner "Feature.enable(:knowledge_graph); Feature.enable(:knowledge_graph_infra)"
+   ```
+
+1. Enable namespaces for indexing:
+
+   ```shell
+   cd $GDK_ROOT/gitlab
+   bundle exec rails runner "Namespace.where(type: 'Group').find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
+   ```
+
+The Knowledge Graph UI is then available at
+`https://<gdk-hostname>:<gdk-port>/dashboard/orbit`.
+
 See `.gkg-dev.conf.example` for all configuration options (K8s runtime,
 resource allocation, Tilt streaming mode).
 
