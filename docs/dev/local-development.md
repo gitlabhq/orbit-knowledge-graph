@@ -62,7 +62,7 @@ ClickHouse from your GDK installation.
      done
    ```
 
-   Or use `mise run dev:setup`, which does both steps above.
+   Or skip both steps and run `mise run dev:setup` later (see [Setup](#setup)).
 
 1. **Configure Siphon tables:**
 
@@ -246,6 +246,9 @@ ClickHouse from your GDK installation.
    ```shell
    mise run dev
    ```
+
+The GKG webserver is available at `http://localhost:8090` (HTTP) and
+`localhost:50054` (gRPC) by default. Ports can be changed in `.env`.
 
 This starts all three GKG runtime modes in the foreground:
 
