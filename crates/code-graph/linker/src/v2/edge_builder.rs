@@ -96,6 +96,9 @@ struct Resolver<'a> {
     ctx: &'a ResolutionContext,
     ssa: &'a mut SsaResolver,
     sep: &'a str,
+    /// Reusable buffer for FQN construction. Avoids allocating a new
+    /// String for every format!("{}{}{}", ...) in member/import lookups.
+    buf: String,
 }
 
 impl<'a> Resolver<'a> {
@@ -109,7 +112,17 @@ impl<'a> Resolver<'a> {
             rules,
             ctx,
             ssa,
+            buf: String::with_capacity(128),
         }
+    }
+
+    /// Build a FQN string in the reusable buffer and look it up.
+    fn lookup_fqn_joined(&mut self, prefix: &str, suffix: &str) -> &[DefRef] {
+        self.buf.clear();
+        self.buf.push_str(prefix);
+        self.buf.push_str(self.sep);
+        self.buf.push_str(suffix);
+        self.ctx.definitions.lookup_fqn(&self.buf)
     }
 
     // ── Shared primitive ────────────────────────────────────────
@@ -119,7 +132,7 @@ impl<'a> Resolver<'a> {
     /// compound key fallback, and base resolution.
     fn value_to_types(&mut self, value: &Value) -> Vec<String> {
         match value {
-            Value::Type(t) => vec![t.clone()],
+            Value::Type(t) => vec![t.to_string()],
             Value::Def(f, d) => {
                 let def = &self.ctx.results[*f].definitions[*d];
                 if def.kind.is_type_container() {
@@ -190,8 +203,8 @@ impl<'a> Resolver<'a> {
                     if !members.is_empty() {
                         result.extend(members);
                     } else {
-                        let fqn = format!("{}{}{}", type_name, self.sep, read.name);
-                        result.extend(self.ctx.definitions.lookup_fqn(&fqn));
+                        let fqn_matches = self.lookup_fqn_joined(type_name, &read.name);
+                        result.extend_from_slice(fqn_matches);
                     }
                 }
                 _ => {}
@@ -315,7 +328,7 @@ impl<'a> Resolver<'a> {
                         .values
                         .iter()
                         .filter_map(|v| match v {
-                            Value::Type(t) => Some(t.clone()),
+                            Value::Type(t) => Some(t.to_string()),
                             _ => None,
                         })
                         .collect()

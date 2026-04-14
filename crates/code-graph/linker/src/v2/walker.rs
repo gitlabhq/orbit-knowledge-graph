@@ -217,13 +217,13 @@ impl<'a> FileWalker<'a> {
             let class_fqn = self.build_fqn(name);
             for &self_name in self.rules.self_names {
                 self.ssa
-                    .write_variable(self_name, new_block, Value::Type(class_fqn.clone()));
+                    .write_variable(self_name, new_block, Value::type_of(&class_fqn));
             }
             if let Some(super_name) = self.rules.super_name
                 && let Some(super_type) = self.find_super_type(name)
             {
                 self.ssa
-                    .write_variable(super_name, new_block, Value::Type(super_type));
+                    .write_variable(super_name, new_block, Value::type_of(&super_type));
             }
         }
 
@@ -438,7 +438,7 @@ impl<'a> FileWalker<'a> {
             if let Some(type_node) = node.field(field_name) {
                 let type_text = type_node.text().to_string();
                 if !skip_types.iter().any(|&s| s == type_text) {
-                    return Some(Value::Type(type_text));
+                    return Some(Value::type_of(&type_text));
                 }
             }
         }
@@ -459,7 +459,7 @@ impl<'a> FileWalker<'a> {
             if let Some(value_node) = node.field(value_field) {
                 let name = self.extract_rhs_name(&value_node);
                 if let Some(name) = name {
-                    let reaching = self.ssa.read_variable(&name, self.current_block);
+                    let reaching = self.ssa.read_variable_stateless(&name, self.current_block);
                     if !reaching.values.is_empty() {
                         let value = reaching.values[0].clone();
                         self.maybe_promote_to_type(value)
@@ -524,7 +524,7 @@ impl<'a> FileWalker<'a> {
                 .get(*def_idx)
                 .and_then(|d| d.metadata.as_ref())
                 .and_then(|m| m.return_type.as_ref())
-                .map(|rt| Value::Type(rt.clone()))
+                .map(|rt| Value::type_of(rt))
                 .unwrap_or(value),
             // Cross-file defs can't be checked here (walker only has
             // current file). The chain resolver handles cross-file
