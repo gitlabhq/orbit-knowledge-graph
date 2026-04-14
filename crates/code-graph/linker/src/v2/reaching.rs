@@ -11,7 +11,7 @@ use super::context::{DefRef, ResolutionContext};
 use super::edges::{EdgeSource, ResolvedEdge};
 use super::resolver::ReferenceResolver;
 use super::rules::{ImportStrategy, ResolutionRules};
-use super::ssa::{ReachingDefs, Value};
+use super::ssa::{BlockId, ReachingDefs, SsaResolver, Value};
 use super::walker::{walk_files, AsAst};
 
 /// Trait to get rules from the type parameter.
@@ -60,14 +60,28 @@ fn resolve_with_rules<A: AsAst>(
         // Find enclosing class for implicit-this resolution
         let enclosing_class_fqn = find_enclosing_class(ctx, read.file_idx, reference);
 
-        let resolved_defs = resolve_reaching_defs(
-            rules,
-            ctx,
-            read.file_idx,
-            &read.name,
-            &reaching,
-            enclosing_class_fqn.as_deref(),
-        );
+        // If the reference has an expression chain, walk it to resolve
+        // through types. Otherwise fall back to bare name resolution.
+        let resolved_defs = if let Some(ref chain) = reference.expression {
+            resolve_expression_chain(
+                rules,
+                ctx,
+                &mut walk_result.ssa,
+                read.file_idx,
+                read.block,
+                chain,
+                enclosing_class_fqn.as_deref(),
+            )
+        } else {
+            resolve_reaching_defs(
+                rules,
+                ctx,
+                read.file_idx,
+                &read.name,
+                &reaching,
+                enclosing_class_fqn.as_deref(),
+            )
+        };
 
         let source_enclosing = ctx.scopes.enclosing_scope(
             &result.file_path,
@@ -179,6 +193,161 @@ fn resolve_reaching_defs<A>(
     result.retain(|r| seen.insert((r.file_idx, r.def_idx)));
 
     result
+}
+
+/// Walk an `ExpressionStep` chain left-to-right, threading the resolved
+/// type through each step.
+///
+/// e.g. `[Ident("svc"), Call("query")]`:
+///   1. Resolve "svc" via SSA → Value::Type("UserService")
+///   2. Look up "query" as member of UserService → UserService.query
+///
+/// e.g. `[Ident("factory"), Call("getService"), Call("query")]`:
+///   1. Resolve "factory" via SSA → Value::Def(Factory)
+///   2. Factory is a class → look up "getService" as member → Factory.getService
+///   3. getService has return_type "UserService" → look up "query" → UserService.query
+#[allow(clippy::too_many_arguments)]
+fn resolve_expression_chain<A: AsAst>(
+    rules: &ResolutionRules,
+    ctx: &ResolutionContext<A>,
+    ssa: &mut SsaResolver,
+    file_idx: usize,
+    block: BlockId,
+    chain: &[code_graph_types::ExpressionStep],
+    enclosing_class_fqn: Option<&str>,
+) -> Vec<DefRef> {
+    use code_graph_types::ExpressionStep;
+
+    if chain.is_empty() {
+        return vec![];
+    }
+
+    // Resolve the base (first step) to a set of type names
+    let mut current_types: Vec<String> = Vec::new();
+
+    match &chain[0] {
+        ExpressionStep::Ident(name) => {
+            let reaching = ssa.read_variable_stateless(name, block);
+            for value in &reaching.values {
+                match value {
+                    Value::Type(t) => current_types.push(t.clone()),
+                    Value::Def(f, d) => {
+                        let def = &ctx.results[*f].definitions[*d];
+                        match def.kind {
+                            code_graph_types::DefKind::Class
+                            | code_graph_types::DefKind::Interface => {
+                                current_types.push(def.fqn.to_string());
+                            }
+                            _ => {
+                                // Use return_type if it's a method/function
+                                if let Some(meta) = &def.metadata {
+                                    if let Some(rt) = &meta.return_type {
+                                        current_types.push(rt.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        ExpressionStep::This => {
+            if let Some(class_fqn) = enclosing_class_fqn {
+                current_types.push(class_fqn.to_string());
+            }
+        }
+        ExpressionStep::Super => {
+            let reaching = ssa.read_variable_stateless("super", block);
+            for value in &reaching.values {
+                if let Value::Type(t) = value {
+                    current_types.push(t.clone());
+                }
+            }
+        }
+        ExpressionStep::New(type_name) => {
+            current_types.push(type_name.clone());
+        }
+        _ => {}
+    }
+
+    if current_types.is_empty() {
+        // Can't resolve the base — fall back to bare name on the last step
+        if let Some(last) = chain.last() {
+            let name = match last {
+                ExpressionStep::Call(n) | ExpressionStep::Field(n) => n.as_str(),
+                _ => return vec![],
+            };
+            let reaching = ssa.read_variable_stateless(name, block);
+            return resolve_reaching_defs(
+                rules,
+                ctx,
+                file_idx,
+                name,
+                &reaching,
+                enclosing_class_fqn,
+            );
+        }
+        return vec![];
+    }
+
+    // Walk remaining steps, resolving each through the current type(s)
+    for step in &chain[1..] {
+        let member_name = match step {
+            ExpressionStep::Call(n) | ExpressionStep::Field(n) => n,
+            _ => continue,
+        };
+
+        let mut next_types = Vec::new();
+        let mut found_members = Vec::new();
+
+        for type_name in &current_types {
+            let members =
+                ctx.members
+                    .lookup_member_with_supers(type_name, member_name, &ctx.definitions);
+            for def_ref in &members {
+                let def = &ctx.results[def_ref.file_idx].definitions[def_ref.def_idx];
+                // For Call steps, advance to the return type
+                if matches!(step, ExpressionStep::Call(_)) {
+                    if let Some(meta) = &def.metadata {
+                        if let Some(rt) = &meta.return_type {
+                            next_types.push(rt.clone());
+                        }
+                    }
+                    // If it's a class/constructor, the "return type" is the class itself
+                    if matches!(
+                        def.kind,
+                        code_graph_types::DefKind::Class | code_graph_types::DefKind::Constructor
+                    ) {
+                        next_types.push(def.fqn.to_string());
+                    }
+                }
+                // For Field steps, advance to the field's type annotation
+                if matches!(step, ExpressionStep::Field(_)) {
+                    if let Some(meta) = &def.metadata {
+                        if let Some(ta) = &meta.type_annotation {
+                            next_types.push(ta.clone());
+                        }
+                    }
+                }
+            }
+            found_members.extend(members);
+        }
+
+        // If this is the last step, return the found members as the result
+        if std::ptr::eq(step, chain.last().unwrap()) {
+            let mut seen = rustc_hash::FxHashSet::default();
+            found_members.retain(|r| seen.insert((r.file_idx, r.def_idx)));
+            return found_members;
+        }
+
+        current_types = next_types;
+        if current_types.is_empty() {
+            break;
+        }
+    }
+
+    vec![]
 }
 
 /// Find the enclosing class FQN for a reference, for implicit-this resolution.

@@ -126,6 +126,26 @@ pub struct ReferenceRule {
     kind: &'static str,
     condition: Option<Pred>,
     name: Extract,
+    /// Tree-sitter field holding the receiver/object expression.
+    /// When set, the engine builds an `ExpressionStep` chain by
+    /// recursively walking the receiver using the `ChainConfig`.
+    pub(crate) object_field: Option<&'static str>,
+}
+
+/// Per-language configuration for expression chain extraction.
+/// Tells the engine how to recognize identifiers, this/super,
+/// field access, and constructors in the tree-sitter AST.
+pub struct ChainConfig {
+    /// Node kinds that are bare identifiers (e.g. `["identifier"]` for Java).
+    pub ident_kinds: &'static [&'static str],
+    /// Node kinds that represent `this` / `self`.
+    pub this_kinds: &'static [&'static str],
+    /// Node kinds that represent `super`.
+    pub super_kinds: &'static [&'static str],
+    /// Field access node kinds + (object_field, member_field).
+    pub field_access: &'static [(&'static str, &'static str, &'static str)],
+    /// Constructor node kinds + type_field.
+    pub constructor: &'static [(&'static str, &'static str)],
 }
 
 impl Rule for ReferenceRule {
@@ -153,6 +173,13 @@ impl ReferenceRule {
         self.name = extract;
         self
     }
+
+    /// Declare the tree-sitter field holding the receiver/object.
+    /// Triggers `ExpressionStep` chain extraction on the reference.
+    pub fn object(mut self, field: &'static str) -> Self {
+        self.object_field = Some(field);
+        self
+    }
 }
 
 pub fn reference(kind: &'static str) -> ReferenceRule {
@@ -160,6 +187,7 @@ pub fn reference(kind: &'static str) -> ReferenceRule {
         kind,
         condition: None,
         name: Extract::Default,
+        object_field: None,
     }
 }
 
@@ -329,6 +357,10 @@ pub trait DslLanguage: Send + Sync + Default {
         false
     }
 
+    fn chain_config() -> Option<ChainConfig> {
+        None
+    }
+
     fn package_node() -> Option<(&'static str, Extract)> {
         None
     }
@@ -341,6 +373,9 @@ pub trait DslLanguage: Send + Sync + Default {
                 .auto_refs(Self::auto_refs())
                 .auto_imports(Self::auto_imports())
                 .custom_import(Self::custom_import);
+        if let Some(cc) = Self::chain_config() {
+            spec = spec.chain(cc);
+        }
         if let Some((kind, extract)) = Self::package_node() {
             spec = spec.package(kind, extract);
         }
@@ -446,6 +481,7 @@ pub struct LanguageSpec {
     pub refs: Vec<ReferenceRule>,
     pub imports: Vec<ImportRule>,
     pub bindings: Vec<ParseBindingRule>,
+    pub(crate) chain_config: Option<ChainConfig>,
     pub(crate) scope_kinds: FxHashSet<&'static str>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,
@@ -465,6 +501,7 @@ impl LanguageSpec {
             refs,
             imports,
             bindings: Vec::new(),
+            chain_config: None,
             scope_kinds,
             package_node: None,
             custom_import_fn: None,
@@ -473,6 +510,11 @@ impl LanguageSpec {
 
     pub fn bindings(mut self, rules: Vec<ParseBindingRule>) -> Self {
         self.bindings = rules;
+        self
+    }
+
+    pub fn chain(mut self, config: ChainConfig) -> Self {
+        self.chain_config = Some(config);
         self
     }
 

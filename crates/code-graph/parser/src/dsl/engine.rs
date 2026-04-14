@@ -6,7 +6,7 @@ use treesitter_visit::{Node, SupportLang};
 use code_graph_config::Language;
 use code_graph_types::{
     CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind,
-    DefinitionMetadata, Fqn, ReferenceStatus,
+    DefinitionMetadata, ExpressionStep, Fqn, ReferenceStatus,
 };
 
 use crate::utils::node_to_range;
@@ -130,7 +130,7 @@ impl LanguageSpec {
             });
         }
 
-        if let Some((name, range)) = self.evaluate_reference(node, &node_kind) {
+        if let Some((name, range, expression)) = self.evaluate_reference(node, &node_kind) {
             refs.push(CanonicalReference {
                 reference_type: "Call",
                 name,
@@ -138,7 +138,7 @@ impl LanguageSpec {
                 scope_fqn: Fqn::from_scope_only(scope_stack, sep),
                 status: ReferenceStatus::Unresolved,
                 target_fqn: None,
-                expression: None,
+                expression,
             });
         }
 
@@ -199,10 +199,97 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-    ) -> Option<(String, crate::utils::Range)> {
+    ) -> Option<(String, crate::utils::Range, Option<Vec<ExpressionStep>>)> {
         let rule = self.refs.iter().find(|r| r.matches(node, node_kind))?;
         let name = rule.extract_name(node)?;
-        Some((name, node_to_range(node)))
+
+        // Build expression chain if the rule declares an object field
+        // and the spec has a ChainConfig
+        let expression = rule
+            .object_field
+            .zip(self.chain_config.as_ref())
+            .and_then(|(obj_field, cc)| {
+                let obj_node = node.field(obj_field)?;
+                let mut chain = Vec::new();
+                self.build_expression_chain(&obj_node, &mut chain, cc);
+                chain.push(ExpressionStep::Call(name.clone()));
+                if chain.len() > 1 { Some(chain) } else { None }
+            });
+
+        Some((name, node_to_range(node), expression))
+    }
+
+    /// Recursively walk a receiver expression, building the chain
+    /// from innermost (base) to outermost (final call).
+    /// All node kind recognition is driven by `ChainConfig`.
+    fn build_expression_chain(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        chain: &mut Vec<ExpressionStep>,
+        cc: &crate::dsl::types::ChainConfig,
+    ) {
+        let kind = node.kind();
+        let kind_ref = kind.as_ref();
+
+        // Identifier base
+        if cc.ident_kinds.iter().any(|&k| k == kind_ref) {
+            chain.push(ExpressionStep::Ident(node.text().to_string()));
+            return;
+        }
+
+        // this/self
+        if cc.this_kinds.iter().any(|&k| k == kind_ref) {
+            chain.push(ExpressionStep::This);
+            return;
+        }
+
+        // super
+        if cc.super_kinds.iter().any(|&k| k == kind_ref) {
+            chain.push(ExpressionStep::Super);
+            return;
+        }
+
+        // Constructor (new Foo())
+        for &(ctor_kind, type_field) in cc.constructor {
+            if kind_ref == ctor_kind {
+                if let Some(type_node) = node.field(type_field) {
+                    chain.push(ExpressionStep::New(type_node.text().to_string()));
+                }
+                return;
+            }
+        }
+
+        // Field access (obj.field)
+        for &(fa_kind, obj_field, member_field) in cc.field_access {
+            if kind_ref == fa_kind {
+                if let Some(obj) = node.field(obj_field) {
+                    self.build_expression_chain(&obj, chain, cc);
+                }
+                if let Some(field) = node.field(member_field) {
+                    chain.push(ExpressionStep::Field(field.text().to_string()));
+                }
+                return;
+            }
+        }
+
+        // Call expression with object field (method_invocation, call_expression)
+        if let Some(rule) = self.refs.iter().find(|r| r.kind() == kind_ref) {
+            if let Some(obj_field) = rule.object_field {
+                if let Some(obj_node) = node.field(obj_field) {
+                    self.build_expression_chain(&obj_node, chain, cc);
+                }
+            }
+            if let Some(name) = rule.extract_name(node) {
+                chain.push(ExpressionStep::Call(name));
+            }
+            return;
+        }
+
+        // Fallback: treat as identifier
+        let text = node.text().to_string();
+        if !text.is_empty() {
+            chain.push(ExpressionStep::Ident(text));
+        }
     }
 
     fn evaluate_imports(
