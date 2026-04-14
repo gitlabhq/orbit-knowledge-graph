@@ -627,6 +627,14 @@ impl Ontology {
         self.local_entities.keys().map(|s| s.as_str()).collect()
     }
 
+    /// Returns the exclude list for a local entity.
+    ///
+    /// Returns `None` if the entity is not in `local_entities`.
+    #[must_use]
+    pub fn local_entity_excludes(&self, entity_name: &str) -> Option<&[String]> {
+        self.local_entities.get(entity_name).map(|v| v.as_slice())
+    }
+
     /// Returns the fields for a local entity, filtered to exclude virtual
     /// fields and properties listed in the entity's `exclude_properties`.
     ///

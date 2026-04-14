@@ -7,7 +7,7 @@ BASE_REF="${1:-origin/main}"
 
 schema_files_changed() {
     git diff --name-only "$BASE_REF"...HEAD \
-        | grep -qE '^(config/graph\.sql|config/graph_local\.sql|config/ontology/)'
+        | grep -qE '^(config/graph\.sql|config/ontology/)'
 }
 
 skip_requested() {
@@ -35,8 +35,8 @@ if schema_files_changed; then
     else
         echo "❌ Schema-affecting files changed but config/SCHEMA_VERSION was not bumped."
         echo ""
-        echo "Any MR that modifies config/graph.sql, config/graph_local.sql, or"
-        echo "config/ontology/ in a way that affects the ClickHouse schema must also"
+        echo "Any MR that modifies config/graph.sql or config/ontology/ in a way"
+        echo "that affects the ClickHouse or DuckDB schema must also"
         echo "bump config/SCHEMA_VERSION."
         echo ""
         echo "If this change does not affect the ClickHouse schema (e.g. comments,"

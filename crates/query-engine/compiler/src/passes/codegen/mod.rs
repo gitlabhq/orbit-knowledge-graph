@@ -5,8 +5,7 @@
 //! exposes a single `codegen()` entry point with the same signature.
 
 pub mod clickhouse;
-pub mod clickhouse_ddl;
-pub mod ddl_generator;
+pub mod ddl;
 pub mod duckdb;
 
 use gkg_server_config::QueryConfig;

@@ -4,6 +4,13 @@
 //! in each node/edge/auxiliary YAML is fully explicit: every column, codec,
 //! default, index, and projection is specified. The generator is a thin
 //! pass-through with no auto-derivation.
+//!
+//! Submodules provide backend-specific SQL emission:
+//! - [`clickhouse`] — ClickHouse `CREATE TABLE` with engine, codecs, indexes, projections
+//! - [`duckdb`] — DuckDB `CREATE TABLE` stripped of ClickHouse-specific features
+
+pub mod clickhouse;
+pub mod duckdb;
 
 use ontology::{AuxiliaryTable, Ontology, StorageColumn, StorageIndex, StorageProjection};
 
@@ -34,6 +41,29 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
         if let Some(config) = ontology.edge_table_config(name) {
             tables.push(build_edge_table(name, config).with_prefix(prefix));
         }
+    }
+
+    tables
+}
+
+/// Generates local (DuckDB) graph table DDL from the ontology's `local_db` config.
+///
+/// Returns `CreateTable` ASTs for each local entity and the local edge table.
+/// These are stripped-down versions of the ClickHouse tables: no system columns
+/// (`_version`, `_deleted`), and excluded properties (e.g. `traversal_path`)
+/// are filtered out. The engine/indexes/projections fields are set to empty
+/// defaults since DuckDB codegen ignores them.
+pub fn generate_local_tables(ontology: &Ontology) -> Vec<CreateTable> {
+    let mut tables: Vec<CreateTable> = Vec::new();
+
+    for entity_name in ontology.local_entity_names() {
+        if let Some(table) = build_local_node_table(ontology, entity_name) {
+            tables.push(table);
+        }
+    }
+
+    if let Some(table) = build_local_edge_table(ontology) {
+        tables.push(table);
     }
 
     tables
@@ -349,6 +379,90 @@ fn aux_col_ch_type(dt: &ontology::DataType, nullable: bool) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Local (DuckDB) table builders
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Builds a local node table from the ontology's storage columns, filtering
+/// out properties listed in the entity's `exclude_properties`.
+fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<CreateTable> {
+    let exclude = ontology.local_entity_excludes(entity_name)?;
+    let node = ontology.get_node(entity_name)?;
+
+    let columns: Vec<ColumnDef> = node
+        .storage
+        .columns
+        .iter()
+        .filter(|col| !exclude.iter().any(|e| e == &col.name))
+        .map(storage_col_to_def)
+        .collect();
+
+    Some(CreateTable {
+        name: node.destination_table.clone(),
+        columns,
+        indexes: vec![],
+        projections: vec![],
+        engine: Engine {
+            name: String::new(),
+            args: vec![],
+        },
+        order_by: node
+            .sort_key
+            .iter()
+            .filter(|k| !exclude.iter().any(|e| e == *k))
+            .cloned()
+            .collect(),
+        primary_key: None,
+        settings: vec![],
+    })
+}
+
+/// Builds the local edge table from the ontology's `local_db.edge_table` config.
+fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
+    let table_name = ontology.local_edge_table_name()?;
+    let columns: Vec<ColumnDef> = ontology
+        .local_edge_columns()
+        .iter()
+        .map(|c| {
+            let col_type = local_data_type_to_column_type(&c.data_type);
+            ColumnDef::new(&c.name, col_type)
+        })
+        .collect();
+
+    Some(CreateTable {
+        name: table_name.to_string(),
+        columns,
+        indexes: vec![],
+        projections: vec![],
+        engine: Engine {
+            name: String::new(),
+            args: vec![],
+        },
+        order_by: ontology
+            .local_edge_columns()
+            .iter()
+            .map(|c| c.name.clone())
+            .collect(),
+        primary_key: None,
+        settings: vec![],
+    })
+}
+
+/// Maps ontology `DataType` to DDL `ColumnType` for local tables.
+fn local_data_type_to_column_type(dt: &ontology::DataType) -> ColumnType {
+    match dt {
+        ontology::DataType::String | ontology::DataType::Uuid => ColumnType::String,
+        ontology::DataType::Int => ColumnType::Int64,
+        ontology::DataType::Bool => ColumnType::Bool,
+        ontology::DataType::DateTime => ColumnType::Timestamp {
+            precision: 6,
+            timezone: None,
+        },
+        ontology::DataType::Date => ColumnType::Date32,
+        _ => ColumnType::String,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -396,7 +510,7 @@ mod tests {
 
     #[test]
     fn generated_ddl_snapshot() {
-        use crate::passes::codegen::clickhouse_ddl::emit_create_table;
+        use super::clickhouse::emit_create_table;
 
         let tables = generate_graph_tables(&ontology());
         let full_ddl: String = tables
@@ -412,6 +526,96 @@ mod tests {
         for table in &tables {
             assert!(!table.columns.is_empty(), "{}: no columns", table.name);
             assert!(!table.order_by.is_empty(), "{}: no ORDER BY", table.name);
+        }
+    }
+
+    // ─── Local table generation tests ────────────────────────────────────
+
+    #[test]
+    fn local_tables_include_expected_entities() {
+        let tables = generate_local_tables(&ontology());
+        let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+        for expected in [
+            "gl_directory",
+            "gl_file",
+            "gl_definition",
+            "gl_imported_symbol",
+            "gl_edge",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "missing local table {expected}: {names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn local_tables_exclude_traversal_path() {
+        for table in &generate_local_tables(&ontology()) {
+            let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+            assert!(
+                !cols.contains(&"traversal_path"),
+                "{}: should not contain traversal_path",
+                table.name
+            );
+        }
+    }
+
+    #[test]
+    fn local_tables_have_no_system_columns() {
+        for table in &generate_local_tables(&ontology()) {
+            let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+            assert!(
+                !cols.contains(&"_version"),
+                "{}: should not contain _version",
+                table.name
+            );
+            assert!(
+                !cols.contains(&"_deleted"),
+                "{}: should not contain _deleted",
+                table.name
+            );
+        }
+    }
+
+    #[test]
+    fn local_tables_have_no_clickhouse_features() {
+        for table in &generate_local_tables(&ontology()) {
+            assert!(
+                table.indexes.is_empty(),
+                "{}: should have no indexes",
+                table.name
+            );
+            assert!(
+                table.projections.is_empty(),
+                "{}: should have no projections",
+                table.name
+            );
+            assert!(
+                table.settings.is_empty(),
+                "{}: should have no settings",
+                table.name
+            );
+        }
+    }
+
+    #[test]
+    fn local_ddl_snapshot() {
+        use super::duckdb::emit_create_table as emit_duckdb;
+
+        let tables = generate_local_tables(&ontology());
+        let full_ddl: String = tables
+            .iter()
+            .map(|t| format!("{};\n", emit_duckdb(t)))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Print for manual comparison:
+        // cargo test -p compiler --lib ddl_generator::tests::local_ddl_snapshot -- --nocapture
+        eprintln!("\n--- LOCAL DDL ---\n{full_ddl}\n--- END ---\n");
+
+        for table in &tables {
+            assert!(!table.columns.is_empty(), "{}: no columns", table.name);
         }
     }
 }

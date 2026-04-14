@@ -102,10 +102,11 @@ startup — values below 2 are rejected.
 
 ## CI and local enforcement
 
-A CI job (`schema-version-check`, lint stage, MR-only) fails if `config/graph.sql`,
-`config/graph_local.sql`, or `config/ontology/` changes without a corresponding bump to
-`config/SCHEMA_VERSION`. The same check runs as a lefthook pre-commit hook for immediate local
-feedback.
+A CI job (`schema-version-check`, lint stage, MR-only) fails if `config/graph.sql`
+or `config/ontology/` changes without a corresponding bump to `config/SCHEMA_VERSION`.
+The same check runs as a lefthook pre-commit hook for immediate local feedback.
+Local (DuckDB) DDL is generated from the ontology at runtime, so `config/ontology/`
+changes automatically affect both ClickHouse and DuckDB schemas.
 
 Non-schema ontology changes (descriptions, comments) can bypass the check by adding
 `[skip schema-version-check]` to the MR description.
