@@ -91,7 +91,7 @@ GDK_POSTGRES_PORT="$(parse_gdk_value postgresql.port 2>/dev/null || echo 5432)"
 # (e.g. /home/git/gdk/postgresql) which won't exist on macOS. If the resolved
 # path doesn't exist, fall back to $GDK_ROOT/postgresql.
 GDK_POSTGRES_HOST="$(parse_gdk_value postgresql.host 2>/dev/null || echo "$GDK_ROOT/postgresql")"
-if [[ ! -d "$GDK_POSTGRES_HOST" && "$GDK_POSTGRES_HOST" != "localhost" ]]; then
+if [[ "$GDK_POSTGRES_HOST" == /* && ! -d "$GDK_POSTGRES_HOST" ]]; then
   GDK_POSTGRES_HOST="$GDK_ROOT/postgresql"
 fi
 
