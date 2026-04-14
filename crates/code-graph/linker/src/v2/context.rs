@@ -3,27 +3,18 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Shared resolution context built from all parsed results for a language.
 ///
-/// Owns all data. Built once by the pipeline after parsing, consumed
-/// by the resolver.
-///
-/// The generic `A` carries the raw AST type. Languages that need
-/// expression-level resolution set `A` to the concrete tree-sitter root.
-/// Languages that don't need it use `A = ()`.
-pub struct ResolutionContext<A = ()> {
+/// Owns canonical results and pre-built indexes. ASTs are not stored
+/// here -- they are dropped after the parallel walk phase.
+pub struct ResolutionContext {
     pub root_path: String,
     pub results: Vec<CanonicalResult>,
     pub definitions: DefinitionIndex,
     pub members: MemberIndex,
     pub scopes: FileScopes,
-    pub asts: FxHashMap<String, A>,
 }
 
-impl<A> ResolutionContext<A> {
-    pub fn build(
-        results: Vec<CanonicalResult>,
-        asts: FxHashMap<String, A>,
-        root_path: String,
-    ) -> Self {
+impl ResolutionContext {
+    pub fn build(results: Vec<CanonicalResult>, root_path: String) -> Self {
         let definitions = DefinitionIndex::build(&results);
         let members = MemberIndex::build(&results);
         let scopes = FileScopes::build(&results);
@@ -34,7 +25,6 @@ impl<A> ResolutionContext<A> {
             definitions,
             members,
             scopes,
-            asts,
         }
     }
 

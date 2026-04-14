@@ -1,15 +1,15 @@
 use code_graph_config::{Language, detect_language_from_extension};
 use code_graph_types::CanonicalParser;
 use ignore::WalkBuilder;
-use parser_core::dsl::types::DslParser;
+use parser_core::dsl::types::{DslLanguage, DslParser};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
 
+use crate::linker::v2::walker::{FileWalkResult, HasRoot};
 use crate::linker::v2::{
-    CodeGraph, GraphBuilder, GraphEdge, NoResolver, ReferenceResolver, ResolutionContext,
-    RulesResolver,
+    CodeGraph, GraphBuilder, GraphEdge, HasRules, ResolutionContext, build_edges,
 };
 use crate::v2::langs::csharp::CSharpDsl;
 use crate::v2::langs::java::{JavaDsl, JavaRules};
@@ -23,12 +23,9 @@ pub type FileInput = (String, Vec<u8>);
 ///
 /// Two strategies:
 /// - **Generic**: `GenericPipeline<P, R>` for languages using the standard
-///   `CanonicalParser → Resolver → GraphBuilder` flow.
+///   parse+walk → resolve → graph flow.
 /// - **Custom**: implement directly for languages that need full control
 ///   over parsing and linking (e.g. Ruby).
-///
-/// Each pipeline receives all files for its language at once (needed
-/// for cross-file resolution) and produces a `CodeGraph`.
 pub trait LanguagePipeline {
     fn process_files(
         files: Vec<FileInput>,
@@ -36,69 +33,80 @@ pub trait LanguagePipeline {
     ) -> Result<CodeGraph, Vec<PipelineError>>;
 }
 
-/// Generic pipeline parameterized by parser `P` and resolver `R`.
+/// Generic pipeline parameterized by parser `P` and rules `R`.
 ///
-/// - `P` produces `(CanonicalResult, P::Ast)` per file (parallel)
-/// - `R` resolves references across all results + ASTs into edges (sync)
-/// - `GraphBuilder` constructs the final graph with structural + resolved edges
-pub struct GenericPipeline<P: CanonicalParser, R: ReferenceResolver<P::Ast>>(PhantomData<(P, R)>);
+/// Streaming architecture:
+/// 1. **Parallel**: parse + walk each file, drop AST immediately
+/// 2. **Sequential**: build indexes, resolve cross-file references, build graph
+pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
 where
     P: CanonicalParser + Default + Sync + Send,
-    P::Ast: Send,
-    R: ReferenceResolver<P::Ast>,
+    P::Ast: HasRoot + Send,
+    R: HasRules + Send + Sync,
 {
     fn process_files(
         files: Vec<FileInput>,
         root_path: &str,
     ) -> Result<CodeGraph, Vec<PipelineError>> {
         let parser = P::default();
+        let rules = R::rules();
 
-        // Parse all files in parallel
-        let parse_results: Vec<_> = files
+        // ── Parallel phase: parse + walk each file, drop AST ────
+        //
+        // Each rayon task: parse → walk AST → return (CanonicalResult, FileWalkResult).
+        // AST is dropped at end of closure. Only the canonical data and SSA
+        // state survive for the sequential phase.
+        let file_outputs: Vec<_> = files
             .par_iter()
-            .map(|(path, source)| {
-                parser.parse_file(source, path).map_err(|e| PipelineError {
+            .enumerate()
+            .map(|(file_idx, (path, source))| {
+                let (result, ast) = parser.parse_file(source, path).map_err(|e| PipelineError {
                     file_path: path.clone(),
                     error: format!("Parse error: {e}"),
-                })
+                })?;
+
+                let walk = if let Some(root) = ast.as_root() {
+                    crate::linker::v2::walker::walk_file(&rules, file_idx, &result, &root)
+                } else {
+                    FileWalkResult::empty()
+                };
+                // AST dropped here
+
+                Ok((result, walk))
             })
             .collect();
 
-        let mut canonical_results = Vec::new();
-        let mut asts: FxHashMap<String, P::Ast> = FxHashMap::default();
+        // ── Collect results ─────────────────────────────────────
+        let mut results = Vec::with_capacity(file_outputs.len());
+        let mut walks = Vec::with_capacity(file_outputs.len());
         let mut errors = Vec::new();
 
-        for r in parse_results {
-            match r {
-                Ok((result, ast)) => {
-                    asts.insert(result.file_path.clone(), ast);
-                    canonical_results.push(result);
+        for output in file_outputs {
+            match output {
+                Ok((result, walk)) => {
+                    results.push(result);
+                    walks.push(walk);
                 }
                 Err(err) => errors.push(err),
             }
         }
 
-        if !errors.is_empty() && canonical_results.is_empty() {
+        if !errors.is_empty() && results.is_empty() {
             return Err(errors);
         }
 
-        // Build resolution context — owns results + ASTs
-        let ctx = ResolutionContext::build(canonical_results, asts, root_path.to_string());
+        // ── Sequential phase: indexes + resolution + graph ──────
+        let ctx = ResolutionContext::build(results, root_path.to_string());
+        let resolved_edges = build_edges(&rules, &ctx, &mut walks);
 
-        // Resolve references
-        let resolved_edges = R::resolve(&ctx);
-
-        // Build the graph with structural edges + resolved edges
         let mut builder = GraphBuilder::new(root_path.to_string());
         for result in &ctx.results {
             builder.add_result(result.clone());
         }
-
         let mut graph = builder.build();
 
-        // Add resolved edges to the petgraph
         for edge in resolved_edges {
             use crate::linker::v2::EdgeSource;
 
@@ -160,12 +168,36 @@ macro_rules! register_v2_pipelines {
     };
 }
 
+/// No-op rules for languages without resolution (parse-only).
+pub struct NoRules;
+impl HasRules for NoRules {
+    fn rules() -> crate::linker::v2::ResolutionRules {
+        let spec = CSharpDsl::spec();
+        let scopes = crate::linker::v2::ResolutionRules::derive_scopes(&spec);
+        crate::linker::v2::ResolutionRules::new(
+            "noop",
+            scopes,
+            spec,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            crate::linker::v2::rules::ChainMode::ValueFlow,
+            crate::linker::v2::rules::ReceiverMode::None,
+            ".",
+            &[],
+            None,
+            false,
+        )
+    }
+}
+
 register_v2_pipelines! {
-    // Generic: DSL parser + SSA resolver
-    Python  => GenericPipeline<DslParser<PythonDsl>, RulesResolver<PythonRules>>,
-    Java    => GenericPipeline<DslParser<JavaDsl>, RulesResolver<JavaRules>>,
-    Kotlin  => GenericPipeline<DslParser<KotlinDsl>, RulesResolver<KotlinRules>>,
-    CSharp  => GenericPipeline<DslParser<CSharpDsl>, NoResolver>,
+    // Generic: DSL parser + rules-based SSA resolver
+    Python  => GenericPipeline<DslParser<PythonDsl>, PythonRules>,
+    Java    => GenericPipeline<DslParser<JavaDsl>, JavaRules>,
+    Kotlin  => GenericPipeline<DslParser<KotlinDsl>, KotlinRules>,
+    CSharp  => GenericPipeline<DslParser<CSharpDsl>, NoRules>,
 
     // Custom: full control over parse + link
     Ruby    => crate::v2::custom::ruby::RubyPipeline,

@@ -19,7 +19,7 @@ pub use scope::{HasRange, ScopeIndex};
 /// `Ast` determines what the parser preserves beyond the `CanonicalResult`.
 /// For tree-sitter languages this is `Root<StrDoc<SupportLang>>`.
 /// Custom pipelines (e.g. Prism) provide their own AST type that
-/// implements `AsAst`.
+/// implements `HasRoot`.
 pub trait CanonicalParser: Send + Sync {
     type Ast: Send;
 

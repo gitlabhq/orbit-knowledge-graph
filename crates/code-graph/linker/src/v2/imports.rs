@@ -14,9 +14,9 @@ use super::context::ResolutionContext;
 const MAX_BARE_NAME_CANDIDATES: usize = 3;
 
 /// Apply import strategies in order, returning the first non-empty result.
-pub fn apply<A>(
+pub fn apply(
     strategies: &[super::rules::ImportStrategy],
-    ctx: &ResolutionContext<A>,
+    ctx: &ResolutionContext,
     file_idx: usize,
     name: &str,
     sep: &str,
@@ -58,8 +58,8 @@ pub fn apply<A>(
 }
 
 /// Resolve an import to definitions by FQN matching.
-pub fn resolve_import<A>(
-    ctx: &ResolutionContext<A>,
+pub fn resolve_import(
+    ctx: &ResolutionContext,
     import: &CanonicalImport,
     sep: &str,
     bare_name_fallback: bool,
@@ -102,8 +102,8 @@ pub fn resolve_import<A>(
     vec![]
 }
 
-fn scope_fqn_walk<A>(
-    ctx: &ResolutionContext<A>,
+fn scope_fqn_walk(
+    ctx: &ResolutionContext,
     result: &CanonicalResult,
     name: &str,
     sep: &str,
@@ -137,12 +137,7 @@ fn scope_fqn_walk<A>(
     vec![]
 }
 
-fn explicit_import<A>(
-    ctx: &ResolutionContext<A>,
-    file_idx: usize,
-    name: &str,
-    sep: &str,
-) -> Vec<DefRef> {
+fn explicit_import(ctx: &ResolutionContext, file_idx: usize, name: &str, sep: &str) -> Vec<DefRef> {
     let result = &ctx.results[file_idx];
     for imp in &result.imports {
         let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
@@ -156,12 +151,7 @@ fn explicit_import<A>(
     vec![]
 }
 
-fn wildcard_import<A>(
-    ctx: &ResolutionContext<A>,
-    file_idx: usize,
-    name: &str,
-    sep: &str,
-) -> Vec<DefRef> {
+fn wildcard_import(ctx: &ResolutionContext, file_idx: usize, name: &str, sep: &str) -> Vec<DefRef> {
     let result = &ctx.results[file_idx];
     for imp in &result.imports {
         if imp.wildcard {
@@ -175,8 +165,8 @@ fn wildcard_import<A>(
     vec![]
 }
 
-fn same_package<A>(
-    ctx: &ResolutionContext<A>,
+fn same_package(
+    ctx: &ResolutionContext,
     result: &CanonicalResult,
     name: &str,
     sep: &str,

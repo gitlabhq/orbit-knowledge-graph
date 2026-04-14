@@ -452,8 +452,7 @@ mod tests {
             vec![
                 scope("class_definition", "Class"),
                 scope("function_definition", "Function"),
-                scope("function_definition", "Method")
-                    .when(grandparent_is("class_definition")),
+                scope("function_definition", "Method").when(grandparent_is("class_definition")),
             ],
             vec![],
             vec![],

@@ -15,6 +15,17 @@ use parser_core::dsl::types::Rule as DslRule;
 use super::rules::{BindingKind, ChainMode, ResolutionRules};
 use super::ssa::{BlockId, SsaResolver, Value};
 
+/// Trait for AST types that can provide a tree-sitter root for walking.
+pub trait HasRoot {
+    fn as_root(&self) -> Option<Node<'_, StrDoc<SupportLang>>>;
+}
+
+impl HasRoot for treesitter_visit::Root<StrDoc<SupportLang>> {
+    fn as_root(&self) -> Option<Node<'_, StrDoc<SupportLang>>> {
+        Some(self.root())
+    }
+}
+
 /// Minimum remaining stack space (bytes) before the walker stops recursing.
 /// Prevents stack overflow on deeply nested ASTs.
 const MIN_STACK_REMAINING: usize = 128 * 1024;
@@ -28,51 +39,40 @@ pub struct RecordedRead {
     pub name: String,
 }
 
-/// Result of walking all files: the populated SSA resolver + recorded reads.
-pub struct WalkResult {
+/// Per-file walk result: owned SSA state + recorded reads.
+/// AST is dropped after walking, only this survives.
+pub struct FileWalkResult {
     pub ssa: SsaResolver,
     pub reads: Vec<RecordedRead>,
 }
 
-/// Walk all files and build the SSA graph.
+impl FileWalkResult {
+    /// Empty result for files without an AST (custom pipelines, parse failures).
+    pub fn empty() -> Self {
+        Self {
+            ssa: SsaResolver::new(),
+            reads: Vec::new(),
+        }
+    }
+}
+
+/// Walk a single file's AST and build its SSA graph.
 ///
-/// Walks each file's retained tree-sitter AST using `rules` to discover
-/// control flow (branches, loops, scopes) per Braun et al.
-/// Files without an AST entry in `asts` are skipped.
-pub fn walk_files<A>(
+/// Called in the parallel phase (one per file). The AST can be dropped
+/// after this returns -- only the SSA state and reads are needed for
+/// resolution.
+pub fn walk_file(
     rules: &ResolutionRules,
-    results: &[CanonicalResult],
-    asts: &FxHashMap<String, A>,
-) -> WalkResult
-where
-    A: AsAst,
-{
+    file_idx: usize,
+    result: &CanonicalResult,
+    root: &Node<StrDoc<SupportLang>>,
+) -> FileWalkResult {
     let mut ssa = SsaResolver::new();
-    let mut reads = Vec::new();
-
-    for (file_idx, result) in results.iter().enumerate() {
-        let Some(root) = asts.get(&result.file_path).and_then(|a| a.as_root()) else {
-            continue;
-        };
-
-        let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result);
-        walker.walk_node(&root);
-        reads.extend(walker.reads);
-        ssa.seal_remaining();
-    }
-
-    WalkResult { ssa, reads }
-}
-
-/// Trait for extracting a tree-sitter root from the AST type.
-pub trait AsAst {
-    fn as_root(&self) -> Option<Node<'_, StrDoc<SupportLang>>>;
-}
-
-impl AsAst for treesitter_visit::Root<StrDoc<SupportLang>> {
-    fn as_root(&self) -> Option<Node<'_, StrDoc<SupportLang>>> {
-        Some(self.root())
-    }
+    let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result);
+    walker.walk_node(root);
+    let reads = walker.reads;
+    ssa.seal_remaining();
+    FileWalkResult { ssa, reads }
 }
 
 // ── AST walker (Braun et al.) ───────────────────────────────────

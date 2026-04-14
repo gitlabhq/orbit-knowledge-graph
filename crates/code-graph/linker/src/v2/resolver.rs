@@ -5,16 +5,16 @@ use super::edges::ResolvedEdge;
 ///
 /// Receives a `ResolutionContext` containing all parsed results plus
 /// pre-built indexes. Returns edges referencing definitions by index.
-pub trait ReferenceResolver<A = ()> {
-    fn resolve(ctx: &ResolutionContext<A>) -> Vec<ResolvedEdge>;
+pub trait ReferenceResolver {
+    fn resolve(ctx: &ResolutionContext) -> Vec<ResolvedEdge>;
 }
 
 /// No reference resolution. Only structural edges (containment,
 /// file→def) are produced by the GraphBuilder.
 pub struct NoResolver;
 
-impl<A> ReferenceResolver<A> for NoResolver {
-    fn resolve(_ctx: &ResolutionContext<A>) -> Vec<ResolvedEdge> {
+impl ReferenceResolver for NoResolver {
+    fn resolve(_ctx: &ResolutionContext) -> Vec<ResolvedEdge> {
         vec![]
     }
 }
@@ -22,8 +22,8 @@ impl<A> ReferenceResolver<A> for NoResolver {
 /// Name-based resolution with local-first preference.
 pub struct GlobalBacktracker;
 
-impl<A> ReferenceResolver<A> for GlobalBacktracker {
-    fn resolve(_ctx: &ResolutionContext<A>) -> Vec<ResolvedEdge> {
+impl ReferenceResolver for GlobalBacktracker {
+    fn resolve(_ctx: &ResolutionContext) -> Vec<ResolvedEdge> {
         // TODO: implement name-based backtracking resolution
         vec![]
     }

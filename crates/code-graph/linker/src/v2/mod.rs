@@ -11,7 +11,7 @@ pub mod walker;
 
 pub use builder::GraphBuilder;
 pub use context::{DefRef, MemberIndex, ResolutionContext, ScopedDef};
-pub use edge_builder::{HasRules, RulesResolver};
+pub use edge_builder::{HasRules, build_edges};
 pub use edges::{EdgeSource, ResolvedEdge};
 pub use graph::{CodeGraph, GraphEdge, GraphNode};
 pub use resolver::{GlobalBacktracker, NoResolver, ReferenceResolver};

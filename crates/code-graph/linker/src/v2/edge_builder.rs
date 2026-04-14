@@ -1,6 +1,6 @@
-//! Edge builder: converts SSA walk results into resolved call edges.
+//! Edge builder: converts per-file SSA walk results into resolved call edges.
 //!
-//! Takes the walker's `WalkResult` (SSA graph + recorded reads) and the
+//! Takes per-file `FileWalkResult`s (SSA graph + recorded reads) and the
 //! `ResolutionContext` (indexes), resolves each reference read to concrete
 //! definitions, and produces `ResolvedEdge`s for the graph.
 
@@ -12,84 +12,75 @@ use super::edges::{EdgeSource, ResolvedEdge};
 use super::imports;
 use super::rules::ResolutionRules;
 use super::ssa::{SsaResolver, Value};
-use super::walker::{AsAst, RecordedRead, WalkResult, walk_files};
+use super::walker::{FileWalkResult, RecordedRead};
 
 /// Trait to get rules from the type parameter.
 pub trait HasRules {
     fn rules() -> ResolutionRules;
 }
 
-/// Generic resolver parameterized by a `HasRules` type.
-pub struct RulesResolver<R: HasRules>(std::marker::PhantomData<R>);
-
-impl<A, R> super::resolver::ReferenceResolver<A> for RulesResolver<R>
-where
-    A: AsAst + Send + Sync,
-    R: HasRules + Send + Sync,
-{
-    fn resolve(ctx: &ResolutionContext<A>) -> Vec<ResolvedEdge> {
-        let rules = R::rules();
-        let walk_result = walk_files(&rules, &ctx.results, &ctx.asts);
-        build_edges(&rules, ctx, walk_result)
-    }
-}
-
-/// Build edges from walk results. This is the pipeline's resolve stage.
-fn build_edges<A>(
+/// Build edges from per-file walk results. This is the pipeline's resolve stage.
+///
+/// For each file's recorded reads, resolves references to concrete definitions
+/// via SSA values, import strategies, and expression chain walking.
+pub fn build_edges(
     rules: &ResolutionRules,
-    ctx: &ResolutionContext<A>,
-    mut walk_result: WalkResult,
+    ctx: &ResolutionContext,
+    walks: &mut [FileWalkResult],
 ) -> Vec<ResolvedEdge> {
     let mut edges = Vec::new();
-    let reads = std::mem::take(&mut walk_result.reads);
-    let mut resolver = Resolver::new(rules, ctx, &mut walk_result.ssa);
 
-    for read in &reads {
-        let result = &ctx.results[read.file_idx];
-        let reference = &result.references[read.ref_idx];
+    for walk in walks.iter_mut() {
+        let reads = std::mem::take(&mut walk.reads);
+        let mut resolver = Resolver::new(rules, ctx, &mut walk.ssa);
 
-        let resolved_defs = if let Some(ref chain) = reference.expression {
-            resolver.resolve_chain(read, chain)
-        } else {
-            resolver.resolve_bare(read)
-        };
+        for read in &reads {
+            let result = &ctx.results[read.file_idx];
+            let reference = &result.references[read.ref_idx];
 
-        let source_enclosing = ctx.scopes.enclosing_scope(
-            &result.file_path,
-            reference.range.byte_offset.0,
-            reference.range.byte_offset.1,
-        );
+            let resolved_defs = if let Some(ref chain) = reference.expression {
+                resolver.resolve_chain(read, chain)
+            } else {
+                resolver.resolve_bare(read)
+            };
 
-        let (source, source_node, source_def_kind) = match source_enclosing {
-            Some(s) => {
-                let def_ref = DefRef {
-                    file_idx: s.file_idx,
-                    def_idx: s.def_idx,
-                };
-                let (def, _) = ctx.resolve_def(def_ref);
-                (
-                    EdgeSource::Definition(def_ref),
-                    NodeKind::Definition,
-                    Some(def.kind),
-                )
+            let source_enclosing = ctx.scopes.enclosing_scope(
+                &result.file_path,
+                reference.range.byte_offset.0,
+                reference.range.byte_offset.1,
+            );
+
+            let (source, source_node, source_def_kind) = match source_enclosing {
+                Some(s) => {
+                    let def_ref = DefRef {
+                        file_idx: s.file_idx,
+                        def_idx: s.def_idx,
+                    };
+                    let (def, _) = ctx.resolve_def(def_ref);
+                    (
+                        EdgeSource::Definition(def_ref),
+                        NodeKind::Definition,
+                        Some(def.kind),
+                    )
+                }
+                None => (EdgeSource::File(read.file_idx), NodeKind::File, None),
+            };
+
+            for target in resolved_defs {
+                let (target_def, _) = ctx.resolve_def(target);
+                edges.push(ResolvedEdge {
+                    relationship: Relationship {
+                        edge_kind: EdgeKind::Calls,
+                        source_node,
+                        target_node: NodeKind::Definition,
+                        source_def_kind,
+                        target_def_kind: Some(target_def.kind),
+                    },
+                    source,
+                    target,
+                    reference_range: reference.range,
+                });
             }
-            None => (EdgeSource::File(read.file_idx), NodeKind::File, None),
-        };
-
-        for target in resolved_defs {
-            let (target_def, _) = ctx.resolve_def(target);
-            edges.push(ResolvedEdge {
-                relationship: Relationship {
-                    edge_kind: EdgeKind::Calls,
-                    source_node,
-                    target_node: NodeKind::Definition,
-                    source_def_kind,
-                    target_def_kind: Some(target_def.kind),
-                },
-                source,
-                target,
-                reference_range: reference.range,
-            });
         }
     }
 
@@ -100,17 +91,17 @@ fn build_edges<A>(
 
 /// Stateful resolver that holds shared context for resolving references.
 /// Eliminates parameter threading across all resolution functions.
-struct Resolver<'a, A> {
+struct Resolver<'a> {
     rules: &'a ResolutionRules,
-    ctx: &'a ResolutionContext<A>,
+    ctx: &'a ResolutionContext,
     ssa: &'a mut SsaResolver,
     sep: &'a str,
 }
 
-impl<'a, A> Resolver<'a, A> {
+impl<'a> Resolver<'a> {
     fn new(
         rules: &'a ResolutionRules,
-        ctx: &'a ResolutionContext<A>,
+        ctx: &'a ResolutionContext,
         ssa: &'a mut SsaResolver,
     ) -> Self {
         Self {
