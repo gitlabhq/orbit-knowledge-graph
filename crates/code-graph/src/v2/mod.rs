@@ -1,5 +1,5 @@
 pub mod custom;
-pub mod lang_rules;
+pub mod langs;
 mod pipeline;
 pub mod resolvers;
 

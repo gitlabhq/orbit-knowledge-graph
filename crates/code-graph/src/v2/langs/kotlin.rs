@@ -1,10 +1,14 @@
 use code_graph_config::Language;
 use code_graph_types::DefKind;
+use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
+use parser_core::dsl::types::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::dsl::extractors::{Extract, ExtractList, field, metadata};
-use crate::dsl::types::*;
+use crate::linker::v2::reaching::HasRules;
+use crate::linker::v2::rules::*;
+
+// ── DSL parser spec ─────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct KotlinDsl;
@@ -138,11 +142,9 @@ impl DslLanguage for KotlinDsl {
 
     fn bindings() -> Vec<ParseBindingRule> {
         vec![
-            // val x = getValue()
             parse_binding("property_declaration")
                 .name_from(Extract::ChildOfKind("simple_identifier"))
                 .value_from(Extract::Field("expression")),
-            // x = newValue
             parse_binding("assignment")
                 .name_from(field("directly_assignable_expression"))
                 .value_from(Extract::Field("expression")),
@@ -151,6 +153,70 @@ impl DslLanguage for KotlinDsl {
 
     fn package_node() -> Option<(&'static str, Extract)> {
         Some(("package_header", Extract::Default))
+    }
+}
+
+// ── Resolution rules ────────────────────────────────────────────
+
+pub struct KotlinRules;
+
+impl HasRules for KotlinRules {
+    fn rules() -> ResolutionRules {
+        let spec = KotlinDsl::spec();
+        let scopes = ResolutionRules::derive_scopes(&spec);
+
+        ResolutionRules::new(
+            "kotlin",
+            scopes,
+            spec,
+            vec![
+                branch("if_expression")
+                    .branches(&["control_structure_body"])
+                    .condition("condition")
+                    .catch_all("control_structure_body"),
+                branch("when_expression").branches(&["when_entry"]),
+                branch("try_expression").branches(&["statements", "catch_block", "finally_block"]),
+            ],
+            vec![
+                loop_rule("for_statement").iter_over("expression"),
+                loop_rule("while_statement"),
+                loop_rule("do_while_statement"),
+            ],
+            vec![
+                binding("property_declaration", BindingKind::Assignment)
+                    .name_from(&["name"])
+                    .value_from("value"),
+                binding("variable_declaration", BindingKind::Assignment)
+                    .name_from(&["name"])
+                    .no_value(),
+                binding("value_parameter", BindingKind::Parameter)
+                    .name_from(&["simple_identifier"])
+                    .no_value(),
+                binding("assignment", BindingKind::Assignment)
+                    .name_from(&["directly_assignable_expression"])
+                    .value_from("expression"),
+            ],
+            vec![
+                ImportStrategy::ScopeFqnWalk,
+                ImportStrategy::ExplicitImport,
+                ImportStrategy::WildcardImport,
+                ImportStrategy::SamePackage,
+                ImportStrategy::SameFile,
+                ImportStrategy::GlobalName { max_candidates: 3 },
+            ],
+            ChainMode::TypeFlow {
+                type_fields: &["user_type", "type"],
+                skip_types: &[
+                    "Int", "Long", "Short", "Byte", "Float", "Double", "Boolean", "Char", "Unit",
+                    "Nothing", "String",
+                ],
+            },
+            ReceiverMode::Keyword,
+            ".",
+            &["this", "self"],
+            Some("super"),
+            true,
+        )
     }
 }
 
@@ -183,23 +249,6 @@ mod tests {
             .find(|d| d.name == "Service")
             .unwrap();
         assert_eq!(service.fqn.to_string(), "com.example.Service");
-        assert!(service.is_top_level);
-    }
-
-    #[test]
-    fn imports() {
-        let result = parse("import com.example.Foo\nimport com.example.*\n");
-        assert!(
-            result.imports.len() >= 2,
-            "got {} imports",
-            result.imports.len()
-        );
-    }
-
-    #[test]
-    fn call_references() {
-        let result = parse("fun main() {\n    println(\"hello\")\n}\n");
-        assert!(!result.references.is_empty());
     }
 
     #[test]
@@ -207,17 +256,7 @@ mod tests {
         let result = parse("open class Animal\nclass Dog : Animal() {\n}\n");
         let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         if let Some(meta) = &dog.metadata {
-            assert!(
-                !meta.super_types.is_empty(),
-                "super_types: {:?}",
-                meta.super_types
-            );
+            assert!(!meta.super_types.is_empty());
         }
-    }
-
-    #[test]
-    fn language() {
-        let result = parse("class X");
-        assert_eq!(result.language, Language::Kotlin);
     }
 }

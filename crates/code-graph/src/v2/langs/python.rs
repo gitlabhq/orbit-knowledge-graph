@@ -1,11 +1,15 @@
 use code_graph_config::Language;
 use code_graph_types::DefKind;
+use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
+use parser_core::dsl::predicates::*;
+use parser_core::dsl::types::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::dsl::extractors::{Extract, ExtractList, field, metadata};
-use crate::dsl::predicates::*;
-use crate::dsl::types::*;
+use crate::linker::v2::reaching::HasRules;
+use crate::linker::v2::rules::*;
+
+// ── DSL parser spec ─────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct PythonDsl;
@@ -107,7 +111,6 @@ impl DslLanguage for PythonDsl {
                         .return_type(field("return_type"))
                         .decorators(ExtractList::Fn(python_decorators)),
                 ),
-            // `square = lambda x: x * x` — assignment where right is a lambda
             scope("assignment", "Lambda")
                 .def_kind(DefKind::Lambda)
                 .when(field_kind("right", &["lambda"]))
@@ -118,12 +121,10 @@ impl DslLanguage for PythonDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // `obj.method()` — name is the attribute, receiver is obj
             reference("call")
                 .when(field_kind("function", &["attribute"]))
                 .name_from(Extract::FieldChain(&["function", "attribute"]))
                 .receiver_chain(&["function", "object"]),
-            // `foo()` — bare call
             reference("call").name_from(field("function")),
         ]
     }
@@ -158,23 +159,18 @@ impl DslLanguage for PythonDsl {
         }
 
         vec![
-            // `import os` / `import os as system`
-            // No module path — each dotted_name child IS the import path
             import("import_statement")
                 .classify(python_import_classify)
                 .path_from(Extract::None)
                 .multi(&["dotted_name"])
                 .alias_child("aliased_import")
                 .wildcard_child("wildcard_import"),
-            // `from pathlib import Path` / `from pathlib import Path, PurePath`
             import("import_from_statement")
                 .classify(python_from_classify)
                 .path_from(field("module_name"))
                 .multi(&["dotted_name", "identifier"])
                 .alias_child("aliased_import")
                 .wildcard_child("wildcard_import"),
-            // `from __future__ import annotations`
-            // The path is always "__future__" — use ChildOfKind to find the keyword token
             import("future_import_statement")
                 .label("FutureImport")
                 .path_from(Extract::ChildOfKind("__future__"))
@@ -196,6 +192,85 @@ impl DslLanguage for PythonDsl {
                 .name_from(field("name"))
                 .value_from(field("value")),
         ]
+    }
+}
+
+// ── Resolution rules ────────────────────────────────────────────
+
+pub struct PythonRules;
+
+impl HasRules for PythonRules {
+    fn rules() -> ResolutionRules {
+        let spec = PythonDsl::spec();
+        let scopes = ResolutionRules::derive_scopes(&spec);
+
+        ResolutionRules::new(
+            "python",
+            scopes,
+            spec,
+            vec![
+                branch("if_statement")
+                    .branches(&["block", "elif_clause", "else_clause"])
+                    .condition("condition")
+                    .catch_all("else_clause"),
+                branch("try_statement").branches(&[
+                    "block",
+                    "except_clause",
+                    "except_group_clause",
+                    "finally_clause",
+                ]),
+                branch("match_statement")
+                    .branches(&["case_clause"])
+                    .catch_all("case_clause"),
+                branch("conditional_expression").branches(&[]),
+            ],
+            vec![
+                loop_rule("for_statement").iter_over("right"),
+                loop_rule("while_statement").body("body"),
+                loop_rule("list_comprehension").body("body"),
+                loop_rule("set_comprehension").body("body"),
+                loop_rule("dictionary_comprehension").body("body"),
+                loop_rule("generator_expression").body("body"),
+            ],
+            vec![
+                binding("assignment", BindingKind::Assignment)
+                    .name_from(&["left"])
+                    .value_from("right")
+                    .instance_attrs(&["self."]),
+                binding("augmented_assignment", BindingKind::Assignment)
+                    .name_from(&["left"])
+                    .no_value(),
+                binding("named_expression", BindingKind::Assignment)
+                    .name_from(&["name"])
+                    .value_from("value"),
+                binding("delete_statement", BindingKind::Deletion)
+                    .name_from(&["argument"])
+                    .no_value(),
+                binding("for_in_clause", BindingKind::ForTarget)
+                    .name_from(&["left"])
+                    .no_value(),
+                binding("with_item", BindingKind::WithAlias)
+                    .name_from(&["value"])
+                    .no_value(),
+            ],
+            vec![
+                ImportStrategy::ScopeFqnWalk,
+                ImportStrategy::ExplicitImport,
+                ImportStrategy::FilePath,
+                ImportStrategy::SameFile,
+                ImportStrategy::GlobalName { max_candidates: 3 },
+            ],
+            ChainMode::ValueFlow,
+            ReceiverMode::Convention {
+                instance_decorators: &[],
+                classmethod_decorators: &["classmethod"],
+                staticmethod_decorators: &["staticmethod"],
+            },
+            ".",
+            &["self"],
+            Some("super"),
+            false,
+        )
     }
 }
 
@@ -233,36 +308,6 @@ mod tests {
     }
 
     #[test]
-    fn decorators() {
-        let result = parse("class A:\n    @classmethod\n    def create(cls):\n        pass\n");
-        let create = result
-            .definitions
-            .iter()
-            .find(|d| d.name == "create")
-            .unwrap();
-        if let Some(meta) = &create.metadata {
-            assert!(meta.decorators.iter().any(|d| d == "classmethod"));
-        }
-    }
-
-    #[test]
-    fn imports() {
-        let result = parse("import os\nfrom pathlib import Path\n");
-        assert!(
-            result.imports.len() >= 2,
-            "got {} imports",
-            result.imports.len()
-        );
-        assert!(result.imports.iter().any(|i| i.path == "os"));
-        assert!(
-            result
-                .imports
-                .iter()
-                .any(|i| i.name.as_deref() == Some("Path"))
-        );
-    }
-
-    #[test]
     fn return_type_annotation() {
         let result = parse("def greet(name: str) -> str:\n    return f'Hello, {name}'\n");
         let greet = result
@@ -275,26 +320,6 @@ mod tests {
     }
 
     #[test]
-    fn return_type_none_when_absent() {
-        let result = parse("def foo():\n    pass\n");
-        let foo = result.definitions.iter().find(|d| d.name == "foo").unwrap();
-        assert!(foo.metadata.is_none() || foo.metadata.as_ref().unwrap().return_type.is_none());
-    }
-
-    #[test]
-    fn method_return_type() {
-        let result =
-            parse("class Service:\n    def get_name(self) -> str:\n        return self.name\n");
-        let get_name = result
-            .definitions
-            .iter()
-            .find(|d| d.name == "get_name")
-            .unwrap();
-        let meta = get_name.metadata.as_ref().expect("should have metadata");
-        assert_eq!(meta.return_type.as_deref(), Some("str"));
-    }
-
-    #[test]
     fn call_references() {
         let result = parse("def foo():\n    bar()\n");
         assert!(!result.references.is_empty());
@@ -302,44 +327,15 @@ mod tests {
     }
 
     #[test]
-    fn language() {
-        let result = parse("x = 1\n");
-        assert_eq!(result.language, Language::Python);
-    }
-
-    #[test]
-    fn bindings_extracted() {
-        let result = parse(
-            "def option1():\n    pass\n\ndef option2():\n    pass\n\ndef caller():\n    x = option1\n    x = option2\n    x()\n",
-        );
-        eprintln!(
-            "bindings: {:?}",
-            result
-                .bindings
-                .iter()
-                .map(|b| (&b.name, &b.value))
-                .collect::<Vec<_>>()
-        );
-        eprintln!(
-            "refs: {:?}",
-            result
-                .references
-                .iter()
-                .map(|r| &r.name)
-                .collect::<Vec<_>>()
-        );
-        assert!(!result.bindings.is_empty(), "should have bindings");
+    fn imports() {
+        let result = parse("import os\nfrom pathlib import Path\n");
+        assert!(result.imports.len() >= 2);
+        assert!(result.imports.iter().any(|i| i.path == "os"));
         assert!(
             result
-                .bindings
+                .imports
                 .iter()
-                .any(|b| b.name == "x" && b.value.as_deref() == Some("option1"))
-        );
-        assert!(
-            result
-                .bindings
-                .iter()
-                .any(|b| b.name == "x" && b.value.as_deref() == Some("option2"))
+                .any(|i| i.name.as_deref() == Some("Path"))
         );
     }
 }

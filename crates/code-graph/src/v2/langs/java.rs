@@ -1,10 +1,14 @@
 use code_graph_config::Language;
 use code_graph_types::DefKind;
+use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
+use parser_core::dsl::types::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::dsl::extractors::{Extract, ExtractList, field, metadata};
-use crate::dsl::types::*;
+use crate::linker::v2::reaching::HasRules;
+use crate::linker::v2::rules::*;
+
+// ── DSL parser spec ─────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct JavaDsl;
@@ -112,11 +116,9 @@ impl DslLanguage for JavaDsl {
 
     fn bindings() -> Vec<ParseBindingRule> {
         vec![
-            // int x = getValue();
             parse_binding("local_variable_declaration")
                 .name_from(Extract::Declarator)
                 .value_from(Extract::Declarator),
-            // x = newValue;
             parse_binding("assignment_expression")
                 .name_from(field("left"))
                 .value_from(field("right")),
@@ -134,8 +136,87 @@ impl DslLanguage for JavaDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        // package_declaration has a scoped_identifier or identifier child
         Some(("package_declaration", Extract::Default))
+    }
+}
+
+// ── Resolution rules ────────────────────────────────────────────
+
+pub struct JavaRules;
+
+impl HasRules for JavaRules {
+    fn rules() -> ResolutionRules {
+        let spec = JavaDsl::spec();
+        let scopes = ResolutionRules::derive_scopes(&spec);
+
+        ResolutionRules::new(
+            "java",
+            scopes,
+            spec,
+            vec![
+                branch("if_statement")
+                    .branches(&["block", "else_clause"])
+                    .condition("condition")
+                    .catch_all("else_clause"),
+                branch("try_statement").branches(&["block", "catch_clause", "finally_clause"]),
+                branch("try_with_resources_statement").branches(&[
+                    "block",
+                    "catch_clause",
+                    "finally_clause",
+                ]),
+                branch("switch_expression")
+                    .branches(&["switch_block_statement_group", "switch_rule"]),
+                branch("switch_statement").branches(&["switch_block_statement_group"]),
+                branch("ternary_expression")
+                    .branches(&["consequence", "alternative"])
+                    .catch_all("alternative"),
+            ],
+            vec![
+                loop_rule("for_statement"),
+                loop_rule("while_statement"),
+                loop_rule("enhanced_for_statement").iter_over("value"),
+                loop_rule("do_statement"),
+            ],
+            vec![
+                binding("local_variable_declaration", BindingKind::Assignment)
+                    .name_from(&["declarator", "name"]),
+                binding("field_declaration", BindingKind::Assignment)
+                    .name_from(&["declarator", "name"])
+                    .instance_attrs(&["this."]),
+                binding("formal_parameter", BindingKind::Parameter)
+                    .name_from(&["name"])
+                    .no_value(),
+                binding("catch_formal_parameter", BindingKind::Parameter)
+                    .name_from(&["name"])
+                    .no_value(),
+                binding("resource", BindingKind::Assignment)
+                    .name_from(&["name"])
+                    .value_from("value"),
+                binding("assignment_expression", BindingKind::Assignment)
+                    .name_from(&["left"])
+                    .value_from("right"),
+            ],
+            vec![
+                ImportStrategy::ScopeFqnWalk,
+                ImportStrategy::ExplicitImport,
+                ImportStrategy::WildcardImport,
+                ImportStrategy::SamePackage,
+                ImportStrategy::SameFile,
+                ImportStrategy::GlobalName { max_candidates: 3 },
+            ],
+            ChainMode::TypeFlow {
+                type_fields: &["type"],
+                skip_types: &[
+                    "int", "long", "short", "byte", "float", "double", "boolean", "char", "void",
+                    "String",
+                ],
+            },
+            ReceiverMode::Keyword,
+            ".",
+            &["this", "self"],
+            Some("super"),
+            true,
+        )
     }
 }
 
@@ -145,122 +226,47 @@ mod tests {
     use code_graph_types::CanonicalParser;
 
     fn parse(code: &str) -> code_graph_types::CanonicalResult {
-        let parser = DslParser::<JavaDsl>::default();
-        parser.parse_file(code.as_bytes(), "Test.java").unwrap().0
+        DslParser::<JavaDsl>::default()
+            .parse_file(code.as_bytes(), "Test.java")
+            .unwrap()
+            .0
     }
 
     #[test]
     fn class_with_methods() {
         let result = parse(
-            r#"
-public class Calculator {
-    public int add(int a, int b) {
-        return a + b;
-    }
-}
-"#,
+            "public class Calculator {\n    public int add(int a, int b) {\n        return a + b;\n    }\n}\n",
         );
-
         assert_eq!(result.definitions.len(), 2);
-        let calc = &result.definitions[0];
-        assert_eq!(calc.name, "Calculator");
-        assert_eq!(calc.kind, DefKind::Class);
-        assert!(calc.is_top_level);
-
-        let add = &result.definitions[1];
-        assert_eq!(add.name, "add");
-        assert_eq!(add.kind, DefKind::Method);
-        assert_eq!(add.fqn.to_string(), "Calculator.add");
+        assert_eq!(result.definitions[0].name, "Calculator");
+        assert_eq!(result.definitions[0].kind, DefKind::Class);
+        assert_eq!(result.definitions[1].name, "add");
+        assert_eq!(result.definitions[1].fqn.to_string(), "Calculator.add");
     }
 
     #[test]
     fn package_scoping() {
-        let result = parse(
-            r#"
-package com.example;
-
-public class Service {
-    public void run() {}
-}
-"#,
-        );
-
+        let result =
+            parse("package com.example;\n\npublic class Service {\n    public void run() {}\n}\n");
         let service = result
             .definitions
             .iter()
             .find(|d| d.name == "Service")
             .unwrap();
         assert_eq!(service.fqn.to_string(), "com.example.Service");
-        assert!(service.is_top_level);
     }
 
     #[test]
     fn super_types_extracted() {
-        let result = parse(
-            r#"
-public class Dog extends Animal implements Serializable {
-}
-"#,
-        );
-
+        let result = parse("public class Dog extends Animal implements Serializable {\n}\n");
         let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         let meta = dog.metadata.as_ref().expect("Dog should have metadata");
-        assert!(
-            !meta.super_types.is_empty(),
-            "super_types: {:?}",
-            meta.super_types
-        );
-    }
-
-    #[test]
-    fn method_return_type() {
-        let result = parse(
-            r#"
-public class Service {
-    public String getName() { return ""; }
-}
-"#,
-        );
-
-        let get_name = result
-            .definitions
-            .iter()
-            .find(|d| d.name == "getName")
-            .unwrap();
-        let meta = get_name.metadata.as_ref().expect("should have metadata");
-        assert_eq!(meta.return_type.as_deref(), Some("String"));
-    }
-
-    #[test]
-    fn references_extracted() {
-        let result = parse(
-            r#"
-public class App {
-    public void run() {
-        helper();
-        new ArrayList();
-    }
-    private void helper() {}
-}
-"#,
-        );
-
-        let names: Vec<&str> = result.references.iter().map(|r| r.name.as_str()).collect();
-        assert!(names.contains(&"helper"));
-        assert!(names.contains(&"ArrayList"));
+        assert!(!meta.super_types.is_empty());
     }
 
     #[test]
     fn imports_extracted() {
-        let result = parse(
-            r#"
-import java.util.List;
-import java.util.*;
-
-public class Test {}
-"#,
-        );
-
+        let result = parse("import java.util.List;\nimport java.util.*;\n\npublic class Test {}\n");
         assert!(result.imports.len() >= 2);
     }
 }

@@ -157,7 +157,7 @@ impl<'a> FileWalker<'a> {
         let kind_ref = kind.as_ref();
 
         // Scope-creating nodes
-        if let Some(scope_rule) = self.rules.scopes.iter().find(|s| s.node_kind == kind_ref) {
+        if let Some(scope_rule) = self.rules.scopes().iter().find(|s| s.node_kind == kind_ref) {
             self.enter_scope(node, scope_rule.scope_kind);
             self.walk_children(node);
             self.exit_scope();
@@ -499,17 +499,6 @@ impl<'a> FileWalker<'a> {
             && let Some(ref_rule) = spec.refs.iter().find(|r| r.kind() == kind_ref)
         {
             return ref_rule.extract_name(node);
-        }
-
-        // Check walker-level reference rules (fallback for non-DSL languages)
-        if let Some(ref_rule) = self
-            .rules
-            .references
-            .iter()
-            .find(|r| r.node_kind == kind_ref)
-        {
-            let name_node = node.field(ref_rule.name_field)?;
-            return Some(name_node.text().to_string());
         }
 
         // Check if it's a known identifier node kind

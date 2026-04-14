@@ -37,7 +37,7 @@ pub struct ScopeRule {
     def_kind: DefKind,
     condition: Option<Pred>,
     name: Extract,
-    pub(crate) creates_scope: bool,
+    pub creates_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
 }
 
@@ -54,6 +54,10 @@ impl Rule for ScopeRule {
 }
 
 impl ScopeRule {
+    pub fn get_def_kind(&self) -> DefKind {
+        self.def_kind
+    }
+
     pub fn when(mut self, pred: Pred) -> Self {
         self.condition = Some(match self.condition {
             Some(existing) => existing.and(pred),

@@ -67,14 +67,6 @@ pub struct BindingRule {
     pub instance_attr_prefixes: &'static [&'static str],
 }
 
-// ── Reference rules ─────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub struct ReferenceRule {
-    pub node_kind: &'static str,
-    pub name_field: &'static str,
-}
-
 // ── Import resolution ───────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,18 +112,20 @@ pub enum ReceiverMode {
 /// Complete declarative configuration for a language.
 ///
 /// The `FileWalker` interprets the AST-walking rules (scopes, branches,
-/// loops, bindings, references) to drive the SSA engine per Braun et al.
+/// loops, bindings) to drive the SSA engine per Braun et al.
 /// The `RulesResolver` interprets the resolution rules (import strategies,
 /// chain mode, receiver) to chase imports and produce call edges.
+///
+/// Scopes are derived from `language_spec.scopes` (mapping `DefKind` →
+/// `ScopeKind`). References are handled entirely by `language_spec.refs`.
 pub struct ResolutionRules {
     pub name: &'static str,
 
-    // AST walking
-    pub scopes: Vec<IsolatedScopeRule>,
+    // AST walking (derived from language_spec for DSL languages)
+    scopes: Vec<IsolatedScopeRule>,
     pub branches: Vec<BranchRule>,
     pub loops: Vec<LoopRule>,
     pub bindings: Vec<BindingRule>,
-    pub references: Vec<ReferenceRule>,
 
     // Resolution
     pub import_strategies: Vec<ImportStrategy>,
@@ -154,11 +148,76 @@ pub struct ResolutionRules {
     /// True for Java/Kotlin (implicit `this`), false for Python (explicit `self`).
     pub implicit_member_lookup: bool,
 
-    /// The DSL language spec, if this language uses the DSL parser.
-    /// Gives the walker access to chain extraction config, reference
-    /// rules with receiver fields, and other parser-level metadata
-    /// without duplicating it.
+    /// The DSL language spec. Provides chain extraction config, reference
+    /// rules with receiver fields, and scope rules for deriving walker scopes.
     pub language_spec: Option<parser_core::dsl::types::LanguageSpec>,
+}
+
+impl ResolutionRules {
+    /// Construct resolution rules with scopes derived from the language spec.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: &'static str,
+        scopes: Vec<IsolatedScopeRule>,
+        language_spec: parser_core::dsl::types::LanguageSpec,
+        branches: Vec<BranchRule>,
+        loops: Vec<LoopRule>,
+        bindings: Vec<BindingRule>,
+        import_strategies: Vec<ImportStrategy>,
+        chain_mode: ChainMode,
+        receiver: ReceiverMode,
+        fqn_separator: &'static str,
+        self_names: &'static [&'static str],
+        super_name: Option<&'static str>,
+        implicit_member_lookup: bool,
+    ) -> Self {
+        Self {
+            name,
+            scopes,
+            branches,
+            loops,
+            bindings,
+            import_strategies,
+            chain_mode,
+            receiver,
+            fqn_separator,
+            self_names,
+            super_name,
+            implicit_member_lookup,
+            language_spec: Some(language_spec),
+        }
+    }
+
+    /// Access the scope rules.
+    pub fn scopes(&self) -> &[IsolatedScopeRule] {
+        &self.scopes
+    }
+
+    /// Derive walker scope rules from the DSL spec's scope rules.
+    /// Filters out `no_scope` entries and maps `DefKind` → `ScopeKind`.
+    pub fn derive_scopes(spec: &parser_core::dsl::types::LanguageSpec) -> Vec<IsolatedScopeRule> {
+        use code_graph_types::DefKind;
+        use parser_core::dsl::types::Rule;
+        use std::collections::HashSet;
+
+        let mut seen = HashSet::new();
+        spec.scopes
+            .iter()
+            .filter(|s| s.creates_scope)
+            .filter(|s| seen.insert(s.kind()))
+            .map(|s| {
+                let scope_kind = match s.get_def_kind() {
+                    DefKind::Class | DefKind::Interface | DefKind::Module => ScopeKind::Class,
+                    _ => ScopeKind::Function,
+                };
+                IsolatedScopeRule {
+                    node_kind: s.kind(),
+                    scope_kind,
+                    name_field: "name",
+                }
+            })
+            .collect()
+    }
 }
 
 // ── Builder helpers ─────────────────────────────────────────────
@@ -254,20 +313,6 @@ impl BindingRule {
 
     pub fn instance_attrs(mut self, prefixes: &'static [&'static str]) -> Self {
         self.instance_attr_prefixes = prefixes;
-        self
-    }
-}
-
-pub fn reference_rule(node_kind: &'static str) -> ReferenceRule {
-    ReferenceRule {
-        node_kind,
-        name_field: "function",
-    }
-}
-
-impl ReferenceRule {
-    pub fn name_from(mut self, field: &'static str) -> Self {
-        self.name_field = field;
         self
     }
 }

@@ -2,9 +2,6 @@ use code_graph_config::{Language, detect_language_from_extension};
 use code_graph_types::CanonicalParser;
 use ignore::WalkBuilder;
 use parser_core::dsl::types::DslParser;
-use parser_core::v2::langs::{
-    csharp::CSharpDsl, java::JavaDsl, kotlin::KotlinDsl, python::PythonDsl,
-};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
@@ -14,9 +11,10 @@ use crate::linker::v2::{
     CodeGraph, GraphBuilder, GraphEdge, NoResolver, ReferenceResolver, ResolutionContext,
     RulesResolver,
 };
-use crate::v2::lang_rules::java::JavaRules;
-use crate::v2::lang_rules::kotlin::KotlinRules;
-use crate::v2::lang_rules::python::PythonRules;
+use crate::v2::langs::csharp::CSharpDsl;
+use crate::v2::langs::java::{JavaDsl, JavaRules};
+use crate::v2::langs::kotlin::{KotlinDsl, KotlinRules};
+use crate::v2::langs::python::{PythonDsl, PythonRules};
 
 /// Input to a language pipeline: file path + source bytes.
 pub type FileInput = (String, Vec<u8>);
