@@ -26,9 +26,9 @@ The storage model aims to replicate the CSR (Compressed Sparse Row) adjacency li
 
 - Multi‑tenancy and authorization are enforced in every query by prefix filtering on `organization_id` and `traversal_id` to keep scans local and permission-scoped.
 
-### Edge table schema (`gl_edge`)
+### Edge table schema
 
-The unified edge table uses an adjacency-optimized primary key:
+Edge tables are declared in `settings.edge_tables` in `schema.yaml` (default: `gl_edge`). Each edge YAML can set `table:` to route that relationship type to a specific table. All edge tables share the same column schema and use an adjacency-optimized primary key:
 
 ```sql
 PRIMARY KEY (source_id, relationship_kind, target_id)
@@ -64,7 +64,7 @@ The planner emits ClickHouse SQL similar to these patterns:
 - Multi‑hop fixed depth (2–3): chained JOINs/CTEs with DISTINCT frontiers between hops to avoid blow‑ups.
 - Variable‑length paths: `WITH RECURSIVE` over the edge table(s) with a depth limit and optional accumulation of `nodes(path)` and `relationships(path)` as arrays.
 - Reverse hops: use the destination‑ordered projection or a reversed view produced on the fly.
-- Alternate relationship types: `UNION ALL` of the participating edge tables inside a single `edges_all` CTE, then join once per hop.
+- Alternate relationship types: when a query's relationship types span multiple physical edge tables (or use a wildcard), the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
 - Derived‑table subqueries: `(SELECT ... GROUP BY ... HAVING ...) AS alias` in FROM/JOIN positions for deduplication patterns (e.g., `argMax(_deleted, _version)`).

@@ -107,11 +107,11 @@ We are going to transform the data from ClickHouse to a graph-like format by des
   - Core attributes relevant to that entity type
   - Metadata fields (created_at, updated_at, deleted_at for soft deletes)
 
-- **Edges**: We will define a table schema for each edge type. For example, `namespaces_projects`, `projects_issues`, `issues_merge_requests`, `merge_requests_pipelines`, `pipelines_runners`, `vulnerabilities_projects`, etc. Each edge table will contain:
-  - The tenant ID
-  - Source node identifier
-  - Target node identifier
-  - Edge type or relationship metadata
+- **Edges**: Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`). Each edge YAML can set a `table:` field to route that relationship type to a dedicated table; `settings.edge_tables` in `schema.yaml` defines the available tables and their storage layout. Each edge table contains:
+  - Traversal path (namespace scoping)
+  - Source node identifier and kind
+  - Relationship kind
+  - Target node identifier and kind
 
 #### Transformation and Loading Logic
 

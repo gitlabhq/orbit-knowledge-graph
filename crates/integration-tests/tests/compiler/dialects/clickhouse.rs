@@ -312,3 +312,174 @@ fn valid_identifiers_produce_parseable_sql() {
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
     ParsedSql::from_query(&result.base);
 }
+
+// ── Multi-edge-table end-to-end SQL tests ───────────────────────────────
+
+fn multi_table_ontology() -> ontology::Ontology {
+    use ontology::DataType;
+    ontology::Ontology::new()
+        .with_nodes(["User", "Project", "File", "Definition"])
+        .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
+        .with_edge_table("gl_code_edge")
+        .with_edge_for_table("DEFINES", "gl_code_edge")
+        .with_edge_for_table("IMPORTS", "gl_code_edge")
+        .with_fields(
+            "User",
+            [("username", DataType::String), ("state", DataType::String)],
+        )
+        .with_default_columns("User", ["username"])
+        .with_fields("Project", [("name", DataType::String)])
+        .with_default_columns("Project", ["name"])
+        .with_fields("File", [("path", DataType::String)])
+        .with_default_columns("File", ["path"])
+        .with_fields("Definition", [("name", DataType::String)])
+        .with_default_columns("Definition", ["name"])
+}
+
+#[test]
+fn multi_table_single_type_routes_to_default() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "p", "entity": "Project"}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+        "limit": 25
+    }"#;
+    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_edge"),
+        "AUTHORED should scan gl_edge: {rendered}"
+    );
+    assert!(
+        !rendered.contains("gl_code_edge"),
+        "AUTHORED should not touch gl_code_edge: {rendered}"
+    );
+}
+
+#[test]
+fn multi_table_code_edge_routes_to_code_table() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "f", "entity": "File"},
+            {"id": "d", "entity": "Definition"}
+        ],
+        "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
+        "limit": 25
+    }"#;
+    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_code_edge"),
+        "DEFINES should scan gl_code_edge: {rendered}"
+    );
+    assert!(
+        !rendered.contains("gl_edge"),
+        "DEFINES should not touch gl_edge: {rendered}"
+    );
+}
+
+#[test]
+fn multi_table_wildcard_scans_all_tables() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "p", "entity": "Project"}
+        ],
+        "relationships": [{"type": "*", "from": "u", "to": "p"}],
+        "limit": 25
+    }"#;
+    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_edge"),
+        "wildcard should scan gl_edge: {rendered}"
+    );
+    assert!(
+        rendered.contains("gl_code_edge"),
+        "wildcard should scan gl_code_edge: {rendered}"
+    );
+    assert!(
+        rendered.contains("UNION ALL"),
+        "multi-table wildcard should produce UNION ALL: {rendered}"
+    );
+}
+
+#[test]
+fn multi_table_mixed_types_scans_both_tables() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "p", "entity": "Project"}
+        ],
+        "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
+        "limit": 25
+    }"#;
+    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
+        "mixed types should scan both tables: {rendered}"
+    );
+    assert!(
+        rendered.contains("UNION ALL"),
+        "mixed types should produce UNION ALL: {rendered}"
+    );
+}
+
+#[test]
+fn single_table_ontology_no_union() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "p", "entity": "Project"}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+        "limit": 25
+    }"#;
+    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        !rendered.contains("UNION ALL"),
+        "single-table ontology should not produce UNION ALL: {rendered}"
+    );
+}
+
+#[test]
+fn multi_table_path_finding_scans_all_tables() {
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Definition", "node_ids": [100]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
+        "wildcard path finding should scan both edge tables: {rendered}"
+    );
+}
+
+#[test]
+fn multi_table_neighbors_scans_all_tables() {
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1]},
+        "neighbors": {"node": "p", "direction": "both"}
+    }"#;
+    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
+        "wildcard neighbors should scan both edge tables: {rendered}"
+    );
+}

@@ -258,6 +258,11 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             }
         }
 
+        if ontology.edges.contains_key(edge_name) {
+            return Err(OntologyError::Validation(format!(
+                "duplicate edge definition: '{edge_name}'"
+            )));
+        }
         ontology.edges.insert(edge_name.clone(), entities);
 
         if let Some(desc) = &edge_def.description {

@@ -267,7 +267,7 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 
 ##### Storage in ClickHouse
 
-The graph is converted to Apache Arrow record batches and written to six ClickHouse tables: one each for branches, directories, files, definitions, imported symbols, and edges (shared with SDLC data). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
+The graph is converted to Apache Arrow record batches and written to six ClickHouse tables: one each for branches, directories, files, definitions, imported symbols, and the ontology-configured edge table (defaulting to `gl_edge`). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 

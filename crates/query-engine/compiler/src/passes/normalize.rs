@@ -69,6 +69,15 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         .map(|s| s.to_string())
         .collect();
     input.compiler.default_edge_table = ontology.edge_table().to_string();
+    input.compiler.edge_table_for_rel = ontology
+        .edge_names()
+        .map(|name| {
+            (
+                name.to_string(),
+                ontology.edge_table_for_relationship(name).to_string(),
+            )
+        })
+        .collect();
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
