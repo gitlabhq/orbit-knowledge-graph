@@ -65,12 +65,11 @@ For E2E local development setup and workflow, see `docs/dev/local-development.md
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/gkg-server-config/` |
 | Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |
 | Local development guide | `docs/dev/local-development.md` |
-| Native dev (`mise run dev`) | `scripts/gkg-native-dev.sh`, `docs/dev/local-development.md` § "Alternative: quick start with mise" |
+| Local development (`mise run dev`) | `scripts/gkg-native-dev.sh`, `docs/dev/local-development.md` |
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
-| Helm charts | `helm/gkg/` (vendored via vendir), `helm/local/` (dev Prometheus + Grafana) |
-| Local Grafana dashboards | `helm/local/dashboards/` |
+| Helm charts | `helm/gkg/` (vendored via vendir) |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |

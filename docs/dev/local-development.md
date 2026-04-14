@@ -1,19 +1,13 @@
 # Local development setup
 
-Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and ClickHouse from your GDK installation.
+Run GKG as native Rust processes connected to NATS, Siphon, PostgreSQL, and
+ClickHouse from your GDK installation.
 
 ## Prerequisites
 
 1. **[mise](https://mise.jdx.dev/)** for tool version management
 
-2. **[Tilt](https://tilt.dev/)** for local Kubernetes development
-
-3. **Kubernetes cluster** (one of):
-   - Colima with k8s: `colima start --kubernetes`
-   - Docker Desktop with Kubernetes enabled
-   - minikube, kind, or rancher-desktop
-
-4. **GDK with required services enabled:**
+1. **GDK with required services enabled:**
 
    Add the following to `$GDK_ROOT/gdk.yml`:
 
@@ -28,10 +22,10 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
      host: localhost
    ```
 
-   Setting `postgresql.host: localhost` makes PostgreSQL listen on TCP so that
-   GKG services running in Kubernetes can connect via `host.docker.internal`.
+   Setting `postgresql.host: localhost` makes PostgreSQL listen on TCP, which
+   Siphon requires for logical replication (GDK defaults to Unix sockets).
 
-5. **PostgreSQL logical replication and TCP access:**
+1. **PostgreSQL logical replication:**
 
    Edit `$GDK_ROOT/postgresql/data/postgresql.conf` (and `replication.conf` if it exists):
 
@@ -42,7 +36,7 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
 
    Then restart PostgreSQL: `gdk restart postgresql`
 
-6. **ClickHouse setup:**
+1. **ClickHouse setup:**
 
    Create the Rails ClickHouse config from the example and run migrations:
 
@@ -68,7 +62,9 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
      done
    ```
 
-7. **Configure Siphon tables:**
+   Or skip both steps and run `mise run dev:setup` later (see [Setup](#setup)).
+
+1. **Configure Siphon tables:**
 
    Run `gdk reconfigure` to generate the initial Siphon configs, then replace
    them with the correct format. The current Siphon binary expects a
@@ -169,7 +165,7 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
    See the [staging Siphon config](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/releases/siphon/orbit-stg.yaml.gotmpl)
    for the full list of tables used in production.
 
-8. **Enable Knowledge Graph and JWT auth:**
+1. **Enable Knowledge Graph and JWT auth:**
 
    Add the `knowledge_graph` section to `$GDK_ROOT/gitlab/config/gitlab.yml`
    under the `production:` / `development:` block (e.g. near the `elasticsearch:` section):
@@ -195,15 +191,25 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
    ```
 
    This creates `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret` which the
-   Tiltfile reads automatically to configure the GKG webserver's JWT
+   dev script reads automatically to configure the GKG webserver's JWT
    verifying key.
 
-   Finally, enable the feature flags:
+   Enable the feature flags:
 
    ```shell
    cd $GDK_ROOT/gitlab
    bundle exec rails runner "Feature.enable(:knowledge_graph); Feature.enable(:knowledge_graph_infra)"
    ```
+
+   Enable namespaces for indexing:
+
+   ```shell
+   cd $GDK_ROOT/gitlab
+   bundle exec rails runner "Namespace.where(type: 'Group').find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
+   ```
+
+   The Knowledge Graph UI is available at
+   `https://<gdk-hostname>:<gdk-port>/dashboard/orbit`.
 
 ## Setup
 
@@ -213,79 +219,44 @@ Run GKG components in Kubernetes while using NATS, Siphon, PostgreSQL, and Click
    mise install
    ```
 
-2. **Sync vendored Helm charts:**
+1. **Configure environment:**
 
    ```shell
-   helm/sync.sh
+   cp .env.example .env
    ```
 
-   This fetches the official GKG chart via vendir and applies local patches.
-   Requires `vendir` and `yq` (installed by `mise install`).
+   Edit `.env` and set `GDK_ROOT` to the absolute path to your GDK
+   installation. The script derives GDK service ports from `gdk.yml`
+   automatically, so you do not need to copy connection details into `.env`.
 
-3. **Configure secrets:**
+1. **Validate prerequisites:**
 
    ```shell
-   cp .tilt-secrets.example .tilt-secrets
+   mise run dev:check
    ```
 
-   Edit `.tilt-secrets` and set:
-   - `GDK_ROOT`: Absolute path to your GDK installation
-   - `CLICKHOUSE_PASSWORD`: Usually empty for local development
-
-   The JWT secret is read automatically from `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret`
-   (generated in prerequisite 8).
-
-4. **Start local environment:**
+1. **Create graph database and apply schema:**
 
    ```shell
-   tilt up
+   mise run dev:setup
    ```
 
-## Quick start/stop script
+1. **Start all services:**
 
-Once prerequisites are installed, you can use `scripts/gkg-dev.sh` to manage
-the full stack (K8s cluster, GDK, and Tilt) with a single command:
+   ```shell
+   mise run dev
+   ```
 
-```shell
-# Copy the config template and set your GDK path
-cp .gkg-dev.conf.example .gkg-dev.conf
-# Edit .gkg-dev.conf — at minimum, set GDK_ROOT if your GDK is not at ~/gdk
+The GKG webserver is available at `http://localhost:8090` (HTTP) and
+`localhost:50054` (gRPC) by default. Ports can be changed in `.env`.
 
-# Verify everything is installed and configured correctly
-scripts/gkg-dev.sh check
-
-# Start all services (K8s → GDK → Tilt)
-scripts/gkg-dev.sh start
-
-# Check what's running
-scripts/gkg-dev.sh status
-
-# Stop all services (Tilt → GDK → K8s)
-scripts/gkg-dev.sh stop
-```
-
-## Alternative: quick start with mise
-
-If you prefer using the repository's existing `mise` task runner, an additive
-shortcut is also available:
-
-```shell
-mise run dev
-```
-
-This alternative is separate from the Tilt/Kubernetes workflow above. It starts
-lightweight native Rust processes directly on your host and connects them to the
-existing services in your GDK instance (for example NATS, ClickHouse, GitLab,
-and Gitaly), without using Tilt, Helm, Colima, or minikube.
-
-It starts all three GKG runtime modes in the foreground:
+This starts all three GKG runtime modes in the foreground:
 
 - 1 webserver (HTTP + gRPC)
 - 1 indexer
 - 1 dispatcher (dispatch-indexing)
 
-`mise run dev` orchestrates these long-running processes directly via mise
-tasks, so you get mise's built-in prefixed output and Ctrl+C stops
+`mise run dev` runs these processes with prefixed output. Ctrl+C stops
 everything.
 
 Useful companion tasks:
@@ -297,44 +268,13 @@ mise run dev:status   # show derived config
 mise run dev:env      # print env vars
 ```
 
-`mise run gdk` is also available as an alias for the same GDK-connected local
-development workflow.
-
-Port assignments and GDK connection settings can be overridden in a gitignored
-`.env` file. The only required input is `GDK_ROOT` (or `GDK_DIR` as an alias),
-and the script derives GDK service ports from `gdk.yml` automatically. Start from the checked-in template
-if you want to override only the GKG-local listen ports:
-
-```shell
-cp .env.example .env
-```
-
-For example, you can change the webserver and indexer ports if you want to run
-multiple isolated local clusters on the same machine. You do not need to copy
-GDK connection details into `.env`; those are parsed from `gdk.yml`.
-
-Prerequisites:
-
-- A working GDK with `nats`, `clickhouse`, and `siphon` enabled in `gdk.yml`
-- PostgreSQL `wal_level = logical` (required for Siphon CDC)
-- `mise` shell activation so that `cargo`, `ruby`, and `clickhouse` are on `PATH`
-- Run `mise run dev:check` to validate all prerequisites
-
-Typical usage:
-
-```shell
-export GDK_ROOT=~/workspace/gdk
-mise run dev
-```
+`mise run gdk` is also available as an alias.
 
 On the first run, `cargo` compiles the full workspace which takes several
 minutes. Subsequent runs use the cached build and start in seconds.
 
-`mise run dev:setup` creates the graph database (default `gkg-development`) and
-applies `config/graph.sql` to the configured ClickHouse instance.
-
-This lightweight path assumes NATS, ClickHouse, Siphon, PostgreSQL, and Gitaly
-come from GDK.
+Port assignments can be overridden in the `.env` file if you want to run
+multiple isolated local clusters on the same machine.
 
 ### HTTPS and nginx GDK setups
 
@@ -346,19 +286,6 @@ automatically sets `GKG_GITLAB__BASE_URL=https://gdk.test:3443`.
 For HTTPS to work, the GKG server's TLS stack (`rustls` via `reqwest`) must
 trust the certificate. If you used `mkcert` to generate GDK certificates, run
 `mkcert -install` to add the root CA to your system trust store.
-
-### PostgreSQL: TCP required for Siphon
-
-Siphon requires PostgreSQL on TCP for logical replication. GDK defaults to Unix
-sockets, which causes Siphon to crash-loop with connection errors. Add
-`postgresql.host: localhost` to `gdk.yml`, then:
-
-```shell
-gdk reconfigure && gdk restart postgresql
-```
-
-The dev script detects both Unix sockets and TCP automatically for its own
-health checks.
 
 ### Siphon prometheus port conflict
 
@@ -374,70 +301,6 @@ prometheus:
 Protect the file from being overwritten by adding `siphon/config.yml` to
 `gdk.protected_config_files` in `gdk.yml`, then `gdk restart siphon`.
 
-### Enabling the Knowledge Graph in GitLab
-
-To access the Knowledge Graph UI in your GDK:
-
-1. Add to `$GDK_ROOT/gitlab/config/gitlab.yml` under the `development:` block:
-
-   ```yaml
-     knowledge_graph:
-       enabled: true
-   ```
-
-1. Protect `gitlab.yml` by adding `gitlab/config/gitlab.yml` to
-   `gdk.protected_config_files` in `gdk.yml`.
-
-1. Restart Rails:
-
-   ```shell
-   gdk restart rails-web rails-background-jobs
-   ```
-
-1. Enable feature flags:
-
-   ```shell
-   cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Feature.enable(:knowledge_graph); Feature.enable(:knowledge_graph_infra)"
-   ```
-
-1. Enable namespaces for indexing:
-
-   ```shell
-   cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Namespace.where(type: 'Group').find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
-   ```
-
-The Knowledge Graph UI is then available at
-`https://<gdk-hostname>:<gdk-port>/dashboard/orbit`.
-
-See `.gkg-dev.conf.example` for all configuration options (K8s runtime,
-resource allocation, Tilt streaming mode).
-
-## Access Services
-
-- **Tilt UI**: http://localhost:10350
-- **GKG Webserver**: http://localhost:8080
-- **Grafana**: http://localhost:3030 (login: admin/admin). Dashboards: GKG Overview, ETL Engine, SDLC Indexing, Query Pipeline.
-- **Prometheus**: http://localhost:9090
-
-## Architecture
-
-```plaintext
-GDK Host (localhost)                    Kubernetes Cluster
-┌─────────────────────────┐            ┌─────────────────────────┐
-│ PostgreSQL :5432        │            │                         │
-│   ↓                     │            │ gkg-scheduler (cron)    │
-│ siphon-producer         │            │   ↓ publishes indexing  │
-│   ↓                     │            │   ↓ requests to NATS    │
-│ NATS :4222 ─────────────┼────────────┼── gkg-indexer           │
-│   ↓                     │            │   ↓ reads from CH       │
-│ siphon-consumer         │            │   ↓ writes graph        │
-│   ↓                     │            │                         │
-│ ClickHouse :8123 ───────┼────────────┼── gkg-webserver         │
-└─────────────────────────┘            └─────────────────────────┘
-```
-
 ## Troubleshooting
 
 **NATS connection refused:**
@@ -448,9 +311,9 @@ GDK Host (localhost)                    Kubernetes Cluster
 **NATS limit_markers error:**
 
 - Update `NATS_VERSION` in `$GDK_ROOT/support/makefiles/Makefile.nats.mk` to a version >= 2.11 (example `2.11.12`)
-- Run `gkg-stop && rm -rf nats/nats-server`
+- Run `cd $GDK_ROOT && rm -rf nats/nats-server`
 - Run `make nats-setup && nats/nats-server -version`
-- Run `gkg start`
+- Restart GDK: `gdk restart nats`
 
 **ClickHouse connection issues:**
 
@@ -461,9 +324,4 @@ GDK Host (localhost)                    Kubernetes Cluster
 
 - Check siphon services: `gdk status siphon-producer-main-db siphon-clickhouse-consumer`
 - Verify `siphon_*` tables have data: `clickhouse-client --port 9001 -q "SELECT count() FROM siphon_projects"`
-- Check indexer logs: `kubectl logs -l app.kubernetes.io/name=gkg-indexer`
-
-**host.docker.internal not resolving:**
-
-- On Linux, add `--add-host=host.docker.internal:host-gateway` to Docker
-- Or use your host's actual IP address in `helm/values/gkg-local.yaml`
+- Check GKG indexer output in the `mise run dev` terminal
