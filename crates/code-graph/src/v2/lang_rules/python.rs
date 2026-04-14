@@ -81,6 +81,9 @@ impl HasRules for PythonRules {
                 staticmethod_decorators: &["staticmethod"],
             },
             fqn_separator: ".",
+            self_names: &["self"],
+            super_name: Some("super"),
+            implicit_member_lookup: false,
             language_spec: Some(PythonDsl::spec()),
         }
     }

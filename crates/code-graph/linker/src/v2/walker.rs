@@ -210,14 +210,15 @@ impl<'a> FileWalker<'a> {
             && let Some(ref name) = scope_name
         {
             let class_fqn = self.build_fqn(name);
-            self.ssa
-                .write_variable("this", new_block, Value::Type(class_fqn.clone()));
-            self.ssa
-                .write_variable("self", new_block, Value::Type(class_fqn));
-            // super → look up first super_type from canonical definitions
-            if let Some(super_type) = self.find_super_type(name) {
+            for &self_name in self.rules.self_names {
                 self.ssa
-                    .write_variable("super", new_block, Value::Type(super_type));
+                    .write_variable(self_name, new_block, Value::Type(class_fqn.clone()));
+            }
+            if let Some(super_name) = self.rules.super_name
+                && let Some(super_type) = self.find_super_type(name)
+            {
+                self.ssa
+                    .write_variable(super_name, new_block, Value::Type(super_type));
             }
         }
 

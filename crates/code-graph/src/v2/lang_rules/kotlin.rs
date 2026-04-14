@@ -73,6 +73,9 @@ impl HasRules for KotlinRules {
             },
             receiver: ReceiverMode::Keyword,
             fqn_separator: ".",
+            self_names: &["this", "self"],
+            super_name: Some("super"),
+            implicit_member_lookup: true,
             language_spec: Some(KotlinDsl::spec()),
         }
     }

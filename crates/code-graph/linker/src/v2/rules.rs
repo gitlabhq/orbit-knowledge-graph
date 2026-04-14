@@ -138,6 +138,21 @@ pub struct ResolutionRules {
     pub receiver: ReceiverMode,
     pub fqn_separator: &'static str,
 
+    /// SSA variable names the walker writes as `Value::Type(class_fqn)`
+    /// when entering a class scope. e.g. `&["this", "self"]` for Java,
+    /// `&["self"]` for Python.
+    pub self_names: &'static [&'static str],
+
+    /// SSA variable name for the super-class reference.
+    /// Written as `Value::Type(super_type)` when entering a class scope
+    /// that has super_types metadata. e.g. `"super"` for Java/Kotlin/Python.
+    pub super_name: Option<&'static str>,
+
+    /// Whether bare names in a method body should fall back to member
+    /// lookup on the enclosing type scope (class/interface/module).
+    /// True for Java/Kotlin (implicit `this`), false for Python (explicit `self`).
+    pub implicit_member_lookup: bool,
+
     /// The DSL language spec, if this language uses the DSL parser.
     /// Gives the walker access to chain extraction config, reference
     /// rules with receiver fields, and other parser-level metadata

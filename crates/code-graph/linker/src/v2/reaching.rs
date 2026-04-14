@@ -57,8 +57,8 @@ fn resolve_with_rules<A: AsAst>(
         let result = &ctx.results[read.file_idx];
         let reference = &result.references[read.ref_idx];
 
-        // Find enclosing class for implicit-this resolution
-        let enclosing_class_fqn = find_enclosing_class(ctx, read.file_idx, reference);
+        // Find enclosing type scope for implicit member lookup
+        let enclosing_type_fqn = find_enclosing_type_scope(ctx, read.file_idx, reference);
 
         // If the reference has an expression chain, walk it to resolve
         // through types. Otherwise fall back to bare name resolution.
@@ -70,7 +70,7 @@ fn resolve_with_rules<A: AsAst>(
                 read.file_idx,
                 read.block,
                 chain,
-                enclosing_class_fqn.as_deref(),
+                enclosing_type_fqn.as_deref(),
             )
         } else {
             resolve_reaching_defs(
@@ -79,7 +79,7 @@ fn resolve_with_rules<A: AsAst>(
                 read.file_idx,
                 &read.name,
                 &reaching,
-                enclosing_class_fqn.as_deref(),
+                enclosing_type_fqn.as_deref(),
             )
         };
 
@@ -130,15 +130,16 @@ fn resolve_with_rules<A: AsAst>(
 ///
 /// For SSA values that are Def, return directly.
 /// For Import values, chase through import strategies.
-/// For Type values, look up by FQN.
+/// For Type values, look up `name` as a member of the type.
 fn resolve_reaching_defs<A>(
     rules: &ResolutionRules,
     ctx: &ResolutionContext<A>,
     file_idx: usize,
     name: &str,
     reaching: &ReachingDefs,
-    enclosing_class_fqn: Option<&str>,
+    enclosing_type_fqn: Option<&str>,
 ) -> Vec<DefRef> {
+    let sep = rules.fqn_separator;
     let mut result = Vec::new();
 
     for value in &reaching.values {
@@ -151,18 +152,17 @@ fn resolve_reaching_defs<A>(
             }
             Value::Import(f, i) => {
                 let import = &ctx.results[*f].imports[*i];
-                let import_defs = resolve_import(ctx, import);
+                let import_defs = resolve_import(ctx, import, sep);
                 result.extend(import_defs);
             }
             Value::Type(type_name) => {
-                // Type-flow: look up `name` as a member of the type.
                 let member_defs =
                     ctx.members
                         .lookup_member_with_supers(type_name, name, &ctx.definitions);
                 if !member_defs.is_empty() {
                     result.extend(member_defs);
                 } else {
-                    let fqn = format!("{}.{}", type_name, name);
+                    let fqn = format!("{}{}{}", type_name, sep, name);
                     for def_ref in ctx.definitions.lookup_fqn(&fqn) {
                         result.push(*def_ref);
                     }
@@ -177,14 +177,16 @@ fn resolve_reaching_defs<A>(
         result = apply_import_strategies(rules, ctx, file_idx, name);
     }
 
-    // Fallback 2: implicit this — try member lookup on the enclosing class.
-    // In Java/Kotlin, `helper()` inside a method body means `this.helper()`.
+    // Fallback 2: implicit member lookup on the enclosing type scope.
+    // When enabled (Java/Kotlin), bare `helper()` in a method body resolves
+    // as a member of the enclosing class/interface/module.
     if result.is_empty()
-        && let Some(class_fqn) = enclosing_class_fqn
+        && rules.implicit_member_lookup
+        && let Some(type_fqn) = enclosing_type_fqn
     {
         let member_defs = ctx
             .members
-            .lookup_member_with_supers(class_fqn, name, &ctx.definitions);
+            .lookup_member_with_supers(type_fqn, name, &ctx.definitions);
         result.extend(member_defs);
     }
 
@@ -204,7 +206,7 @@ fn resolve_reaching_defs<A>(
 ///
 /// e.g. `[Ident("factory"), Call("getService"), Call("query")]`:
 ///   1. Resolve "factory" via SSA → Value::Def(Factory)
-///   2. Factory is a class → look up "getService" as member → Factory.getService
+///   2. Factory is a type container → look up "getService" as member → Factory.getService
 ///   3. getService has return_type "UserService" → look up "query" → UserService.query
 #[allow(clippy::too_many_arguments)]
 fn resolve_expression_chain<A: AsAst>(
@@ -214,9 +216,11 @@ fn resolve_expression_chain<A: AsAst>(
     file_idx: usize,
     block: BlockId,
     chain: &[code_graph_types::ExpressionStep],
-    enclosing_class_fqn: Option<&str>,
+    enclosing_type_fqn: Option<&str>,
 ) -> Vec<DefRef> {
     use code_graph_types::ExpressionStep;
+
+    let sep = rules.fqn_separator;
 
     if chain.is_empty() {
         return vec![];
@@ -233,19 +237,12 @@ fn resolve_expression_chain<A: AsAst>(
                     Value::Type(t) => current_types.push(t.clone()),
                     Value::Def(f, d) => {
                         let def = &ctx.results[*f].definitions[*d];
-                        match def.kind {
-                            code_graph_types::DefKind::Class
-                            | code_graph_types::DefKind::Interface => {
-                                current_types.push(def.fqn.to_string());
-                            }
-                            _ => {
-                                // Use return_type if it's a method/function
-                                if let Some(meta) = &def.metadata
-                                    && let Some(rt) = &meta.return_type
-                                {
-                                    current_types.push(rt.clone());
-                                }
-                            }
+                        if def.kind.is_type_container() {
+                            current_types.push(def.fqn.to_string());
+                        } else if let Some(meta) = &def.metadata
+                            && let Some(rt) = &meta.return_type
+                        {
+                            current_types.push(rt.clone());
                         }
                     }
                     _ => {}
@@ -253,15 +250,17 @@ fn resolve_expression_chain<A: AsAst>(
             }
         }
         ExpressionStep::This => {
-            if let Some(class_fqn) = enclosing_class_fqn {
-                current_types.push(class_fqn.to_string());
+            if let Some(type_fqn) = enclosing_type_fqn {
+                current_types.push(type_fqn.to_string());
             }
         }
         ExpressionStep::Super => {
-            let reaching = ssa.read_variable_stateless("super", block);
-            for value in &reaching.values {
-                if let Value::Type(t) = value {
-                    current_types.push(t.clone());
+            if let Some(super_name) = rules.super_name {
+                let reaching = ssa.read_variable_stateless(super_name, block);
+                for value in &reaching.values {
+                    if let Value::Type(t) = value {
+                        current_types.push(t.clone());
+                    }
                 }
             }
         }
@@ -285,7 +284,7 @@ fn resolve_expression_chain<A: AsAst>(
                 file_idx,
                 name,
                 &reaching,
-                enclosing_class_fqn,
+                enclosing_type_fqn,
             );
         }
         return vec![];
@@ -293,11 +292,16 @@ fn resolve_expression_chain<A: AsAst>(
 
     // Walk remaining steps, resolving each through the current type(s).
     // Track the compound key (e.g. "self.db") for SSA fallback when
-    // member lookup fails (common in Python where fields aren't typed).
+    // member lookup fails (languages where fields aren't typed).
     let mut compound_key = match &chain[0] {
         ExpressionStep::Ident(n) => n.clone(),
-        ExpressionStep::This => "self".to_string(),
-        ExpressionStep::Super => "super".to_string(),
+        ExpressionStep::This => {
+            // Use the first self_name as the compound key base
+            rules.self_names.first().map(|s| s.to_string()).unwrap_or_default()
+        }
+        ExpressionStep::Super => {
+            rules.super_name.map(|s| s.to_string()).unwrap_or_default()
+        }
         _ => String::new(),
     };
 
@@ -348,21 +352,18 @@ fn resolve_expression_chain<A: AsAst>(
 
         // SSA compound key fallback: if member lookup found nothing,
         // try reading "self.db" (or "obj.field") as a single SSA variable.
-        // This handles Python's `self.db = Database()` → `self.db.query()`.
+        // Handles languages where instance fields are assigned dynamically
+        // (e.g. Python's `self.db = Database()` → `self.db.query()`).
         if next_types.is_empty() && found_members.is_empty() {
             if !compound_key.is_empty() {
-                compound_key = format!("{}.{}", compound_key, member_name);
+                compound_key = format!("{}{}{}", compound_key, sep, member_name);
                 let reaching = ssa.read_variable_stateless(&compound_key, block);
                 for value in &reaching.values {
                     match value {
                         Value::Type(t) => next_types.push(t.clone()),
                         Value::Def(f, d) => {
                             let def = &ctx.results[*f].definitions[*d];
-                            if matches!(
-                                def.kind,
-                                code_graph_types::DefKind::Class
-                                    | code_graph_types::DefKind::Interface
-                            ) {
+                            if def.kind.is_type_container() {
                                 next_types.push(def.fqn.to_string());
                             } else if let Some(meta) = &def.metadata
                                 && let Some(rt) = &meta.return_type
@@ -389,8 +390,9 @@ fn resolve_expression_chain<A: AsAst>(
     vec![]
 }
 
-/// Find the enclosing class FQN for a reference, for implicit-this resolution.
-fn find_enclosing_class<A>(
+/// Find the innermost enclosing type scope (class, interface, module) FQN
+/// for a reference. Used for implicit member lookup and `this`/`self` resolution.
+fn find_enclosing_type_scope<A>(
     ctx: &ResolutionContext<A>,
     file_idx: usize,
     reference: &code_graph_types::CanonicalReference,
@@ -399,16 +401,12 @@ fn find_enclosing_class<A>(
     let byte_start = reference.range.byte_offset.0;
     let byte_end = reference.range.byte_offset.1;
 
-    // Find all containing scopes, then pick the innermost class/interface
     let containing = ctx
         .scopes
         .containing_scopes(&result.file_path, byte_start, byte_end);
     for scope in containing.iter().rev() {
         let def = &result.definitions[scope.def_idx];
-        if matches!(
-            def.kind,
-            code_graph_types::DefKind::Class | code_graph_types::DefKind::Interface
-        ) {
+        if def.kind.is_type_container() {
             return Some(def.fqn.to_string());
         }
     }
@@ -423,21 +421,17 @@ fn apply_import_strategies<A>(
     name: &str,
 ) -> Vec<DefRef> {
     let result = &ctx.results[file_idx];
+    let sep = rules.fqn_separator;
 
     for strategy in &rules.import_strategies {
         let candidates = match strategy {
-            ImportStrategy::ScopeFqnWalk => {
-                // Walk up the scope FQN trying scope.name at each level
-                scope_fqn_walk(ctx, result, name)
+            ImportStrategy::ScopeFqnWalk => scope_fqn_walk(ctx, result, name, sep),
+            ImportStrategy::ExplicitImport => explicit_import_lookup(ctx, file_idx, name, sep),
+            ImportStrategy::WildcardImport => {
+                wildcard_import_lookup(ctx, file_idx, name, sep)
             }
-            ImportStrategy::ExplicitImport => {
-                // Check if there's an import that brings this name into scope
-                explicit_import_lookup(ctx, file_idx, name)
-            }
-            ImportStrategy::WildcardImport => wildcard_import_lookup(ctx, file_idx, name),
-            ImportStrategy::SamePackage => same_package_lookup(ctx, result, name),
+            ImportStrategy::SamePackage => same_package_lookup(ctx, result, name, sep),
             ImportStrategy::SameFile => {
-                // Look up by name within the same file
                 ctx.definitions
                     .lookup_name(name)
                     .iter()
@@ -454,8 +448,8 @@ fn apply_import_strategies<A>(
                 }
             }
             ImportStrategy::FilePath => {
-                // Python-style: resolve import path to file, find definitions there
-                // This requires the file tree — handled separately
+                // Resolve import path to file, find definitions there.
+                // Requires file tree — not yet implemented.
                 vec![]
             }
         };
@@ -469,7 +463,11 @@ fn apply_import_strategies<A>(
 }
 
 /// Resolve an import to terminal definitions.
-fn resolve_import<A>(ctx: &ResolutionContext<A>, import: &CanonicalImport) -> Vec<DefRef> {
+fn resolve_import<A>(
+    ctx: &ResolutionContext<A>,
+    import: &CanonicalImport,
+    sep: &str,
+) -> Vec<DefRef> {
     let symbol_name = import
         .alias
         .as_deref()
@@ -484,7 +482,7 @@ fn resolve_import<A>(ctx: &ResolutionContext<A>, import: &CanonicalImport) -> Ve
     let full_fqn = if import.path.is_empty() {
         symbol_name.to_string()
     } else {
-        format!("{}.{}", import.path, symbol_name)
+        format!("{}{}{}", import.path, sep, symbol_name)
     };
 
     let by_fqn = ctx.definitions.lookup_fqn(&full_fqn);
@@ -509,16 +507,17 @@ fn resolve_import<A>(ctx: &ResolutionContext<A>, import: &CanonicalImport) -> Ve
     vec![]
 }
 
-/// Walk up scope FQN segments trying `scope.name` at each level.
+/// Walk up scope FQN segments trying `scope{sep}name` at each level.
 fn scope_fqn_walk<A>(
     ctx: &ResolutionContext<A>,
     result: &CanonicalResult,
     name: &str,
+    sep: &str,
 ) -> Vec<DefRef> {
     // Try each top-level definition's FQN as a potential scope
     for def in &result.definitions {
         if def.is_top_level {
-            let candidate = format!("{}.{}", def.fqn, name);
+            let candidate = format!("{}{}{}", def.fqn, sep, name);
             let matches = ctx.definitions.lookup_fqn(&candidate);
             if !matches.is_empty() {
                 return matches.to_vec();
@@ -531,12 +530,12 @@ fn scope_fqn_walk<A>(
         let fqn_str = def.fqn.to_string();
         let mut current = fqn_str.as_str();
         loop {
-            let candidate = format!("{}.{}", current, name);
+            let candidate = format!("{}{}{}", current, sep, name);
             let matches = ctx.definitions.lookup_fqn(&candidate);
             if !matches.is_empty() {
                 return matches.to_vec();
             }
-            match current.rfind('.') {
+            match current.rfind(sep) {
                 Some(pos) => current = &current[..pos],
                 None => break,
             }
@@ -551,12 +550,13 @@ fn explicit_import_lookup<A>(
     ctx: &ResolutionContext<A>,
     file_idx: usize,
     name: &str,
+    sep: &str,
 ) -> Vec<DefRef> {
     let result = &ctx.results[file_idx];
     for imp in &result.imports {
         let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
         if imp_name == name {
-            let defs = resolve_import_to_defs(ctx, imp);
+            let defs = resolve_import_to_defs(ctx, imp, sep);
             if !defs.is_empty() {
                 return defs;
             }
@@ -566,12 +566,16 @@ fn explicit_import_lookup<A>(
 }
 
 /// Resolve a single import to definitions by FQN matching.
-fn resolve_import_to_defs<A>(ctx: &ResolutionContext<A>, import: &CanonicalImport) -> Vec<DefRef> {
+fn resolve_import_to_defs<A>(
+    ctx: &ResolutionContext<A>,
+    import: &CanonicalImport,
+    sep: &str,
+) -> Vec<DefRef> {
     let symbol = import.name.as_deref().unwrap_or("");
     let full_fqn = if import.path.is_empty() {
         symbol.to_string()
     } else {
-        format!("{}.{}", import.path, symbol)
+        format!("{}{}{}", import.path, sep, symbol)
     };
 
     let by_fqn = ctx.definitions.lookup_fqn(&full_fqn);
@@ -595,11 +599,12 @@ fn wildcard_import_lookup<A>(
     ctx: &ResolutionContext<A>,
     file_idx: usize,
     name: &str,
+    sep: &str,
 ) -> Vec<DefRef> {
     let result = &ctx.results[file_idx];
     for imp in &result.imports {
-        if imp.import_type == "WildcardImport" || imp.import_type == "RelativeWildcardImport" {
-            let candidate = format!("{}.{}", imp.path, name);
+        if imp.wildcard {
+            let candidate = format!("{}{}{}", imp.path, sep, name);
             let matches = ctx.definitions.lookup_fqn(&candidate);
             if !matches.is_empty() {
                 return matches.to_vec();
@@ -614,13 +619,14 @@ fn same_package_lookup<A>(
     ctx: &ResolutionContext<A>,
     result: &CanonicalResult,
     name: &str,
+    sep: &str,
 ) -> Vec<DefRef> {
     for def in &result.definitions {
         if def.is_top_level {
             let fqn_str = def.fqn.to_string();
-            if let Some(dot_pos) = fqn_str.rfind('.') {
-                let pkg = &fqn_str[..dot_pos];
-                let candidate = format!("{}.{}", pkg, name);
+            if let Some(sep_pos) = fqn_str.rfind(sep) {
+                let pkg = &fqn_str[..sep_pos];
+                let candidate = format!("{}{}{}", pkg, sep, name);
                 let matches = ctx.definitions.lookup_fqn(&candidate);
                 if !matches.is_empty() {
                     return matches.to_vec();

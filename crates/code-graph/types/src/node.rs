@@ -35,6 +35,14 @@ impl DefKind {
             Self::Other => "OTHER",
         }
     }
+
+    /// Whether this kind produces a type scope that can have members.
+    /// Used by the resolver for type-flow: when a value resolves to a
+    /// definition of this kind, the resolver uses its FQN as a type name
+    /// for member lookup.
+    pub const fn is_type_container(&self) -> bool {
+        matches!(self, Self::Class | Self::Interface | Self::Module)
+    }
 }
 
 /// Resolution status of a reference at a call site.
@@ -89,13 +97,18 @@ pub struct DefinitionMetadata {
 /// A parsed import, language-agnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalImport {
-    /// Language-specific import type (e.g. "RequireRelative", "WildcardImport").
+    /// Language-specific import type (e.g. "RequireRelative", "FromImport").
     pub import_type: &'static str,
     pub path: String,
     pub name: Option<String>,
     pub alias: Option<String>,
     pub scope_fqn: Option<Fqn>,
     pub range: Range,
+    /// Whether this is a wildcard import (e.g. `from foo import *`,
+    /// `import java.util.*`). Set by the parser; the resolver uses
+    /// this to drive wildcard import lookup instead of matching on
+    /// `import_type` strings.
+    pub wildcard: bool,
 }
 
 /// A parsed reference (call site / usage), language-agnostic.

@@ -342,6 +342,7 @@ impl LanguageSpec {
                             alias,
                             scope_fqn: None,
                             range,
+                            wildcard: false,
                         });
                     }
                 } else if child_kinds.iter().any(|&k| k == ck.as_ref()) {
@@ -361,15 +362,17 @@ impl LanguageSpec {
                         alias: None,
                         scope_fqn: None,
                         range,
+                        wildcard: false,
                     });
                 } else if ck == "wildcard_import" {
                     imports.push(CanonicalImport {
-                        import_type: "WildcardImport",
+                        import_type: label,
                         path: base_path.clone(),
                         name: Some("*".to_string()),
                         alias: None,
                         scope_fqn: None,
                         range,
+                        wildcard: true,
                     });
                 }
             }
@@ -379,6 +382,7 @@ impl LanguageSpec {
             } else {
                 (full_path, rule.extract_symbol(node))
             };
+            let is_wildcard = name.as_deref() == Some("*");
             imports.push(CanonicalImport {
                 import_type: label,
                 path,
@@ -386,6 +390,7 @@ impl LanguageSpec {
                 alias: rule.extract_alias(node),
                 scope_fqn: None,
                 range,
+                wildcard: is_wildcard,
             });
         }
     }
