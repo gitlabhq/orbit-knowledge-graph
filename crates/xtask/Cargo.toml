@@ -20,10 +20,8 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 arrow = { workspace = true }
 chrono = { workspace = true }
-const_format = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
-tempfile = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
@@ -33,8 +31,6 @@ sqlformat = { workspace = true }
 tabled = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-indicatif = { workspace = true }
-rayon = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 ontology = { path = "../ontology" }
 schemars = { workspace = true }

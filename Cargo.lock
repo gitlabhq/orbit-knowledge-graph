@@ -2109,12 +2109,10 @@ dependencies = [
  "code-graph-linker",
  "code-graph-types",
  "ignore",
- "log",
  "parser-core",
  "petgraph 0.8.3",
  "rayon",
  "rustc-hash",
- "stacker",
  "tempfile",
  "treesitter-visit",
 ]
@@ -2209,7 +2207,6 @@ name = "compiler"
 version = "0.1.0"
 dependencies = [
  "compiler-pipeline-macros",
- "const_format",
  "gkg-server-config",
  "gkg-utils",
  "jsonschema",
@@ -2253,18 +2250,6 @@ dependencies = [
  "serde_core",
  "winnow 1.0.1",
  "yaml-rust2",
-]
-
-[[package]]
-name = "console"
-version = "0.16.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d64e8af5551369d19cf50138de61f1c42074ab970f74e99be916646777f8fc87"
-dependencies = [
- "encode_unicode",
- "libc",
- "unicode-width",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4238,12 +4223,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "encode_unicode"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
-
-[[package]]
 name = "encoding_rs"
 version = "0.8.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4923,35 +4902,27 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow 58.1.0",
- "arrow-ipc 58.1.0",
  "async-trait",
  "axum",
  "base64 0.22.1",
- "bytes",
  "chrono",
  "clap",
- "clickhouse",
  "clickhouse-client",
- "enum-as-inner",
  "futures",
  "gitlab-client",
  "gkg-server-config",
  "gkg-utils",
  "health-check",
  "indexer",
- "indexmap 2.14.0",
  "jsonschema",
  "jsonwebtoken 10.3.0",
  "labkit",
  "ontology",
  "opentelemetry",
- "parking_lot",
  "prost 0.14.3",
  "prost-build 0.14.3",
- "prost-types 0.14.3",
  "query-engine",
  "reqwest 0.13.2",
- "rustc-hash",
  "rustls",
  "serde",
  "serde_json",
@@ -4964,7 +4935,6 @@ dependencies = [
  "tonic-prost",
  "tonic-prost-build",
  "toon-format",
- "tower",
  "tracing",
  "uuid",
 ]
@@ -5679,7 +5649,6 @@ dependencies = [
  "parking_lot",
  "parser-core",
  "prost 0.14.3",
- "prost-types 0.14.3",
  "query-engine",
  "rustc-hash",
  "serde",
@@ -5723,19 +5692,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "indicatif"
-version = "0.18.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25470f23803092da7d239834776d653104d551bc4d7eacaf31e6837854b8e9eb"
-dependencies = [
- "console",
- "portable-atomic",
- "unicode-width",
- "unit-prefix",
- "web-time",
-]
-
-[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5761,7 +5717,6 @@ dependencies = [
  "clickhouse-client",
  "code-graph",
  "code-graph-linker",
- "code-graph-types",
  "futures",
  "gitalisk-core",
  "gkg-server",
@@ -5769,7 +5724,6 @@ dependencies = [
  "gkg-utils",
  "globset",
  "lance-graph",
- "parser-core",
  "petgraph 0.8.3",
  "query-engine",
  "rustc-hash",
@@ -6919,16 +6873,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
-name = "libmimalloc-sys"
-version = "0.1.44"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "667f4fec20f29dfc6bc7357c582d91796c169ad7e2fce709468aefeb2c099870"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "libredox"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7125,15 +7069,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "mimalloc"
-version = "0.1.48"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1ee66a4b64c74f4ef288bcbb9192ad9c3feaad75193129ac8509af543894fd8"
-dependencies = [
- "libmimalloc-sys",
 ]
 
 [[package]]
@@ -7874,15 +7809,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "par-core"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e96cbd21255b7fb29a5d51ef38a779b517a91abd59e2756c039583f43ef4c90f"
-dependencies = [
- "once_cell",
-]
-
-[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8011,21 +7937,18 @@ dependencies = [
  "code-graph-config",
  "code-graph-types",
  "internment",
- "mimalloc",
  "once_cell",
  "pastey",
  "ruby-prism",
  "rust-lapper",
  "rustc-hash",
  "serde",
- "serde_json",
  "smallvec",
  "stacker",
  "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_parser",
- "swc_ecma_transforms_base",
  "swc_ecma_visit",
  "tempfile",
  "thiserror 2.0.18",
@@ -9662,12 +9585,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
-name = "ryu-js"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd29631678d6fb0903b69223673e122c32e9ae559d0960a38d574695ebc0ea15"
-
-[[package]]
 name = "salsa20"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10499,47 +10416,6 @@ dependencies = [
  "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
- "tracing",
-]
-
-[[package]]
-name = "swc_ecma_transforms_base"
-version = "35.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83f9f0dee4466e6eeb7042f2a0fc6c84298dfa914baff5bcfb44beb9f24b215f"
-dependencies = [
- "better_scoped_tls",
- "indexmap 2.14.0",
- "once_cell",
- "par-core",
- "phf 0.11.3",
- "rustc-hash",
- "serde",
- "swc_atoms",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_parser",
- "swc_ecma_utils",
- "swc_ecma_visit",
- "tracing",
-]
-
-[[package]]
-name = "swc_ecma_utils"
-version = "25.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dd5ee449d21110a271e73d0a9f7640a8854a62cb0e2cb0c9db3445383598e21"
-dependencies = [
- "indexmap 2.14.0",
- "num_cpus",
- "once_cell",
- "par-core",
- "rustc-hash",
- "ryu-js",
- "swc_atoms",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_visit",
  "tracing",
 ]
 
@@ -11660,8 +11536,6 @@ dependencies = [
  "arrow 58.1.0",
  "compiler",
  "gkg-utils",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -11727,12 +11601,6 @@ name = "unicode_categories"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
-
-[[package]]
-name = "unit-prefix"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
 
 [[package]]
 name = "unsafe-libyaml"
@@ -12598,23 +12466,19 @@ dependencies = [
  "clap",
  "clickhouse",
  "clickhouse-client",
- "const_format",
  "futures",
  "gkg-server-config",
  "gkg-utils",
- "indicatif",
  "ontology",
  "parquet 58.1.0",
  "query-engine",
  "rand 0.10.1",
- "rayon",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "serde_yaml",
  "sqlformat",
  "tabled",
- "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
