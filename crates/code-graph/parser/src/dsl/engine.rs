@@ -43,7 +43,6 @@ impl LanguageSpec {
         let mut defs = Vec::new();
         let mut refs = Vec::new();
         let mut imports = Vec::new();
-        let mut bindings = Vec::new();
         let mut scope_stack: Vec<Arc<str>> = Vec::new();
 
         self.walk(
@@ -52,7 +51,6 @@ impl LanguageSpec {
             &mut defs,
             &mut refs,
             &mut imports,
-            &mut bindings,
             sep,
         );
 
@@ -69,7 +67,6 @@ impl LanguageSpec {
             definitions: defs,
             imports,
             references: refs,
-            bindings,
         };
 
         Ok((result, ast))
@@ -83,7 +80,6 @@ impl LanguageSpec {
         defs: &mut Vec<CanonicalDefinition>,
         refs: &mut Vec<CanonicalReference>,
         imports: &mut Vec<CanonicalImport>,
-        bindings: &mut Vec<code_graph_types::CanonicalBinding>,
         sep: &'static str,
     ) {
         if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
@@ -147,21 +143,8 @@ impl LanguageSpec {
             self.evaluate_imports(node, &node_kind, imports);
         }
 
-        // Extract bindings (assignments, parameters, etc.)
-        if let Some(rule) = self.bindings.iter().find(|r| r.matches(node, &node_kind))
-            && let Some(name) = rule.extract_name(node)
-        {
-            let value = rule.extract_value(node);
-            bindings.push(code_graph_types::CanonicalBinding {
-                name,
-                value,
-                range: canonical_range(&node_to_range(node)),
-                scope_fqn: Fqn::from_scope_only(scope_stack, sep),
-            });
-        }
-
         for child in node.children() {
-            self.walk(&child, scope_stack, defs, refs, imports, bindings, sep);
+            self.walk(&child, scope_stack, defs, refs, imports, sep);
         }
 
         if pushed_scope {
@@ -210,16 +193,7 @@ impl LanguageSpec {
             .as_ref()
             .zip(self.chain_config.as_ref())
             .and_then(|(extract, cc)| {
-                let receiver_node = match extract {
-                    crate::dsl::types::ReceiverExtract::Field(f) => node.field(f),
-                    crate::dsl::types::ReceiverExtract::FieldChain(fields) => {
-                        let mut current = Some(node.clone());
-                        for &f in fields.iter() {
-                            current = current.and_then(|n| n.field(f));
-                        }
-                        current
-                    }
-                }?;
+                let receiver_node = extract.resolve(node)?;
                 let mut chain = Vec::new();
                 self.build_expression_chain(&receiver_node, &mut chain, cc);
                 chain.push(ExpressionStep::Call(name.clone()));
@@ -284,20 +258,10 @@ impl LanguageSpec {
 
         // Call expression with object field (method_invocation, call_expression)
         if let Some(rule) = self.refs.iter().find(|r| r.kind() == kind_ref) {
-            if let Some(extract) = &rule.receiver_extract {
-                let receiver_node = match extract {
-                    crate::dsl::types::ReceiverExtract::Field(f) => node.field(f),
-                    crate::dsl::types::ReceiverExtract::FieldChain(fields) => {
-                        let mut current = Some(node.clone());
-                        for &f in fields.iter() {
-                            current = current.and_then(|n| n.field(f));
-                        }
-                        current
-                    }
-                };
-                if let Some(recv) = receiver_node {
-                    self.build_expression_chain(&recv, chain, cc);
-                }
+            if let Some(extract) = &rule.receiver_extract
+                && let Some(recv) = extract.resolve(node)
+            {
+                self.build_expression_chain(&recv, chain, cc);
             }
             if let Some(name) = rule.extract_name(node) {
                 chain.push(ExpressionStep::Call(name));

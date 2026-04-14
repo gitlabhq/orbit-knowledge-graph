@@ -179,20 +179,6 @@ impl DslLanguage for PythonDsl {
                 .wildcard_child("wildcard_import"),
         ]
     }
-
-    fn bindings() -> Vec<ParseBindingRule> {
-        vec![
-            parse_binding("assignment")
-                .name_from(field("left"))
-                .value_from(field("right")),
-            parse_binding("augmented_assignment")
-                .name_from(field("left"))
-                .no_value(),
-            parse_binding("named_expression")
-                .name_from(field("name"))
-                .value_from(field("value")),
-        ]
-    }
 }
 
 // ── Resolution rules ────────────────────────────────────────────

@@ -169,26 +169,11 @@ pub struct CanonicalFile {
     pub size: u64,
 }
 
-/// A variable binding (assignment, parameter, for-target).
-///
-/// The resolver uses these to track what names are bound to at each
-/// program point via the SSA engine.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalBinding {
-    /// The name being bound (LHS of assignment).
-    pub name: String,
-    /// What the name is bound to (RHS). `None` for opaque bindings
-    /// (parameters, deletions).
-    pub value: Option<String>,
-    pub range: Range,
-    /// FQN of the enclosing scope.
-    pub scope_fqn: Option<Fqn>,
-}
-
 /// The complete output of parsing a single file.
 ///
 /// Boundary type between parser and linker — nothing language-specific
-/// crosses this boundary.
+/// crosses this boundary. Bindings are not extracted at parse time;
+/// the SSA walker discovers them from the AST using `BindingRule`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalResult {
     pub file_path: String,
@@ -198,6 +183,4 @@ pub struct CanonicalResult {
     pub definitions: Vec<CanonicalDefinition>,
     pub imports: Vec<CanonicalImport>,
     pub references: Vec<CanonicalReference>,
-    /// Variable bindings sorted by byte offset.
-    pub bindings: Vec<CanonicalBinding>,
 }

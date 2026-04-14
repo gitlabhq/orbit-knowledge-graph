@@ -157,7 +157,7 @@ fn resolve_reaching_defs<A>(
             }
             Value::Import(f, i) => {
                 let import = &ctx.results[*f].imports[*i];
-                let import_defs = resolve_import(ctx, import, sep);
+                let import_defs = resolve_import(ctx, import, sep, true);
                 result.extend(import_defs);
             }
             Value::Type(type_name) => {
@@ -466,11 +466,14 @@ fn apply_import_strategies<A>(
     vec![]
 }
 
-/// Resolve an import to terminal definitions.
+/// Resolve an import to definitions by FQN matching.
+///
+/// Tries: full FQN (path + symbol), path alone, then optionally bare name.
 fn resolve_import<A>(
     ctx: &ResolutionContext<A>,
     import: &CanonicalImport,
     sep: &str,
+    bare_name_fallback: bool,
 ) -> Vec<DefRef> {
     let symbol_name = import
         .alias
@@ -482,7 +485,6 @@ fn resolve_import<A>(
         return vec![];
     }
 
-    // Try full import path + symbol name as FQN
     let full_fqn = if import.path.is_empty() {
         symbol_name.to_string()
     } else {
@@ -494,7 +496,6 @@ fn resolve_import<A>(
         return by_fqn.to_vec();
     }
 
-    // Try just the import path as FQN (for `import X` style)
     if !import.path.is_empty() {
         let by_path = ctx.definitions.lookup_fqn(&import.path);
         if !by_path.is_empty() {
@@ -502,10 +503,11 @@ fn resolve_import<A>(
         }
     }
 
-    // Try the symbol name as a bare name
-    let by_name = ctx.definitions.lookup_name(symbol_name);
-    if by_name.len() <= MAX_BARE_NAME_CANDIDATES {
-        return by_name.to_vec();
+    if bare_name_fallback {
+        let by_name = ctx.definitions.lookup_name(symbol_name);
+        if by_name.len() <= MAX_BARE_NAME_CANDIDATES {
+            return by_name.to_vec();
+        }
     }
 
     vec![]
@@ -560,41 +562,12 @@ fn explicit_import_lookup<A>(
     for imp in &result.imports {
         let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
         if imp_name == name {
-            let defs = resolve_import_to_defs(ctx, imp, sep);
+            let defs = resolve_import(ctx, imp, sep, false);
             if !defs.is_empty() {
                 return defs;
             }
         }
     }
-    vec![]
-}
-
-/// Resolve a single import to definitions by FQN matching.
-fn resolve_import_to_defs<A>(
-    ctx: &ResolutionContext<A>,
-    import: &CanonicalImport,
-    sep: &str,
-) -> Vec<DefRef> {
-    let symbol = import.name.as_deref().unwrap_or("");
-    let full_fqn = if import.path.is_empty() {
-        symbol.to_string()
-    } else {
-        format!("{}{}{}", import.path, sep, symbol)
-    };
-
-    let by_fqn = ctx.definitions.lookup_fqn(&full_fqn);
-    if !by_fqn.is_empty() {
-        return by_fqn.to_vec();
-    }
-
-    // Try path alone (for `import X` where X is a module/class)
-    if !import.path.is_empty() {
-        let by_path = ctx.definitions.lookup_fqn(&import.path);
-        if !by_path.is_empty() {
-            return by_path.to_vec();
-        }
-    }
-
     vec![]
 }
 

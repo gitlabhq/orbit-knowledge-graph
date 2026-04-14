@@ -1,4 +1,4 @@
-use code_graph_types::{CanonicalDefinition, CanonicalImport, CanonicalResult, Range, ScopeIndex};
+use code_graph_types::{CanonicalDefinition, CanonicalResult, Range, ScopeIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Shared resolution context built from all parsed results for a language.
@@ -14,7 +14,6 @@ pub struct ResolutionContext<A = ()> {
     pub results: Vec<CanonicalResult>,
     pub definitions: DefinitionIndex,
     pub members: MemberIndex,
-    pub imports: ImportIndex,
     pub scopes: FileScopes,
     pub asts: FxHashMap<String, A>,
 }
@@ -27,7 +26,6 @@ impl<A> ResolutionContext<A> {
     ) -> Self {
         let definitions = DefinitionIndex::build(&results);
         let members = MemberIndex::build(&results);
-        let imports = ImportIndex::build(&results);
         let scopes = FileScopes::build(&results);
 
         Self {
@@ -35,7 +33,6 @@ impl<A> ResolutionContext<A> {
             results,
             definitions,
             members,
-            imports,
             scopes,
             asts,
         }
@@ -45,12 +42,6 @@ impl<A> ResolutionContext<A> {
     pub fn resolve_def(&self, r: DefRef) -> (&CanonicalDefinition, &str) {
         let result = &self.results[r.file_idx];
         (&result.definitions[r.def_idx], &result.file_path)
-    }
-
-    /// Resolve an ImportRef to the actual import + file path.
-    pub fn resolve_import(&self, r: ImportRef) -> (&CanonicalImport, &str) {
-        let result = &self.results[r.file_idx];
-        (&result.imports[r.import_idx], &result.file_path)
     }
 }
 
@@ -65,7 +56,6 @@ pub struct DefRef {
 pub struct DefinitionIndex {
     by_fqn: FxHashMap<String, Vec<DefRef>>,
     by_name: FxHashMap<String, Vec<DefRef>>,
-    by_file: FxHashMap<String, Vec<usize>>,
     /// (file_idx, def_idx) → FQN string, for reverse lookup.
     fqns: FxHashMap<(usize, usize), String>,
 }
@@ -74,15 +64,9 @@ impl DefinitionIndex {
     fn build(results: &[CanonicalResult]) -> Self {
         let mut by_fqn: FxHashMap<String, Vec<DefRef>> = FxHashMap::default();
         let mut by_name: FxHashMap<String, Vec<DefRef>> = FxHashMap::default();
-        let mut by_file: FxHashMap<String, Vec<usize>> = FxHashMap::default();
         let mut fqns: FxHashMap<(usize, usize), String> = FxHashMap::default();
 
         for (file_idx, result) in results.iter().enumerate() {
-            by_file
-                .entry(result.file_path.clone())
-                .or_default()
-                .push(file_idx);
-
             for (def_idx, def) in result.definitions.iter().enumerate() {
                 let r = DefRef { file_idx, def_idx };
                 let fqn_str = def.fqn.to_string();
@@ -95,7 +79,6 @@ impl DefinitionIndex {
         Self {
             by_fqn,
             by_name,
-            by_file,
             fqns,
         }
     }
@@ -114,13 +97,6 @@ impl DefinitionIndex {
             .get(&(def_ref.file_idx, def_ref.def_idx))
             .cloned()
             .unwrap_or_default()
-    }
-
-    pub fn file_indices(&self, file_path: &str) -> &[usize] {
-        self.by_file
-            .get(file_path)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
     }
 }
 
@@ -247,50 +223,6 @@ impl MemberIndex {
         }
 
         vec![]
-    }
-}
-
-/// Lightweight reference to an import: file index + import index.
-#[derive(Clone, Copy, Debug)]
-pub struct ImportRef {
-    pub file_idx: usize,
-    pub import_idx: usize,
-}
-
-/// Index of all imports across files.
-pub struct ImportIndex {
-    by_file: FxHashMap<String, Vec<ImportRef>>,
-    by_path: FxHashMap<String, Vec<ImportRef>>,
-}
-
-impl ImportIndex {
-    fn build(results: &[CanonicalResult]) -> Self {
-        let mut by_file: FxHashMap<String, Vec<ImportRef>> = FxHashMap::default();
-        let mut by_path: FxHashMap<String, Vec<ImportRef>> = FxHashMap::default();
-
-        for (file_idx, result) in results.iter().enumerate() {
-            for (import_idx, imp) in result.imports.iter().enumerate() {
-                let r = ImportRef {
-                    file_idx,
-                    import_idx,
-                };
-                by_file.entry(result.file_path.clone()).or_default().push(r);
-                by_path.entry(imp.path.clone()).or_default().push(r);
-            }
-        }
-
-        Self { by_file, by_path }
-    }
-
-    pub fn in_file(&self, file_path: &str) -> &[ImportRef] {
-        self.by_file
-            .get(file_path)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
-    pub fn by_import_path(&self, path: &str) -> &[ImportRef] {
-        self.by_path.get(path).map(|v| v.as_slice()).unwrap_or(&[])
     }
 }
 

@@ -114,17 +114,6 @@ impl DslLanguage for JavaDsl {
         ]
     }
 
-    fn bindings() -> Vec<ParseBindingRule> {
-        vec![
-            parse_binding("local_variable_declaration")
-                .name_from(Extract::Declarator)
-                .value_from(Extract::Declarator),
-            parse_binding("assignment_expression")
-                .name_from(field("left"))
-                .value_from(field("right")),
-        ]
-    }
-
     fn chain_config() -> Option<ChainConfig> {
         Some(ChainConfig {
             ident_kinds: &["identifier", "type_identifier"],

@@ -164,6 +164,16 @@ impl SsaResolver {
         self.blocks[block.0].sealed = true;
     }
 
+    /// Seal any blocks that haven't been sealed yet.
+    /// Safety net for walker bugs that leave blocks unsealed.
+    pub fn seal_remaining(&mut self) {
+        for id in 0..self.blocks.len() {
+            if !self.blocks[id].sealed {
+                self.seal_block(BlockId(id));
+            }
+        }
+    }
+
     /// Record a variable definition: `variable` is defined as `value` in `block`.
     pub fn write_variable(&mut self, variable: &str, block: BlockId, value: Value) {
         self.current_def

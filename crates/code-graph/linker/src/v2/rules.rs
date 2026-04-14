@@ -10,17 +10,12 @@
 
 // ── Scope rules ─────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ScopeKind {
-    Class,
-    Function,
-    Module,
-}
-
 #[derive(Debug, Clone)]
 pub struct IsolatedScopeRule {
     pub node_kind: &'static str,
-    pub scope_kind: ScopeKind,
+    /// Whether this scope is a type container (class, interface, module)
+    /// that has members and gets this/self/super SSA bindings.
+    pub is_type_scope: bool,
     pub name_field: &'static str,
 }
 
@@ -196,7 +191,6 @@ impl ResolutionRules {
     /// Derive walker scope rules from the DSL spec's scope rules.
     /// Filters out `no_scope` entries and maps `DefKind` → `ScopeKind`.
     pub fn derive_scopes(spec: &parser_core::dsl::types::LanguageSpec) -> Vec<IsolatedScopeRule> {
-        use code_graph_types::DefKind;
         use parser_core::dsl::types::Rule;
         use std::collections::HashSet;
 
@@ -205,16 +199,10 @@ impl ResolutionRules {
             .iter()
             .filter(|s| s.creates_scope)
             .filter(|s| seen.insert(s.kind()))
-            .map(|s| {
-                let scope_kind = match s.get_def_kind() {
-                    DefKind::Class | DefKind::Interface | DefKind::Module => ScopeKind::Class,
-                    _ => ScopeKind::Function,
-                };
-                IsolatedScopeRule {
-                    node_kind: s.kind(),
-                    scope_kind,
-                    name_field: "name",
-                }
+            .map(|s| IsolatedScopeRule {
+                node_kind: s.kind(),
+                is_type_scope: s.get_def_kind().is_type_container(),
+                name_field: "name",
             })
             .collect()
     }
@@ -222,10 +210,10 @@ impl ResolutionRules {
 
 // ── Builder helpers ─────────────────────────────────────────────
 
-pub fn isolated_scope(node_kind: &'static str, scope_kind: ScopeKind) -> IsolatedScopeRule {
+pub fn isolated_scope(node_kind: &'static str, is_type_scope: bool) -> IsolatedScopeRule {
     IsolatedScopeRule {
         node_kind,
-        scope_kind,
+        is_type_scope,
         name_field: "name",
     }
 }

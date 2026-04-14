@@ -12,7 +12,7 @@ use treesitter_visit::{Node, SupportLang};
 
 use parser_core::dsl::types::Rule as DslRule;
 
-use super::rules::{BindingKind, ChainMode, ResolutionRules, ScopeKind};
+use super::rules::{BindingKind, ChainMode, ResolutionRules};
 use super::ssa::{BlockId, SsaResolver, Value};
 
 /// Minimum remaining stack space (bytes) before the walker stops recursing.
@@ -57,8 +57,8 @@ where
 
         let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result);
         walker.walk_node(&root);
-        walker.finalize();
         reads.extend(walker.reads);
+        ssa.seal_remaining();
     }
 
     WalkResult { ssa, reads }
@@ -80,7 +80,7 @@ impl AsAst for treesitter_visit::Root<StrDoc<SupportLang>> {
 /// An entry on the scope stack, tracking the block, kind, and name.
 struct ScopeEntry {
     block: BlockId,
-    kind: ScopeKind,
+    is_type_scope: bool,
     name: Option<String>,
 }
 
@@ -140,7 +140,7 @@ impl<'a> FileWalker<'a> {
             current_block: module_block,
             scope_stack: vec![ScopeEntry {
                 block: module_block,
-                kind: ScopeKind::Module,
+                is_type_scope: false,
                 name: None,
             }],
             ref_by_range_start,
@@ -158,7 +158,7 @@ impl<'a> FileWalker<'a> {
 
         // Scope-creating nodes
         if let Some(scope_rule) = self.rules.scopes().iter().find(|s| s.node_kind == kind_ref) {
-            self.enter_scope(node, scope_rule.scope_kind);
+            self.enter_scope(node, scope_rule.is_type_scope);
             self.walk_children(node);
             self.exit_scope();
             return;
@@ -206,16 +206,14 @@ impl<'a> FileWalker<'a> {
         }
     }
 
-    fn enter_scope(&mut self, node: &Node<StrDoc<SupportLang>>, scope_kind: ScopeKind) {
+    fn enter_scope(&mut self, node: &Node<StrDoc<SupportLang>>, is_type_scope: bool) {
         let new_block = self.ssa.add_block();
         self.ssa.add_predecessor(new_block, self.current_block);
         self.ssa.seal_block(new_block);
 
         let scope_name = node.field("name").map(|n| n.text().to_string());
 
-        if scope_kind == ScopeKind::Class
-            && let Some(ref name) = scope_name
-        {
+        if is_type_scope && let Some(ref name) = scope_name {
             let class_fqn = self.build_fqn(name);
             for &self_name in self.rules.self_names {
                 self.ssa
@@ -231,7 +229,7 @@ impl<'a> FileWalker<'a> {
 
         self.scope_stack.push(ScopeEntry {
             block: new_block,
-            kind: scope_kind,
+            is_type_scope,
             name: scope_name,
         });
         self.current_block = new_block;
@@ -420,7 +418,7 @@ impl<'a> FileWalker<'a> {
         self.scope_stack
             .iter()
             .rev()
-            .find(|e| e.kind == ScopeKind::Class)
+            .find(|e| e.is_type_scope)
             .map(|e| e.block)
     }
 
@@ -533,9 +531,5 @@ impl<'a> FileWalker<'a> {
             // return_type lookup via ctx.results.
             _ => value,
         }
-    }
-
-    fn finalize(&mut self) {
-        // All blocks should already be sealed
     }
 }
