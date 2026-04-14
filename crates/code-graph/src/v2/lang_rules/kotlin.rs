@@ -37,16 +37,16 @@ impl HasRules for KotlinRules {
 
             bindings: vec![
                 binding("property_declaration", BindingKind::Assignment)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .value_from("value"),
                 binding("variable_declaration", BindingKind::Assignment)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .no_value(),
                 binding("value_parameter", BindingKind::Parameter)
-                    .name_from("simple_identifier")
+                    .name_from(&["simple_identifier"])
                     .no_value(),
                 binding("assignment", BindingKind::Assignment)
-                    .name_from("directly_assignable_expression")
+                    .name_from(&["directly_assignable_expression"])
                     .value_from("expression"),
             ],
 

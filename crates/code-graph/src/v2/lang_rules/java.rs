@@ -49,21 +49,21 @@ impl HasRules for JavaRules {
 
             bindings: vec![
                 binding("local_variable_declaration", BindingKind::Assignment)
-                    .name_from("declarator"),
+                    .name_from(&["declarator", "name"]),
                 binding("field_declaration", BindingKind::Assignment)
-                    .name_from("declarator")
+                    .name_from(&["declarator", "name"])
                     .instance_attrs(&["this."]),
                 binding("formal_parameter", BindingKind::Parameter)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .no_value(),
                 binding("catch_formal_parameter", BindingKind::Parameter)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .no_value(),
                 binding("resource", BindingKind::Assignment)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .value_from("value"),
                 binding("assignment_expression", BindingKind::Assignment)
-                    .name_from("left")
+                    .name_from(&["left"])
                     .value_from("right"),
             ],
 

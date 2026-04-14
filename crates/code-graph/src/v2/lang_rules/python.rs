@@ -44,23 +44,23 @@ impl HasRules for PythonRules {
 
             bindings: vec![
                 binding("assignment", BindingKind::Assignment)
-                    .name_from("left")
+                    .name_from(&["left"])
                     .value_from("right")
                     .instance_attrs(&["self."]),
                 binding("augmented_assignment", BindingKind::Assignment)
-                    .name_from("left")
+                    .name_from(&["left"])
                     .no_value(),
                 binding("named_expression", BindingKind::Assignment)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .value_from("value"),
                 binding("delete_statement", BindingKind::Deletion)
-                    .name_from("argument")
+                    .name_from(&["argument"])
                     .no_value(),
                 binding("for_in_clause", BindingKind::ForTarget)
-                    .name_from("left")
+                    .name_from(&["left"])
                     .no_value(),
                 binding("with_item", BindingKind::WithAlias)
-                    .name_from("value")
+                    .name_from(&["value"])
                     .no_value(),
             ],
 

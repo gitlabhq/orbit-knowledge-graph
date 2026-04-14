@@ -375,16 +375,8 @@ impl<'a> FileWalker<'a> {
         node: &Node<StrDoc<SupportLang>>,
         binding_rule: &super::rules::BindingRule,
     ) {
-        let name = match node.field(binding_rule.name_field) {
-            Some(name_node) => {
-                // For compound nodes (e.g. Java's variable_declarator), drill
-                // into the `name` sub-field to get the actual identifier.
-                name_node
-                    .field("name")
-                    .unwrap_or(name_node)
-                    .text()
-                    .to_string()
-            }
+        let name = match Self::walk_field_chain(node, binding_rule.name_fields) {
+            Some(n) => n.text().to_string(),
             None => return,
         };
 
@@ -408,6 +400,19 @@ impl<'a> FileWalker<'a> {
             self.current_block
         };
         self.ssa.write_variable(&name, target_block, value);
+    }
+
+    /// Walk a chain of field names to reach a nested node.
+    /// e.g. `&["declarator", "name"]` → `node.field("declarator")?.field("name")?`
+    fn walk_field_chain<'b>(
+        node: &Node<'b, StrDoc<SupportLang>>,
+        fields: &[&str],
+    ) -> Option<Node<'b, StrDoc<SupportLang>>> {
+        let mut current = node.clone();
+        for &field in fields {
+            current = current.field(field)?;
+        }
+        Some(current)
     }
 
     /// Find the enclosing class scope's block.

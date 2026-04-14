@@ -8,8 +8,6 @@
 //! The `FileWalker` uses the walking rules to drive the SSA engine.
 //! The `RulesResolver` uses the resolution rules to chase imports.
 
-use rustc_hash::FxHashSet;
-
 // ── Scope rules ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,7 +56,10 @@ pub enum BindingKind {
 pub struct BindingRule {
     pub node_kind: &'static str,
     pub binding_kind: BindingKind,
-    pub name_field: &'static str,
+    /// Field chain to extract the binding name. Single-element for simple
+    /// fields (e.g. `&["left"]`), multi-element for compound nodes
+    /// (e.g. `&["declarator", "name"]` for Java's `variable_declarator`).
+    pub name_fields: &'static [&'static str],
     pub value_field: Option<&'static str>,
     /// When the binding name starts with one of these prefixes, write
     /// to the enclosing class block instead of the current block.
@@ -160,31 +161,6 @@ pub struct ResolutionRules {
     pub language_spec: Option<parser_core::dsl::types::LanguageSpec>,
 }
 
-impl ResolutionRules {
-    pub fn interesting_kinds(&self) -> FxHashSet<&'static str> {
-        let mut kinds = FxHashSet::default();
-        for s in &self.scopes {
-            kinds.insert(s.node_kind);
-        }
-        for b in &self.branches {
-            kinds.insert(b.node_kind);
-            for &k in b.branch_kinds {
-                kinds.insert(k);
-            }
-        }
-        for l in &self.loops {
-            kinds.insert(l.node_kind);
-        }
-        for b in &self.bindings {
-            kinds.insert(b.node_kind);
-        }
-        for r in &self.references {
-            kinds.insert(r.node_kind);
-        }
-        kinds
-    }
-}
-
 // ── Builder helpers ─────────────────────────────────────────────
 
 pub fn isolated_scope(node_kind: &'static str, scope_kind: ScopeKind) -> IsolatedScopeRule {
@@ -252,15 +228,17 @@ pub fn binding(node_kind: &'static str, kind: BindingKind) -> BindingRule {
     BindingRule {
         node_kind,
         binding_kind: kind,
-        name_field: "left",
+        name_fields: &["left"],
         value_field: Some("right"),
         instance_attr_prefixes: &[],
     }
 }
 
 impl BindingRule {
-    pub fn name_from(mut self, field: &'static str) -> Self {
-        self.name_field = field;
+    /// Set the field chain to extract the binding name.
+    /// Single field: `&["left"]`. Compound: `&["declarator", "name"]`.
+    pub fn name_from(mut self, fields: &'static [&'static str]) -> Self {
+        self.name_fields = fields;
         self
     }
 
