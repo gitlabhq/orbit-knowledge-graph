@@ -2185,6 +2185,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "code-graph-config",
+ "internment",
  "intervaltree",
  "serde",
  "smallvec",

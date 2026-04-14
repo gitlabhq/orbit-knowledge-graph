@@ -13,6 +13,11 @@ pub use node::{
 pub use range::{Position, Range};
 pub use scope::{HasRange, ScopeIndex};
 
+/// Interned string. Pointer-sized (8 bytes), O(1) clone/hash/eq.
+/// Use for strings that appear repeatedly: definition names, FQN
+/// segments, import paths, type names.
+pub type IStr = internment::Intern<str>;
+
 /// Parses a source file into canonical types, retaining the raw AST
 /// for downstream SSA-based resolution.
 ///
