@@ -14,11 +14,13 @@ pub use node::{
 pub use range::{Position, Range};
 pub use scope::{HasRange, ScopeIndex};
 
-/// Parses a source file into canonical types, optionally retaining the
-/// raw AST for downstream resolution.
+/// Parses a source file into canonical types, retaining the raw AST
+/// for downstream SSA-based resolution.
 ///
 /// `Ast` determines what the parser preserves beyond the `CanonicalResult`.
-/// Languages that don't need AST-level resolution set `Ast = ()`.
+/// For tree-sitter languages this is `Root<StrDoc<SupportLang>>`.
+/// Custom pipelines (e.g. Prism) provide their own AST type that
+/// implements `AsAst`.
 pub trait CanonicalParser: Send + Sync {
     type Ast: Send;
 

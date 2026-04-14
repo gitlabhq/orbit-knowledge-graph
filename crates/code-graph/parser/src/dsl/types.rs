@@ -122,10 +122,36 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
     }
 }
 
+/// How to locate the receiver node for expression chain building.
+pub enum ReceiverExtract {
+    /// Single field name (e.g. `"object"` for Java's method_invocation).
+    Field(&'static str),
+    /// Chain of field names (e.g. `["function", "object"]` for Python's call.function.object).
+    FieldChain(&'static [&'static str]),
+}
+
 pub struct ReferenceRule {
     kind: &'static str,
     condition: Option<Pred>,
     name: Extract,
+    /// How to extract the receiver expression node for chain building.
+    pub(crate) receiver_extract: Option<ReceiverExtract>,
+}
+
+/// Per-language configuration for expression chain extraction.
+/// Tells the engine how to recognize identifiers, this/super,
+/// field access, and constructors in the tree-sitter AST.
+pub struct ChainConfig {
+    /// Node kinds that are bare identifiers (e.g. `["identifier"]` for Java).
+    pub ident_kinds: &'static [&'static str],
+    /// Node kinds that represent `this` / `self`.
+    pub this_kinds: &'static [&'static str],
+    /// Node kinds that represent `super`.
+    pub super_kinds: &'static [&'static str],
+    /// Field access node kinds + (object_field, member_field).
+    pub field_access: &'static [(&'static str, &'static str, &'static str)],
+    /// Constructor node kinds + type_field.
+    pub constructor: &'static [(&'static str, &'static str)],
 }
 
 impl Rule for ReferenceRule {
@@ -153,6 +179,19 @@ impl ReferenceRule {
         self.name = extract;
         self
     }
+
+    /// Declare which tree-sitter field holds the receiver expression.
+    pub fn receiver(mut self, field: &'static str) -> Self {
+        self.receiver_extract = Some(ReceiverExtract::Field(field));
+        self
+    }
+
+    /// Declare a field chain to reach the receiver expression.
+    /// e.g. `["function", "object"]` for Python's `call.function.object`.
+    pub fn receiver_chain(mut self, fields: &'static [&'static str]) -> Self {
+        self.receiver_extract = Some(ReceiverExtract::FieldChain(fields));
+        self
+    }
 }
 
 pub fn reference(kind: &'static str) -> ReferenceRule {
@@ -160,6 +199,7 @@ pub fn reference(kind: &'static str) -> ReferenceRule {
         kind,
         condition: None,
         name: Extract::Default,
+        receiver_extract: None,
     }
 }
 
@@ -184,6 +224,12 @@ pub struct ImportRule {
     /// Node kind for aliased children (e.g. "aliased_import").
     /// When a child matches this kind, name comes from `name` field, alias from `alias` field.
     pub(crate) alias_child_kind: Option<&'static str>,
+    /// Node kind for wildcard children (e.g. "wildcard_import", "asterisk").
+    /// When a child matches this kind, a wildcard import is emitted with
+    /// `wildcard: true` and name from `wildcard_symbol`.
+    pub(crate) wildcard_child_kind: Option<&'static str>,
+    /// Symbol name used for wildcard imports (e.g. "*").
+    pub(crate) wildcard_symbol: &'static str,
     /// If set, split a scoped name at this separator into (path, name).
     /// e.g. `"."` splits `java.util.List` → path=`java.util`, name=`List`.
     pub(crate) split_last: Option<&'static str>,
@@ -253,6 +299,18 @@ impl ImportRule {
         self
     }
 
+    /// Set the node kind for wildcard children (e.g. "wildcard_import", "asterisk").
+    pub fn wildcard_child(mut self, kind: &'static str) -> Self {
+        self.wildcard_child_kind = Some(kind);
+        self
+    }
+
+    /// Set the symbol name used for wildcard imports (default: "*").
+    pub fn wildcard_sym(mut self, sym: &'static str) -> Self {
+        self.wildcard_symbol = sym;
+        self
+    }
+
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
         self.classify.map_or(self.label, |f| f(node))
     }
@@ -290,6 +348,8 @@ pub fn import(kind: &'static str) -> ImportRule {
         classify: None,
         multi_child_kinds: None,
         alias_child_kind: None,
+        wildcard_child_kind: None,
+        wildcard_symbol: "*",
         split_last: None,
     }
 }
@@ -329,6 +389,10 @@ pub trait DslLanguage: Send + Sync + Default {
         false
     }
 
+    fn chain_config() -> Option<ChainConfig> {
+        None
+    }
+
     fn package_node() -> Option<(&'static str, Extract)> {
         None
     }
@@ -341,6 +405,9 @@ pub trait DslLanguage: Send + Sync + Default {
                 .auto_refs(Self::auto_refs())
                 .auto_imports(Self::auto_imports())
                 .custom_import(Self::custom_import);
+        if let Some(cc) = Self::chain_config() {
+            spec = spec.chain(cc);
+        }
         if let Some((kind, extract)) = Self::package_node() {
             spec = spec.package(kind, extract);
         }
@@ -361,16 +428,16 @@ impl<L: DslLanguage> Default for DslParser<L> {
 }
 
 impl<L: DslLanguage> code_graph_types::CanonicalParser for DslParser<L> {
-    type Ast = ();
+    type Ast = treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>;
 
     fn parse_file(
         &self,
         source: &[u8],
         file_path: &str,
-    ) -> anyhow::Result<(code_graph_types::CanonicalResult, ())> {
+    ) -> anyhow::Result<(code_graph_types::CanonicalResult, Self::Ast)> {
         let spec = L::spec();
-        let result = spec.parse_canonical(source, file_path, L::language())?;
-        Ok((result, ()))
+        let (result, ast) = spec.parse_canonical(source, file_path, L::language())?;
+        Ok((result, ast))
     }
 }
 
@@ -446,6 +513,7 @@ pub struct LanguageSpec {
     pub refs: Vec<ReferenceRule>,
     pub imports: Vec<ImportRule>,
     pub bindings: Vec<ParseBindingRule>,
+    pub chain_config: Option<ChainConfig>,
     pub(crate) scope_kinds: FxHashSet<&'static str>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,
@@ -465,6 +533,7 @@ impl LanguageSpec {
             refs,
             imports,
             bindings: Vec::new(),
+            chain_config: None,
             scope_kinds,
             package_node: None,
             custom_import_fn: None,
@@ -473,6 +542,11 @@ impl LanguageSpec {
 
     pub fn bindings(mut self, rules: Vec<ParseBindingRule>) -> Self {
         self.bindings = rules;
+        self
+    }
+
+    pub fn chain(mut self, config: ChainConfig) -> Self {
+        self.chain_config = Some(config);
         self
     }
 

@@ -1,10 +1,12 @@
 use crate::linker::v2::reaching::HasRules;
 use crate::linker::v2::rules::*;
+use parser_core::dsl::types::DslLanguage;
+use parser_core::v2::langs::kotlin::KotlinDsl;
 
 pub struct KotlinRules;
 
 impl HasRules for KotlinRules {
-    fn default_rules() -> ResolutionRules {
+    fn rules() -> ResolutionRules {
         ResolutionRules {
             name: "kotlin",
 
@@ -22,7 +24,7 @@ impl HasRules for KotlinRules {
                 branch("if_expression")
                     .branches(&["control_structure_body"])
                     .condition("condition")
-                    .catch_all("control_structure_body"), // kotlin if is an expression with mandatory else
+                    .catch_all("control_structure_body"),
                 branch("when_expression").branches(&["when_entry"]),
                 branch("try_expression").branches(&["statements", "catch_block", "finally_block"]),
             ],
@@ -35,16 +37,16 @@ impl HasRules for KotlinRules {
 
             bindings: vec![
                 binding("property_declaration", BindingKind::Assignment)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .value_from("value"),
                 binding("variable_declaration", BindingKind::Assignment)
-                    .name_from("name")
+                    .name_from(&["name"])
                     .no_value(),
                 binding("value_parameter", BindingKind::Parameter)
-                    .name_from("simple_identifier")
+                    .name_from(&["simple_identifier"])
                     .no_value(),
                 binding("assignment", BindingKind::Assignment)
-                    .name_from("directly_assignable_expression")
+                    .name_from(&["directly_assignable_expression"])
                     .value_from("expression"),
             ],
 
@@ -62,9 +64,19 @@ impl HasRules for KotlinRules {
                 ImportStrategy::GlobalName { max_candidates: 3 },
             ],
 
-            chain_mode: ChainMode::TypeFlow,
+            chain_mode: ChainMode::TypeFlow {
+                type_fields: &["user_type", "type"],
+                skip_types: &[
+                    "Int", "Long", "Short", "Byte", "Float", "Double", "Boolean", "Char", "Unit",
+                    "Nothing", "String",
+                ],
+            },
             receiver: ReceiverMode::Keyword,
             fqn_separator: ".",
+            self_names: &["this", "self"],
+            super_name: Some("super"),
+            implicit_member_lookup: true,
+            language_spec: Some(KotlinDsl::spec()),
         }
     }
 }

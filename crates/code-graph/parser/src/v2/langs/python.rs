@@ -94,11 +94,19 @@ impl DslLanguage for PythonDsl {
                 .metadata(metadata().super_types(ExtractList::Fn(python_super_types))),
             scope_fn("function_definition", classify_python_function)
                 .def_kind(DefKind::Function)
-                .metadata(metadata().decorators(ExtractList::Fn(python_decorators))),
+                .metadata(
+                    metadata()
+                        .return_type(field("return_type"))
+                        .decorators(ExtractList::Fn(python_decorators)),
+                ),
             scope_fn("function_definition", |_| "Method")
                 .def_kind(DefKind::Method)
                 .when(grandparent_is("class_definition"))
-                .metadata(metadata().decorators(ExtractList::Fn(python_decorators))),
+                .metadata(
+                    metadata()
+                        .return_type(field("return_type"))
+                        .decorators(ExtractList::Fn(python_decorators)),
+                ),
             // `square = lambda x: x * x` — assignment where right is a lambda
             scope("assignment", "Lambda")
                 .def_kind(DefKind::Lambda)
@@ -110,13 +118,24 @@ impl DslLanguage for PythonDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // `obj.method()` — name is the attribute field
+            // `obj.method()` — name is the attribute, receiver is obj
             reference("call")
                 .when(field_kind("function", &["attribute"]))
-                .name_from(Extract::FieldChain(&["function", "attribute"])),
+                .name_from(Extract::FieldChain(&["function", "attribute"]))
+                .receiver_chain(&["function", "object"]),
             // `foo()` — bare call
             reference("call").name_from(field("function")),
         ]
+    }
+
+    fn chain_config() -> Option<ChainConfig> {
+        Some(ChainConfig {
+            ident_kinds: &["identifier"],
+            this_kinds: &[],
+            super_kinds: &[],
+            field_access: &[("attribute", "object", "attribute")],
+            constructor: &[],
+        })
     }
 
     fn imports() -> Vec<ImportRule> {
@@ -145,20 +164,23 @@ impl DslLanguage for PythonDsl {
                 .classify(python_import_classify)
                 .path_from(Extract::None)
                 .multi(&["dotted_name"])
-                .alias_child("aliased_import"),
+                .alias_child("aliased_import")
+                .wildcard_child("wildcard_import"),
             // `from pathlib import Path` / `from pathlib import Path, PurePath`
             import("import_from_statement")
                 .classify(python_from_classify)
                 .path_from(field("module_name"))
                 .multi(&["dotted_name", "identifier"])
-                .alias_child("aliased_import"),
+                .alias_child("aliased_import")
+                .wildcard_child("wildcard_import"),
             // `from __future__ import annotations`
             // The path is always "__future__" — use ChildOfKind to find the keyword token
             import("future_import_statement")
                 .label("FutureImport")
                 .path_from(Extract::ChildOfKind("__future__"))
                 .multi(&["dotted_name", "identifier"])
-                .alias_child("aliased_import"),
+                .alias_child("aliased_import")
+                .wildcard_child("wildcard_import"),
         ]
     }
 
@@ -238,6 +260,38 @@ mod tests {
                 .iter()
                 .any(|i| i.name.as_deref() == Some("Path"))
         );
+    }
+
+    #[test]
+    fn return_type_annotation() {
+        let result = parse("def greet(name: str) -> str:\n    return f'Hello, {name}'\n");
+        let greet = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "greet")
+            .unwrap();
+        let meta = greet.metadata.as_ref().expect("should have metadata");
+        assert_eq!(meta.return_type.as_deref(), Some("str"));
+    }
+
+    #[test]
+    fn return_type_none_when_absent() {
+        let result = parse("def foo():\n    pass\n");
+        let foo = result.definitions.iter().find(|d| d.name == "foo").unwrap();
+        assert!(foo.metadata.is_none() || foo.metadata.as_ref().unwrap().return_type.is_none());
+    }
+
+    #[test]
+    fn method_return_type() {
+        let result =
+            parse("class Service:\n    def get_name(self) -> str:\n        return self.name\n");
+        let get_name = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "get_name")
+            .unwrap();
+        let meta = get_name.metadata.as_ref().expect("should have metadata");
+        assert_eq!(meta.return_type.as_deref(), Some("str"));
     }
 
     #[test]

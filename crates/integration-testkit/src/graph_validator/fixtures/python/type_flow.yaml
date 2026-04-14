@@ -1,0 +1,205 @@
+name: "Python: expression chain resolution"
+fixtures:
+  - path: service.py
+    content: |
+      class Database:
+          def query(self):
+              pass
+
+          def close(self):
+              pass
+
+      class App:
+          def __init__(self):
+              self.db = Database()
+
+          def run(self):
+              self.db.query()
+
+  - path: chained.py
+    content: |
+      class Builder:
+          def step_one(self):
+              pass
+
+          def step_two(self):
+              pass
+
+      def get_builder():
+          return Builder()
+
+      def caller():
+          b = get_builder()
+          b.step_one()
+
+  - path: cross_file_chain.py
+    content: |
+      from service import Database
+
+      class Client:
+          def execute(self):
+              db = Database()
+              db.query()
+
+  - path: return_type_flow.py
+    content: |
+      class Connection:
+          def execute(self):
+              pass
+
+          def rollback(self):
+              pass
+
+      class Pool:
+          def get_connection(self) -> Connection:
+              return Connection()
+
+      def use_pool(pool: Pool):
+          conn = pool.get_connection()
+          conn.execute()
+
+  - path: return_type_chain.py
+    content: |
+      class Cursor:
+          def fetch_all(self):
+              pass
+
+      class Session:
+          def cursor(self) -> Cursor:
+              return Cursor()
+
+      class Engine:
+          def session(self) -> Session:
+              return Session()
+
+      def run_query(engine: Engine):
+          s = engine.session()
+          c = s.cursor()
+          c.fetch_all()
+
+  - path: return_type_no_annotation.py
+    content: |
+      class Logger:
+          def info(self):
+              pass
+
+          def debug(self):
+              pass
+
+      def make_logger():
+          return Logger()
+
+      def use_logger():
+          log = make_logger()
+          log.info()
+
+tests:
+  - name: "self.db.query() resolves through attribute chain"
+    description: |
+      Known gap: self.db is set in __init__ and should be visible in run
+      via instance_attr_prefixes writing to the class scope block.
+      The SSA compound key fallback ("self.db" read from run's block)
+      should find it via predecessor chain, but doesn't yet.
+    skip: true
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+          RETURN callee.name AS callee
+        assert:
+          - { contains_row: { callee: "query" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+            AND callee.name = 'close'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "b.step_one() resolves via value-flow alias"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'caller'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "get_builder" } }
+          - { contains_row: { callee: "step_one" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'caller' AND callee.name = 'step_two'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "cross-file: db.query() resolves to Database.query via import"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'execute'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "query" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'execute' AND callee.name = 'close'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "return type annotation: pool.get_connection().execute() resolves via -> Connection"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'use_pool'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "get_connection" } }
+          - { contains_row: { callee: "execute" } }
+      # no false positive to rollback()
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'use_pool' AND callee.name = 'rollback'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "chained return types: engine.session().cursor().fetch_all() via annotations"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run_query'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "session" } }
+          - { contains_row: { callee: "cursor" } }
+          - { contains_row: { callee: "fetch_all" } }
+      # no edges to wrong types
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run_query'
+            AND NOT callee.name IN ['session', 'cursor', 'fetch_all']
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "no annotation: make_logger() still resolves via value-flow"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'use_logger'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "make_logger" } }
+          - { contains_row: { callee: "info" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'use_logger' AND callee.name = 'debug'
+          RETURN callee.name
+        assert:
+          - { empty: true }
