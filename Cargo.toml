@@ -150,9 +150,6 @@ jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 tower-http = { version = "0.6.8", features = ["trace"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
 
-# Docker API
-bollard = "0.20"
-
 # Health check dependencies
 kube = { version = "3.0", features = ["client", "runtime", "ws"] }
 k8s-openapi = { version = "0.27", features = ["v1_31"] }
