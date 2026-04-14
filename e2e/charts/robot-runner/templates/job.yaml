@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: e2e-robot-runner
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: {{ .Values.ttlSecondsAfterFinished }}
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: robot
+        image: {{ .Values.image }}
+        command: ["sh", "-c"]
+        args:
+        - |
+          pip install --quiet --disable-pip-version-check --root-user-action=ignore \
+            robotframework=={{ .Values.robotframework.version }} \
+            robotframework-requests=={{ .Values.robotframework.requestsVersion }} &&
+          robot --outputdir /tmp/results --consolecolors off /tests/
+        env:
+        - name: NATS_URL
+          value: "http://nats-0.nats-headless.{{ .Values.namespaces.nats }}.svc.cluster.local:8222"
+        - name: CLICKHOUSE_URL
+          value: "http://clickhouse.{{ .Values.namespaces.clickhouse }}.svc.cluster.local:8123"
+        - name: GITLAB_URL
+          value: "http://gitlab-webservice-default.{{ .Values.namespaces.gitlab }}.svc.cluster.local:8181"
+        - name: GKG_URL
+          value: "http://gkg-webserver.{{ .Values.namespaces.gkg }}.svc.cluster.local:8080"
+        - name: GITLAB_PAT
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.credentialsSecret }}
+              key: gitlab-pat
+        volumeMounts:
+        - name: tests
+          mountPath: /tests
+          readOnly: true
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+      volumes:
+      - name: tests
+        configMap:
+          name: {{ .Values.configMap }}

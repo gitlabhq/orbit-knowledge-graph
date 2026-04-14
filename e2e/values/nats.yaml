@@ -1,0 +1,32 @@
+config:
+  cluster:
+    enabled: false
+  jetstream:
+    enabled: true
+    fileStore:
+      enabled: true
+      dir: /data
+      pvc:
+        enabled: true
+        size: 5Gi
+  merge:
+    max_payload: 67108864  # 64MB, matches staging
+
+container:
+  merge:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 2Gi
+
+service:
+  enabled: true
+  ports:
+    nats:
+      enabled: true
+
+podTemplate:
+  topologySpreadConstraints: {}
