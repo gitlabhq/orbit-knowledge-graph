@@ -77,10 +77,9 @@ pub use pipelines::{
 pub use passes::check::check_ast;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
-    clickhouse::emit_simple_query, clickhouse_ddl::emit_create_table, codegen,
-    ddl_generator::generate_graph_tables, ddl_generator::generate_graph_tables_with_prefix,
-    ddl_generator::generate_local_tables,
-    duckdb_ddl::emit_create_table as emit_duckdb_create_table,
+    clickhouse::emit_simple_query, codegen, ddl::clickhouse::emit_create_table,
+    ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::generate_graph_tables,
+    ddl::generate_graph_tables_with_prefix, ddl::generate_local_tables,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
 pub use passes::hydrate::{

@@ -4,6 +4,13 @@
 //! in each node/edge/auxiliary YAML is fully explicit: every column, codec,
 //! default, index, and projection is specified. The generator is a thin
 //! pass-through with no auto-derivation.
+//!
+//! Submodules provide backend-specific SQL emission:
+//! - [`clickhouse`] — ClickHouse `CREATE TABLE` with engine, codecs, indexes, projections
+//! - [`duckdb`] — DuckDB `CREATE TABLE` stripped of ClickHouse-specific features
+
+pub mod clickhouse;
+pub mod duckdb;
 
 use ontology::{AuxiliaryTable, Ontology, StorageColumn, StorageIndex, StorageProjection};
 
@@ -503,7 +510,7 @@ mod tests {
 
     #[test]
     fn generated_ddl_snapshot() {
-        use crate::passes::codegen::clickhouse_ddl::emit_create_table;
+        use super::clickhouse::emit_create_table;
 
         let tables = generate_graph_tables(&ontology());
         let full_ddl: String = tables
@@ -594,7 +601,7 @@ mod tests {
 
     #[test]
     fn local_ddl_snapshot() {
-        use crate::passes::codegen::duckdb_ddl::emit_create_table as emit_duckdb;
+        use super::duckdb::emit_create_table as emit_duckdb;
 
         let tables = generate_local_tables(&ontology());
         let full_ddl: String = tables
