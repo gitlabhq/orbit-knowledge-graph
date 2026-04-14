@@ -1,4 +1,0 @@
-# Ignore helm chart dependencies to prevent reload loops
-helm/gkg/charts/
-helm/gkg/Chart.lock
-**/tmpcharts*/
