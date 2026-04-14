@@ -11,6 +11,10 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 **Worktrees:** after creating a git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
 
+## E2E local development (native dev)
+
+For E2E local development setup and workflow, see `docs/dev/local-development.md`.
+
 ## How the system works
 
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). GKG only writes to its own ClickHouse tables.
@@ -61,6 +65,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/gkg-server-config/` |
 | Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |
 | Local development guide | `docs/dev/local-development.md` |
+| Native dev (`mise run dev`) | `scripts/gkg-native-dev.sh`, `docs/dev/local-development.md` § "Alternative: quick start with mise" |
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
