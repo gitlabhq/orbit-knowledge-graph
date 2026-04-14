@@ -90,35 +90,35 @@ impl DefinitionIndex {
     }
 }
 
-/// Index of class/interface members: class FQN → member definitions.
+/// Index of class/interface members: class FQN → member name → definitions.
 ///
 /// Built from the FQN hierarchy: if a definition's FQN is `Foo.bar`,
 /// then `bar` is a member of `Foo`. Also indexes super_types for
 /// inherited member lookup.
 pub struct MemberIndex {
-    /// class_fqn → [(member_name, DefRef)]
-    members: FxHashMap<String, Vec<(String, DefRef)>>,
+    /// class_fqn → member_name → [DefRef]
+    members: FxHashMap<String, FxHashMap<String, Vec<DefRef>>>,
     /// class_fqn → [super_type_name]
     supers: FxHashMap<String, Vec<String>>,
 }
 
 impl MemberIndex {
     fn build(results: &[CanonicalResult]) -> Self {
-        let mut members: FxHashMap<String, Vec<(String, DefRef)>> = FxHashMap::default();
+        let mut members: FxHashMap<String, FxHashMap<String, Vec<DefRef>>> = FxHashMap::default();
         let mut supers: FxHashMap<String, Vec<String>> = FxHashMap::default();
 
         for (file_idx, result) in results.iter().enumerate() {
             for (def_idx, def) in result.definitions.iter().enumerate() {
-                // Record parent→child membership via FQN
                 if let Some(parent_fqn) = def.fqn.parent() {
                     let parent_str = parent_fqn.to_string();
                     members
                         .entry(parent_str)
                         .or_default()
-                        .push((def.name.clone(), DefRef { file_idx, def_idx }));
+                        .entry(def.name.clone())
+                        .or_default()
+                        .push(DefRef { file_idx, def_idx });
                 }
 
-                // Record super_types for hierarchy walking
                 if let Some(meta) = &def.metadata
                     && !meta.super_types.is_empty()
                 {
@@ -130,17 +130,13 @@ impl MemberIndex {
         Self { members, supers }
     }
 
-    /// Look up direct members of a class/interface by name.
-    pub fn lookup_member(&self, class_fqn: &str, member_name: &str) -> Vec<DefRef> {
+    /// Look up direct members of a class/interface by name. O(1).
+    pub fn lookup_member(&self, class_fqn: &str, member_name: &str) -> &[DefRef] {
         self.members
             .get(class_fqn)
-            .map(|ms| {
-                ms.iter()
-                    .filter(|(name, _)| name == member_name)
-                    .map(|(_, r)| *r)
-                    .collect()
-            })
-            .unwrap_or_default()
+            .and_then(|ms| ms.get(member_name))
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Resolve a type name (possibly bare) to its full FQN(s).
@@ -162,14 +158,15 @@ impl MemberIndex {
     /// Uses BFS to find the closest ancestor's member first (matches MRO
     /// semantics of most languages).
     ///
-    /// Handles bare type names (e.g. `"PackagedDog"`) by resolving them to
-    /// full FQNs (e.g. `"com.example.PackagedDog"`) via the definition index.
+    /// Results are written into `out` to avoid allocation. Returns true if
+    /// any members were found.
     pub fn lookup_member_with_supers(
         &self,
         class_fqn: &str,
         member_name: &str,
         def_index: &DefinitionIndex,
-    ) -> Vec<DefRef> {
+        out: &mut Vec<DefRef>,
+    ) -> bool {
         // Resolve bare type name to full FQN(s)
         let resolved_fqns = self.resolve_type_fqns(class_fqn, def_index);
 
@@ -177,7 +174,8 @@ impl MemberIndex {
         for fqn in &resolved_fqns {
             let direct = self.lookup_member(fqn, member_name);
             if !direct.is_empty() {
-                return direct;
+                out.extend_from_slice(direct);
+                return true;
             }
         }
 
@@ -192,7 +190,6 @@ impl MemberIndex {
         while let Some(current) = queue.pop_front() {
             if let Some(super_names) = self.supers.get(&current) {
                 for super_name in super_names {
-                    // Resolve bare super name to full FQNs via the definition index
                     let super_fqns: Vec<String> = def_index
                         .lookup_name(super_name)
                         .iter()
@@ -203,7 +200,8 @@ impl MemberIndex {
                         if visited.insert(super_fqn.clone()) {
                             let found = self.lookup_member(super_fqn, member_name);
                             if !found.is_empty() {
-                                return found;
+                                out.extend_from_slice(found);
+                                return true;
                             }
                             queue.push_back(super_fqn.clone());
                         }
@@ -212,7 +210,7 @@ impl MemberIndex {
             }
         }
 
-        vec![]
+        false
     }
 }
 

@@ -4,8 +4,9 @@
 //! `ResolutionContext` (indexes), resolves each reference read to concrete
 //! definitions, and produces `ResolvedEdge`s for the graph.
 
-use code_graph_types::{EdgeKind, ExpressionStep, NodeKind, Relationship};
+use code_graph_types::{EdgeKind, ExpressionStep, IStr, NodeKind, Relationship};
 use rustc_hash::FxHashSet;
+use smallvec::{SmallVec, smallvec};
 
 use super::context::{DefRef, ResolutionContext};
 use super::edges::{EdgeSource, ResolvedEdge};
@@ -128,24 +129,23 @@ impl<'a> Resolver<'a> {
     // ── Shared primitive ────────────────────────────────────────
 
     /// Convert an SSA `Value` to type name(s) for member lookup.
-    /// This is the key shared operation used by chain resolution,
-    /// compound key fallback, and base resolution.
-    fn value_to_types(&mut self, value: &Value) -> Vec<String> {
+    /// Returns interned strings to avoid allocation during chain resolution.
+    fn value_to_types(&mut self, value: &Value) -> SmallVec<[IStr; 2]> {
         match value {
-            Value::Type(t) => vec![t.to_string()],
+            Value::Type(t) => smallvec![*t],
             Value::Def(f, d) => {
                 let def = &self.ctx.results[*f].definitions[*d];
                 if def.kind.is_type_container() {
-                    vec![def.fqn.to_string()]
+                    smallvec![def.fqn.as_istr()]
                 } else if let Some(meta) = &def.metadata
                     && let Some(rt) = &meta.return_type
                 {
-                    vec![rt.clone()]
+                    smallvec![IStr::from(rt.as_str())]
                 } else {
-                    vec![]
+                    SmallVec::new()
                 }
             }
-            _ => vec![],
+            _ => SmallVec::new(),
         }
     }
 
@@ -195,14 +195,12 @@ impl<'a> Resolver<'a> {
                     result.extend(imports::resolve_import(self.ctx, import, self.sep, true));
                 }
                 Value::Type(type_name) => {
-                    let members = self.ctx.members.lookup_member_with_supers(
+                    if !self.ctx.members.lookup_member_with_supers(
                         type_name,
                         &read.name,
                         &self.ctx.definitions,
-                    );
-                    if !members.is_empty() {
-                        result.extend(members);
-                    } else {
+                        &mut result,
+                    ) {
                         let fqn_matches = self.lookup_fqn_joined(type_name, &read.name);
                         result.extend_from_slice(fqn_matches);
                     }
@@ -227,11 +225,12 @@ impl<'a> Resolver<'a> {
             && self.rules.implicit_member_lookup
             && let Some(type_fqn) = &enclosing
         {
-            result.extend(self.ctx.members.lookup_member_with_supers(
+            self.ctx.members.lookup_member_with_supers(
                 type_fqn,
                 &read.name,
                 &self.ctx.definitions,
-            ));
+                &mut result,
+            );
         }
 
         dedup(&mut result);
@@ -306,7 +305,7 @@ impl<'a> Resolver<'a> {
         step: &ExpressionStep,
         block: super::ssa::BlockId,
         enclosing: Option<&str>,
-    ) -> Vec<String> {
+    ) -> SmallVec<[IStr; 2]> {
         match step {
             ExpressionStep::Ident(name) => {
                 let reaching = self.ssa.read_variable_stateless(name, block);
@@ -317,7 +316,7 @@ impl<'a> Resolver<'a> {
                     .collect()
             }
             ExpressionStep::This => enclosing
-                .map(|fqn| vec![fqn.to_string()])
+                .map(|fqn| smallvec![IStr::from(fqn)])
                 .unwrap_or_default(),
             ExpressionStep::Super => self
                 .rules
@@ -328,14 +327,14 @@ impl<'a> Resolver<'a> {
                         .values
                         .iter()
                         .filter_map(|v| match v {
-                            Value::Type(t) => Some(t.to_string()),
+                            Value::Type(t) => Some(*t),
                             _ => None,
                         })
                         .collect()
                 })
                 .unwrap_or_default(),
-            ExpressionStep::New(type_name) => vec![type_name.clone()],
-            _ => vec![],
+            ExpressionStep::New(type_name) => smallvec![IStr::from(type_name.as_ref())],
+            _ => SmallVec::new(),
         }
     }
 
@@ -343,42 +342,43 @@ impl<'a> Resolver<'a> {
     /// Returns (next type names for further steps, found member DefRefs).
     fn walk_step(
         &mut self,
-        current_types: &[String],
+        current_types: &[IStr],
         step: &ExpressionStep,
         member_name: &str,
-    ) -> (Vec<String>, Vec<DefRef>) {
-        let mut next_types = Vec::new();
+    ) -> (SmallVec<[IStr; 2]>, Vec<DefRef>) {
+        let mut next_types = SmallVec::new();
         let mut found_members = Vec::new();
 
         for type_name in current_types {
-            let members = self.ctx.members.lookup_member_with_supers(
+            let before = found_members.len();
+            self.ctx.members.lookup_member_with_supers(
                 type_name,
                 member_name,
                 &self.ctx.definitions,
+                &mut found_members,
             );
-            for def_ref in &members {
+            for def_ref in &found_members[before..] {
                 let def = &self.ctx.results[def_ref.file_idx].definitions[def_ref.def_idx];
                 if matches!(step, ExpressionStep::Call(_)) {
                     if let Some(meta) = &def.metadata
                         && let Some(rt) = &meta.return_type
                     {
-                        next_types.push(rt.clone());
+                        next_types.push(IStr::from(rt.as_str()));
                     }
                     if matches!(
                         def.kind,
                         code_graph_types::DefKind::Class | code_graph_types::DefKind::Constructor
                     ) {
-                        next_types.push(def.fqn.to_string());
+                        next_types.push(def.fqn.as_istr());
                     }
                 }
                 if matches!(step, ExpressionStep::Field(_))
                     && let Some(meta) = &def.metadata
                     && let Some(ta) = &meta.type_annotation
                 {
-                    next_types.push(ta.clone());
+                    next_types.push(IStr::from(ta.as_str()));
                 }
             }
-            found_members.extend(members);
         }
 
         (next_types, found_members)
@@ -409,11 +409,15 @@ impl<'a> Resolver<'a> {
         compound_key: &mut String,
         member_name: &str,
         block: super::ssa::BlockId,
-    ) -> Vec<String> {
+    ) -> SmallVec<[IStr; 2]> {
         if compound_key.is_empty() {
-            return vec![];
+            return SmallVec::new();
         }
-        *compound_key = format!("{}{}{}", compound_key, self.sep, member_name);
+        self.buf.clear();
+        self.buf.push_str(compound_key);
+        self.buf.push_str(self.sep);
+        self.buf.push_str(member_name);
+        std::mem::swap(compound_key, &mut self.buf);
         let reaching = self.ssa.read_variable_stateless(compound_key, block);
         reaching
             .values
