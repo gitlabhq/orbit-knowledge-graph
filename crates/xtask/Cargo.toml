@@ -24,7 +24,6 @@ const_format = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 tempfile = { workspace = true }
-xshell = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
