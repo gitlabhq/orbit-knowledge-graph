@@ -5,6 +5,7 @@
 //! definitions, and produces `ResolvedEdge`s for the graph.
 
 use code_graph_types::{EdgeKind, ExpressionStep, IStr, NodeKind, Relationship};
+use indicatif::{ProgressBar, ProgressStyle};
 use rustc_hash::FxHashSet;
 use smallvec::{SmallVec, smallvec};
 
@@ -29,6 +30,14 @@ pub fn build_edges(
     ctx: &ResolutionContext,
     walks: &mut [FileWalkResult],
 ) -> Vec<ResolvedEdge> {
+    let total_reads: u64 = walks.iter().map(|w| w.reads.len() as u64).sum();
+    let pb = ProgressBar::new(total_reads);
+    pb.set_style(
+        ProgressStyle::with_template("Resolving [{bar:40}] {pos}/{len} ({per_sec}, {eta})")
+            .unwrap()
+            .progress_chars("█▓░"),
+    );
+
     let mut edges = Vec::new();
 
     for walk in walks.iter_mut() {
@@ -39,11 +48,24 @@ pub fn build_edges(
             let result = &ctx.results[read.file_idx];
             let reference = &result.references[read.ref_idx];
 
+            let t = std::time::Instant::now();
             let resolved_defs = if let Some(ref chain) = reference.expression {
                 resolver.resolve_chain(read, chain)
             } else {
                 resolver.resolve_bare(read)
             };
+            let elapsed = t.elapsed();
+            if elapsed.as_millis() >= 100 {
+                pb.suspend(|| {
+                    eprintln!(
+                        "\x1b[31m[SLOW] {:.2?} resolving '{}' in {} (chain: {})\x1b[0m",
+                        elapsed,
+                        reference.name,
+                        result.file_path,
+                        reference.expression.is_some(),
+                    );
+                });
+            }
 
             let source_enclosing = ctx.scopes.enclosing_scope(
                 &result.file_path,
@@ -82,9 +104,11 @@ pub fn build_edges(
                     reference_range: reference.range,
                 });
             }
+            pb.inc(1);
         }
     }
 
+    pb.finish_and_clear();
     edges
 }
 

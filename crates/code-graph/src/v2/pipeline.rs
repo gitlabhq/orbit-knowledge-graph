@@ -73,6 +73,7 @@ where
         let parser = P::default();
         let rules = R::rules();
         let file_count = files.len();
+        let t0 = std::time::Instant::now();
 
         // ── Parallel phase: parse + walk each file, drop AST ────
         let pb = progress_bar(file_count as u64, "Parse + walk");
@@ -95,7 +96,10 @@ where
                 Ok((result, walk))
             })
             .collect();
-        pb.finish_with_message(format!("Parsed {file_count} files"));
+        pb.finish_with_message(format!(
+            "Parse + walk: {file_count} files in {:.2?}",
+            t0.elapsed()
+        ));
 
         // ── Collect results ─────────────────────────────────────
         let mut results = Vec::with_capacity(file_outputs.len());
@@ -116,18 +120,26 @@ where
             return Err(errors);
         }
 
-        // ── Sequential phase: indexes + resolution + graph ──────
-        let pb_resolve = spinner("Building indexes + resolving...");
+        // ── Sequential phase ────────────────────────────────────
+        let total_defs: usize = results.iter().map(|r| r.definitions.len()).sum();
+        let total_refs: usize = results.iter().map(|r| r.references.len()).sum();
+        let total_imports: usize = results.iter().map(|r| r.imports.len()).sum();
+        eprintln!(
+            "[v2] {total_defs} defs, {total_refs} refs, {total_imports} imports, {} errors",
+            errors.len()
+        );
+
+        let t2 = std::time::Instant::now();
         let ctx = ResolutionContext::build(results, root_path.to_string());
+        eprintln!("[v2] indexes: {:.2?}", t2.elapsed());
+
+        let t3 = std::time::Instant::now();
         let resolved_edges = build_edges(&rules, &ctx, &mut walks);
-        pb_resolve.finish_with_message(format!(
-            "Resolved {} edges from {} definitions",
+        eprintln!(
+            "[v2] resolve: {} edges in {:.2?}",
             resolved_edges.len(),
-            ctx.results
-                .iter()
-                .map(|r| r.definitions.len())
-                .sum::<usize>()
-        ));
+            t3.elapsed()
+        );
 
         let mut builder = GraphBuilder::new(root_path.to_string());
         for result in &ctx.results {
@@ -299,17 +311,27 @@ impl Pipeline {
 
         for (language, files) in files_by_language {
             let file_count = files.len();
+            eprintln!("[v2] processing {language}: {file_count} files");
+            let t_lang = std::time::Instant::now();
 
             match dispatch_language(language, files, &root_str) {
                 Some(Ok(graph)) => {
+                    eprintln!(
+                        "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
+                        t_lang.elapsed(),
+                        graph.node_count(),
+                        graph.edge_count()
+                    );
                     files_parsed += file_count;
                     all_graphs.push(graph);
                 }
                 Some(Err(errors)) => {
+                    eprintln!("[v2] {language}: failed with {} errors", errors.len());
                     files_skipped += file_count;
                     all_errors.extend(errors);
                 }
                 None => {
+                    eprintln!("[v2] {language}: not supported, skipping {file_count} files");
                     files_skipped += file_count;
                 }
             }

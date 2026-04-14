@@ -286,9 +286,19 @@ impl AsRecordBatch<RowContext<'_>> for ImportRow<'_> {
         b.col("commit_sha")?.push_str(ctx.commit_sha)?;
         b.col("file_path")?.push_str(self.file_path)?;
         b.col("import_type")?.push_str(self.import.import_type)?;
-        b.col("path")?.push_str(&self.import.path)?;
-        b.col("name")?.push_opt_str(self.import.name.as_deref())?;
-        b.col("alias")?.push_opt_str(self.import.alias.as_deref())?;
+        b.col("import_path")?.push_str(&self.import.path)?;
+        b.col("identifier_name")?
+            .push_opt_str(self.import.name.as_deref())?;
+        b.col("identifier_alias")?
+            .push_opt_str(self.import.alias.as_deref())?;
+        b.col("start_line")?
+            .push_int(self.import.range.start.line as i64)?;
+        b.col("end_line")?
+            .push_int(self.import.range.end.line as i64)?;
+        b.col("start_byte")?
+            .push_int(self.import.range.byte_offset.0 as i64)?;
+        b.col("end_byte")?
+            .push_int(self.import.range.byte_offset.1 as i64)?;
         Ok(())
     }
 }
@@ -305,12 +315,10 @@ pub struct EdgeRow {
 impl AsRecordBatch for EdgeRow {
     fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), arrow::error::ArrowError> {
         b.col("source_id")?.push_int(self.source_id)?;
+        b.col("source_kind")?.push_str(&self.source_node_kind)?;
+        b.col("relationship_kind")?.push_str(&self.edge_kind)?;
         b.col("target_id")?.push_int(self.target_id)?;
-        b.col("edge_kind")?.push_str(&self.edge_kind)?;
-        b.col("source_node_kind")?
-            .push_str(&self.source_node_kind)?;
-        b.col("target_node_kind")?
-            .push_str(&self.target_node_kind)?;
+        b.col("target_kind")?.push_str(&self.target_node_kind)?;
         Ok(())
     }
 }

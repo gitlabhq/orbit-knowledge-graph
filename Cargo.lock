@@ -2158,6 +2158,7 @@ dependencies = [
  "gitalisk-core",
  "gkg-utils",
  "ignore",
+ "indicatif",
  "internment",
  "log",
  "num_cpus",
