@@ -1,0 +1,98 @@
+name: "Python: expression chain resolution"
+fixtures:
+  - path: service.py
+    content: |
+      class Database:
+          def query(self):
+              pass
+
+          def close(self):
+              pass
+
+      class App:
+          def __init__(self):
+              self.db = Database()
+
+          def run(self):
+              self.db.query()
+
+  - path: chained.py
+    content: |
+      class Builder:
+          def step_one(self):
+              pass
+
+          def step_two(self):
+              pass
+
+      def get_builder():
+          return Builder()
+
+      def caller():
+          b = get_builder()
+          b.step_one()
+
+  - path: cross_file_chain.py
+    content: |
+      from service import Database
+
+      class Client:
+          def execute(self):
+              db = Database()
+              db.query()
+
+tests:
+  - name: "self.db.query() resolves through attribute chain"
+    description: |
+      Known gap: self.db is set in __init__ and should be visible in run
+      via instance_attr_prefixes writing to the class scope block.
+      The SSA compound key fallback ("self.db" read from run's block)
+      should find it via predecessor chain, but doesn't yet.
+    skip: true
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+          RETURN callee.name AS callee
+        assert:
+          - { contains_row: { callee: "query" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+            AND callee.name = 'close'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "b.step_one() resolves via value-flow alias"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'caller'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "get_builder" } }
+          - { contains_row: { callee: "step_one" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'caller' AND callee.name = 'step_two'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "cross-file: db.query() resolves to Database.query via import"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'execute'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "query" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'execute' AND callee.name = 'close'
+          RETURN callee.name
+        assert:
+          - { empty: true }

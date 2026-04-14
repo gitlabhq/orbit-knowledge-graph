@@ -1,0 +1,62 @@
+name: "Java: cross-file type-flow resolution"
+fixtures:
+  - path: com/example/UserService.java
+    content: |
+      package com.example;
+
+      public class UserService {
+          public void findUser() {}
+          public void deleteUser() {}
+      }
+
+  - path: com/example/ServiceFactory.java
+    content: |
+      package com.example;
+
+      public class ServiceFactory {
+          public UserService createService() { return null; }
+      }
+
+  - path: com/example/App.java
+    content: |
+      package com.example;
+
+      public class App {
+          public void run() {
+              ServiceFactory factory = new ServiceFactory();
+              UserService svc = factory.createService();
+              svc.findUser();
+          }
+      }
+
+tests:
+  - name: "cross-file: factory.createService().findUser() resolves through return type"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'com.example.App'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+          ORDER BY callee
+        assert:
+          - { contains_row: { callee: "ServiceFactory" } }
+          - { contains_row: { callee: "createService", callee_fqn: "com.example.ServiceFactory.createService" } }
+          - { contains_row: { callee: "findUser", callee_fqn: "com.example.UserService.findUser" } }
+      # no false positive to deleteUser
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'com.example.App'
+            AND callee.name = 'deleteUser'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "no duplicate edges"
+    queries:
+      - query: |
+          MATCH (src:Definition)-[e:DefinitionToDefinition]->(tgt:Definition)
+          WHERE src.fqn STARTS WITH 'com.example.App'
+          WITH src.name AS caller, tgt.name AS callee, count(*) AS cnt
+          WHERE cnt > 1
+          RETURN caller, callee, cnt
+        assert:
+          - { empty: true }

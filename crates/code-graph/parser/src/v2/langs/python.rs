@@ -110,13 +110,24 @@ impl DslLanguage for PythonDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // `obj.method()` — name is the attribute field
+            // `obj.method()` — name is the attribute, receiver is obj
             reference("call")
                 .when(field_kind("function", &["attribute"]))
-                .name_from(Extract::FieldChain(&["function", "attribute"])),
+                .name_from(Extract::FieldChain(&["function", "attribute"]))
+                .receiver_chain(&["function", "object"]),
             // `foo()` — bare call
             reference("call").name_from(field("function")),
         ]
+    }
+
+    fn chain_config() -> Option<ChainConfig> {
+        Some(ChainConfig {
+            ident_kinds: &["identifier"],
+            this_kinds: &[],
+            super_kinds: &[],
+            field_access: &[("attribute", "object", "attribute")],
+            constructor: &[],
+        })
     }
 
     fn imports() -> Vec<ImportRule> {

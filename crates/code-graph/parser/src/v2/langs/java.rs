@@ -86,7 +86,7 @@ impl DslLanguage for JavaDsl {
         vec![
             reference("method_invocation")
                 .name_from(field("name"))
-                .object("object"),
+                .receiver("object"),
             reference("object_creation_expression").name_from(field("type")),
         ]
     }

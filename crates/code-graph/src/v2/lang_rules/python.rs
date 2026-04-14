@@ -1,5 +1,7 @@
 use crate::linker::v2::reaching::HasRules;
 use crate::linker::v2::rules::*;
+use parser_core::dsl::types::DslLanguage;
+use parser_core::v2::langs::python::PythonDsl;
 
 pub struct PythonRules;
 
@@ -43,7 +45,8 @@ impl HasRules for PythonRules {
             bindings: vec![
                 binding("assignment", BindingKind::Assignment)
                     .name_from("left")
-                    .value_from("right"),
+                    .value_from("right")
+                    .instance_attrs(&["self."]),
                 binding("augmented_assignment", BindingKind::Assignment)
                     .name_from("left")
                     .no_value(),
@@ -78,6 +81,7 @@ impl HasRules for PythonRules {
                 staticmethod_decorators: &["staticmethod"],
             },
             fqn_separator: ".",
+            language_spec: Some(PythonDsl::spec()),
         }
     }
 }

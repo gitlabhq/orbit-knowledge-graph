@@ -291,7 +291,16 @@ fn resolve_expression_chain<A: AsAst>(
         return vec![];
     }
 
-    // Walk remaining steps, resolving each through the current type(s)
+    // Walk remaining steps, resolving each through the current type(s).
+    // Track the compound key (e.g. "self.db") for SSA fallback when
+    // member lookup fails (common in Python where fields aren't typed).
+    let mut compound_key = match &chain[0] {
+        ExpressionStep::Ident(n) => n.clone(),
+        ExpressionStep::This => "self".to_string(),
+        ExpressionStep::Super => "super".to_string(),
+        _ => String::new(),
+    };
+
     for step in &chain[1..] {
         let member_name = match step {
             ExpressionStep::Call(n) | ExpressionStep::Field(n) => n,
@@ -307,14 +316,12 @@ fn resolve_expression_chain<A: AsAst>(
                     .lookup_member_with_supers(type_name, member_name, &ctx.definitions);
             for def_ref in &members {
                 let def = &ctx.results[def_ref.file_idx].definitions[def_ref.def_idx];
-                // For Call steps, advance to the return type
                 if matches!(step, ExpressionStep::Call(_)) {
                     if let Some(meta) = &def.metadata {
                         if let Some(rt) = &meta.return_type {
                             next_types.push(rt.clone());
                         }
                     }
-                    // If it's a class/constructor, the "return type" is the class itself
                     if matches!(
                         def.kind,
                         code_graph_types::DefKind::Class | code_graph_types::DefKind::Constructor
@@ -322,7 +329,6 @@ fn resolve_expression_chain<A: AsAst>(
                         next_types.push(def.fqn.to_string());
                     }
                 }
-                // For Field steps, advance to the field's type annotation
                 if matches!(step, ExpressionStep::Field(_)) {
                     if let Some(meta) = &def.metadata {
                         if let Some(ta) = &meta.type_annotation {
@@ -334,11 +340,47 @@ fn resolve_expression_chain<A: AsAst>(
             found_members.extend(members);
         }
 
-        // If this is the last step, return the found members as the result
+        // If this is the last step, return the found members
         if std::ptr::eq(step, chain.last().unwrap()) {
-            let mut seen = rustc_hash::FxHashSet::default();
-            found_members.retain(|r| seen.insert((r.file_idx, r.def_idx)));
-            return found_members;
+            if !found_members.is_empty() {
+                let mut seen = rustc_hash::FxHashSet::default();
+                found_members.retain(|r| seen.insert((r.file_idx, r.def_idx)));
+                return found_members;
+            }
+        }
+
+        // SSA compound key fallback: if member lookup found nothing,
+        // try reading "self.db" (or "obj.field") as a single SSA variable.
+        // This handles Python's `self.db = Database()` → `self.db.query()`.
+        if next_types.is_empty() && found_members.is_empty() {
+            if !compound_key.is_empty() {
+                compound_key = format!("{}.{}", compound_key, member_name);
+                let reaching = ssa.read_variable_stateless(&compound_key, block);
+                for value in &reaching.values {
+                    match value {
+                        Value::Type(t) => next_types.push(t.clone()),
+                        Value::Def(f, d) => {
+                            let def = &ctx.results[*f].definitions[*d];
+                            if matches!(
+                                def.kind,
+                                code_graph_types::DefKind::Class
+                                    | code_graph_types::DefKind::Interface
+                            ) {
+                                next_types.push(def.fqn.to_string());
+                            } else if let Some(meta) = &def.metadata {
+                                if let Some(rt) = &meta.return_type {
+                                    next_types.push(rt.clone());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        } else {
+            // Reset compound key when member lookup succeeds (we're
+            // now on a new type, compound key no longer applies)
+            compound_key.clear();
         }
 
         current_types = next_types;

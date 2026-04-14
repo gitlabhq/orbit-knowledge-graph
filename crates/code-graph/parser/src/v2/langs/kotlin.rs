@@ -78,7 +78,7 @@ impl DslLanguage for KotlinDsl {
                 .def_kind(DefKind::Class)
                 .name_from(Extract::ChildOfKind("type_identifier")),
             scope("companion_object", "CompanionObject")
-                .def_kind(DefKind::Function)
+                .def_kind(DefKind::Class)
                 .name_from(Extract::ChildOfKind("type_identifier")),
             scope("function_declaration", "Function").def_kind(DefKind::Function),
             scope("secondary_constructor", "Constructor")
@@ -102,7 +102,20 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn refs() -> Vec<ReferenceRule> {
-        vec![reference("call_expression")]
+        vec![
+            reference("call_expression")
+                .receiver("navigation_expression"),
+        ]
+    }
+
+    fn chain_config() -> Option<ChainConfig> {
+        Some(ChainConfig {
+            ident_kinds: &["simple_identifier"],
+            this_kinds: &["this_expression"],
+            super_kinds: &["super_expression"],
+            field_access: &[("navigation_expression", "expression", "navigation_suffix")],
+            constructor: &[],
+        })
     }
 
     fn imports() -> Vec<ImportRule> {

@@ -1,5 +1,7 @@
 use crate::linker::v2::reaching::HasRules;
 use crate::linker::v2::rules::*;
+use parser_core::dsl::types::DslLanguage;
+use parser_core::v2::langs::kotlin::KotlinDsl;
 
 pub struct KotlinRules;
 
@@ -71,6 +73,7 @@ impl HasRules for KotlinRules {
             },
             receiver: ReceiverMode::Keyword,
             fqn_separator: ".",
+            language_spec: Some(KotlinDsl::spec()),
         }
     }
 }

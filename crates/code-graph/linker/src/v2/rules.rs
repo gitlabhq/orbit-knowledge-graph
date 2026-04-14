@@ -60,6 +60,10 @@ pub struct BindingRule {
     pub binding_kind: BindingKind,
     pub name_field: &'static str,
     pub value_field: Option<&'static str>,
+    /// When the binding name starts with one of these prefixes, write
+    /// to the enclosing class block instead of the current block.
+    /// e.g. `&["self."]` for Python, `&["this."]` for Java/Kotlin.
+    pub instance_attr_prefixes: &'static [&'static str],
 }
 
 // ── Reference rules ─────────────────────────────────────────────
@@ -118,7 +122,6 @@ pub enum ReceiverMode {
 /// loops, bindings, references) to drive the SSA engine per Braun et al.
 /// The `RulesResolver` interprets the resolution rules (import strategies,
 /// chain mode, receiver) to chase imports and produce call edges.
-#[derive(Debug, Clone)]
 pub struct ResolutionRules {
     pub name: &'static str,
 
@@ -134,6 +137,12 @@ pub struct ResolutionRules {
     pub chain_mode: ChainMode,
     pub receiver: ReceiverMode,
     pub fqn_separator: &'static str,
+
+    /// The DSL language spec, if this language uses the DSL parser.
+    /// Gives the walker access to chain extraction config, reference
+    /// rules with receiver fields, and other parser-level metadata
+    /// without duplicating it.
+    pub language_spec: Option<parser_core::dsl::types::LanguageSpec>,
 }
 
 impl ResolutionRules {
@@ -230,6 +239,7 @@ pub fn binding(node_kind: &'static str, kind: BindingKind) -> BindingRule {
         binding_kind: kind,
         name_field: "left",
         value_field: Some("right"),
+        instance_attr_prefixes: &[],
     }
 }
 
@@ -246,6 +256,11 @@ impl BindingRule {
 
     pub fn no_value(mut self) -> Self {
         self.value_field = None;
+        self
+    }
+
+    pub fn instance_attrs(mut self, prefixes: &'static [&'static str]) -> Self {
+        self.instance_attr_prefixes = prefixes;
         self
     }
 }

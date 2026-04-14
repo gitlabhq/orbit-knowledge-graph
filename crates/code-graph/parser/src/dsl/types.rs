@@ -122,14 +122,20 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
     }
 }
 
+/// How to locate the receiver node for expression chain building.
+pub enum ReceiverExtract {
+    /// Single field name (e.g. `"object"` for Java's method_invocation).
+    Field(&'static str),
+    /// Chain of field names (e.g. `["function", "object"]` for Python's call.function.object).
+    FieldChain(&'static [&'static str]),
+}
+
 pub struct ReferenceRule {
     kind: &'static str,
     condition: Option<Pred>,
     name: Extract,
-    /// Tree-sitter field holding the receiver/object expression.
-    /// When set, the engine builds an `ExpressionStep` chain by
-    /// recursively walking the receiver using the `ChainConfig`.
-    pub(crate) object_field: Option<&'static str>,
+    /// How to extract the receiver expression node for chain building.
+    pub(crate) receiver_extract: Option<ReceiverExtract>,
 }
 
 /// Per-language configuration for expression chain extraction.
@@ -174,10 +180,16 @@ impl ReferenceRule {
         self
     }
 
-    /// Declare the tree-sitter field holding the receiver/object.
-    /// Triggers `ExpressionStep` chain extraction on the reference.
-    pub fn object(mut self, field: &'static str) -> Self {
-        self.object_field = Some(field);
+    /// Declare which tree-sitter field holds the receiver expression.
+    pub fn receiver(mut self, field: &'static str) -> Self {
+        self.receiver_extract = Some(ReceiverExtract::Field(field));
+        self
+    }
+
+    /// Declare a field chain to reach the receiver expression.
+    /// e.g. `["function", "object"]` for Python's `call.function.object`.
+    pub fn receiver_chain(mut self, fields: &'static [&'static str]) -> Self {
+        self.receiver_extract = Some(ReceiverExtract::FieldChain(fields));
         self
     }
 }
@@ -187,7 +199,7 @@ pub fn reference(kind: &'static str) -> ReferenceRule {
         kind,
         condition: None,
         name: Extract::Default,
-        object_field: None,
+        receiver_extract: None,
     }
 }
 
@@ -481,7 +493,7 @@ pub struct LanguageSpec {
     pub refs: Vec<ReferenceRule>,
     pub imports: Vec<ImportRule>,
     pub bindings: Vec<ParseBindingRule>,
-    pub(crate) chain_config: Option<ChainConfig>,
+    pub chain_config: Option<ChainConfig>,
     pub(crate) scope_kinds: FxHashSet<&'static str>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,

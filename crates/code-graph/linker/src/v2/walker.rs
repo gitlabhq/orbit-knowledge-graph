@@ -10,6 +10,8 @@ use rustc_hash::FxHashMap;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
+use parser_core::dsl::types::Rule as DslRule;
+
 use super::rules::{BindingKind, ChainMode, ResolutionRules, ScopeKind};
 use super::ssa::{BlockId, SsaResolver, Value};
 
@@ -521,7 +523,27 @@ impl<'a> FileWalker<'a> {
             }
         };
 
-        self.ssa.write_variable(&name, self.current_block, value);
+        // Instance attribute bindings (e.g. self.db = ...) are written to
+        // the enclosing class block so sibling methods can see them.
+        let is_instance_attr = binding_rule
+            .instance_attr_prefixes
+            .iter()
+            .any(|prefix| name.starts_with(prefix));
+        let target_block = if is_instance_attr {
+            self.enclosing_class_block().unwrap_or(self.current_block)
+        } else {
+            self.current_block
+        };
+        self.ssa.write_variable(&name, target_block, value);
+    }
+
+    /// Find the enclosing class scope's block.
+    fn enclosing_class_block(&self) -> Option<BlockId> {
+        self.scope_stack
+            .iter()
+            .rev()
+            .find(|e| e.kind == ScopeKind::Class)
+            .map(|e| e.block)
     }
 
     /// Extract a type annotation from a node, producing `Value::Type`.
@@ -547,10 +569,11 @@ impl<'a> FileWalker<'a> {
         None
     }
 
-    /// Resolve a binding's RHS value through the SSA (value-flow).
-    /// For TypeFlow, if the resolved value is a Def with return_type
-    /// metadata, promote to Value::Type so downstream member access
-    /// chains resolve through the return type.
+    /// Resolve a binding's RHS value through the SSA.
+    ///
+    /// Extracts the meaningful name from the RHS expression — unwrapping
+    /// call expressions to get the callee name (e.g. `Database()` → `Database`).
+    /// For TypeFlow, promotes Def values with return_type to Value::Type.
     fn resolve_binding_value(
         &mut self,
         node: &Node<StrDoc<SupportLang>>,
@@ -558,11 +581,15 @@ impl<'a> FileWalker<'a> {
     ) -> Value {
         if let Some(value_field) = binding_rule.value_field {
             if let Some(value_node) = node.field(value_field) {
-                let value_text = value_node.text().to_string();
-                let reaching = self.ssa.read_variable(&value_text, self.current_block);
-                if !reaching.values.is_empty() {
-                    let value = reaching.values[0].clone();
-                    self.maybe_promote_to_type(value)
+                let name = self.extract_rhs_name(&value_node);
+                if let Some(name) = name {
+                    let reaching = self.ssa.read_variable(&name, self.current_block);
+                    if !reaching.values.is_empty() {
+                        let value = reaching.values[0].clone();
+                        self.maybe_promote_to_type(value)
+                    } else {
+                        Value::Opaque
+                    }
                 } else {
                     Value::Opaque
                 }
@@ -574,6 +601,46 @@ impl<'a> FileWalker<'a> {
         }
     }
 
+    /// Extract the resolvable name from an RHS expression node.
+    ///
+    /// Unwraps call expressions to find the callee:
+    /// - `Database()` → `"Database"` (call whose function is an identifier)
+    /// - `foo` → `"foo"` (bare identifier)
+    /// - `a + b` → `None` (not a simple name)
+    ///
+    /// Uses the language spec's reference rules and chain config to
+    /// identify calls and identifiers — no hardcoded node kinds.
+    fn extract_rhs_name(&self, node: &Node<StrDoc<SupportLang>>) -> Option<String> {
+        let kind = node.kind();
+        let kind_ref = kind.as_ref();
+
+        let spec = self.rules.language_spec.as_ref();
+
+        // Check reference rules from the language spec (call expressions)
+        if let Some(spec) = spec {
+            if let Some(ref_rule) = spec.refs.iter().find(|r| r.kind() == kind_ref) {
+                return ref_rule.extract_name(node);
+            }
+        }
+
+        // Check walker-level reference rules (fallback for non-DSL languages)
+        if let Some(ref_rule) = self.rules.references.iter().find(|r| r.node_kind == kind_ref) {
+            let name_node = node.field(ref_rule.name_field)?;
+            return Some(name_node.text().to_string());
+        }
+
+        // Check if it's a known identifier node kind
+        if let Some(spec) = spec {
+            if let Some(cc) = &spec.chain_config {
+                if cc.ident_kinds.iter().any(|&k| k == kind_ref) {
+                    return Some(node.text().to_string());
+                }
+            }
+        }
+
+        None
+    }
+
     /// For TypeFlow: if a value is Def and the definition has return_type
     /// metadata, promote to Value::Type(return_type). This allows
     /// `x = getService(); x.query()` to resolve through the return type.
@@ -583,15 +650,17 @@ impl<'a> FileWalker<'a> {
         }
         match &value {
             Value::Def(file_idx, def_idx) if *file_idx == self.file_idx => {
-                if let Some(def) = self.result.definitions.get(*def_idx) {
-                    if let Some(meta) = &def.metadata {
-                        if let Some(return_type) = &meta.return_type {
-                            return Value::Type(return_type.clone());
-                        }
-                    }
-                }
-                value
+                self.result
+                    .definitions
+                    .get(*def_idx)
+                    .and_then(|d| d.metadata.as_ref())
+                    .and_then(|m| m.return_type.as_ref())
+                    .map(|rt| Value::Type(rt.clone()))
+                    .unwrap_or(value)
             }
+            // Cross-file defs can't be checked here (walker only has
+            // current file). The chain resolver handles cross-file
+            // return_type lookup via ctx.results.
             _ => value,
         }
     }

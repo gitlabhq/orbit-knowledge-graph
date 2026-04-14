@@ -1,5 +1,7 @@
 use crate::linker::v2::reaching::HasRules;
 use crate::linker::v2::rules::*;
+use parser_core::dsl::types::DslLanguage;
+use parser_core::v2::langs::java::JavaDsl;
 
 pub struct JavaRules;
 
@@ -32,6 +34,10 @@ impl HasRules for JavaRules {
                 ]),
                 branch("switch_expression")
                     .branches(&["switch_block_statement_group", "switch_rule"]),
+                branch("switch_statement").branches(&["switch_block_statement_group"]),
+                branch("ternary_expression")
+                    .branches(&["consequence", "alternative"])
+                    .catch_all("alternative"),
             ],
 
             loops: vec![
@@ -44,7 +50,13 @@ impl HasRules for JavaRules {
             bindings: vec![
                 binding("local_variable_declaration", BindingKind::Assignment)
                     .name_from("declarator"),
+                binding("field_declaration", BindingKind::Assignment)
+                    .name_from("declarator")
+                    .instance_attrs(&["this."]),
                 binding("formal_parameter", BindingKind::Parameter)
+                    .name_from("name")
+                    .no_value(),
+                binding("catch_formal_parameter", BindingKind::Parameter)
                     .name_from("name")
                     .no_value(),
                 binding("resource", BindingKind::Assignment)
@@ -78,6 +90,7 @@ impl HasRules for JavaRules {
             },
             receiver: ReceiverMode::Keyword,
             fqn_separator: ".",
+            language_spec: Some(JavaDsl::spec()),
         }
     }
 }

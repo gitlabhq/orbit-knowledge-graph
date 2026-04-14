@@ -206,12 +206,22 @@ impl LanguageSpec {
         // Build expression chain if the rule declares an object field
         // and the spec has a ChainConfig
         let expression = rule
-            .object_field
+            .receiver_extract
+            .as_ref()
             .zip(self.chain_config.as_ref())
-            .and_then(|(obj_field, cc)| {
-                let obj_node = node.field(obj_field)?;
+            .and_then(|(extract, cc)| {
+                let receiver_node = match extract {
+                    crate::dsl::types::ReceiverExtract::Field(f) => node.field(f),
+                    crate::dsl::types::ReceiverExtract::FieldChain(fields) => {
+                        let mut current = Some(node.clone());
+                        for &f in fields.iter() {
+                            current = current.and_then(|n| n.field(f));
+                        }
+                        current
+                    }
+                }?;
                 let mut chain = Vec::new();
-                self.build_expression_chain(&obj_node, &mut chain, cc);
+                self.build_expression_chain(&receiver_node, &mut chain, cc);
                 chain.push(ExpressionStep::Call(name.clone()));
                 if chain.len() > 1 { Some(chain) } else { None }
             });
@@ -274,9 +284,19 @@ impl LanguageSpec {
 
         // Call expression with object field (method_invocation, call_expression)
         if let Some(rule) = self.refs.iter().find(|r| r.kind() == kind_ref) {
-            if let Some(obj_field) = rule.object_field {
-                if let Some(obj_node) = node.field(obj_field) {
-                    self.build_expression_chain(&obj_node, chain, cc);
+            if let Some(extract) = &rule.receiver_extract {
+                let receiver_node = match extract {
+                    crate::dsl::types::ReceiverExtract::Field(f) => node.field(f),
+                    crate::dsl::types::ReceiverExtract::FieldChain(fields) => {
+                        let mut current = Some(node.clone());
+                        for &f in fields.iter() {
+                            current = current.and_then(|n| n.field(f));
+                        }
+                        current
+                    }
+                };
+                if let Some(recv) = receiver_node {
+                    self.build_expression_chain(&recv, chain, cc);
                 }
             }
             if let Some(name) = rule.extract_name(node) {
