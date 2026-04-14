@@ -1,0 +1,49 @@
+name: "Python: match statement"
+fixtures:
+  - path: main.py
+    content: |
+      def get_value():
+          return 1
+
+      def handle_one():
+          pass
+
+      def handle_two():
+          pass
+
+      def handle_default():
+          pass
+
+      def dispatcher():
+          match get_value():
+              case 1:
+                  handle_one()
+              case 2:
+                  handle_two()
+              case _:
+                  handle_default()
+
+tests:
+  - name: get_value() called from dispatcher
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'dispatcher' AND callee.name = 'get_value'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: handle_one() called from dispatcher
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'dispatcher' AND callee.name = 'handle_one'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
+
+  - name: handle_default() called from dispatcher
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'dispatcher' AND callee.name = 'handle_default'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }

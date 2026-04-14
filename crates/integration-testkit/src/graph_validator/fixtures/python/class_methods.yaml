@@ -1,0 +1,50 @@
+name: "Python: class method types"
+fixtures:
+  - path: main.py
+    content: |
+      class MyClass:
+          def instance_method(self):
+              pass
+
+          @classmethod
+          def class_method(cls):
+              pass
+
+          @staticmethod
+          def static_method():
+              pass
+
+      obj = MyClass()
+
+tests:
+  - name: Class has exactly 3 method members
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'MyClass'
+      RETURN count(m) AS n
+    assert:
+      - { count_equals: { field: n, value: 3 } }
+
+  - name: instance_method exists in class
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'MyClass' AND m.name = 'instance_method'
+      RETURN m.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: class_method exists in class
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'MyClass' AND m.name = 'class_method'
+      RETURN m.fqn AS fqn
+    assert:
+      - { non_empty: true }
+
+  - name: static_method exists in class
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'MyClass' AND m.name = 'static_method'
+      RETURN m.fqn AS fqn
+    assert:
+      - { non_empty: true }

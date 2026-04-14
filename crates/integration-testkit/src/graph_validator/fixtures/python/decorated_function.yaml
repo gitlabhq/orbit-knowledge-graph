@@ -1,0 +1,22 @@
+name: "Python: decorated function call"
+fixtures:
+  - path: main.py
+    content: |
+      def my_decorator(func):
+          return func
+
+      @my_decorator
+      def decorated():
+          pass
+
+      def run():
+          decorated()
+
+tests:
+  - name: decorated() resolves to definition
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'decorated'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { non_empty: true }
