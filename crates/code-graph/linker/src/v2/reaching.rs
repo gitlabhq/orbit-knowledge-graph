@@ -10,14 +10,14 @@ use code_graph_types::{CanonicalImport, CanonicalResult, EdgeKind, NodeKind, Rel
 use super::context::{DefRef, ResolutionContext};
 use super::edges::{EdgeSource, ResolvedEdge};
 use super::resolver::ReferenceResolver;
-use super::rules::{ImportStrategy, ResolutionConfig};
+use super::rules::{ImportStrategy, ResolutionRules};
 use super::ssa::{ReachingDefs, Value};
 use super::walker::{walk_files, AsAst};
 
 /// Trait to get rules from the type parameter.
 /// Each language implements this on a zero-sized struct.
 pub trait HasRules {
-    fn resolution_config() -> ResolutionConfig;
+    fn rules() -> ResolutionRules;
 }
 
 /// Generic resolver parameterized by a `HasRules` type.
@@ -35,17 +35,17 @@ where
     R: HasRules + Send + Sync,
 {
     fn resolve(ctx: &ResolutionContext<A>) -> Vec<ResolvedEdge> {
-        let config = R::resolution_config();
-        resolve_with_config(&config, ctx)
+        let rules = R::rules();
+        resolve_with_rules(&rules, ctx)
     }
 }
 
 /// Core resolution logic, shared by all resolver wrappers.
-fn resolve_with_config<A: AsAst>(
-    config: &ResolutionConfig,
+fn resolve_with_rules<A: AsAst>(
+    rules: &ResolutionRules,
     ctx: &ResolutionContext<A>,
 ) -> Vec<ResolvedEdge> {
-    let mut walk_result = walk_files(None, &ctx.results, &ctx.asts);
+    let mut walk_result = walk_files(rules, &ctx.results, &ctx.asts);
     let mut edges = Vec::new();
     let reads = std::mem::take(&mut walk_result.reads);
 
@@ -54,8 +54,7 @@ fn resolve_with_config<A: AsAst>(
             .ssa
             .read_variable_stateless(&read.name, read.block);
 
-        let resolved_defs =
-            resolve_reaching_defs(config, ctx, read.file_idx, &read.name, &reaching);
+        let resolved_defs = resolve_reaching_defs(rules, ctx, read.file_idx, &read.name, &reaching);
 
         let result = &ctx.results[read.file_idx];
         let reference = &result.references[read.ref_idx];
@@ -109,7 +108,7 @@ fn resolve_with_config<A: AsAst>(
 /// For Import values, chase through import strategies.
 /// For Type values, look up by FQN.
 fn resolve_reaching_defs<A>(
-    config: &ResolutionConfig,
+    rules: &ResolutionRules,
     ctx: &ResolutionContext<A>,
     file_idx: usize,
     name: &str,
@@ -143,7 +142,7 @@ fn resolve_reaching_defs<A>(
 
     // If SSA didn't find anything, fall back to import strategies
     if result.is_empty() {
-        result = apply_import_strategies(config, ctx, file_idx, name);
+        result = apply_import_strategies(rules, ctx, file_idx, name);
     }
 
     // Deduplicate
@@ -155,14 +154,14 @@ fn resolve_reaching_defs<A>(
 
 /// Apply the language's import resolution strategies in order.
 fn apply_import_strategies<A>(
-    config: &ResolutionConfig,
+    rules: &ResolutionRules,
     ctx: &ResolutionContext<A>,
     file_idx: usize,
     name: &str,
 ) -> Vec<DefRef> {
     let result = &ctx.results[file_idx];
 
-    for strategy in &config.import_strategies {
+    for strategy in &rules.import_strategies {
         let candidates = match strategy {
             ImportStrategy::ScopeFqnWalk => {
                 // Walk up the scope FQN trying scope.name at each level

@@ -270,7 +270,6 @@ mod tests {
             imports: vec![],
             references: vec![],
             bindings: vec![],
-            branches: vec![],
         }
     }
 

@@ -1,22 +1,77 @@
 //! Declarative per-language resolution and walking rules.
 //!
-//! Two concerns, two structs:
+//! A single [`ResolutionRules`] struct carries both:
+//! - AST walking config: which tree-sitter node kinds create scopes,
+//!   branches, loops, bindings, and references
+//! - Resolution config: import strategy ordering, chain mode, receiver handling
 //!
-//! - [`ResolutionConfig`]: how the resolver interprets SSA values — import
-//!   strategy ordering, chain mode, receiver handling. Language-agnostic
-//!   once the SSA graph is built.
-//!
-//! - [`AstWalkerRules`]: how the AST walker drives the SSA engine — which
-//!   tree-sitter node kinds create scopes, branches, loops, bindings, and
-//!   references. Only used when the parser retains the AST (`Ast != ()`).
-//!   For DSL-parsed languages (`Ast = ()`), the parser extracts all this
-//!   into `CanonicalResult` and the flat walker consumes it directly.
+//! The `FileWalker` uses the walking rules to drive the SSA engine.
+//! The `RulesResolver` uses the resolution rules to chase imports.
 
 use rustc_hash::FxHashSet;
 
-// ── Resolution config (used by reaching resolver) ───────────────
+// ── Scope rules ─────────────────────────────────────────────────
 
-/// Import resolution strategy ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScopeKind {
+    Class,
+    Function,
+    Module,
+}
+
+#[derive(Debug, Clone)]
+pub struct IsolatedScopeRule {
+    pub node_kind: &'static str,
+    pub scope_kind: ScopeKind,
+    pub name_field: &'static str,
+}
+
+// ── Branch / loop rules ─────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct BranchRule {
+    pub node_kind: &'static str,
+    pub branch_kinds: &'static [&'static str],
+    pub condition_field: Option<&'static str>,
+    pub catch_all_kind: Option<&'static str>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoopRule {
+    pub node_kind: &'static str,
+    pub body_field: &'static str,
+    pub iter_field: Option<&'static str>,
+}
+
+// ── Binding rules ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingKind {
+    Assignment,
+    Parameter,
+    Deletion,
+    ForTarget,
+    WithAlias,
+}
+
+#[derive(Debug, Clone)]
+pub struct BindingRule {
+    pub node_kind: &'static str,
+    pub binding_kind: BindingKind,
+    pub name_field: &'static str,
+    pub value_field: Option<&'static str>,
+}
+
+// ── Reference rules ─────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ReferenceRule {
+    pub node_kind: &'static str,
+    pub name_field: &'static str,
+}
+
+// ── Import resolution ───────────────────────────────────────────
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportStrategy {
     ExplicitImport,
@@ -28,16 +83,14 @@ pub enum ImportStrategy {
     FilePath,
 }
 
-/// How expression chains (a.b.c()) are resolved step-by-step.
+// ── Chain / receiver ────────────────────────────────────────────
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChainMode {
-    /// Follow value aliases. Used by Python.
     ValueFlow,
-    /// Follow type annotations. Used by Java/Kotlin.
     TypeFlow,
 }
 
-/// How self/this/receiver is handled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReceiverMode {
     None,
@@ -49,97 +102,33 @@ pub enum ReceiverMode {
     Keyword,
 }
 
-/// Resolution-time configuration for a language.
+// ── Top-level config ────────────────────────────────────────────
+
+/// Complete declarative configuration for a language.
 ///
-/// Controls how the resolver interprets SSA values and chases imports.
-/// No tree-sitter node kinds — those belong in [`AstWalkerRules`] or
-/// the parser's `LanguageSpec`.
+/// The `FileWalker` interprets the AST-walking rules (scopes, branches,
+/// loops, bindings, references) to drive the SSA engine per Braun et al.
+/// The `RulesResolver` interprets the resolution rules (import strategies,
+/// chain mode, receiver) to chase imports and produce call edges.
 #[derive(Debug, Clone)]
-pub struct ResolutionConfig {
+pub struct ResolutionRules {
     pub name: &'static str,
+
+    // AST walking
+    pub scopes: Vec<IsolatedScopeRule>,
+    pub branches: Vec<BranchRule>,
+    pub loops: Vec<LoopRule>,
+    pub bindings: Vec<BindingRule>,
+    pub references: Vec<ReferenceRule>,
+
+    // Resolution
     pub import_strategies: Vec<ImportStrategy>,
     pub chain_mode: ChainMode,
     pub receiver: ReceiverMode,
     pub fqn_separator: &'static str,
 }
 
-// ── AST walker rules (used by FileWalker only) ──────────────────
-
-/// Classification of scope-creating constructs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ScopeKind {
-    Class,
-    Function,
-    Module,
-}
-
-/// A node kind that creates an isolated scope.
-#[derive(Debug, Clone)]
-pub struct IsolatedScopeRule {
-    pub node_kind: &'static str,
-    pub scope_kind: ScopeKind,
-    pub name_field: &'static str,
-}
-
-/// A node kind that creates conditional branches.
-#[derive(Debug, Clone)]
-pub struct BranchRule {
-    pub node_kind: &'static str,
-    pub branch_kinds: &'static [&'static str],
-    pub condition_field: Option<&'static str>,
-    pub catch_all_kind: Option<&'static str>,
-}
-
-/// A node kind that creates a loop.
-#[derive(Debug, Clone)]
-pub struct LoopRule {
-    pub node_kind: &'static str,
-    pub body_field: &'static str,
-    pub iter_field: Option<&'static str>,
-}
-
-/// What a binding represents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BindingKind {
-    Assignment,
-    Parameter,
-    Deletion,
-    ForTarget,
-    WithAlias,
-}
-
-/// A node kind that creates a variable binding.
-#[derive(Debug, Clone)]
-pub struct BindingRule {
-    pub node_kind: &'static str,
-    pub binding_kind: BindingKind,
-    pub name_field: &'static str,
-    pub value_field: Option<&'static str>,
-}
-
-/// A node kind that creates a reference.
-#[derive(Debug, Clone)]
-pub struct ReferenceRule {
-    pub node_kind: &'static str,
-    pub name_field: &'static str,
-}
-
-/// AST walker rules for the retained-AST path (`FileWalker`).
-///
-/// Only used when `CanonicalParser::Ast != ()`. For DSL-parsed languages,
-/// the parser extracts all this information into `CanonicalResult` fields
-/// (definitions, imports, references, bindings, branches) and the flat
-/// walker consumes them directly.
-#[derive(Debug, Clone)]
-pub struct AstWalkerRules {
-    pub scopes: Vec<IsolatedScopeRule>,
-    pub branches: Vec<BranchRule>,
-    pub loops: Vec<LoopRule>,
-    pub bindings: Vec<BindingRule>,
-    pub references: Vec<ReferenceRule>,
-}
-
-impl AstWalkerRules {
+impl ResolutionRules {
     pub fn interesting_kinds(&self) -> FxHashSet<&'static str> {
         let mut kinds = FxHashSet::default();
         for s in &self.scopes {

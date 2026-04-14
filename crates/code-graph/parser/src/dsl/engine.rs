@@ -5,8 +5,8 @@ use treesitter_visit::{Node, SupportLang};
 
 use code_graph_config::Language;
 use code_graph_types::{
-    CanonicalBranch, CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult,
-    DefKind, DefinitionMetadata, Fqn, ReferenceStatus,
+    CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind,
+    DefinitionMetadata, Fqn, ReferenceStatus,
 };
 
 use crate::utils::node_to_range;
@@ -23,13 +23,16 @@ struct ScopeMatch {
 }
 
 impl LanguageSpec {
-    /// Parse source bytes into a `CanonicalResult`.
+    /// Parse source bytes into a `CanonicalResult` and the retained AST.
     pub fn parse_canonical(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
-    ) -> crate::Result<CanonicalResult> {
+    ) -> crate::Result<(
+        CanonicalResult,
+        treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>,
+    )> {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
@@ -58,10 +61,7 @@ impl LanguageSpec {
             .map(|(_, ext)| ext.to_string())
             .unwrap_or_default();
 
-        let mut branches = Vec::new();
-        self.extract_branches(&root, &mut Vec::new(), sep, &mut branches);
-
-        Ok(CanonicalResult {
+        let result = CanonicalResult {
             file_path: file_path.to_string(),
             extension,
             file_size: source.len() as u64,
@@ -70,8 +70,9 @@ impl LanguageSpec {
             imports,
             references: refs,
             bindings,
-            branches,
-        })
+        };
+
+        Ok((result, ast))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -164,67 +165,6 @@ impl LanguageSpec {
         }
 
         if pushed_scope {
-            scope_stack.pop();
-        }
-    }
-
-    /// Walk the AST to extract `CanonicalBranch` entries for control flow.
-    fn extract_branches(
-        &self,
-        node: &Node<StrDoc<SupportLang>>,
-        scope_stack: &mut Vec<Arc<str>>,
-        sep: &'static str,
-        branches: &mut Vec<CanonicalBranch>,
-    ) {
-        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
-            return;
-        }
-
-        let node_kind = node.kind();
-        let kind_ref = node_kind.as_ref();
-
-        // Track scope for scope_fqn on branches
-        let mut pushed = false;
-        if self.is_scope_candidate(kind_ref) {
-            if let Some(m) = self.evaluate_scope(node, kind_ref) {
-                if m.creates_scope {
-                    scope_stack.push(Arc::from(m.name.as_str()));
-                    pushed = true;
-                }
-            }
-        }
-
-        if let Some(decl) = self.branch_decls.iter().find(|d| d.node_kind == kind_ref) {
-            let range = canonical_range(&node_to_range(node));
-            let mut arm_ranges = Vec::new();
-            let mut has_catch_all = false;
-
-            for child in node.children() {
-                let ck = child.kind();
-                if decl.arm_kinds.iter().any(|&k| k == ck.as_ref()) {
-                    arm_ranges.push(canonical_range(&node_to_range(&child)));
-                    if decl.catch_all_kind.is_some_and(|ca| ca == ck.as_ref()) {
-                        has_catch_all = true;
-                    }
-                }
-            }
-
-            if !arm_ranges.is_empty() {
-                branches.push(CanonicalBranch {
-                    node_kind: kind_ref.to_string(),
-                    range,
-                    arm_ranges,
-                    has_catch_all,
-                    scope_fqn: Fqn::from_scope_only(scope_stack, sep),
-                });
-            }
-        }
-
-        for child in node.children() {
-            self.extract_branches(&child, scope_stack, sep, branches);
-        }
-
-        if pushed {
             scope_stack.pop();
         }
     }
@@ -362,6 +302,7 @@ mod tests {
     fn parse_with(spec: &LanguageSpec, code: &str) -> CanonicalResult {
         spec.parse_canonical(code.as_bytes(), "test.py", Language::Python)
             .unwrap()
+            .0
     }
 
     #[test]

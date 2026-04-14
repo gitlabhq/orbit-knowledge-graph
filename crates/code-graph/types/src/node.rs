@@ -172,26 +172,6 @@ pub struct CanonicalBinding {
     pub scope_fqn: Option<Fqn>,
 }
 
-/// A control flow branch extracted by the parser.
-///
-/// The SSA walker uses these to create separate blocks for each arm,
-/// producing phi nodes at merge points when different arms bind the
-/// same variable to different values.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalBranch {
-    /// Tree-sitter node kind (e.g. "if_statement", "try_statement").
-    pub node_kind: String,
-    /// Byte range of the entire branch construct.
-    pub range: Range,
-    /// Byte ranges of individual arms (then/else, try/except, each case).
-    pub arm_ranges: Vec<Range>,
-    /// Whether a catch-all arm exists (else, bare except, default).
-    /// When true, the variable is guaranteed defined after the branch.
-    pub has_catch_all: bool,
-    /// FQN of the enclosing scope.
-    pub scope_fqn: Option<Fqn>,
-}
-
 /// The complete output of parsing a single file.
 ///
 /// Boundary type between parser and linker — nothing language-specific
@@ -207,7 +187,4 @@ pub struct CanonicalResult {
     pub references: Vec<CanonicalReference>,
     /// Variable bindings sorted by byte offset.
     pub bindings: Vec<CanonicalBinding>,
-    /// Control flow branches for SSA phi node construction.
-    /// Sorted by byte offset.
-    pub branches: Vec<CanonicalBranch>,
 }
