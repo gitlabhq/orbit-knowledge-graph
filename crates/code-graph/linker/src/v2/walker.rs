@@ -325,18 +325,18 @@ impl<'a> FileWalker<'a> {
 
         let scope_name = node.field("name").map(|n| n.text().to_string());
 
-        if scope_kind == ScopeKind::Class {
-            if let Some(ref name) = scope_name {
-                let class_fqn = self.build_fqn(name);
+        if scope_kind == ScopeKind::Class
+            && let Some(ref name) = scope_name
+        {
+            let class_fqn = self.build_fqn(name);
+            self.ssa
+                .write_variable("this", new_block, Value::Type(class_fqn.clone()));
+            self.ssa
+                .write_variable("self", new_block, Value::Type(class_fqn));
+            // super → look up first super_type from canonical definitions
+            if let Some(super_type) = self.find_super_type(name) {
                 self.ssa
-                    .write_variable("this", new_block, Value::Type(class_fqn.clone()));
-                self.ssa
-                    .write_variable("self", new_block, Value::Type(class_fqn));
-                // super → look up first super_type from canonical definitions
-                if let Some(super_type) = self.find_super_type(name) {
-                    self.ssa
-                        .write_variable("super", new_block, Value::Type(super_type));
-                }
+                    .write_variable("super", new_block, Value::Type(super_type));
             }
         }
 
@@ -349,10 +349,10 @@ impl<'a> FileWalker<'a> {
     }
 
     fn exit_scope(&mut self) {
-        if self.scope_stack.pop().is_some() {
-            if let Some(parent) = self.scope_stack.last() {
-                self.current_block = parent.block;
-            }
+        if self.scope_stack.pop().is_some()
+            && let Some(parent) = self.scope_stack.last()
+        {
+            self.current_block = parent.block;
         }
     }
 
@@ -366,27 +366,6 @@ impl<'a> FileWalker<'a> {
             .collect();
         parts.push(name);
         parts.join(sep)
-    }
-
-    /// Find the enclosing class FQN by walking up the scope stack.
-    fn enclosing_class_fqn(&self) -> Option<String> {
-        for entry in self.scope_stack.iter().rev() {
-            if entry.kind == ScopeKind::Class {
-                if let Some(ref name) = entry.name {
-                    // Rebuild the FQN up to this scope
-                    let sep = self.rules.fqn_separator;
-                    let parts: Vec<&str> = self
-                        .scope_stack
-                        .iter()
-                        .take_while(|e| !std::ptr::eq(*e, entry))
-                        .filter_map(|e| e.name.as_deref())
-                        .chain(std::iter::once(name.as_str()))
-                        .collect();
-                    return Some(parts.join(sep));
-                }
-            }
-        }
-        None
     }
 
     /// Look up the first super_type for a class by name from canonical defs.
@@ -513,14 +492,11 @@ impl<'a> FileWalker<'a> {
         };
 
         let value = match binding_rule.binding_kind {
-            BindingKind::Parameter => {
-                self.extract_type_value(node).unwrap_or(Value::Opaque)
-            }
+            BindingKind::Parameter => self.extract_type_value(node).unwrap_or(Value::Opaque),
             BindingKind::Deletion | BindingKind::ForTarget => Value::Opaque,
-            BindingKind::Assignment | BindingKind::WithAlias => {
-                self.extract_type_value(node)
-                    .unwrap_or_else(|| self.resolve_binding_value(node, binding_rule))
-            }
+            BindingKind::Assignment | BindingKind::WithAlias => self
+                .extract_type_value(node)
+                .unwrap_or_else(|| self.resolve_binding_value(node, binding_rule)),
         };
 
         // Instance attribute bindings (e.g. self.db = ...) are written to
@@ -617,25 +593,29 @@ impl<'a> FileWalker<'a> {
         let spec = self.rules.language_spec.as_ref();
 
         // Check reference rules from the language spec (call expressions)
-        if let Some(spec) = spec {
-            if let Some(ref_rule) = spec.refs.iter().find(|r| r.kind() == kind_ref) {
-                return ref_rule.extract_name(node);
-            }
+        if let Some(spec) = spec
+            && let Some(ref_rule) = spec.refs.iter().find(|r| r.kind() == kind_ref)
+        {
+            return ref_rule.extract_name(node);
         }
 
         // Check walker-level reference rules (fallback for non-DSL languages)
-        if let Some(ref_rule) = self.rules.references.iter().find(|r| r.node_kind == kind_ref) {
+        if let Some(ref_rule) = self
+            .rules
+            .references
+            .iter()
+            .find(|r| r.node_kind == kind_ref)
+        {
             let name_node = node.field(ref_rule.name_field)?;
             return Some(name_node.text().to_string());
         }
 
         // Check if it's a known identifier node kind
-        if let Some(spec) = spec {
-            if let Some(cc) = &spec.chain_config {
-                if cc.ident_kinds.iter().any(|&k| k == kind_ref) {
-                    return Some(node.text().to_string());
-                }
-            }
+        if let Some(spec) = spec
+            && let Some(cc) = &spec.chain_config
+            && cc.ident_kinds.contains(&kind_ref)
+        {
+            return Some(node.text().to_string());
         }
 
         None
@@ -649,15 +629,14 @@ impl<'a> FileWalker<'a> {
             return value;
         }
         match &value {
-            Value::Def(file_idx, def_idx) if *file_idx == self.file_idx => {
-                self.result
-                    .definitions
-                    .get(*def_idx)
-                    .and_then(|d| d.metadata.as_ref())
-                    .and_then(|m| m.return_type.as_ref())
-                    .map(|rt| Value::Type(rt.clone()))
-                    .unwrap_or(value)
-            }
+            Value::Def(file_idx, def_idx) if *file_idx == self.file_idx => self
+                .result
+                .definitions
+                .get(*def_idx)
+                .and_then(|d| d.metadata.as_ref())
+                .and_then(|m| m.return_type.as_ref())
+                .map(|rt| Value::Type(rt.clone()))
+                .unwrap_or(value),
             // Cross-file defs can't be checked here (walker only has
             // current file). The chain resolver handles cross-file
             // return_type lookup via ctx.results.

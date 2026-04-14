@@ -12,7 +12,7 @@ use super::edges::{EdgeSource, ResolvedEdge};
 use super::resolver::ReferenceResolver;
 use super::rules::{ImportStrategy, ResolutionRules};
 use super::ssa::{BlockId, ReachingDefs, SsaResolver, Value};
-use super::walker::{walk_files, AsAst};
+use super::walker::{AsAst, walk_files};
 
 /// Trait to get rules from the type parameter.
 /// Each language implements this on a zero-sized struct.
@@ -179,13 +179,13 @@ fn resolve_reaching_defs<A>(
 
     // Fallback 2: implicit this — try member lookup on the enclosing class.
     // In Java/Kotlin, `helper()` inside a method body means `this.helper()`.
-    if result.is_empty() {
-        if let Some(class_fqn) = enclosing_class_fqn {
-            let member_defs =
-                ctx.members
-                    .lookup_member_with_supers(class_fqn, name, &ctx.definitions);
-            result.extend(member_defs);
-        }
+    if result.is_empty()
+        && let Some(class_fqn) = enclosing_class_fqn
+    {
+        let member_defs = ctx
+            .members
+            .lookup_member_with_supers(class_fqn, name, &ctx.definitions);
+        result.extend(member_defs);
     }
 
     // Deduplicate
@@ -240,10 +240,10 @@ fn resolve_expression_chain<A: AsAst>(
                             }
                             _ => {
                                 // Use return_type if it's a method/function
-                                if let Some(meta) = &def.metadata {
-                                    if let Some(rt) = &meta.return_type {
-                                        current_types.push(rt.clone());
-                                    }
+                                if let Some(meta) = &def.metadata
+                                    && let Some(rt) = &meta.return_type
+                                {
+                                    current_types.push(rt.clone());
                                 }
                             }
                         }
@@ -317,10 +317,10 @@ fn resolve_expression_chain<A: AsAst>(
             for def_ref in &members {
                 let def = &ctx.results[def_ref.file_idx].definitions[def_ref.def_idx];
                 if matches!(step, ExpressionStep::Call(_)) {
-                    if let Some(meta) = &def.metadata {
-                        if let Some(rt) = &meta.return_type {
-                            next_types.push(rt.clone());
-                        }
+                    if let Some(meta) = &def.metadata
+                        && let Some(rt) = &meta.return_type
+                    {
+                        next_types.push(rt.clone());
                     }
                     if matches!(
                         def.kind,
@@ -329,24 +329,21 @@ fn resolve_expression_chain<A: AsAst>(
                         next_types.push(def.fqn.to_string());
                     }
                 }
-                if matches!(step, ExpressionStep::Field(_)) {
-                    if let Some(meta) = &def.metadata {
-                        if let Some(ta) = &meta.type_annotation {
-                            next_types.push(ta.clone());
-                        }
-                    }
+                if matches!(step, ExpressionStep::Field(_))
+                    && let Some(meta) = &def.metadata
+                    && let Some(ta) = &meta.type_annotation
+                {
+                    next_types.push(ta.clone());
                 }
             }
             found_members.extend(members);
         }
 
         // If this is the last step, return the found members
-        if std::ptr::eq(step, chain.last().unwrap()) {
-            if !found_members.is_empty() {
-                let mut seen = rustc_hash::FxHashSet::default();
-                found_members.retain(|r| seen.insert((r.file_idx, r.def_idx)));
-                return found_members;
-            }
+        if std::ptr::eq(step, chain.last().unwrap()) && !found_members.is_empty() {
+            let mut seen = rustc_hash::FxHashSet::default();
+            found_members.retain(|r| seen.insert((r.file_idx, r.def_idx)));
+            return found_members;
         }
 
         // SSA compound key fallback: if member lookup found nothing,
@@ -367,10 +364,10 @@ fn resolve_expression_chain<A: AsAst>(
                                     | code_graph_types::DefKind::Interface
                             ) {
                                 next_types.push(def.fqn.to_string());
-                            } else if let Some(meta) = &def.metadata {
-                                if let Some(rt) = &meta.return_type {
-                                    next_types.push(rt.clone());
-                                }
+                            } else if let Some(meta) = &def.metadata
+                                && let Some(rt) = &meta.return_type
+                            {
+                                next_types.push(rt.clone());
                             }
                         }
                         _ => {}

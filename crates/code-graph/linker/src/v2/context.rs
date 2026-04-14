@@ -139,10 +139,10 @@ impl MemberIndex {
                 }
 
                 // Record super_types for hierarchy walking
-                if let Some(meta) = &def.metadata {
-                    if !meta.super_types.is_empty() {
-                        supers.insert(def.fqn.to_string(), meta.super_types.clone());
-                    }
+                if let Some(meta) = &def.metadata
+                    && !meta.super_types.is_empty()
+                {
+                    supers.insert(def.fqn.to_string(), meta.super_types.clone());
                 }
             }
         }

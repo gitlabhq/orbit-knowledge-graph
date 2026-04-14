@@ -102,10 +102,7 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn refs() -> Vec<ReferenceRule> {
-        vec![
-            reference("call_expression")
-                .receiver("navigation_expression"),
-        ]
+        vec![reference("call_expression").receiver("navigation_expression")]
     }
 
     fn chain_config() -> Option<ChainConfig> {

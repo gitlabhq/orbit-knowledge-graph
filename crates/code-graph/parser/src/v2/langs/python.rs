@@ -274,25 +274,14 @@ mod tests {
     #[test]
     fn return_type_none_when_absent() {
         let result = parse("def foo():\n    pass\n");
-        let foo = result
-            .definitions
-            .iter()
-            .find(|d| d.name == "foo")
-            .unwrap();
-        assert!(
-            foo.metadata.is_none()
-                || foo
-                    .metadata
-                    .as_ref()
-                    .unwrap()
-                    .return_type
-                    .is_none()
-        );
+        let foo = result.definitions.iter().find(|d| d.name == "foo").unwrap();
+        assert!(foo.metadata.is_none() || foo.metadata.as_ref().unwrap().return_type.is_none());
     }
 
     #[test]
     fn method_return_type() {
-        let result = parse("class Service:\n    def get_name(self) -> str:\n        return self.name\n");
+        let result =
+            parse("class Service:\n    def get_name(self) -> str:\n        return self.name\n");
         let get_name = result
             .definitions
             .iter()

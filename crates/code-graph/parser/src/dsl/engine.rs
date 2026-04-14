@@ -242,19 +242,19 @@ impl LanguageSpec {
         let kind_ref = kind.as_ref();
 
         // Identifier base
-        if cc.ident_kinds.iter().any(|&k| k == kind_ref) {
+        if cc.ident_kinds.contains(&kind_ref) {
             chain.push(ExpressionStep::Ident(node.text().to_string()));
             return;
         }
 
         // this/self
-        if cc.this_kinds.iter().any(|&k| k == kind_ref) {
+        if cc.this_kinds.contains(&kind_ref) {
             chain.push(ExpressionStep::This);
             return;
         }
 
         // super
-        if cc.super_kinds.iter().any(|&k| k == kind_ref) {
+        if cc.super_kinds.contains(&kind_ref) {
             chain.push(ExpressionStep::Super);
             return;
         }
