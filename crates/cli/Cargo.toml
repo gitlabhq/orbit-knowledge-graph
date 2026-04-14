@@ -11,6 +11,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+mimalloc = { workspace = true }
 arrow = { workspace = true }
 async-trait = { workspace = true }
 code-graph = { path = "../code-graph" }
