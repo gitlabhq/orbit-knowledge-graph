@@ -322,7 +322,7 @@ As a first iteration, the team aims to build **a [Graph Query Engine](querying/g
 The current implementation has already standardized on ClickHouse for deployed graph storage and query execution. In the current repository state:
 
 - Graph nodes live in typed `gl_*` ClickHouse tables such as `gl_group`, `gl_project`, `gl_merge_request`, `gl_pipeline`, `gl_job`, `gl_vulnerability`, `gl_branch`, `gl_file`, `gl_definition`, and `gl_imported_symbol`.
-- Relationships are stored in a shared `gl_edge` table with adjacency-optimized ordering and projections.
+- Relationships are stored in ontology-configured edge tables (defaulting to `gl_edge`) with adjacency-optimized ordering and projections. Each edge YAML can specify a `table:` field to route relationship types to dedicated tables; `settings.edge_tables` in `schema.yaml` defines available tables.
 - Code indexing progress is tracked in `code_indexing_checkpoint`.
 - The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
 
@@ -459,8 +459,8 @@ Please see the [Code Indexing](./indexing/code_indexing.md) and [SDLC Metadata I
 
 This is still the current implementation shape in the repository. SDLC and code data share the same codebase, ontology-driven graph model, and API layer, but they remain operationally distinct in how they are indexed and stored:
 
-- SDLC data is loaded into typed `gl_*` node tables plus the shared `gl_edge` relationship table using namespaced ETL driven by the ontology.
-- Code data is loaded into `gl_branch`, `gl_directory`, `gl_file`, `gl_definition`, `gl_imported_symbol`, and the shared `gl_edge` table, keyed by `traversal_path`, `project_id`, and `branch`.
+- SDLC data is loaded into typed `gl_*` node tables plus ontology-configured edge tables (defaulting to `gl_edge`) using namespaced ETL driven by the ontology.
+- Code data is loaded into `gl_branch`, `gl_directory`, `gl_file`, `gl_definition`, `gl_imported_symbol`, and the ontology-configured edge table(s), keyed by `traversal_path`, `project_id`, and `branch`.
 - Cross-graph linkage happens through shared entity identifiers and shared relationship semantics rather than by collapsing everything into a single undifferentiated store.
 
 ### Workstreams Roadmap

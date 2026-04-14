@@ -57,7 +57,7 @@ impl ClickHouseStaleDataCleaner {
             .map(|table| (table.to_string(), Self::build_node_delete_query(table)))
             .collect();
 
-        // TODO(multi-edge-tables): when gl_code_edge is declared, table_names.edge
+        // TODO(multi-edge-tables, #454): when gl_code_edge is declared, table_names.edge
         // will already point to the correct table via CodeTableNames::from_ontology.
         Self {
             client,

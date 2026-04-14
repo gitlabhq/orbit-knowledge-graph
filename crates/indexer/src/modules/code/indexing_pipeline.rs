@@ -252,7 +252,7 @@ impl CodeIndexingPipeline {
             &converted.imported_symbols,
         )
         .await?;
-        // TODO(multi-edge-tables): when gl_code_edge is declared, split converted.edges
+        // TODO(multi-edge-tables, #454): when gl_code_edge is declared, split converted.edges
         // by destination table if code edges span multiple tables. Currently all code
         // edges share one table, so a single write_batch is correct.
         self.write_batch(ctx, &self.table_names.edge, &converted.edges)
