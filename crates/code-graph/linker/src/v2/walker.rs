@@ -190,6 +190,13 @@ fn walk_flat(
 
 // ── AST walker (Braun et al.) ───────────────────────────────────
 
+/// An entry on the scope stack, tracking the block, kind, and name.
+struct ScopeEntry {
+    block: BlockId,
+    kind: ScopeKind,
+    name: Option<String>,
+}
+
 struct FileWalker<'a> {
     rules: &'a ResolutionRules,
     ssa: &'a mut SsaResolver,
@@ -197,7 +204,7 @@ struct FileWalker<'a> {
     result: &'a CanonicalResult,
 
     current_block: BlockId,
-    scope_stack: Vec<(BlockId, ScopeKind)>,
+    scope_stack: Vec<ScopeEntry>,
     ref_by_range_start: FxHashMap<usize, Vec<usize>>,
 
     reads: Vec<RecordedRead>,
@@ -241,7 +248,11 @@ impl<'a> FileWalker<'a> {
             file_idx,
             result,
             current_block: module_block,
-            scope_stack: vec![(module_block, ScopeKind::Module)],
+            scope_stack: vec![ScopeEntry {
+                block: module_block,
+                kind: ScopeKind::Module,
+                name: None,
+            }],
             ref_by_range_start,
             reads: Vec::new(),
         }
@@ -310,39 +321,81 @@ impl<'a> FileWalker<'a> {
         self.ssa.add_predecessor(new_block, self.current_block);
         self.ssa.seal_block(new_block);
 
-        // For class scopes, write `this`/`self` so method bodies can
-        // resolve `this.member()` via type-flow.
+        let scope_name = node.field("name").map(|n| n.text().to_string());
+
         if scope_kind == ScopeKind::Class {
-            if let Some(name_node) = node.field("name") {
-                let class_name = name_node.text().to_string();
-                // Build FQN from scope stack + class name
-                let class_fqn = self.build_fqn(&class_name);
+            if let Some(ref name) = scope_name {
+                let class_fqn = self.build_fqn(name);
                 self.ssa
                     .write_variable("this", new_block, Value::Type(class_fqn.clone()));
                 self.ssa
                     .write_variable("self", new_block, Value::Type(class_fqn));
+                // super → look up first super_type from canonical definitions
+                if let Some(super_type) = self.find_super_type(name) {
+                    self.ssa
+                        .write_variable("super", new_block, Value::Type(super_type));
+                }
             }
         }
 
-        self.scope_stack.push((new_block, scope_kind));
+        self.scope_stack.push(ScopeEntry {
+            block: new_block,
+            kind: scope_kind,
+            name: scope_name,
+        });
         self.current_block = new_block;
     }
 
-    /// Build a dotted FQN from the current scope stack + a name.
-    fn build_fqn(&self, name: &str) -> String {
-        // Walk the scope stack to find enclosing definitions by matching
-        // canonical definitions that contain this byte range.
-        // For now, just use the name — type-flow will resolve via the
-        // DefinitionIndex which does FQN and name lookup.
-        name.to_string()
-    }
-
     fn exit_scope(&mut self) {
-        if let Some((_block, _kind)) = self.scope_stack.pop() {
-            if let Some(&(parent_block, _)) = self.scope_stack.last() {
-                self.current_block = parent_block;
+        if self.scope_stack.pop().is_some() {
+            if let Some(parent) = self.scope_stack.last() {
+                self.current_block = parent.block;
             }
         }
+    }
+
+    /// Build a dotted FQN from the scope stack names + a new name.
+    fn build_fqn(&self, name: &str) -> String {
+        let sep = self.rules.fqn_separator;
+        let mut parts: Vec<&str> = self
+            .scope_stack
+            .iter()
+            .filter_map(|e| e.name.as_deref())
+            .collect();
+        parts.push(name);
+        parts.join(sep)
+    }
+
+    /// Find the enclosing class FQN by walking up the scope stack.
+    fn enclosing_class_fqn(&self) -> Option<String> {
+        for entry in self.scope_stack.iter().rev() {
+            if entry.kind == ScopeKind::Class {
+                if let Some(ref name) = entry.name {
+                    // Rebuild the FQN up to this scope
+                    let sep = self.rules.fqn_separator;
+                    let parts: Vec<&str> = self
+                        .scope_stack
+                        .iter()
+                        .take_while(|e| !std::ptr::eq(*e, entry))
+                        .filter_map(|e| e.name.as_deref())
+                        .chain(std::iter::once(name.as_str()))
+                        .collect();
+                    return Some(parts.join(sep));
+                }
+            }
+        }
+        None
+    }
+
+    /// Look up the first super_type for a class by name from canonical defs.
+    fn find_super_type(&self, class_name: &str) -> Option<String> {
+        self.result
+            .definitions
+            .iter()
+            .find(|d| d.name == class_name)
+            .and_then(|d| d.metadata.as_ref())
+            .and_then(|m| m.super_types.first())
+            .cloned()
     }
 
     /// Branch handling per Braun et al. §2.3 (Figure 3b).

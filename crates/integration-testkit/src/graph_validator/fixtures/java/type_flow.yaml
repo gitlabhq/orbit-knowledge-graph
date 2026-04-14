@@ -49,6 +49,38 @@ fixtures:
           }
       }
 
+  - path: ImplicitThis.java
+    content: |
+      public class ImplicitThis {
+          public void helper() {}
+          public void run() {
+              helper();
+          }
+      }
+
+  - path: SuperCall.java
+    content: |
+      public class Base {
+          public void baseMethod() {}
+      }
+
+  - path: SuperCallChild.java
+    content: |
+      public class Child extends Base {
+          public void run() {
+              super.baseMethod();
+          }
+      }
+
+  - path: ChainedCall.java
+    content: |
+      public class ChainedCall {
+          public UserService getService() { return null; }
+          public void run() {
+              getService().query();
+          }
+      }
+
   - path: ThisCall.java
     content: |
       public class ThisCall {
@@ -103,6 +135,25 @@ tests:
           RETURN callee.name
         assert:
           - { empty: true }
+
+  - name: "implicit this: bare helper() in method body resolves to ImplicitThis.helper"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ImplicitThis'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+        assert:
+          - { row_count: 1 }
+          - { contains_row: { callee: "helper", callee_fqn: "ImplicitThis.helper" } }
+
+  - name: "super.baseMethod() resolves to Base.baseMethod"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'Child'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+        assert:
+          - { contains_row: { callee: "baseMethod", callee_fqn: "Base.baseMethod" } }
 
   - name: "this.helper() resolves to ThisCall.helper"
     queries:

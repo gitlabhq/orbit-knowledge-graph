@@ -54,10 +54,20 @@ fn resolve_with_rules<A: AsAst>(
             .ssa
             .read_variable_stateless(&read.name, read.block);
 
-        let resolved_defs = resolve_reaching_defs(rules, ctx, read.file_idx, &read.name, &reaching);
-
         let result = &ctx.results[read.file_idx];
         let reference = &result.references[read.ref_idx];
+
+        // Find enclosing class for implicit-this resolution
+        let enclosing_class_fqn = find_enclosing_class(ctx, read.file_idx, reference);
+
+        let resolved_defs = resolve_reaching_defs(
+            rules,
+            ctx,
+            read.file_idx,
+            &read.name,
+            &reaching,
+            enclosing_class_fqn.as_deref(),
+        );
 
         let source_enclosing = ctx.scopes.enclosing_scope(
             &result.file_path,
@@ -113,6 +123,7 @@ fn resolve_reaching_defs<A>(
     file_idx: usize,
     name: &str,
     reaching: &ReachingDefs,
+    enclosing_class_fqn: Option<&str>,
 ) -> Vec<DefRef> {
     let mut result = Vec::new();
 
@@ -125,22 +136,18 @@ fn resolve_reaching_defs<A>(
                 });
             }
             Value::Import(f, i) => {
-                // Chase the import to find terminal definitions
                 let import = &ctx.results[*f].imports[*i];
                 let import_defs = resolve_import(ctx, import);
                 result.extend(import_defs);
             }
             Value::Type(type_name) => {
                 // Type-flow: look up `name` as a member of the type.
-                // e.g., if reaching def is Type("UserService") and ref name
-                // is "query", look up UserService.query in the member index.
                 let member_defs =
                     ctx.members
                         .lookup_member_with_supers(type_name, name, &ctx.definitions);
                 if !member_defs.is_empty() {
                     result.extend(member_defs);
                 } else {
-                    // Fallback: try FQN lookup (type_name.name)
                     let fqn = format!("{}.{}", type_name, name);
                     for def_ref in ctx.definitions.lookup_fqn(&fqn) {
                         result.push(*def_ref);
@@ -151,9 +158,20 @@ fn resolve_reaching_defs<A>(
         }
     }
 
-    // If SSA didn't find anything, fall back to import strategies
+    // Fallback 1: import strategies
     if result.is_empty() {
         result = apply_import_strategies(rules, ctx, file_idx, name);
+    }
+
+    // Fallback 2: implicit this — try member lookup on the enclosing class.
+    // In Java/Kotlin, `helper()` inside a method body means `this.helper()`.
+    if result.is_empty() {
+        if let Some(class_fqn) = enclosing_class_fqn {
+            let member_defs =
+                ctx.members
+                    .lookup_member_with_supers(class_fqn, name, &ctx.definitions);
+            result.extend(member_defs);
+        }
     }
 
     // Deduplicate
@@ -161,6 +179,32 @@ fn resolve_reaching_defs<A>(
     result.retain(|r| seen.insert((r.file_idx, r.def_idx)));
 
     result
+}
+
+/// Find the enclosing class FQN for a reference, for implicit-this resolution.
+fn find_enclosing_class<A>(
+    ctx: &ResolutionContext<A>,
+    file_idx: usize,
+    reference: &code_graph_types::CanonicalReference,
+) -> Option<String> {
+    let result = &ctx.results[file_idx];
+    let byte_start = reference.range.byte_offset.0;
+    let byte_end = reference.range.byte_offset.1;
+
+    // Find all containing scopes, then pick the innermost class/interface
+    let containing = ctx
+        .scopes
+        .containing_scopes(&result.file_path, byte_start, byte_end);
+    for scope in containing.iter().rev() {
+        let def = &result.definitions[scope.def_idx];
+        if matches!(
+            def.kind,
+            code_graph_types::DefKind::Class | code_graph_types::DefKind::Interface
+        ) {
+            return Some(def.fqn.to_string());
+        }
+    }
+    None
 }
 
 /// Apply the language's import resolution strategies in order.
