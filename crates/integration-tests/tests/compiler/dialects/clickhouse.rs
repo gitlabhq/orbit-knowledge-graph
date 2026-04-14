@@ -450,3 +450,36 @@ fn single_table_ontology_no_union() {
         "single-table ontology should not produce UNION ALL: {rendered}"
     );
 }
+
+#[test]
+fn multi_table_path_finding_scans_all_tables() {
+    let json = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Definition", "node_ids": [100]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    }"#;
+    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
+        "wildcard path finding should scan both edge tables: {rendered}"
+    );
+}
+
+#[test]
+fn multi_table_neighbors_scans_all_tables() {
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1]},
+        "neighbors": {"node": "p", "direction": "both"}
+    }"#;
+    let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
+        "wildcard neighbors should scan both edge tables: {rendered}"
+    );
+}
