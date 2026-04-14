@@ -11,6 +11,29 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 **Worktrees:** after creating a git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
 
+## E2E local development (native dev)
+
+Run GKG natively against GDK services with `mise run dev`. Full guide: `docs/dev/local-development.md` § "Alternative: quick start with mise".
+
+**First-time setup checklist:**
+
+1. **GDK prerequisites** — enable in `gdk.yml`: `nats.enabled`, `clickhouse.enabled`, `siphon.enabled`
+2. **PostgreSQL TCP** — Siphon requires TCP, not Unix sockets. Add `postgresql.host: localhost` to `gdk.yml`, then `gdk reconfigure && gdk restart postgresql`
+3. **WAL level** — set `wal_level = logical` in `$GDK_ROOT/postgresql/data/postgresql.conf`, then `gdk restart postgresql`
+4. **Siphon port conflict** — Siphon's prometheus port (8081) often conflicts with Elasticsearch. Fix: change `prometheus.port` to `8082` in `$GDK_ROOT/siphon/config.yml`, add `siphon/config.yml` to `gdk.protected_config_files`, then `gdk restart siphon`
+5. **Knowledge Graph in gitlab.yml** — add `knowledge_graph: enabled: true` under the `development:` block in `$GDK_ROOT/gitlab/config/gitlab.yml`, add `gitlab/config/gitlab.yml` to `gdk.protected_config_files`
+6. **Feature flags** — `cd $GDK_ROOT/gitlab && bundle exec rails runner "Feature.enable(:knowledge_graph); Feature.enable(:knowledge_graph_infra)"`
+7. **Enable namespaces** — `cd $GDK_ROOT/gitlab && bundle exec rails runner "Namespace.where(type: 'Group').find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"`
+8. **GKG setup** — `mise run dev:check && mise run dev:setup && mise run dev`
+
+**Data flow:** PostgreSQL → Siphon → NATS → ClickHouse (datalake) → GKG Indexer → ClickHouse (graph). The dispatcher triggers indexing every ~60s. After Siphon's initial snapshot completes (~1–2 min), the graph tables populate within one dispatch cycle.
+
+**UI access:** `https://<gdk-hostname>:<gdk-port>/dashboard/orbit` (e.g. `https://gdk.test:3443/dashboard/orbit`). Request flow: Browser → Workhorse → GKG gRPC (`localhost:50054`).
+
+**Ports:** Webserver HTTP `127.0.0.1:8090`, gRPC `127.0.0.1:50054`, Indexer health `127.0.0.1:4202`. Override via `.env` file (see `.env.example`).
+
+**Stale processes:** if `mise run dev` fails with "Address already in use", kill leftover processes: `pkill -f gkg-server`.
+
 ## How the system works
 
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). GKG only writes to its own ClickHouse tables.
