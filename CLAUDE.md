@@ -61,6 +61,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/gkg-server-config/` |
 | Dev environment setup | `docs/dev/INFRASTRUCTURE.md` |
 | Local development guide | `docs/dev/local-development.md` |
+| Native dev (`mise run dev`) | `scripts/gkg-native-dev.sh`, `docs/dev/local-development.md` § "Alternative: quick start with mise" |
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |

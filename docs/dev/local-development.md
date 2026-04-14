@@ -336,6 +336,26 @@ applies `config/graph.sql` to the configured ClickHouse instance.
 This lightweight path assumes NATS, ClickHouse, Siphon, PostgreSQL, and Gitaly
 come from GDK.
 
+### HTTPS and nginx GDK setups
+
+The dev script reads `hostname`, `port`, and `https.enabled` from `gdk.yml` to
+derive `GKG_GITLAB__BASE_URL`. If your GDK has HTTPS enabled (for example
+`https.enabled: true` with `hostname: gdk.test` and `port: 3443`), the script
+automatically sets `GKG_GITLAB__BASE_URL=https://gdk.test:3443`.
+
+For HTTPS to work, the GKG server's TLS stack (`rustls` via `reqwest`) must
+trust the certificate. If you used `mkcert` to generate GDK certificates, run
+`mkcert -install` to add the root CA to your system trust store.
+
+### PostgreSQL socket vs TCP
+
+GDK defaults to Unix sockets for PostgreSQL (`postgresql.host` points to the
+GDK directory, e.g. `~/gdk/postgresql`). The dev script detects this
+automatically and checks for the socket file instead of probing TCP port 5432.
+
+If you need PostgreSQL on TCP (for example for external tools), add
+`postgresql.host: localhost` to `gdk.yml` and run `gdk reconfigure`.
+
 See `.gkg-dev.conf.example` for all configuration options (K8s runtime,
 resource allocation, Tilt streaming mode).
 

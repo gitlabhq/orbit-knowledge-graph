@@ -87,7 +87,27 @@ GKG_HEALTHCHECK_BIND_ADDRESS="${GKG_HEALTHCHECK_BIND_ADDRESS:-127.0.0.1:4201}"
 GDK_CLICKHOUSE_HTTP_PORT="$(parse_gdk_value clickhouse.http_port 2>/dev/null || echo 8123)"
 GDK_CLICKHOUSE_TCP_PORT="$(parse_gdk_value clickhouse.tcp_port 2>/dev/null || echo 9001)"
 GDK_POSTGRES_PORT="$(parse_gdk_value postgresql.port 2>/dev/null || echo 5432)"
-GDK_GITLAB_PORT="$(parse_gdk_value gitlab.rails.port 2>/dev/null || echo 3000)"
+# gdk.example.yml contains a hardcoded absolute path for postgresql.host
+# (e.g. /home/git/gdk/postgresql) which won't exist on macOS. If the resolved
+# path doesn't exist, fall back to $GDK_ROOT/postgresql.
+GDK_POSTGRES_HOST="$(parse_gdk_value postgresql.host 2>/dev/null || echo "$GDK_ROOT/postgresql")"
+if [[ ! -d "$GDK_POSTGRES_HOST" && "$GDK_POSTGRES_HOST" != "localhost" ]]; then
+  GDK_POSTGRES_HOST="$GDK_ROOT/postgresql"
+fi
+
+# Derive the GDK external URL from gdk.yml hostname/port/https settings.
+# GDK may be configured with HTTPS + nginx, in which case Rails is not
+# directly reachable on a TCP port — traffic goes through nginx/workhorse.
+GDK_HOSTNAME="$(parse_gdk_value hostname 2>/dev/null || echo "127.0.0.1")"
+GDK_PORT="$(parse_gdk_value port 2>/dev/null || echo 3000)"
+GDK_HTTPS_ENABLED="$(parse_gdk_value https.enabled 2>/dev/null || echo false)"
+
+if [[ "$GDK_HTTPS_ENABLED" == "true" ]]; then
+  GDK_GITLAB_URL="https://${GDK_HOSTNAME}:${GDK_PORT}"
+else
+  GDK_GITLAB_URL="http://${GDK_HOSTNAME}:${GDK_PORT}"
+fi
+
 GKG_NATS__URL="${GKG_NATS__URL:-nats://127.0.0.1:4222}"
 GKG_DATALAKE__URL="${GKG_DATALAKE__URL:-http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}}"
 GKG_DATALAKE__DATABASE="${GKG_DATALAKE__DATABASE:-gitlab_clickhouse_development}"
@@ -95,7 +115,7 @@ GKG_DATALAKE__USERNAME="${GKG_DATALAKE__USERNAME:-default}"
 GKG_GRAPH__URL="${GKG_GRAPH__URL:-http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}}"
 GKG_GRAPH__DATABASE="${GKG_GRAPH__DATABASE:-gkg-development}"
 GKG_GRAPH__USERNAME="${GKG_GRAPH__USERNAME:-default}"
-GKG_GITLAB__BASE_URL="${GKG_GITLAB__BASE_URL:-http://127.0.0.1:${GDK_GITLAB_PORT}}"
+GKG_GITLAB__BASE_URL="${GKG_GITLAB__BASE_URL:-${GDK_GITLAB_URL}}"
 GKG_SIPHON_STREAM_NAME="${GKG_SIPHON_STREAM_NAME:-siphon_stream}"
 GKG_ENABLE_METRICS="${GKG_ENABLE_METRICS:-false}"
 
@@ -243,18 +263,45 @@ EOF
   if command -v nc >/dev/null 2>&1; then
     nc -z 127.0.0.1 4222 >/dev/null 2>&1 && printf "[ok] NATS reachable on localhost:4222\n" || { printf "[fail] NATS not running — enable it in gdk.yml: nats:\n  enabled: true\n"; failures=$((failures + 1)); }
     nc -z 127.0.0.1 "$GDK_CLICKHOUSE_HTTP_PORT" >/dev/null 2>&1 && printf "[ok] ClickHouse reachable on localhost:%s\n" "$GDK_CLICKHOUSE_HTTP_PORT" || { printf "[fail] ClickHouse not running — enable it in gdk.yml: clickhouse:\n  enabled: true\n"; failures=$((failures + 1)); }
-    nc -z 127.0.0.1 "$GDK_POSTGRES_PORT" >/dev/null 2>&1 && printf "[ok] PostgreSQL reachable on localhost:%s\n" "$GDK_POSTGRES_PORT" || { printf "[fail] PostgreSQL not reachable on localhost:%s — GDK and Siphon require PostgreSQL running\n" "$GDK_POSTGRES_PORT"; failures=$((failures + 1)); }
-    local wal_level
-    wal_level="$(psql -h 127.0.0.1 -p "$GDK_POSTGRES_PORT" -U "$USER" -d gitlabhq_development -tAc "SHOW wal_level" 2>/dev/null || true)"
-    if [[ "$wal_level" == "logical" ]]; then
-      printf "[ok] PostgreSQL wal_level is 'logical' (required for Siphon CDC)\n"
-    elif [[ -n "$wal_level" ]]; then
-      printf "[fail] PostgreSQL wal_level is '%s', must be 'logical' for Siphon CDC\n" "$wal_level"
-      printf "  Edit %s/postgresql/data/postgresql.conf and set: wal_level = logical\n" "$GDK_ROOT"
-      printf "  Then restart PostgreSQL: gdk restart postgresql\n"
+
+    # PostgreSQL: GDK may use a Unix socket (default) or TCP depending on
+    # postgresql.host in gdk.yml. Try the socket first, then fall back to TCP.
+    local pg_reachable=false
+    if [[ "$GDK_POSTGRES_HOST" != "localhost" && -S "${GDK_POSTGRES_HOST}/.s.PGSQL.${GDK_POSTGRES_PORT}" ]]; then
+      printf "[ok] PostgreSQL reachable via Unix socket at %s (port %s)\n" "$GDK_POSTGRES_HOST" "$GDK_POSTGRES_PORT"
+      pg_reachable=true
+    elif nc -z 127.0.0.1 "$GDK_POSTGRES_PORT" >/dev/null 2>&1; then
+      printf "[ok] PostgreSQL reachable on localhost:%s\n" "$GDK_POSTGRES_PORT"
+      pg_reachable=true
+    else
+      printf "[fail] PostgreSQL not reachable (checked socket %s and TCP localhost:%s)\n" "$GDK_POSTGRES_HOST" "$GDK_POSTGRES_PORT"
       failures=$((failures + 1))
     fi
-    nc -z 127.0.0.1 "$GDK_GITLAB_PORT" >/dev/null 2>&1 && printf "[ok] GitLab reachable on localhost:%s\n" "$GDK_GITLAB_PORT" || { printf "[fail] GitLab not reachable on localhost:%s — GKG requires GitLab for JWT auth\n" "$GDK_GITLAB_PORT"; failures=$((failures + 1)); }
+
+    if [[ "$pg_reachable" == "true" ]]; then
+      local wal_level
+      wal_level="$(psql -h "$GDK_POSTGRES_HOST" -p "$GDK_POSTGRES_PORT" -U "$USER" -d gitlabhq_development -tAc "SHOW wal_level" 2>/dev/null || true)"
+      if [[ "$wal_level" == "logical" ]]; then
+        printf "[ok] PostgreSQL wal_level is 'logical' (required for Siphon CDC)\n"
+      elif [[ -n "$wal_level" ]]; then
+        printf "[fail] PostgreSQL wal_level is '%s', must be 'logical' for Siphon CDC\n" "$wal_level"
+        printf "  Edit %s/postgresql/data/postgresql.conf and set: wal_level = logical\n" "$GDK_ROOT"
+        printf "  Then restart PostgreSQL: gdk restart postgresql\n"
+        failures=$((failures + 1))
+      fi
+    fi
+
+    # GitLab: GDK may serve via HTTPS + nginx, so check the derived URL
+    # instead of assuming a raw TCP port.
+    local gitlab_host="${GDK_HOSTNAME}"
+    local gitlab_port="${GDK_PORT}"
+    if nc -z "$gitlab_host" "$gitlab_port" >/dev/null 2>&1; then
+      printf "[ok] GitLab reachable on %s:%s\n" "$gitlab_host" "$gitlab_port"
+    else
+      printf "[fail] GitLab not reachable on %s:%s — GKG requires GitLab for JWT auth\n" "$gitlab_host" "$gitlab_port"
+      failures=$((failures + 1))
+    fi
+
     if [[ -n "$GITALY_TCP_ADDR" ]]; then
       local gitaly_host="${GITALY_TCP_ADDR%:*}"
       local gitaly_port="${GITALY_TCP_ADDR##*:}"
@@ -279,8 +326,9 @@ GDK_ROOT=$GDK_ROOT
 ENV_FILE=${REPO_ROOT}/.env
 GDK_CLICKHOUSE_HTTP_PORT=$GDK_CLICKHOUSE_HTTP_PORT
 GDK_CLICKHOUSE_TCP_PORT=$GDK_CLICKHOUSE_TCP_PORT
+GDK_POSTGRES_HOST=$GDK_POSTGRES_HOST
 GDK_POSTGRES_PORT=$GDK_POSTGRES_PORT
-GDK_GITLAB_PORT=$GDK_GITLAB_PORT
+GDK_GITLAB_URL=$GDK_GITLAB_URL
 GITALY_TCP_ADDR=${GITALY_TCP_ADDR:-<not configured>}
 WEB_HTTP=$WEB_HTTP
 WEB_GRPC=$WEB_GRPC
