@@ -223,22 +223,21 @@ impl GraphBuilder {
         def_indices: &[NodeIndex],
         cg: &mut CodeGraph,
     ) {
+        // Pre-build FQN → index lookup to avoid O(D²) inner scan.
+        let fqn_to_idx: rustc_hash::FxHashMap<code_graph_types::IStr, usize> = definitions
+            .iter()
+            .enumerate()
+            .map(|(i, d)| (d.fqn.as_istr(), i))
+            .collect();
+
         for (i, def) in definitions.iter().enumerate() {
             let Some(parent_fqn) = def.fqn.parent() else {
                 continue;
             };
 
-            let parent_fqn_str = parent_fqn.to_string();
-
-            // Find the parent definition
-            let parent = definitions
-                .iter()
-                .enumerate()
-                .find(|(_, d)| d.fqn.to_string() == parent_fqn_str);
-
-            if let Some((parent_idx, parent_def)) = parent
+            if let Some(&parent_idx) = fqn_to_idx.get(&parent_fqn.as_istr())
                 && parent_idx != i
-                && let Some(rel) = containment_relationship(parent_def.kind, def.kind)
+                && let Some(rel) = containment_relationship(definitions[parent_idx].kind, def.kind)
             {
                 cg.graph.add_edge(
                     def_indices[parent_idx],
