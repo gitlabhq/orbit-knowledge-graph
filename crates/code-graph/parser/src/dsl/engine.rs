@@ -13,6 +13,8 @@ use crate::utils::node_to_range;
 
 use super::types::{LanguageSpec, Rule};
 
+
+
 struct ScopeMatch {
     name: String,
     label: &'static str,
@@ -364,11 +366,11 @@ impl LanguageSpec {
                         range,
                         wildcard: false,
                     });
-                } else if ck == "wildcard_import" {
+                } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
                     imports.push(CanonicalImport {
                         import_type: label,
                         path: base_path.clone(),
-                        name: Some("*".to_string()),
+                        name: Some(rule.wildcard_symbol.to_string()),
                         alias: None,
                         scope_fqn: None,
                         range,
@@ -382,7 +384,7 @@ impl LanguageSpec {
             } else {
                 (full_path, rule.extract_symbol(node))
             };
-            let is_wildcard = name.as_deref() == Some("*");
+            let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
             imports.push(CanonicalImport {
                 import_type: label,
                 path,

@@ -14,6 +14,10 @@ use super::rules::{ImportStrategy, ResolutionRules};
 use super::ssa::{BlockId, ReachingDefs, SsaResolver, Value};
 use super::walker::{AsAst, walk_files};
 
+/// Maximum number of candidates returned by `GlobalName` bare-name lookup
+/// before we consider the result ambiguous and return nothing.
+const MAX_BARE_NAME_CANDIDATES: usize = 3;
+
 /// Trait to get rules from the type parameter.
 /// Each language implements this on a zero-sized struct.
 pub trait HasRules {
@@ -474,7 +478,7 @@ fn resolve_import<A>(
         .or(import.name.as_deref())
         .unwrap_or("");
 
-    if symbol_name.is_empty() || symbol_name == "*" {
+    if symbol_name.is_empty() || import.wildcard {
         return vec![];
     }
 
@@ -500,7 +504,7 @@ fn resolve_import<A>(
 
     // Try the symbol name as a bare name
     let by_name = ctx.definitions.lookup_name(symbol_name);
-    if by_name.len() <= 3 {
+    if by_name.len() <= MAX_BARE_NAME_CANDIDATES {
         return by_name.to_vec();
     }
 

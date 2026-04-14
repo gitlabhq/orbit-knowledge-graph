@@ -15,6 +15,10 @@ use parser_core::dsl::types::Rule as DslRule;
 use super::rules::{BindingKind, ChainMode, ResolutionRules, ScopeKind};
 use super::ssa::{BlockId, SsaResolver, Value};
 
+/// Minimum remaining stack space (bytes) before the walker stops recursing.
+/// Prevents stack overflow on deeply nested ASTs.
+const MIN_STACK_REMAINING: usize = 128 * 1024;
+
 /// A recorded reference read, linking back to the canonical data.
 #[derive(Debug, Clone)]
 pub struct RecordedRead {
@@ -108,10 +112,13 @@ impl<'a> FileWalker<'a> {
             ssa.write_variable(&def.name, module_block, Value::Def(file_idx, def_idx));
         }
 
-        // Write all imports
+        // Write all imports (skip wildcards — they have no single name to bind)
         for (import_idx, imp) in result.imports.iter().enumerate() {
+            if imp.wildcard {
+                continue;
+            }
             let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-            if !name.is_empty() && name != "*" {
+            if !name.is_empty() {
                 ssa.write_variable(name, module_block, Value::Import(file_idx, import_idx));
             }
         }
@@ -142,7 +149,7 @@ impl<'a> FileWalker<'a> {
     }
 
     fn walk_node(&mut self, node: &Node<StrDoc<SupportLang>>) {
-        if stacker::remaining_stack().unwrap_or(usize::MAX) < 128 * 1024 {
+        if stacker::remaining_stack().unwrap_or(usize::MAX) < MIN_STACK_REMAINING {
             return;
         }
 

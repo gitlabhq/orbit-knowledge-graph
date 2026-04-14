@@ -164,20 +164,23 @@ impl DslLanguage for PythonDsl {
                 .classify(python_import_classify)
                 .path_from(Extract::None)
                 .multi(&["dotted_name"])
-                .alias_child("aliased_import"),
+                .alias_child("aliased_import")
+                .wildcard_child("wildcard_import"),
             // `from pathlib import Path` / `from pathlib import Path, PurePath`
             import("import_from_statement")
                 .classify(python_from_classify)
                 .path_from(field("module_name"))
                 .multi(&["dotted_name", "identifier"])
-                .alias_child("aliased_import"),
+                .alias_child("aliased_import")
+                .wildcard_child("wildcard_import"),
             // `from __future__ import annotations`
             // The path is always "__future__" — use ChildOfKind to find the keyword token
             import("future_import_statement")
                 .label("FutureImport")
                 .path_from(Extract::ChildOfKind("__future__"))
                 .multi(&["dotted_name", "identifier"])
-                .alias_child("aliased_import"),
+                .alias_child("aliased_import")
+                .wildcard_child("wildcard_import"),
         ]
     }
 

@@ -224,6 +224,12 @@ pub struct ImportRule {
     /// Node kind for aliased children (e.g. "aliased_import").
     /// When a child matches this kind, name comes from `name` field, alias from `alias` field.
     pub(crate) alias_child_kind: Option<&'static str>,
+    /// Node kind for wildcard children (e.g. "wildcard_import", "asterisk").
+    /// When a child matches this kind, a wildcard import is emitted with
+    /// `wildcard: true` and name from `wildcard_symbol`.
+    pub(crate) wildcard_child_kind: Option<&'static str>,
+    /// Symbol name used for wildcard imports (e.g. "*").
+    pub(crate) wildcard_symbol: &'static str,
     /// If set, split a scoped name at this separator into (path, name).
     /// e.g. `"."` splits `java.util.List` → path=`java.util`, name=`List`.
     pub(crate) split_last: Option<&'static str>,
@@ -293,6 +299,18 @@ impl ImportRule {
         self
     }
 
+    /// Set the node kind for wildcard children (e.g. "wildcard_import", "asterisk").
+    pub fn wildcard_child(mut self, kind: &'static str) -> Self {
+        self.wildcard_child_kind = Some(kind);
+        self
+    }
+
+    /// Set the symbol name used for wildcard imports (default: "*").
+    pub fn wildcard_sym(mut self, sym: &'static str) -> Self {
+        self.wildcard_symbol = sym;
+        self
+    }
+
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
         self.classify.map_or(self.label, |f| f(node))
     }
@@ -330,6 +348,8 @@ pub fn import(kind: &'static str) -> ImportRule {
         classify: None,
         multi_child_kinds: None,
         alias_child_kind: None,
+        wildcard_child_kind: None,
+        wildcard_symbol: "*",
         split_last: None,
     }
 }
