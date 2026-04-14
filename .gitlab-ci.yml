@@ -43,10 +43,10 @@ workflow:
 include:
   - template: Jobs/SAST.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
-  - project: 'gitlab-org/orbit/experiments/ai-review-bot'
-    file: '/template.yml'
   - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/components/lgtm-agent/lgtm-agent@main
-  - component: gitlab.com/gitlab-org/orbit/experiments/ai-review-bot/ai-review-bot@main
+  - project: 'gitlab-org/orbit/experiments/ai-review-bot'
+    file: '/templates/ai-review-bot/template.yml'
+    ref: main
     inputs:
       automatic: manual
 
