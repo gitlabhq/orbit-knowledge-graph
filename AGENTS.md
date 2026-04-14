@@ -11,10 +11,6 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 **Worktrees:** after creating a git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
 
-## E2E local development (native dev)
-
-For E2E local development setup and workflow, see `docs/dev/local-development.md`.
-
 ## How the system works
 
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). GKG only writes to its own ClickHouse tables.
@@ -69,7 +65,6 @@ For E2E local development setup and workflow, see `docs/dev/local-development.md
 | GitLab instance config | `docs/dev/GITLAB_INSTANCE.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
-| Helm charts | `helm/gkg/` (vendored via vendir) |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
@@ -108,7 +103,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, CLI test harness (`cli` module) for CLI integration tests |
 | `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness, graph formatting) + cli (concurrency, worktrees); depends on gkg-server, compiler, integration-testkit |
-| `xtask` | Developer task runner (data generation, query evaluation, ClickHouse management) |
+| `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |
 
 ## Code quality
 
