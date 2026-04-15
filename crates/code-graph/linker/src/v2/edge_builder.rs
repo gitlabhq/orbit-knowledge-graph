@@ -10,6 +10,12 @@ use rustc_hash::FxHashSet;
 use smallvec::{SmallVec, smallvec};
 
 use super::context::{DefRef, ResolutionContext};
+
+/// Maximum chain depth before we stop walking and resolve only the last step.
+/// Fluent builder chains (e.g. `builder.startObject().field().endObject()`)
+/// can be 30+ steps. Beyond this depth, the call graph value is minimal
+/// and the cost is linear in chain length.
+const MAX_CHAIN_DEPTH: usize = 10;
 use super::edges::{EdgeSource, ResolvedEdge};
 use super::imports;
 use super::rules::ResolutionRules;
@@ -275,19 +281,28 @@ impl<'a> Resolver<'a> {
             reference.range.byte_offset.1,
         );
 
+        // If the chain is too long, resolve only the last few steps.
+        // This handles fluent builder patterns (30+ chained calls) without
+        // walking the entire chain.
+        let effective_chain = if chain.len() > MAX_CHAIN_DEPTH {
+            &chain[chain.len() - MAX_CHAIN_DEPTH..]
+        } else {
+            chain
+        };
+
         // Step 1: resolve the base to type name(s)
-        let mut current_types = self.resolve_base(&chain[0], read.block, enclosing.as_deref());
+        let mut current_types =
+            self.resolve_base(&effective_chain[0], read.block, enclosing.as_deref());
 
         if current_types.is_empty() {
-            // Can't resolve base — fall back to bare name on last step
             return self.chain_fallback(read, chain);
         }
 
         // Step 2: walk remaining steps
-        let mut compound_key = self.compound_key_base(&chain[0]);
+        let mut compound_key = self.compound_key_base(&effective_chain[0]);
 
-        for (i, step) in chain[1..].iter().enumerate() {
-            let is_last = i == chain.len() - 2;
+        for (i, step) in effective_chain[1..].iter().enumerate() {
+            let is_last = i == effective_chain.len() - 2;
             let member_name = match step {
                 ExpressionStep::Call(n) | ExpressionStep::Field(n) => n,
                 _ => continue,
