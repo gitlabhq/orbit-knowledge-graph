@@ -231,6 +231,10 @@ pub fn build_edges(
 
     const BATCH_SIZE: usize = 1024;
 
+    // Sort heaviest files first so rayon has maximum work to steal from
+    // in early batches. Tail batches are small files that finish fast.
+    walks.sort_unstable_by(|a, b| b.reads.len().cmp(&a.reads.len()));
+
     let mut all_edges = Vec::new();
     let mut combined = ResolveStats::default();
     let mut timings = Vec::with_capacity(walks.len());
