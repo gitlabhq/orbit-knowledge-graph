@@ -124,8 +124,6 @@ pub struct CodeGraph {
     pub def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
     pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
     pub members: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
-    pub imports_by_file: FxHashMap<String, Vec<NodeIndex>>,
-    pub defs_by_file: FxHashMap<String, Vec<NodeIndex>>,
 
     pub root_path: String,
 }
@@ -147,8 +145,6 @@ impl CodeGraph {
             def_by_fqn: FxHashMap::default(),
             def_by_name: FxHashMap::default(),
             members: FxHashMap::default(),
-            imports_by_file: FxHashMap::default(),
-            defs_by_file: FxHashMap::default(),
             root_path: String::new(),
         }
     }
@@ -227,11 +223,6 @@ impl CodeGraph {
                 GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::ImportedSymbol),
             );
         }
-        self.defs_by_file
-            .insert(relative_path.clone(), def_nodes.clone());
-        self.imports_by_file
-            .insert(relative_path, import_nodes.clone());
-
         (def_nodes, import_nodes)
     }
 
@@ -261,12 +252,9 @@ impl CodeGraph {
         // Containment edges between definitions (per file)
         for result in results {
             let file_path = self.relative_path(&result.file_path);
-            let def_indices = self
-                .defs_by_file
-                .get(&file_path)
-                .cloned()
-                .unwrap_or_default();
-            build_containment_edges(&result.definitions, &def_indices, self);
+            if let Some(&file_node) = self.file_index.get(&file_path) {
+                build_containment_edges(file_node, self);
+            }
         }
 
         self.link_supers();
@@ -351,18 +339,9 @@ impl CodeGraph {
         false
     }
 
-    pub fn file_imports(&self, file_path: &str) -> &[NodeIndex] {
-        self.imports_by_file
-            .get(file_path)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
-    pub fn file_defs(&self, file_path: &str) -> &[NodeIndex] {
-        self.defs_by_file
-            .get(file_path)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+    /// Does this definition node belong to the given file?
+    pub fn def_in_file(&self, def_idx: NodeIndex, file_path: &str) -> bool {
+        self.graph[def_idx].path() == file_path
     }
 
     pub fn def(&self, idx: NodeIndex) -> &CanonicalDefinition {
@@ -562,35 +541,47 @@ fn build_directory_chain(
     cg.dir_index.get(&parent_dir).copied()
 }
 
-fn build_containment_edges(
-    definitions: &[CanonicalDefinition],
-    def_indices: &[NodeIndex],
-    cg: &mut CodeGraph,
-) {
-    let fqn_to_idx: FxHashMap<code_graph_types::IStr, usize> = definitions
-        .iter()
-        .enumerate()
-        .map(|(i, d)| (d.fqn.as_istr(), i))
+fn build_containment_edges(file_node: NodeIndex, cg: &mut CodeGraph) {
+    // Collect def nodes for this file from graph neighbors
+    let defs: Vec<(NodeIndex, code_graph_types::IStr, code_graph_types::DefKind)> = cg
+        .graph
+        .neighbors_directed(file_node, petgraph::Direction::Outgoing)
+        .filter_map(|idx| {
+            let (_, def) = cg.graph[idx].as_definition()?;
+            Some((idx, def.fqn.as_istr(), def.kind))
+        })
         .collect();
 
-    for (i, def) in definitions.iter().enumerate() {
+    let fqn_to_pos: FxHashMap<code_graph_types::IStr, usize> = defs
+        .iter()
+        .enumerate()
+        .map(|(i, (_, fqn, _))| (*fqn, i))
+        .collect();
+
+    let mut edges = Vec::new();
+    for (i, (idx, _, kind)) in defs.iter().enumerate() {
+        let def = cg.def(*idx);
         let Some(parent_fqn) = def.fqn.parent() else {
             continue;
         };
-        if let Some(&parent_idx) = fqn_to_idx.get(&parent_fqn.as_istr())
-            && parent_idx != i
-            && let Some(rel) = containment_relationship(definitions[parent_idx].kind, def.kind)
+        if let Some(&parent_pos) = fqn_to_pos.get(&parent_fqn.as_istr())
+            && parent_pos != i
+            && let Some(rel) = containment_relationship(defs[parent_pos].2, *kind)
         {
-            cg.graph.add_edge(
-                def_indices[parent_idx],
-                def_indices[i],
-                GraphEdge {
-                    relationship: rel,
-                    source_definition_range: None,
-                    target_definition_range: None,
-                },
-            );
+            edges.push((defs[parent_pos].0, *idx, rel));
         }
+    }
+
+    for (src, tgt, rel) in edges {
+        cg.graph.add_edge(
+            src,
+            tgt,
+            GraphEdge {
+                relationship: rel,
+                source_definition_range: None,
+                target_definition_range: None,
+            },
+        );
     }
 }
 

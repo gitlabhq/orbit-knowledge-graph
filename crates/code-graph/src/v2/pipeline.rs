@@ -441,28 +441,6 @@ impl Pipeline {
                     .or_default()
                     .extend(remapped);
             }
-            for (fp, nodes) in &g.defs_by_file {
-                let remapped: Vec<_> = nodes
-                    .iter()
-                    .filter_map(|i| index_map.get(i).copied())
-                    .collect();
-                merged
-                    .defs_by_file
-                    .entry(fp.clone())
-                    .or_default()
-                    .extend(remapped);
-            }
-            for (fp, nodes) in &g.imports_by_file {
-                let remapped: Vec<_> = nodes
-                    .iter()
-                    .filter_map(|i| index_map.get(i).copied())
-                    .collect();
-                merged
-                    .imports_by_file
-                    .entry(fp.clone())
-                    .or_default()
-                    .extend(remapped);
-            }
             for (class_fqn, member_map) in &g.members {
                 for (member_name, nodes) in member_map {
                     let remapped: Vec<_> = nodes

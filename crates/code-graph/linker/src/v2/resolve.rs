@@ -199,12 +199,11 @@ fn same_file(
     name: &str,
 ) -> Vec<NodeIndex> {
     let file_path = graph.relative_path(&results[file_idx].file_path);
-    let file_defs = graph.file_defs(&file_path);
 
     let by_fqn: Vec<NodeIndex> = graph
         .lookup_fqn(name)
         .iter()
-        .filter(|idx| file_defs.contains(idx))
+        .filter(|&&idx| graph.def_in_file(idx, &file_path))
         .copied()
         .collect();
     if !by_fqn.is_empty() {
@@ -214,7 +213,7 @@ fn same_file(
     graph
         .lookup_name(name)
         .iter()
-        .filter(|idx| file_defs.contains(idx))
+        .filter(|&&idx| graph.def_in_file(idx, &file_path))
         .copied()
         .collect()
 }
