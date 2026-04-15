@@ -15,7 +15,7 @@ Documentation lives in three tiers:
 
 1. **SSOT** — `README.md` (project overview, repos, epics, infra, people, helm charts)
 2. **Design documents** — `docs/design-documents/` (architecture, data model, security, querying, indexing, schema, observability)
-3. **Dev guides** — `docs/dev/` (local development, infrastructure, runbook, e2e)
+3. **Dev guides** — `docs/dev/` (local development, infrastructure, runbook)
 
 `AGENTS.md` and `CLAUDE.md` must be identical (CI enforces this).
 

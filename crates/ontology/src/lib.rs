@@ -218,6 +218,56 @@ impl Ontology {
         self
     }
 
+    /// Builder: declare an additional edge table (for testing multi-table routing).
+    #[must_use]
+    pub fn with_edge_table(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        let sort_key: Vec<String> = EDGE_RESERVED_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        self.edge_table_configs.insert(
+            name,
+            EdgeTableConfig {
+                sort_key,
+                columns: Vec::new(),
+                storage: EdgeTableStorage::default(),
+            },
+        );
+        self
+    }
+
+    /// Builder: assign specific edge types to a named edge table.
+    ///
+    /// The edge must already be added via `with_edges()` and the table
+    /// via `with_edge_table()`. This sets `destination_table` on all
+    /// variants of the named edge.
+    #[must_use]
+    pub fn with_edge_for_table(
+        mut self,
+        edge_name: impl Into<String>,
+        table: impl Into<String>,
+    ) -> Self {
+        let edge_name = edge_name.into();
+        let table = table.into();
+        if let Some(variants) = self.edges.get_mut(&edge_name) {
+            for v in variants.iter_mut() {
+                v.destination_table = table.clone();
+            }
+            // If the edge has no variants (common in builder-constructed
+            // ontologies), insert a placeholder so edge_table_for_relationship
+            // can look it up.
+            if variants.is_empty() {
+                variants.push(EdgeEntity {
+                    relationship_kind: edge_name,
+                    destination_table: table,
+                    ..Default::default()
+                });
+            }
+        }
+        self
+    }
+
     /// Columns of the default edge table, in schema order.
     #[must_use]
     pub fn edge_columns(&self) -> &[EdgeColumn] {
@@ -607,6 +657,23 @@ impl Ontology {
     #[must_use]
     pub fn is_edge_table(&self, table: &str) -> bool {
         self.edge_table_configs.contains_key(table)
+    }
+
+    /// Returns the destination table for a given relationship kind.
+    ///
+    /// Uses the first variant's `destination_table`. This is correct because
+    /// `EdgeYaml::to_entities()` assigns the same table to all variants of a
+    /// relationship kind — per-variant table routing is not supported.
+    ///
+    /// Falls back to the default edge table if the relationship kind is
+    /// unknown (e.g. wildcard queries).
+    #[must_use]
+    pub fn edge_table_for_relationship(&self, relationship_kind: &str) -> &str {
+        self.edges
+            .get(relationship_kind)
+            .and_then(|variants| variants.first())
+            .map(|e| e.destination_table.as_str())
+            .unwrap_or(&self.default_edge_table)
     }
 
     /// Prefix for internal columns injected by the compiler.

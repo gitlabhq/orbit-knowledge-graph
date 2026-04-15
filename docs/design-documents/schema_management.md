@@ -155,7 +155,7 @@ time:
 | `modules/code/config.rs` | All code-module node and edge tables (`gl_branch`, `gl_directory`, `gl_file`, `gl_definition`, `gl_imported_symbol`, edge table) |
 | `modules/namespace_deletion/store.rs` | `checkpoint`, `code_indexing_checkpoint`, `namespace_deletion_schedule` |
 | `modules/namespace_deletion/lower.rs` | All ontology node and edge tables |
-| `modules/sdlc/plan/input.rs` | All SDLC node destination tables and the shared edge table |
+| `modules/sdlc/plan/input.rs` | All SDLC node destination tables and per-relationship edge tables (resolved from ontology) |
 
 Datalake tables (`siphon_*`) are never prefixed — only graph tables are.
 

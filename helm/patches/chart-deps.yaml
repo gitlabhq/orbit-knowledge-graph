@@ -1,9 +1,0 @@
-# Extra Chart.yaml dependencies added by sync.sh
-- name: nats
-  version: "1.3.x"
-  repository: "file://charts/nats"
-  condition: nats.enabled
-- name: siphon
-  version: "1.x.x"
-  repository: "file://charts/siphon"
-  condition: siphon.enabled

@@ -22,8 +22,6 @@ uuid = { workspace = true }
 # Call graph validator
 code-graph = { path = "../code-graph" }
 code-graph-linker = { path = "../code-graph/linker" }
-code-graph-types = { path = "../code-graph/types" }
-parser-core = { workspace = true }
 lance-graph = { workspace = true }
 # lance-graph uses arrow 56 — we need matching types for its API
 arrow_56 = { package = "arrow", version = "56" }

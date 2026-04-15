@@ -14,10 +14,10 @@ regenerate-protos = []
 testkit = ["clickhouse-client/testkit"]
 
 [dependencies]
+mimalloc = { workspace = true, features = ["secure"] }
 anyhow = { workspace = true }
 arrow = { workspace = true }
 base64 = { workspace = true }
-bytes = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
@@ -25,15 +25,12 @@ clickhouse-client = { path = "../clickhouse-client" }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 health-check = { path = "../health-check" }
-indexmap = { workspace = true }
 indexer = { path = "../indexer" }
 ontology = { path = "../ontology" }
 opentelemetry = { workspace = true }
 prost = { workspace = true }
-prost-types = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
-parking_lot = { workspace = true }
 query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonwebtoken = { workspace = true }
@@ -45,18 +42,13 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util.workspace = true
 tokio-stream = { workspace = true }
-tower = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
-arrow-ipc = { workspace = true }
-clickhouse = { workspace = true }
 futures = { workspace = true }
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 toon-format = { version = "0.4.1", default-features = false }
-rustc-hash = { workspace = true }
-enum-as-inner = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }

@@ -31,7 +31,6 @@ DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 "cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.5.0"
 "cargo:cargo-bolero" = "0.13.4"
 "sccache" = "0.13.0"
-"tilt" = "0.36.1"
 "zig" = "0.15.2"
 clickhouse = "25.12"
 duckdb = "1.5.1"
@@ -42,7 +41,6 @@ lychee = "0.21.0"
 lefthook = "2.1.3"
 protoc = "34.1"
 jq = "1.7"
-vendir = "0.45.2"
 yq = "4.52.5"
 hyperfine = "1.20.0"
 
@@ -315,42 +313,6 @@ description = "Validate ontology YAML files against JSON schema"
 [tasks."schema:generate"]
 run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"
-
-[tasks."e2e:setup"]
-run = "cargo xtask e2e setup"
-description = "Set up the full E2E environment (cluster, GitLab, GKG stack)"
-
-[tasks."e2e:teardown"]
-run = "cargo xtask e2e teardown"
-description = "Tear down the full E2E environment (cluster, GitLab, GKG stack)"
-
-[tasks."e2e:test"]
-run = "cargo xtask e2e test"
-description = "Run E2E redaction tests (assumes environment is up)"
-
-[tasks."e2e:rebuild:gkg"]
-run = "cargo xtask e2e rebuild --gkg"
-description = "Rebuild GKG image and restart GKG pods"
-
-[tasks."e2e:rebuild:rails"]
-run = "cargo xtask e2e rebuild --rails"
-description = "Rebuild Rails CNG images and helm upgrade GitLab"
-
-[tasks."e2e:rebuild:all"]
-run = "cargo xtask e2e rebuild --gkg --rails"
-description = "Rebuild both Rails CNG and GKG images"
-
-[tasks."colima:start"]
-run = "colima start gkg --memory 12"
-description = "Start gkg Colima instance for integration tests"
-
-[tasks."colima:stop"]
-run = "colima stop gkg"
-description = "Stop gkg Colima instance"
-
-[tasks."colima:status"]
-run = "colima list"
-description = "Show status of all Colima instances"
 
 [tasks."lint:markdown"]
 run = "npx markdownlint-cli2@0.19.0 '**/*.md'"
