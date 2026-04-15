@@ -153,6 +153,12 @@ where
         let t2 = std::time::Instant::now();
         let mut graph = graph.into_inner().unwrap();
         graph.finalize();
+
+        // Pre-resolve imports per file (one-time cost, eliminates repeated neighbor iteration)
+        let sep = rules.fqn_separator;
+        for walk in &mut walks {
+            walk.import_map = graph.pre_resolve_file_imports(walk.file_node, sep);
+        }
         eprintln!("[v2] graph finalize: {:.2?}", t2.elapsed());
 
         let t3 = std::time::Instant::now();

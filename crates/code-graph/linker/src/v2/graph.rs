@@ -11,6 +11,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
 
+
 // ── Node + Edge types ───────────────────────────────────────────
 
 /// A node in the code graph.
@@ -337,6 +338,47 @@ impl CodeGraph {
             .map(|p| p.strip_prefix('/').unwrap_or(p))
             .unwrap_or(file_path)
             .to_string()
+    }
+
+    /// Pre-resolve all imports for a file into a name → defs map.
+    pub fn pre_resolve_file_imports(
+        &self,
+        file_node: NodeIndex,
+        sep: &str,
+    ) -> rustc_hash::FxHashMap<code_graph_types::IStr, Vec<NodeIndex>> {
+        use code_graph_types::IStr;
+
+        let mut map = rustc_hash::FxHashMap::default();
+        for neighbor in self
+            .graph
+            .neighbors_directed(file_node, petgraph::Direction::Outgoing)
+        {
+            let Some((_, imp)) = self.graph[neighbor].as_import() else {
+                continue;
+            };
+            if imp.wildcard {
+                continue;
+            }
+            let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+            if name.is_empty() {
+                continue;
+            }
+
+            let full_fqn = if imp.path.is_empty() {
+                name.to_string()
+            } else {
+                format!("{}{}{}", imp.path, sep, name)
+            };
+
+            let mut defs = self.lookup_fqn(&full_fqn).to_vec();
+            if defs.is_empty() && !imp.path.is_empty() {
+                defs = self.lookup_fqn(&imp.path).to_vec();
+            }
+            if !defs.is_empty() {
+                map.entry(IStr::from(name)).or_insert(defs);
+            }
+        }
+        map
     }
 
     // ── Resolution lookups ──────────────────────────────────

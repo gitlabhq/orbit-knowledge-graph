@@ -49,14 +49,12 @@ fn apply_import_strategies(
     file_node: NodeIndex,
     name: &str,
     sep: &str,
-    import_cache: &mut FxHashMap<NodeIndex, Vec<NodeIndex>>,
+    import_map: &FxHashMap<IStr, Vec<NodeIndex>>,
 ) -> Vec<NodeIndex> {
     for strategy in strategies {
         let candidates = match strategy {
             ImportStrategy::ScopeFqnWalk => scope_fqn_walk(graph, file_node, name, sep),
-            ImportStrategy::ExplicitImport => {
-                explicit_import(graph, file_node, name, sep, import_cache)
-            }
+            ImportStrategy::ExplicitImport => explicit_import(import_map, name),
             ImportStrategy::WildcardImport => wildcard_import(graph, file_node, name, sep),
             ImportStrategy::SamePackage => same_package(graph, file_node, name, sep),
             ImportStrategy::SameFile => same_file(graph, file_node, name),
@@ -139,27 +137,11 @@ fn scope_fqn_walk(
     vec![]
 }
 
-fn explicit_import(
-    graph: &CodeGraph,
-    file_node: NodeIndex,
-    name: &str,
-    sep: &str,
-    import_cache: &mut FxHashMap<NodeIndex, Vec<NodeIndex>>,
-) -> Vec<NodeIndex> {
-    for neighbor in graph.graph.neighbors_directed(file_node, petgraph::Direction::Outgoing) {
-        if let Some((_, imp)) = graph.graph[neighbor].as_import() {
-            let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-            if imp_name == name {
-                let defs = import_cache
-                    .entry(neighbor)
-                    .or_insert_with(|| resolve_import(graph, neighbor, sep));
-                if !defs.is_empty() {
-                    return defs.clone();
-                }
-            }
-        }
-    }
-    vec![]
+fn explicit_import(import_map: &FxHashMap<IStr, Vec<NodeIndex>>, name: &str) -> Vec<NodeIndex> {
+    import_map
+        .get(&IStr::from(name))
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn wildcard_import(
@@ -258,7 +240,7 @@ pub fn build_edges(
             let file_node = walk.file_node;
             let file_path: std::sync::Arc<str> = graph.graph[file_node].path().into();
             let thread_id = rayon::current_thread_index().unwrap_or(0);
-            let mut resolver = Resolver::new(rules, graph, file_node, settings, &mut walk.ssa);
+            let mut resolver = Resolver::new(rules, graph, file_node, settings, &mut walk.ssa, &walk.import_map);
             let mut file_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)> = Vec::new();
 
             for (resolved_count, read) in reads.iter().enumerate() {
@@ -381,6 +363,7 @@ struct Resolver<'a> {
     ssa: &'a mut SsaResolver,
     sep: &'a str,
     buf: String,
+    import_map: &'a FxHashMap<IStr, Vec<NodeIndex>>,
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     member_cache: FxHashMap<(IStr, IStr), Vec<NodeIndex>>,
     pub stats: ResolveStats,
@@ -395,6 +378,7 @@ impl<'a> Resolver<'a> {
         file_node: NodeIndex,
         settings: &'a ResolveSettings,
         ssa: &'a mut SsaResolver,
+        import_map: &'a FxHashMap<IStr, Vec<NodeIndex>>,
     ) -> Self {
         Self {
             sep: rules.fqn_separator,
@@ -404,6 +388,7 @@ impl<'a> Resolver<'a> {
             settings,
             ssa,
             buf: String::with_capacity(128),
+            import_map,
             import_cache: FxHashMap::default(),
             member_cache: FxHashMap::default(),
             stats: ResolveStats::default(),
@@ -518,7 +503,7 @@ impl<'a> Resolver<'a> {
                         self.file_node,
                         &read.name,
                         self.sep,
-                        &mut self.import_cache,
+                        self.import_map,
                     );
                     if !r.is_empty() {
                         self.stats.bare_import_resolved += 1;

@@ -54,6 +54,9 @@ pub struct FileWalkResult {
     pub file_node: NodeIndex,
     /// Moved from CanonicalResult after walking — owns expression chains.
     pub references: Vec<CanonicalReference>,
+    /// Pre-resolved import name → definition NodeIndexes.
+    /// Built once before resolve, eliminates repeated neighbor iteration.
+    pub import_map: FxHashMap<IStr, Vec<NodeIndex>>,
 }
 
 impl FileWalkResult {
@@ -64,6 +67,7 @@ impl FileWalkResult {
             reads: Vec::new(),
             file_node: NodeIndex::new(0),
             references: Vec::new(),
+            import_map: FxHashMap::default(),
         }
     }
 }
@@ -91,6 +95,7 @@ pub fn walk_file(
         reads,
         file_node,
         references: Vec::new(), // populated by caller after walk
+        import_map: FxHashMap::default(), // populated before resolve
     }
 }
 
