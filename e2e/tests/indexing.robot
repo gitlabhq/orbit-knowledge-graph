@@ -25,9 +25,17 @@ Create Group
 
 Enable Knowledge Graph
     [Arguments]    ${namespace_id}
+    Wait Until Keyword Succeeds    30s    5s
+    ...    Enable Knowledge Graph Once    ${namespace_id}
+
+Enable Knowledge Graph Once
+    [Arguments]    ${namespace_id}
     ${headers}=    Create Dictionary    PRIVATE-TOKEN=${GITLAB_PAT}
-    PUT    ${GITLAB_URL}/api/v4/admin/knowledge_graph/namespaces/${namespace_id}
-    ...    headers=${headers}    expected_status=200
+    ${resp}=    PUT    ${GITLAB_URL}/api/v4/admin/knowledge_graph/namespaces/${namespace_id}
+    ...    headers=${headers}    expected_status=any
+    IF    ${resp.status_code} != 200
+        Fail    Enable KG returned ${resp.status_code}: ${resp.text}
+    END
 
 Create Project
     [Arguments]    ${name}    ${namespace_id}
@@ -47,6 +55,13 @@ Orbit Query Node
     ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
 
+Verify Node Indexed
+    [Arguments]    ${entity}    ${node_id}    ${expected_name}
+    ${result}=    Orbit Query Node    ${entity}    ${node_id}
+    Should Be True    ${result["row_count"]} >= 1
+    ...    ${entity} id=${node_id} not found via Orbit query
+    Should Be Equal    ${result["result"]["nodes"][0]["name"]}    ${expected_name}
+
 *** Test Cases ***
 Namespace Is Indexed After Enablement
     [Documentation]    Create group, enable KG, wait for indexing, verify Group node via Orbit API
@@ -57,14 +72,8 @@ Namespace Is Indexed After Enablement
 
     Enable Knowledge Graph    ${group_id}
 
-    Sleep    25s    Wait for Siphon CDC + dispatcher + indexer cycle
-
-    ${result}=    Orbit Query Node    Group    ${group_id}
-    ${count}=    Set Variable    ${result["row_count"]}
-    Should Be True    ${count} >= 1    Group ${name} (id=${group_id}) not found via Orbit query
-
-    ${node_name}=    Set Variable    ${result["result"]["nodes"][0]["name"]}
-    Should Be Equal    ${node_name}    ${name}
+    Wait Until Keyword Succeeds    30s    3s
+    ...    Verify Node Indexed    Group    ${group_id}    ${name}
 
 Project Is Indexed Under Enabled Namespace
     [Documentation]    Create group + project, enable KG, wait, verify both via Orbit API
@@ -77,13 +86,7 @@ Project Is Indexed Under Enabled Namespace
     ${project}=    Create Project    proj-${suffix}    ${group_id}
     ${project_id}=    Set Variable    ${project["id"]}
 
-    Sleep    25s    Wait for Siphon CDC + indexing
-
-    ${grp_result}=    Orbit Query Node    Group    ${group_id}
-    Should Be True    ${grp_result["row_count"]} >= 1    Group ${name} not found via Orbit query
-
-    ${prj_result}=    Orbit Query Node    Project    ${project_id}
-    Should Be True    ${prj_result["row_count"]} >= 1    Project proj-${suffix} not found via Orbit query
-
-    ${prj_name}=    Set Variable    ${prj_result["result"]["nodes"][0]["name"]}
-    Should Be Equal    ${prj_name}    proj-${suffix}
+    Wait Until Keyword Succeeds    30s    3s
+    ...    Verify Node Indexed    Group    ${group_id}    ${name}
+    Wait Until Keyword Succeeds    30s    3s
+    ...    Verify Node Indexed    Project    ${project_id}    proj-${suffix}

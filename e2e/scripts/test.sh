@@ -25,28 +25,28 @@ helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
   --set "namespaces.gitlab=$NS_GITLAB" \
   --set "namespaces.gkg=$NS_GKG"
 
-# Wait for completion
+# Wait for completion or failure
 log "Waiting for tests to complete..."
-if $KC wait --for=condition=complete job/"$JOB_NAME" -n "$NS_GKG" --timeout=300s 2>/dev/null; then
-  log "Tests passed"
-  echo ""
-  $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null
-  exit 0
-fi
-
-# Handle failure
-JOB_STATUS=$($KC get job "$JOB_NAME" -n "$NS_GKG" \
-  -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
+while true; do
+  STATUS=$($KC get job "$JOB_NAME" -n "$NS_GKG" \
+    -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
+  case "$STATUS" in
+    Complete)
+      log "Tests passed"
+      echo ""
+      $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null
+      exit 0
+      ;;
+    Failed)
+      break
+      ;;
+  esac
+  sleep 5
+done
 
 log "Tests failed"
 echo ""
 $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null
-
-if [[ "$JOB_STATUS" != "True" ]]; then
-  echo ""
-  log "Job may have timed out. Pod status:"
-  $KC get pods -l job-name="$JOB_NAME" -n "$NS_GKG" --no-headers 2>/dev/null
-fi
 
 echo ""
 log "Diagnostics:"
