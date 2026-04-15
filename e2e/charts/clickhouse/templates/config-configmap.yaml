@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+data:
+  low_memory.xml: |
+    <clickhouse>
+        <!-- Cap server to 75% of container memory limit -->
+        <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
+
+        <!-- Reduce caches for low-memory environment -->
+        <mark_cache_size>268435456</mark_cache_size>  <!-- 256 MB -->
+        <uncompressed_cache_size>16777216</uncompressed_cache_size>  <!-- 16 MB -->
+
+        <!-- Limit background merges -->
+        <background_pool_size>2</background_pool_size>
+        <merge_tree>
+            <merge_max_block_size>1024</merge_max_block_size>
+        </merge_tree>
+
+        <profiles>
+            <default>
+                <!-- Per-query memory limit: 2 GB -->
+                <max_memory_usage>2147483648</max_memory_usage>
+                <!-- Spill to disk before OOM -->
+                <max_bytes_before_external_group_by>536870912</max_bytes_before_external_group_by>
+                <max_bytes_before_external_sort>536870912</max_bytes_before_external_sort>
+            </default>
+        </profiles>
+    </clickhouse>

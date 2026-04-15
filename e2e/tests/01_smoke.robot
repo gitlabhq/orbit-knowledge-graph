@@ -10,6 +10,10 @@ ${GITLAB_PAT}     %{GITLAB_PAT}
 GitLab Auth Headers
     RETURN    ${{{"PRIVATE-TOKEN": "${GITLAB_PAT}", "Content-Type": "application/json"}}}
 
+GitLab API Is Ready
+    ${headers}=    GitLab Auth Headers
+    ${resp}=    GET    ${GITLAB_URL}/api/v4/user    headers=${headers}    expected_status=200
+
 Orbit Status Is Healthy
     ${headers}=    GitLab Auth Headers
     ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
@@ -25,10 +29,14 @@ User Exists In Graph
     Should Be True    ${resp.json()["row_count"]} >= 1    No users found in graph
 
 *** Test Cases ***
+GitLab Is Ready
+    [Documentation]    Wait for GitLab API to respond before testing Orbit
+    Wait Until Keyword Succeeds    60s    3s    GitLab API Is Ready
+
 Orbit Is Healthy
     [Documentation]    Wait for all components (GKG, Siphon, NATS, ClickHouse) to report healthy
-    Wait Until Keyword Succeeds    120s    5s    Orbit Status Is Healthy
+    Wait Until Keyword Succeeds    30s    3s    Orbit Status Is Healthy
 
 User Data Is Available Via Orbit Query
     [Documentation]    Verify full data pipeline: PG -> Siphon -> ClickHouse -> GKG indexer -> Orbit API
-    Wait Until Keyword Succeeds    120s    5s    User Exists In Graph
+    Wait Until Keyword Succeeds    30s    3s    User Exists In Graph
