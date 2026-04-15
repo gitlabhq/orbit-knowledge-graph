@@ -8040,6 +8040,7 @@ dependencies = [
  "internment",
  "once_cell",
  "pastey",
+ "regex",
  "ruby-prism",
  "rust-lapper",
  "rustc-hash",

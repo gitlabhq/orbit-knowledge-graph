@@ -35,6 +35,7 @@ swc_ecma_parser = "32.0.0"
 swc_ecma_ast = "19.0.0"
 swc_ecma_visit = "19.0.0"
 swc_atoms = "9.0.0"
+regex.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }
