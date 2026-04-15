@@ -11,13 +11,13 @@ $KC exec -n "$NS_GITLAB" gitlab-postgresql-0 -c postgresql -- \
   DO \$\$
   BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'siphon') THEN
-      CREATE USER siphon WITH REPLICATION PASSWORD '$E2E_PG_SIPHON_PASS';
+      CREATE USER siphon WITH PASSWORD '$E2E_PG_SIPHON_PASS' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
     END IF;
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'siphon_replicator') THEN
-      CREATE USER siphon_replicator WITH REPLICATION PASSWORD '$E2E_PG_SIPHON_PASS';
+      CREATE USER siphon_replicator WITH REPLICATION PASSWORD '$E2E_PG_SIPHON_PASS' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
     END IF;
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'siphon_snapshot') THEN
-      CREATE USER siphon_snapshot WITH PASSWORD '$E2E_PG_SIPHON_PASS';
+      CREATE USER siphon_snapshot WITH PASSWORD '$E2E_PG_SIPHON_PASS' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
     END IF;
   END \$\$;
 
@@ -28,19 +28,35 @@ $KC exec -n "$NS_GITLAB" gitlab-postgresql-0 -c postgresql -- \
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_replicator;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_snapshot;
 
+  -- Siphon manages publication membership at startup via SetupPublication().
+  -- We only create an empty publication here; the producer adds tables from table_mapping config.
   DROP PUBLICATION IF EXISTS e2e_siphon_publication;
-  CREATE PUBLICATION e2e_siphon_publication FOR TABLE $(cdc_table_names | paste -sd, -);
+  CREATE PUBLICATION e2e_siphon_publication;
+  ALTER PUBLICATION e2e_siphon_publication OWNER TO siphon;
 
-  CREATE OR REPLACE FUNCTION siphon_alter_publication(pub_name text, table_name text, operation integer)
-  RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS \$fn\$
+  -- Upstream-aligned function: allows non-superuser to alter publication membership.
+  -- Op codes match siphon Go code: 0=ADD, 1=DROP.
+  CREATE OR REPLACE FUNCTION siphon_alter_publication(pbl TEXT, tbl TEXT, op INTEGER)
+  RETURNS void AS \$fn\$
+  DECLARE
+    operation TEXT;
   BEGIN
-    IF operation = 1 THEN
-      EXECUTE format('ALTER PUBLICATION %I ADD TABLE %I', pub_name, table_name);
-    ELSIF operation = 2 THEN
-      EXECUTE format('ALTER PUBLICATION %I DROP TABLE %I', pub_name, table_name);
+    IF pbl !~ '^[a-zA-Z_][a-zA-Z0-9_]*\$' THEN
+      RAISE EXCEPTION 'Invalid publication name';
     END IF;
-  EXCEPTION WHEN duplicate_object THEN NULL;
-           WHEN undefined_table THEN NULL;
+    IF tbl !~ '^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*\$' THEN
+      RAISE EXCEPTION 'Invalid table name format: must be schema-qualified (e.g., public.users)';
+    END IF;
+    IF op = 0 THEN
+      operation := 'ADD';
+    ELSIF op = 1 THEN
+      operation := 'DROP';
+    ELSE
+      RAISE EXCEPTION 'Invalid operation: op must be 0 (ADD) or 1 (DROP)';
+    END IF;
+    EXECUTE pg_catalog.format('ALTER PUBLICATION %s %s TABLE %s', pbl, operation, tbl);
   END;
-  \$fn\$;
+  \$fn\$ LANGUAGE plpgsql SECURITY DEFINER;
+
+  GRANT EXECUTE ON FUNCTION siphon_alter_publication(TEXT, TEXT, INTEGER) TO siphon;
 "

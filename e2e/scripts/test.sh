@@ -20,8 +20,6 @@ log "Launching Robot Framework job"
 helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
   --namespace "$NS_GKG" \
   --kube-context "$KCTX" \
-  --set "namespaces.nats=$NS_NATS" \
-  --set "namespaces.clickhouse=$NS_CH" \
   --set "namespaces.gitlab=$NS_GITLAB" \
   --set "namespaces.gkg=$NS_GKG"
 
