@@ -28,7 +28,12 @@ $KC exec -n "$NS_GITLAB" gitlab-postgresql-0 -c postgresql -- \
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_replicator;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_snapshot;
 
-  CREATE PUBLICATION IF NOT EXISTS e2e_siphon_publication;
+  DO \$pub\$
+  BEGIN
+    IF NOT EXISTS (SELECT FROM pg_publication WHERE pubname = 'e2e_siphon_publication') THEN
+      CREATE PUBLICATION e2e_siphon_publication;
+    END IF;
+  END \$pub\$;
 
   CREATE OR REPLACE FUNCTION siphon_alter_publication(pub_name text, table_names text[])
   RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS \$fn\$
