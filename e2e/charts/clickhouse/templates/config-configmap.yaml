@@ -4,38 +4,29 @@ metadata:
   name: {{ .Release.Name }}-config
 data:
   low_memory_server.xml: |
+    <?xml version="1.0"?>
     <clickhouse>
-        <!-- Cap server to 75% of container memory limit -->
-        <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
+        <mark_cache_size>268435456</mark_cache_size>
+        <uncompressed_cache_size>268435456</uncompressed_cache_size>
 
-        <!-- Reduce caches (docs: mark_cache min 500 MB) -->
-        <mark_cache_size>524288000</mark_cache_size>  <!-- 500 MB -->
-        <uncompressed_cache_size>16777216</uncompressed_cache_size>  <!-- 16 MB -->
+        <asynchronous_metric_log>
+            <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+        </asynchronous_metric_log>
+        <metric_log>
+            <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+        </metric_log>
 
-        <!-- Limit background merges -->
-        <background_pool_size>2</background_pool_size>
         <merge_tree>
             <merge_max_block_size>1024</merge_max_block_size>
         </merge_tree>
-
-        <!-- Disable system logs to save memory -->
-        <asynchronous_metric_log remove="1"/>
-        <metric_log remove="1"/>
-        <text_log remove="1"/>
-        <trace_log remove="1"/>
     </clickhouse>
   low_memory_users.xml: |
+    <?xml version="1.0"?>
     <clickhouse>
         <profiles>
             <default>
-                <!-- Per-query memory limit: 2 GB -->
-                <max_memory_usage>2147483648</max_memory_usage>
-                <!-- Spill to disk before OOM -->
-                <max_bytes_before_external_group_by>536870912</max_bytes_before_external_group_by>
-                <max_bytes_before_external_sort>536870912</max_bytes_before_external_sort>
-                <!-- Reduce parallelism for low memory -->
+                <max_threads>2</max_threads>
                 <max_block_size>8192</max_block_size>
-                <max_threads>1</max_threads>
                 <max_download_threads>1</max_download_threads>
                 <input_format_parallel_parsing>0</input_format_parallel_parsing>
                 <output_format_parallel_formatting>0</output_format_parallel_formatting>
