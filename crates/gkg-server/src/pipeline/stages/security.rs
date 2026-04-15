@@ -77,6 +77,7 @@ mod tests {
             min_access_level: Some(20),
             group_traversal_ids,
             source_type: "rest".into(),
+            session_id: None,
         }
     }
 
