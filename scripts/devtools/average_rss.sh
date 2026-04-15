@@ -85,6 +85,79 @@ if [ $num_samples -gt 0 ]; then
   min_rss_gb=$(echo "scale=2; $min_rss / 1024 / 1024" | bc)
   total_time=$(echo "scale=2; $num_samples*$SAMPLING_INTERVAL" | bc)
   
+  # ── ASCII chart ──────────────────────────────────────────
+  CHART_WIDTH=60
+  CHART_HEIGHT=15
+
+  # Bucket samples into CHART_WIDTH time slots
+  samples_per_bucket=$(( (num_samples + CHART_WIDTH - 1) / CHART_WIDTH ))
+  buckets=()
+  for (( i=0; i<CHART_WIDTH && i*samples_per_bucket<num_samples; i++ )); do
+    start=$((i * samples_per_bucket))
+    bucket_max=0
+    for (( j=start; j<start+samples_per_bucket && j<num_samples; j++ )); do
+      if [ ${samples[$j]} -gt $bucket_max ]; then
+        bucket_max=${samples[$j]}
+      fi
+    done
+    buckets+=($bucket_max)
+  done
+
+  # Render chart
+  num_buckets=${#buckets[@]}
+  # Round max_rss up to nearest GB for y-axis
+  max_gb_ceil=$(echo "($max_rss + 1048575) / 1048576" | bc)
+  if [ "$max_gb_ceil" -lt 1 ]; then max_gb_ceil=1; fi
+  y_max=$((max_gb_ceil * 1048576))  # back to KB
+
+  echo "" >&2
+  echo "RSS over time (${total_time}s, ${num_samples} samples, peak ${max_rss_mb}MB):" >&2
+
+  for (( row=CHART_HEIGHT; row>=1; row-- )); do
+    threshold=$(( y_max * row / CHART_HEIGHT ))
+    threshold_gb=$(echo "scale=1; $threshold / 1048576" | bc)
+    if [ $((row % 3)) -eq 0 ] || [ $row -eq $CHART_HEIGHT ]; then
+      printf "%5sGB │" "$threshold_gb" >&2
+    else
+      printf "       │" >&2
+    fi
+    for (( col=0; col<num_buckets; col++ )); do
+      val_kb=${buckets[$col]}
+      if [ $val_kb -ge $threshold ]; then
+        printf "█" >&2
+      else
+        # Check if we're in the lower portion (partial fill)
+        lower_threshold=$(( y_max * (row - 1) / CHART_HEIGHT ))
+        if [ $val_kb -ge $lower_threshold ] && [ $val_kb -lt $threshold ]; then
+          printf "▄" >&2
+        else
+          printf " " >&2
+        fi
+      fi
+    done
+    echo "" >&2
+  done
+
+  # X-axis
+  printf "       └" >&2
+  for (( col=0; col<num_buckets; col++ )); do printf "─" >&2; done
+  echo "" >&2
+
+  # Time labels
+  printf "        0" >&2
+  mid_time=$(echo "scale=1; $total_time / 2" | bc)
+  end_time=$total_time
+  padding=$(( num_buckets / 2 - 2 ))
+  if [ $padding -gt 0 ]; then
+    printf "%${padding}s%s" "" "${mid_time}s" >&2
+    padding2=$(( num_buckets - num_buckets / 2 - ${#end_time} - 3 ))
+    if [ $padding2 -gt 0 ]; then
+      printf "%${padding2}s%ss" "" "$end_time" >&2
+    fi
+  fi
+  echo "" >&2
+  echo "" >&2
+
   # Output structured JSON
   echo "{
   \"path\": \"$1\",
