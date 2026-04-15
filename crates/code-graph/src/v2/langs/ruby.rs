@@ -1,6 +1,7 @@
 use code_graph_config::Language;
 use code_graph_types::{BindingKind, CanonicalImport, DefKind};
 use parser_core::dsl::extractors::{field, metadata, Extract, ExtractList};
+use parser_core::dsl::predicates::parent_is;
 use parser_core::dsl::types::{
     binding, branch, loop_rule, reference, scope, scopes, BindingRule, BranchRule, ChainConfig,
     DslLanguage, ImportRule, LoopRule, ReferenceRule, ScopeRule,
@@ -41,9 +42,17 @@ impl DslLanguage for RubyDsl {
     }
 
     fn refs() -> Vec<ReferenceRule> {
-        vec![reference("call")
-            .name_from(field("method"))
-            .receiver("receiver")]
+        vec![
+            // obj.method or method(args) — explicit call node
+            reference("call")
+                .name_from(field("method"))
+                .receiver("receiver"),
+            // bare method call without parens/args — just an identifier in Ruby
+            // e.g. `validate_name` inside a method body
+            reference("identifier")
+                .when(parent_is("body_statement"))
+                .name_from(Extract::Text),
+        ]
     }
 
     fn imports() -> Vec<ImportRule> {

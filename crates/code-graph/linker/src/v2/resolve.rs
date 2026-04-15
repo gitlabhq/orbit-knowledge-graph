@@ -503,6 +503,7 @@ impl<'a> Resolver<'a> {
         use super::rules::ResolveStage;
         self.last_bare_path = ResolvePath::None;
 
+
         for stage in &self.rules.bare_stages {
             let result = match stage {
                 ResolveStage::SSA => self.resolve_bare_ssa(read),
