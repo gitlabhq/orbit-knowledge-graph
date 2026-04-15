@@ -22,7 +22,7 @@ use integration_testkit::run_subtests;
 
 #[tokio::test]
 async fn global_indexing() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     run_subtests!(
         &ctx,
         global::processes_and_transforms_users,
@@ -32,7 +32,7 @@ async fn global_indexing() {
 
 #[tokio::test]
 async fn namespace_indexing() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     run_subtests!(
         &ctx,
         projects::processes_projects,

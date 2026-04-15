@@ -1,6 +1,7 @@
 use arrow::array::{Array, BooleanArray, StringArray};
 
 use gkg_utils::arrow::ArrowUtils;
+use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
@@ -35,7 +36,10 @@ pub async fn processes_vulnerabilities(ctx: &TestContext) {
     assert_node_count(ctx, "gl_vulnerability", 2).await;
 
     let result = ctx
-        .query("SELECT title, state, severity FROM gl_vulnerability FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT title, state, severity FROM {} FINAL ORDER BY id",
+            t("gl_vulnerability")
+        ))
         .await;
     let batch = &result[0];
 
@@ -81,7 +85,10 @@ pub async fn processes_scanners(ctx: &TestContext) {
     assert_node_count(ctx, "gl_vulnerability_scanner", 2).await;
 
     let result = ctx
-        .query("SELECT name, external_id FROM gl_vulnerability_scanner FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT name, external_id FROM {} FINAL ORDER BY id",
+            t("gl_vulnerability_scanner")
+        ))
         .await;
     let batch = &result[0];
     let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
@@ -119,7 +126,10 @@ pub async fn processes_vulnerability_identifiers(ctx: &TestContext) {
     assert_node_count(ctx, "gl_vulnerability_identifier", 2).await;
 
     let result = ctx
-        .query("SELECT name, external_type, external_id FROM gl_vulnerability_identifier FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT name, external_type, external_id FROM {} FINAL ORDER BY id",
+            t("gl_vulnerability_identifier")
+        ))
         .await;
     let batch = &result[0];
 
@@ -177,7 +187,10 @@ pub async fn processes_findings(ctx: &TestContext) {
     assert_node_count(ctx, "gl_finding", 2).await;
 
     let result = ctx
-        .query("SELECT uuid, name, description, solution, severity, deduplicated FROM gl_finding FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT uuid, name, description, solution, severity, deduplicated FROM {} FINAL ORDER BY id",
+            t("gl_finding")
+        ))
         .await;
     let batch = &result[0];
 
@@ -345,7 +358,10 @@ pub async fn processes_vulnerability_occurrences(ctx: &TestContext) {
     assert_node_count(ctx, "gl_vulnerability_occurrence", 2).await;
 
     let result = ctx
-        .query("SELECT uuid, name, description, severity, report_type, detection_method FROM gl_vulnerability_occurrence FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT uuid, name, description, severity, report_type, detection_method FROM {} FINAL ORDER BY id",
+            t("gl_vulnerability_occurrence")
+        ))
         .await;
     let batch = &result[0];
 
@@ -563,7 +579,10 @@ pub async fn processes_security_scans(ctx: &TestContext) {
     assert_node_count(ctx, "gl_security_scan", 2).await;
 
     let result = ctx
-        .query("SELECT scan_type, status, latest FROM gl_security_scan FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT scan_type, status, latest FROM {} FINAL ORDER BY id",
+            t("gl_security_scan")
+        ))
         .await;
     let batch = &result[0];
 

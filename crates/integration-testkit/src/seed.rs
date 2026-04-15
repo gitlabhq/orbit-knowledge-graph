@@ -1,3 +1,4 @@
+use crate::TABLE_PREFIX;
 use crate::context::TestContext;
 use sqlparser::ast::Statement;
 use sqlparser::dialect::ClickHouseDialect;
@@ -10,8 +11,29 @@ pub async fn load_seed(ctx: &TestContext, name: &str) {
     let sql = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("seed '{name}' not found at {path}: {e}"));
     for stmt in split_sql_statements(&sql).unwrap() {
-        ctx.execute(&stmt).await;
+        let prefixed = prefix_graph_tables(&stmt, &TABLE_PREFIX);
+        ctx.execute(&prefixed).await;
     }
+}
+
+/// Applies the schema version table prefix to graph table names in SQL.
+/// Prefixes tables starting with `gl_`, plus `checkpoint`,
+/// `namespace_deletion_schedule`, and `code_indexing_checkpoint`.
+/// Siphon tables (`siphon_*`) and system tables are never prefixed.
+fn prefix_graph_tables(sql: &str, prefix: &str) -> String {
+    if prefix.is_empty() {
+        return sql.to_string();
+    }
+    let mut result = sql.to_string();
+    for aux in [
+        "checkpoint",
+        "namespace_deletion_schedule",
+        "code_indexing_checkpoint",
+    ] {
+        result = result.replace(&format!(" {aux}"), &format!(" {prefix}{aux}"));
+    }
+    result = result.replace(" gl_", &format!(" {prefix}gl_"));
+    result
 }
 
 /// Split a SQL seed file into individual statement strings, validated

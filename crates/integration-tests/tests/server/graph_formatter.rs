@@ -13,7 +13,7 @@ use crate::common::{
 };
 use gkg_server::pipeline::HydrationStage;
 use gkg_server::redaction::QueryResult;
-use integration_testkit::{run_subtests, run_subtests_shared};
+use integration_testkit::{run_subtests, run_subtests_shared, t};
 use query_engine::compiler::compile;
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
@@ -71,55 +71,60 @@ fn node_ids(nodes: &[Value], entity_type: &str) -> HashSet<i64> {
 //   User 3 →AUTHORED→ MR 2002
 //
 async fn seed(ctx: &TestContext) {
-    ctx.execute(
-        "INSERT INTO gl_user (id, username, name, state, user_type) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, username, name, state, user_type) VALUES
          (1, 'alice', 'Alice Admin', 'active', 'human'),
          (2, 'bob', 'Bob Builder', 'active', 'human'),
          (3, 'charlie', 'Charlie Private', 'active', 'human'),
          (4, 'diana', 'Diana Dev', 'blocked', 'project_bot'),
          (5, '用户_émoji_🎉', 'Unicode Name ñ', 'active', 'human')",
-    )
+        t("gl_user")
+    ))
     .await;
 
     // Groups: 100-102 are direct, 200-300 form a depth chain reachable only via multi-hop
-    ctx.execute(
-        "INSERT INTO gl_group (id, name, visibility_level, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
          (100, 'Public Group', 'public', '1/100/'),
          (101, 'Private Group', 'private', '1/101/'),
          (102, 'Internal Group', 'internal', '1/102/'),
          (200, 'Depth2 Group', 'public', '1/200/'),
          (300, 'Depth3 Group', 'public', '1/300/')",
-    )
+        t("gl_group")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_project (id, name, visibility_level, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
          (1000, 'Public Project', 'public', '1/100/1000/'),
          (1001, 'Private Project', 'private', '1/101/1001/'),
          (1002, 'Internal Project', 'internal', '1/102/1002/')",
-    )
+        t("gl_project")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
          (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
          (2001, 2, 'Fix bug B', 'merged', 'fix-b', 'main', '1/101/1001/'),
          (2002, 3, 'Update C', 'closed', 'update-c', 'main', '1/102/1002/')",
-    )
+        t("gl_merge_request")
+    ))
     .await;
 
     let giant = "A".repeat(10_000);
     ctx.execute(&format!(
-        "INSERT INTO gl_note (id, note, noteable_type, noteable_id, traversal_path) VALUES
+        "INSERT INTO {} (id, note, noteable_type, noteable_id, traversal_path) VALUES
          (3000, 'Normal note', 'MergeRequest', 2000, '1/100/1000/'),
          (3001, '{giant}', 'MergeRequest', 2001, '1/101/1001/'),
          (3002, 'SQL injection attempt: \\'; DROP TABLE gl_user; --', 'MergeRequest', 2000, '1/100/1000/'),
-         (3003, 'Backslash\\\\quote\\\"newline\\n\\ttab', 'MergeRequest', 2000, '1/100/1000/')"
+         (3003, 'Backslash\\\\quote\\\"newline\\n\\ttab', 'MergeRequest', 2000, '1/100/1000/')",
+        t("gl_note")
     ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
          ('1/101/', 1, 'User', 'MEMBER_OF', 101, 'Group'),
          ('1/101/', 2, 'User', 'MEMBER_OF', 101, 'Group'),
@@ -138,7 +143,8 @@ async fn seed(ctx: &TestContext) {
          ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3002, 'Note'),
          ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3003, 'Note'),
          ('1/101/1001/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note')",
-    )
+        t("gl_edge")
+    ))
     .await;
 
     ctx.optimize_all().await;
@@ -1522,11 +1528,12 @@ async fn traversal_both_direction(ctx: &TestContext) {
 async fn traversal_shared_target_node(ctx: &TestContext) {
     seed(ctx).await;
 
-    ctx.execute(
-        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/1000/', 1, 'User', 'AUTHORED', 3000, 'Note'),
          ('1/100/1000/', 1000, 'Project', 'CONTAINS', 3000, 'Note')",
-    )
+        t("gl_edge")
+    ))
     .await;
 
     let value = run_pipeline(
@@ -1611,10 +1618,11 @@ async fn search_datetime_columns(ctx: &TestContext) {
     seed(ctx).await;
 
     // Insert a note with an explicit created_at
-    ctx.execute(
-        "INSERT INTO gl_note (id, note, noteable_type, traversal_path, created_at) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, note, noteable_type, traversal_path, created_at) VALUES
          (9000, 'timestamped', 'MergeRequest', '1/100/1000/', '2024-06-15 12:30:00')",
-    )
+        t("gl_note")
+    ))
     .await;
 
     let value = run_pipeline(
@@ -2413,7 +2421,7 @@ async fn pagination_with_redaction(ctx: &TestContext) {
 
 #[tokio::test]
 async fn graph_formatter_e2e() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;
 
     // Read-only subtests share one database (seed once, query many).
