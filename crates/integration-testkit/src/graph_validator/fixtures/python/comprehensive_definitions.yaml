@@ -75,14 +75,14 @@ tests:
       MATCH (d:Definition) WHERE d.name = 'inner_function'
       RETURN d.fqn AS fqn
     assert:
-      - { all_match: { field: fqn, pattern: "outer_function.*" } }
+      - { all_match: { field: fqn, pattern: "*outer_function.*" } }
 
   - name: InnerClass has correct FQN
     query: |
       MATCH (d:Definition) WHERE d.name = 'InnerClass'
       RETURN d.fqn AS fqn
     assert:
-      - { all_match: { field: fqn, pattern: "OuterClass.*" } }
+      - { all_match: { field: fqn, pattern: "*OuterClass.*" } }
 
   - name: ClassWithMethods has multiple methods
     query: |

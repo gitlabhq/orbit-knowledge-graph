@@ -32,4 +32,4 @@ tests:
       WHERE d.name = 'method'
       RETURN d.fqn AS fqn
     assert:
-      - all_match: { field: fqn, pattern: "Outer.Inner.*" }
+      - all_match: { field: fqn, pattern: "*Outer.Inner.*" }

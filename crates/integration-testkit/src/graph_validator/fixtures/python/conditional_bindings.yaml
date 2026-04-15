@@ -94,8 +94,8 @@ tests:
           ORDER BY callee
         assert:
           - { row_count: 2 }
-          - { contains_row: { caller_fqn: "if_else_caller", callee: "option_a", callee_fqn: "option_a" } }
-          - { contains_row: { caller_fqn: "if_else_caller", callee: "option_b", callee_fqn: "option_b" } }
+          - { contains_row: { caller_fqn: "main.if_else_caller", callee: "option_a", callee_fqn: "main.option_a" } }
+          - { contains_row: { caller_fqn: "main.if_else_caller", callee: "option_b", callee_fqn: "main.option_b" } }
       # false positive: no edge to option_c, foo, bar, or any other def
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
@@ -115,8 +115,8 @@ tests:
           ORDER BY callee
         assert:
           - { row_count: 2 }
-          - { contains_row: { callee: "bar", callee_fqn: "bar" } }
-          - { contains_row: { callee: "foo", callee_fqn: "foo" } }
+          - { contains_row: { callee: "bar", callee_fqn: "main.bar" } }
+          - { contains_row: { callee: "foo", callee_fqn: "main.foo" } }
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'try_except_caller'

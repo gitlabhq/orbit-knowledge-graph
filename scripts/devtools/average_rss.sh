@@ -1,18 +1,27 @@
 #!/bin/bash
 
-# Check if a path argument was provided
+# Parse --v2 flag
+V2_FLAG=""
+POSITIONAL=()
+for arg in "$@"; do
+  case $arg in
+    --v2) V2_FLAG="--v2"; shift ;;
+    *) POSITIONAL+=("$arg"); shift ;;
+  esac
+done
+set -- "${POSITIONAL[@]}"
+
 if [ -z "$1" ]; then
-  echo '{"error": "Usage: ./average_rss.sh <path> [sampling_interval_seconds]"}'
-  echo '{"example": "./average_rss.sh ../gdk/gitlab 0.025"}'
+  echo '{"error": "Usage: ./average_rss.sh [--v2] <path> [sampling_interval_seconds]"}'
+  echo '{"example": "./average_rss.sh --v2 ../gdk/gitlab 0.025"}'
   exit 1
 fi
 
 # Configuration: Sampling interval in seconds (default: 0.025 = 25ms)
-# Can be overridden by passing a second argument
 SAMPLING_INTERVAL=${2:-0.025}
 
 # Start the process in the background
-cargo run --release --bin orbit index "$1" > /dev/null 2>&1 &
+cargo run --release --bin orbit index $V2_FLAG "$1" > /dev/null 2>&1 &
 PROCESS_PID=$!
 
 # Wait a moment for the process to start
@@ -31,7 +40,7 @@ max_rss=0
 min_rss=-1
 samples=()
 
-echo "Monitoring process gkg index process(pid=$PROCESS_PID, path=$1, sampling_interval=$SAMPLING_INTERVAL ms)..." >&2
+echo "Monitoring process gkg index process(pid=$PROCESS_PID, path=$1, v2=$V2_FLAG, sampling_interval=$SAMPLING_INTERVAL ms)..." >&2
 
 # Sample RSS while the process is running
 while kill -0 $PROCESS_PID 2>/dev/null; do
@@ -79,12 +88,13 @@ if [ $num_samples -gt 0 ]; then
   # Output structured JSON
   echo "{
   \"path\": \"$1\",
+  \"v2\": $([ -n "$V2_FLAG" ] && echo "true" || echo "false"),
   \"process_id\": $PROCESS_PID,
   \"exit_code\": $EXIT_CODE,
   \"sampling\": {
     \"num_samples\": $num_samples,
-    \"interval_seconds\": $SAMPLING_INTERVAL
-    \"total_time_seconds\": $total_time,
+    \"interval_seconds\": $SAMPLING_INTERVAL,
+    \"total_time_seconds\": $total_time
   },
   \"rss\": {
     \"average_kb\": $average_rss,

@@ -117,6 +117,10 @@ enum Commands {
         /// Verbose logging to stderr
         #[arg(short, long)]
         verbose: bool,
+
+        /// Use v2 code-graph pipeline (Python, Java, Kotlin, C#)
+        #[arg(long)]
+        v2: bool,
     },
     /// Query the local DuckDB graph (~/.orbit/graph.duckdb)
     Query {
@@ -180,6 +184,7 @@ async fn main() -> Result<()> {
             threads,
             stats,
             verbose,
+            v2,
         } => {
             let level = if verbose { Level::DEBUG } else { Level::INFO };
             let subscriber = tracing_subscriber::fmt()
@@ -198,7 +203,7 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber failed");
 
-            run_index(path, threads, stats).await
+            run_index(path, threads, stats, v2).await
         }
         Commands::Query {
             json,
@@ -391,7 +396,7 @@ fn run_schema_diff(generated_stmts: &[String], sql_path: &PathBuf) -> Result<()>
     Ok(())
 }
 
-async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
+async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool) -> Result<()> {
     let store = workspace::Workspace::open_default()?;
     let repos = store.resolve_repos(&path)?;
 
@@ -456,7 +461,12 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             )?;
         }
 
-        match index_repo(&git, &config, &store, &ontology).await {
+        let result = if use_v2 {
+            index_repo_v2(&git, &store, &ontology).await
+        } else {
+            index_repo(&git, &config, &store, &ontology).await
+        };
+        match result {
             Ok(result) => {
                 let repo_name = git
                     .repo_path
@@ -498,6 +508,7 @@ async fn index_repo(
     store: &workspace::Workspace,
     ontology: &Ontology,
 ) -> Result<RepositoryIndexingResult> {
+    // v1 pipeline — unchanged
     let key = git.repo_path.to_string_lossy().to_string();
     let repo_name = git
         .repo_path
@@ -561,6 +572,92 @@ async fn index_repo(
     }
 
     Ok(result)
+}
+
+async fn index_repo_v2(
+    git: &workspace::GitInfo,
+    store: &workspace::Workspace,
+    ontology: &Ontology,
+) -> Result<RepositoryIndexingResult> {
+    let key = git.repo_path.to_string_lossy().to_string();
+    let root_path = key.clone();
+
+    // Run v2 pipeline
+    let pipeline = code_graph::v2::Pipeline::new(code_graph::v2::PipelineConfig::default());
+    let v2_result = pipeline.run(std::path::Path::new(&root_path));
+
+    if !v2_result.errors.is_empty() {
+        for err in &v2_result.errors {
+            tracing::warn!("v2 pipeline error: {} ({})", err.error, err.file_path);
+        }
+    }
+
+    let graph = v2_result.graph;
+
+    // Convert to Arrow and write to DuckDB
+    let local_data = duckdb_client::convert_v2_graph(
+        &graph,
+        git.project_id,
+        &git.branch,
+        &git.commit_sha,
+        ontology,
+    )
+    .context("failed to convert v2 graph data to Arrow")?;
+
+    let db_path = store.db_path();
+    let client =
+        duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB for writing")?;
+
+    let node_tables: Vec<String> = ontology
+        .local_entity_names()
+        .iter()
+        .map(|name| {
+            ontology
+                .get_node(name)
+                .expect("local entity must exist")
+                .destination_table
+                .clone()
+        })
+        .collect();
+    let edge_table = ontology
+        .local_edge_table_name()
+        .context("local_db.edge_table.name must be configured")?;
+
+    client
+        .delete_project(git.project_id, &node_tables, edge_table)
+        .context("failed to clear existing project data")?;
+    client
+        .insert_graph(local_data)
+        .context("failed to insert graph data")?;
+    workspace::set_status(
+        &client,
+        &key,
+        git.project_id,
+        workspace::RepoStatus::Indexed,
+        None,
+        Some(git),
+    )?;
+
+    // Return a minimal v1-compatible result for stats output
+    Ok(RepositoryIndexingResult {
+        total_processing_time: std::time::Duration::ZERO,
+        repository_name: git
+            .repo_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        repository_path: key,
+        skipped_files: vec![],
+        errored_files: vec![],
+        errors: v2_result
+            .errors
+            .iter()
+            .map(|e| (e.file_path.clone(), e.error.clone()))
+            .collect(),
+        graph_data: None,
+        database_path: None,
+        database_loaded: true,
+    })
 }
 
 fn build_index_output(

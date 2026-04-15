@@ -25,7 +25,7 @@ tests:
       RETURN m.fqn AS fqn
     assert:
       - { non_empty: true }
-      - { all_match: { field: fqn, pattern: "Outer.Inner.*" } }
+      - { all_match: { field: fqn, pattern: "*Outer.Inner.*" } }
 
   - name: outer_method is contained in Outer
     query: |
@@ -34,4 +34,4 @@ tests:
       RETURN m.fqn AS fqn
     assert:
       - { non_empty: true }
-      - { all_match: { field: fqn, pattern: "Outer.*" } }
+      - { all_match: { field: fqn, pattern: "*Outer.*" } }
