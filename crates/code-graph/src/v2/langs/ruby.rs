@@ -30,7 +30,7 @@ impl DslLanguage for RubyDsl {
         vec![
             scope("class", "Class")
                 .def_kind(DefKind::Class)
-                .metadata(metadata().super_types(ExtractList::Fn(ruby_super_class))),
+                .metadata(metadata().super_types(ExtractList::Fn(ruby_super_types))),
             scope("module", "Module").def_kind(DefKind::Class),
             scope("method", "Method").def_kind(DefKind::Method),
             scope("singleton_method", "SingletonMethod").def_kind(DefKind::Method),
@@ -57,6 +57,15 @@ impl DslLanguage for RubyDsl {
 
     fn imports() -> Vec<ImportRule> {
         vec![]
+    }
+
+    fn custom_scope(
+        node: &N<'_>,
+        defs: &mut Vec<code_graph_types::CanonicalDefinition>,
+        scope_stack: &[std::sync::Arc<str>],
+        sep: &'static str,
+    ) -> bool {
+        ruby_extract_attr_methods(node, defs, scope_stack, sep)
     }
 
     fn custom_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
@@ -112,10 +121,82 @@ impl DslLanguage for RubyDsl {
     }
 }
 
-fn ruby_super_class(node: &N<'_>) -> Vec<String> {
-    node.field("superclass")
-        .map(|s| vec![s.text().to_string()])
-        .unwrap_or_default()
+/// Extract synthetic method definitions from attr_accessor/attr_reader/attr_writer.
+fn ruby_extract_attr_methods(
+    node: &N<'_>,
+    defs: &mut Vec<code_graph_types::CanonicalDefinition>,
+    scope_stack: &[std::sync::Arc<str>],
+    sep: &'static str,
+) -> bool {
+    if node.kind().as_ref() != "call" {
+        return false;
+    }
+    let method = node
+        .field("method")
+        .map(|m| m.text().to_string())
+        .unwrap_or_default();
+    if method != "attr_accessor" && method != "attr_reader" && method != "attr_writer" {
+        return false;
+    }
+    let Some(args) = node.field("arguments") else {
+        return true;
+    };
+    for arg in args.children() {
+        if arg.kind().as_ref() != "simple_symbol" {
+            continue;
+        }
+        let name = arg.text().trim_start_matches(':').to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let fqn = code_graph_types::Fqn::from_scope(scope_stack, &name, sep);
+        defs.push(code_graph_types::CanonicalDefinition {
+            definition_type: "Attribute",
+            kind: DefKind::Property,
+            name,
+            fqn,
+            range: code_graph_types::Range::empty(),
+            is_top_level: false,
+            metadata: None,
+        });
+    }
+    true
+}
+
+/// Extract super types: superclass + include/extend calls in the class body.
+fn ruby_super_types(node: &N<'_>) -> Vec<String> {
+    let mut types = Vec::new();
+
+    // Direct superclass: class Dog < Animal
+    if let Some(s) = node.field("superclass") {
+        types.push(s.text().to_string());
+    }
+
+    // include/extend in body: include Foo, extend Bar
+    if let Some(body) = node.field("body") {
+        for child in body.children() {
+            if child.kind().as_ref() != "call" {
+                continue;
+            }
+            let method_name = child
+                .field("method")
+                .map(|m| m.text().to_string())
+                .unwrap_or_default();
+            if method_name != "include" && method_name != "extend" && method_name != "prepend" {
+                continue;
+            }
+            if let Some(args) = child.field("arguments") {
+                for arg in args.children() {
+                    let kind = arg.kind();
+                    if kind.as_ref() == "constant" || kind.as_ref() == "scope_resolution" {
+                        types.push(arg.text().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    types
 }
 
 fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {

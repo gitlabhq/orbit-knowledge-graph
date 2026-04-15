@@ -151,6 +151,10 @@ impl LanguageSpec {
             });
         }
 
+        if let Some(f) = self.custom_scope_fn {
+            f(node, defs, scope_stack, sep);
+        }
+
         if let Some((name, range, expression)) =
             self.evaluate_reference(node, node_kind_ref, import_map, sep)
         {
