@@ -82,10 +82,7 @@ impl DslLanguage for KotlinDsl {
                 .def_kind(DefKind::Class)
                 .name_from(Extract::ChildOfKind("type_identifier"))
                 .metadata(metadata().super_types(ExtractList::Fn(kotlin_super_types))),
-            scope("object_declaration", "Object")
-                .def_kind(DefKind::Class)
-                .name_from(Extract::ChildOfKind("type_identifier")),
-            scope("companion_object", "CompanionObject")
+            scopes(&["object_declaration", "companion_object"], "Object")
                 .def_kind(DefKind::Class)
                 .name_from(Extract::ChildOfKind("type_identifier")),
             scope("function_declaration", "Function").def_kind(DefKind::Function),
@@ -98,11 +95,7 @@ impl DslLanguage for KotlinDsl {
             scope("enum_entry", "EnumEntry")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
-            scope("lambda_literal", "Lambda")
-                .def_kind(DefKind::Lambda)
-                .no_scope()
-                .name_from(Extract::None),
-            scope("anonymous_function", "Lambda")
+            scopes(&["lambda_literal", "anonymous_function"], "Lambda")
                 .def_kind(DefKind::Lambda)
                 .no_scope()
                 .name_from(Extract::None),

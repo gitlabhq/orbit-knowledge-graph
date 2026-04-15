@@ -1,6 +1,6 @@
 use code_graph_config::Language;
 use code_graph_types::{BindingKind, DefKind};
-use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
+use parser_core::dsl::extractors::{field, metadata, Extract, ExtractList};
 use parser_core::dsl::types::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -60,17 +60,18 @@ impl DslLanguage for JavaDsl {
         let class_meta = || metadata().super_types(ExtractList::Fn(java_super_types));
 
         vec![
-            scope("class_declaration", "Class")
-                .def_kind(DefKind::Class)
-                .metadata(class_meta()),
+            scopes(
+                &[
+                    "class_declaration",
+                    "enum_declaration",
+                    "record_declaration",
+                ],
+                "Class",
+            )
+            .def_kind(DefKind::Class)
+            .metadata(class_meta()),
             scope("interface_declaration", "Interface")
                 .def_kind(DefKind::Interface)
-                .metadata(class_meta()),
-            scope("enum_declaration", "Enum")
-                .def_kind(DefKind::Class)
-                .metadata(class_meta()),
-            scope("record_declaration", "Record")
-                .def_kind(DefKind::Class)
                 .metadata(class_meta()),
             scope("annotation_type_declaration", "AnnotationDeclaration")
                 .def_kind(DefKind::Interface),
@@ -109,12 +110,10 @@ impl DslLanguage for JavaDsl {
             }
         }
 
-        vec![
-            import("import_declaration")
-                .classify(java_import_classify)
-                .split_last(".")
-                .wildcard_child("asterisk"),
-        ]
+        vec![import("import_declaration")
+            .classify(java_import_classify)
+            .split_last(".")
+            .wildcard_child("asterisk")]
     }
 
     fn chain_config() -> Option<ChainConfig> {
