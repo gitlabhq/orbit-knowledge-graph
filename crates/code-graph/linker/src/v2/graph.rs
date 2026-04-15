@@ -126,6 +126,10 @@ pub struct CodeGraph {
     pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
     pub nested_defs: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
 
+    /// Pre-computed ancestor chains from Extends edges.
+    /// Built once during finalize(), used during resolve for hierarchy lookups.
+    pub ancestors: FxHashMap<NodeIndex, Vec<NodeIndex>>,
+
     pub root_path: String,
 }
 
@@ -146,6 +150,7 @@ impl CodeGraph {
             def_by_fqn: FxHashMap::default(),
             def_by_name: FxHashMap::default(),
             nested_defs: FxHashMap::default(),
+            ancestors: FxHashMap::default(),
             root_path: String::new(),
         }
     }
@@ -261,6 +266,13 @@ impl CodeGraph {
         (file_node, def_nodes, import_nodes)
     }
 
+    /// Free indexes only needed during graph construction.
+    /// Call after finalize() and pre_resolve_file_imports().
+    pub fn drop_construction_indexes(&mut self) {
+        self.dir_index = FxHashMap::default();
+        self.file_index = FxHashMap::default();
+    }
+
     /// Finalize the graph after all files have been added.
     /// Directory chains and containment edges are built during add_file_nodes().
     /// This just links supertypes via Extends edges (cross-file resolution).
@@ -270,6 +282,39 @@ impl CodeGraph {
     /// we target single-language workspaces / workspace nested_defs.
     pub fn finalize(&mut self) {
         self.link_extends();
+        self.build_ancestor_table();
+    }
+
+    /// BFS over Extends edges once per class. Stores the ancestor chain
+    /// so resolve never does BFS — just iterates a flat vec.
+    fn build_ancestor_table(&mut self) {
+        let extends_only = EdgeFiltered(&self.graph, |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
+            e.weight().relationship.edge_kind == EdgeKind::Extends
+        });
+
+        for idx in self.graph.node_indices() {
+            // Only definitions that have outgoing Extends edges
+            if !matches!(self.graph[idx], GraphNode::Definition { .. }) {
+                continue;
+            }
+            let has_extends = self
+                .graph
+                .edges_directed(idx, petgraph::Direction::Outgoing)
+                .any(|e| e.weight().relationship.edge_kind == EdgeKind::Extends);
+            if !has_extends {
+                continue;
+            }
+
+            let mut chain = Vec::new();
+            let mut bfs = Bfs::new(&extends_only, idx);
+            bfs.next(&extends_only); // skip self
+            while let Some(ancestor) = bfs.next(&extends_only) {
+                chain.push(ancestor);
+            }
+            if !chain.is_empty() {
+                self.ancestors.insert(idx, chain);
+            }
+        }
     }
 
     /// Create directory nodes and dir→dir edges for a file path.
@@ -421,18 +466,24 @@ impl CodeGraph {
             return false;
         };
 
-        let extends_only = EdgeFiltered(&self.graph, |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
-            e.weight().relationship.edge_kind == EdgeKind::Extends
-        });
-
         for &start in start_nodes {
-            let mut bfs = Bfs::new(&extends_only, start);
-            while let Some(node) = bfs.next(&extends_only) {
-                let fqn = self.def_fqn(node);
-                let found = self.lookup_nested(&fqn, member_name);
-                if !found.is_empty() {
-                    out.extend_from_slice(found);
-                    return true;
+            // Check direct nested defs first
+            let fqn = self.def_fqn(start);
+            let found = self.lookup_nested(&fqn, member_name);
+            if !found.is_empty() {
+                out.extend_from_slice(found);
+                return true;
+            }
+
+            // Walk pre-computed ancestor chain (no BFS)
+            if let Some(chain) = self.ancestors.get(&start) {
+                for &ancestor in chain {
+                    let ancestor_fqn = self.def_fqn(ancestor);
+                    let found = self.lookup_nested(&ancestor_fqn, member_name);
+                    if !found.is_empty() {
+                        out.extend_from_slice(found);
+                        return true;
+                    }
                 }
             }
         }

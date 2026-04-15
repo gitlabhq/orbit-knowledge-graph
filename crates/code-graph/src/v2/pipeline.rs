@@ -159,6 +159,13 @@ where
         for walk in &mut walks {
             walk.import_map = graph.pre_resolve_file_imports(walk.file_node, sep);
         }
+
+        // Free construction-only indexes before resolve
+        graph.drop_construction_indexes();
+
+        // Drop walks with zero reads — no references to resolve
+        walks.retain(|w| !w.reads.is_empty());
+
         eprintln!("[v2] graph finalize: {:.2?}", t2.elapsed());
 
         let t3 = std::time::Instant::now();
@@ -462,6 +469,17 @@ impl Pipeline {
                         .entry(name.clone())
                         .or_default()
                         .extend(remapped);
+                }
+            }
+            for (node, chain) in &g.ancestors {
+                if let Some(&new_node) = index_map.get(node) {
+                    let remapped: Vec<_> = chain
+                        .iter()
+                        .filter_map(|i| index_map.get(i).copied())
+                        .collect();
+                    if !remapped.is_empty() {
+                        merged.ancestors.insert(new_node, remapped);
+                    }
                 }
             }
             for old_edge in g.graph.edge_indices() {
