@@ -5796,6 +5796,7 @@ dependencies = [
  "gkg-utils",
  "globset",
  "lance-graph",
+ "ontology",
  "petgraph 0.8.3",
  "query-engine",
  "rustc-hash",

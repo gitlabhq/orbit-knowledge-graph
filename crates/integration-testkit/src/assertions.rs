@@ -2,8 +2,10 @@ use arrow::array::StringArray;
 use gkg_utils::arrow::ArrowUtils;
 
 use crate::context::TestContext;
+use crate::t;
 
 pub async fn assert_node_count(ctx: &TestContext, table: &str, expected: usize) {
+    let table = t(table);
     let result = ctx.query(&format!("SELECT 1 FROM {table} FINAL")).await;
     let actual = result.first().map_or(0, |b| b.num_rows());
     assert_eq!(
@@ -19,8 +21,9 @@ pub async fn assert_edge_count(
     target_kind: &str,
     expected: usize,
 ) {
+    let edge_table = t("gl_edge");
     let query = format!(
-        "SELECT source_id, target_id FROM gl_edge FINAL \
+        "SELECT source_id, target_id FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
          AND source_kind = '{source_kind}' AND target_kind = '{target_kind}'"
     );
@@ -44,8 +47,9 @@ pub async fn assert_edge_count_for_traversal_path(
     traversal_path: &str,
     expected: usize,
 ) {
+    let edge_table = t("gl_edge");
     let query = format!(
-        "SELECT 1 FROM gl_edge FINAL \
+        "SELECT 1 FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
          AND source_kind = '{source_kind}' AND target_kind = '{target_kind}' \
          AND traversal_path = '{traversal_path}'"
@@ -67,8 +71,9 @@ pub async fn assert_edges_have_traversal_path(
     expected_traversal_path: &str,
     expected_count: usize,
 ) {
+    let edge_table = t("gl_edge");
     let query = format!(
-        "SELECT traversal_path FROM gl_edge FINAL \
+        "SELECT traversal_path FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
          AND source_kind = '{source_kind}' AND target_kind = '{target_kind}'"
     );

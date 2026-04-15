@@ -335,6 +335,7 @@ fn watermark_where(watermark: &str) -> Expr {
 mod tests {
     use super::super::input;
     use super::*;
+    use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
     use std::collections::BTreeMap;
 
     fn emit(query: &Query) -> String {
@@ -374,10 +375,13 @@ mod tests {
             note_plan.transforms.len() >= 2,
             "Note should have node transform + FK edge transforms"
         );
-        assert_eq!(note_plan.transforms[0].destination_table, "gl_note");
+        assert_eq!(
+            note_plan.transforms[0].destination_table,
+            prefixed_table_name("gl_note", *SCHEMA_VERSION),
+        );
         assert_eq!(
             note_plan.transforms[1].destination_table,
-            ontology.edge_table().to_string(),
+            prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION),
         );
     }
 
@@ -388,7 +392,7 @@ mod tests {
 
         let all_plans: Vec<_> = plans.global.iter().chain(plans.namespaced.iter()).collect();
 
-        let edge_table = ontology.edge_table().to_string();
+        let edge_table = prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION);
         let standalone_edge_plans: Vec<_> = all_plans
             .iter()
             .filter(|p| p.transforms.len() == 1 && p.transforms[0].destination_table == edge_table)

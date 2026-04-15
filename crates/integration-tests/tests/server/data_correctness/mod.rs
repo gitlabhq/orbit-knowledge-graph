@@ -15,7 +15,7 @@ use integration_testkit::{run_subtests, run_subtests_shared};
 
 #[tokio::test]
 async fn data_correctness() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;
 
     run_subtests_shared!(
