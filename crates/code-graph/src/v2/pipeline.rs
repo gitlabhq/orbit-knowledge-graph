@@ -9,9 +9,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 
 use crate::linker::v2::walker::{FileWalkResult, HasRoot};
-use crate::linker::v2::{
-    CodeGraph, GraphBuilder, GraphEdge, HasRules, ResolutionContext, build_edges,
-};
+use crate::linker::v2::{CodeGraph, GraphEdge, HasRules, ResolutionContext, build_edges};
 
 fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
@@ -132,9 +130,12 @@ where
             errors.len()
         );
 
+        // Build graph with resolution indexes, and legacy ResolutionContext
+        // for the resolver (will be removed when resolver migrates to CodeGraph).
         let t2 = std::time::Instant::now();
-        let ctx = ResolutionContext::build(results, root_path.to_string());
-        eprintln!("[v2] indexes: {:.2?}", t2.elapsed());
+        let ctx = ResolutionContext::build(results.clone(), root_path.to_string());
+        let mut graph = CodeGraph::from_results(results, root_path.to_string());
+        eprintln!("[v2] graph + indexes: {:.2?}", t2.elapsed());
 
         let t3 = std::time::Instant::now();
         let result = build_edges(&rules, &ctx, &mut walks, &rules.settings);
@@ -146,12 +147,6 @@ where
         );
         result.stats.print();
 
-        let mut builder = GraphBuilder::new(root_path.to_string());
-        for result in &ctx.results {
-            builder.add_result(result.clone());
-        }
-        let mut graph = builder.build();
-
         for edge in resolved_edges {
             use crate::linker::v2::EdgeSource;
 
@@ -162,11 +157,8 @@ where
                     .copied(),
                 EdgeSource::File(file_idx) => {
                     let file_path = &ctx.results[file_idx].file_path;
-                    let relative: &str = file_path
-                        .strip_prefix(root_path)
-                        .map(|p: &str| p.strip_prefix('/').unwrap_or(p))
-                        .unwrap_or(file_path);
-                    graph.file_index.get(relative).copied()
+                    let relative = graph.relative_path(file_path);
+                    graph.file_index.get(&relative).copied()
                 }
             };
             let tgt_node = graph
