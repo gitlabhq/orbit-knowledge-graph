@@ -32,6 +32,7 @@ members = [
   "crates/gitlab-client",
   "crates/xtask",
   "crates/integration-testkit",
+  "crates/integration-tests-codegraph",
   "crates/utils",
   "crates/integration-tests",
   "crates/duckdb-client",

@@ -355,6 +355,16 @@ unit-test:
     - ./scripts/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
+integration-test-codegraph:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - cargo nextest run --profile ci -p integration-test-codegraph --no-fail-fast
+    - sccache --show-stats || true
+
 cli-integration-test:
   stage: test
   extends:

@@ -5783,28 +5783,17 @@ checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 name = "integration-testkit"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "arrow 56.2.0",
  "arrow 58.1.0",
  "clickhouse-client",
- "code-graph",
- "code-graph-linker",
  "futures",
  "gitalisk-core",
  "gkg-server",
  "gkg-server-config",
  "gkg-utils",
- "globset",
- "lance-graph",
- "petgraph 0.8.3",
  "query-engine",
- "rustc-hash",
  "rustls",
- "serde",
  "serde_json",
- "serde_yaml",
  "sqlparser 0.61.0",
- "tempfile",
  "testcontainers",
  "tokio",
  "uuid",
@@ -5858,6 +5847,25 @@ dependencies = [
  "tonic",
  "tower",
  "zstd",
+]
+
+[[package]]
+name = "integration-tests-codegraph"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow 56.2.0",
+ "code-graph",
+ "code-graph-linker",
+ "globset",
+ "lance-graph",
+ "petgraph 0.8.3",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

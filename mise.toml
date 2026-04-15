@@ -104,9 +104,9 @@ description = "Run unit + non-Docker integration tests with reduced debug info"
 run = "cargo nextest run --test local"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
 
-[tasks."test:graph-validator"]
-run = "cargo nextest run --test local -E 'test(graph_validator::)' --no-capture"
-description = "Run call graph validator YAML Cypher suites (no Docker)"
+[tasks."test:integration:codegraph"]
+run = "cargo nextest run -p integration-test-codegraph --no-capture"
+description = "Run code-graph v2 validator tests — YAML Cypher suites (no Docker)"
 
 [tasks."test:cli"]
 run = "cargo build -p orbit && cargo nextest run --test cli --no-fail-fast"

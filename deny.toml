@@ -123,6 +123,11 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "integration-tests-codegraph"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "gkg-server-config"
 expression = "LicenseRef-EE"
 license-files = []
