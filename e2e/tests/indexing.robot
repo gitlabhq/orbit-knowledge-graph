@@ -25,7 +25,7 @@ Create Group
 
 Enable Knowledge Graph
     [Arguments]    ${namespace_id}
-    ${headers}=    GitLab Auth Headers
+    ${headers}=    Create Dictionary    PRIVATE-TOKEN=${GITLAB_PAT}
     PUT    ${GITLAB_URL}/api/v4/admin/knowledge_graph/namespaces/${namespace_id}
     ...    headers=${headers}    expected_status=200
 

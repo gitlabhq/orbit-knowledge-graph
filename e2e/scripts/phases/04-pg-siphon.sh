@@ -28,23 +28,19 @@ $KC exec -n "$NS_GITLAB" gitlab-postgresql-0 -c postgresql -- \
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_replicator;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_snapshot;
 
-  DO \$pub\$
-  BEGIN
-    IF NOT EXISTS (SELECT FROM pg_publication WHERE pubname = 'e2e_siphon_publication') THEN
-      CREATE PUBLICATION e2e_siphon_publication;
-    END IF;
-  END \$pub\$;
+  DROP PUBLICATION IF EXISTS e2e_siphon_publication;
+  CREATE PUBLICATION e2e_siphon_publication FOR TABLE $(cdc_table_names | paste -sd, -);
 
-  CREATE OR REPLACE FUNCTION siphon_alter_publication(pub_name text, table_names text[])
+  CREATE OR REPLACE FUNCTION siphon_alter_publication(pub_name text, table_name text, operation integer)
   RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS \$fn\$
-  DECLARE t text;
   BEGIN
-    FOREACH t IN ARRAY table_names LOOP
-      BEGIN
-        EXECUTE format('ALTER PUBLICATION %I ADD TABLE %I', pub_name, t);
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END;
-    END LOOP;
+    IF operation = 1 THEN
+      EXECUTE format('ALTER PUBLICATION %I ADD TABLE %I', pub_name, table_name);
+    ELSIF operation = 2 THEN
+      EXECUTE format('ALTER PUBLICATION %I DROP TABLE %I', pub_name, table_name);
+    END IF;
+  EXCEPTION WHEN duplicate_object THEN NULL;
+           WHEN undefined_table THEN NULL;
   END;
   \$fn\$;
 "
