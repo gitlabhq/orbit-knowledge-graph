@@ -122,6 +122,11 @@ run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, hydration, redaction, graph formatter)"
 
+[tasks."test:integration:data"]
+run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(data_correctness)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run data correctness integration tests"
+
 [tasks."test:integration:indexer"]
 run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 -E 'test(indexer::)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }

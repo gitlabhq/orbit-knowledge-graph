@@ -218,7 +218,8 @@ impl PipelineStage for HydrationStage {
                 }
             }
             HydrationPlan::Dynamic(entity_specs) => {
-                let refs = hydration_helpers::extract_dynamic_refs(&query_result);
+                let static_nodes: Vec<_> = result_context.nodes().cloned().collect();
+                let refs = hydration_helpers::extract_dynamic_refs(&query_result, &static_nodes);
                 if !refs.is_empty() {
                     let (nodes, ids_count) =
                         hydration_helpers::hydrate_dynamic(entity_specs, &refs)?;
@@ -254,6 +255,11 @@ impl PipelineStage for HydrationStage {
                     );
 
                     hydration_helpers::merge_dynamic_properties(&mut query_result, &property_map);
+                    hydration_helpers::merge_static_node_properties(
+                        &mut query_result,
+                        &property_map,
+                        &static_nodes,
+                    );
                 }
             }
         }
