@@ -51,7 +51,7 @@ pub struct ResolveStats {
     pub bare_ssa_type: u64,
     pub bare_early_exit_unknown: u64,
     pub bare_import_resolved: u64,
-    pub bare_implicit_this_resolved: u64,
+    pub bare_implicit_scope_resolved: u64,
     pub bare_unresolved: u64,
     pub chain_resolved: u64,
     pub chain_fallback_fired: u64,
@@ -83,7 +83,7 @@ impl ResolveStats {
         self.bare_ssa_type += other.bare_ssa_type;
         self.bare_early_exit_unknown += other.bare_early_exit_unknown;
         self.bare_import_resolved += other.bare_import_resolved;
-        self.bare_implicit_this_resolved += other.bare_implicit_this_resolved;
+        self.bare_implicit_scope_resolved += other.bare_implicit_scope_resolved;
         self.bare_unresolved += other.bare_unresolved;
         self.chain_resolved += other.chain_resolved;
         self.chain_fallback_fired += other.chain_fallback_fired;
@@ -140,9 +140,9 @@ impl ResolveStats {
                 pct(self.bare_import_resolved, self.bare_refs)
             );
             eprintln!(
-                "    Implicit this:      {:>8} ({:.1}%)",
-                self.bare_implicit_this_resolved,
-                pct(self.bare_implicit_this_resolved, self.bare_refs)
+                "    Implicit scope:      {:>8} ({:.1}%)",
+                self.bare_implicit_scope_resolved,
+                pct(self.bare_implicit_scope_resolved, self.bare_refs)
             );
             eprintln!(
                 "    Unresolved:         {:>8} ({:.1}%)",

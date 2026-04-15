@@ -90,7 +90,7 @@ pub struct ResolutionRules {
     pub receiver: ReceiverMode,
     pub fqn_separator: &'static str,
 
-    /// SSA variable names the walker writes as `Value::Type(class_fqn)`
+    /// SSA variable names the walker writes as `Value::Type(scope_fqn)`
     /// when entering a class scope. e.g. `&["this", "self"]` for Java,
     /// `&["self"]` for Python.
     pub self_names: &'static [&'static str],

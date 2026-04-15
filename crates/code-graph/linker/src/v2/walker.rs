@@ -43,7 +43,7 @@ pub struct RecordedRead {
     /// Pre-computed enclosing definition (for edge source). None = file-level.
     pub enclosing_def: Option<NodeIndex>,
     /// Pre-computed enclosing type scope FQN (for implicit this / This chains).
-    pub enclosing_type_fqn: Option<IStr>,
+    pub enclosing_scope_fqn: Option<IStr>,
 }
 
 /// Per-file walk result: owned SSA state + recorded reads.
@@ -107,7 +107,7 @@ struct ScopeEntry {
     is_type_scope: bool,
     name: Option<String>,
     def_node: Option<NodeIndex>,
-    enclosing_type_fqn: Option<IStr>,
+    enclosing_scope_fqn: Option<IStr>,
 }
 
 struct FileWalker<'a> {
@@ -192,7 +192,7 @@ impl<'a> FileWalker<'a> {
                 is_type_scope: false,
                 name: None,
                 def_node: None,
-                enclosing_type_fqn: None,
+                enclosing_scope_fqn: None,
             }],
             ref_by_range_start,
             def_by_byte_start,
@@ -247,7 +247,7 @@ impl<'a> FileWalker<'a> {
         // References (matched by byte offset against parsed CanonicalReference).
         if let Some(ref_indices) = self.ref_by_range_start.remove(&byte_start) {
             let enclosing_def = self.innermost_def();
-            let enclosing_type_fqn = self.scope_stack.last().and_then(|e| e.enclosing_type_fqn);
+            let enclosing_scope_fqn = self.scope_stack.last().and_then(|e| e.enclosing_scope_fqn);
 
             for ref_idx in ref_indices {
                 let reference = &self.result.references[ref_idx];
@@ -256,7 +256,7 @@ impl<'a> FileWalker<'a> {
                     block: self.current_block,
                     name: IStr::from(reference.name.as_str()),
                     enclosing_def,
-                    enclosing_type_fqn,
+                    enclosing_scope_fqn,
                 });
             }
         }
@@ -281,9 +281,9 @@ impl<'a> FileWalker<'a> {
         let byte_start = node.range().start;
         let def_idx = self.def_by_byte_start.get(&byte_start).copied();
 
-        // Compute enclosing_type_fqn for this scope.
+        // Compute enclosing_scope_fqn for this scope.
         // Prefer the canonical definition's FQN (source of truth) over build_fqn.
-        let enclosing_type_fqn = if is_type_scope {
+        let enclosing_scope_fqn = if is_type_scope {
             if let Some(di) = def_idx {
                 Some(self.result.definitions[di].fqn.as_istr())
             } else if scope_name.is_some() {
@@ -292,23 +292,23 @@ impl<'a> FileWalker<'a> {
                     .as_ref()
                     .map(|name| IStr::from(self.build_fqn(name).as_str()))
             } else {
-                self.scope_stack.last().and_then(|e| e.enclosing_type_fqn)
+                self.scope_stack.last().and_then(|e| e.enclosing_scope_fqn)
             }
         } else {
             // Non-type scope — inherit parent's enclosing type.
-            self.scope_stack.last().and_then(|e| e.enclosing_type_fqn)
+            self.scope_stack.last().and_then(|e| e.enclosing_scope_fqn)
         };
 
         if is_type_scope && let Some(ref name) = scope_name {
             // Use canonical FQN for self/super SSA writes (matches MemberIndex keys).
-            let class_fqn = if let Some(di) = def_idx {
+            let scope_fqn = if let Some(di) = def_idx {
                 self.result.definitions[di].fqn.to_string()
             } else {
                 self.build_fqn(name)
             };
             for &self_name in self.rules.self_names {
                 self.ssa
-                    .write_variable(self_name, new_block, Value::type_of(&class_fqn));
+                    .write_variable(self_name, new_block, Value::type_of(&scope_fqn));
             }
             if let Some(super_name) = self.rules.super_name
                 && let Some(super_type) = self.find_super_type(name)
@@ -323,7 +323,7 @@ impl<'a> FileWalker<'a> {
             is_type_scope,
             name: scope_name,
             def_node: def_idx.map(|di| self.def_nodes[di]),
-            enclosing_type_fqn,
+            enclosing_scope_fqn,
         });
         self.current_block = new_block;
     }

@@ -124,7 +124,7 @@ pub struct CodeGraph {
     // Resolution indexes
     pub def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
     pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
-    pub members: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
+    pub nested_defs: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
 
     pub root_path: String,
 }
@@ -145,7 +145,7 @@ impl CodeGraph {
 
             def_by_fqn: FxHashMap::default(),
             def_by_name: FxHashMap::default(),
-            members: FxHashMap::default(),
+            nested_defs: FxHashMap::default(),
             root_path: String::new(),
         }
     }
@@ -205,7 +205,7 @@ impl CodeGraph {
                 .push(def_node);
 
             if let Some(parent_fqn) = def.fqn.parent() {
-                self.members
+                self.nested_defs
                     .entry(parent_fqn.to_string())
                     .or_default()
                     .entry(def.name.clone())
@@ -267,9 +267,9 @@ impl CodeGraph {
     ///
     /// NOTE: currently called per-language before merge_graphs(), so cross-language
     /// inheritance (e.g. Kotlin extending Java) won't be linked. Fine for now since
-    /// we target single-language workspaces / workspace members.
+    /// we target single-language workspaces / workspace nested_defs.
     pub fn finalize(&mut self) {
-        self.link_supers();
+        self.link_extends();
     }
 
     /// Create directory nodes and dir→dir edges for a file path.
@@ -277,15 +277,15 @@ impl CodeGraph {
     /// Only creates edges when a directory is first seen, so no dedup set needed.
     fn ensure_directory_chain(&mut self, file_path: &str) -> Option<NodeIndex> {
         let path = Path::new(file_path);
-        let mut ancestors: Vec<String> = Vec::new();
+        let mut parent_dirs: Vec<String> = Vec::new();
         let mut current = path.parent();
         while let Some(dir) = current {
-            ancestors.push(dir_to_string(dir));
+            parent_dirs.push(dir_to_string(dir));
             current = dir.parent();
         }
-        ancestors.reverse();
+        parent_dirs.reverse();
 
-        for dir_path in &ancestors {
+        for dir_path in &parent_dirs {
             if !self.dir_index.contains_key(dir_path) {
                 let name = Path::new(dir_path)
                     .file_name()
@@ -397,25 +397,25 @@ impl CodeGraph {
             .unwrap_or(&[])
     }
 
-    pub fn lookup_member(&self, class_fqn: &str, member_name: &str) -> &[NodeIndex] {
-        self.members
-            .get(class_fqn)
+    pub fn lookup_nested(&self, scope_fqn: &str, member_name: &str) -> &[NodeIndex] {
+        self.nested_defs
+            .get(scope_fqn)
             .and_then(|ms| ms.get(member_name))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
-    pub fn lookup_member_with_supers(
+    pub fn lookup_nested_with_hierarchy(
         &self,
-        class_fqn: &str,
+        scope_fqn: &str,
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        // Resolve class_fqn to NodeIndex(es): try FQN first, then bare name
+        // Resolve scope_fqn to NodeIndex(es): try FQN first, then bare name
         let start_nodes = self
             .def_by_fqn
-            .get(class_fqn)
-            .or_else(|| self.def_by_name.get(class_fqn));
+            .get(scope_fqn)
+            .or_else(|| self.def_by_name.get(scope_fqn));
 
         let Some(start_nodes) = start_nodes else {
             return false;
@@ -429,7 +429,7 @@ impl CodeGraph {
             let mut bfs = Bfs::new(&extends_only, start);
             while let Some(node) = bfs.next(&extends_only) {
                 let fqn = self.def_fqn(node);
-                let found = self.lookup_member(&fqn, member_name);
+                let found = self.lookup_nested(&fqn, member_name);
                 if !found.is_empty() {
                     out.extend_from_slice(found);
                     return true;
@@ -509,7 +509,7 @@ impl CodeGraph {
     /// Add Extends edges from each class/interface to its supertypes.
     /// Resolves super_type names (which may be bare names or FQNs)
     /// to NodeIndexes in the graph.
-    fn link_supers(&mut self) {
+    fn link_extends(&mut self) {
         let mut edges = Vec::new();
 
         for idx in self.graph.node_indices() {
@@ -917,6 +917,6 @@ mod tests {
         assert_eq!(cg.lookup_fqn("Foo.bar").len(), 1);
         assert_eq!(cg.lookup_name("Foo").len(), 1);
         assert_eq!(cg.lookup_name("bar").len(), 1);
-        assert_eq!(cg.lookup_member("Foo", "bar").len(), 1);
+        assert_eq!(cg.lookup_nested("Foo", "bar").len(), 1);
     }
 }

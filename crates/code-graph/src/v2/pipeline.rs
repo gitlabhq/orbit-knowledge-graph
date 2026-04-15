@@ -449,17 +449,17 @@ impl Pipeline {
                     .or_default()
                     .extend(remapped);
             }
-            for (class_fqn, member_map) in &g.members {
-                for (member_name, nodes) in member_map {
+            for (scope_fqn, nested_map) in &g.nested_defs {
+                for (name, nodes) in nested_map {
                     let remapped: Vec<_> = nodes
                         .iter()
                         .filter_map(|i| index_map.get(i).copied())
                         .collect();
                     merged
-                        .members
-                        .entry(class_fqn.clone())
+                        .nested_defs
+                        .entry(scope_fqn.clone())
                         .or_default()
-                        .entry(member_name.clone())
+                        .entry(name.clone())
                         .or_default()
                         .extend(remapped);
                 }

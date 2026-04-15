@@ -25,7 +25,7 @@ pub struct ResolveSettings {
     pub slow_ref_threshold: Option<std::time::Duration>,
     pub chain_fallback: bool,
     pub compound_key_recovery: bool,
-    pub implicit_this_on_base: bool,
+    pub implicit_scope_on_base: bool,
 }
 
 impl Default for ResolveSettings {
@@ -36,7 +36,7 @@ impl Default for ResolveSettings {
             slow_ref_threshold: Some(std::time::Duration::from_millis(100)),
             chain_fallback: true,
             compound_key_recovery: true,
-            implicit_this_on_base: true,
+            implicit_scope_on_base: true,
         }
     }
 }
@@ -365,7 +365,7 @@ struct Resolver<'a> {
     buf: String,
     import_map: &'a FxHashMap<IStr, Vec<NodeIndex>>,
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
-    member_cache: FxHashMap<(IStr, IStr), Vec<NodeIndex>>,
+    nested_cache: FxHashMap<(IStr, IStr), Vec<NodeIndex>>,
     pub stats: ResolveStats,
     pub last_bare_path: ResolvePath,
     pub last_chain_path: ResolvePath,
@@ -390,7 +390,7 @@ impl<'a> Resolver<'a> {
             buf: String::with_capacity(128),
             import_map,
             import_cache: FxHashMap::default(),
-            member_cache: FxHashMap::default(),
+            nested_cache: FxHashMap::default(),
             stats: ResolveStats::default(),
             last_bare_path: ResolvePath::None,
             last_chain_path: ResolvePath::None,
@@ -406,14 +406,14 @@ impl<'a> Resolver<'a> {
         result
     }
 
-    fn lookup_member_cached(
+    fn lookup_nested_cached(
         &mut self,
-        class_fqn: &str,
+        scope_fqn: &str,
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let key = (IStr::from(class_fqn), IStr::from(member_name));
-        if let Some(cached) = self.member_cache.get(&key) {
+        let key = (IStr::from(scope_fqn), IStr::from(member_name));
+        if let Some(cached) = self.nested_cache.get(&key) {
             if !cached.is_empty() {
                 out.extend_from_slice(cached);
                 return true;
@@ -422,16 +422,16 @@ impl<'a> Resolver<'a> {
         }
         let mut result = Vec::new();
         self.graph
-            .lookup_member_with_supers(class_fqn, member_name, &mut result);
+            .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
         let found = !result.is_empty();
         if found {
             out.extend_from_slice(&result);
         }
-        self.member_cache.insert(key, result);
+        self.nested_cache.insert(key, result);
         found
     }
 
-    fn def_to_types(&self, def: &code_graph_types::CanonicalDefinition) -> SmallVec<[IStr; 2]> {
+    fn def_types(&self, def: &code_graph_types::CanonicalDefinition) -> SmallVec<[IStr; 2]> {
         if def.kind.is_type_container() {
             smallvec![def.fqn.as_istr()]
         } else if let Some(meta) = &def.metadata
@@ -463,19 +463,19 @@ impl<'a> Resolver<'a> {
         out
     }
 
-    fn value_to_types(&mut self, value: &Value) -> SmallVec<[IStr; 2]> {
+    fn value_types(&mut self, value: &Value) -> SmallVec<[IStr; 2]> {
         match value {
             Value::Type(t) => smallvec![*t],
             Value::Def(idx) => {
                 let def = self.graph.def(*idx);
-                self.def_to_types(def)
+                self.def_types(def)
             }
             Value::Import(idx) => {
                 let defs = self.resolve_import_cached(*idx);
                 defs.iter()
                     .flat_map(|&di| {
                         let def = self.graph.def(di);
-                        self.def_to_types(def)
+                        self.def_types(def)
                     })
                     .collect()
             }
@@ -513,10 +513,10 @@ impl<'a> Resolver<'a> {
                 }
                 ResolveStage::ImplicitMember => {
                     let mut r = Vec::new();
-                    if let Some(type_fqn) = &read.enclosing_type_fqn
-                        && self.lookup_member_cached(type_fqn, &read.name, &mut r)
+                    if let Some(type_fqn) = &read.enclosing_scope_fqn
+                        && self.lookup_nested_cached(type_fqn, &read.name, &mut r)
                     {
-                        self.stats.bare_implicit_this_resolved += 1;
+                        self.stats.bare_implicit_scope_resolved += 1;
                         self.last_bare_path = ResolvePath::BareImplicit;
                     }
                     r
@@ -550,7 +550,7 @@ impl<'a> Resolver<'a> {
                 }
                 Value::Type(type_name) => {
                     self.stats.bare_ssa_type += 1;
-                    self.lookup_member_cached(type_name, &read.name, &mut result);
+                    self.lookup_nested_cached(type_name, &read.name, &mut result);
                 }
                 Value::Alias(name) => {
                     let alias_reaching = self.ssa.read_variable_stateless(name, read.block);
@@ -600,7 +600,7 @@ impl<'a> Resolver<'a> {
             _ => self.stats.chain_base_other += 1,
         }
 
-        let enclosing_str = read.enclosing_type_fqn.as_ref().map(|s| s.as_ref());
+        let enclosing_str = read.enclosing_scope_fqn.as_ref().map(|s| s.as_ref());
         let mut current_types = self.resolve_base(&effective_chain[0], read.block, enclosing_str);
 
         if current_types.is_empty() {
@@ -629,17 +629,17 @@ impl<'a> Resolver<'a> {
                 _ => continue,
             };
 
-            let (mut next_types, found_members) = self.walk_step(&current_types, step, member_name);
+            let (mut next_types, found_nested) = self.walk_step(&current_types, step, member_name);
 
-            if is_last && !found_members.is_empty() {
+            if is_last && !found_nested.is_empty() {
                 self.stats.chain_resolved += 1;
                 self.last_chain_path = ResolvePath::Chain;
-                let mut result = found_members;
+                let mut result = found_nested;
                 dedup(&mut result);
                 return result;
             }
 
-            if next_types.is_empty() && found_members.is_empty() {
+            if next_types.is_empty() && found_nested.is_empty() {
                 let recovered = self.compound_key_step(&mut compound_key, member_name, read.block);
                 if !recovered.is_empty() {
                     self.stats.chain_compound_key_recovered += 1;
@@ -674,10 +674,10 @@ impl<'a> Resolver<'a> {
                 let reaching = self.ssa.read_variable_stateless(name, block);
                 let values = self.resolve_aliases(&reaching.values, block);
                 let mut types: SmallVec<[IStr; 2]> =
-                    values.iter().flat_map(|v| self.value_to_types(v)).collect();
+                    values.iter().flat_map(|v| self.value_types(v)).collect();
 
                 if types.is_empty()
-                    && self.settings.implicit_this_on_base
+                    && self.settings.implicit_scope_on_base
                     && self
                         .rules
                         .bare_stages
@@ -685,10 +685,10 @@ impl<'a> Resolver<'a> {
                     && let Some(fqn) = enclosing
                 {
                     let mut members = Vec::new();
-                    self.lookup_member_cached(fqn, name, &mut members);
+                    self.lookup_nested_cached(fqn, name, &mut members);
                     for &def_idx in &members {
                         let def = self.graph.def(def_idx);
-                        types.extend(self.def_to_types(def));
+                        types.extend(self.def_types(def));
                     }
                 }
                 types
@@ -723,12 +723,12 @@ impl<'a> Resolver<'a> {
         member_name: &str,
     ) -> (SmallVec<[IStr; 2]>, Vec<NodeIndex>) {
         let mut next_types = SmallVec::new();
-        let mut found_members = Vec::new();
+        let mut found_nested = Vec::new();
 
         for type_name in current_types {
-            let before = found_members.len();
-            self.lookup_member_cached(type_name, member_name, &mut found_members);
-            for &def_idx in &found_members[before..] {
+            let before = found_nested.len();
+            self.lookup_nested_cached(type_name, member_name, &mut found_nested);
+            for &def_idx in &found_nested[before..] {
                 let def = self.graph.def(def_idx);
                 if matches!(step, ExpressionStep::Call(_)) {
                     if let Some(meta) = &def.metadata
@@ -751,7 +751,7 @@ impl<'a> Resolver<'a> {
                 }
             }
         }
-        (next_types, found_members)
+        (next_types, found_nested)
     }
 
     fn compound_key_base(&mut self, step: &ExpressionStep) -> String {
@@ -790,7 +790,7 @@ impl<'a> Resolver<'a> {
         reaching
             .values
             .iter()
-            .flat_map(|v| self.value_to_types(v))
+            .flat_map(|v| self.value_types(v))
             .collect()
     }
 
@@ -804,7 +804,7 @@ impl<'a> Resolver<'a> {
             block: read.block,
             name: IStr::from(last.as_str()),
             enclosing_def: read.enclosing_def,
-            enclosing_type_fqn: read.enclosing_type_fqn,
+            enclosing_scope_fqn: read.enclosing_scope_fqn,
         };
         self.resolve_bare(&bare_read)
     }
