@@ -298,7 +298,8 @@ mod tests {
         assert!(result.definitions[0].is_top_level);
 
         assert_eq!(result.definitions[1].name, "add");
-        assert_eq!(result.definitions[1].fqn.to_string(), "Calculator.add");
+        // FQN includes module prefix from file path (test.py → "test")
+        assert_eq!(result.definitions[1].fqn.to_string(), "test.Calculator.add");
     }
 
     #[test]

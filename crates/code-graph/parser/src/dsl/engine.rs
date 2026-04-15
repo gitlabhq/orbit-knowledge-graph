@@ -56,9 +56,14 @@ impl LanguageSpec {
             scope_stack.push(Arc::from(module.as_str()));
         }
 
+        // Scope depth at which definitions are "top level" — accounts for
+        // the module scope pushed by module_from_path.
+        let top_level_depth = scope_stack.len();
+
         self.walk(
             &root,
             &mut scope_stack,
+            top_level_depth,
             &mut defs,
             &mut refs,
             &mut imports,
@@ -93,6 +98,7 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         scope_stack: &mut Vec<Arc<str>>,
+        top_level_depth: usize,
         defs: &mut Vec<CanonicalDefinition>,
         refs: &mut Vec<CanonicalReference>,
         imports: &mut Vec<CanonicalImport>,
@@ -118,8 +124,7 @@ impl LanguageSpec {
         }
 
         if let Some(m) = self.evaluate_scope(node, node_kind_ref, import_map, sep) {
-            let is_top_level =
-                scope_stack.is_empty() || (scope_stack.len() == 1 && scope_stack[0].contains('.'));
+            let is_top_level = scope_stack.len() <= top_level_depth;
 
             if m.creates_scope {
                 scope_stack.push(Arc::from(m.name.as_str()));
@@ -267,6 +272,7 @@ impl LanguageSpec {
             self.walk(
                 &child,
                 scope_stack,
+                top_level_depth,
                 defs,
                 refs,
                 imports,
