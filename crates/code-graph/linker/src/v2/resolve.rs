@@ -229,112 +229,125 @@ pub fn build_edges(
             .progress_chars("█▓░"),
     );
 
-    #[allow(clippy::type_complexity)]
-    let per_file: Vec<(Vec<(NodeIndex, NodeIndex, GraphEdge)>, ResolveStats, FileTimingEntry)> = walks
-        .par_iter_mut()
-        .map(|walk| {
-            let file_start = std::time::Instant::now();
-            let deadline = settings.per_file_timeout.map(|d| file_start + d);
-            let reads = std::mem::take(&mut walk.reads);
-            let num_reads = reads.len();
-            let file_node = walk.file_node;
-            let file_path: std::sync::Arc<str> = graph.graph[file_node].path().into();
-            let thread_id = rayon::current_thread_index().unwrap_or(0);
-            let mut resolver = Resolver::new(rules, graph, file_node, settings, &mut walk.ssa, &walk.import_map);
-            let mut file_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)> = Vec::new();
-
-            for (resolved_count, read) in reads.iter().enumerate() {
-                if let Some(dl) = deadline
-                    && std::time::Instant::now() > dl
-                {
-                    let skipped = (num_reads - resolved_count) as u64;
-                    resolver.stats.timed_out_files = 1;
-                    resolver.stats.timed_out_refs = skipped;
-                    pb.suspend(|| {
-                        eprintln!("\x1b[33m[TIMEOUT] {} after {:.2?} ({} refs resolved, {} skipped)\x1b[0m",
-                            file_path, file_start.elapsed(), resolved_count, skipped);
-                    });
-                    pb.inc(skipped);
-                    break;
-                }
-
-                let reference = &walk.references[read.ref_idx];
-
-                let t = std::time::Instant::now();
-                let (resolved_defs, path) = if let Some(ref chain) = reference.expression {
-                    resolver.stats.chain_refs += 1;
-                    let defs = resolver.resolve_chain(read, chain);
-                    (defs, resolver.last_chain_path)
-                } else {
-                    resolver.stats.bare_refs += 1;
-                    let defs = resolver.resolve_bare(read);
-                    (defs, resolver.last_bare_path)
-                };
-                let elapsed = t.elapsed();
-                if let Some(threshold) = settings.slow_ref_threshold
-                    && elapsed >= threshold
-                {
-                    pb.suspend(|| {
-                        eprintln!("\x1b[31m[SLOW] {:.2?} resolving '{}' in {} (chain: {})\x1b[0m",
-                            elapsed, reference.name, &*file_path, reference.expression.is_some());
-                    });
-                }
-
-                let (source_idx, source_node_kind, source_def_kind) = match read.enclosing_def {
-                    Some(def_node) => {
-                        let def = graph.def(def_node);
-                        (def_node, NodeKind::Definition, Some(def.kind))
-                    }
-                    None => (file_node, NodeKind::File, None),
-                };
-
-                let edge_count = resolved_defs.len() as u64;
-                for target_idx in resolved_defs {
-                    let target_def = graph.def(target_idx);
-                    file_edges.push((
-                        source_idx, target_idx,
-                        GraphEdge {
-                            relationship: Relationship {
-                                edge_kind: EdgeKind::Calls,
-                                source_node: source_node_kind,
-                                target_node: NodeKind::Definition,
-                                source_def_kind,
-                                target_def_kind: Some(target_def.kind),
-                            },
-                            source_definition_range: None,
-                            target_definition_range: None,
-                        },
-                    ));
-                }
-
-                match path {
-                    ResolvePath::BareSsa => resolver.stats.edges_from_bare_ssa += edge_count,
-                    ResolvePath::BareImport => resolver.stats.edges_from_bare_import += edge_count,
-                    ResolvePath::BareImplicit => resolver.stats.edges_from_bare_implicit += edge_count,
-                    ResolvePath::Chain => resolver.stats.edges_from_chain += edge_count,
-                    ResolvePath::ChainFallback => resolver.stats.edges_from_chain_fallback += edge_count,
-                    ResolvePath::None => {}
-                }
-                pb.inc(1);
-            }
-
-            resolver.stats.ssa.merge(&resolver.ssa.stats);
-            let stats = std::mem::take(&mut resolver.stats);
-            let timing = FileTimingEntry { file_path: file_path.clone(), num_reads, duration: file_start.elapsed(), thread_id };
-            (file_edges, stats, timing)
-        })
-        .collect();
-
-    pb.finish_and_clear();
+    const BATCH_SIZE: usize = 1024;
 
     let mut all_edges = Vec::new();
     let mut combined = ResolveStats::default();
-    let mut timings = Vec::with_capacity(per_file.len());
-    for (edges, stats, timing) in per_file {
-        all_edges.extend(edges);
-        combined.merge(&stats);
-        timings.push(timing);
+    let mut timings = Vec::with_capacity(walks.len());
+
+    for chunk in walks.chunks_mut(BATCH_SIZE) {
+        #[allow(clippy::type_complexity)]
+        let batch: Vec<(Vec<(NodeIndex, NodeIndex, GraphEdge)>, ResolveStats, FileTimingEntry)> = chunk
+            .par_iter_mut()
+            .map(|walk| {
+                let file_start = std::time::Instant::now();
+                let deadline = settings.per_file_timeout.map(|d| file_start + d);
+                let reads = std::mem::take(&mut walk.reads);
+                let num_reads = reads.len();
+                let file_node = walk.file_node;
+                let file_path: std::sync::Arc<str> = graph.graph[file_node].path().into();
+                let thread_id = rayon::current_thread_index().unwrap_or(0);
+                let mut resolver = Resolver::new(rules, graph, file_node, settings, &mut walk.ssa, &walk.import_map);
+                let mut file_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)> = Vec::new();
+
+                for (resolved_count, read) in reads.iter().enumerate() {
+                    if let Some(dl) = deadline
+                        && std::time::Instant::now() > dl
+                    {
+                        let skipped = (num_reads - resolved_count) as u64;
+                        resolver.stats.timed_out_files = 1;
+                        resolver.stats.timed_out_refs = skipped;
+                        pb.suspend(|| {
+                            eprintln!("\x1b[33m[TIMEOUT] {} after {:.2?} ({} refs resolved, {} skipped)\x1b[0m",
+                                file_path, file_start.elapsed(), resolved_count, skipped);
+                        });
+                        pb.inc(skipped);
+                        break;
+                    }
+
+                    let reference = &walk.references[read.ref_idx];
+
+                    let t = std::time::Instant::now();
+                    let (resolved_defs, path) = if let Some(ref chain) = reference.expression {
+                        resolver.stats.chain_refs += 1;
+                        let defs = resolver.resolve_chain(read, chain);
+                        (defs, resolver.last_chain_path)
+                    } else {
+                        resolver.stats.bare_refs += 1;
+                        let defs = resolver.resolve_bare(read);
+                        (defs, resolver.last_bare_path)
+                    };
+                    let elapsed = t.elapsed();
+                    if let Some(threshold) = settings.slow_ref_threshold
+                        && elapsed >= threshold
+                    {
+                        pb.suspend(|| {
+                            eprintln!("\x1b[31m[SLOW] {:.2?} resolving '{}' in {} (chain: {})\x1b[0m",
+                                elapsed, reference.name, &*file_path, reference.expression.is_some());
+                        });
+                    }
+
+                    let (source_idx, source_node_kind, source_def_kind) = match read.enclosing_def {
+                        Some(def_node) => {
+                            let def = graph.def(def_node);
+                            (def_node, NodeKind::Definition, Some(def.kind))
+                        }
+                        None => (file_node, NodeKind::File, None),
+                    };
+
+                    let edge_count = resolved_defs.len() as u64;
+                    for target_idx in resolved_defs {
+                        let target_def = graph.def(target_idx);
+                        file_edges.push((
+                            source_idx, target_idx,
+                            GraphEdge {
+                                relationship: Relationship {
+                                    edge_kind: EdgeKind::Calls,
+                                    source_node: source_node_kind,
+                                    target_node: NodeKind::Definition,
+                                    source_def_kind,
+                                    target_def_kind: Some(target_def.kind),
+                                },
+                                source_definition_range: None,
+                                target_definition_range: None,
+                            },
+                        ));
+                    }
+
+                    match path {
+                        ResolvePath::BareSsa => resolver.stats.edges_from_bare_ssa += edge_count,
+                        ResolvePath::BareImport => resolver.stats.edges_from_bare_import += edge_count,
+                        ResolvePath::BareImplicit => resolver.stats.edges_from_bare_implicit += edge_count,
+                        ResolvePath::Chain => resolver.stats.edges_from_chain += edge_count,
+                        ResolvePath::ChainFallback => resolver.stats.edges_from_chain_fallback += edge_count,
+                        ResolvePath::None => {}
+                    }
+                    pb.inc(1);
+                }
+
+                resolver.stats.ssa.merge(&resolver.ssa.stats);
+                let stats = std::mem::take(&mut resolver.stats);
+                let timing = FileTimingEntry { file_path: file_path.clone(), num_reads, duration: file_start.elapsed(), thread_id };
+                (file_edges, stats, timing)
+            })
+            .collect();
+
+        // Collect batch results
+        for (edges, stats, timing) in batch {
+            all_edges.extend(edges);
+            combined.merge(&stats);
+            timings.push(timing);
+        }
+
+        // Release SSA state, references, and import maps for this batch
+        for walk in chunk.iter_mut() {
+            walk.ssa = SsaResolver::new();
+            walk.references = Vec::new();
+            walk.import_map = FxHashMap::default();
+        }
     }
+
+    pb.finish_and_clear();
 
     print_long_tail_analysis(&timings);
     BuildEdgesResult {
