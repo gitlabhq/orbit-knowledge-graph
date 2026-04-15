@@ -8,6 +8,7 @@ use code_graph_types::{
 };
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 // ── Node + Edge types ───────────────────────────────────────────
@@ -123,8 +124,6 @@ pub struct CodeGraph {
     pub def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
     pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
     pub members: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
-    pub supers: FxHashMap<String, Vec<String>>,
-    pub ancestors: FxHashMap<String, Vec<String>>,
     pub imports_by_file: FxHashMap<String, Vec<NodeIndex>>,
     pub defs_by_file: FxHashMap<String, Vec<NodeIndex>>,
 
@@ -148,8 +147,6 @@ impl CodeGraph {
             def_by_fqn: FxHashMap::default(),
             def_by_name: FxHashMap::default(),
             members: FxHashMap::default(),
-            supers: FxHashMap::default(),
-            ancestors: FxHashMap::default(),
             imports_by_file: FxHashMap::default(),
             defs_by_file: FxHashMap::default(),
             root_path: String::new(),
@@ -208,12 +205,6 @@ impl CodeGraph {
                     .entry(def.name.clone())
                     .or_default()
                     .push(def_node);
-            }
-
-            if let Some(meta) = &def.metadata
-                && !meta.super_types.is_empty()
-            {
-                self.supers.insert(fqn_str, meta.super_types.clone());
             }
 
             self.graph.add_edge(
@@ -278,7 +269,7 @@ impl CodeGraph {
             build_containment_edges(&result.definitions, &def_indices, self);
         }
 
-        self.flatten_supers();
+        self.link_supers();
     }
 
     /// Build the complete graph from parsed results in a single pass.
@@ -332,44 +323,28 @@ impl CodeGraph {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let direct = self.lookup_member(class_fqn, member_name);
-        if !direct.is_empty() {
-            out.extend_from_slice(direct);
-            return true;
-        }
+        // Resolve class_fqn to NodeIndex(es): try FQN first, then bare name
+        let start_nodes = self
+            .def_by_fqn
+            .get(class_fqn)
+            .or_else(|| self.def_by_name.get(class_fqn));
 
-        if let Some(chain) = self.ancestors.get(class_fqn) {
-            for ancestor_fqn in chain {
-                let found = self.lookup_member(ancestor_fqn, member_name);
+        let Some(start_nodes) = start_nodes else {
+            return false;
+        };
+
+        let extends_only = EdgeFiltered(&self.graph, |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
+            e.weight().relationship.edge_kind == EdgeKind::Extends
+        });
+
+        for &start in start_nodes {
+            let mut bfs = Bfs::new(&extends_only, start);
+            while let Some(node) = bfs.next(&extends_only) {
+                let fqn = self.def_fqn(node);
+                let found = self.lookup_member(&fqn, member_name);
                 if !found.is_empty() {
                     out.extend_from_slice(found);
                     return true;
-                }
-            }
-        }
-
-        // Bare name fallback
-        if !self.ancestors.contains_key(class_fqn)
-            && !self.members.contains_key(class_fqn)
-            && let Some(nodes) = self.def_by_name.get(class_fqn)
-        {
-            for &idx in nodes {
-                if let GraphNode::Definition { def, .. } = &self.graph[idx] {
-                    let fqn = def.fqn.to_string();
-                    let direct = self.lookup_member(&fqn, member_name);
-                    if !direct.is_empty() {
-                        out.extend_from_slice(direct);
-                        return true;
-                    }
-                    if let Some(chain) = self.ancestors.get(fqn.as_str()) {
-                        for ancestor_fqn in chain {
-                            let found = self.lookup_member(ancestor_fqn, member_name);
-                            if !found.is_empty() {
-                                out.extend_from_slice(found);
-                                return true;
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -452,62 +427,52 @@ impl CodeGraph {
 
     // ── Internal ────────────────────────────────────────────
 
-    fn flatten_supers(&mut self) {
-        let type_fqns: Vec<String> = self.supers.keys().cloned().collect();
-        for fqn in type_fqns {
-            if self.ancestors.contains_key(&fqn) {
-                continue;
-            }
-            let chain = self.compute_ancestor_chain(&fqn);
-            self.ancestors.insert(fqn, chain);
-        }
-    }
+    /// Add Extends edges from each class/interface to its supertypes.
+    /// Resolves super_type names (which may be bare names or FQNs)
+    /// to NodeIndexes in the graph.
+    fn link_supers(&mut self) {
+        let mut edges = Vec::new();
 
-    fn compute_ancestor_chain(&self, class_fqn: &str) -> Vec<String> {
-        let mut chain = Vec::new();
-        let mut visited = FxHashSet::default();
-        let mut queue = std::collections::VecDeque::new();
-
-        let root_fqns = self.resolve_type_fqns(class_fqn);
-        for fqn in &root_fqns {
-            visited.insert(fqn.clone());
-            queue.push_back(fqn.clone());
-        }
-
-        while let Some(current) = queue.pop_front() {
-            if let Some(super_names) = self.supers.get(&current) {
-                for super_name in super_names {
-                    for super_fqn in self.resolve_type_fqns(super_name) {
-                        if visited.insert(super_fqn.clone()) {
-                            chain.push(super_fqn.clone());
-                            queue.push_back(super_fqn);
+        for idx in self.graph.node_indices() {
+            if let GraphNode::Definition { def, .. } = &self.graph[idx]
+                && let Some(meta) = &def.metadata
+                && !meta.super_types.is_empty()
+            {
+                for super_name in &meta.super_types {
+                    let targets = self.resolve_type_to_nodes(super_name);
+                    for &target in targets {
+                        if target != idx {
+                            edges.push((idx, target));
                         }
                     }
                 }
             }
         }
-        chain
+
+        for (child, parent) in edges {
+            self.graph.add_edge(
+                child,
+                parent,
+                GraphEdge::structural(
+                    EdgeKind::Extends,
+                    NodeKind::Definition,
+                    NodeKind::Definition,
+                ),
+            );
+        }
     }
 
-    fn resolve_type_fqns(&self, type_name: &str) -> Vec<String> {
-        if self.members.contains_key(type_name) || self.supers.contains_key(type_name) {
-            return vec![type_name.to_string()];
+    /// Resolve a type name (FQN or bare name) to graph NodeIndexes.
+    fn resolve_type_to_nodes(&self, name: &str) -> &[NodeIndex] {
+        if let Some(nodes) = self.def_by_fqn.get(name) {
+            if !nodes.is_empty() {
+                return nodes;
+            }
         }
         self.def_by_name
-            .get(type_name)
-            .map(|nodes| {
-                nodes
-                    .iter()
-                    .filter_map(|&idx| {
-                        if let GraphNode::Definition { def, .. } = &self.graph[idx] {
-                            Some(def.fqn.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+            .get(name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Assign stable IDs to all nodes for Arrow serialization.

@@ -478,13 +478,6 @@ impl Pipeline {
                         .extend(remapped);
                 }
             }
-            merged
-                .supers
-                .extend(g.supers.iter().map(|(k, v)| (k.clone(), v.clone())));
-            merged
-                .ancestors
-                .extend(g.ancestors.iter().map(|(k, v)| (k.clone(), v.clone())));
-
             for old_edge in g.graph.edge_indices() {
                 let (src, tgt) = g.graph.edge_endpoints(old_edge).unwrap();
                 let weight = g.graph[old_edge].clone();
