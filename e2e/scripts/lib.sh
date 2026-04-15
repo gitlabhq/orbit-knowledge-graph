@@ -37,6 +37,9 @@ wait_for_pods() {
   log "Waiting for pods in $ns (timeout: ${timeout}s)"
   $KC wait --for=condition=Ready pods \
     --field-selector=status.phase!=Succeeded,status.phase!=Failed \
-    --all -n "$ns" --timeout="${timeout}s" 2>/dev/null || true
+    --all -n "$ns" --timeout="${timeout}s" 2>/dev/null || {
+    log "Warning: not all pods in $ns became ready within ${timeout}s"
+    $KC get pods -n "$ns" --no-headers 2>/dev/null
+  }
   $KC get pods -n "$ns" --no-headers 2>/dev/null
 }

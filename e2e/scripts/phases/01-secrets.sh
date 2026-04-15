@@ -3,14 +3,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 
 log "Phase 1: Generating secrets"
 
-export E2E_JWT_KEY=$(openssl rand -base64 32)
-export E2E_CH_DEFAULT_PASS=$(openssl rand -base64 24)
-export E2E_CH_SIPHON_PASS=$(openssl rand -base64 24)
-export E2E_CH_DATALAKE_PASS=$(openssl rand -base64 24)
-export E2E_CH_GRAPH_PASS=$(openssl rand -base64 24)
-export E2E_CH_GRAPH_READ_PASS=$(openssl rand -base64 24)
-export E2E_PG_SIPHON_PASS=$(openssl rand -base64 24)
-export E2E_CH_GITLAB_PASS=$(openssl rand -base64 24)
+E2E_JWT_KEY=$(openssl rand -base64 32)
+E2E_CH_DEFAULT_PASS=$(openssl rand -base64 24)
+E2E_CH_SIPHON_PASS=$(openssl rand -base64 24)
+E2E_CH_DATALAKE_PASS=$(openssl rand -base64 24)
+E2E_CH_GRAPH_PASS=$(openssl rand -base64 24)
+E2E_CH_GRAPH_READ_PASS=$(openssl rand -base64 24)
+E2E_PG_SIPHON_PASS=$(openssl rand -base64 24)
+E2E_CH_GITLAB_PASS=$(openssl rand -base64 24)
+export E2E_JWT_KEY E2E_CH_DEFAULT_PASS E2E_CH_SIPHON_PASS E2E_CH_DATALAKE_PASS
+export E2E_CH_GRAPH_PASS E2E_CH_GRAPH_READ_PASS E2E_PG_SIPHON_PASS E2E_CH_GITLAB_PASS
 
 $KC create secret generic e2e-master-secrets -n "$NS_SECRETS" \
   --from-literal=jwt-key="$E2E_JWT_KEY" \

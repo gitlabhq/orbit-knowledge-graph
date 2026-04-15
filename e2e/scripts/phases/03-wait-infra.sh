@@ -8,7 +8,8 @@ wait_for_pods "$NS_CH" 180
 log "Waiting for GitLab migrations..."
 $KC wait --for=condition=complete job -l app=migrations \
   -n "$NS_GITLAB" --timeout=900s 2>/dev/null || {
-  log "Warning: migrations job wait timed out, checking status..."
+  log "ERROR: GitLab migrations did not complete within 900s"
   $KC get jobs -n "$NS_GITLAB"
+  exit 1
 }
 wait_for_pods "$NS_GITLAB" 600

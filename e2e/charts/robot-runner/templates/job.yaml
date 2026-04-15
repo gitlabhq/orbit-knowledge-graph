@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: e2e-robot-runner
+  name: {{ .Release.Name }}
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: {{ .Values.ttlSecondsAfterFinished }}
