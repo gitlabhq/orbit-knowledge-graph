@@ -49,7 +49,7 @@ fn apply_import_strategies(
     file_node: NodeIndex,
     name: &str,
     sep: &str,
-    import_map: &FxHashMap<IStr, Vec<NodeIndex>>,
+    import_map: &FxHashMap<String, Vec<NodeIndex>>,
 ) -> Vec<NodeIndex> {
     for strategy in strategies {
         let candidates = match strategy {
@@ -137,11 +137,8 @@ fn scope_fqn_walk(
     vec![]
 }
 
-fn explicit_import(import_map: &FxHashMap<IStr, Vec<NodeIndex>>, name: &str) -> Vec<NodeIndex> {
-    import_map
-        .get(&IStr::from(name))
-        .cloned()
-        .unwrap_or_default()
+fn explicit_import(import_map: &FxHashMap<String, Vec<NodeIndex>>, name: &str) -> Vec<NodeIndex> {
+    import_map.get(name).cloned().unwrap_or_default()
 }
 
 fn wildcard_import(
@@ -379,9 +376,9 @@ struct Resolver<'a> {
     ssa: &'a mut SsaResolver,
     sep: &'a str,
     buf: String,
-    import_map: &'a FxHashMap<IStr, Vec<NodeIndex>>,
+    import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
-    nested_cache: FxHashMap<(IStr, IStr), Vec<NodeIndex>>,
+    nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
     pub stats: ResolveStats,
     pub last_bare_path: ResolvePath,
     pub last_chain_path: ResolvePath,
@@ -394,7 +391,7 @@ impl<'a> Resolver<'a> {
         file_node: NodeIndex,
         settings: &'a ResolveSettings,
         ssa: &'a mut SsaResolver,
-        import_map: &'a FxHashMap<IStr, Vec<NodeIndex>>,
+    import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
     ) -> Self {
         Self {
             sep: rules.fqn_separator,
@@ -428,7 +425,7 @@ impl<'a> Resolver<'a> {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let key = (IStr::from(scope_fqn), IStr::from(member_name));
+        let key = (scope_fqn.to_string(), member_name.to_string());
         if let Some(cached) = self.nested_cache.get(&key) {
             if !cached.is_empty() {
                 out.extend_from_slice(cached);

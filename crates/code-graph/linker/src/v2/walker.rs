@@ -56,7 +56,7 @@ pub struct FileWalkResult {
     pub references: Vec<CanonicalReference>,
     /// Pre-resolved import name → definition NodeIndexes.
     /// Built once before resolve, eliminates repeated neighbor iteration.
-    pub import_map: FxHashMap<IStr, Vec<NodeIndex>>,
+    pub import_map: FxHashMap<String, Vec<NodeIndex>>,
 }
 
 impl FileWalkResult {

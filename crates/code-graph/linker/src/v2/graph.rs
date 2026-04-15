@@ -118,10 +118,10 @@ pub struct CodeGraph {
     pub dir_index: FxHashMap<String, NodeIndex>,
     pub file_index: FxHashMap<String, NodeIndex>,
 
-    // Resolution indexes (IStr keys = interned, zero-alloc Copy)
-    pub def_by_fqn: FxHashMap<IStr, Vec<NodeIndex>>,
-    pub def_by_name: FxHashMap<IStr, Vec<NodeIndex>>,
-    pub nested_defs: FxHashMap<IStr, FxHashMap<IStr, Vec<NodeIndex>>>,
+    // Resolution indexes
+    pub def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
+    pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
+    pub nested_defs: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
 
     /// Pre-computed ancestor chains from Extends edges.
     /// Built once during finalize(), used during resolve for hierarchy lookups.
@@ -196,20 +196,21 @@ impl CodeGraph {
             });
             def_nodes.push(def_node);
 
+            let fqn_str = def.fqn.to_string();
             self.def_by_fqn
-                .entry(def.fqn.as_istr())
+                .entry(fqn_str)
                 .or_default()
                 .push(def_node);
             self.def_by_name
-                .entry(IStr::from(def.name.as_str()))
+                .entry(def.name.clone())
                 .or_default()
                 .push(def_node);
 
             if let Some(parent_fqn) = def.fqn.parent() {
                 self.nested_defs
-                    .entry(parent_fqn.as_istr())
+                    .entry(parent_fqn.to_string())
                     .or_default()
-                    .entry(IStr::from(def.name.as_str()))
+                    .entry(def.name.clone())
                     .or_default()
                     .push(def_node);
             }
@@ -382,9 +383,7 @@ impl CodeGraph {
         &self,
         file_node: NodeIndex,
         sep: &str,
-    ) -> rustc_hash::FxHashMap<code_graph_types::IStr, Vec<NodeIndex>> {
-        use code_graph_types::IStr;
-
+    ) -> rustc_hash::FxHashMap<String, Vec<NodeIndex>> {
         let mut map = rustc_hash::FxHashMap::default();
         for neighbor in self
             .graph
@@ -412,7 +411,7 @@ impl CodeGraph {
                 defs = self.lookup_fqn(&imp.path).to_vec();
             }
             if !defs.is_empty() {
-                map.entry(IStr::from(name)).or_insert(defs);
+                map.entry(name.to_string()).or_insert(defs);
             }
         }
         map
@@ -422,29 +421,22 @@ impl CodeGraph {
 
     pub fn lookup_fqn(&self, fqn: &str) -> &[NodeIndex] {
         self.def_by_fqn
-            .get(&IStr::from(fqn))
+            .get(fqn)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
     pub fn lookup_name(&self, name: &str) -> &[NodeIndex] {
         self.def_by_name
-            .get(&IStr::from(name))
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
-    pub fn lookup_name_istr(&self, name: &IStr) -> &[NodeIndex] {
-        self.def_by_name
             .get(name)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
-    pub fn lookup_nested(&self, scope_fqn: &IStr, member_name: &str) -> &[NodeIndex] {
+    pub fn lookup_nested(&self, scope_fqn: &str, member_name: &str) -> &[NodeIndex] {
         self.nested_defs
             .get(scope_fqn)
-            .and_then(|ms| ms.get(&IStr::from(member_name)))
+            .and_then(|ms| ms.get(member_name))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
@@ -456,11 +448,10 @@ impl CodeGraph {
         out: &mut Vec<NodeIndex>,
     ) -> bool {
         // Resolve scope_fqn to NodeIndex(es): try FQN first, then bare name
-        let key = IStr::from(scope_fqn);
         let start_nodes = self
             .def_by_fqn
-            .get(&key)
-            .or_else(|| self.def_by_name.get(&key));
+            .get(scope_fqn)
+            .or_else(|| self.def_by_name.get(scope_fqn));
 
         let Some(start_nodes) = start_nodes else {
             return false;
@@ -594,14 +585,13 @@ impl CodeGraph {
 
     /// Resolve a type name (FQN or bare name) to graph NodeIndexes.
     fn resolve_type_to_nodes(&self, name: &str) -> &[NodeIndex] {
-        let key = IStr::from(name);
-        if let Some(nodes) = self.def_by_fqn.get(&key) {
+        if let Some(nodes) = self.def_by_fqn.get(name) {
             if !nodes.is_empty() {
                 return nodes;
             }
         }
         self.def_by_name
-            .get(&key)
+            .get(name)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
