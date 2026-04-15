@@ -498,7 +498,7 @@ code-indexing-benchmark-v2-linux:
     SCENARIO: index-v2
   parallel:
     matrix:
-      - GROUP: [python, java]
+      - GROUP: [python, java, kotlin, csharp]
 
 code-indexing-benchmark-analyze:
   stage: benchmark

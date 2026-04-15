@@ -54,7 +54,7 @@ repos:
     project: square/okhttp
     version: parent-5.0.0-alpha.14
     commit_sha: 374def39eb276bf0ad724dc71c589241851f5b16
-    groups: [java]
+    groups: [java, kotlin]
 
   - name: elasticsearch
     source: github
@@ -77,6 +77,14 @@ repos:
     version: master
     commit_sha: 608496a672949e6ab4ea5c4d55870fe79efbbc8d
     groups: [typescript]
+
+  # C# (GitHub)
+  - name: nlog
+    source: github
+    project: NLog/NLog
+    version: v5.4.0
+    commit_sha: 4d45d445601312040107cbe2ac00e56c4bf4a60b
+    groups: [csharp]
 
   # Python (GitHub)
   - name: django
