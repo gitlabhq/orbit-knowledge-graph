@@ -186,3 +186,4 @@ storage:
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_status_id, order_by: [status, id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
