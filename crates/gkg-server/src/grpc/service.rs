@@ -42,19 +42,15 @@ impl KnowledgeGraphServiceImpl {
         ontology: Arc<Ontology>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
-        resolver_registry: Option<Arc<ColumnResolverRegistry>>,
         stream_timeout_secs: u64,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
-        let mut pipeline = QueryPipelineService::new(
+        let pipeline = QueryPipelineService::new(
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
         );
-        if let Some(registry) = resolver_registry {
-            pipeline = pipeline.with_resolver_registry(registry);
-        }
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {
             validator,
@@ -65,6 +61,11 @@ impl KnowledgeGraphServiceImpl {
             graph_stats,
             stream_timeout_secs,
         }
+    }
+
+    pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
+        self.pipeline = self.pipeline.with_resolver_registry(registry);
+        self
     }
 }
 
@@ -440,7 +441,6 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 
@@ -468,7 +468,6 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 
@@ -498,7 +497,6 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 
@@ -534,7 +532,6 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 
@@ -558,7 +555,6 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 
@@ -576,7 +572,6 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 
@@ -605,7 +600,6 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 
@@ -629,7 +623,6 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 
@@ -657,7 +650,6 @@ mod tests {
             test_ontology(),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 
@@ -762,7 +754,6 @@ mod tests {
             Arc::clone(&ontology),
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
-            None,
             60,
         );
 

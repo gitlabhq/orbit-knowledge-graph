@@ -141,14 +141,13 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
-    let mut registry = query_engine::shared::content::ColumnResolverRegistry::new();
-    registry.register(
+    let mut resolver_registry = query_engine::shared::content::ColumnResolverRegistry::new();
+    resolver_registry.register(
         "gitaly",
         Arc::new(content::gitaly::GitalyContentService::new(
             gitlab_client.clone(),
         )),
     );
-    let resolver_registry = Some(Arc::new(registry));
     info!("Content resolution enabled (GitlabClient configured)");
 
     let graph_client = config.graph.build_client();
@@ -165,9 +164,9 @@ async fn run_webserver(
         &config.graph,
         cluster_health,
         tls_config,
-        resolver_registry,
         config.grpc.clone(),
-    );
+    )
+    .with_resolver_registry(Arc::new(resolver_registry));
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
     tokio::select! {
