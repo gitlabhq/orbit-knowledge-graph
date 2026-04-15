@@ -1,8 +1,9 @@
 use code_graph_config::Language;
-use code_graph_types::{CanonicalImport, DefKind};
+use code_graph_types::{BindingKind, CanonicalImport, DefKind};
 use parser_core::dsl::extractors::{field, metadata, Extract, ExtractList};
 use parser_core::dsl::types::{
-    reference, scope, scopes, ChainConfig, DslLanguage, ImportRule, ReferenceRule, ScopeRule,
+    binding, branch, loop_rule, reference, scope, scopes, BindingRule, BranchRule, ChainConfig,
+    DslLanguage, ImportRule, LoopRule, ReferenceRule, ScopeRule,
 };
 
 use crate::linker::v2::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
@@ -51,6 +52,44 @@ impl DslLanguage for RubyDsl {
 
     fn custom_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
         ruby_extract_imports(node, imports)
+    }
+
+    fn bindings() -> Vec<BindingRule> {
+        vec![
+            binding("assignment", BindingKind::Assignment)
+                .name_from(&["left"])
+                .value_from("right")
+                .instance_attrs(&["@"]),
+            binding("operator_assignment", BindingKind::Assignment)
+                .name_from(&["left"])
+                .no_value(),
+            binding("left_assignment_list", BindingKind::Assignment)
+                .name_from(&["left"])
+                .value_from("right"),
+        ]
+    }
+
+    fn branches() -> Vec<BranchRule> {
+        vec![
+            branch("if")
+                .branches(&["then", "else"])
+                .condition("condition"),
+            branch("unless")
+                .branches(&["then", "else"])
+                .condition("condition"),
+            branch("case").branches(&["when", "else"]),
+            branch("ternary")
+                .branches(&["consequence", "alternative"])
+                .condition("condition"),
+        ]
+    }
+
+    fn loops() -> Vec<LoopRule> {
+        vec![
+            loop_rule("while").iter_over("condition"),
+            loop_rule("until").iter_over("condition"),
+            loop_rule("for").iter_over("value"),
+        ]
     }
 
     fn chain_config() -> Option<ChainConfig> {

@@ -1,5 +1,5 @@
 use code_graph_config::Language;
-use code_graph_types::{CanonicalImport, DefKind};
+use code_graph_types::{BindingKind, CanonicalImport, DefKind};
 use parser_core::dsl::extractors::{field, metadata, Extract};
 use parser_core::dsl::predicates::*;
 use parser_core::dsl::types::*;
@@ -49,6 +49,36 @@ impl DslLanguage for GoDsl {
 
     fn imports() -> Vec<ImportRule> {
         vec![]
+    }
+
+    fn bindings() -> Vec<BindingRule> {
+        vec![
+            binding("short_var_declaration", BindingKind::Assignment)
+                .name_from(&["left"])
+                .value_from("right"),
+            binding("var_spec", BindingKind::Assignment)
+                .name_from(&["name"])
+                .value_from("value"),
+            binding("assignment_statement", BindingKind::Assignment)
+                .name_from(&["left"])
+                .value_from("right"),
+        ]
+    }
+
+    fn branches() -> Vec<BranchRule> {
+        vec![
+            branch("if_statement")
+                .branches(&["consequence", "alternative"])
+                .condition("condition"),
+            branch("expression_switch_statement")
+                .branches(&["expression_case", "default_case"])
+                .condition("value"),
+            branch("type_switch_statement").branches(&["type_case", "default_case"]),
+        ]
+    }
+
+    fn loops() -> Vec<LoopRule> {
+        vec![loop_rule("for_statement").body("body")]
     }
 
     fn custom_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
