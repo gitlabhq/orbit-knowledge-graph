@@ -281,25 +281,23 @@ impl<'a> Resolver<'a> {
             reference.range.byte_offset.1,
         );
 
-        // If the chain is too long, resolve only the last few steps.
-        // This handles fluent builder patterns (30+ chained calls) without
-        // walking the entire chain.
         let effective_chain = if chain.len() > MAX_CHAIN_DEPTH {
             &chain[chain.len() - MAX_CHAIN_DEPTH..]
         } else {
             chain
         };
 
-        // Step 1: resolve the base to type name(s)
+        let t_base = std::time::Instant::now();
         let mut current_types =
             self.resolve_base(&effective_chain[0], read.block, enclosing.as_deref());
+        let base_time = t_base.elapsed();
 
         if current_types.is_empty() {
             return self.chain_fallback(read, chain);
         }
 
-        // Step 2: walk remaining steps
         let mut compound_key = self.compound_key_base(&effective_chain[0]);
+        let mut slow_steps: Vec<(usize, String, std::time::Duration)> = Vec::new();
 
         for (i, step) in effective_chain[1..].iter().enumerate() {
             let is_last = i == effective_chain.len() - 2;
@@ -308,16 +306,28 @@ impl<'a> Resolver<'a> {
                 _ => continue,
             };
 
-            // Look up member on current type(s)
+            let t_step = std::time::Instant::now();
             let (next_types, found_members) = self.walk_step(&current_types, step, member_name);
+            let step_time = t_step.elapsed();
+            if step_time.as_millis() >= 10 {
+                slow_steps.push((i, member_name.to_string(), step_time));
+            }
 
             if is_last && !found_members.is_empty() {
+                if base_time.as_millis() >= 50 || !slow_steps.is_empty() {
+                    let file = &self.ctx.results[read.file_idx].file_path;
+                    eprintln!(
+                        "\x1b[33m[CHAIN] {} base={:.1?} steps={} types={:?} slow={:?}\x1b[0m",
+                        file, base_time, effective_chain.len(),
+                        current_types.iter().map(|t| t.to_string()).collect::<Vec<_>>(),
+                        slow_steps,
+                    );
+                }
                 let mut result = found_members;
                 dedup(&mut result);
                 return result;
             }
 
-            // Compound key fallback (Python's self.db)
             if next_types.is_empty() && found_members.is_empty() {
                 let recovered = self.compound_key_step(&mut compound_key, member_name, read.block);
                 if !recovered.is_empty() {
