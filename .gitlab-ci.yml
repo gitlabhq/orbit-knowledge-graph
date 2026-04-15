@@ -459,13 +459,15 @@ code-indexing-benchmark-build:
       prefix: "benchmark-repos-${GROUP}"
     paths:
       - temp/
+  variables:
+    SCENARIO: index
   script:
     - |
-      OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${GROUP}.json"
+      OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${SCENARIO}-${GROUP}.json"
       gitlab-xtasks benchmark hyperfine \
         --config code-indexing-benchmark.yaml \
         --architecture "$ARCH" \
-        --scenario index \
+        --scenario "$SCENARIO" \
         --group "$GROUP" \
         --output-file "$OUTPUT_FILE"
   artifacts:
@@ -485,10 +487,24 @@ code-indexing-benchmark-linux:
     matrix:
       - GROUP: [ruby, typescript, java, go]
 
+code-indexing-benchmark-v2-linux:
+  extends:
+    - .job-template
+    - .code-indexing-benchmark-template
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: "linux-x86_64"
+    SCENARIO: index-v2
+  parallel:
+    matrix:
+      - GROUP: [python, java]
+
 code-indexing-benchmark-analyze:
   stage: benchmark
   needs:
     - code-indexing-benchmark-linux
+    - code-indexing-benchmark-v2-linux
   allow_failure: true
   extends:
     - .job-template

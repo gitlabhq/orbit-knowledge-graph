@@ -78,10 +78,31 @@ repos:
     commit_sha: 608496a672949e6ab4ea5c4d55870fe79efbbc8d
     groups: [typescript]
 
+  # Python (GitHub)
+  - name: django
+    source: github
+    project: django/django
+    version: "5.2"
+    commit_sha: 9e7cc2b628fe8fd3895986af9b7fc9525034c1b0
+    groups: [python]
+
+  - name: flask
+    source: github
+    project: pallets/flask
+    version: "3.1.1"
+    commit_sha: 7fff56f5172c48b6f3aedf17ee14ef5c2533dfd1
+    groups: [python]
+
 scenarios:
   hyperfine:
     - id: index
       command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats
+      warmup: 1
+      min_runs: 3
+      max_runs: 3
+
+    - id: index-v2
+      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats --v2
       warmup: 1
       min_runs: 3
       max_runs: 3
