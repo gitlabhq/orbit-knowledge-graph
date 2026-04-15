@@ -48,10 +48,10 @@ impl DslLanguage for RubyDsl {
                 .name_from(field("method"))
                 .receiver("receiver"),
             // bare method call without parens/args — just an identifier in Ruby
-            // e.g. `validate_name` inside a method body
-            reference("identifier")
-                .when(parent_is("body_statement"))
-                .name_from(Extract::Text),
+            // e.g. `validate_name` inside a method body. No parent filter —
+            // identifiers appear in body_statement, then, else, begin, rescue, etc.
+            // The early exit filter (lookup_name) rejects names not in the graph.
+            reference("identifier").name_from(Extract::Text),
         ]
     }
 
