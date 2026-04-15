@@ -240,7 +240,7 @@ impl MetadataRule {
     pub fn extract_metadata(
         &self,
         node: &N<'_>,
-        imports: &[code_graph_types::CanonicalImport],
+        import_map: &rustc_hash::FxHashMap<String, String>,
         sep: &'static str,
     ) -> Option<Box<code_graph_types::DefinitionMetadata>> {
         let super_types: Vec<String> = self
@@ -249,7 +249,7 @@ impl MetadataRule {
             .map(|e| {
                 e.extract(node)
                     .into_iter()
-                    .map(|s| resolve_type_via_imports(&s, imports, sep))
+                    .map(|s| resolve_type_via_map(&s, import_map, sep))
                     .collect()
             })
             .unwrap_or_default();
@@ -257,17 +257,17 @@ impl MetadataRule {
             .return_type
             .as_ref()
             .and_then(|e| e.extract_name(node))
-            .map(|s| resolve_type_via_imports(&s, imports, sep));
+            .map(|s| resolve_type_via_map(&s, import_map, sep));
         let type_annotation = self
             .type_annotation
             .as_ref()
             .and_then(|e| e.extract_name(node))
-            .map(|s| resolve_type_via_imports(&s, imports, sep));
+            .map(|s| resolve_type_via_map(&s, import_map, sep));
         let receiver_type = self
             .receiver_type
             .as_ref()
             .and_then(|e| e.extract_name(node))
-            .map(|s| resolve_type_via_imports(&s, imports, sep));
+            .map(|s| resolve_type_via_map(&s, import_map, sep));
         let decorators = self
             .decorators
             .as_ref()
@@ -304,21 +304,17 @@ pub fn metadata() -> MetadataRule {
     MetadataRule::new()
 }
 
-/// Resolve a bare type name to a full FQN using the file's imports.
-/// If the name matches an explicit import (by name or alias), returns
-/// the full path. Otherwise returns the bare name unchanged.
-fn resolve_type_via_imports(
+/// Resolve a bare type name to a full FQN using the pre-built import map.
+/// O(1) hashmap lookup instead of linear scan.
+fn resolve_type_via_map(
     bare_name: &str,
-    imports: &[code_graph_types::CanonicalImport],
-    sep: &str,
+    import_map: &rustc_hash::FxHashMap<String, String>,
+    _sep: &str,
 ) -> String {
-    for imp in imports {
-        let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-        if imp_name == bare_name && !imp.path.is_empty() {
-            return format!("{}{}{}", imp.path, sep, bare_name);
-        }
-    }
-    bare_name.to_string()
+    import_map
+        .get(bare_name)
+        .cloned()
+        .unwrap_or_else(|| bare_name.to_string())
 }
 
 #[cfg(test)]

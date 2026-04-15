@@ -44,6 +44,7 @@ impl LanguageSpec {
         let mut refs = Vec::new();
         let mut imports = Vec::new();
         let mut scope_stack: Vec<Arc<str>> = Vec::new();
+        let mut import_map = rustc_hash::FxHashMap::default();
 
         self.walk(
             &root,
@@ -51,6 +52,7 @@ impl LanguageSpec {
             &mut defs,
             &mut refs,
             &mut imports,
+            &mut import_map,
             sep,
         );
 
@@ -80,6 +82,7 @@ impl LanguageSpec {
         defs: &mut Vec<CanonicalDefinition>,
         refs: &mut Vec<CanonicalReference>,
         imports: &mut Vec<CanonicalImport>,
+        import_map: &mut rustc_hash::FxHashMap<String, String>,
         sep: &'static str,
     ) {
         if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
@@ -97,7 +100,7 @@ impl LanguageSpec {
             scope_stack.push(Arc::from(name.as_str()));
         }
 
-        if let Some(m) = self.evaluate_scope(node, &node_kind, imports, sep) {
+        if let Some(m) = self.evaluate_scope(node, &node_kind, import_map, sep) {
             let is_top_level =
                 scope_stack.is_empty() || (scope_stack.len() == 1 && scope_stack[0].contains('.'));
 
@@ -138,13 +141,23 @@ impl LanguageSpec {
             });
         }
 
+        let import_count_before = imports.len();
         let handled = self.custom_import_fn.is_some_and(|f| f(node, imports));
         if !handled {
             self.evaluate_imports(node, &node_kind, imports);
         }
+        // Update import map with any newly added imports
+        for imp in &imports[import_count_before..] {
+            if !imp.wildcard && !imp.path.is_empty() {
+                let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+                if !name.is_empty() {
+                    import_map.insert(name.to_string(), format!("{}{}{}", imp.path, sep, name));
+                }
+            }
+        }
 
         for child in node.children() {
-            self.walk(&child, scope_stack, defs, refs, imports, sep);
+            self.walk(&child, scope_stack, defs, refs, imports, import_map, sep);
         }
 
         if pushed_scope {
@@ -156,7 +169,7 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-        imports: &[code_graph_types::CanonicalImport],
+        import_map: &rustc_hash::FxHashMap<String, String>,
         sep: &'static str,
     ) -> Option<ScopeMatch> {
         if !self.is_scope_candidate(node_kind) {
@@ -176,7 +189,7 @@ impl LanguageSpec {
             def_kind: rule.resolve_def_kind(),
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
-            metadata: rule.extract_metadata(node, imports, sep),
+            metadata: rule.extract_metadata(node, import_map, sep),
         })
     }
 

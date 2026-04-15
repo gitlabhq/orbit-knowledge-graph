@@ -93,12 +93,12 @@ impl ScopeRule {
     pub(crate) fn extract_metadata(
         &self,
         node: &N<'_>,
-        imports: &[code_graph_types::CanonicalImport],
+        import_map: &rustc_hash::FxHashMap<String, String>,
         sep: &'static str,
     ) -> Option<Box<DefinitionMetadata>> {
         self.metadata_rule
             .as_ref()?
-            .extract_metadata(node, imports, sep)
+            .extract_metadata(node, import_map, sep)
     }
 
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
