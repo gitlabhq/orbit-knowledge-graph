@@ -100,6 +100,9 @@ pub struct MemberIndex {
     members: FxHashMap<String, FxHashMap<String, Vec<DefRef>>>,
     /// class_fqn → [super_type_name]
     supers: FxHashMap<String, Vec<String>>,
+    /// Cache for super-type lookups: (class_fqn, member_name) → [DefRef].
+    /// Uses RefCell for interior mutability so callers keep &self.
+    super_cache: std::cell::RefCell<FxHashMap<(String, String), Vec<DefRef>>>,
 }
 
 impl MemberIndex {
@@ -127,7 +130,11 @@ impl MemberIndex {
             }
         }
 
-        Self { members, supers }
+        Self {
+            members,
+            supers,
+            super_cache: std::cell::RefCell::new(FxHashMap::default()),
+        }
     }
 
     /// Look up direct members of a class/interface by name. O(1).
@@ -156,7 +163,7 @@ impl MemberIndex {
 
     /// Look up a member, walking the super_types chain if not found directly.
     /// Uses BFS to find the closest ancestor's member first (matches MRO
-    /// semantics of most languages).
+    /// semantics of most languages). Results are cached.
     ///
     /// Results are written into `out` to avoid allocation. Returns true if
     /// any members were found.
@@ -167,10 +174,41 @@ impl MemberIndex {
         def_index: &DefinitionIndex,
         out: &mut Vec<DefRef>,
     ) -> bool {
-        // Resolve bare type name to full FQN(s)
+        // Check cache first
+        let cache_key = (class_fqn.to_string(), member_name.to_string());
+        if let Some(cached) = self.super_cache.borrow().get(&cache_key) {
+            if cached.is_empty() {
+                return false;
+            }
+            out.extend_from_slice(cached);
+            return true;
+        }
+
+        // Resolve
+        let mut result = Vec::new();
+        let found =
+            self.lookup_member_with_supers_uncached(class_fqn, member_name, def_index, &mut result);
+
+        // Cache the result (even empty ones to avoid re-BFS)
+        self.super_cache
+            .borrow_mut()
+            .insert(cache_key, result.clone());
+
+        if found {
+            out.extend(result);
+        }
+        found
+    }
+
+    fn lookup_member_with_supers_uncached(
+        &self,
+        class_fqn: &str,
+        member_name: &str,
+        def_index: &DefinitionIndex,
+        out: &mut Vec<DefRef>,
+    ) -> bool {
         let resolved_fqns = self.resolve_type_fqns(class_fqn, def_index);
 
-        // Direct lookup on each resolved FQN
         for fqn in &resolved_fqns {
             let direct = self.lookup_member(fqn, member_name);
             if !direct.is_empty() {
@@ -179,7 +217,6 @@ impl MemberIndex {
             }
         }
 
-        // BFS through super_types chain
         let mut visited = FxHashSet::default();
         let mut queue = std::collections::VecDeque::new();
         for fqn in &resolved_fqns {

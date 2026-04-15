@@ -121,8 +121,7 @@ struct Resolver<'a> {
     ctx: &'a ResolutionContext,
     ssa: &'a mut SsaResolver,
     sep: &'a str,
-    /// Reusable buffer for FQN construction. Avoids allocating a new
-    /// String for every format!("{}{}{}", ...) in member/import lookups.
+    /// Reusable buffer for FQN construction.
     buf: String,
 }
 
