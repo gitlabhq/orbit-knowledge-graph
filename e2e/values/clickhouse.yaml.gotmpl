@@ -1,0 +1,13 @@
+password: {{ requiredEnv "E2E_CH_DEFAULT_PASS" | quote }}
+
+users:
+  siphon:
+    password: {{ requiredEnv "E2E_CH_SIPHON_PASS" | quote }}
+  gkg_siphon_reader:
+    password: {{ requiredEnv "E2E_CH_DATALAKE_PASS" | quote }}
+  gkg_writer:
+    password: {{ requiredEnv "E2E_CH_GRAPH_PASS" | quote }}
+  gkg_reader:
+    password: {{ requiredEnv "E2E_CH_GRAPH_READ_PASS" | quote }}
+  gitlab:
+    password: {{ requiredEnv "E2E_CH_GITLAB_PASS" | quote }}

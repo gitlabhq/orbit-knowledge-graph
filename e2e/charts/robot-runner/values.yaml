@@ -1,0 +1,23 @@
+image: python:3.12-slim
+
+robotframework:
+  version: "7.2.2"
+  requestsVersion: "0.9.7"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+namespaces:
+  nats: ""
+  clickhouse: ""
+  gitlab: ""
+  gkg: ""
+
+configMap: e2e-robot-tests
+credentialsSecret: e2e-test-credentials
+ttlSecondsAfterFinished: 600
