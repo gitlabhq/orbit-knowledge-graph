@@ -235,10 +235,16 @@ impl DslLanguage for PythonDsl {
         vec![
             loop_rule("for_statement").iter_over("right"),
             loop_rule("while_statement").body("body"),
-            loop_rule("list_comprehension").body("body"),
-            loop_rule("set_comprehension").body("body"),
-            loop_rule("dictionary_comprehension").body("body"),
-            loop_rule("generator_expression").body("body"),
+            LoopRule {
+                kinds: vec![
+                    "list_comprehension",
+                    "set_comprehension",
+                    "dictionary_comprehension",
+                    "generator_expression",
+                ],
+                body_field: "body",
+                iter_field: None,
+            },
         ]
     }
 }
