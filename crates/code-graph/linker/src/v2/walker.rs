@@ -94,7 +94,7 @@ pub fn walk_file(
         ssa,
         reads,
         file_node,
-        references: Vec::new(), // populated by caller after walk
+        references: Vec::new(),           // populated by caller after walk
         import_map: FxHashMap::default(), // populated before resolve
     }
 }

@@ -43,18 +43,18 @@ impl Cond {
         match self {
             Cond::HasName => node.field("name").is_some(),
             Cond::ParentIs(kind) => node.parent().is_some_and(|p| p.kind() == *kind),
-            Cond::ParentEndsWith(suffix) => {
-                node.parent().is_some_and(|p| p.kind().as_ref().ends_with(suffix))
-            }
+            Cond::ParentEndsWith(suffix) => node
+                .parent()
+                .is_some_and(|p| p.kind().as_ref().ends_with(suffix)),
             Cond::KindEndsWith(suffix) => node.kind().as_ref().ends_with(suffix),
             Cond::KindStartsWith(prefix) => node.kind().as_ref().starts_with(prefix),
-            Cond::ParentKindEndsWith(suffix) => {
-                node.parent().is_some_and(|p| p.kind().as_ref().ends_with(suffix))
-            }
+            Cond::ParentKindEndsWith(suffix) => node
+                .parent()
+                .is_some_and(|p| p.kind().as_ref().ends_with(suffix)),
             Cond::KindMatches(re) => re.is_match(node.kind().as_ref()),
-            Cond::ParentKindMatches(re) => {
-                node.parent().is_some_and(|p| re.is_match(p.kind().as_ref()))
-            }
+            Cond::ParentKindMatches(re) => node
+                .parent()
+                .is_some_and(|p| re.is_match(p.kind().as_ref())),
             Cond::GrandparentIs(kind) => node
                 .parent()
                 .and_then(|p| p.parent())

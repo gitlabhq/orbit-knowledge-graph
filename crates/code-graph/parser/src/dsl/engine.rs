@@ -180,7 +180,10 @@ impl LanguageSpec {
         }
 
         // Extract bindings
-        if let Some(&rule_idx) = self.binding_dispatch.get(node_kind_ref).and_then(|v| v.first())
+        if let Some(&rule_idx) = self
+            .binding_dispatch
+            .get(node_kind_ref)
+            .and_then(|v| v.first())
             && let rule = &self.bindings[rule_idx]
             && let Some(name) = rule.extract_name(node)
         {
@@ -202,7 +205,11 @@ impl LanguageSpec {
         }
 
         // Extract branches
-        if let Some(&rule_idx) = self.branch_dispatch.get(node_kind_ref).and_then(|v| v.first()) {
+        if let Some(&rule_idx) = self
+            .branch_dispatch
+            .get(node_kind_ref)
+            .and_then(|v| v.first())
+        {
             let rule = &self.branches[rule_idx];
             let byte_range = (node.range().start, node.range().end);
             let mut children = Vec::new();
@@ -240,7 +247,11 @@ impl LanguageSpec {
         }
 
         // Extract loops
-        if let Some(&rule_idx) = self.loop_dispatch.get(node_kind_ref).and_then(|v| v.first()) {
+        if let Some(&rule_idx) = self
+            .loop_dispatch
+            .get(node_kind_ref)
+            .and_then(|v| v.first())
+        {
             let rule = &self.loops[rule_idx];
             let byte_range = (node.range().start, node.range().end);
             let mut children = Vec::new();

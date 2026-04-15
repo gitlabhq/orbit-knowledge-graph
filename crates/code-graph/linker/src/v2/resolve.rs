@@ -147,7 +147,10 @@ fn wildcard_import(
     name: &str,
     sep: &str,
 ) -> Vec<NodeIndex> {
-    for neighbor in graph.graph.neighbors_directed(file_node, petgraph::Direction::Outgoing) {
+    for neighbor in graph
+        .graph
+        .neighbors_directed(file_node, petgraph::Direction::Outgoing)
+    {
         if let Some((_, imp)) = graph.graph[neighbor].as_import() {
             if imp.wildcard {
                 let candidate = format!("{}{}{}", imp.path, sep, name);
@@ -161,13 +164,11 @@ fn wildcard_import(
     vec![]
 }
 
-fn same_package(
-    graph: &CodeGraph,
-    file_node: NodeIndex,
-    name: &str,
-    sep: &str,
-) -> Vec<NodeIndex> {
-    for neighbor in graph.graph.neighbors_directed(file_node, petgraph::Direction::Outgoing) {
+fn same_package(graph: &CodeGraph, file_node: NodeIndex, name: &str, sep: &str) -> Vec<NodeIndex> {
+    for neighbor in graph
+        .graph
+        .neighbors_directed(file_node, petgraph::Direction::Outgoing)
+    {
         if let Some((_, def)) = graph.graph[neighbor].as_definition() {
             if def.is_top_level {
                 let fqn_str = def.fqn.to_string();
@@ -391,7 +392,7 @@ impl<'a> Resolver<'a> {
         file_node: NodeIndex,
         settings: &'a ResolveSettings,
         ssa: &'a mut SsaResolver,
-    import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
+        import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
     ) -> Self {
         Self {
             sep: rules.fqn_separator,

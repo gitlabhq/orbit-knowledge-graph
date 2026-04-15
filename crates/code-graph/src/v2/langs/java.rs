@@ -1,6 +1,6 @@
 use code_graph_config::Language;
 use code_graph_types::{BindingKind, DefKind};
-use parser_core::dsl::extractors::{field, metadata, Extract, ExtractList};
+use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
 use parser_core::dsl::types::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -110,10 +110,12 @@ impl DslLanguage for JavaDsl {
             }
         }
 
-        vec![import("import_declaration")
-            .classify(java_import_classify)
-            .split_last(".")
-            .wildcard_child("asterisk")]
+        vec![
+            import("import_declaration")
+                .classify(java_import_classify)
+                .split_last(".")
+                .wildcard_child("asterisk"),
+        ]
     }
 
     fn chain_config() -> Option<ChainConfig> {

@@ -1,6 +1,6 @@
 use code_graph_config::Language;
 use code_graph_types::DefKind;
-use parser_core::dsl::extractors::{field, Extract};
+use parser_core::dsl::extractors::{Extract, field};
 use parser_core::dsl::types::*;
 
 // ── DSL parser spec ─────────────────────────────────────────────

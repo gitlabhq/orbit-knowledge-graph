@@ -11,7 +11,6 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
 
-
 // ── Node + Edge types ───────────────────────────────────────────
 
 /// A node in the code graph.
@@ -102,7 +101,6 @@ impl GraphEdge {
                 source_def_kind: None,
                 target_def_kind: None,
             },
-
         }
     }
 }
@@ -197,10 +195,7 @@ impl CodeGraph {
             def_nodes.push(def_node);
 
             let fqn_str = def.fqn.to_string();
-            self.def_by_fqn
-                .entry(fqn_str)
-                .or_default()
-                .push(def_node);
+            self.def_by_fqn.entry(fqn_str).or_default().push(def_node);
             self.def_by_name
                 .entry(def.name.clone())
                 .or_default()
@@ -281,9 +276,12 @@ impl CodeGraph {
     /// BFS over Extends edges once per class. Stores the ancestor chain
     /// so resolve never does BFS — just iterates a flat vec.
     fn build_ancestor_table(&mut self) {
-        let extends_only = EdgeFiltered(&self.graph, |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
-            e.weight().relationship.edge_kind == EdgeKind::Extends
-        });
+        let extends_only = EdgeFiltered(
+            &self.graph,
+            |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
+                e.weight().relationship.edge_kind == EdgeKind::Extends
+            },
+        );
 
         for idx in self.graph.node_indices() {
             // Only definitions that have outgoing Extends edges
@@ -329,10 +327,12 @@ impl CodeGraph {
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| dir_path.clone());
-                let idx = self.graph.add_node(GraphNode::Directory(CanonicalDirectory {
-                    path: dir_path.clone(),
-                    name,
-                }));
+                let idx = self
+                    .graph
+                    .add_node(GraphNode::Directory(CanonicalDirectory {
+                        path: dir_path.clone(),
+                        name,
+                    }));
                 self.dir_index.insert(dir_path.clone(), idx);
 
                 // Parent was created/exists from a previous iteration — add edge.
@@ -637,8 +637,6 @@ fn dir_to_string(dir: &Path) -> String {
         dir.to_string_lossy().to_string()
     }
 }
-
-
 
 fn compute_id(components: &[&str]) -> i64 {
     let mut hasher = FxHasher::default();
