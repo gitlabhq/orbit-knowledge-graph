@@ -8,7 +8,7 @@ use indexer::schema::version::{
     SCHEMA_VERSION, ensure_version_table, read_active_version, table_prefix, write_schema_version,
 };
 use indexer::testkit::MockLockService;
-use integration_testkit::TestContext;
+use integration_testkit::{TestContext, t};
 use query_engine::compiler::generate_graph_tables_with_prefix;
 
 async fn setup() -> (TestContext, ontology::Ontology, MigrationMetrics) {
@@ -139,9 +139,9 @@ async fn created_tables_have_correct_columns() {
 
     // Spot-check a node table, an edge table, and an auxiliary table.
     for (table, expected_col) in [
-        ("gl_user", "username"),
-        ("gl_edge", "relationship_kind"),
-        ("checkpoint", "watermark"),
+        (t("gl_user"), "username"),
+        (t("gl_edge"), "relationship_kind"),
+        (t("checkpoint"), "watermark"),
     ] {
         let result = ctx
             .query(&format!(

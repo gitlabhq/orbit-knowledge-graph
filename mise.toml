@@ -104,9 +104,9 @@ description = "Run unit + non-Docker integration tests with reduced debug info"
 run = "cargo nextest run --test local"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
 
-[tasks."test:graph-validator"]
-run = "cargo nextest run --test local -E 'test(graph_validator::)' --no-capture"
-description = "Run call graph validator YAML Cypher suites (no Docker)"
+[tasks."test:integration:codegraph"]
+run = "cargo nextest run -p integration-tests-codegraph --no-capture"
+description = "Run code-graph v2 validator tests — YAML Cypher suites (no Docker)"
 
 [tasks."test:cli"]
 run = "cargo build -p orbit && cargo nextest run --test cli --no-fail-fast"
@@ -121,6 +121,11 @@ description = "Run integration tests (requires Docker and `mise colima:start`)"
 run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, hydration, redaction, graph formatter)"
+
+[tasks."test:integration:data"]
+run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(data_correctness)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run data correctness integration tests"
 
 [tasks."test:integration:indexer"]
 run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 -E 'test(indexer::)'"

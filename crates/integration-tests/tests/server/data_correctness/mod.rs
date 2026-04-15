@@ -15,7 +15,7 @@ use integration_testkit::{run_subtests, run_subtests_shared};
 
 #[tokio::test]
 async fn data_correctness() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;
 
     run_subtests_shared!(
@@ -98,6 +98,7 @@ async fn data_correctness() {
         neighbors::neighbors_mixed_entity_types,
         neighbors::neighbors_redaction_removes_unauthorized_targets,
         neighbors::neighbors_dynamic_columns_all_returns_properties,
+        neighbors::neighbors_center_node_properties_hydrated,
         neighbors::neighbors_both_direction_preserves_edge_direction,
         // edge cases
         edge_cases::giant_string_survives_pipeline,

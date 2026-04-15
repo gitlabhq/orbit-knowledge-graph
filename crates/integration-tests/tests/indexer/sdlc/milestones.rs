@@ -1,5 +1,6 @@
 use arrow::array::StringArray;
 use gkg_utils::arrow::ArrowUtils;
+use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
@@ -30,7 +31,10 @@ pub async fn processes_milestones_with_edges(ctx: &TestContext) {
     assert_node_count(ctx, "gl_milestone", 3).await;
 
     let result = ctx
-        .query("SELECT title, state FROM gl_milestone FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT title, state FROM {} FINAL ORDER BY id",
+            t("gl_milestone")
+        ))
         .await;
     let batch = &result[0];
     let titles =

@@ -46,7 +46,7 @@ struct TestContext {
 impl TestContext {
     async fn new() -> Self {
         let clickhouse =
-            ClickHouseContext::new(&[common::SIPHON_SCHEMA_SQL, common::GRAPH_SCHEMA_SQL]).await;
+            ClickHouseContext::new(&[common::SIPHON_SCHEMA_SQL, *common::GRAPH_SCHEMA_SQL]).await;
         let (nats, nats_url) = Self::start_nats().await;
         Self::create_stream(&nats_url).await;
         Self {
