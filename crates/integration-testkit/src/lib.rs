@@ -1,7 +1,6 @@
 mod assertions;
 pub mod cli;
 mod context;
-pub mod graph_validator;
 pub mod mock_redaction;
 mod seed;
 pub mod visitor;

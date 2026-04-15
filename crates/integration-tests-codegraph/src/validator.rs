@@ -1,20 +1,19 @@
-//! Execution engine: runs test suites against lance-graph datasets.
-
 use arrow_56::array::{Array, Int64Array, StringArray};
 use arrow_56::record_batch::RecordBatch;
 use lance_graph::{CypherQuery, GraphConfig};
+use tabled::{Table, builder::Builder};
 
-use super::assertions::{Assert, QueryBlock, Severity, TestCase, TestSuite};
+use super::assertions::{Assert, FieldValueArgs, QueryBlock, Severity, TestCase, TestSuite};
 use super::datasets::LanceDatasets;
 
 #[derive(Debug)]
-pub struct Failure {
+pub(crate) struct Failure {
     pub test: String,
     pub severity: Severity,
     pub message: String,
 }
 
-pub async fn run_suite(
+pub(crate) async fn run_suite(
     suite: &TestSuite,
     datasets: &LanceDatasets,
     config: &GraphConfig,
@@ -31,15 +30,15 @@ pub async fn run_suite(
 }
 
 async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfig) -> Vec<Failure> {
+    let blocks = test.all_queries();
     let mut failures = Vec::new();
 
-    for (i, block) in test.all_queries().iter().enumerate() {
-        let label = if test.all_queries().len() == 1 {
+    for (i, block) in blocks.iter().enumerate() {
+        let label = if blocks.len() == 1 {
             test.name.clone()
         } else {
             format!("{} [query {}]", test.name, i + 1)
         };
-
         failures.extend(run_query_block(&label, test.severity, block, datasets, config).await);
     }
 
@@ -55,25 +54,12 @@ async fn run_query_block(
 ) -> Vec<Failure> {
     let query = match CypherQuery::new(&block.query) {
         Ok(q) => q.with_config(config.clone()),
-        Err(e) => {
-            return vec![Failure {
-                test: label.to_string(),
-                severity,
-                message: format!("Cypher parse error: {e}"),
-            }];
-        }
+        Err(e) => return vec![fail(label, severity, format!("Cypher parse error: {e}"))],
     };
 
-    let ds = datasets.clone();
-    let batch = match query.execute(ds, None).await {
+    let batch = match query.execute(datasets.clone(), None).await {
         Ok(b) => b,
-        Err(e) => {
-            return vec![Failure {
-                test: label.to_string(),
-                severity,
-                message: format!("Query execution error: {e}"),
-            }];
-        }
+        Err(e) => return vec![fail(label, severity, format!("Query execution error: {e}"))],
     };
 
     let failures = check_assertions(label, severity, &block.assert, &batch);
@@ -84,31 +70,33 @@ async fn run_query_block(
 }
 
 fn print_result(label: &str, query: &str, batch: &RecordBatch) {
-    eprintln!("  ┌─ TEST: \"{label}\"");
-    eprintln!("  │ query: {}", query.trim().replace('\n', "\n  │        "));
-    eprintln!("  │ result: {} rows", batch.num_rows());
+    eprintln!("  TEST: \"{label}\"");
+    eprintln!("  query: {}", query.trim());
+    eprintln!("  result: {} rows", batch.num_rows());
     if batch.num_rows() > 0 {
         let schema = batch.schema();
         let col_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-        eprintln!("  │ ┌──{}──┐", col_names.join("──┬──"));
-        let max_rows = batch.num_rows().min(20);
-        for row in 0..max_rows {
+        let mut builder = Builder::new();
+        builder.push_record(col_names);
+        for row in 0..batch.num_rows().min(20) {
             let vals: Vec<String> = (0..batch.num_columns())
                 .map(|col| format_cell(batch.column(col).as_ref(), row))
                 .collect();
-            eprintln!("  │ │ {} │", vals.join(" │ "));
+            builder.push_record(&vals);
+        }
+        let table = Table::from(builder).to_string();
+        for line in table.lines() {
+            eprintln!("  {line}");
         }
         if batch.num_rows() > 20 {
-            eprintln!("  │ │ ... +{} more rows │", batch.num_rows() - 20);
+            eprintln!("  ... +{} more rows", batch.num_rows() - 20);
         }
-        eprintln!("  │ └{}┘", "─".repeat(col_names.join("──┬──").len() + 4));
     }
-    eprintln!("  └─");
 }
 
 fn format_cell(array: &dyn Array, row: usize) -> String {
     if array.is_null(row) {
-        return "NULL".to_string();
+        return "NULL".into();
     }
     if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
         return arr.value(row).to_string();
@@ -116,7 +104,7 @@ fn format_cell(array: &dyn Array, row: usize) -> String {
     if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
         return arr.value(row).to_string();
     }
-    "<?>".to_string()
+    "<?>".into()
 }
 
 fn check_assertions(
@@ -125,16 +113,11 @@ fn check_assertions(
     assertions: &[Assert],
     batch: &RecordBatch,
 ) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    let total_rows = batch.num_rows();
-
-    for assertion in assertions {
-        if let Some(f) = check_one(label, severity, assertion, batch, total_rows) {
-            failures.push(f);
-        }
-    }
-
-    failures
+    let rows = batch.num_rows();
+    assertions
+        .iter()
+        .filter_map(|a| check_one(label, severity, a, batch, rows))
+        .collect()
 }
 
 fn check_one(
@@ -186,44 +169,10 @@ fn check_one(
             }
         }
         Assert::CountEquals { count_equals } => {
-            if let Some(col) = batch.column_by_name(&count_equals.field)
-                && let Some(arr) = col.as_any().downcast_ref::<Int64Array>()
-                && !arr.is_empty()
-                && arr.value(0) != count_equals.value
-            {
-                return Some(fail(
-                    label,
-                    severity,
-                    format!(
-                        "Expected {}={}, got {}={}",
-                        count_equals.field,
-                        count_equals.value,
-                        count_equals.field,
-                        arr.value(0)
-                    ),
-                ));
-            }
-            None
+            check_int_field(batch, count_equals, |v, e| v != e, "=", label, severity)
         }
         Assert::CountGte { count_gte } => {
-            if let Some(col) = batch.column_by_name(&count_gte.field)
-                && let Some(arr) = col.as_any().downcast_ref::<Int64Array>()
-                && !arr.is_empty()
-                && arr.value(0) < count_gte.value
-            {
-                return Some(fail(
-                    label,
-                    severity,
-                    format!(
-                        "Expected {}>={}, got {}={}",
-                        count_gte.field,
-                        count_gte.value,
-                        count_gte.field,
-                        arr.value(0)
-                    ),
-                ));
-            }
-            None
+            check_int_field(batch, count_gte, |v, e| v < e, ">=", label, severity)
         }
         Assert::AllMatch { all_match } => {
             let glob = match globset::Glob::new(&all_match.pattern) {
@@ -236,7 +185,6 @@ fn check_one(
                     ));
                 }
             };
-
             if let Some(col) = batch.column_by_name(&all_match.field)
                 && let Some(arr) = col.as_any().downcast_ref::<StringArray>()
             {
@@ -259,18 +207,15 @@ fn check_one(
         }
         Assert::ContainsRow { contains_row } => {
             for row in 0..total_rows {
-                let mut all_match = true;
-                for (field, expected) in contains_row {
-                    let actual = batch
+                let all_match = contains_row.iter().all(|(field, expected)| {
+                    batch
                         .column_by_name(field)
-                        .map(|col| format_cell(col.as_ref(), row));
-                    if actual.as_deref() != Some(expected.as_str()) {
-                        all_match = false;
-                        break;
-                    }
-                }
+                        .map(|col| format_cell(col.as_ref(), row))
+                        .as_deref()
+                        == Some(expected.as_str())
+                });
                 if all_match {
-                    return None; // found the row
+                    return None;
                 }
             }
             let expected_str: Vec<String> = contains_row
@@ -286,6 +231,34 @@ fn check_one(
                 ),
             ))
         }
+    }
+}
+
+fn check_int_field(
+    batch: &RecordBatch,
+    args: &FieldValueArgs,
+    pred: impl Fn(i64, i64) -> bool,
+    op: &str,
+    label: &str,
+    severity: Severity,
+) -> Option<Failure> {
+    let col = batch.column_by_name(&args.field)?;
+    let arr = col.as_any().downcast_ref::<Int64Array>()?;
+    if arr.is_empty() {
+        return None;
+    }
+    let actual = arr.value(0);
+    if pred(actual, args.value) {
+        Some(fail(
+            label,
+            severity,
+            format!(
+                "Expected {}{op}{}, got {}={actual}",
+                args.field, args.value, args.field
+            ),
+        ))
+    } else {
+        None
     }
 }
 

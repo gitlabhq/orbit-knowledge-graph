@@ -1,0 +1,25 @@
+[package]
+name = "integration-tests-codegraph"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+code-graph = { path = "../code-graph" }
+code-graph-linker = { path = "../code-graph/linker" }
+
+# lance-graph uses arrow 56 — we need matching types for its API
+lance-graph = { workspace = true }
+arrow_56 = { workspace = true }
+
+globset = { workspace = true }
+petgraph = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+tabled = { workspace = true }
+anyhow = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

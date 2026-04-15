@@ -1,23 +1,19 @@
-use integration_testkit::graph_validator::run_yaml_suite;
+use integration_tests_codegraph::run_yaml_suite;
 
 macro_rules! yaml_test {
     ($name:ident, $path:expr) => {
         #[tokio::test]
         async fn $name() {
-            run_yaml_suite(include_str!(concat!(
-                "../../../integration-testkit/src/graph_validator/fixtures/",
-                $path
-            )))
-            .await;
+            run_yaml_suite(include_str!(concat!("../fixtures/", $path))).await;
         }
     };
 }
 
-// ── Structural ──────────────────────────────────────────────────
+// Structural
 yaml_test!(structural_invariants, "structural.yaml");
 yaml_test!(containment_hierarchy, "containment.yaml");
 
-// ── Python ──────────────────────────────────────────────────────
+// Python
 yaml_test!(python_simple_call, "python/simple_call.yaml");
 yaml_test!(python_self_method_call, "python/self_method_call.yaml");
 yaml_test!(python_cross_file_import, "python/cross_file_import.yaml");
@@ -75,14 +71,14 @@ yaml_test!(
 yaml_test!(python_call_resolution, "python_resolution.yaml");
 yaml_test!(python_type_flow, "python/type_flow.yaml");
 
-// ── Java ────────────────────────────────────────────────────────
+// Java
 yaml_test!(java_call_resolution, "java_resolution.yaml");
 yaml_test!(java_intrafile_resolution, "java/intrafile_resolution.yaml");
 yaml_test!(java_interfile_resolution, "java/interfile_resolution.yaml");
 yaml_test!(java_type_flow, "java/type_flow.yaml");
 yaml_test!(java_cross_file_type_flow, "java/cross_file_type_flow.yaml");
 
-// ── Kotlin ──────────────────────────────────────────────────────
+// Kotlin
 yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");
 yaml_test!(
     kotlin_intrafile_resolution,
