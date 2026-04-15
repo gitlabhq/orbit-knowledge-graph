@@ -96,35 +96,42 @@ impl DslLanguage for PythonDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        vec![
+        let class_meta = || metadata().super_types(ExtractList::Fn(python_super_types));
+        let func_meta = || {
+            metadata()
+                .return_type(field("return_type"))
+                .decorators(ExtractList::Fn(python_decorators))
+        };
+
+        let mut rules = vec![
             scope("class_definition", "Class")
                 .def_kind(DefKind::Class)
-                .metadata(metadata().super_types(ExtractList::Fn(python_super_types))),
+                .metadata(class_meta()),
             scope("class_definition", "DecoratedClass")
                 .def_kind(DefKind::Class)
                 .when(parent_is("decorated_definition"))
-                .metadata(metadata().super_types(ExtractList::Fn(python_super_types))),
+                .metadata(class_meta()),
             scope_fn("function_definition", classify_python_function)
                 .def_kind(DefKind::Function)
-                .metadata(
-                    metadata()
-                        .return_type(field("return_type"))
-                        .decorators(ExtractList::Fn(python_decorators)),
-                ),
-            scope_fn("function_definition", |_| "Method")
-                .def_kind(DefKind::Method)
-                .when(grandparent_is("class_definition"))
-                .metadata(
-                    metadata()
-                        .return_type(field("return_type"))
-                        .decorators(ExtractList::Fn(python_decorators)),
-                ),
+                .metadata(func_meta()),
             scope("assignment", "Lambda")
                 .def_kind(DefKind::Lambda)
                 .when(field_kind("right", &["lambda"]))
                 .name_from(field("left"))
                 .no_scope(),
-        ]
+        ];
+
+        // Inside a class: functions become methods
+        rules.extend(within(
+            grandparent_is("class_definition"),
+            vec![
+                scope_fn("function_definition", |_| "Method")
+                    .def_kind(DefKind::Method)
+                    .metadata(func_meta()),
+            ],
+        ));
+
+        rules
     }
 
     fn refs() -> Vec<ReferenceRule> {
