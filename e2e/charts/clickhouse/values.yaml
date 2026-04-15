@@ -1,0 +1,29 @@
+image:
+  repository: clickhouse/clickhouse-server
+  tag: "26.2"
+  pullPolicy: IfNotPresent
+
+password: "e2e-clickhouse-password"
+
+users:
+  siphon:
+    password: "e2e-siphon-ch-password"
+  gkg_siphon_reader:
+    password: "e2e-datalake-password"
+  gkg_writer:
+    password: "e2e-graph-password"
+  gkg_reader:
+    password: "e2e-graph-read-password"
+  gitlab:
+    password: "e2e-gitlab-ch-password"
+
+persistence:
+  size: 20Gi
+
+resources:
+  requests:
+    cpu: 1
+    memory: 4Gi
+  limits:
+    cpu: 4
+    memory: 8Gi

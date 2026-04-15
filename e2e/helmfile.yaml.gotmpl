@@ -1,0 +1,81 @@
+{{ $sha := requiredEnv "E2E_SHA" }}
+{{ $kctx := env "KCTX" | default "gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_e2e-harness" }}
+
+helmDefaults:
+  wait: true
+  timeout: 600
+  kubeContext: {{ $kctx }}
+
+repositories:
+  - name: gitlab-devel
+    url: https://gitlab.com/api/v4/projects/3828396/packages/helm/devel
+  - name: nats
+    url: https://nats-io.github.io/k8s/helm/charts
+  - name: siphon
+    url: https://gitlab.com/api/v4/projects/76780115/packages/helm/stable
+
+releases:
+  # --- Phase: infra ---
+  - name: nats
+    namespace: e2e-{{ $sha }}-nats
+    createNamespace: true
+    chart: nats/nats
+    version: 2.12.6
+    labels:
+      phase: infra
+      component: nats
+    values:
+      - values/nats.yaml
+
+  - name: clickhouse
+    namespace: e2e-{{ $sha }}-clickhouse
+    createNamespace: true
+    chart: charts/clickhouse
+    labels:
+      phase: infra
+      component: clickhouse
+    values:
+      - values/clickhouse.yaml.gotmpl
+
+  - name: gitlab
+    namespace: e2e-{{ $sha }}-gitlab
+    createNamespace: true
+    chart: gitlab-devel/gitlab
+    version: 9.10.3-2450691409
+    labels:
+      phase: infra
+      component: gitlab
+    timeout: 1200
+    values:
+      - values/gitlab.yaml.gotmpl
+
+  # --- Phase: pipeline ---
+  - name: siphon
+    namespace: e2e-{{ $sha }}-siphon
+    createNamespace: true
+    chart: siphon/siphon
+    version: 1.10.0
+    labels:
+      phase: pipeline
+      component: siphon
+    needs:
+      - e2e-{{ $sha }}-nats/nats
+      - e2e-{{ $sha }}-clickhouse/clickhouse
+      - e2e-{{ $sha }}-gitlab/gitlab
+    values:
+      - values/siphon.yaml.gotmpl
+
+  - name: gkg
+    namespace: e2e-{{ $sha }}-gkg
+    createNamespace: true
+    chart: oci://registry.gitlab.com/gitlab-org/orbit/gkg-helm-charts/gkg
+    version: 0.18.1
+    labels:
+      phase: pipeline
+      component: gkg
+    needs:
+      - e2e-{{ $sha }}-nats/nats
+      - e2e-{{ $sha }}-clickhouse/clickhouse
+      - e2e-{{ $sha }}-gitlab/gitlab
+    values:
+      - values/gkg.yaml.gotmpl
