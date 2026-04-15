@@ -3,9 +3,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 
 log "Phase 4: Configuring PostgreSQL for Siphon CDC"
 
-TABLES=$(cdc_table_names | paste -sd, -)
+PG_PASS=$($KC get secret gitlab-postgresql-password -n "$NS_GITLAB" \
+  -o jsonpath='{.data.postgresql-postgres-password}' | base64 -d)
 
-pg_exec -c "
+$KC exec -n "$NS_GITLAB" gitlab-postgresql-0 -c postgresql -- \
+  env PGPASSWORD="$PG_PASS" psql -U postgres -d gitlabhq_production -c "
   DO \$\$
   BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'siphon') THEN
@@ -26,11 +28,10 @@ pg_exec -c "
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_replicator;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_snapshot;
 
-  DROP PUBLICATION IF EXISTS e2e_siphon_publication;
-  CREATE PUBLICATION e2e_siphon_publication FOR TABLE $TABLES;
+  CREATE PUBLICATION IF NOT EXISTS e2e_siphon_publication;
 
   CREATE OR REPLACE FUNCTION siphon_alter_publication(pub_name text, table_names text[])
-  RETURNS void LANGUAGE plpgsql AS \$fn\$
+  RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS \$fn\$
   DECLARE t text;
   BEGIN
     FOREACH t IN ARRAY table_names LOOP

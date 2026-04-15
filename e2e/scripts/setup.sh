@@ -10,7 +10,6 @@ source "$PHASES_DIR/01-secrets.sh"
 source "$PHASES_DIR/02-infra.sh"
 source "$PHASES_DIR/03-wait-infra.sh"
 source "$PHASES_DIR/04-pg-siphon.sh"
-source "$PHASES_DIR/05-ch-schema.sh"
 source "$PHASES_DIR/06-pipeline.sh"
 source "$PHASES_DIR/07-seed-toolbox.sh"
 

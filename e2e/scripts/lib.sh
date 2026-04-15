@@ -32,20 +32,3 @@ wait_for_pods() {
     --all -n "$ns" --timeout="${timeout}s" 2>/dev/null || true
   $KC get pods -n "$ns" --no-headers 2>/dev/null
 }
-
-pg_exec() {
-  local pg_pass
-  pg_pass=$($KC get secret gitlab-postgresql-password -n "$NS_GITLAB" \
-    -o jsonpath='{.data.postgresql-postgres-password}' | base64 -d)
-  $KC exec -n "$NS_GITLAB" gitlab-postgresql-0 -c postgresql -- \
-    env PGPASSWORD="$pg_pass" psql -U postgres -d gitlabhq_production "$@"
-}
-
-# Extract table names from config/cdc-tables.yaml
-cdc_table_names() {
-  python3 -c "
-import re, sys
-text = open(sys.argv[1]).read()
-print('\n'.join(re.findall(r'- name: (\S+)', text)))
-" "$E2E_DIR/config/cdc-tables.yaml"
-}

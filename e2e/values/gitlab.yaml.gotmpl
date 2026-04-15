@@ -151,15 +151,8 @@ postgresql:
       limits:
         cpu: 2
         memory: 2Gi
-    initdb:
-      scripts:
-        siphon-users.sql: |
-          CREATE USER siphon WITH REPLICATION PASSWORD '{{ requiredEnv "E2E_PG_SIPHON_PASS" }}';
-          CREATE USER siphon_replicator WITH REPLICATION PASSWORD '{{ requiredEnv "E2E_PG_SIPHON_PASS" }}';
-          CREATE USER siphon_snapshot WITH PASSWORD '{{ requiredEnv "E2E_PG_SIPHON_PASS" }}';
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_replicator;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_snapshot;
+    # GitLab chart hardcodes initdb.scriptsConfigMap — custom scripts via
+    # initdb.scripts are ignored. Siphon PG setup runs post-migration in 04-pg-siphon.sh.
 
 redis:
   install: true
