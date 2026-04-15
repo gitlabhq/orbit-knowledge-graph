@@ -263,6 +263,10 @@ impl CodeGraph {
     /// Finalize the graph after all files have been added.
     /// Directory chains and containment edges are built during add_file_nodes().
     /// This just links supertypes via Extends edges (cross-file resolution).
+    ///
+    /// NOTE: currently called per-language before merge_graphs(), so cross-language
+    /// inheritance (e.g. Kotlin extending Java) won't be linked. Fine for now since
+    /// we target single-language workspaces / workspace members.
     pub fn finalize(&mut self) {
         self.link_supers();
     }
