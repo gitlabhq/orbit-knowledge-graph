@@ -19,14 +19,16 @@ Orbit Status Is Healthy
     ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
     Should Be Equal    ${resp.json()["status"]}    healthy
 
-User Exists In Graph
+Users Indexed In Graph
     ${headers}=    GitLab Auth Headers
-    ${node}=    Create Dictionary    id=n    entity=User    node_ids=${{[1]}}
-    ${query}=    Create Dictionary    query_type=search    node=${node}
+    ${agg}=    Create Dictionary    function=count    target=n
+    ${node}=    Create Dictionary    id=n    entity=User
+    ${query}=    Create Dictionary    query_type=aggregation    nodes=${{[${node}]}}    aggregations=${{[${agg}]}}
     ${body}=    Create Dictionary    query=${query}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
     ...    headers=${headers}    json=${body}    expected_status=200
-    Should Be True    ${resp.json()["row_count"]} >= 1    No users found in graph
+    ${count}=    Set Variable    ${resp.json()["result"]["columns"][0]["value"]}
+    Should Be True    ${count} >= 1    No users indexed in graph (count=${count})
 
 *** Test Cases ***
 GitLab Is Ready
@@ -39,4 +41,4 @@ Orbit Is Healthy
 
 User Data Is Available Via Orbit Query
     [Documentation]    Verify full data pipeline: PG -> Siphon -> ClickHouse -> GKG indexer -> Orbit API
-    Wait Until Keyword Succeeds    60s    3s    User Exists In Graph
+    Wait Until Keyword Succeeds    60s    3s    Users Indexed In Graph
