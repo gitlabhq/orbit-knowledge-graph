@@ -587,6 +587,7 @@ impl<'a> Resolver<'a> {
                     if !self.ctx.members.lookup_member_with_supers(
                         type_name,
                         &read.name,
+                        &self.ctx.results,
                         &self.ctx.definitions,
                         &mut result,
                     ) {
@@ -635,6 +636,7 @@ impl<'a> Resolver<'a> {
             && self.ctx.members.lookup_member_with_supers(
                 type_fqn,
                 &read.name,
+                &self.ctx.results,
                 &self.ctx.definitions,
                 &mut result,
             )
@@ -790,6 +792,7 @@ impl<'a> Resolver<'a> {
             self.ctx.members.lookup_member_with_supers(
                 type_name,
                 member_name,
+                &self.ctx.results,
                 &self.ctx.definitions,
                 &mut found_members,
             );
