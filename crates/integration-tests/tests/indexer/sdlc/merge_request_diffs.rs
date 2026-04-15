@@ -1,5 +1,6 @@
 use arrow::array::{BooleanArray, Int64Array, StringArray};
 use gkg_utils::arrow::ArrowUtils;
+use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, handler_context,
@@ -36,7 +37,10 @@ pub async fn processes_merge_request_diffs_with_edges(ctx: &TestContext) {
     assert_node_count(ctx, "gl_merge_request_diff", 2).await;
 
     let result = ctx
-        .query("SELECT state FROM gl_merge_request_diff FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT state FROM {} FINAL ORDER BY id",
+            t("gl_merge_request_diff")
+        ))
         .await;
     let states =
         ArrowUtils::get_column_by_name::<StringArray>(&result[0], "state").expect("state column");
@@ -93,9 +97,10 @@ pub async fn processes_merge_request_diff_files_with_edges(ctx: &TestContext) {
     assert_node_count(ctx, "gl_merge_request_diff_file", 3).await;
 
     let result = ctx
-        .query(
-            "SELECT merge_request_id, new_file FROM gl_merge_request_diff_file FINAL ORDER BY old_path",
-        )
+        .query(&format!(
+            "SELECT merge_request_id, new_file FROM {} FINAL ORDER BY old_path",
+            t("gl_merge_request_diff_file")
+        ))
         .await;
     let batch = &result[0];
 

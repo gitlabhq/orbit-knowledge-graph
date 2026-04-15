@@ -7,27 +7,33 @@ use arrow::array::UInt64Array;
 use gkg_utils::arrow::ArrowUtils;
 
 use crate::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL};
-use integration_testkit::{TestContext, run_subtests, run_subtests_shared};
+use integration_testkit::{TestContext, run_subtests, run_subtests_shared, t};
 
 async fn seed(ctx: &TestContext) {
-    ctx.execute(
-        "INSERT INTO gl_user (id, username, name, state) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, username, name, state) VALUES
          (1, 'canary', 'Canary Bird', 'active')",
-    )
+        t("gl_user")
+    ))
     .await;
     ctx.optimize_all().await;
 }
 
 async fn shared_subtest_reads_seeded_data(ctx: &TestContext) {
     let batches = ctx
-        .query("SELECT id, username FROM gl_user ORDER BY id")
+        .query(&format!(
+            "SELECT id, username FROM {} ORDER BY id",
+            t("gl_user")
+        ))
         .await;
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0].num_rows(), 1);
 }
 
 async fn shared_subtest_sees_same_data(ctx: &TestContext) {
-    let batches = ctx.query("SELECT count() AS cnt FROM gl_user").await;
+    let batches = ctx
+        .query(&format!("SELECT count() AS cnt FROM {}", t("gl_user")))
+        .await;
     let col =
         ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "cnt").expect("cnt column");
     assert_eq!(col.value(0), 1);
@@ -35,19 +41,24 @@ async fn shared_subtest_sees_same_data(ctx: &TestContext) {
 
 async fn forked_subtest_can_write(ctx: &TestContext) {
     seed(ctx).await;
-    ctx.execute(
-        "INSERT INTO gl_user (id, username, name, state) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, username, name, state) VALUES
          (2, 'forked', 'Forked User', 'active')",
-    )
+        t("gl_user")
+    ))
     .await;
-    let batches = ctx.query("SELECT count() AS cnt FROM gl_user").await;
+    let batches = ctx
+        .query(&format!("SELECT count() AS cnt FROM {}", t("gl_user")))
+        .await;
     let col =
         ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "cnt").expect("cnt column");
     assert_eq!(col.value(0), 2);
 }
 
 async fn forked_write_does_not_leak_to_shared(ctx: &TestContext) {
-    let batches = ctx.query("SELECT count() AS cnt FROM gl_user").await;
+    let batches = ctx
+        .query(&format!("SELECT count() AS cnt FROM {}", t("gl_user")))
+        .await;
     let col =
         ArrowUtils::get_column_by_name::<UInt64Array>(&batches[0], "cnt").expect("cnt column");
     assert_eq!(
@@ -59,7 +70,7 @@ async fn forked_write_does_not_leak_to_shared(ctx: &TestContext) {
 
 #[tokio::test]
 async fn infra_canary() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;
 
     // Shared subtests see the seeded data, don't fork.
@@ -84,7 +95,7 @@ async fn infra_canary() {
 async fn fetch_arrow_with_summary_returns_stats(ctx: &TestContext) {
     let client = ctx.create_client();
     let (batches, summary) = client
-        .query("SELECT id, username FROM gl_user")
+        .query(&format!("SELECT id, username FROM {}", t("gl_user")))
         .fetch_arrow_with_summary()
         .await
         .expect("query should succeed");

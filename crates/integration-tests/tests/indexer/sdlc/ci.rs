@@ -1,5 +1,6 @@
 use arrow::array::StringArray;
 use gkg_utils::arrow::ArrowUtils;
+use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
@@ -28,7 +29,10 @@ pub async fn processes_pipelines(ctx: &TestContext) {
     assert_node_count(ctx, "gl_pipeline", 2).await;
 
     let result = ctx
-        .query("SELECT status FROM gl_pipeline FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT status FROM {} FINAL ORDER BY id",
+            t("gl_pipeline")
+        ))
         .await;
     let status =
         ArrowUtils::get_column_by_name::<StringArray>(&result[0], "status").expect("status column");
@@ -68,7 +72,10 @@ pub async fn processes_stages(ctx: &TestContext) {
     assert_node_count(ctx, "gl_stage", 3).await;
 
     let result = ctx
-        .query("SELECT name FROM gl_stage FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT name FROM {} FINAL ORDER BY id",
+            t("gl_stage")
+        ))
         .await;
     let name =
         ArrowUtils::get_column_by_name::<StringArray>(&result[0], "name").expect("name column");
@@ -107,7 +114,12 @@ pub async fn processes_jobs(ctx: &TestContext) {
 
     assert_node_count(ctx, "gl_job", 2).await;
 
-    let result = ctx.query("SELECT name FROM gl_job FINAL ORDER BY id").await;
+    let result = ctx
+        .query(&format!(
+            "SELECT name FROM {} FINAL ORDER BY id",
+            t("gl_job")
+        ))
+        .await;
     let name =
         ArrowUtils::get_column_by_name::<StringArray>(&result[0], "name").expect("name column");
     assert_eq!(name.value(0), "compile");

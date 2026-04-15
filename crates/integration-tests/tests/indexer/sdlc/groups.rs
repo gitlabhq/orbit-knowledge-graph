@@ -1,5 +1,6 @@
 use arrow::array::StringArray;
 use gkg_utils::arrow::ArrowUtils;
+use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
@@ -21,7 +22,10 @@ pub async fn processes_and_transforms_groups(ctx: &TestContext) {
     assert_node_count(ctx, "gl_group", 3).await;
 
     let result = ctx
-        .query("SELECT visibility_level FROM gl_group FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT visibility_level FROM {} FINAL ORDER BY id",
+            t("gl_group")
+        ))
         .await;
     let visibility = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "visibility_level")
         .expect("visibility_level column");
@@ -56,7 +60,10 @@ pub async fn computes_full_path_for_top_level_group(ctx: &TestContext) {
         .unwrap();
 
     let result = ctx
-        .query("SELECT full_path FROM gl_group FINAL WHERE id = 100")
+        .query(&format!(
+            "SELECT full_path FROM {} FINAL WHERE id = 100",
+            t("gl_group")
+        ))
         .await;
     let full_path = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
         .expect("full_path column");
@@ -106,7 +113,10 @@ pub async fn computes_full_path_for_nested_subgroups(ctx: &TestContext) {
     assert_node_count(ctx, "gl_group", 3).await;
 
     let result = ctx
-        .query("SELECT id, full_path FROM gl_group FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT id, full_path FROM {} FINAL ORDER BY id",
+            t("gl_group")
+        ))
         .await;
     let ids = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(&result[0], "id")
         .expect("id column");
@@ -132,16 +142,20 @@ pub async fn route_rename_updates_full_path(ctx: &TestContext) {
         .unwrap();
 
     let result = ctx
-        .query("SELECT full_path FROM gl_group FINAL WHERE id = 100")
+        .query(&format!(
+            "SELECT full_path FROM {} FINAL WHERE id = 100",
+            t("gl_group")
+        ))
         .await;
     let paths = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
         .expect("full_path column");
     assert_eq!(paths.value(0), "old-name");
 
-    ctx.execute(
-        "INSERT INTO checkpoint (key, watermark, cursor_values) \
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
          VALUES ('ns.100.Group', '2024-01-20 12:00:00.000000', 'null')",
-    )
+        t("checkpoint")
+    ))
     .await;
     ctx.execute(
         "INSERT INTO siphon_routes (id, source_id, source_type, path, namespace_id, traversal_path, _siphon_replicated_at) \
@@ -166,7 +180,10 @@ pub async fn route_rename_updates_full_path(ctx: &TestContext) {
         .unwrap();
 
     let result = ctx
-        .query("SELECT full_path FROM gl_group FINAL WHERE id = 100")
+        .query(&format!(
+            "SELECT full_path FROM {} FINAL WHERE id = 100",
+            t("gl_group")
+        ))
         .await;
     let paths = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
         .expect("full_path column");
@@ -195,7 +212,10 @@ pub async fn child_route_reflects_parent_rename(ctx: &TestContext) {
         .unwrap();
 
     let result = ctx
-        .query("SELECT id, full_path FROM gl_group FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT id, full_path FROM {} FINAL ORDER BY id",
+            t("gl_group")
+        ))
         .await;
     let ids = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(&result[0], "id")
         .expect("id column");
@@ -206,10 +226,11 @@ pub async fn child_route_reflects_parent_rename(ctx: &TestContext) {
     assert_eq!(ids.value(1), 200);
     assert_eq!(paths.value(1), "parent/child");
 
-    ctx.execute(
-        "INSERT INTO checkpoint (key, watermark, cursor_values) \
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
          VALUES ('ns.100.Group', '2024-01-20 12:00:00.000000', 'null')",
-    )
+        t("checkpoint")
+    ))
     .await;
     ctx.execute(
         "INSERT INTO siphon_routes (id, source_id, source_type, path, namespace_id, traversal_path, _siphon_replicated_at) \
@@ -244,7 +265,10 @@ pub async fn child_route_reflects_parent_rename(ctx: &TestContext) {
         .unwrap();
 
     let result = ctx
-        .query("SELECT id, full_path FROM gl_group FINAL ORDER BY id")
+        .query(&format!(
+            "SELECT id, full_path FROM {} FINAL ORDER BY id",
+            t("gl_group")
+        ))
         .await;
     let ids = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(&result[0], "id")
         .expect("id column");
@@ -266,7 +290,10 @@ pub async fn no_route_falls_back_to_slug(ctx: &TestContext) {
         .unwrap();
 
     let result = ctx
-        .query("SELECT full_path FROM gl_group FINAL WHERE id = 100")
+        .query(&format!(
+            "SELECT full_path FROM {} FINAL WHERE id = 100",
+            t("gl_group")
+        ))
         .await;
     let paths = ArrowUtils::get_column_by_name::<StringArray>(&result[0], "full_path")
         .expect("full_path column");

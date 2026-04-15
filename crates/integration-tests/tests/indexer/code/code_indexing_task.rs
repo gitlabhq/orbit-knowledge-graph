@@ -4,7 +4,7 @@ use indexer::handler::Handler;
 use indexer::modules::code::CodeIndexingTaskHandler;
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
-use integration_testkit::assert_edge_count_for_traversal_path;
+use integration_testkit::{assert_edge_count_for_traversal_path, t};
 
 use super::helpers::*;
 
@@ -15,7 +15,7 @@ async fn indexes_repository() {
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
-        integration_testkit::GRAPH_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
     ])
     .await;
 
@@ -54,7 +54,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
-        integration_testkit::GRAPH_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
     ])
     .await;
 
@@ -136,7 +136,7 @@ async fn incremental_update_applies_changed_paths_and_blobs() {
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
-        integration_testkit::GRAPH_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
     ])
     .await;
 
@@ -243,8 +243,9 @@ async fn assert_file_not_active(
 ) {
     let active_rows = clickhouse
         .query(&format!(
-            "SELECT id FROM gl_file FINAL \
-             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false"
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_file")
         ))
         .await;
     assert!(
@@ -260,8 +261,9 @@ async fn assert_file_is_active(
 ) {
     let result = clickhouse
         .query(&format!(
-            "SELECT id FROM gl_file FINAL \
-             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false"
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_file")
         ))
         .await;
     assert!(
@@ -277,8 +279,9 @@ async fn query_active_definition_names(
 ) -> Vec<String> {
     let result = clickhouse
         .query(&format!(
-            "SELECT name FROM gl_definition FINAL \
-             WHERE project_id = {project_id} AND file_path = '{file_path}' AND _deleted = false"
+            "SELECT name FROM {} FINAL \
+             WHERE project_id = {project_id} AND file_path = '{file_path}' AND _deleted = false",
+            t("gl_definition")
         ))
         .await;
     let Some(batch) = result.first() else {
@@ -313,9 +316,11 @@ async fn count_active_edges(
 ) -> usize {
     let result = clickhouse
         .query(&format!(
-            "SELECT source_id FROM gl_edge FINAL \
+            "SELECT source_id FROM {} FINAL \
              WHERE relationship_kind = '{relationship_kind}' AND _deleted = false \
-             AND source_id IN (SELECT id FROM gl_definition FINAL WHERE project_id = {project_id} AND _deleted = false)"
+             AND source_id IN (SELECT id FROM {} FINAL WHERE project_id = {project_id} AND _deleted = false)",
+            t("gl_edge"),
+            t("gl_definition")
         ))
         .await;
     result.first().map_or(0, |b| b.num_rows())
@@ -357,8 +362,9 @@ async fn assert_branch_indexed(
     let result = clickhouse
         .query(&format!(
             "SELECT name, is_default, traversal_path, project_id \
-             FROM gl_branch FINAL \
-             WHERE project_id = {project_id} AND _deleted = false"
+             FROM {} FINAL \
+             WHERE project_id = {project_id} AND _deleted = false",
+            t("gl_branch")
         ))
         .await;
 
