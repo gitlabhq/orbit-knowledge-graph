@@ -276,7 +276,7 @@ fn apply_import_strategies(
             ImportStrategy::ExplicitImport => explicit_import(graph, results, file_idx, name, sep),
             ImportStrategy::WildcardImport => wildcard_import(graph, results, file_idx, name, sep),
             ImportStrategy::SamePackage => same_package(graph, result, name, sep),
-            ImportStrategy::SameFile => same_file(graph, file_idx, name),
+            ImportStrategy::SameFile => same_file(graph, results, file_idx, name),
             ImportStrategy::FilePath => vec![],
         };
         if !candidates.is_empty() {
@@ -408,36 +408,29 @@ fn same_package(
     vec![]
 }
 
-fn same_file(graph: &CodeGraph, file_idx: usize, name: &str) -> Vec<NodeIndex> {
-    // Filter by file_idx using def_index (legacy, but correct)
+fn same_file(
+    graph: &CodeGraph,
+    results: &[CanonicalResult],
+    file_idx: usize,
+    name: &str,
+) -> Vec<NodeIndex> {
+    let file_path = graph.relative_path(&results[file_idx].file_path);
+    let file_defs = graph.file_defs(&file_path);
+
     let by_fqn: Vec<NodeIndex> = graph
         .lookup_fqn(name)
         .iter()
-        .filter(|&&idx| {
-            graph.def_index.values().any(|&v| {
-                v == idx
-                    && graph
-                        .def_index
-                        .iter()
-                        .any(|(&(fi, _), &v2)| v2 == idx && fi == file_idx)
-            })
-        })
+        .filter(|idx| file_defs.contains(idx))
         .copied()
         .collect();
     if !by_fqn.is_empty() {
         return by_fqn;
     }
 
-    // Simpler: use def_index to filter by file_idx
     graph
         .lookup_name(name)
         .iter()
-        .filter(|&&idx| {
-            graph
-                .def_index
-                .iter()
-                .any(|(&(fi, _), &v)| v == idx && fi == file_idx)
-        })
+        .filter(|idx| file_defs.contains(idx))
         .copied()
         .collect()
 }

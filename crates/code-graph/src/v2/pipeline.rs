@@ -418,12 +418,72 @@ impl Pipeline {
                 }
             }
 
-            // Remap def_index
-            for (key, old_idx) in &g.def_index {
-                if let Some(&new_idx) = index_map.get(old_idx) {
-                    merged.def_index.insert(*key, new_idx);
+            // Remap resolution indexes
+            for (fqn, nodes) in &g.def_by_fqn {
+                let remapped: Vec<_> = nodes
+                    .iter()
+                    .filter_map(|i| index_map.get(i).copied())
+                    .collect();
+                merged
+                    .def_by_fqn
+                    .entry(fqn.clone())
+                    .or_default()
+                    .extend(remapped);
+            }
+            for (name, nodes) in &g.def_by_name {
+                let remapped: Vec<_> = nodes
+                    .iter()
+                    .filter_map(|i| index_map.get(i).copied())
+                    .collect();
+                merged
+                    .def_by_name
+                    .entry(name.clone())
+                    .or_default()
+                    .extend(remapped);
+            }
+            for (fp, nodes) in &g.defs_by_file {
+                let remapped: Vec<_> = nodes
+                    .iter()
+                    .filter_map(|i| index_map.get(i).copied())
+                    .collect();
+                merged
+                    .defs_by_file
+                    .entry(fp.clone())
+                    .or_default()
+                    .extend(remapped);
+            }
+            for (fp, nodes) in &g.imports_by_file {
+                let remapped: Vec<_> = nodes
+                    .iter()
+                    .filter_map(|i| index_map.get(i).copied())
+                    .collect();
+                merged
+                    .imports_by_file
+                    .entry(fp.clone())
+                    .or_default()
+                    .extend(remapped);
+            }
+            for (class_fqn, member_map) in &g.members {
+                for (member_name, nodes) in member_map {
+                    let remapped: Vec<_> = nodes
+                        .iter()
+                        .filter_map(|i| index_map.get(i).copied())
+                        .collect();
+                    merged
+                        .members
+                        .entry(class_fqn.clone())
+                        .or_default()
+                        .entry(member_name.clone())
+                        .or_default()
+                        .extend(remapped);
                 }
             }
+            merged
+                .supers
+                .extend(g.supers.iter().map(|(k, v)| (k.clone(), v.clone())));
+            merged
+                .ancestors
+                .extend(g.ancestors.iter().map(|(k, v)| (k.clone(), v.clone())));
 
             for old_edge in g.graph.edge_indices() {
                 let (src, tgt) = g.graph.edge_endpoints(old_edge).unwrap();

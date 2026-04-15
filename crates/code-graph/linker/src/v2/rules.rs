@@ -19,49 +19,6 @@ pub struct IsolatedScopeRule {
     pub name_field: &'static str,
 }
 
-// ── Branch / loop rules ─────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub struct BranchRule {
-    pub node_kind: &'static str,
-    pub branch_kinds: &'static [&'static str],
-    pub condition_field: Option<&'static str>,
-    pub catch_all_kind: Option<&'static str>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LoopRule {
-    pub node_kind: &'static str,
-    pub body_field: &'static str,
-    pub iter_field: Option<&'static str>,
-}
-
-// ── Binding rules ───────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BindingKind {
-    Assignment,
-    Parameter,
-    Deletion,
-    ForTarget,
-    WithAlias,
-}
-
-#[derive(Debug, Clone)]
-pub struct BindingRule {
-    pub node_kind: &'static str,
-    pub binding_kind: BindingKind,
-    /// Field chain to extract the binding name. Single-element for simple
-    /// fields (e.g. `&["left"]`), multi-element for compound nodes
-    /// (e.g. `&["declarator", "name"]` for Java's `variable_declarator`).
-    pub name_fields: &'static [&'static str],
-    pub value_field: Option<&'static str>,
-    /// When the binding name starts with one of these prefixes, write
-    /// to the enclosing class block instead of the current block.
-    /// e.g. `&["self."]` for Python, `&["this."]` for Java/Kotlin.
-    pub instance_attr_prefixes: &'static [&'static str],
-}
-
 // ── Import resolution ───────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,9 +77,6 @@ pub struct ResolutionRules {
 
     // AST walking (derived from language_spec for DSL languages)
     scopes: Vec<IsolatedScopeRule>,
-    pub branches: Vec<BranchRule>,
-    pub loops: Vec<LoopRule>,
-    pub bindings: Vec<BindingRule>,
 
     // Resolution
     pub bare_stages: Vec<ResolveStage>,
@@ -166,9 +120,6 @@ impl ResolutionRules {
         Self {
             name,
             scopes,
-            branches: vec![],
-            loops: vec![],
-            bindings: vec![],
             bare_stages,
             import_strategies,
             chain_mode,
@@ -225,86 +176,6 @@ pub fn isolated_scope(node_kind: &'static str, is_type_scope: bool) -> IsolatedS
 impl IsolatedScopeRule {
     pub fn name_from(mut self, field: &'static str) -> Self {
         self.name_field = field;
-        self
-    }
-}
-
-pub fn branch(node_kind: &'static str) -> BranchRule {
-    BranchRule {
-        node_kind,
-        branch_kinds: &[],
-        condition_field: None,
-        catch_all_kind: None,
-    }
-}
-
-impl BranchRule {
-    pub fn branches(mut self, kinds: &'static [&'static str]) -> Self {
-        self.branch_kinds = kinds;
-        self
-    }
-
-    pub fn condition(mut self, field: &'static str) -> Self {
-        self.condition_field = Some(field);
-        self
-    }
-
-    pub fn catch_all(mut self, kind: &'static str) -> Self {
-        self.catch_all_kind = Some(kind);
-        self
-    }
-}
-
-pub fn loop_rule(node_kind: &'static str) -> LoopRule {
-    LoopRule {
-        node_kind,
-        body_field: "body",
-        iter_field: None,
-    }
-}
-
-impl LoopRule {
-    pub fn body(mut self, field: &'static str) -> Self {
-        self.body_field = field;
-        self
-    }
-
-    pub fn iter_over(mut self, field: &'static str) -> Self {
-        self.iter_field = Some(field);
-        self
-    }
-}
-
-pub fn binding(node_kind: &'static str, kind: BindingKind) -> BindingRule {
-    BindingRule {
-        node_kind,
-        binding_kind: kind,
-        name_fields: &["left"],
-        value_field: Some("right"),
-        instance_attr_prefixes: &[],
-    }
-}
-
-impl BindingRule {
-    /// Set the field chain to extract the binding name.
-    /// Single field: `&["left"]`. Compound: `&["declarator", "name"]`.
-    pub fn name_from(mut self, fields: &'static [&'static str]) -> Self {
-        self.name_fields = fields;
-        self
-    }
-
-    pub fn value_from(mut self, field: &'static str) -> Self {
-        self.value_field = Some(field);
-        self
-    }
-
-    pub fn no_value(mut self) -> Self {
-        self.value_field = None;
-        self
-    }
-
-    pub fn instance_attrs(mut self, prefixes: &'static [&'static str]) -> Self {
-        self.instance_attr_prefixes = prefixes;
         self
     }
 }

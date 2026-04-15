@@ -118,16 +118,15 @@ pub struct CodeGraph {
     // Structural indexes
     pub dir_index: FxHashMap<String, NodeIndex>,
     pub file_index: FxHashMap<String, NodeIndex>,
-    /// Legacy: (parse_order_idx, def_idx) → NodeIndex.
-    pub def_index: FxHashMap<(usize, usize), NodeIndex>,
 
     // Resolution indexes
-    def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
-    def_by_name: FxHashMap<String, Vec<NodeIndex>>,
-    members: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
-    supers: FxHashMap<String, Vec<String>>,
-    ancestors: FxHashMap<String, Vec<String>>,
-    imports_by_file: FxHashMap<String, Vec<NodeIndex>>,
+    pub def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
+    pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
+    pub members: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
+    pub supers: FxHashMap<String, Vec<String>>,
+    pub ancestors: FxHashMap<String, Vec<String>>,
+    pub imports_by_file: FxHashMap<String, Vec<NodeIndex>>,
+    pub defs_by_file: FxHashMap<String, Vec<NodeIndex>>,
 
     pub root_path: String,
 }
@@ -145,13 +144,14 @@ impl CodeGraph {
             graph: DiGraph::new(),
             dir_index: FxHashMap::default(),
             file_index: FxHashMap::default(),
-            def_index: FxHashMap::default(),
+
             def_by_fqn: FxHashMap::default(),
             def_by_name: FxHashMap::default(),
             members: FxHashMap::default(),
             supers: FxHashMap::default(),
             ancestors: FxHashMap::default(),
             imports_by_file: FxHashMap::default(),
+            defs_by_file: FxHashMap::default(),
             root_path: String::new(),
         }
     }
@@ -190,7 +190,6 @@ impl CodeGraph {
                 def: def.clone(),
             });
             def_nodes.push(def_node);
-            self.def_index.insert((file_order, di), def_node);
 
             let fqn_str = def.fqn.to_string();
             self.def_by_fqn
@@ -237,6 +236,8 @@ impl CodeGraph {
                 GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::ImportedSymbol),
             );
         }
+        self.defs_by_file
+            .insert(relative_path.clone(), def_nodes.clone());
         self.imports_by_file
             .insert(relative_path, import_nodes.clone());
 
@@ -267,13 +268,13 @@ impl CodeGraph {
         }
 
         // Containment edges between definitions (per file)
-        for (file_order, result) in results.iter().enumerate() {
-            let def_indices: Vec<NodeIndex> = result
-                .definitions
-                .iter()
-                .enumerate()
-                .filter_map(|(di, _)| self.def_index.get(&(file_order, di)).copied())
-                .collect();
+        for result in results {
+            let file_path = self.relative_path(&result.file_path);
+            let def_indices = self
+                .defs_by_file
+                .get(&file_path)
+                .cloned()
+                .unwrap_or_default();
             build_containment_edges(&result.definitions, &def_indices, self);
         }
 
@@ -281,105 +282,15 @@ impl CodeGraph {
     }
 
     /// Build the complete graph from parsed results in a single pass.
+    /// Convenience: build complete graph from results in one call.
+    /// Used by tests and custom pipelines. The main pipeline uses
+    /// `add_file_nodes()` + `finalize()` instead.
     pub fn from_results(results: Vec<CanonicalResult>, root_path: String) -> Self {
-        let mut cg = Self {
-            root_path,
-            ..Self::new()
-        };
-        let mut seen_dir_edges: FxHashSet<(String, String)> = FxHashSet::default();
-
-        for (file_order, result) in results.iter().enumerate() {
-            let relative_path = cg.relative_path(&result.file_path);
-            let file_path: Arc<str> = Arc::from(relative_path.as_str());
-
-            let file_name = Path::new(&relative_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            let file_node = cg.graph.add_node(GraphNode::File(CanonicalFile {
-                path: relative_path.clone(),
-                name: file_name,
-                extension: result.extension.clone(),
-                language: result.language,
-                size: result.file_size,
-            }));
-            cg.file_index.insert(relative_path.clone(), file_node);
-
-            if let Some(dir_idx) =
-                build_directory_chain(&relative_path, &mut cg, &mut seen_dir_edges)
-            {
-                cg.graph.add_edge(
-                    dir_idx,
-                    file_node,
-                    GraphEdge::structural(EdgeKind::Contains, NodeKind::Directory, NodeKind::File),
-                );
-            }
-
-            let mut def_indices = Vec::new();
-            for (di, def) in result.definitions.iter().enumerate() {
-                let def_node = cg.graph.add_node(GraphNode::Definition {
-                    file_path: file_path.clone(),
-                    def: def.clone(),
-                });
-                def_indices.push(def_node);
-                cg.def_index.insert((file_order, di), def_node);
-
-                let fqn_str = def.fqn.to_string();
-                cg.def_by_fqn
-                    .entry(fqn_str.clone())
-                    .or_default()
-                    .push(def_node);
-                cg.def_by_name
-                    .entry(def.name.clone())
-                    .or_default()
-                    .push(def_node);
-
-                if let Some(parent_fqn) = def.fqn.parent() {
-                    cg.members
-                        .entry(parent_fqn.to_string())
-                        .or_default()
-                        .entry(def.name.clone())
-                        .or_default()
-                        .push(def_node);
-                }
-
-                if let Some(meta) = &def.metadata
-                    && !meta.super_types.is_empty()
-                {
-                    cg.supers.insert(fqn_str, meta.super_types.clone());
-                }
-
-                cg.graph.add_edge(
-                    file_node,
-                    def_node,
-                    GraphEdge::structural(EdgeKind::Defines, NodeKind::File, NodeKind::Definition),
-                );
-            }
-
-            build_containment_edges(&result.definitions, &def_indices, &mut cg);
-
-            let mut file_imports = Vec::new();
-            for imp in &result.imports {
-                let imp_node = cg.graph.add_node(GraphNode::Import {
-                    file_path: file_path.clone(),
-                    import: imp.clone(),
-                });
-                file_imports.push(imp_node);
-                cg.graph.add_edge(
-                    file_node,
-                    imp_node,
-                    GraphEdge::structural(
-                        EdgeKind::Imports,
-                        NodeKind::File,
-                        NodeKind::ImportedSymbol,
-                    ),
-                );
-            }
-            cg.imports_by_file.insert(relative_path, file_imports);
+        let mut cg = Self::new_with_root(root_path);
+        for (i, result) in results.iter().enumerate() {
+            cg.add_file_nodes(result, i);
         }
-
-        cg.flatten_supers();
+        cg.finalize(&results);
         cg
     }
 
@@ -467,6 +378,13 @@ impl CodeGraph {
 
     pub fn file_imports(&self, file_path: &str) -> &[NodeIndex] {
         self.imports_by_file
+            .get(file_path)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn file_defs(&self, file_path: &str) -> &[NodeIndex] {
+        self.defs_by_file
             .get(file_path)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
