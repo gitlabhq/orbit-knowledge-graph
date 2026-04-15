@@ -13,60 +13,66 @@ use crate::common::{
 };
 use gkg_server::pipeline::HydrationStage;
 use gkg_server::redaction::QueryResult;
-use integration_testkit::run_subtests_shared;
+use integration_testkit::{run_subtests_shared, t};
 use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
 use query_engine::formatters::row_to_json;
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
 
 async fn setup_test_data(ctx: &TestContext) {
-    ctx.execute(
-        "INSERT INTO gl_user (id, username, name, state, user_type) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, username, name, state, user_type) VALUES
          (1, 'alice', 'Alice Admin', 'active', 'human'),
          (2, 'bob', 'Bob Builder', 'active', 'human'),
          (3, 'charlie', 'Charlie Private', 'active', 'human')",
-    )
+        t("gl_user")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_group (id, name, visibility_level, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
          (100, 'Public Group', 'public', '1/100/'),
          (101, 'Private Group', 'private', '1/101/')",
-    )
+        t("gl_group")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_project (id, name, visibility_level, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
          (1000, 'Public Project', 'public', '1/100/1000/'),
          (1001, 'Private Project', 'private', '1/101/1001/')",
-    )
+        t("gl_project")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
          (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
          (2001, 2, 'Fix bug B', 'merged', 'fix-b', 'main', '1/101/1001/')",
-    )
+        t("gl_merge_request")
+    ))
     .await;
 
-    // Source code entities — File and Definition have redaction id_column = project_id,
+    // Source code entities -- File and Definition have redaction id_column = project_id,
     // so their PK (_gkg_f_pk) differs from the auth ID (_gkg_f_id).
-    ctx.execute(
-        "INSERT INTO gl_file (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
          (5001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust'),
          (5002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'main.rs', 'rs', 'Rust')",
-    )
+        t("gl_file")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_definition (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
          (6001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib::greet', 'greet', 'function', 1, 5, 0, 80),
          (6002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'main', 'main', 'function', 1, 10, 0, 120)",
-    )
+        t("gl_definition")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
          ('1/101/', 2, 'User', 'MEMBER_OF', 101, 'Group'),
          ('1/101/', 3, 'User', 'MEMBER_OF', 101, 'Group'),
@@ -74,7 +80,8 @@ async fn setup_test_data(ctx: &TestContext) {
          ('1/101/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
          ('1/100/1000/', 5001, 'File', 'DEFINES', 6001, 'Definition'),
          ('1/100/1000/', 5002, 'File', 'DEFINES', 6002, 'Definition')",
-    )
+        t("gl_edge")
+    ))
     .await;
 
     ctx.optimize_all().await;
@@ -1083,7 +1090,7 @@ async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
 
 #[tokio::test]
 async fn hydration_integration() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     setup_test_data(&ctx).await;
 
     run_subtests_shared!(

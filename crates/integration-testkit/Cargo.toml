@@ -11,6 +11,7 @@ gitalisk-core = { workspace = true }
 gkg-utils = { path = "../utils" }
 futures = { workspace = true }
 gkg-server = { path = "../gkg-server" }
+ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 rustls = { workspace = true }
 sqlparser = { workspace = true }

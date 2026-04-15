@@ -5,11 +5,7 @@ use ontology::Ontology;
 use query_engine::compiler::{CompiledQueryContext, SecurityContext, compile};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
-pub use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
-
-pub fn load_ontology() -> Ontology {
-    Ontology::load_embedded().expect("embedded ontology should load")
-}
+pub use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
 
 pub fn test_security_context() -> SecurityContext {
     SecurityContext::new(1, vec!["1/".into()]).expect("valid security context")
