@@ -9,7 +9,7 @@ use code_graph_types::{
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Bfs, EdgeFiltered};
-use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use rustc_hash::{FxHashMap, FxHasher};
 
 // ── Node + Edge types ───────────────────────────────────────────
 
@@ -176,6 +176,15 @@ impl CodeGraph {
         }));
         self.file_index.insert(relative_path.clone(), file_node);
 
+        // Build directory chain and dir→file edge inline.
+        if let Some(dir_idx) = self.ensure_directory_chain(&relative_path) {
+            self.graph.add_edge(
+                dir_idx,
+                file_node,
+                GraphEdge::structural(EdgeKind::Contains, NodeKind::Directory, NodeKind::File),
+            );
+        }
+
         let mut def_nodes = Vec::with_capacity(result.definitions.len());
         for def in result.definitions.iter() {
             let def_node = self.graph.add_node(GraphNode::Definition {
@@ -227,28 +236,61 @@ impl CodeGraph {
     }
 
     /// Finalize the graph after all files have been added.
-    /// Adds directory chains, containment edges, and links supertypes.
+    /// Builds containment edges between definitions and links supertypes.
+    /// Directory chains are already built during add_file_nodes().
     pub fn finalize(&mut self) {
-        let mut seen_dir_edges: FxHashSet<(String, String)> = FxHashSet::default();
+        let file_nodes: Vec<NodeIndex> = self.file_index.values().copied().collect();
+        for file_node in file_nodes {
+            build_containment_edges(file_node, self);
+        }
+        self.link_supers();
+    }
 
-        let file_entries: Vec<(String, NodeIndex)> = self
-            .file_index
-            .iter()
-            .map(|(path, &node)| (path.clone(), node))
-            .collect();
+    /// Create directory nodes and dir→dir edges for a file path.
+    /// Returns the immediate parent directory's NodeIndex.
+    /// Only creates edges when a directory is first seen, so no dedup set needed.
+    fn ensure_directory_chain(&mut self, file_path: &str) -> Option<NodeIndex> {
+        let path = Path::new(file_path);
+        let mut ancestors: Vec<String> = Vec::new();
+        let mut current = path.parent();
+        while let Some(dir) = current {
+            ancestors.push(dir_to_string(dir));
+            current = dir.parent();
+        }
+        ancestors.reverse();
 
-        for (path, file_node) in &file_entries {
-            if let Some(dir_idx) = build_directory_chain(path, self, &mut seen_dir_edges) {
-                self.graph.add_edge(
-                    dir_idx,
-                    *file_node,
-                    GraphEdge::structural(EdgeKind::Contains, NodeKind::Directory, NodeKind::File),
-                );
+        for dir_path in &ancestors {
+            if !self.dir_index.contains_key(dir_path) {
+                let name = Path::new(dir_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| dir_path.clone());
+                let idx = self.graph.add_node(GraphNode::Directory(CanonicalDirectory {
+                    path: dir_path.clone(),
+                    name,
+                }));
+                self.dir_index.insert(dir_path.clone(), idx);
+
+                // Parent was created/exists from a previous iteration — add edge.
+                if let Some(parent_dir) = Path::new(dir_path).parent() {
+                    let parent_str = dir_to_string(parent_dir);
+                    if let Some(&parent_idx) = self.dir_index.get(&parent_str) {
+                        self.graph.add_edge(
+                            parent_idx,
+                            idx,
+                            GraphEdge::structural(
+                                EdgeKind::Contains,
+                                NodeKind::Directory,
+                                NodeKind::Directory,
+                            ),
+                        );
+                    }
+                }
             }
-            build_containment_edges(*file_node, self);
         }
 
-        self.link_supers();
+        let parent_dir = dir_to_string(path.parent()?);
+        self.dir_index.get(&parent_dir).copied()
     }
 
     /// Build the complete graph from parsed results in a single pass.
@@ -487,50 +529,6 @@ fn dir_to_string(dir: &Path) -> String {
     }
 }
 
-fn build_directory_chain(
-    file_path: &str,
-    cg: &mut CodeGraph,
-    seen_dir_edges: &mut FxHashSet<(String, String)>,
-) -> Option<NodeIndex> {
-    let path = Path::new(file_path);
-    let mut ancestors: Vec<String> = Vec::new();
-    let mut current = path.parent();
-    while let Some(dir) = current {
-        ancestors.push(dir_to_string(dir));
-        current = dir.parent();
-    }
-    ancestors.reverse();
-
-    for dir_path in &ancestors {
-        if !cg.dir_index.contains_key(dir_path) {
-            let name = Path::new(dir_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| dir_path.clone());
-            let idx = cg.graph.add_node(GraphNode::Directory(CanonicalDirectory {
-                path: dir_path.clone(),
-                name,
-            }));
-            cg.dir_index.insert(dir_path.clone(), idx);
-        }
-    }
-
-    for pair in ancestors.windows(2) {
-        if seen_dir_edges.insert((pair[0].clone(), pair[1].clone()))
-            && let (Some(&src), Some(&tgt)) =
-                (cg.dir_index.get(&pair[0]), cg.dir_index.get(&pair[1]))
-        {
-            cg.graph.add_edge(
-                src,
-                tgt,
-                GraphEdge::structural(EdgeKind::Contains, NodeKind::Directory, NodeKind::Directory),
-            );
-        }
-    }
-
-    let parent_dir = dir_to_string(path.parent()?);
-    cg.dir_index.get(&parent_dir).copied()
-}
 
 fn build_containment_edges(file_node: NodeIndex, cg: &mut CodeGraph) {
     // Collect def nodes for this file from graph neighbors
