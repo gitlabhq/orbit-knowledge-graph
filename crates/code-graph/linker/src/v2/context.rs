@@ -1,4 +1,4 @@
-use code_graph_types::{CanonicalDefinition, CanonicalResult, Range, ScopeIndex};
+use code_graph_types::{CanonicalDefinition, CanonicalResult};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Shared resolution context built from all parsed results for a language.
@@ -10,21 +10,18 @@ pub struct ResolutionContext {
     pub results: Vec<CanonicalResult>,
     pub definitions: DefinitionIndex,
     pub members: MemberIndex,
-    pub scopes: FileScopes,
 }
 
 impl ResolutionContext {
     pub fn build(results: Vec<CanonicalResult>, root_path: String) -> Self {
         let definitions = DefinitionIndex::build(&results);
         let members = MemberIndex::build(&results);
-        let scopes = FileScopes::build(&results);
 
         Self {
             root_path,
             results,
             definitions,
             members,
-            scopes,
         }
     }
 
@@ -249,76 +246,5 @@ impl MemberIndex {
         }
 
         false
-    }
-}
-
-/// Per-file scope index for byte-offset → enclosing definition lookup.
-#[derive(Debug, Clone)]
-pub struct ScopedDef {
-    pub file_idx: usize,
-    pub def_idx: usize,
-    pub range: Range,
-}
-
-impl code_graph_types::HasRange for ScopedDef {
-    fn range(&self) -> Range {
-        self.range
-    }
-}
-
-pub struct FileScopes {
-    scopes: FxHashMap<String, ScopeIndex<ScopedDef>>,
-}
-
-impl FileScopes {
-    fn build(results: &[CanonicalResult]) -> Self {
-        let mut scopes: FxHashMap<String, ScopeIndex<ScopedDef>> = FxHashMap::default();
-
-        for (file_idx, result) in results.iter().enumerate() {
-            let items: Vec<_> = result
-                .definitions
-                .iter()
-                .enumerate()
-                .map(|(def_idx, def)| {
-                    (
-                        def.range,
-                        ScopedDef {
-                            file_idx,
-                            def_idx,
-                            range: def.range,
-                        },
-                    )
-                })
-                .collect();
-
-            if !items.is_empty() {
-                scopes.insert(result.file_path.clone(), ScopeIndex::from_items(items));
-            }
-        }
-
-        Self { scopes }
-    }
-
-    pub fn enclosing_scope(
-        &self,
-        file_path: &str,
-        byte_start: usize,
-        byte_end: usize,
-    ) -> Option<&ScopedDef> {
-        self.scopes
-            .get(file_path)?
-            .find_innermost(byte_start, byte_end)
-    }
-
-    pub fn containing_scopes(
-        &self,
-        file_path: &str,
-        byte_start: usize,
-        byte_end: usize,
-    ) -> Vec<&ScopedDef> {
-        self.scopes
-            .get(file_path)
-            .map(|idx| idx.find_containing(byte_start, byte_end))
-            .unwrap_or_default()
     }
 }

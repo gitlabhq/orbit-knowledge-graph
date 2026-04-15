@@ -10,7 +10,7 @@ pub mod ssa;
 pub mod walker;
 
 pub use builder::GraphBuilder;
-pub use context::{DefRef, MemberIndex, ResolutionContext, ScopedDef};
+pub use context::{DefRef, MemberIndex, ResolutionContext};
 pub use edge_builder::{BuildEdgesResult, HasRules, ResolveStats, build_edges};
 pub use edges::{EdgeSource, ResolvedEdge};
 pub use graph::{CodeGraph, GraphEdge, GraphNode};
