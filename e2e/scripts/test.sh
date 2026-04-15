@@ -28,19 +28,17 @@ helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
 # Wait for completion or failure
 log "Waiting for tests to complete..."
 while true; do
-  STATUS=$($KC get job "$JOB_NAME" -n "$NS_GKG" \
-    -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
-  case "$STATUS" in
-    Complete)
-      log "Tests passed"
-      echo ""
-      $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null
-      exit 0
-      ;;
-    Failed)
-      break
-      ;;
-  esac
+  CONDITIONS=$($KC get job "$JOB_NAME" -n "$NS_GKG" \
+    -o jsonpath='{range .status.conditions[*]}{.type}={.status}{"\n"}{end}' 2>/dev/null)
+  if echo "$CONDITIONS" | grep -q "Complete=True"; then
+    log "Tests passed"
+    echo ""
+    $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null
+    exit 0
+  fi
+  if echo "$CONDITIONS" | grep -q "Failed=True"; then
+    break
+  fi
   sleep 5
 done
 
