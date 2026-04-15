@@ -312,8 +312,7 @@ pub fn build_edges(
                                     source_def_kind,
                                     target_def_kind: Some(target_def.kind),
                                 },
-                                source_definition_range: None,
-                                target_definition_range: None,
+
                             },
                         ));
                     }
