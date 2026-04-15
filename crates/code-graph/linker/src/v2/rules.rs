@@ -7,6 +7,11 @@
 //!
 //! The `FileWalker` uses the walking rules to drive the SSA engine.
 //! The `RulesResolver` uses the resolution rules to chase imports.
+//!
+//!
+pub trait HasRules {
+    fn rules() -> ResolutionRules;
+}
 
 // ── Scope rules ─────────────────────────────────────────────────
 

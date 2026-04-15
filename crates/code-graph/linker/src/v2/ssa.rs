@@ -8,6 +8,7 @@
 //! are pointer-sized. Blocks use `SmallVec` for predecessors (most have ≤2).
 //! `Value::Type` uses `Intern<str>` for zero-cost cloning.
 
+use super::stats::SsaStats;
 use internment::Intern;
 use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -95,45 +96,6 @@ pub struct ReachingDefs {
 impl ReachingDefs {
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
-    }
-}
-
-// ── SSA Stats ───────────────────────────────────────────────────
-
-/// Per-file SSA statistics, collected during resolution reads.
-#[derive(Debug, Clone, Default)]
-pub struct SsaStats {
-    /// Total `read_variable_stateless` calls.
-    pub reads: u64,
-    /// Read resolved from current block's `current_def` (no predecessor walk).
-    pub local_hits: u64,
-    /// Read required walking predecessors (`read_variable_recursive`).
-    pub recursive_lookups: u64,
-    /// Read hit an unsealed block (incomplete phi created).
-    pub unsealed_hits: u64,
-    /// Read hit a block with zero predecessors (returned Opaque).
-    pub dead_end_hits: u64,
-    /// Phi nodes created during reads.
-    pub phis_created: u64,
-    /// Phi nodes that were trivially eliminated (collapsed to single value).
-    pub phis_trivial: u64,
-    /// Total variable writes.
-    pub writes: u64,
-    /// Total blocks created.
-    pub blocks_created: u64,
-}
-
-impl SsaStats {
-    pub fn merge(&mut self, other: &SsaStats) {
-        self.reads += other.reads;
-        self.local_hits += other.local_hits;
-        self.recursive_lookups += other.recursive_lookups;
-        self.unsealed_hits += other.unsealed_hits;
-        self.dead_end_hits += other.dead_end_hits;
-        self.phis_created += other.phis_created;
-        self.phis_trivial += other.phis_trivial;
-        self.writes += other.writes;
-        self.blocks_created += other.blocks_created;
     }
 }
 

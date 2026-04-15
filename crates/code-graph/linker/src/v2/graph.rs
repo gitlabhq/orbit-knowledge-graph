@@ -164,7 +164,7 @@ impl CodeGraph {
     pub fn add_file_nodes(
         &mut self,
         result: &CanonicalResult,
-        file_order: usize,
+        _file_order: usize,
     ) -> (Vec<NodeIndex>, Vec<NodeIndex>) {
         let relative_path = self.relative_path(&result.file_path);
         let file_path: Arc<str> = Arc::from(relative_path.as_str());
@@ -184,7 +184,7 @@ impl CodeGraph {
         self.file_index.insert(relative_path.clone(), file_node);
 
         let mut def_nodes = Vec::with_capacity(result.definitions.len());
-        for (di, def) in result.definitions.iter().enumerate() {
+        for def in result.definitions.iter() {
             let def_node = self.graph.add_node(GraphNode::Definition {
                 file_path: file_path.clone(),
                 def: def.clone(),
