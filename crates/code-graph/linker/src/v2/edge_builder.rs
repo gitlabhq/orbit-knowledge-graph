@@ -312,18 +312,8 @@ pub fn build_edges(
                     });
                 }
 
-                let source_enclosing = ctx.scopes.enclosing_scope(
-                    &result.file_path,
-                    reference.range.byte_offset.0,
-                    reference.range.byte_offset.1,
-                );
-
-                let (source, source_node, source_def_kind) = match source_enclosing {
-                    Some(s) => {
-                        let def_ref = DefRef {
-                            file_idx: s.file_idx,
-                            def_idx: s.def_idx,
-                        };
+                let (source, source_node, source_def_kind) = match read.enclosing_def {
+                    Some(def_ref) => {
                         let (def, _) = ctx.resolve_def(def_ref);
                         (
                             EdgeSource::Definition(def_ref),
@@ -474,25 +464,6 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// Find the enclosing type scope FQN for a reference.
-    fn enclosing_type_fqn(
-        &mut self,
-        file_idx: usize,
-        byte_start: usize,
-        byte_end: usize,
-    ) -> Option<String> {
-        let result = &self.ctx.results[file_idx];
-        let containing = self
-            .ctx
-            .scopes
-            .containing_scopes(&result.file_path, byte_start, byte_end);
-        containing
-            .iter()
-            .rev()
-            .find(|s| result.definitions[s.def_idx].kind.is_type_container())
-            .map(|s| result.definitions[s.def_idx].fqn.to_string())
-    }
-
     // ── Bare name resolution ────────────────────────────────────
 
     /// Resolve a bare name (no expression chain) via SSA + fallbacks.
@@ -500,12 +471,6 @@ impl<'a> Resolver<'a> {
         self.last_bare_path = ResolvePath::None;
 
         let reaching = self.ssa.read_variable_stateless(&read.name, read.block);
-        let reference = &self.ctx.results[read.file_idx].references[read.ref_idx];
-        let enclosing = self.enclosing_type_fqn(
-            read.file_idx,
-            reference.range.byte_offset.0,
-            reference.range.byte_offset.1,
-        );
 
         let mut result = Vec::new();
 
@@ -572,7 +537,7 @@ impl<'a> Resolver<'a> {
         // Fallback 2: implicit member lookup on enclosing type
         if result.is_empty()
             && self.rules.implicit_member_lookup
-            && let Some(type_fqn) = &enclosing
+            && let Some(type_fqn) = &read.enclosing_type_fqn
             && self.ctx.members.lookup_member_with_supers(
                 type_fqn,
                 &read.name,
@@ -602,13 +567,6 @@ impl<'a> Resolver<'a> {
             return vec![];
         }
 
-        let reference = &self.ctx.results[read.file_idx].references[read.ref_idx];
-        let enclosing = self.enclosing_type_fqn(
-            read.file_idx,
-            reference.range.byte_offset.0,
-            reference.range.byte_offset.1,
-        );
-
         let effective_chain = if chain.len() > MAX_CHAIN_DEPTH {
             &chain[chain.len() - MAX_CHAIN_DEPTH..]
         } else {
@@ -624,8 +582,8 @@ impl<'a> Resolver<'a> {
             _ => self.stats.chain_base_other += 1,
         }
 
-        let mut current_types =
-            self.resolve_base(&effective_chain[0], read.block, enclosing.as_deref());
+        let enclosing_str = read.enclosing_type_fqn.as_ref().map(|s| s.as_ref());
+        let mut current_types = self.resolve_base(&effective_chain[0], read.block, enclosing_str);
 
         if current_types.is_empty() {
             self.stats.chain_fallback_fired += 1;
@@ -821,6 +779,8 @@ impl<'a> Resolver<'a> {
             ref_idx: read.ref_idx,
             block: read.block,
             name: last.clone(),
+            enclosing_def: read.enclosing_def,
+            enclosing_type_fqn: read.enclosing_type_fqn,
         };
         self.resolve_bare(&bare_read)
     }

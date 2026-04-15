@@ -5,13 +5,14 @@
 //! processes bindings, and records reference reads. The output is a
 //! populated `SsaResolver` with all reaching definitions computed.
 
-use code_graph_types::CanonicalResult;
+use code_graph_types::{CanonicalResult, IStr};
 use rustc_hash::FxHashMap;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use parser_core::dsl::types::Rule as DslRule;
 
+use super::context::DefRef;
 use super::rules::{BindingKind, ChainMode, ResolutionRules};
 use super::ssa::{BlockId, SsaResolver, Value};
 
@@ -37,6 +38,10 @@ pub struct RecordedRead {
     pub ref_idx: usize,
     pub block: BlockId,
     pub name: String,
+    /// Pre-computed enclosing definition (for edge source). None = file-level.
+    pub enclosing_def: Option<DefRef>,
+    /// Pre-computed enclosing type scope FQN (for implicit this / This chains).
+    pub enclosing_type_fqn: Option<IStr>,
 }
 
 /// Per-file walk result: owned SSA state + recorded reads.
@@ -82,6 +87,11 @@ struct ScopeEntry {
     block: BlockId,
     is_type_scope: bool,
     name: Option<String>,
+    /// The canonical definition index for this scope, if matched.
+    def_idx: Option<usize>,
+    /// FQN of the enclosing type scope (class/interface), cached for reads.
+    /// Set when entering a type scope, propagated to inner non-type scopes.
+    enclosing_type_fqn: Option<IStr>,
 }
 
 struct FileWalker<'a> {
@@ -93,6 +103,8 @@ struct FileWalker<'a> {
     current_block: BlockId,
     scope_stack: Vec<ScopeEntry>,
     ref_by_range_start: FxHashMap<usize, Vec<usize>>,
+    /// byte_offset_start → def_idx for matching scopes to canonical definitions.
+    def_by_byte_start: FxHashMap<usize, usize>,
 
     reads: Vec<RecordedRead>,
 }
@@ -132,6 +144,12 @@ impl<'a> FileWalker<'a> {
                 .push(idx);
         }
 
+        // Index canonical definitions by byte offset for scope matching
+        let mut def_by_byte_start: FxHashMap<usize, usize> = FxHashMap::default();
+        for (idx, d) in result.definitions.iter().enumerate() {
+            def_by_byte_start.insert(d.range.byte_offset.0, idx);
+        }
+
         Self {
             rules,
             ssa,
@@ -142,8 +160,11 @@ impl<'a> FileWalker<'a> {
                 block: module_block,
                 is_type_scope: false,
                 name: None,
+                def_idx: None,
+                enclosing_type_fqn: None,
             }],
             ref_by_range_start,
+            def_by_byte_start,
             reads: Vec::new(),
         }
     }
@@ -186,6 +207,10 @@ impl<'a> FileWalker<'a> {
         // references; we just need to assign them to the correct SSA block.
         let byte_start = node.range().start;
         if let Some(ref_indices) = self.ref_by_range_start.remove(&byte_start) {
+            // Pre-compute scope context from the stack (free — no interval tree).
+            let enclosing_def = self.innermost_def();
+            let enclosing_type_fqn = self.scope_stack.last().and_then(|e| e.enclosing_type_fqn);
+
             for ref_idx in ref_indices {
                 let reference = &self.result.references[ref_idx];
                 self.reads.push(RecordedRead {
@@ -193,6 +218,8 @@ impl<'a> FileWalker<'a> {
                     ref_idx,
                     block: self.current_block,
                     name: reference.name.clone(),
+                    enclosing_def,
+                    enclosing_type_fqn,
                 });
             }
         }
@@ -213,6 +240,24 @@ impl<'a> FileWalker<'a> {
 
         let scope_name = node.field("name").map(|n| n.text().to_string());
 
+        // Match this scope to a canonical definition by byte offset.
+        let byte_start = node.range().start;
+        let def_idx = self.def_by_byte_start.get(&byte_start).copied();
+
+        // Compute enclosing_type_fqn for this scope.
+        let enclosing_type_fqn = if is_type_scope {
+            // This IS a type scope — use its FQN.
+            if let Some(ref name) = scope_name {
+                Some(IStr::from(self.build_fqn(name).as_str()))
+            } else {
+                // Type scope without a name — inherit from parent.
+                self.scope_stack.last().and_then(|e| e.enclosing_type_fqn)
+            }
+        } else {
+            // Non-type scope — inherit parent's enclosing type.
+            self.scope_stack.last().and_then(|e| e.enclosing_type_fqn)
+        };
+
         if is_type_scope && let Some(ref name) = scope_name {
             let class_fqn = self.build_fqn(name);
             for &self_name in self.rules.self_names {
@@ -231,6 +276,8 @@ impl<'a> FileWalker<'a> {
             block: new_block,
             is_type_scope,
             name: scope_name,
+            def_idx,
+            enclosing_type_fqn,
         });
         self.current_block = new_block;
     }
@@ -422,6 +469,16 @@ impl<'a> FileWalker<'a> {
             current = current.field(field)?;
         }
         Some(current)
+    }
+
+    /// Find the innermost scope that has a canonical definition.
+    fn innermost_def(&self) -> Option<DefRef> {
+        self.scope_stack.iter().rev().find_map(|e| {
+            e.def_idx.map(|def_idx| DefRef {
+                file_idx: self.file_idx,
+                def_idx,
+            })
+        })
     }
 
     /// Find the enclosing class scope's block.
