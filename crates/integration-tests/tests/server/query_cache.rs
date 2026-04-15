@@ -100,7 +100,7 @@ fn build_context(
 async fn cached_executor_miss_then_hit() {
     // Start both containers in parallel
     let (nats_future, ch_future) =
-        tokio::join!(start_nats(), TestContext::new(&[GRAPH_SCHEMA_SQL]),);
+        tokio::join!(start_nats(), TestContext::new(&[&GRAPH_SCHEMA_SQL]),);
     let (_nats_container, nats_url) = nats_future;
     let ch_ctx = ch_future;
 
@@ -188,7 +188,7 @@ async fn cached_executor_miss_then_hit() {
 async fn cached_executor_bypass_when_disabled() {
     // Start both containers
     let (nats_future, ch_future) =
-        tokio::join!(start_nats(), TestContext::new(&[GRAPH_SCHEMA_SQL]),);
+        tokio::join!(start_nats(), TestContext::new(&[&GRAPH_SCHEMA_SQL]),);
     let (_nats_container, nats_url) = nats_future;
     let ch_ctx = ch_future;
 
@@ -258,7 +258,7 @@ async fn cached_executor_bypass_when_disabled() {
 #[tokio::test]
 async fn cached_executor_works_without_nats() {
     // Start only ClickHouse - no NATS broker in extensions
-    let ch_ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
+    let ch_ctx = TestContext::new(&[&GRAPH_SCHEMA_SQL]).await;
 
     integration_testkit::load_seed(&ch_ctx, "data_correctness").await;
     ch_ctx.optimize_all().await;
