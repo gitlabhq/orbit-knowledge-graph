@@ -17,13 +17,13 @@ Proposed
 
 ### The problem
 
-The GKG server returns graph query results in two formats via `ResponseFormat`: `RAW` (structured JSON from `GraphFormatter`) and `LLM` (from `GoonFormatter`). The LLM path exists in proto, gRPC routing, and CLI wiring, but `GoonFormatter` is a stub that delegates to `GraphFormatter` and returns the same JSON. There is no actual LLM-optimized encoding.
+The GKG server returns graph query results in two formats via `ResponseFormat`: `RAW` (structured JSON from `GraphFormatter`) and `LLM` (from `GoonFormatter`). The LLM path exists in proto, gRPC routing, and CLI wiring, but `GoonFormatter` is a stub that delegates to `GraphFormatter` and returns the same JSON. No LLM-optimized encoding exists.
 
-When an AI agent calls `query_graph`, it receives the full `GraphResponse` JSON. For a traversal of 50 users and 200 merge requests with 200 edges, that response is roughly 12,000-15,000 tokens. The same information in a columnar text format can be expressed in 5,000-7,000 tokens while preserving all graph topology needed for reasoning. Over a multi-turn agent session with 5-10 graph queries, the difference is 50,000-80,000 tokens of context window consumed versus needed.
+When an agent calls `query_graph`, it receives the full `GraphResponse` JSON. A traversal of 50 users and 200 merge requests with 200 edges runs roughly 12,000-15,000 tokens. The same information in a columnar text format fits in 5,000-7,000 tokens while preserving all graph topology needed for reasoning. Over a multi-turn session with 5-10 graph queries, that is 50,000-80,000 tokens of context window spent on structural JSON syntax.
 
-The problem is not just token count. Google's "Talk like a Graph" study (Fatemi et al., ICLR 2024) demonstrated that the encoding format alone changes LLM graph reasoning accuracy by 4.8% to 61.8% depending on the task. Incident encoding (grouping edges by source node) outperformed flat edge lists and adjacency matrices across most tasks and prompting methods. Dense graph encodings with many edges acted as distractors, degrading performance on node degree, connected nodes, and counting tasks. Application-context framing ("who authored which merge requests") outperformed abstract graph framing ("what is the degree of node i?") by up to 18 percentage points.
+The encoding format also affects accuracy. Google's "Talk like a Graph" study (Fatemi et al., ICLR 2024) measured that encoding choice alone changes LLM graph reasoning accuracy by 4.8% to 61.8% depending on the task. Incident encoding (grouping edges by source node) outperformed flat edge lists and adjacency matrices across most tasks and prompting methods. Dense graph encodings with many edges acted as distractors, degrading performance on node degree, connected nodes, and counting tasks. Application-context framing ("who authored which merge requests") outperformed abstract graph framing ("what is the degree of node i?") by up to 18 percentage points.
 
-These findings mean the encoding choice is a correctness concern, not just an efficiency one.
+The encoding choice is a correctness concern as much as an efficiency one.
 
 ### What GOON needs to do
 
@@ -37,9 +37,9 @@ These findings mean the encoding choice is a correctness concern, not just an ef
 
 ### Prior research
 
-**Token efficiency.** TOON (Token-Oriented Object Notation) benchmarks show 27.7 accuracy-points per 1,000 tokens, the best efficiency ratio of any format tested. It achieves ~40% fewer tokens than JSON with comparable comprehension accuracy. The technique: eliminate braces, quotes, and commas; declare field names once as a header row; use delimiter-separated values for data rows; add explicit count annotations (`[N]`).
+TOON (Token-Oriented Object Notation) benchmarks show 27.7 accuracy-points per 1,000 tokens. It uses ~40% fewer tokens than JSON with comparable comprehension accuracy. The technique: eliminate braces, quotes, and commas; declare field names once as a header row; use delimiter-separated values for data rows; add explicit count annotations (`[N]`).
 
-**Graph encoding.** The "Talk like a Graph" study tested 9 encoding functions across 6 graph tasks on PaLM 2 (XXS through L) and GPT-3.5-turbo. Key findings relevant to GOON:
+The "Talk like a Graph" study tested 9 encoding functions across 6 graph tasks on PaLM 2 (XXS through L) and GPT-3.5-turbo. Findings relevant to GOON:
 
 | Finding | Implication for GOON |
 |---------|---------------------|
@@ -49,11 +49,11 @@ These findings mean the encoding choice is a correctness concern, not just an ef
 | Application-context framing: 42.8% to 60.8% on edge existence | Use GitLab domain vocabulary in type hints, not abstract graph terms |
 | Multiple relation types do not hurt and can help | Use actual relationship names (AUTHORED, MEMBER_OF) not generic labels |
 | Dense graphs degrade performance (complete graphs worst on most tasks) | Budget response density; materialize relevant edges, summarize or paginate the rest |
-| LLMs completely fail at absent-connection reasoning (~0% accuracy) | Never express queries as "which X is NOT connected to Y"; format for positive traversal |
+| LLMs fail at absent-connection reasoning (~0% accuracy) | Never express queries as "which X is NOT connected to Y"; format for positive traversal |
 | Few-shot examples from different graph structures still help | Include a compact GOON example in the `query_graph` tool description |
-| Model capacity matters enormously (XXS: 53.4% vs L: 95.4% on node degree with incident+COT-BAG) | The format must be parseable by smaller models too; keep structure simple and consistent |
+| Model capacity matters (XXS: 53.4% vs L: 95.4% on node degree with incident+COT-BAG) | The format must be parseable by smaller models too; keep structure simple and consistent |
 
-**Progressive disclosure.** Claude-Mem's 3-layer pattern reduced context consumption from 25,000 tokens at 0.8% relevance to ~955 tokens at 100% relevance. For graph results, this translates to: summary header (counts, types) at low cost, then columnar data for materialized nodes/edges, then on-demand expansion via follow-up queries with cursor pagination.
+Claude-Mem's 3-layer progressive disclosure pattern reduced context consumption from 25,000 tokens at 0.8% relevance to ~955 tokens at 100% relevance. For graph results: summary header (counts, types) at low cost, then columnar data for materialized nodes/edges, then on-demand expansion via follow-up queries with cursor pagination.
 
 ## Decision
 
@@ -83,7 +83,7 @@ has_more:true
 total_rows:47
 ```
 
-Fields: `query_type` (always present), node and edge counts, pagination info (when cursor was requested). This costs ~30 tokens and gives the agent immediate situational awareness.
+Fields: `query_type` (always present), node and edge counts, pagination info (when cursor was requested). This costs ~30 tokens and tells the agent what it got back.
 
 #### `@nodes`
 
@@ -153,7 +153,7 @@ When `@edges` is empty (search, scalar aggregation), the section is omitted enti
 
 #### `@hints`
 
-Navigation hints for the agent. These tell the agent what follow-up queries are possible without the agent needing to call `get_graph_schema` first.
+Navigation hints. These tell the agent what follow-up queries are possible without calling `get_graph_schema` first.
 
 ```
 @hints
@@ -163,13 +163,13 @@ next:User-[AUTHORED]->MergeRequest,User-[MEMBER_OF]->Project,MergeRequest-[IN_PR
 
 `label` maps entity types to their human-readable label field from the ontology. The agent should use these when presenting results to the user.
 
-`next` lists available relationship traversals from the entity types present in the response. This enables the agent to plan follow-up queries without a schema lookup. Only outgoing edges from materialized node types are included.
+`next` lists available relationship traversals from the entity types present in the response. The agent can use these to plan follow-up queries without a schema lookup. Only outgoing edges from materialized node types are included.
 
 When pagination is active (`has_more:true` in header), the agent can issue a follow-up query with `cursor: { offset: N, page_size: M }` to fetch the next page.
 
 ### Examples from staging queries
 
-The following examples transform actual staging responses into GOON format.
+These examples are from actual staging queries (`staging.gitlab.com/api/v4/orbit`), converted to GOON.
 
 #### Search
 
@@ -334,7 +334,7 @@ next:Project-[CONTAINS]->File,Project-[CONTAINS]->Directory
 
 ### `query_graph` tool description update
 
-The `query_graph` tool description should include a ~100 token GOON format guide so the agent knows how to parse responses. Based on the paper's finding that few-shot examples help even when out-of-distribution, a single concrete example is sufficient:
+The `query_graph` tool description should include a ~100 token GOON format guide so the agent can parse responses. A single concrete example is enough (the ICLR study found that few-shot examples help even across different graph structures):
 
 ```
 Response format (GOON):
@@ -362,31 +362,31 @@ User:1->Project:11
 label:User=username,Project=name
 ```
 
-### Design rationale mapped to research
+### Why each design choice
 
-| Design choice | Research basis |
-|---------------|---------------|
+| Design choice | Rationale |
+|---------------|-----------|
 | Pipe-delimited columnar rows with header declaration | TOON: 40% fewer tokens than JSON with comparable accuracy. Header-once pattern eliminates per-row key repetition |
-| Edges grouped by relationship type | Incident encoding (ICLR 2024): #1 ranked across COT-BAG, COT, FEW-SHOT. Grouping by type is the incident pattern applied to typed graphs |
+| Edges grouped by relationship type | Incident encoding (ICLR 2024): ranked #1 across COT-BAG, COT, FEW-SHOT. Grouping by type is the incident pattern applied to typed graphs |
 | `Type:id` integer handles | Integer node encoding improves arithmetic performance (degree, count). Named labels preserved via `@hints.label` for non-numeric tasks |
 | `@hints.next` with GitLab vocabulary | Application-context framing: 42.8% to 60.8% improvement. Semantic relationship names (AUTHORED, MEMBER_OF) outperform generic labels |
 | Count annotations `[N]` on type headers | TOON's array-length declarations help LLMs validate data completeness |
-| Empty sections omitted | Dense encodings with irrelevant edges degrade performance. Minimize distractors |
-| Pagination via cursor, not bulk | Progressive disclosure: agent fetches what it needs, keeping context lean |
+| Empty sections omitted | Dense encodings with irrelevant edges degrade performance; fewer distractors is better |
+| Pagination via cursor, not bulk | Agent fetches what it needs, keeping context lean |
 
 ### Implementation
 
-`GoonFormatter` in `crates/query-engine/formatters/src/goon.rs` replaces its current `GraphFormatter` delegation with actual GOON text encoding. The method:
+`GoonFormatter` in `crates/query-engine/formatters/src/goon.rs` replaces its current `GraphFormatter` delegation with actual GOON text encoding:
 
 1. Call `GraphFormatter` internally to get the structured `GraphResponse`
 2. Serialize `GraphResponse` into GOON text
 3. Return `Value::String(goon_text)`
 
-This avoids duplicating the extraction logic (deduplication, edge key tracking, aggregation dispatch) that `GraphFormatter` already handles. The GOON encoder is a pure serialization layer on top of `GraphResponse`.
+This reuses the extraction logic (deduplication, edge key tracking, aggregation dispatch) that `GraphFormatter` already has. GOON is a serialization layer on top of `GraphResponse`, not a parallel pipeline.
 
-The `@hints` section requires ontology access for `label` and `next` fields. The formatter receives `PipelineOutput` which includes the compiled query context. The ontology is available via the `OnceLock<Ontology>` global, same as the compiler uses.
+The `@hints` section needs ontology access for `label` and `next` fields. The formatter gets `PipelineOutput` which includes the compiled query context. The ontology is available via the `OnceLock<Ontology>` global, same as the compiler.
 
-Snapshot tests should be added per query type in `crates/query-engine/formatters/src/goon.rs` using `insta` snapshots, matching the patterns used in the compiler tests.
+Snapshot tests per query type go in `crates/query-engine/formatters/src/goon.rs` using `insta`, matching compiler test patterns.
 
 ## Why not the alternatives
 
@@ -412,18 +412,18 @@ The `@hints` section costs ~50-80 tokens. Without it, the agent must call `get_g
 
 ## Consequences
 
-**What improves:**
+What improves:
 
-- Agent context efficiency: 40-74% token reduction depending on query type and result size
-- Agent graph reasoning: encoding aligns with empirically validated patterns from ICLR 2024 research
-- Agent navigation: `@hints` enables multi-step graph exploration without schema lookups
-- CLI output: `orbit query --format=llm` produces human-scannable text instead of dense JSON
+- 40-74% token reduction depending on query type and result size
+- Encoding aligns with the patterns that performed best in the ICLR 2024 graph encoding study
+- `@hints` lets agents explore the graph across multiple turns without calling `get_graph_schema` each time
+- `orbit query --format=llm` produces human-scannable text instead of dense JSON
 
-**What gets harder:**
+What gets harder:
 
-- A new text format to maintain. GOON is a GKG-specific format, not an industry standard. Changes to `GraphResponse` structure require corresponding updates to the GOON serializer.
-- String escaping. Pipe-delimited text needs escaping rules for values containing pipes, newlines, or leading/trailing whitespace. The implementation must handle this correctly.
-- Snapshot test maintenance. GOON output is text, so any formatting change (column order, whitespace, delimiter choice) breaks snapshots. This is intentional: snapshots catch unintended format drift.
+- GOON is a GKG-specific format. Changes to `GraphResponse` structure need corresponding updates to the GOON serializer.
+- Pipe-delimited text needs escaping rules for values containing pipes, newlines, or leading/trailing whitespace.
+- GOON output is text, so any formatting change (column order, whitespace, delimiter choice) breaks snapshot tests. This is intentional: snapshots catch unintended format drift.
 
 ## References
 
