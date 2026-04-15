@@ -100,6 +100,27 @@ total_rows:47
 
 Fields: `query_type` (always present), node and edge counts, pagination info (when cursor was requested).
 
+For neighbors queries, the header includes `center:Type:id` to identify the ego node:
+
+```
+@header
+query_type:neighbors
+center:User:64248
+nodes:6
+edges:5
+```
+
+For ungrouped (scalar) aggregation, the header carries the computed values directly (no `@nodes` section):
+
+```
+@header
+query_type:aggregation
+columns:total=count(mr)
+total=30997
+```
+
+For paginated responses after the first page, `@hints` is omitted (the agent already has it from page 1).
+
 #### `@nodes`
 
 Nodes grouped by entity type. Each type group starts with `TypeName(count):` then one line per entity. Each line starts with the integer id, followed by `key=value` pairs. String values containing spaces are quoted.
@@ -119,13 +140,40 @@ MergeRequest(5):
 46 iid=105 title="Remove dead code" state=closed
 ```
 
-The `(count)` annotation lets the agent validate it processed all rows. The id is always first with no `id=` prefix since it is always present and always an integer. Null properties are omitted (the key simply does not appear). Boolean values are `true`/`false`. Datetime values use ISO 8601.
+The `(count)` annotation lets the agent validate it processed all rows. The id is always first with no `id=` prefix since it is always present and always an integer.
 
 This format mirrors what the model naturally produces: `[Type] id key=value key=value`. The type tag moves to a group header to avoid repeating it on every line.
 
-For aggregation queries with `group_by`, computed columns appear as additional `key=value` pairs:
+**Value formatting rules:**
+
+| Value type | Format | Example |
+|------------|--------|---------|
+| Simple identifiers (no spaces) | Unquoted | `username=stanhu` |
+| Strings with spaces | Double-quoted | `title="Fix auth bug"` |
+| Embedded double quotes | Backslash-escaped | `title="Remove \"Integration\" line"` |
+| Embedded newlines | Escaped as `\n` | `note="Line 1\nLine 2"` |
+| Null properties | Omitted entirely | (key does not appear) |
+| Empty strings | Omitted entirely | (same as null) |
+| Booleans | Unquoted | `draft=false` |
+| Enums | Unquoted | `state=merged`, `severity=critical` |
+| Hex colors | Unquoted with `#` | `color=#428BCA` |
+| UUIDs | Unquoted | `uuid=e6f48912-32fb-5903-8ddd-08f639f2fd1f` |
+| Datetimes | Unquoted ISO 8601 | `created_at=2026-03-25T07:47:37Z` |
+
+**Long text truncation.** Text fields longer than 200 characters (primarily `description`) are truncated with a `...` suffix. The agent can fetch the full value via `node_ids=[X], columns=["description"]`. This follows the progressive disclosure pattern: the first response gives the agent enough to reason about the entity, and it can drill down if needed.
+
+**Column ordering.** When `columns="*"` is requested, properties are ordered by utility: identity fields first (`iid`, `title`, `name`), then state fields (`state`, `merge_status`), then booleans, then dates, then long text (`description` always last). This means truncation of a description never hides shorter fields.
+
+**Internal columns excluded.** `traversal_path` and any other `filterable: false` columns are stripped unconditionally, even with `columns="*"`.
+
+For aggregation queries with `group_by`, computed columns appear as additional `key=value` pairs. The `columns:` line in `@header` serves as a legend:
 
 ```
+@header
+query_type:aggregation
+nodes:5
+columns:mr_count=count(mr)
+
 @nodes
 User(5):
 1677357 username=terrichu mr_count=14617
@@ -133,15 +181,6 @@ User(5):
 113870 username=iamphill mr_count=1658
 15139 username=rspeicher mr_count=1566
 128633 username=rymai mr_count=1562
-```
-
-For ungrouped (scalar) aggregation, `@nodes` is empty and results go in `@header`:
-
-```
-@header
-query_type:aggregation
-total=42
-avg_size=128.5
 ```
 
 #### `@edges`
@@ -163,9 +202,37 @@ User:2 --> Project:101
 User:3 --> Project:102
 ```
 
-Edge references use `Type:id` handles that correspond to nodes in `@nodes`. For variable-length traversals, edges include depth as a trailing key=value: `User:1 --> Project:101 depth=2`. For path finding, edges include path_id and step: `User:1 --> MergeRequest:42 path=0 step=0`.
+Edge references use `Type:id` handles that correspond to nodes in `@nodes`. For variable-length traversals, edges include depth as a trailing key=value: `User:1 --> Project:101 depth=2`.
+
+For neighbors queries, incoming edges (where the center node is the target) use `<--` to show direction:
+
+```
+@edges
+AUTHORED(5):
+User:64248 --> MergeRequest:35121
+MEMBER_OF(3):
+User:58926 --> Project:278964
+```
 
 When `@edges` is empty (search, scalar aggregation), the section is omitted.
+
+#### `@paths` (path_finding only)
+
+For `path_finding` queries, `@edges` is replaced by `@paths`. Each path is a chain of `Type:id --REL_TYPE--> Type:id` segments on a single line. This is immediately readable without requiring the agent to reassemble paths from scattered edge metadata.
+
+```
+@paths
+path[0] depth=1:
+User:64248 --MEMBER_OF--> Project:2009901
+
+path[1] depth=1:
+User:64248 --CREATOR--> Project:4108541
+
+path[2] depth=2:
+User:64248 --AUTHORED--> MergeRequest:4652021 --REVIEWER--> User:1
+```
+
+The `@nodes` section still provides full properties for each entity referenced in the path chains. The `path[N]` header carries the depth so the agent does not need to count arrows.
 
 #### `@hints`
 
@@ -281,6 +348,7 @@ Query: outgoing neighbors of User:64248 via AUTHORED.
 ```
 @header
 query_type:neighbors
+center:User:64248
 nodes:6
 edges:5
 
@@ -316,7 +384,6 @@ Query: shortest path from User:64248 to Project, max_depth 2.
 @header
 query_type:path_finding
 nodes:3
-edges:3
 paths:3
 
 @nodes
@@ -327,17 +394,30 @@ Project(2):
 2009901 name=gitaly full_path=gitlab-org/gitaly
 4108541 name=openssh-packages full_path=gitlab-org/openssh-packages
 
-@edges
-MEMBER_OF(1):
-User:64248 --> Project:2009901 path=0 step=0
+@paths
+path[0] depth=1:
+User:64248 --MEMBER_OF--> Project:2009901
 
-CREATOR(2):
-User:64248 --> Project:4108541 path=1 step=0
-User:64248 --> Project:4108541 path=2 step=0
+path[1] depth=1:
+User:64248 --CREATOR--> Project:4108541
+
+path[2] depth=1:
+User:64248 --CREATOR--> Project:4108541
 
 @hints
 label:User=username,Project=name
 next:Project-[CONTAINS]->File,Project-[CONTAINS]->Directory
+```
+
+Multi-hop path example (User 64248 to User 1 via MergeRequests):
+
+```
+@paths
+path[0] depth=2:
+User:64248 --AUTHORED--> MergeRequest:4652021 --REVIEWER--> User:1
+
+path[1] depth=2:
+User:64248 --AUTHORED--> MergeRequest:4652237 --REVIEWER--> User:1
 ```
 
 ### `query_graph` tool description update
@@ -346,12 +426,13 @@ The `query_graph` tool description should include a ~100 token GOON format guide
 
 ```
 Response format (GOON):
-@header -- query metadata, counts
-@nodes  -- TypeName(count): then "id key=value ..." per line
-@edges  -- REL_TYPE(count): then "Source:id --> Target:id" per line
-@hints  -- label:Type=field, next:traversal options
+@header   -- query metadata, counts
+@nodes    -- TypeName(count): then "id key=value ..." per line
+@edges    -- REL_TYPE(count): then "Source:id --> Target:id" per line
+@paths    -- path_finding only: "path[N] depth=D:" then chain notation
+@hints    -- label:Type=field, next:traversal options
 
-Example:
+Example (traversal):
 @header
 query_type:traversal
 nodes:3
@@ -368,6 +449,11 @@ User:1 --> Project:10
 User:1 --> Project:11
 @hints
 label:User=username,Project=name
+
+Example (path_finding):
+@paths
+path[0] depth=2:
+User:1 --AUTHORED--> MergeRequest:42 --IN_PROJECT--> Project:10
 ```
 
 ### Why each design choice
@@ -381,8 +467,13 @@ label:User=username,Project=name
 | Integer id first with no `id=` prefix | Always present, always an integer. Saves 3 tokens per line |
 | `Type:id` handles in edges | Integer node encoding improves arithmetic performance (ICLR 2024). Named labels preserved via `@hints.label` |
 | `@hints.next` with GitLab vocabulary | Application-context framing: 42.8% to 60.8% accuracy improvement. Semantic relationship names outperform generic labels |
+| `@paths` chain notation for path_finding | Path identity is the organizing principle for path queries. Grouping by relationship type (like traversals) forces the agent to reassemble paths from scattered edge metadata |
+| `center:Type:id` in header for neighbors | Identifies the ego node. The agent needs to know which node is the center vs a neighbor |
 | Count annotations on type headers | Lets the agent validate it processed all rows |
-| Null properties omitted | Avoids blank values. The model naturally skips missing fields when formatting |
+| Null/empty properties omitted | Avoids blank values. The model naturally skips missing fields when formatting |
+| Long text truncated at 200 chars | Progressive disclosure: summary in first response, full value on follow-up. Prevents descriptions from dominating the token budget |
+| `traversal_path` excluded | Internal auth column with no semantic value for the agent |
+| `@hints` omitted after page 1 | Hints are static for a given query shape. Repeating on every page wastes tokens |
 | Empty sections omitted | Dense encodings degrade performance; fewer distractors is better |
 
 ### Implementation
@@ -438,8 +529,15 @@ What improves:
 What gets harder:
 
 - GOON is a GKG-specific format. Changes to `GraphResponse` structure need corresponding updates to the GOON serializer.
-- String quoting: values containing spaces need quotes. Values containing quotes need escaping. More complex than pipe-delimited (which only needs pipe escaping).
+- String quoting: values containing spaces need quotes. Values containing quotes need escaping (`\"`). Newlines must be escaped as `\n`. More complex than pipe-delimited (which only needs pipe escaping).
 - GOON output is text, so any formatting change breaks snapshot tests. This is intentional: snapshots catch unintended format drift.
+
+Known bugs that affect GOON output (filed during staging validation):
+
+- [#466](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/466): Center node properties are not hydrated in neighbors queries. The GOON encoder will show the center node with only its id until this is fixed.
+- [#467](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/467): IN_PROJECT edges report `source_kind=Job` instead of `MergeRequest` in multi-hop traversals. The GOON encoder will show the wrong source type on these edges until this is fixed.
+- [#468](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/468): Boolean properties are returned as strings (`"false"`) instead of booleans (`false`). The GOON encoder should normalize these to `true`/`false` using the ontology `data_type`.
+- [#469](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/469): Neighbors query does not deduplicate edges. The same edge can appear multiple times in the response.
 
 ## References
 
