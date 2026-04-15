@@ -253,6 +253,14 @@ pub trait HasRules {
     fn rules() -> ResolutionRules;
 }
 
+/// Per-file timing for long-tail analysis.
+struct FileTimingEntry {
+    file_idx: usize,
+    num_reads: usize,
+    duration: std::time::Duration,
+    thread_id: usize,
+}
+
 /// Result of `build_edges`: resolved edges + aggregated stats.
 pub struct BuildEdgesResult {
     pub edges: Vec<ResolvedEdge>,
@@ -276,10 +284,14 @@ pub fn build_edges(
             .progress_chars("█▓░"),
     );
 
-    let per_file: Vec<(Vec<ResolvedEdge>, ResolveStats)> = walks
+    let per_file: Vec<(Vec<ResolvedEdge>, ResolveStats, FileTimingEntry)> = walks
         .par_iter_mut()
         .map(|walk| {
+            let file_start = std::time::Instant::now();
             let reads = std::mem::take(&mut walk.reads);
+            let num_reads = reads.len();
+            let file_idx = reads.first().map(|r| r.file_idx).unwrap_or(0);
+            let thread_id = rayon::current_thread_index().unwrap_or(0);
             let mut resolver = Resolver::new(rules, ctx, &mut walk.ssa);
             let mut file_edges = Vec::new();
 
@@ -362,7 +374,13 @@ pub fn build_edges(
             resolver.stats.ssa.merge(&resolver.ssa.stats);
 
             let stats = std::mem::take(&mut resolver.stats);
-            (file_edges, stats)
+            let timing = FileTimingEntry {
+                file_idx,
+                num_reads,
+                duration: file_start.elapsed(),
+                thread_id,
+            };
+            (file_edges, stats, timing)
         })
         .collect();
 
@@ -370,14 +388,90 @@ pub fn build_edges(
 
     let mut all_edges = Vec::new();
     let mut combined = ResolveStats::default();
-    for (edges, stats) in per_file {
+    let mut timings: Vec<FileTimingEntry> = Vec::with_capacity(per_file.len());
+    for (edges, stats, timing) in per_file {
         all_edges.extend(edges);
         combined.merge(&stats);
+        timings.push(timing);
     }
+
+    print_long_tail_analysis(ctx, &timings);
 
     BuildEdgesResult {
         edges: all_edges,
         stats: combined,
+    }
+}
+
+fn print_long_tail_analysis(ctx: &ResolutionContext, timings: &[FileTimingEntry]) {
+    if timings.is_empty() {
+        return;
+    }
+
+    // Reference distribution.
+    let mut ref_counts: Vec<usize> = timings.iter().map(|t| t.num_reads).collect();
+    ref_counts.sort_unstable();
+    let total_files = ref_counts.len();
+    let total_refs: usize = ref_counts.iter().sum();
+
+    let p50 = ref_counts[total_files / 2];
+    let p95 = ref_counts[total_files * 95 / 100];
+    let p99 = ref_counts[total_files * 99 / 100];
+    let max = *ref_counts.last().unwrap();
+    let mean = total_refs / total_files;
+    let files_over_1k = ref_counts.iter().filter(|&&c| c > 1000).count();
+
+    eprintln!("  Ref distribution ({total_files} files):");
+    eprintln!("    mean={mean} p50={p50} p95={p95} p99={p99} max={max} >1k={files_over_1k}");
+
+    // Top 10 slowest files.
+    let mut by_duration: Vec<&FileTimingEntry> = timings.iter().collect();
+    by_duration.sort_by(|a, b| b.duration.cmp(&a.duration));
+
+    eprintln!("  Top 10 slowest files:");
+    for entry in by_duration.iter().take(10) {
+        let path = &ctx.results[entry.file_idx].file_path;
+        // Truncate path to last 60 chars for readability.
+        let display = if path.len() > 60 {
+            &path[path.len() - 60..]
+        } else {
+            path
+        };
+        eprintln!(
+            "    {:>7.1?} {:>5} refs  t{:<2}  {}",
+            entry.duration, entry.num_reads, entry.thread_id, display
+        );
+    }
+
+    // Thread utilization: total time per thread vs wall clock.
+    let num_threads = timings.iter().map(|t| t.thread_id).max().unwrap_or(0) + 1;
+    let mut per_thread_total = vec![std::time::Duration::ZERO; num_threads];
+    let mut per_thread_files = vec![0u32; num_threads];
+    for t in timings {
+        per_thread_total[t.thread_id] += t.duration;
+        per_thread_files[t.thread_id] += 1;
+    }
+    let wall_clock = by_duration.first().map(|e| e.duration).unwrap_or_default();
+    let total_cpu: std::time::Duration = per_thread_total.iter().sum();
+
+    eprintln!(
+        "  Thread utilization ({} threads, {:.2?} wall, {:.2?} CPU):",
+        num_threads, wall_clock, total_cpu
+    );
+    for (tid, (total, files)) in per_thread_total
+        .iter()
+        .zip(per_thread_files.iter())
+        .enumerate()
+    {
+        let util = if wall_clock.as_nanos() > 0 {
+            total.as_nanos() as f64 / wall_clock.as_nanos() as f64 * 100.0
+        } else {
+            0.0
+        };
+        eprintln!(
+            "    t{:<2}: {:>7.1?} ({:>5.1}%) {:>5} files",
+            tid, total, util, files
+        );
     }
 }
 
