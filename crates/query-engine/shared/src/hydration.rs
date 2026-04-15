@@ -53,10 +53,10 @@ pub fn extract_dynamic_refs(
                 .push(node_ref.id);
         }
         for node in static_nodes {
-            if let Some(id) = row.get_public_id(node) {
-                if let Some(entity_type) = row.get_type(node) {
-                    refs.entry(entity_type.to_string()).or_default().push(id);
-                }
+            if let Some(id) = row.get_public_id(node)
+                && let Some(entity_type) = row.get_type(node)
+            {
+                refs.entry(entity_type.to_string()).or_default().push(id);
             }
         }
     }
