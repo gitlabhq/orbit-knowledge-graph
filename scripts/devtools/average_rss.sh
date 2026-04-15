@@ -86,75 +86,117 @@ if [ $num_samples -gt 0 ]; then
   total_time=$(echo "scale=2; $num_samples*$SAMPLING_INTERVAL" | bc)
   
   # ── ASCII chart ──────────────────────────────────────────
-  CHART_WIDTH=60
-  CHART_HEIGHT=15
+  CHART_HEIGHT=20
+  NUM_BANDS=${3:-8}  # configurable via 3rd arg, default 8
 
-  # Bucket samples into CHART_WIDTH time slots
-  samples_per_bucket=$(( (num_samples + CHART_WIDTH - 1) / CHART_WIDTH ))
-  buckets=()
-  for (( i=0; i<CHART_WIDTH && i*samples_per_bucket<num_samples; i++ )); do
-    start=$((i * samples_per_bucket))
-    bucket_max=0
-    for (( j=start; j<start+samples_per_bucket && j<num_samples; j++ )); do
-      if [ ${samples[$j]} -gt $bucket_max ]; then
-        bucket_max=${samples[$j]}
-      fi
+  # Bucket samples into NUM_BANDS time bands
+  samples_per_band=$(( (num_samples + NUM_BANDS - 1) / NUM_BANDS ))
+
+  # For each band: compute min, avg, max, p95
+  band_mins=()
+  band_avgs=()
+  band_maxs=()
+  band_p95s=()
+  band_times=()
+
+  for (( b=0; b<NUM_BANDS && b*samples_per_band<num_samples; b++ )); do
+    start=$((b * samples_per_band))
+    end=$((start + samples_per_band))
+    if [ $end -gt $num_samples ]; then end=$num_samples; fi
+    count=$((end - start))
+
+    b_min=${samples[$start]}
+    b_max=${samples[$start]}
+    b_sum=0
+    sorted_band=()
+    for (( j=start; j<end; j++ )); do
+      v=${samples[$j]}
+      sorted_band+=($v)
+      b_sum=$((b_sum + v))
+      if [ $v -gt $b_max ]; then b_max=$v; fi
+      if [ $v -lt $b_min ]; then b_min=$v; fi
     done
-    buckets+=($bucket_max)
+    b_avg=$((b_sum / count))
+
+    # Sort for p95
+    IFS=$'\n' sorted_band=($(sort -n <<< "${sorted_band[*]}")); unset IFS
+    p95_idx=$(( count * 95 / 100 ))
+    if [ $p95_idx -ge $count ]; then p95_idx=$((count - 1)); fi
+    b_p95=${sorted_band[$p95_idx]}
+
+    band_mins+=($b_min)
+    band_avgs+=($b_avg)
+    band_maxs+=($b_max)
+    band_p95s+=($b_p95)
+    band_time=$(echo "scale=1; ($start + $count / 2) * $SAMPLING_INTERVAL" | bc)
+    band_times+=($band_time)
   done
 
-  # Render chart
-  num_buckets=${#buckets[@]}
-  # Round max_rss up to nearest GB for y-axis
+  actual_bands=${#band_maxs[@]}
+
+  # Y-axis scale: round max up to nearest GB
   max_gb_ceil=$(echo "($max_rss + 1048575) / 1048576" | bc)
   if [ "$max_gb_ceil" -lt 1 ]; then max_gb_ceil=1; fi
-  y_max=$((max_gb_ceil * 1048576))  # back to KB
+  y_max=$((max_gb_ceil * 1048576))
+
+  # Column width per band (total chart ~60 chars)
+  col_w=$(( 60 / actual_bands ))
+  if [ $col_w -lt 5 ]; then col_w=5; fi
+  chart_w=$((col_w * actual_bands))
 
   echo "" >&2
-  echo "RSS over time (${total_time}s, ${num_samples} samples, peak ${max_rss_mb}MB):" >&2
+  echo "RSS over time (${total_time}s, ${num_samples} samples, ${actual_bands} bands):" >&2
+  echo "  ▓ = p95-max   █ = avg-p95   ░ = min-avg" >&2
+  echo "" >&2
 
+  # Render rows top-down
   for (( row=CHART_HEIGHT; row>=1; row-- )); do
     threshold=$(( y_max * row / CHART_HEIGHT ))
+    lower=$(( y_max * (row - 1) / CHART_HEIGHT ))
     threshold_gb=$(echo "scale=1; $threshold / 1048576" | bc)
-    if [ $((row % 3)) -eq 0 ] || [ $row -eq $CHART_HEIGHT ]; then
+    if [ $((row % 4)) -eq 0 ] || [ $row -eq $CHART_HEIGHT ]; then
       printf "%5sGB │" "$threshold_gb" >&2
     else
       printf "       │" >&2
     fi
-    for (( col=0; col<num_buckets; col++ )); do
-      val_kb=${buckets[$col]}
-      if [ $val_kb -ge $threshold ]; then
-        printf "█" >&2
-      else
-        # Check if we're in the lower portion (partial fill)
-        lower_threshold=$(( y_max * (row - 1) / CHART_HEIGHT ))
-        if [ $val_kb -ge $lower_threshold ] && [ $val_kb -lt $threshold ]; then
-          printf "▄" >&2
+
+    for (( b=0; b<actual_bands; b++ )); do
+      bmin=${band_mins[$b]}
+      bavg=${band_avgs[$b]}
+      bp95=${band_p95s[$b]}
+      bmax=${band_maxs[$b]}
+
+      # For each char in the column
+      for (( c=0; c<col_w; c++ )); do
+        # Row midpoint in KB
+        mid=$(( (threshold + lower) / 2 ))
+        if [ $mid -le $bmax ] && [ $mid -ge $bp95 ]; then
+          printf "▓" >&2
+        elif [ $mid -lt $bp95 ] && [ $mid -ge $bavg ]; then
+          printf "█" >&2
+        elif [ $mid -lt $bavg ] && [ $mid -ge $bmin ]; then
+          printf "░" >&2
         else
           printf " " >&2
         fi
-      fi
+      done
     done
     echo "" >&2
   done
 
   # X-axis
   printf "       └" >&2
-  for (( col=0; col<num_buckets; col++ )); do printf "─" >&2; done
+  for (( c=0; c<chart_w; c++ )); do printf "─" >&2; done
   echo "" >&2
 
   # Time labels
-  printf "        0" >&2
-  mid_time=$(echo "scale=1; $total_time / 2" | bc)
-  end_time=$total_time
-  padding=$(( num_buckets / 2 - 2 ))
-  if [ $padding -gt 0 ]; then
-    printf "%${padding}s%s" "" "${mid_time}s" >&2
-    padding2=$(( num_buckets - num_buckets / 2 - ${#end_time} - 3 ))
-    if [ $padding2 -gt 0 ]; then
-      printf "%${padding2}s%ss" "" "$end_time" >&2
-    fi
-  fi
+  printf "        " >&2
+  for (( b=0; b<actual_bands; b++ )); do
+    t=${band_times[$b]}
+    label="${t}s"
+    padded=$(printf "%-${col_w}s" "$label")
+    printf "%s" "$padded" >&2
+  done
   echo "" >&2
   echo "" >&2
 
