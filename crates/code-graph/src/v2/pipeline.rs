@@ -389,12 +389,12 @@ impl Pipeline {
                 continue;
             };
 
-            let path_str = path.to_string_lossy();
+            let rel_path = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
             if let Some(lang) = detect_language_from_extension(ext) {
                 if lang
                     .exclude_extensions()
                     .iter()
-                    .any(|excl| path_str.ends_with(excl))
+                    .any(|excl| rel_path.ends_with(excl))
                 {
                     continue;
                 }
@@ -407,7 +407,7 @@ impl Pipeline {
                 groups
                     .entry(lang)
                     .or_default()
-                    .push((path_str.to_string(), source));
+                    .push((rel_path.to_string(), source));
             }
         }
 

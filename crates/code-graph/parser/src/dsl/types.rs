@@ -414,6 +414,11 @@ pub trait DslLanguage: Send + Sync + Default {
         None
     }
 
+    /// Whether to derive module scope from file path (e.g. Python).
+    fn module_scope_from_path() -> bool {
+        false
+    }
+
     fn spec() -> LanguageSpec {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
@@ -423,6 +428,9 @@ pub trait DslLanguage: Send + Sync + Default {
         }
         if let Some((kind, extract)) = Self::package_node() {
             spec = spec.package(kind, extract);
+        }
+        if Self::module_scope_from_path() {
+            spec = spec.module_scope_from_path();
         }
         spec
     }
@@ -466,6 +474,8 @@ pub struct LanguageSpec {
     pub(crate) scope_kinds: FxHashSet<&'static str>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,
+    /// Derive module scope from file path (e.g. Python: `services/user_service.py` → `services.user_service`).
+    pub(crate) module_from_path: bool,
 }
 
 impl LanguageSpec {
@@ -485,6 +495,7 @@ impl LanguageSpec {
             scope_kinds,
             package_node: None,
             custom_import_fn: None,
+            module_from_path: false,
         }
     }
 
@@ -502,6 +513,13 @@ impl LanguageSpec {
 
     pub fn custom_import(mut self, f: CustomImportFn) -> Self {
         self.custom_import_fn = Some(f);
+        self
+    }
+
+    /// Derive module scope from file path. For languages like Python where
+    /// the module hierarchy comes from the filesystem, not from an AST node.
+    pub fn module_scope_from_path(mut self) -> Self {
+        self.module_from_path = true;
         self
     }
 

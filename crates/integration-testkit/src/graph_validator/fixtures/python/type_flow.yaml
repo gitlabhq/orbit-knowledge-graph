@@ -104,13 +104,13 @@ tests:
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'service.App'
           RETURN callee.name AS callee
         assert:
           - { contains_row: { callee: "query" } }
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'service.App'
             AND callee.name = 'close'
           RETURN callee.name
         assert:

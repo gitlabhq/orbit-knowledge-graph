@@ -87,6 +87,10 @@ impl DslLanguage for PythonDsl {
         Language::Python
     }
 
+    fn module_scope_from_path() -> bool {
+        true
+    }
+
     fn scopes() -> Vec<ScopeRule> {
         vec![
             scope("class_definition", "Class")

@@ -46,6 +46,13 @@ impl LanguageSpec {
         let mut scope_stack: Vec<Arc<str>> = Vec::new();
         let mut import_map = rustc_hash::FxHashMap::default();
 
+        // Derive module scope from file path for languages like Python.
+        if self.module_from_path
+            && let Some(module) = file_path_to_module(file_path, sep)
+        {
+            scope_stack.push(Arc::from(module.as_str()));
+        }
+
         self.walk(
             &root,
             &mut scope_stack,
@@ -401,6 +408,32 @@ impl LanguageSpec {
             }
         }
     }
+}
+
+/// Convert a file path to a module scope string.
+/// `services/user_service.py` → `services.user_service`
+/// `models/__init__.py` → `models`
+/// `main.py` → `main`
+fn file_path_to_module(file_path: &str, sep: &str) -> Option<String> {
+    let path = std::path::Path::new(file_path);
+
+    // Strip extension
+    let stem = path.with_extension("");
+    let stem_str = stem.to_str()?;
+
+    // Convert path separators to module separator
+    let module = stem_str.replace(['/', '\\'], sep);
+
+    // Strip trailing __init__ (package init files)
+    let module = module
+        .strip_suffix(&format!("{sep}__init__"))
+        .unwrap_or(&module);
+
+    if module.is_empty() {
+        return None;
+    }
+
+    Some(module.to_string())
 }
 
 fn canonical_range(r: &crate::utils::Range) -> code_graph_types::Range {
