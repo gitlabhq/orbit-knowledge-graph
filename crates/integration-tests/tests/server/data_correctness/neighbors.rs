@@ -198,25 +198,9 @@ pub(super) async fn neighbors_center_node_properties_hydrated(ctx: &TestContext)
 
     // Center node must have its requested columns hydrated.
     resp.assert_node("User", 1, |n| {
-        let has_username = n.prop_str("username") == Some("alice");
-        let has_name = n.prop_str("name") == Some("Alice Admin");
-        let has_state = n.prop_str("state") == Some("active");
-        assert!(
-            has_username,
-            "center node missing username, got: {:?}",
-            n.prop_str("username")
-        );
-        assert!(
-            has_name,
-            "center node missing name, got: {:?}",
-            n.prop_str("name")
-        );
-        assert!(
-            has_state,
-            "center node missing state, got: {:?}",
-            n.prop_str("state")
-        );
-        has_username && has_name && has_state
+        n.prop_str("username") == Some("alice")
+            && n.prop_str("name") == Some("Alice Admin")
+            && n.prop_str("state") == Some("active")
     });
 
     // Neighbor nodes should also be hydrated with default columns.
@@ -224,6 +208,9 @@ pub(super) async fn neighbors_center_node_properties_hydrated(ctx: &TestContext)
     resp.assert_node("Group", 102, |n| {
         n.prop_str("name") == Some("Internal Group")
     });
+
+    resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+    resp.assert_edge_exists("User", 1, "Group", 102, "MEMBER_OF");
 }
 
 pub(super) async fn neighbors_both_direction_preserves_edge_direction(ctx: &TestContext) {
