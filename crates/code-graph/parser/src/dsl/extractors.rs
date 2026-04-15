@@ -234,25 +234,40 @@ impl MetadataRule {
         self
     }
 
-    /// Extract metadata from a node. Returns None if all fields are empty.
+    /// Extract metadata from a node. Type names in return_type, type_annotation,
+    /// receiver_type, and super_types are resolved against the file's imports
+    /// to produce full FQNs where possible.
     pub fn extract_metadata(
         &self,
         node: &N<'_>,
+        import_map: &rustc_hash::FxHashMap<String, String>,
+        sep: &'static str,
     ) -> Option<Box<code_graph_types::DefinitionMetadata>> {
-        let super_types = self
+        let super_types: Vec<String> = self
             .super_types
             .as_ref()
-            .map(|e| e.extract(node))
+            .map(|e| {
+                e.extract(node)
+                    .into_iter()
+                    .map(|s| resolve_type_via_map(&s, import_map, sep))
+                    .collect()
+            })
             .unwrap_or_default();
-        let return_type = self.return_type.as_ref().and_then(|e| e.extract_name(node));
+        let return_type = self
+            .return_type
+            .as_ref()
+            .and_then(|e| e.extract_name(node))
+            .map(|s| resolve_type_via_map(&s, import_map, sep));
         let type_annotation = self
             .type_annotation
             .as_ref()
-            .and_then(|e| e.extract_name(node));
+            .and_then(|e| e.extract_name(node))
+            .map(|s| resolve_type_via_map(&s, import_map, sep));
         let receiver_type = self
             .receiver_type
             .as_ref()
-            .and_then(|e| e.extract_name(node));
+            .and_then(|e| e.extract_name(node))
+            .map(|s| resolve_type_via_map(&s, import_map, sep));
         let decorators = self
             .decorators
             .as_ref()
@@ -287,6 +302,19 @@ impl MetadataRule {
 
 pub fn metadata() -> MetadataRule {
     MetadataRule::new()
+}
+
+/// Resolve a bare type name to a full FQN using the pre-built import map.
+/// O(1) hashmap lookup instead of linear scan.
+pub fn resolve_type_via_map(
+    bare_name: &str,
+    import_map: &rustc_hash::FxHashMap<String, String>,
+    _sep: &str,
+) -> String {
+    import_map
+        .get(bare_name)
+        .cloned()
+        .unwrap_or_else(|| bare_name.to_string())
 }
 
 #[cfg(test)]

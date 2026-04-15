@@ -1,8 +1,9 @@
 use code_graph_config::Language;
 use code_graph_types::DefKind;
+use parser_core::dsl::extractors::{Extract, field};
+use parser_core::dsl::types::*;
 
-use crate::dsl::extractors::{Extract, field};
-use crate::dsl::types::*;
+// ── DSL parser spec ─────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct CSharpDsl;
@@ -66,15 +67,8 @@ mod tests {
     #[test]
     fn class_with_methods() {
         let result = parse(
-            r#"
-namespace MyApp {
-    public class Controller {
-        public void Index() {}
-    }
-}
-"#,
+            "namespace MyApp {\n    public class Controller {\n        public void Index() {}\n    }\n}\n",
         );
-
         assert!(result.definitions.len() >= 2);
         assert!(result.definitions.iter().any(|d| d.name == "Controller"));
     }

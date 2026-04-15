@@ -32,4 +32,4 @@ tests:
       WHERE d.name = 'inner'
       RETURN d.fqn AS fqn
     assert:
-      - { all_match: { field: fqn, pattern: "outer.*" } }
+      - { all_match: { field: fqn, pattern: "*outer.*" } }

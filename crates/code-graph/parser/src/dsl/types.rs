@@ -37,7 +37,7 @@ pub struct ScopeRule {
     def_kind: DefKind,
     condition: Option<Pred>,
     name: Extract,
-    pub(crate) creates_scope: bool,
+    pub creates_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
 }
 
@@ -54,6 +54,10 @@ impl Rule for ScopeRule {
 }
 
 impl ScopeRule {
+    pub fn get_def_kind(&self) -> DefKind {
+        self.def_kind
+    }
+
     pub fn when(mut self, pred: Pred) -> Self {
         self.condition = Some(match self.condition {
             Some(existing) => existing.and(pred),
@@ -86,8 +90,15 @@ impl ScopeRule {
         self.def_kind
     }
 
-    pub(crate) fn extract_metadata(&self, node: &N<'_>) -> Option<Box<DefinitionMetadata>> {
-        self.metadata_rule.as_ref()?.extract_metadata(node)
+    pub(crate) fn extract_metadata(
+        &self,
+        node: &N<'_>,
+        import_map: &rustc_hash::FxHashMap<String, String>,
+        sep: &'static str,
+    ) -> Option<Box<DefinitionMetadata>> {
+        self.metadata_rule
+            .as_ref()?
+            .extract_metadata(node, import_map, sep)
     }
 
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
@@ -128,6 +139,26 @@ pub enum ReceiverExtract {
     Field(&'static str),
     /// Chain of field names (e.g. `["function", "object"]` for Python's call.function.object).
     FieldChain(&'static [&'static str]),
+}
+
+impl ReceiverExtract {
+    /// Navigate to the receiver node from the given parent.
+    pub fn resolve<'a>(
+        &self,
+        node: &Node<'a, treesitter_visit::tree_sitter::StrDoc<treesitter_visit::SupportLang>>,
+    ) -> Option<Node<'a, treesitter_visit::tree_sitter::StrDoc<treesitter_visit::SupportLang>>>
+    {
+        match self {
+            Self::Field(f) => node.field(f),
+            Self::FieldChain(fields) => {
+                let mut current = Some(node.clone());
+                for &f in fields.iter() {
+                    current = current.and_then(|n| n.field(f));
+                }
+                current
+            }
+        }
+    }
 }
 
 pub struct ReferenceRule {
@@ -358,16 +389,6 @@ pub trait DslLanguage: Send + Sync + Default {
     fn name() -> &'static str;
     fn language() -> code_graph_config::Language;
 
-    fn auto_scopes() -> &'static [(&'static str, &'static str)] {
-        &[]
-    }
-    fn auto_refs() -> &'static [&'static str] {
-        &[]
-    }
-    fn auto_imports() -> &'static [&'static str] {
-        &[]
-    }
-
     fn scopes() -> Vec<ScopeRule> {
         vec![]
     }
@@ -375,10 +396,6 @@ pub trait DslLanguage: Send + Sync + Default {
         vec![]
     }
     fn imports() -> Vec<ImportRule> {
-        vec![]
-    }
-
-    fn bindings() -> Vec<ParseBindingRule> {
         vec![]
     }
 
@@ -397,19 +414,37 @@ pub trait DslLanguage: Send + Sync + Default {
         None
     }
 
+    fn module_scope_from_path() -> bool {
+        false
+    }
+
+    fn bindings() -> Vec<BindingRule> {
+        vec![]
+    }
+
+    fn branches() -> Vec<BranchRule> {
+        vec![]
+    }
+
+    fn loops() -> Vec<LoopRule> {
+        vec![]
+    }
+
     fn spec() -> LanguageSpec {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
-                .bindings(Self::bindings())
-                .auto(Self::auto_scopes())
-                .auto_refs(Self::auto_refs())
-                .auto_imports(Self::auto_imports())
-                .custom_import(Self::custom_import);
+                .custom_import(Self::custom_import)
+                .with_bindings(Self::bindings())
+                .with_branches(Self::branches())
+                .with_loops(Self::loops());
         if let Some(cc) = Self::chain_config() {
             spec = spec.chain(cc);
         }
         if let Some((kind, extract)) = Self::package_node() {
             spec = spec.package(kind, extract);
+        }
+        if Self::module_scope_from_path() {
+            spec = spec.module_scope_from_path();
         }
         spec
     }
@@ -441,68 +476,172 @@ impl<L: DslLanguage> code_graph_types::CanonicalParser for DslParser<L> {
     }
 }
 
-// ── Binding rule ────────────────────────────────────────────────
+// ── Binding rules ───────────────────────────────────────────────
 
-/// Declarative rule for extracting variable bindings (assignments, parameters).
-pub struct ParseBindingRule {
-    kind: &'static str,
-    condition: Option<Pred>,
-    name: Extract,
-    value: Option<Extract>,
+pub struct BindingRule {
+    pub kind: &'static str,
+    pub binding_kind: code_graph_types::BindingKind,
+    pub name_fields: &'static [&'static str],
+    pub value_field: Option<&'static str>,
+    pub instance_attr_prefixes: &'static [&'static str],
+    /// Type annotation fields to check (TypeFlow). First match wins.
+    pub type_fields: &'static [&'static str],
+    /// Type names to skip (primitives, builtins).
+    pub skip_types: &'static [&'static str],
 }
 
-impl Rule for ParseBindingRule {
-    fn kind(&self) -> &'static str {
-        self.kind
-    }
-
-    fn condition(&self) -> Option<&Pred> {
-        self.condition.as_ref()
-    }
-
-    fn extract(&self) -> &Extract {
-        &self.name
-    }
-
-    fn extract_name(&self, node: &N<'_>) -> Option<String> {
-        self.name.extract_name(node)
+pub fn binding(kind: &'static str, binding_kind: code_graph_types::BindingKind) -> BindingRule {
+    BindingRule {
+        kind,
+        binding_kind,
+        name_fields: &["left"],
+        value_field: Some("right"),
+        instance_attr_prefixes: &[],
+        type_fields: &[],
+        skip_types: &[],
     }
 }
 
-impl ParseBindingRule {
-    pub fn when(mut self, pred: Pred) -> Self {
-        self.condition = Some(pred);
+impl BindingRule {
+    pub fn name_from(mut self, fields: &'static [&'static str]) -> Self {
+        self.name_fields = fields;
         self
     }
 
-    pub fn name_from(mut self, extract: Extract) -> Self {
-        self.name = extract;
-        self
-    }
-
-    pub fn value_from(mut self, extract: Extract) -> Self {
-        self.value = Some(extract);
+    pub fn value_from(mut self, field: &'static str) -> Self {
+        self.value_field = Some(field);
         self
     }
 
     pub fn no_value(mut self) -> Self {
-        self.value = None;
+        self.value_field = None;
         self
     }
 
-    pub(crate) fn extract_value(&self, node: &N<'_>) -> Option<String> {
-        self.value.as_ref()?.extract_name(node)
+    pub fn instance_attrs(mut self, prefixes: &'static [&'static str]) -> Self {
+        self.instance_attr_prefixes = prefixes;
+        self
+    }
+
+    pub fn typed(mut self, fields: &'static [&'static str], skip: &'static [&'static str]) -> Self {
+        self.type_fields = fields;
+        self.skip_types = skip;
+        self
+    }
+
+    /// Extract the binding name from an AST node by walking the field chain.
+    pub(crate) fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        let mut current = node.clone();
+        for &field in self.name_fields {
+            current = current.field(field)?;
+        }
+        Some(current.text().to_string())
+    }
+
+    /// Extract a type annotation from the AST node, if configured.
+    /// Returns the bare type name as written in source (e.g. `"Builder"`).
+    /// Resolution to FQN is the resolver's job.
+    pub(crate) fn extract_type_annotation(&self, node: &N<'_>) -> Option<String> {
+        for &field_name in self.type_fields {
+            if let Some(type_node) = node.field(field_name) {
+                let text = type_node.text().to_string();
+                if !self.skip_types.iter().any(|&s| s == text) {
+                    return Some(text);
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract the RHS callee name from a binding's value field.
+    /// Unwraps call expressions: `Database()` → "Database".
+    pub(crate) fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
+        let value_node = node.field(self.value_field?)?;
+        let vk = value_node.kind();
+        let vk_ref = vk.as_ref();
+
+        // Call expression → extract callee name via reference rules.
+        // Use matches() not just kind() to respect conditions (e.g.
+        // Python has two `call` rules — one for method calls, one for plain calls).
+        if let Some(ref_rule) = spec.refs.iter().find(|r| r.matches(&value_node, vk_ref)) {
+            return ref_rule.extract_name(&value_node);
+        }
+
+        // Bare identifier
+        if let Some(cc) = &spec.chain_config
+            && cc.ident_kinds.contains(&vk_ref)
+        {
+            return Some(value_node.text().to_string());
+        }
+
+        None
     }
 }
 
-pub fn parse_binding(kind: &'static str) -> ParseBindingRule {
-    ParseBindingRule {
+// ── Branch rules ────────────────────────────────────────────────
+
+pub struct BranchRule {
+    pub kind: &'static str,
+    pub branch_kinds: &'static [&'static str],
+    pub condition_field: Option<&'static str>,
+    pub catch_all_kind: Option<&'static str>,
+}
+
+pub fn branch(kind: &'static str) -> BranchRule {
+    BranchRule {
         kind,
-        condition: None,
-        name: Extract::Field("left"),
-        value: Some(Extract::Field("right")),
+        branch_kinds: &[],
+        condition_field: None,
+        catch_all_kind: None,
     }
 }
+
+impl BranchRule {
+    pub fn branches(mut self, kinds: &'static [&'static str]) -> Self {
+        self.branch_kinds = kinds;
+        self
+    }
+
+    pub fn condition(mut self, field: &'static str) -> Self {
+        self.condition_field = Some(field);
+        self
+    }
+
+    pub fn catch_all(mut self, kind: &'static str) -> Self {
+        self.catch_all_kind = Some(kind);
+        self
+    }
+}
+
+// ── Loop rules ──────────────────────────────────────────────────
+
+pub struct LoopRule {
+    pub kind: &'static str,
+    pub body_field: &'static str,
+    pub iter_field: Option<&'static str>,
+}
+
+pub fn loop_rule(kind: &'static str) -> LoopRule {
+    LoopRule {
+        kind,
+        body_field: "body",
+        iter_field: None,
+    }
+}
+
+impl LoopRule {
+    pub fn body(mut self, field: &'static str) -> Self {
+        self.body_field = field;
+        self
+    }
+
+    pub fn iter_over(mut self, field: &'static str) -> Self {
+        self.iter_field = Some(field);
+        self
+    }
+}
+
+// ── Function types ──────────────────────────────────────────────
 
 /// Function type for custom import handling.
 pub type CustomImportFn = fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool;
@@ -512,11 +651,14 @@ pub struct LanguageSpec {
     pub scopes: Vec<ScopeRule>,
     pub refs: Vec<ReferenceRule>,
     pub imports: Vec<ImportRule>,
-    pub bindings: Vec<ParseBindingRule>,
+    pub bindings: Vec<BindingRule>,
+    pub branches: Vec<BranchRule>,
+    pub loops: Vec<LoopRule>,
     pub chain_config: Option<ChainConfig>,
     pub(crate) scope_kinds: FxHashSet<&'static str>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,
+    pub(crate) module_from_path: bool,
 }
 
 impl LanguageSpec {
@@ -533,15 +675,28 @@ impl LanguageSpec {
             refs,
             imports,
             bindings: Vec::new(),
+            branches: Vec::new(),
+            loops: Vec::new(),
             chain_config: None,
             scope_kinds,
             package_node: None,
             custom_import_fn: None,
+            module_from_path: false,
         }
     }
 
-    pub fn bindings(mut self, rules: Vec<ParseBindingRule>) -> Self {
-        self.bindings = rules;
+    pub fn with_bindings(mut self, bindings: Vec<BindingRule>) -> Self {
+        self.bindings = bindings;
+        self
+    }
+
+    pub fn with_branches(mut self, branches: Vec<BranchRule>) -> Self {
+        self.branches = branches;
+        self
+    }
+
+    pub fn with_loops(mut self, loops: Vec<LoopRule>) -> Self {
+        self.loops = loops;
         self
     }
 
@@ -562,38 +717,10 @@ impl LanguageSpec {
         self
     }
 
-    /// Register node kinds that automatically create scopes using
-    /// default name extraction (`name` field, then first identifier child).
-    /// Explicit `scope()` rules override these for the same node kind
-    /// via last-rule-wins semantics.
-    pub fn auto(mut self, entries: &[(&'static str, &'static str)]) -> Self {
-        let mut auto_rules: Vec<ScopeRule> = entries
-            .iter()
-            .map(|&(kind, label)| scope(kind, label))
-            .collect();
-        // Prepend so explicit rules come later and win.
-        auto_rules.append(&mut self.scopes);
-        self.scopes = auto_rules;
-        self.scope_kinds = self.scopes.iter().map(|r| r.kind).collect();
-        self
-    }
-
-    /// Register node kinds that automatically produce references using
-    /// default name extraction. Explicit `reference()` rules override.
-    pub fn auto_refs(mut self, kinds: &[&'static str]) -> Self {
-        let mut auto_rules: Vec<ReferenceRule> =
-            kinds.iter().map(|&kind| reference(kind)).collect();
-        auto_rules.append(&mut self.refs);
-        self.refs = auto_rules;
-        self
-    }
-
-    /// Register node kinds that automatically produce imports using
-    /// default path extraction. Explicit `import()` rules override.
-    pub fn auto_imports(mut self, kinds: &[&'static str]) -> Self {
-        let mut auto_rules: Vec<ImportRule> = kinds.iter().map(|&kind| import(kind)).collect();
-        auto_rules.append(&mut self.imports);
-        self.imports = auto_rules;
+    /// Derive module scope from file path. For languages like Python where
+    /// the module hierarchy comes from the filesystem, not from an AST node.
+    pub fn module_scope_from_path(mut self) -> Self {
+        self.module_from_path = true;
         self
     }
 

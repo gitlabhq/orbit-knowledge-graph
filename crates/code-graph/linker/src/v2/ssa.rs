@@ -4,36 +4,53 @@
 //! Static Single Assignment Form", CC 2013) adapted for code-graph reference
 //! resolution.
 //!
-//! The algorithm has three operations:
-//! - `write_variable(name, block, value)` — record a definition
-//! - `read_variable(name, block)` — look up a variable's reaching definition(s)
-//! - `seal_block(block)` — all predecessors of this block are now known
-//!
-//! At control-flow join points (if/else, try/except, loops), phi nodes are
-//! inserted automatically. Trivial phis (referencing only one real value) are
-//! collapsed on the fly, producing minimal pruned SSA for reducible CFGs.
-//!
-//! The per-language `LanguageRules` trait drives the resolver by walking the
-//! AST and calling these operations. The resolver itself is language-agnostic.
+//! Performance: variable names are interned (`Intern<str>`) so HashMap keys
+//! are pointer-sized. Blocks use `SmallVec` for predecessors (most have ≤2).
+//! `Value::Type` uses `Intern<str>` for zero-cost cloning.
 
+use super::stats::SsaStats;
+use internment::Intern;
+use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 use std::fmt;
+
+/// Interned variable name. Pointer-sized, O(1) clone and hash.
+pub type VarName = Intern<str>;
 
 // ── Value ───────────────────────────────────────────────────────
 
 /// A value in the SSA graph — what a variable resolves to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Value {
-    /// A definition in a file (file index + definition index).
-    Def(usize, usize),
-    /// An import in a file (file index + import index).
-    Import(usize, usize),
+    /// A definition node in the graph.
+    Def(NodeIndex),
+    /// An import node in the graph.
+    Import(NodeIndex),
     /// A type name (for type-flow languages: resolve members on this type).
-    Type(String),
+    /// Interned for zero-cost cloning during chain resolution.
+    Type(Intern<str>),
+    /// Deferred name resolution: "I'm whatever this name resolves to."
+    /// Written for bindings like `b = getService()` where the walker
+    /// records the RHS name without resolving it. The resolver follows
+    /// the alias by doing an SSA read for the aliased name.
+    Alias(Intern<str>),
     /// Dead end — parameter, literal, or otherwise unresolvable.
     Opaque,
     /// Internal: a phi node (will be resolved to concrete values).
     Phi(PhiId),
+}
+
+impl Value {
+    /// Create a Type value from a string (interned).
+    pub fn type_of(s: &str) -> Self {
+        Self::Type(Intern::from(s))
+    }
+
+    /// Create a Type value from an owned String (interned).
+    pub fn type_from_string(s: String) -> Self {
+        Self::Type(Intern::from(s.as_str()))
+    }
 }
 
 /// Identifier for a phi node in the SSA graph.
@@ -55,15 +72,15 @@ impl fmt::Display for BlockId {
 #[derive(Debug, Clone)]
 struct PhiNode {
     block: BlockId,
-    variable: String,
-    operands: Vec<Value>,
+    variable: VarName,
+    operands: SmallVec<[Value; 2]>,
 }
 
 // ── Block ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 struct Block {
-    predecessors: Vec<BlockId>,
+    predecessors: SmallVec<[BlockId; 2]>,
     sealed: bool,
 }
 
@@ -73,36 +90,12 @@ struct Block {
 /// Phi nodes are fully resolved into their constituent concrete values.
 #[derive(Debug, Clone, Default)]
 pub struct ReachingDefs {
-    pub values: Vec<Value>,
+    pub values: SmallVec<[Value; 2]>,
 }
 
 impl ReachingDefs {
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
-    }
-
-    /// Get all Def values, ignoring imports/types/opaque.
-    pub fn defs(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
-        self.values.iter().filter_map(|v| match v {
-            Value::Def(file_idx, def_idx) => Some((*file_idx, *def_idx)),
-            _ => None,
-        })
-    }
-
-    /// Get all Import values.
-    pub fn imports(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
-        self.values.iter().filter_map(|v| match v {
-            Value::Import(file_idx, import_idx) => Some((*file_idx, *import_idx)),
-            _ => None,
-        })
-    }
-
-    /// Get all Type values.
-    pub fn types(&self) -> impl Iterator<Item = &str> + '_ {
-        self.values.iter().filter_map(|v| match v {
-            Value::Type(t) => Some(t.as_str()),
-            _ => None,
-        })
     }
 }
 
@@ -117,33 +110,32 @@ pub struct SsaResolver {
     blocks: Vec<Block>,
     phis: Vec<PhiNode>,
     /// current_def[variable][block] = value
-    current_def: FxHashMap<String, FxHashMap<BlockId, Value>>,
+    current_def: FxHashMap<VarName, FxHashMap<BlockId, Value>>,
     /// Incomplete phis for unsealed blocks: block → variable → phi_id
-    incomplete_phis: FxHashMap<BlockId, FxHashMap<String, PhiId>>,
-    /// Recorded reads: (block, reference_index) → variable name.
-    /// The language rules call `read_variable` and we store the result.
-    reads: Vec<(BlockId, String, ReachingDefs)>,
+    incomplete_phis: FxHashMap<BlockId, FxHashMap<VarName, PhiId>>,
+    /// Counters for SSA operations.
+    pub stats: SsaStats,
 }
 
 impl SsaResolver {
     pub fn new() -> Self {
         Self {
-            blocks: Vec::new(),
-            phis: Vec::new(),
-            current_def: FxHashMap::default(),
+            blocks: Vec::with_capacity(32),
+            phis: Vec::with_capacity(8),
+            current_def: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             incomplete_phis: FxHashMap::default(),
-            reads: Vec::new(),
+            stats: SsaStats::default(),
         }
     }
 
     /// Create a new basic block. Returns its ID.
-    /// Predecessors can be added later, but must all be added before sealing.
     pub fn add_block(&mut self) -> BlockId {
         let id = BlockId(self.blocks.len());
         self.blocks.push(Block {
-            predecessors: Vec::new(),
+            predecessors: SmallVec::new(),
             sealed: false,
         });
+        self.stats.blocks_created += 1;
         id
     }
 
@@ -155,105 +147,110 @@ impl SsaResolver {
     /// Seal a block — all predecessors are now known.
     /// Resolves any incomplete phi nodes that were deferred.
     pub fn seal_block(&mut self, block: BlockId) {
-        // Process incomplete phis for this block
         if let Some(incomplete) = self.incomplete_phis.remove(&block) {
             for (variable, phi_id) in incomplete {
-                self.add_phi_operands(&variable, phi_id);
+                self.add_phi_operands(variable, phi_id);
             }
         }
         self.blocks[block.0].sealed = true;
     }
 
-    /// Record a variable definition: `variable` is defined as `value` in `block`.
-    pub fn write_variable(&mut self, variable: &str, block: BlockId, value: Value) {
-        self.current_def
-            .entry(variable.to_string())
-            .or_default()
-            .insert(block, value);
+    /// Seal any blocks that haven't been sealed yet.
+    pub fn seal_remaining(&mut self) {
+        for id in 0..self.blocks.len() {
+            if !self.blocks[id].sealed {
+                self.seal_block(BlockId(id));
+            }
+        }
     }
 
-    /// Look up a variable's reaching definition(s) at `block`.
-    /// Returns the resolved values (phi nodes are expanded).
-    pub fn read_variable(&mut self, variable: &str, block: BlockId) -> ReachingDefs {
-        let value = self.read_variable_internal(variable, block);
-        let defs = self.resolve_value(&value);
-        self.reads.push((block, variable.to_string(), defs.clone()));
-        defs
+    /// Record a variable definition: `variable` is defined as `value` in `block`.
+    pub fn write_variable(&mut self, variable: &str, block: BlockId, value: Value) {
+        let var = Intern::from(variable);
+        self.current_def
+            .entry(var)
+            .or_default()
+            .insert(block, value);
+        self.stats.writes += 1;
     }
 
     /// Look up a variable's reaching definitions without recording the read.
-    /// Used by the ReachingResolver when it already has the read recorded
-    /// via the walker.
     pub fn read_variable_stateless(&mut self, variable: &str, block: BlockId) -> ReachingDefs {
-        let value = self.read_variable_internal(variable, block);
+        self.stats.reads += 1;
+        let var = Intern::from(variable);
+        let value = self.read_variable_internal(var, block);
         self.resolve_value(&value)
-    }
-
-    /// Get all recorded reads (for the ReachingResolver to produce edges).
-    pub fn reads(&self) -> &[(BlockId, String, ReachingDefs)] {
-        &self.reads
     }
 
     // ── Internal: Braun et al. algorithm ────────────────────────
 
-    fn read_variable_internal(&mut self, variable: &str, block: BlockId) -> Value {
+    fn read_variable_internal(&mut self, variable: VarName, block: BlockId) -> Value {
         // Local value numbering: check current block first
-        if let Some(block_defs) = self.current_def.get(variable)
+        if let Some(block_defs) = self.current_def.get(&variable)
             && let Some(value) = block_defs.get(&block)
         {
+            self.stats.local_hits += 1;
             return value.clone();
         }
 
         // Global value numbering
+        self.stats.recursive_lookups += 1;
         self.read_variable_recursive(variable, block)
     }
 
-    fn read_variable_recursive(&mut self, variable: &str, block: BlockId) -> Value {
+    fn read_variable_recursive(&mut self, variable: VarName, block: BlockId) -> Value {
         let val;
         let sealed = self.blocks[block.0].sealed;
         let num_preds = self.blocks[block.0].predecessors.len();
 
         if !sealed {
-            // Incomplete CFG: create a placeholder phi
+            self.stats.unsealed_hits += 1;
             let phi_id = self.new_phi(block, variable);
             self.incomplete_phis
                 .entry(block)
                 .or_default()
-                .insert(variable.to_string(), phi_id);
+                .insert(variable, phi_id);
             val = Value::Phi(phi_id);
         } else if num_preds == 0 {
-            // Entry block with no predecessors — variable is undefined
+            self.stats.dead_end_hits += 1;
             val = Value::Opaque;
         } else if num_preds == 1 {
-            // Single predecessor — no phi needed, just recurse
             let pred = self.blocks[block.0].predecessors[0];
             val = self.read_variable_internal(variable, pred);
         } else {
-            // Multiple predecessors — insert phi, then fill operands
             let phi_id = self.new_phi(block, variable);
-            // Write before recursing to break cycles
-            self.write_variable(variable, block, Value::Phi(phi_id));
+            self.write_variable_interned(variable, block, Value::Phi(phi_id));
             self.add_phi_operands(variable, phi_id);
             val = self.try_remove_trivial_phi(phi_id);
         }
 
-        self.write_variable(variable, block, val.clone());
+        self.write_variable_interned(variable, block, val.clone());
         val
     }
 
-    fn new_phi(&mut self, block: BlockId, variable: &str) -> PhiId {
+    /// Internal write that takes an already-interned name.
+    fn write_variable_interned(&mut self, variable: VarName, block: BlockId, value: Value) {
+        self.current_def
+            .entry(variable)
+            .or_default()
+            .insert(block, value);
+    }
+
+    fn new_phi(&mut self, block: BlockId, variable: VarName) -> PhiId {
+        self.stats.phis_created += 1;
         let id = PhiId(self.phis.len());
         self.phis.push(PhiNode {
             block,
-            variable: variable.to_string(),
-            operands: Vec::new(),
+            variable,
+            operands: SmallVec::new(),
         });
         id
     }
 
-    fn add_phi_operands(&mut self, variable: &str, phi_id: PhiId) {
+    fn add_phi_operands(&mut self, variable: VarName, phi_id: PhiId) {
         let block = self.phis[phi_id.0].block;
-        let preds: Vec<BlockId> = self.blocks[block.0].predecessors.clone();
+        // Copy predecessors to avoid borrow conflict (SmallVec: stack-allocated for ≤2).
+        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
         for pred in preds {
             let val = self.read_variable_internal(variable, pred);
             self.phis[phi_id.0].operands.push(val);
@@ -265,22 +262,22 @@ impl SsaResolver {
     fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> Value {
         let mut same: Option<Value> = None;
 
-        for op in self.phis[phi_id.0].operands.clone() {
-            // Skip self-references and duplicates of `same`
+        // Iterate by index to avoid cloning the operands vec.
+        for i in 0..self.phis[phi_id.0].operands.len() {
+            let op = self.phis[phi_id.0].operands[i].clone();
             if op == Value::Phi(phi_id) || Some(&op) == same.as_ref() {
                 continue;
             }
             if same.is_some() {
-                // The phi merges at least two distinct values — not trivial
                 return Value::Phi(phi_id);
             }
             same = Some(op);
         }
 
         let replacement = same.unwrap_or(Value::Opaque);
+        self.stats.phis_trivial += 1;
 
-        // Replace all uses of this phi with the replacement
-        let variable = self.phis[phi_id.0].variable.clone();
+        let variable = self.phis[phi_id.0].variable;
         let block = self.phis[phi_id.0].block;
 
         // Update current_def if it points to this phi
@@ -319,7 +316,7 @@ impl SsaResolver {
     /// Expand a value into its concrete reaching definitions.
     /// Phi nodes are recursively expanded. Cycles are handled via visited set.
     fn resolve_value(&self, value: &Value) -> ReachingDefs {
-        let mut values = Vec::new();
+        let mut values = SmallVec::new();
         let mut visited = FxHashSet::default();
         self.resolve_value_recursive(value, &mut values, &mut visited);
 
@@ -333,7 +330,7 @@ impl SsaResolver {
     fn resolve_value_recursive(
         &self,
         value: &Value,
-        out: &mut Vec<Value>,
+        out: &mut SmallVec<[Value; 2]>,
         visited: &mut FxHashSet<PhiId>,
     ) {
         match value {
@@ -367,10 +364,10 @@ mod tests {
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("x", b, Value::Def(0, 0));
-        let result = ssa.read_variable("x", b);
+        ssa.write_variable("x", b, Value::Def(NodeIndex::new(0)));
+        let result = ssa.read_variable_stateless("x", b);
 
-        assert_eq!(result.values, vec![Value::Def(0, 0)]);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 
     #[test]
@@ -382,10 +379,10 @@ mod tests {
         ssa.seal_block(b0);
         ssa.seal_block(b1);
 
-        ssa.write_variable("x", b0, Value::Def(0, 0));
-        let result = ssa.read_variable("x", b1);
+        ssa.write_variable("x", b0, Value::Def(NodeIndex::new(0)));
+        let result = ssa.read_variable_stateless("x", b1);
 
-        assert_eq!(result.values, vec![Value::Def(0, 0)]);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 
     #[test]
@@ -407,13 +404,13 @@ mod tests {
         ssa.seal_block(else_b);
         ssa.seal_block(join);
 
-        ssa.write_variable("x", then_b, Value::Def(0, 0));
-        ssa.write_variable("x", else_b, Value::Def(0, 1));
+        ssa.write_variable("x", then_b, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", else_b, Value::Def(NodeIndex::new(1)));
 
-        let result = ssa.read_variable("x", join);
+        let result = ssa.read_variable_stateless("x", join);
         assert_eq!(result.values.len(), 2);
-        assert!(result.values.contains(&Value::Def(0, 0)));
-        assert!(result.values.contains(&Value::Def(0, 1)));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
     }
 
     #[test]
@@ -436,10 +433,10 @@ mod tests {
         ssa.seal_block(join);
 
         // x defined in entry, not redefined in either branch
-        ssa.write_variable("x", entry, Value::Def(0, 0));
+        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
 
-        let result = ssa.read_variable("x", join);
-        assert_eq!(result.values, vec![Value::Def(0, 0)]);
+        let result = ssa.read_variable_stateless("x", join);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 
     #[test]
@@ -462,13 +459,13 @@ mod tests {
         ssa.seal_block(header);
         ssa.seal_block(exit);
 
-        ssa.write_variable("x", entry, Value::Def(0, 0));
-        ssa.write_variable("x", body, Value::Def(0, 1));
+        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", body, Value::Def(NodeIndex::new(1)));
 
-        let result = ssa.read_variable("x", exit);
+        let result = ssa.read_variable_stateless("x", exit);
         assert_eq!(result.values.len(), 2);
-        assert!(result.values.contains(&Value::Def(0, 0)));
-        assert!(result.values.contains(&Value::Def(0, 1)));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
     }
 
     #[test]
@@ -490,11 +487,11 @@ mod tests {
         ssa.seal_block(header);
         ssa.seal_block(exit);
 
-        ssa.write_variable("x", entry, Value::Def(0, 0));
+        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
 
-        let result = ssa.read_variable("x", exit);
+        let result = ssa.read_variable_stateless("x", exit);
         // Should collapse to single def (trivial phi)
-        assert_eq!(result.values, vec![Value::Def(0, 0)]);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 
     #[test]
@@ -516,8 +513,8 @@ mod tests {
         // Header NOT sealed yet — back edge will come later
 
         // Write defs
-        ssa.write_variable("x", entry, Value::Def(0, 0));
-        ssa.write_variable("x", body, Value::Def(0, 1));
+        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", body, Value::Def(NodeIndex::new(1)));
 
         // Seal body (its only predecessor `header` is already added)
         ssa.seal_block(body);
@@ -528,9 +525,9 @@ mod tests {
         ssa.seal_block(exit);
 
         // Read after everything is sealed — should see both values via phi
-        let result = ssa.read_variable("x", exit);
-        assert!(result.values.contains(&Value::Def(0, 0)));
-        assert!(result.values.contains(&Value::Def(0, 1)));
+        let result = ssa.read_variable_stateless("x", exit);
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
     }
 
     #[test]
@@ -539,14 +536,14 @@ mod tests {
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("x", b, Value::Def(0, 0));
-        ssa.write_variable("y", b, Value::Def(0, 1));
+        ssa.write_variable("x", b, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("y", b, Value::Def(NodeIndex::new(1)));
 
-        let rx = ssa.read_variable("x", b);
-        let ry = ssa.read_variable("y", b);
+        let rx = ssa.read_variable_stateless("x", b);
+        let ry = ssa.read_variable_stateless("y", b);
 
-        assert_eq!(rx.values, vec![Value::Def(0, 0)]);
-        assert_eq!(ry.values, vec![Value::Def(0, 1)]);
+        assert_eq!(rx.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
+        assert_eq!(ry.values.as_slice(), &[Value::Def(NodeIndex::new(1))]);
     }
 
     #[test]
@@ -555,11 +552,11 @@ mod tests {
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("x", b, Value::Def(0, 0));
-        ssa.write_variable("x", b, Value::Def(0, 1)); // overwrite
+        ssa.write_variable("x", b, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", b, Value::Def(NodeIndex::new(1))); // overwrite
 
-        let result = ssa.read_variable("x", b);
-        assert_eq!(result.values, vec![Value::Def(0, 1)]);
+        let result = ssa.read_variable_stateless("x", b);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(1))]);
     }
 
     #[test]
@@ -568,7 +565,7 @@ mod tests {
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        let result = ssa.read_variable("x", b);
+        let result = ssa.read_variable_stateless("x", b);
         assert!(result.is_empty());
     }
 
@@ -599,15 +596,15 @@ mod tests {
             ssa.seal_block(b);
         }
 
-        ssa.write_variable("x", inner_then, Value::Def(0, 0));
-        ssa.write_variable("x", inner_else, Value::Def(0, 1));
-        ssa.write_variable("x", outer_else, Value::Def(0, 2));
+        ssa.write_variable("x", inner_then, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", inner_else, Value::Def(NodeIndex::new(1)));
+        ssa.write_variable("x", outer_else, Value::Def(NodeIndex::new(2)));
 
-        let result = ssa.read_variable("x", outer_join);
+        let result = ssa.read_variable_stateless("x", outer_join);
         assert_eq!(result.values.len(), 3);
-        assert!(result.values.contains(&Value::Def(0, 0)));
-        assert!(result.values.contains(&Value::Def(0, 1)));
-        assert!(result.values.contains(&Value::Def(0, 2)));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(2))));
     }
 
     #[test]
@@ -616,13 +613,13 @@ mod tests {
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("os", b, Value::Import(0, 0));
-        ssa.write_variable("MyClass", b, Value::Def(0, 0));
+        ssa.write_variable("os", b, Value::Import(NodeIndex::new(0)));
+        ssa.write_variable("MyClass", b, Value::Def(NodeIndex::new(0)));
 
-        let r1 = ssa.read_variable("os", b);
-        let r2 = ssa.read_variable("MyClass", b);
+        let r1 = ssa.read_variable_stateless("os", b);
+        let r2 = ssa.read_variable_stateless("MyClass", b);
 
-        assert_eq!(r1.values, vec![Value::Import(0, 0)]);
-        assert_eq!(r2.values, vec![Value::Def(0, 0)]);
+        assert_eq!(r1.values.as_slice(), &[Value::Import(NodeIndex::new(0))]);
+        assert_eq!(r2.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 }

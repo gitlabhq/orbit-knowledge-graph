@@ -152,6 +152,74 @@ pub enum ExpressionStep {
     MethodRef(String),
 }
 
+// ── Bindings ────────────────────────────────────────────────────
+
+/// What kind of variable binding this is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingKind {
+    Assignment,
+    Parameter,
+    Deletion,
+    ForTarget,
+    WithAlias,
+}
+
+/// A variable binding extracted from the AST.
+///
+/// Represents `x = expr`, `def f(param)`, `del x`, `for x in ...`, etc.
+/// The walker writes these to SSA blocks without touching the AST.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalBinding {
+    pub name: String,
+    pub kind: BindingKind,
+    pub range: Range,
+    /// Type annotation from the AST (e.g. `int x` → "int", `x: str` → "str").
+    pub type_annotation: Option<String>,
+    /// Callee name extracted from the RHS (e.g. `get_builder()` → "get_builder",
+    /// `foo` → "foo"). None for complex/non-name expressions.
+    pub rhs_name: Option<String>,
+    /// Whether this is an instance attribute binding (e.g. `self.db = ...`).
+    pub instance_attr: bool,
+}
+
+// ── Control flow ────────────────────────────────────────────────
+
+/// A branch or loop extracted from the AST.
+///
+/// The walker uses these to build SSA blocks (Braun et al.) without
+/// re-walking the tree-sitter AST.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalControlFlow {
+    pub kind: ControlFlowKind,
+    /// AST node kind (e.g. "if_statement", "for_statement") for
+    /// disambiguation when parent and child share the same byte start.
+    pub node_kind: String,
+    /// Byte range of the entire control-flow node.
+    pub byte_range: (usize, usize),
+    /// Arms/body of the control-flow node.
+    pub children: Vec<ControlFlowChild>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlFlowKind {
+    Branch {
+        /// Whether the branch has a catch-all arm (else, default, finally).
+        has_catch_all: bool,
+    },
+    Loop,
+}
+
+/// One arm of a branch or the body of a loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ControlFlowChild {
+    pub byte_range: (usize, usize),
+    /// True if this child is the condition expression (walked in the
+    /// pre-branch block, not in a branch arm).
+    pub is_condition: bool,
+}
+
+// ── Structural types ────────────────────────────────────────────
+
 /// A directory in the code graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalDirectory {
@@ -169,22 +237,6 @@ pub struct CanonicalFile {
     pub size: u64,
 }
 
-/// A variable binding (assignment, parameter, for-target).
-///
-/// The resolver uses these to track what names are bound to at each
-/// program point via the SSA engine.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalBinding {
-    /// The name being bound (LHS of assignment).
-    pub name: String,
-    /// What the name is bound to (RHS). `None` for opaque bindings
-    /// (parameters, deletions).
-    pub value: Option<String>,
-    pub range: Range,
-    /// FQN of the enclosing scope.
-    pub scope_fqn: Option<Fqn>,
-}
-
 /// The complete output of parsing a single file.
 ///
 /// Boundary type between parser and linker — nothing language-specific
@@ -198,6 +250,6 @@ pub struct CanonicalResult {
     pub definitions: Vec<CanonicalDefinition>,
     pub imports: Vec<CanonicalImport>,
     pub references: Vec<CanonicalReference>,
-    /// Variable bindings sorted by byte offset.
     pub bindings: Vec<CanonicalBinding>,
+    pub control_flow: Vec<CanonicalControlFlow>,
 }

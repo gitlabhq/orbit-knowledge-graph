@@ -1,28 +1,42 @@
+use crate::IStr;
 use smallvec::SmallVec;
 use std::sync::Arc;
 
 /// A fully qualified name as an ordered sequence of string parts.
 ///
 /// The separator is language-determined ("::" for Ruby/Rust/TS, "." for
-/// Python/Java/Kotlin/C#). Parts are just names — type information lives
-/// on the definitions themselves, not on FQN segments.
+/// Python/Java/Kotlin/C#). The joined string is cached as an `IStr`
+/// (interned) to avoid repeated allocation on `to_string()`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Fqn {
     parts: Arc<SmallVec<[Arc<str>; 4]>>,
     separator: &'static str,
+    /// Cached joined representation (interned).
+    cached: IStr,
 }
 
 impl Fqn {
     pub fn new(parts: SmallVec<[Arc<str>; 4]>, separator: &'static str) -> Self {
+        let joined = parts
+            .iter()
+            .map(|p| p.as_ref())
+            .collect::<Vec<_>>()
+            .join(separator);
         Self {
             parts: Arc::new(parts),
             separator,
+            cached: IStr::from(joined.as_str()),
         }
     }
 
     pub fn from_parts(parts: &[&str], separator: &'static str) -> Self {
         let sv: SmallVec<[Arc<str>; 4]> = parts.iter().map(|s| Arc::from(*s)).collect();
         Self::new(sv, separator)
+    }
+
+    /// The cached interned string representation.
+    pub fn as_istr(&self) -> IStr {
+        self.cached
     }
 
     /// The leaf name (last segment).
@@ -78,13 +92,7 @@ impl Fqn {
 
 impl std::fmt::Display for Fqn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (i, part) in self.parts.iter().enumerate() {
-            if i > 0 {
-                f.write_str(self.separator)?;
-            }
-            f.write_str(part)?;
-        }
-        Ok(())
+        f.write_str(&self.cached)
     }
 }
 

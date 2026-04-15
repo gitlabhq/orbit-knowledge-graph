@@ -1,22 +1,39 @@
 use code_graph_config::{Language, detect_language_from_extension};
 use code_graph_types::CanonicalParser;
 use ignore::WalkBuilder;
-use parser_core::dsl::types::DslParser;
-use parser_core::v2::langs::{
-    csharp::CSharpDsl, java::JavaDsl, kotlin::KotlinDsl, python::PythonDsl,
-};
+use indicatif::{ProgressBar, ProgressStyle};
+use parser_core::dsl::types::{DslLanguage, DslParser};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Mutex;
 
-use crate::linker::v2::{
-    CodeGraph, GraphBuilder, GraphEdge, NoResolver, ReferenceResolver, ResolutionContext,
-    RulesResolver,
-};
-use crate::v2::lang_rules::java::JavaRules;
-use crate::v2::lang_rules::kotlin::KotlinRules;
-use crate::v2::lang_rules::python::PythonRules;
+use crate::linker::v2::walker::{FileWalkResult, HasRoot};
+use crate::linker::v2::{CodeGraph, HasRules, build_edges};
+
+fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
+    let pb = ProgressBar::new(len);
+    pb.set_style(
+        ProgressStyle::with_template("{prefix} [{bar:40}] {pos}/{len} ({per_sec}, {eta})")
+            .unwrap()
+            .progress_chars("█▓░"),
+    );
+    pb.set_prefix(prefix.to_string());
+    pb
+}
+
+fn spinner(msg: &str) -> ProgressBar {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
+    pb.set_message(msg.to_string());
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+    pb
+}
+use crate::v2::langs::csharp::CSharpDsl;
+use crate::v2::langs::java::{JavaDsl, JavaRules};
+use crate::v2::langs::kotlin::{KotlinDsl, KotlinRules};
+use crate::v2::langs::python::{PythonDsl, PythonRules};
 
 /// Input to a language pipeline: file path + source bytes.
 pub type FileInput = (String, Vec<u8>);
@@ -25,12 +42,9 @@ pub type FileInput = (String, Vec<u8>);
 ///
 /// Two strategies:
 /// - **Generic**: `GenericPipeline<P, R>` for languages using the standard
-///   `CanonicalParser → Resolver → GraphBuilder` flow.
+///   parse+walk → resolve → graph flow.
 /// - **Custom**: implement directly for languages that need full control
 ///   over parsing and linking (e.g. Ruby).
-///
-/// Each pipeline receives all files for its language at once (needed
-/// for cross-file resolution) and produces a `CodeGraph`.
 pub trait LanguagePipeline {
     fn process_files(
         files: Vec<FileInput>,
@@ -38,102 +52,118 @@ pub trait LanguagePipeline {
     ) -> Result<CodeGraph, Vec<PipelineError>>;
 }
 
-/// Generic pipeline parameterized by parser `P` and resolver `R`.
+/// Generic pipeline parameterized by parser `P` and rules `R`.
 ///
-/// - `P` produces `(CanonicalResult, P::Ast)` per file (parallel)
-/// - `R` resolves references across all results + ASTs into edges (sync)
-/// - `GraphBuilder` constructs the final graph with structural + resolved edges
-pub struct GenericPipeline<P: CanonicalParser, R: ReferenceResolver<P::Ast>>(PhantomData<(P, R)>);
+/// Streaming architecture:
+/// 1. **Parallel**: parse + walk each file, drop AST immediately
+/// 2. **Sequential**: build indexes, resolve cross-file references, build graph
+pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
 where
     P: CanonicalParser + Default + Sync + Send,
-    P::Ast: Send,
-    R: ReferenceResolver<P::Ast>,
+    P::Ast: HasRoot + Send,
+    R: HasRules + Send + Sync,
 {
     fn process_files(
         files: Vec<FileInput>,
         root_path: &str,
     ) -> Result<CodeGraph, Vec<PipelineError>> {
         let parser = P::default();
+        let rules = R::rules();
+        let file_count = files.len();
+        let num_threads = rayon::current_num_threads();
+        let t0 = std::time::Instant::now();
 
-        // Parse all files in parallel
-        let parse_results: Vec<_> = files
+        eprintln!("[v2] {file_count} files, {num_threads} threads");
+
+        // Graph exists before the parallel phase. Each file locks it
+        // briefly to add nodes, gets NodeIndex values, then walks.
+        let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
+
+        // ── Parallel phase: parse + add nodes + walk ────────────
+        let pb = progress_bar(file_count as u64, "Parse + walk");
+        let file_outputs: Vec<_> = files
             .par_iter()
-            .map(|(path, source)| {
-                parser.parse_file(source, path).map_err(|e| PipelineError {
+            .enumerate()
+            .map(|(file_idx, (path, source))| {
+                let (result, ast) = parser.parse_file(source, path).map_err(|e| PipelineError {
                     file_path: path.clone(),
                     error: format!("Parse error: {e}"),
-                })
+                })?;
+
+                // Add this file's nodes to the graph under the lock.
+                let (def_nodes, import_nodes) = {
+                    let mut g = graph.lock().unwrap();
+                    g.add_file_nodes(&result, file_idx)
+                };
+
+                let walk = if let Some(root) = ast.as_root() {
+                    crate::linker::v2::walker::walk_file(
+                        &rules,
+                        file_idx,
+                        &result,
+                        &root,
+                        &def_nodes,
+                        &import_nodes,
+                    )
+                } else {
+                    FileWalkResult::empty()
+                };
+
+                pb.inc(1);
+                Ok((result, walk))
             })
             .collect();
+        pb.finish_with_message(format!(
+            "Parse + walk: {file_count} files in {:.2?}",
+            t0.elapsed()
+        ));
 
-        let mut canonical_results = Vec::new();
-        let mut asts: FxHashMap<String, P::Ast> = FxHashMap::default();
+        // ── Collect results ─────────────────────────────────────
+        let mut results = Vec::with_capacity(file_outputs.len());
+        let mut walks = Vec::with_capacity(file_outputs.len());
         let mut errors = Vec::new();
 
-        for r in parse_results {
-            match r {
-                Ok((result, ast)) => {
-                    asts.insert(result.file_path.clone(), ast);
-                    canonical_results.push(result);
+        for output in file_outputs {
+            match output {
+                Ok((result, walk)) => {
+                    results.push(result);
+                    walks.push(walk);
                 }
                 Err(err) => errors.push(err),
             }
         }
 
-        if !errors.is_empty() && canonical_results.is_empty() {
+        if !errors.is_empty() && results.is_empty() {
             return Err(errors);
         }
 
-        // Build resolution context — owns results + ASTs
-        let ctx = ResolutionContext::build(canonical_results, asts, root_path.to_string());
+        // ── Sequential phase ────────────────────────────────────
+        let total_defs: usize = results.iter().map(|r| r.definitions.len()).sum();
+        let total_refs: usize = results.iter().map(|r| r.references.len()).sum();
+        let total_imports: usize = results.iter().map(|r| r.imports.len()).sum();
+        eprintln!(
+            "[v2] {total_defs} defs, {total_refs} refs, {total_imports} imports, {} errors",
+            errors.len()
+        );
 
-        // Resolve references
-        let resolved_edges = R::resolve(&ctx);
+        let t2 = std::time::Instant::now();
+        let mut graph = graph.into_inner().unwrap();
+        graph.finalize(&results);
+        eprintln!("[v2] graph finalize: {:.2?}", t2.elapsed());
 
-        // Build the graph with structural edges + resolved edges
-        let mut builder = GraphBuilder::new(root_path.to_string());
-        for result in &ctx.results {
-            builder.add_result(result.clone());
-        }
+        let t3 = std::time::Instant::now();
+        let result = build_edges(&rules, &graph, &results, &mut walks, &rules.settings);
+        eprintln!(
+            "[v2] resolve: {} edges in {:.2?}",
+            result.edges.len(),
+            t3.elapsed()
+        );
+        result.stats.print();
 
-        let mut graph = builder.build();
-
-        // Add resolved edges to the petgraph
-        for edge in resolved_edges {
-            use crate::linker::v2::EdgeSource;
-
-            let src_node = match edge.source {
-                EdgeSource::Definition(def_ref) => graph
-                    .def_index
-                    .get(&(def_ref.file_idx, def_ref.def_idx))
-                    .copied(),
-                EdgeSource::File(file_idx) => {
-                    let file_path = &ctx.results[file_idx].file_path;
-                    let relative: &str = file_path
-                        .strip_prefix(root_path)
-                        .map(|p: &str| p.strip_prefix('/').unwrap_or(p))
-                        .unwrap_or(file_path);
-                    graph.file_index.get(relative).copied()
-                }
-            };
-            let tgt_node = graph
-                .def_index
-                .get(&(edge.target.file_idx, edge.target.def_idx))
-                .copied();
-
-            if let (Some(src), Some(tgt)) = (src_node, tgt_node) {
-                graph.graph.add_edge(
-                    src,
-                    tgt,
-                    GraphEdge {
-                        relationship: edge.relationship,
-                        source_definition_range: None,
-                        target_definition_range: None,
-                    },
-                );
-            }
+        for (src, tgt, edge) in result.edges {
+            graph.graph.add_edge(src, tgt, edge);
         }
 
         Ok(graph)
@@ -162,12 +192,33 @@ macro_rules! register_v2_pipelines {
     };
 }
 
+/// No-op rules for languages without resolution (parse-only).
+pub struct NoRules;
+impl HasRules for NoRules {
+    fn rules() -> crate::linker::v2::ResolutionRules {
+        let spec = CSharpDsl::spec();
+        let scopes = crate::linker::v2::ResolutionRules::derive_scopes(&spec);
+        crate::linker::v2::ResolutionRules::new(
+            "noop",
+            scopes,
+            spec,
+            vec![],
+            vec![],
+            crate::linker::v2::rules::ChainMode::ValueFlow,
+            crate::linker::v2::rules::ReceiverMode::None,
+            ".",
+            &[],
+            None,
+        )
+    }
+}
+
 register_v2_pipelines! {
-    // Generic: DSL parser + SSA resolver
-    Python  => GenericPipeline<DslParser<PythonDsl>, RulesResolver<PythonRules>>,
-    Java    => GenericPipeline<DslParser<JavaDsl>, RulesResolver<JavaRules>>,
-    Kotlin  => GenericPipeline<DslParser<KotlinDsl>, RulesResolver<KotlinRules>>,
-    CSharp  => GenericPipeline<DslParser<CSharpDsl>, NoResolver>,
+    // Generic: DSL parser + rules-based SSA resolver
+    Python  => GenericPipeline<DslParser<PythonDsl>, PythonRules>,
+    Java    => GenericPipeline<DslParser<JavaDsl>, JavaRules>,
+    Kotlin  => GenericPipeline<DslParser<KotlinDsl>, KotlinRules>,
+    CSharp  => GenericPipeline<DslParser<CSharpDsl>, NoRules>,
 
     // Custom: full control over parse + link
     Ruby    => crate::v2::custom::ruby::RubyPipeline,
@@ -221,7 +272,17 @@ impl Pipeline {
         let root_str = root.to_string_lossy().to_string();
 
         // 1. Walk filesystem, group files by language
+        let pb_discover = spinner("Discovering files...");
         let files_by_language = self.walk_and_group(root);
+        let total_files: usize = files_by_language.values().map(|f| f.len()).sum();
+        let lang_summary: Vec<String> = files_by_language
+            .iter()
+            .map(|(l, f)| format!("{l}: {}", f.len()))
+            .collect();
+        pb_discover.finish_with_message(format!(
+            "Found {total_files} files ({})",
+            lang_summary.join(", ")
+        ));
 
         // 2. Process each language through its pipeline
         let mut all_graphs: Vec<CodeGraph> = Vec::new();
@@ -231,22 +292,28 @@ impl Pipeline {
 
         for (language, files) in files_by_language {
             let file_count = files.len();
+            eprintln!("[v2] processing {language}: {file_count} files");
+            let t_lang = std::time::Instant::now();
 
             match dispatch_language(language, files, &root_str) {
                 Some(Ok(graph)) => {
+                    eprintln!(
+                        "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
+                        t_lang.elapsed(),
+                        graph.node_count(),
+                        graph.edge_count()
+                    );
                     files_parsed += file_count;
                     all_graphs.push(graph);
                 }
                 Some(Err(errors)) => {
+                    eprintln!("[v2] {language}: failed with {} errors", errors.len());
                     files_skipped += file_count;
                     all_errors.extend(errors);
                 }
                 None => {
+                    eprintln!("[v2] {language}: not supported, skipping {file_count} files");
                     files_skipped += file_count;
-                    all_errors.push(PipelineError {
-                        file_path: String::new(),
-                        error: format!("Language {language} not yet supported in v2 pipeline"),
-                    });
                 }
             }
         }
@@ -298,12 +365,12 @@ impl Pipeline {
                 continue;
             };
 
-            let path_str = path.to_string_lossy();
+            let rel_path = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
             if let Some(lang) = detect_language_from_extension(ext) {
                 if lang
                     .exclude_extensions()
                     .iter()
-                    .any(|excl| path_str.ends_with(excl))
+                    .any(|excl| rel_path.ends_with(excl))
                 {
                     continue;
                 }
@@ -316,7 +383,7 @@ impl Pipeline {
                 groups
                     .entry(lang)
                     .or_default()
-                    .push((path_str.to_string(), source));
+                    .push((rel_path.to_string(), source));
             }
         }
 
@@ -351,12 +418,72 @@ impl Pipeline {
                 }
             }
 
-            // Remap def_index
-            for (key, old_idx) in &g.def_index {
-                if let Some(&new_idx) = index_map.get(old_idx) {
-                    merged.def_index.insert(*key, new_idx);
+            // Remap resolution indexes
+            for (fqn, nodes) in &g.def_by_fqn {
+                let remapped: Vec<_> = nodes
+                    .iter()
+                    .filter_map(|i| index_map.get(i).copied())
+                    .collect();
+                merged
+                    .def_by_fqn
+                    .entry(fqn.clone())
+                    .or_default()
+                    .extend(remapped);
+            }
+            for (name, nodes) in &g.def_by_name {
+                let remapped: Vec<_> = nodes
+                    .iter()
+                    .filter_map(|i| index_map.get(i).copied())
+                    .collect();
+                merged
+                    .def_by_name
+                    .entry(name.clone())
+                    .or_default()
+                    .extend(remapped);
+            }
+            for (fp, nodes) in &g.defs_by_file {
+                let remapped: Vec<_> = nodes
+                    .iter()
+                    .filter_map(|i| index_map.get(i).copied())
+                    .collect();
+                merged
+                    .defs_by_file
+                    .entry(fp.clone())
+                    .or_default()
+                    .extend(remapped);
+            }
+            for (fp, nodes) in &g.imports_by_file {
+                let remapped: Vec<_> = nodes
+                    .iter()
+                    .filter_map(|i| index_map.get(i).copied())
+                    .collect();
+                merged
+                    .imports_by_file
+                    .entry(fp.clone())
+                    .or_default()
+                    .extend(remapped);
+            }
+            for (class_fqn, member_map) in &g.members {
+                for (member_name, nodes) in member_map {
+                    let remapped: Vec<_> = nodes
+                        .iter()
+                        .filter_map(|i| index_map.get(i).copied())
+                        .collect();
+                    merged
+                        .members
+                        .entry(class_fqn.clone())
+                        .or_default()
+                        .entry(member_name.clone())
+                        .or_default()
+                        .extend(remapped);
                 }
             }
+            merged
+                .supers
+                .extend(g.supers.iter().map(|(k, v)| (k.clone(), v.clone())));
+            merged
+                .ancestors
+                .extend(g.ancestors.iter().map(|(k, v)| (k.clone(), v.clone())));
 
             for old_edge in g.graph.edge_indices() {
                 let (src, tgt) = g.graph.edge_endpoints(old_edge).unwrap();

@@ -28,6 +28,7 @@ DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.21.5"
 "cargo:ast-grep" = "0.42.0"
+"cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.5.0"
 "cargo:cargo-bolero" = "0.13.4"
 "sccache" = "0.13.0"
 "zig" = "0.15.2"
@@ -192,6 +193,18 @@ description = "Download benchmark repositories"
 depends = ["bench:download-repos"]
 run = "cargo build --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
 description = "Run code indexing benchmark"
+
+[tasks."bench:v2"]
+depends = ["bench:download-repos"]
+run = """
+cargo build --bin orbit --release --features duckdb-client/bundled
+for repo in output/repos/*/; do
+  name=$(basename "$repo")
+  echo "=== Indexing $name with v2 ==="
+  ./target/release/orbit index "$repo" --v2 --stats 2>&1 || echo "FAILED: $name"
+done
+"""
+description = "Run v2 pipeline against all downloaded benchmark repos"
 
 [tasks."bench:list-repos"]
 run = "gitlab-xtasks benchmark list-repos --config code-indexing-benchmark.yaml"

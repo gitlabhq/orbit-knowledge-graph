@@ -69,7 +69,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { caller: "caller_a", callee: "target_a" } }
+      - { contains_row: { caller: "main.caller_a", callee: "main.target_a" } }
 
   - name: "Reassignment: x = option1; x = option2; x() resolves to option2"
     description: "Latest assignment wins — x() should NOT resolve to option1"
@@ -80,7 +80,7 @@ tests:
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
-          - { contains_row: { caller: "reassignment_caller", callee: "option2" } }
+          - { contains_row: { caller: "main.reassignment_caller", callee: "main.option2" } }
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'reassignment_caller' AND callee.name = 'option1'
@@ -96,7 +96,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { caller: "Calculator.compute", callee: "Calculator.add" } }
+      - { contains_row: { caller: "main.Calculator.compute", callee: "main.Calculator.add" } }
 
   - name: "Recursive: factorial calls itself"
     description: "factorial(n-1) inside factorial resolves to factorial — a self-edge"
@@ -106,7 +106,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { caller: "factorial", callee: "factorial" } }
+      - { contains_row: { caller: "main.factorial", callee: "main.factorial" } }
 
   - name: "Lambda: use_lambda calls square"
     description: "square(5) resolves to the lambda definition"
@@ -126,7 +126,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { caller: "call_decorated", callee: "decorated_fn" } }
+      - { contains_row: { caller: "main.call_decorated", callee: "main.decorated_fn" } }
 
   - name: "Instantiation: create_service calls Service"
     description: "Service() class instantiation produces a call edge to the class definition"
@@ -136,7 +136,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { caller: "create_service", callee: "Service" } }
+      - { contains_row: { caller: "main.create_service", callee: "main.Service" } }
 
   - name: "Total call edges from all callers"
     description: "7 callers, each producing exactly 1 call edge = 7 total def-to-def call edges"
