@@ -202,8 +202,8 @@ impl LanguageSpec {
         }
 
         // Extract branches
-        if let Some(&rule_idx) = self.branch_dispatch.get(node_kind_ref).and_then(|v| v.first())
-            && let rule = &self.branches[rule_idx] {
+        if let Some(&rule_idx) = self.branch_dispatch.get(node_kind_ref).and_then(|v| v.first()) {
+            let rule = &self.branches[rule_idx];
             let byte_range = (node.range().start, node.range().end);
             let mut children = Vec::new();
 
@@ -240,8 +240,8 @@ impl LanguageSpec {
         }
 
         // Extract loops
-        if let Some(&rule_idx) = self.loop_dispatch.get(node_kind_ref).and_then(|v| v.first())
-            && let rule = &self.loops[rule_idx] {
+        if let Some(&rule_idx) = self.loop_dispatch.get(node_kind_ref).and_then(|v| v.first()) {
+            let rule = &self.loops[rule_idx];
             let byte_range = (node.range().start, node.range().end);
             let mut children = Vec::new();
 
@@ -407,8 +407,8 @@ impl LanguageSpec {
         }
 
         // Call expression with object field (method_invocation, call_expression)
-        if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first())
-            && let rule = &self.refs[rule_idx] {
+        if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
+            let rule = &self.refs[rule_idx];
             if let Some(extract) = &rule.receiver_extract
                 && let Some(recv) = extract.resolve(node)
             {
@@ -433,7 +433,14 @@ impl LanguageSpec {
         node_kind: &str,
         imports: &mut Vec<CanonicalImport>,
     ) {
-        let Some(rule) = self.imports.iter().find(|r| r.matches(node, node_kind)) else {
+        let Some(indices) = self.import_dispatch.get(node_kind) else {
+            return;
+        };
+        let Some(rule) = indices
+            .iter()
+            .map(|&i| &self.imports[i])
+            .find(|r| r.condition().is_none_or(|c| c.test(node)))
+        else {
             return;
         };
 
