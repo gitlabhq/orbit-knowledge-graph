@@ -61,7 +61,6 @@ once_cell = "1.21.3"
 parking_lot = "0.12.5"
 pastey = "0.2.1"
 petgraph = "0.8.3"
-lance-graph = { version = "0.5.4", default-features = false }
 globset = "0.4"
 rust-lapper = "1.2.0"
 rustc-hash = "2.1.1"
@@ -122,6 +121,9 @@ sqlformat = "0.5"
 tabled = "0.20"
 indicatif = "0.18"
 
+# Codegraph integration tests dependencies
+arrow_56 = { package = "arrow", version = "56" }
+lance-graph = { version = "0.5.4", default-features = false }
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
