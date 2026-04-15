@@ -287,17 +287,14 @@ impl<'a> Resolver<'a> {
             chain
         };
 
-        let t_base = std::time::Instant::now();
         let mut current_types =
             self.resolve_base(&effective_chain[0], read.block, enclosing.as_deref());
-        let base_time = t_base.elapsed();
 
         if current_types.is_empty() {
             return self.chain_fallback(read, chain);
         }
 
         let mut compound_key = self.compound_key_base(&effective_chain[0]);
-        let mut slow_steps: Vec<(usize, String, std::time::Duration)> = Vec::new();
 
         for (i, step) in effective_chain[1..].iter().enumerate() {
             let is_last = i == effective_chain.len() - 2;
@@ -306,23 +303,9 @@ impl<'a> Resolver<'a> {
                 _ => continue,
             };
 
-            let t_step = std::time::Instant::now();
-            let (next_types, found_members) = self.walk_step(&current_types, step, member_name);
-            let step_time = t_step.elapsed();
-            if step_time.as_millis() >= 10 {
-                slow_steps.push((i, member_name.to_string(), step_time));
-            }
+            let (mut next_types, found_members) = self.walk_step(&current_types, step, member_name);
 
             if is_last && !found_members.is_empty() {
-                if base_time.as_millis() >= 50 || !slow_steps.is_empty() {
-                    let file = &self.ctx.results[read.file_idx].file_path;
-                    eprintln!(
-                        "\x1b[33m[CHAIN] {} base={:.1?} steps={} types={:?} slow={:?}\x1b[0m",
-                        file, base_time, effective_chain.len(),
-                        current_types.iter().map(|t| t.to_string()).collect::<Vec<_>>(),
-                        slow_steps,
-                    );
-                }
                 let mut result = found_members;
                 dedup(&mut result);
                 return result;
@@ -338,6 +321,12 @@ impl<'a> Resolver<'a> {
                 compound_key.clear();
             }
 
+            // Deduplicate types to prevent exponential growth in
+            // builder chains where every method returns the same type.
+            {
+                let mut seen = FxHashSet::default();
+                next_types.retain(|t| seen.insert(*t));
+            }
             current_types = next_types;
             if current_types.is_empty() {
                 break;

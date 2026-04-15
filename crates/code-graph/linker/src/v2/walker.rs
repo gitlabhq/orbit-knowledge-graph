@@ -243,6 +243,17 @@ impl<'a> FileWalker<'a> {
         }
     }
 
+    /// Resolve a bare type name to a full FQN using the current file's
+    /// definitions. Returns the FQN if found, bare name otherwise.
+    fn resolve_local_type(&self, bare_name: &str) -> String {
+        for def in &self.result.definitions {
+            if *def.name == *bare_name && def.kind.is_type_container() {
+                return def.fqn.to_string();
+            }
+        }
+        bare_name.to_string()
+    }
+
     /// Build a dotted FQN from the scope stack names + a new name.
     fn build_fqn(&self, name: &str) -> String {
         let sep = self.rules.fqn_separator;
@@ -263,7 +274,7 @@ impl<'a> FileWalker<'a> {
             .find(|d| d.name == class_name)
             .and_then(|d| d.metadata.as_ref())
             .and_then(|m| m.super_types.first())
-            .cloned()
+            .map(|s| self.resolve_local_type(s))
     }
 
     /// Branch handling per Braun et al. §2.3 (Figure 3b).
@@ -438,7 +449,8 @@ impl<'a> FileWalker<'a> {
             if let Some(type_node) = node.field(field_name) {
                 let type_text = type_node.text().to_string();
                 if !skip_types.iter().any(|&s| s == type_text) {
-                    return Some(Value::type_of(&type_text));
+                    let resolved = self.resolve_local_type(&type_text);
+                    return Some(Value::type_of(&resolved));
                 }
             }
         }
