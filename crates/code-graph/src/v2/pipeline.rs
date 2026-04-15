@@ -137,12 +137,14 @@ where
         eprintln!("[v2] indexes: {:.2?}", t2.elapsed());
 
         let t3 = std::time::Instant::now();
-        let resolved_edges = build_edges(&rules, &ctx, &mut walks);
+        let result = build_edges(&rules, &ctx, &mut walks);
+        let resolved_edges = result.edges;
         eprintln!(
             "[v2] resolve: {} edges in {:.2?}",
             resolved_edges.len(),
             t3.elapsed()
         );
+        result.stats.print();
 
         let mut builder = GraphBuilder::new(root_path.to_string());
         for result in &ctx.results {

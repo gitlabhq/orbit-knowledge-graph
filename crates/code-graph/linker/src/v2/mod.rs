@@ -11,9 +11,9 @@ pub mod walker;
 
 pub use builder::GraphBuilder;
 pub use context::{DefRef, MemberIndex, ResolutionContext, ScopedDef};
-pub use edge_builder::{HasRules, build_edges};
+pub use edge_builder::{BuildEdgesResult, HasRules, ResolveStats, build_edges};
 pub use edges::{EdgeSource, ResolvedEdge};
 pub use graph::{CodeGraph, GraphEdge, GraphNode};
 pub use resolver::{GlobalBacktracker, NoResolver, ReferenceResolver};
 pub use rules::ResolutionRules;
-pub use ssa::{BlockId, ReachingDefs, SsaResolver, Value};
+pub use ssa::{BlockId, ReachingDefs, SsaResolver, SsaStats, Value};

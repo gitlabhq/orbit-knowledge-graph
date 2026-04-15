@@ -92,6 +92,45 @@ impl ReachingDefs {
     }
 }
 
+// ── SSA Stats ───────────────────────────────────────────────────
+
+/// Per-file SSA statistics, collected during resolution reads.
+#[derive(Debug, Clone, Default)]
+pub struct SsaStats {
+    /// Total `read_variable_stateless` calls.
+    pub reads: u64,
+    /// Read resolved from current block's `current_def` (no predecessor walk).
+    pub local_hits: u64,
+    /// Read required walking predecessors (`read_variable_recursive`).
+    pub recursive_lookups: u64,
+    /// Read hit an unsealed block (incomplete phi created).
+    pub unsealed_hits: u64,
+    /// Read hit a block with zero predecessors (returned Opaque).
+    pub dead_end_hits: u64,
+    /// Phi nodes created during reads.
+    pub phis_created: u64,
+    /// Phi nodes that were trivially eliminated (collapsed to single value).
+    pub phis_trivial: u64,
+    /// Total variable writes.
+    pub writes: u64,
+    /// Total blocks created.
+    pub blocks_created: u64,
+}
+
+impl SsaStats {
+    pub fn merge(&mut self, other: &SsaStats) {
+        self.reads += other.reads;
+        self.local_hits += other.local_hits;
+        self.recursive_lookups += other.recursive_lookups;
+        self.unsealed_hits += other.unsealed_hits;
+        self.dead_end_hits += other.dead_end_hits;
+        self.phis_created += other.phis_created;
+        self.phis_trivial += other.phis_trivial;
+        self.writes += other.writes;
+        self.blocks_created += other.blocks_created;
+    }
+}
+
 // ── SSA Resolver ────────────────────────────────────────────────
 
 /// SSA-based reaching definitions resolver (Braun et al. algorithm).
@@ -106,6 +145,8 @@ pub struct SsaResolver {
     current_def: FxHashMap<VarName, FxHashMap<BlockId, Value>>,
     /// Incomplete phis for unsealed blocks: block → variable → phi_id
     incomplete_phis: FxHashMap<BlockId, FxHashMap<VarName, PhiId>>,
+    /// Counters for SSA operations.
+    pub stats: SsaStats,
 }
 
 impl SsaResolver {
@@ -115,6 +156,7 @@ impl SsaResolver {
             phis: Vec::with_capacity(8),
             current_def: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             incomplete_phis: FxHashMap::default(),
+            stats: SsaStats::default(),
         }
     }
 
@@ -125,6 +167,7 @@ impl SsaResolver {
             predecessors: SmallVec::new(),
             sealed: false,
         });
+        self.stats.blocks_created += 1;
         id
     }
 
@@ -160,10 +203,12 @@ impl SsaResolver {
             .entry(var)
             .or_default()
             .insert(block, value);
+        self.stats.writes += 1;
     }
 
     /// Look up a variable's reaching definitions without recording the read.
     pub fn read_variable_stateless(&mut self, variable: &str, block: BlockId) -> ReachingDefs {
+        self.stats.reads += 1;
         let var = Intern::from(variable);
         let value = self.read_variable_internal(var, block);
         self.resolve_value(&value)
@@ -176,10 +221,12 @@ impl SsaResolver {
         if let Some(block_defs) = self.current_def.get(&variable)
             && let Some(value) = block_defs.get(&block)
         {
+            self.stats.local_hits += 1;
             return value.clone();
         }
 
         // Global value numbering
+        self.stats.recursive_lookups += 1;
         self.read_variable_recursive(variable, block)
     }
 
@@ -189,6 +236,7 @@ impl SsaResolver {
         let num_preds = self.blocks[block.0].predecessors.len();
 
         if !sealed {
+            self.stats.unsealed_hits += 1;
             let phi_id = self.new_phi(block, variable);
             self.incomplete_phis
                 .entry(block)
@@ -196,6 +244,7 @@ impl SsaResolver {
                 .insert(variable, phi_id);
             val = Value::Phi(phi_id);
         } else if num_preds == 0 {
+            self.stats.dead_end_hits += 1;
             val = Value::Opaque;
         } else if num_preds == 1 {
             let pred = self.blocks[block.0].predecessors[0];
@@ -220,6 +269,7 @@ impl SsaResolver {
     }
 
     fn new_phi(&mut self, block: BlockId, variable: VarName) -> PhiId {
+        self.stats.phis_created += 1;
         let id = PhiId(self.phis.len());
         self.phis.push(PhiNode {
             block,
@@ -257,6 +307,7 @@ impl SsaResolver {
         }
 
         let replacement = same.unwrap_or(Value::Opaque);
+        self.stats.phis_trivial += 1;
 
         let variable = self.phis[phi_id.0].variable;
         let block = self.phis[phi_id.0].block;
