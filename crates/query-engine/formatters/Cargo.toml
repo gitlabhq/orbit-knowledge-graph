@@ -4,6 +4,10 @@ version.workspace = true
 edition = "2024"
 license = "MIT"
 
+[features]
+default = []
+testutils = []
+
 [dependencies]
 gkg-utils = { path = "../../utils" }
 indexmap = { workspace = true }

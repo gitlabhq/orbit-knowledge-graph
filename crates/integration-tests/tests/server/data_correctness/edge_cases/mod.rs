@@ -362,6 +362,60 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
     resp.assert_node_absent("Group", 102);
 }
 
+/// Cross-namespace neighbors isolation: scoped to `1/101/`, neighbors of
+/// Group 101 must only include entities connected via edges in the `1/101/`
+/// subtree. Users with MEMBER_OF edges in other namespaces and projects
+/// contained in other groups must not leak into the result.
+pub(super) async fn neighbors_cross_namespace_no_false_positives(ctx: &TestContext) {
+    let ctx_101 = SecurityContext::new(1, vec!["1/101/".into()]).unwrap();
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "g", "entity": "Group", "node_ids": [101]},
+            "neighbors": {"node": "g", "direction": "both"}
+        }"#,
+        &allow_all(),
+        ctx_101,
+    )
+    .await;
+
+    // Group 101 has incoming MEMBER_OF from Users 3, 4, 5, 6 (edges in 1/101/),
+    // outgoing CONTAINS to Projects 1001, 1003 (edges in 1/101/1001/ and 1/101/1003/),
+    // and incoming IN_GROUP from WorkItem 4002 (edge in 1/101/).
+    resp.assert_node_count(8);
+    resp.assert_node_ids("Group", &[101]);
+    resp.assert_node_ids("User", &[3, 4, 5, 6]);
+    resp.assert_node_ids("Project", &[1001, 1003]);
+    resp.assert_node_ids("WorkItem", &[4002]);
+
+    // MEMBER_OF edges from 1/101/
+    resp.assert_edge_exists("User", 3, "Group", 101, "MEMBER_OF");
+    resp.assert_edge_exists("User", 4, "Group", 101, "MEMBER_OF");
+    resp.assert_edge_exists("User", 5, "Group", 101, "MEMBER_OF");
+    resp.assert_edge_exists("User", 6, "Group", 101, "MEMBER_OF");
+
+    // CONTAINS edges from 1/101/ subtree
+    resp.assert_edge_exists("Group", 101, "Project", 1001, "CONTAINS");
+    resp.assert_edge_exists("Group", 101, "Project", 1003, "CONTAINS");
+
+    // IN_GROUP edge from 1/101/
+    resp.assert_edge_exists("WorkItem", 4002, "Group", 101, "IN_GROUP");
+
+    // Users whose MEMBER_OF edges are only in other namespaces must not appear
+    resp.assert_node_absent("User", 1); // MEMBER_OF Group 100 (1/100/) and Group 102 (1/102/)
+    resp.assert_node_absent("User", 2); // MEMBER_OF Group 100 (1/100/)
+
+    // Projects and groups from other namespaces must not leak
+    resp.assert_node_absent("Group", 100);
+    resp.assert_node_absent("Group", 200);
+    resp.assert_node_absent("Project", 1000); // in 1/100/1000/
+    resp.assert_node_absent("Project", 1002); // in 1/100/1002/
+    resp.assert_node_absent("Project", 1004); // in 1/102/1004/
+
+    resp.assert_referential_integrity();
+}
+
 pub(super) async fn empty_result_has_valid_schema(ctx: &TestContext) {
     let resp = run_query(
         ctx,
