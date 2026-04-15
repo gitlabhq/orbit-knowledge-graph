@@ -1,4 +1,4 @@
-use rustc_hash::FxHashSet;
+use rustc_hash::FxHashMap;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -670,6 +670,37 @@ impl LoopRule {
 /// Function type for custom import handling.
 pub type CustomImportFn = fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool;
 
+fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {
+    let mut map: FxHashMap<&'static str, Vec<usize>> = FxHashMap::default();
+    for (i, rule) in rules.iter().enumerate() {
+        for &kind in &rule.kinds {
+            map.entry(kind).or_default().push(i);
+        }
+    }
+    map
+}
+
+fn build_dispatch_ref(rules: &[ReferenceRule]) -> FxHashMap<&'static str, Vec<usize>> {
+    build_dispatch_generic(rules, |r| &r.kinds)
+}
+
+fn build_dispatch_import(rules: &[ImportRule]) -> FxHashMap<&'static str, Vec<usize>> {
+    build_dispatch_generic(rules, |r| &r.kinds)
+}
+
+fn build_dispatch_generic<T>(
+    rules: &[T],
+    get_kinds: impl Fn(&T) -> &[&'static str],
+) -> FxHashMap<&'static str, Vec<usize>> {
+    let mut map: FxHashMap<&'static str, Vec<usize>> = FxHashMap::default();
+    for (i, rule) in rules.iter().enumerate() {
+        for &kind in get_kinds(rule) {
+            map.entry(kind).or_default().push(i);
+        }
+    }
+    map
+}
+
 pub struct LanguageSpec {
     pub name: &'static str,
     pub scopes: Vec<ScopeRule>,
@@ -679,10 +710,18 @@ pub struct LanguageSpec {
     pub branches: Vec<BranchRule>,
     pub loops: Vec<LoopRule>,
     pub chain_config: Option<ChainConfig>,
-    pub(crate) scope_kinds: FxHashSet<&'static str>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,
     pub(crate) module_from_path: bool,
+
+    // Dispatch tables: node_kind → indices into the corresponding rule Vec.
+    // Built once at construction, O(1) lookup per node during walk.
+    pub(crate) scope_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub(crate) ref_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub(crate) import_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub(crate) binding_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub(crate) branch_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub(crate) loop_dispatch: FxHashMap<&'static str, Vec<usize>>,
 }
 
 impl LanguageSpec {
@@ -692,7 +731,9 @@ impl LanguageSpec {
         refs: Vec<ReferenceRule>,
         imports: Vec<ImportRule>,
     ) -> Self {
-        let scope_kinds = scopes.iter().flat_map(|r| r.kinds.iter().copied()).collect();
+        let scope_dispatch = build_dispatch(&scopes);
+        let ref_dispatch = build_dispatch_ref(&refs);
+        let import_dispatch = build_dispatch_import(&imports);
         Self {
             name,
             scopes,
@@ -702,24 +743,32 @@ impl LanguageSpec {
             branches: Vec::new(),
             loops: Vec::new(),
             chain_config: None,
-            scope_kinds,
             package_node: None,
             custom_import_fn: None,
             module_from_path: false,
+            scope_dispatch,
+            ref_dispatch,
+            import_dispatch,
+            binding_dispatch: FxHashMap::default(),
+            branch_dispatch: FxHashMap::default(),
+            loop_dispatch: FxHashMap::default(),
         }
     }
 
     pub fn with_bindings(mut self, bindings: Vec<BindingRule>) -> Self {
+        self.binding_dispatch = build_dispatch_generic(&bindings, |b| &b.kinds);
         self.bindings = bindings;
         self
     }
 
     pub fn with_branches(mut self, branches: Vec<BranchRule>) -> Self {
+        self.branch_dispatch = build_dispatch_generic(&branches, |b| &b.kinds);
         self.branches = branches;
         self
     }
 
     pub fn with_loops(mut self, loops: Vec<LoopRule>) -> Self {
+        self.loop_dispatch = build_dispatch_generic(&loops, |l| &l.kinds);
         self.loops = loops;
         self
     }
@@ -748,7 +797,5 @@ impl LanguageSpec {
         self
     }
 
-    pub(crate) fn is_scope_candidate(&self, kind: &str) -> bool {
-        self.scope_kinds.contains(kind)
-    }
+
 }
