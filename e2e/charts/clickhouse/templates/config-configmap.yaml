@@ -3,7 +3,7 @@ kind: ConfigMap
 metadata:
   name: {{ .Release.Name }}-config
 data:
-  low_memory.xml: |
+  low_memory_server.xml: |
     <clickhouse>
         <!-- Cap server to 75% of container memory limit -->
         <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
@@ -17,7 +17,9 @@ data:
         <merge_tree>
             <merge_max_block_size>1024</merge_max_block_size>
         </merge_tree>
-
+    </clickhouse>
+  low_memory_users.xml: |
+    <clickhouse>
         <profiles>
             <default>
                 <!-- Per-query memory limit: 2 GB -->

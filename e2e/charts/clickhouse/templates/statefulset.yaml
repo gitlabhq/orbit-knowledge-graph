@@ -39,8 +39,11 @@ spec:
             - name: initdb
               mountPath: /docker-entrypoint-initdb.d
             - name: config
-              mountPath: /etc/clickhouse-server/config.d/low_memory.xml
-              subPath: low_memory.xml
+              mountPath: /etc/clickhouse-server/config.d/low_memory_server.xml
+              subPath: low_memory_server.xml
+            - name: config
+              mountPath: /etc/clickhouse-server/users.d/low_memory_users.xml
+              subPath: low_memory_users.xml
           livenessProbe:
             httpGet:
               path: /ping
