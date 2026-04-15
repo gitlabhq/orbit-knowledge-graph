@@ -4,6 +4,7 @@ use treesitter_visit::{Node, SupportLang};
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 /// A condition on a tree-sitter node.
+#[derive(Clone)]
 pub enum Cond {
     HasName,
     ParentIs(&'static str),
@@ -117,6 +118,7 @@ fn descends(node: &N<'_>, wrappers: &[&str], targets: &[&str], reject: &[&str]) 
 }
 
 /// Boolean logic over conditions.
+#[derive(Clone)]
 pub enum Pred {
     Cond(Cond),
     And(Box<Pred>, Box<Pred>),

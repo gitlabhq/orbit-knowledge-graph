@@ -135,6 +135,15 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
     }
 }
 
+/// Apply a parent/ancestor predicate to a batch of scope rules.
+/// Pure sugar — prepends the predicate to each rule's condition.
+pub fn within(pred: Pred, rules: Vec<ScopeRule>) -> Vec<ScopeRule> {
+    rules
+        .into_iter()
+        .map(|r| r.when(pred.clone()))
+        .collect()
+}
+
 pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
     ScopeRule {
         kinds: vec![kind],
