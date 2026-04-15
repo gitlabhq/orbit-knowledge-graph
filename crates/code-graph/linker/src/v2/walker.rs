@@ -12,7 +12,8 @@ use rustc_hash::FxHashMap;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use super::resolve::DefRef;
+use petgraph::graph::NodeIndex;
+
 use super::rules::ResolutionRules;
 use super::ssa::{BlockId, SsaResolver, Value};
 
@@ -40,7 +41,7 @@ pub struct RecordedRead {
     /// Interned reference name — avoids 2.2M String clones on elasticsearch.
     pub name: IStr,
     /// Pre-computed enclosing definition (for edge source). None = file-level.
-    pub enclosing_def: Option<DefRef>,
+    pub enclosing_def: Option<NodeIndex>,
     /// Pre-computed enclosing type scope FQN (for implicit this / This chains).
     pub enclosing_type_fqn: Option<IStr>,
 }
@@ -72,9 +73,11 @@ pub fn walk_file(
     file_idx: usize,
     result: &CanonicalResult,
     root: &Node<StrDoc<SupportLang>>,
+    def_nodes: &[NodeIndex],
+    import_nodes: &[NodeIndex],
 ) -> FileWalkResult {
     let mut ssa = SsaResolver::new();
-    let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result);
+    let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result, def_nodes, import_nodes);
     walker.walk_node(root);
     let reads = walker.reads;
     ssa.seal_remaining();
@@ -88,10 +91,7 @@ struct ScopeEntry {
     block: BlockId,
     is_type_scope: bool,
     name: Option<String>,
-    /// The canonical definition index for this scope, if matched.
-    def_idx: Option<usize>,
-    /// FQN of the enclosing type scope (class/interface), cached for reads.
-    /// Set when entering a type scope, propagated to inner non-type scopes.
+    def_node: Option<NodeIndex>,
     enclosing_type_fqn: Option<IStr>,
 }
 
@@ -100,6 +100,9 @@ struct FileWalker<'a> {
     ssa: &'a mut SsaResolver,
     file_idx: usize,
     result: &'a CanonicalResult,
+    def_nodes: &'a [NodeIndex],
+    #[allow(dead_code)]
+    import_nodes: &'a [NodeIndex],
 
     current_block: BlockId,
     scope_stack: Vec<ScopeEntry>,
@@ -117,23 +120,23 @@ impl<'a> FileWalker<'a> {
         ssa: &'a mut SsaResolver,
         file_idx: usize,
         result: &'a CanonicalResult,
+        def_nodes: &'a [NodeIndex],
+        import_nodes: &'a [NodeIndex],
     ) -> Self {
         let module_block = ssa.add_block();
         ssa.seal_block(module_block);
 
-        // Write all definitions to the module block
-        for (def_idx, def) in result.definitions.iter().enumerate() {
-            ssa.write_variable(&def.name, module_block, Value::Def(file_idx, def_idx));
+        for (di, def) in result.definitions.iter().enumerate() {
+            ssa.write_variable(&def.name, module_block, Value::Def(def_nodes[di]));
         }
 
-        // Write all imports (skip wildcards — they have no single name to bind)
-        for (import_idx, imp) in result.imports.iter().enumerate() {
+        for (ii, imp) in result.imports.iter().enumerate() {
             if imp.wildcard {
                 continue;
             }
             let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
             if !name.is_empty() {
-                ssa.write_variable(name, module_block, Value::Import(file_idx, import_idx));
+                ssa.write_variable(name, module_block, Value::Import(import_nodes[ii]));
             }
         }
 
@@ -169,12 +172,14 @@ impl<'a> FileWalker<'a> {
             ssa,
             file_idx,
             result,
+            def_nodes,
+            import_nodes,
             current_block: module_block,
             scope_stack: vec![ScopeEntry {
                 block: module_block,
                 is_type_scope: false,
                 name: None,
-                def_idx: None,
+                def_node: None,
                 enclosing_type_fqn: None,
             }],
             ref_by_range_start,
@@ -306,7 +311,7 @@ impl<'a> FileWalker<'a> {
             block: new_block,
             is_type_scope,
             name: scope_name,
-            def_idx,
+            def_node: def_idx.map(|di| self.def_nodes[di]),
             enclosing_type_fqn,
         });
         self.current_block = new_block;
@@ -500,13 +505,8 @@ impl<'a> FileWalker<'a> {
         self.ssa.write_variable(&binding.name, target_block, value);
     }
 
-    fn innermost_def(&self) -> Option<DefRef> {
-        self.scope_stack.iter().rev().find_map(|e| {
-            e.def_idx.map(|def_idx| DefRef {
-                file_idx: self.file_idx,
-                def_idx,
-            })
-        })
+    fn innermost_def(&self) -> Option<NodeIndex> {
+        self.scope_stack.iter().rev().find_map(|e| e.def_node)
     }
 
     fn enclosing_class_block(&self) -> Option<BlockId> {

@@ -133,6 +133,13 @@ pub struct CodeGraph {
 }
 
 impl CodeGraph {
+    pub fn new_with_root(root_path: String) -> Self {
+        Self {
+            root_path,
+            ..Self::new()
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
@@ -147,6 +154,130 @@ impl CodeGraph {
             imports_by_file: FxHashMap::default(),
             root_path: String::new(),
         }
+    }
+
+    /// Add a single file's nodes to the graph. Returns (def_nodes, import_nodes)
+    /// so the walker can write `Value::Def(NodeIndex)` immediately.
+    ///
+    /// Called under a Mutex during the parallel parse+walk phase.
+    /// Does NOT add directory nodes or flatten supers — call `finalize()` after.
+    pub fn add_file_nodes(
+        &mut self,
+        result: &CanonicalResult,
+        file_order: usize,
+    ) -> (Vec<NodeIndex>, Vec<NodeIndex>) {
+        let relative_path = self.relative_path(&result.file_path);
+        let file_path: Arc<str> = Arc::from(relative_path.as_str());
+
+        let file_name = Path::new(&relative_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let file_node = self.graph.add_node(GraphNode::File(CanonicalFile {
+            path: relative_path.clone(),
+            name: file_name,
+            extension: result.extension.clone(),
+            language: result.language,
+            size: result.file_size,
+        }));
+        self.file_index.insert(relative_path.clone(), file_node);
+
+        let mut def_nodes = Vec::with_capacity(result.definitions.len());
+        for (di, def) in result.definitions.iter().enumerate() {
+            let def_node = self.graph.add_node(GraphNode::Definition {
+                file_path: file_path.clone(),
+                def: def.clone(),
+            });
+            def_nodes.push(def_node);
+            self.def_index.insert((file_order, di), def_node);
+
+            let fqn_str = def.fqn.to_string();
+            self.def_by_fqn
+                .entry(fqn_str.clone())
+                .or_default()
+                .push(def_node);
+            self.def_by_name
+                .entry(def.name.clone())
+                .or_default()
+                .push(def_node);
+
+            if let Some(parent_fqn) = def.fqn.parent() {
+                self.members
+                    .entry(parent_fqn.to_string())
+                    .or_default()
+                    .entry(def.name.clone())
+                    .or_default()
+                    .push(def_node);
+            }
+
+            if let Some(meta) = &def.metadata
+                && !meta.super_types.is_empty()
+            {
+                self.supers.insert(fqn_str, meta.super_types.clone());
+            }
+
+            self.graph.add_edge(
+                file_node,
+                def_node,
+                GraphEdge::structural(EdgeKind::Defines, NodeKind::File, NodeKind::Definition),
+            );
+        }
+
+        let mut import_nodes = Vec::with_capacity(result.imports.len());
+        for imp in &result.imports {
+            let imp_node = self.graph.add_node(GraphNode::Import {
+                file_path: file_path.clone(),
+                import: imp.clone(),
+            });
+            import_nodes.push(imp_node);
+            self.graph.add_edge(
+                file_node,
+                imp_node,
+                GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::ImportedSymbol),
+            );
+        }
+        self.imports_by_file
+            .insert(relative_path, import_nodes.clone());
+
+        (def_nodes, import_nodes)
+    }
+
+    /// Finalize the graph after all files have been added.
+    /// Adds directory chains, containment edges, and flattens ancestor chains.
+    pub fn finalize(&mut self, results: &[CanonicalResult]) {
+        let mut seen_dir_edges: FxHashSet<(String, String)> = FxHashSet::default();
+
+        // Collect all file paths for directory chain building
+        let file_paths: Vec<String> = results
+            .iter()
+            .map(|r| self.relative_path(&r.file_path))
+            .collect();
+
+        for path in &file_paths {
+            if let Some(dir_idx) = build_directory_chain(path, self, &mut seen_dir_edges)
+                && let Some(&file_node) = self.file_index.get(path)
+            {
+                self.graph.add_edge(
+                    dir_idx,
+                    file_node,
+                    GraphEdge::structural(EdgeKind::Contains, NodeKind::Directory, NodeKind::File),
+                );
+            }
+        }
+
+        // Containment edges between definitions (per file)
+        for (file_order, result) in results.iter().enumerate() {
+            let def_indices: Vec<NodeIndex> = result
+                .definitions
+                .iter()
+                .enumerate()
+                .filter_map(|(di, _)| self.def_index.get(&(file_order, di)).copied())
+                .collect();
+            build_containment_edges(&result.definitions, &def_indices, self);
+        }
+
+        self.flatten_supers();
     }
 
     /// Build the complete graph from parsed results in a single pass.

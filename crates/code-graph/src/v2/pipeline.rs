@@ -7,9 +7,10 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::linker::v2::walker::{FileWalkResult, HasRoot};
-use crate::linker::v2::{CodeGraph, GraphEdge, HasRules, ResolutionContext, build_edges};
+use crate::linker::v2::{CodeGraph, HasRules, build_edges};
 
 fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
@@ -76,7 +77,11 @@ where
 
         eprintln!("[v2] {file_count} files, {num_threads} threads");
 
-        // ── Parallel phase: parse + walk each file, drop AST ────
+        // Graph exists before the parallel phase. Each file locks it
+        // briefly to add nodes, gets NodeIndex values, then walks.
+        let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
+
+        // ── Parallel phase: parse + add nodes + walk ────────────
         let pb = progress_bar(file_count as u64, "Parse + walk");
         let file_outputs: Vec<_> = files
             .par_iter()
@@ -87,8 +92,21 @@ where
                     error: format!("Parse error: {e}"),
                 })?;
 
+                // Add this file's nodes to the graph under the lock.
+                let (def_nodes, import_nodes) = {
+                    let mut g = graph.lock().unwrap();
+                    g.add_file_nodes(&result, file_idx)
+                };
+
                 let walk = if let Some(root) = ast.as_root() {
-                    crate::linker::v2::walker::walk_file(&rules, file_idx, &result, &root)
+                    crate::linker::v2::walker::walk_file(
+                        &rules,
+                        file_idx,
+                        &result,
+                        &root,
+                        &def_nodes,
+                        &import_nodes,
+                    )
                 } else {
                     FileWalkResult::empty()
                 };
@@ -130,53 +148,22 @@ where
             errors.len()
         );
 
-        // Build graph with resolution indexes, and legacy ResolutionContext
-        // for the resolver (will be removed when resolver migrates to CodeGraph).
         let t2 = std::time::Instant::now();
-        let ctx = ResolutionContext::build(results.clone(), root_path.to_string());
-        let mut graph = CodeGraph::from_results(results, root_path.to_string());
-        eprintln!("[v2] graph + indexes: {:.2?}", t2.elapsed());
+        let mut graph = graph.into_inner().unwrap();
+        graph.finalize(&results);
+        eprintln!("[v2] graph finalize: {:.2?}", t2.elapsed());
 
         let t3 = std::time::Instant::now();
-        let result = build_edges(&rules, &ctx, &mut walks, &rules.settings);
-        let resolved_edges = result.edges;
+        let result = build_edges(&rules, &graph, &results, &mut walks, &rules.settings);
         eprintln!(
             "[v2] resolve: {} edges in {:.2?}",
-            resolved_edges.len(),
+            result.edges.len(),
             t3.elapsed()
         );
         result.stats.print();
 
-        for edge in resolved_edges {
-            use crate::linker::v2::EdgeSource;
-
-            let src_node = match edge.source {
-                EdgeSource::Definition(def_ref) => graph
-                    .def_index
-                    .get(&(def_ref.file_idx, def_ref.def_idx))
-                    .copied(),
-                EdgeSource::File(file_idx) => {
-                    let file_path = &ctx.results[file_idx].file_path;
-                    let relative = graph.relative_path(file_path);
-                    graph.file_index.get(&relative).copied()
-                }
-            };
-            let tgt_node = graph
-                .def_index
-                .get(&(edge.target.file_idx, edge.target.def_idx))
-                .copied();
-
-            if let (Some(src), Some(tgt)) = (src_node, tgt_node) {
-                graph.graph.add_edge(
-                    src,
-                    tgt,
-                    GraphEdge {
-                        relationship: edge.relationship,
-                        source_definition_range: None,
-                        target_definition_range: None,
-                    },
-                );
-            }
+        for (src, tgt, edge) in result.edges {
+            graph.graph.add_edge(src, tgt, edge);
         }
 
         Ok(graph)

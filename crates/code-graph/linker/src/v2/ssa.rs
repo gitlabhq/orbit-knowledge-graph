@@ -9,6 +9,7 @@
 //! `Value::Type` uses `Intern<str>` for zero-cost cloning.
 
 use internment::Intern;
+use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::fmt;
@@ -21,10 +22,10 @@ pub type VarName = Intern<str>;
 /// A value in the SSA graph — what a variable resolves to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Value {
-    /// A definition in a file (file index + definition index).
-    Def(usize, usize),
-    /// An import in a file (file index + import index).
-    Import(usize, usize),
+    /// A definition node in the graph.
+    Def(NodeIndex),
+    /// An import node in the graph.
+    Import(NodeIndex),
     /// A type name (for type-flow languages: resolve members on this type).
     /// Interned for zero-cost cloning during chain resolution.
     Type(Intern<str>),
@@ -401,10 +402,10 @@ mod tests {
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("x", b, Value::Def(0, 0));
+        ssa.write_variable("x", b, Value::Def(NodeIndex::new(0)));
         let result = ssa.read_variable_stateless("x", b);
 
-        assert_eq!(result.values.as_slice(), &[Value::Def(0, 0)]);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 
     #[test]
@@ -416,10 +417,10 @@ mod tests {
         ssa.seal_block(b0);
         ssa.seal_block(b1);
 
-        ssa.write_variable("x", b0, Value::Def(0, 0));
+        ssa.write_variable("x", b0, Value::Def(NodeIndex::new(0)));
         let result = ssa.read_variable_stateless("x", b1);
 
-        assert_eq!(result.values.as_slice(), &[Value::Def(0, 0)]);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 
     #[test]
@@ -441,13 +442,13 @@ mod tests {
         ssa.seal_block(else_b);
         ssa.seal_block(join);
 
-        ssa.write_variable("x", then_b, Value::Def(0, 0));
-        ssa.write_variable("x", else_b, Value::Def(0, 1));
+        ssa.write_variable("x", then_b, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", else_b, Value::Def(NodeIndex::new(1)));
 
         let result = ssa.read_variable_stateless("x", join);
         assert_eq!(result.values.len(), 2);
-        assert!(result.values.contains(&Value::Def(0, 0)));
-        assert!(result.values.contains(&Value::Def(0, 1)));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
     }
 
     #[test]
@@ -470,10 +471,10 @@ mod tests {
         ssa.seal_block(join);
 
         // x defined in entry, not redefined in either branch
-        ssa.write_variable("x", entry, Value::Def(0, 0));
+        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
 
         let result = ssa.read_variable_stateless("x", join);
-        assert_eq!(result.values.as_slice(), &[Value::Def(0, 0)]);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 
     #[test]
@@ -496,13 +497,13 @@ mod tests {
         ssa.seal_block(header);
         ssa.seal_block(exit);
 
-        ssa.write_variable("x", entry, Value::Def(0, 0));
-        ssa.write_variable("x", body, Value::Def(0, 1));
+        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", body, Value::Def(NodeIndex::new(1)));
 
         let result = ssa.read_variable_stateless("x", exit);
         assert_eq!(result.values.len(), 2);
-        assert!(result.values.contains(&Value::Def(0, 0)));
-        assert!(result.values.contains(&Value::Def(0, 1)));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
     }
 
     #[test]
@@ -524,11 +525,11 @@ mod tests {
         ssa.seal_block(header);
         ssa.seal_block(exit);
 
-        ssa.write_variable("x", entry, Value::Def(0, 0));
+        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
 
         let result = ssa.read_variable_stateless("x", exit);
         // Should collapse to single def (trivial phi)
-        assert_eq!(result.values.as_slice(), &[Value::Def(0, 0)]);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 
     #[test]
@@ -550,8 +551,8 @@ mod tests {
         // Header NOT sealed yet — back edge will come later
 
         // Write defs
-        ssa.write_variable("x", entry, Value::Def(0, 0));
-        ssa.write_variable("x", body, Value::Def(0, 1));
+        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", body, Value::Def(NodeIndex::new(1)));
 
         // Seal body (its only predecessor `header` is already added)
         ssa.seal_block(body);
@@ -563,8 +564,8 @@ mod tests {
 
         // Read after everything is sealed — should see both values via phi
         let result = ssa.read_variable_stateless("x", exit);
-        assert!(result.values.contains(&Value::Def(0, 0)));
-        assert!(result.values.contains(&Value::Def(0, 1)));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
     }
 
     #[test]
@@ -573,14 +574,14 @@ mod tests {
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("x", b, Value::Def(0, 0));
-        ssa.write_variable("y", b, Value::Def(0, 1));
+        ssa.write_variable("x", b, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("y", b, Value::Def(NodeIndex::new(1)));
 
         let rx = ssa.read_variable_stateless("x", b);
         let ry = ssa.read_variable_stateless("y", b);
 
-        assert_eq!(rx.values.as_slice(), &[Value::Def(0, 0)]);
-        assert_eq!(ry.values.as_slice(), &[Value::Def(0, 1)]);
+        assert_eq!(rx.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
+        assert_eq!(ry.values.as_slice(), &[Value::Def(NodeIndex::new(1))]);
     }
 
     #[test]
@@ -589,11 +590,11 @@ mod tests {
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("x", b, Value::Def(0, 0));
-        ssa.write_variable("x", b, Value::Def(0, 1)); // overwrite
+        ssa.write_variable("x", b, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", b, Value::Def(NodeIndex::new(1))); // overwrite
 
         let result = ssa.read_variable_stateless("x", b);
-        assert_eq!(result.values.as_slice(), &[Value::Def(0, 1)]);
+        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(1))]);
     }
 
     #[test]
@@ -633,15 +634,15 @@ mod tests {
             ssa.seal_block(b);
         }
 
-        ssa.write_variable("x", inner_then, Value::Def(0, 0));
-        ssa.write_variable("x", inner_else, Value::Def(0, 1));
-        ssa.write_variable("x", outer_else, Value::Def(0, 2));
+        ssa.write_variable("x", inner_then, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", inner_else, Value::Def(NodeIndex::new(1)));
+        ssa.write_variable("x", outer_else, Value::Def(NodeIndex::new(2)));
 
         let result = ssa.read_variable_stateless("x", outer_join);
         assert_eq!(result.values.len(), 3);
-        assert!(result.values.contains(&Value::Def(0, 0)));
-        assert!(result.values.contains(&Value::Def(0, 1)));
-        assert!(result.values.contains(&Value::Def(0, 2)));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
+        assert!(result.values.contains(&Value::Def(NodeIndex::new(2))));
     }
 
     #[test]
@@ -650,13 +651,13 @@ mod tests {
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("os", b, Value::Import(0, 0));
-        ssa.write_variable("MyClass", b, Value::Def(0, 0));
+        ssa.write_variable("os", b, Value::Import(NodeIndex::new(0)));
+        ssa.write_variable("MyClass", b, Value::Def(NodeIndex::new(0)));
 
         let r1 = ssa.read_variable_stateless("os", b);
         let r2 = ssa.read_variable_stateless("MyClass", b);
 
-        assert_eq!(r1.values.as_slice(), &[Value::Import(0, 0)]);
-        assert_eq!(r2.values.as_slice(), &[Value::Def(0, 0)]);
+        assert_eq!(r1.values.as_slice(), &[Value::Import(NodeIndex::new(0))]);
+        assert_eq!(r2.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
     }
 }
