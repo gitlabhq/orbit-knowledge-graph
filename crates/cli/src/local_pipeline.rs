@@ -208,7 +208,8 @@ impl PipelineStage for LocalHydration {
                 hydration_helpers::merge_static_properties(&mut query_result, &props, templates);
             }
             HydrationPlan::Dynamic(entity_specs) => {
-                let refs = hydration_helpers::extract_dynamic_refs(&query_result);
+                let static_nodes: Vec<_> = result_context.nodes().cloned().collect();
+                let refs = hydration_helpers::extract_dynamic_refs(&query_result, &static_nodes);
                 let (nodes, total_ids) =
                     hydration_helpers::build_dynamic_nodes(entity_specs, &refs);
                 let (mut props, debug) =
@@ -232,6 +233,11 @@ impl PipelineStage for LocalHydration {
                 );
 
                 hydration_helpers::merge_dynamic_properties(&mut query_result, &props);
+                hydration_helpers::merge_static_node_properties(
+                    &mut query_result,
+                    &props,
+                    &static_nodes,
+                );
             }
         }
 

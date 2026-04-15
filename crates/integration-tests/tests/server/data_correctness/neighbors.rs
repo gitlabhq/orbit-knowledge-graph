@@ -179,6 +179,53 @@ pub(super) async fn neighbors_dynamic_columns_all_returns_properties(ctx: &TestC
     });
 }
 
+pub(super) async fn neighbors_center_node_properties_hydrated(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "name", "state"]},
+            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(3);
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("Group", &[100, 102]);
+    resp.assert_referential_integrity();
+
+    // Center node must have its requested columns hydrated.
+    resp.assert_node("User", 1, |n| {
+        let has_username = n.prop_str("username") == Some("alice");
+        let has_name = n.prop_str("name") == Some("Alice Admin");
+        let has_state = n.prop_str("state") == Some("active");
+        assert!(
+            has_username,
+            "center node missing username, got: {:?}",
+            n.prop_str("username")
+        );
+        assert!(
+            has_name,
+            "center node missing name, got: {:?}",
+            n.prop_str("name")
+        );
+        assert!(
+            has_state,
+            "center node missing state, got: {:?}",
+            n.prop_str("state")
+        );
+        has_username && has_name && has_state
+    });
+
+    // Neighbor nodes should also be hydrated with default columns.
+    resp.assert_node("Group", 100, |n| n.prop_str("name") == Some("Public Group"));
+    resp.assert_node("Group", 102, |n| {
+        n.prop_str("name") == Some("Internal Group")
+    });
+}
+
 pub(super) async fn neighbors_both_direction_preserves_edge_direction(ctx: &TestContext) {
     // Group 100 has incoming MEMBER_OF from users and outgoing CONTAINS to
     // projects/subgroups. With direction: "both", edges should preserve their

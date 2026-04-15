@@ -38,13 +38,26 @@ pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) ->
 }
 
 /// Extract (entity_type, id) pairs from dynamic nodes (path finding, neighbors).
-pub fn extract_dynamic_refs(result: &QueryResult) -> HashMap<String, Vec<i64>> {
+///
+/// When `static_nodes` is provided (e.g. the center node in a neighbors query),
+/// their IDs are also collected so properties can be hydrated for them.
+pub fn extract_dynamic_refs(
+    result: &QueryResult,
+    static_nodes: &[compiler::RedactionNode],
+) -> HashMap<String, Vec<i64>> {
     let mut refs: HashMap<String, Vec<i64>> = HashMap::new();
     for row in result.authorized_rows() {
         for node_ref in row.dynamic_nodes() {
             refs.entry(node_ref.entity_type.clone())
                 .or_default()
                 .push(node_ref.id);
+        }
+        for node in static_nodes {
+            if let Some(id) = row.get_public_id(node) {
+                if let Some(entity_type) = row.get_type(node) {
+                    refs.entry(entity_type.to_string()).or_default().push(id);
+                }
+            }
         }
     }
     for ids in refs.values_mut() {
@@ -212,6 +225,32 @@ pub fn merge_dynamic_properties(result: &mut QueryResult, property_map: &Propert
         for node_ref in row.dynamic_nodes_mut() {
             if let Some(props) = property_map.get(&(node_ref.entity_type.clone(), node_ref.id)) {
                 node_ref.properties = props.clone();
+            }
+        }
+    }
+}
+
+/// Merge hydrated properties for static nodes (e.g. the center node in
+/// neighbors queries) into row columns so formatters can extract them
+/// via `{alias}_{column}`.
+pub fn merge_static_node_properties(
+    result: &mut QueryResult,
+    property_map: &PropertyMap,
+    static_nodes: &[compiler::RedactionNode],
+) {
+    for row in result.authorized_rows_mut() {
+        for node in static_nodes {
+            let Some(id) = row.get_public_id(node) else {
+                continue;
+            };
+            let Some(entity_type) = row.get_type(node) else {
+                continue;
+            };
+            if let Some(props) = property_map.get(&(entity_type.to_string(), id)) {
+                for (key, value) in props {
+                    let col_name = format!("{}_{key}", node.alias);
+                    row.set_column(col_name, value.clone());
+                }
             }
         }
     }
