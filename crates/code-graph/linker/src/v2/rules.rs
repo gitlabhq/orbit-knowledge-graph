@@ -71,7 +71,6 @@ pub enum ImportStrategy {
     SamePackage,
     SameFile,
     ScopeFqnWalk,
-    GlobalName { max_candidates: usize },
     FilePath,
 }
 

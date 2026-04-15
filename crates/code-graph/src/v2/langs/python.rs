@@ -244,7 +244,6 @@ impl HasRules for PythonRules {
                 ImportStrategy::ExplicitImport,
                 ImportStrategy::FilePath,
                 ImportStrategy::SameFile,
-                ImportStrategy::GlobalName { max_candidates: 3 },
             ],
             ChainMode::ValueFlow,
             ReceiverMode::Convention {

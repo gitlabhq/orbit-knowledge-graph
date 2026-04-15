@@ -526,15 +526,6 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// Build a FQN string in the reusable buffer and look it up.
-    fn lookup_fqn_joined(&mut self, prefix: &str, suffix: &str) -> &[DefRef] {
-        self.buf.clear();
-        self.buf.push_str(prefix);
-        self.buf.push_str(self.sep);
-        self.buf.push_str(suffix);
-        self.ctx.definitions.lookup_fqn(&self.buf)
-    }
-
     // ── Shared primitive ────────────────────────────────────────
 
     /// Convert an SSA `Value` to type name(s) for member lookup.
@@ -580,20 +571,17 @@ impl<'a> Resolver<'a> {
                 Value::Import(f, i) => {
                     self.stats.bare_ssa_import += 1;
                     let import = &self.ctx.results[*f].imports[*i];
-                    result.extend(imports::resolve_import(self.ctx, import, self.sep, true));
+                    result.extend(imports::resolve_import(self.ctx, import, self.sep));
                 }
                 Value::Type(type_name) => {
                     self.stats.bare_ssa_type += 1;
-                    if !self.ctx.members.lookup_member_with_supers(
+                    self.ctx.members.lookup_member_with_supers(
                         type_name,
                         &read.name,
                         &self.ctx.results,
                         &self.ctx.definitions,
                         &mut result,
-                    ) {
-                        let fqn_matches = self.lookup_fqn_joined(type_name, &read.name);
-                        result.extend_from_slice(fqn_matches);
-                    }
+                    );
                 }
                 _ => {}
             }

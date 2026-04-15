@@ -264,7 +264,12 @@ impl<'a> FileWalker<'a> {
         };
 
         if is_type_scope && let Some(ref name) = scope_name {
-            let class_fqn = self.build_fqn(name);
+            // Use canonical FQN for self/super SSA writes (matches MemberIndex keys).
+            let class_fqn = if let Some(di) = def_idx {
+                self.result.definitions[di].fqn.to_string()
+            } else {
+                self.build_fqn(name)
+            };
             for &self_name in self.rules.self_names {
                 self.ssa
                     .write_variable(self_name, new_block, Value::type_of(&class_fqn));

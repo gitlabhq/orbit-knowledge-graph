@@ -110,7 +110,8 @@ impl DslLanguage for JavaDsl {
         vec![
             import("import_declaration")
                 .classify(java_import_classify)
-                .split_last("."),
+                .split_last(".")
+                .wildcard_child("asterisk"),
         ]
     }
 
@@ -191,7 +192,6 @@ impl HasRules for JavaRules {
                 ImportStrategy::WildcardImport,
                 ImportStrategy::SamePackage,
                 ImportStrategy::SameFile,
-                ImportStrategy::GlobalName { max_candidates: 3 },
             ],
             ChainMode::TypeFlow {
                 type_fields: &["type"],

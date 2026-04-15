@@ -129,7 +129,9 @@ impl LanguageSpec {
             });
         }
 
-        if let Some((name, range, expression)) = self.evaluate_reference(node, &node_kind) {
+        if let Some((name, range, expression)) =
+            self.evaluate_reference(node, &node_kind, import_map, sep)
+        {
             refs.push(CanonicalReference {
                 reference_type: "Call",
                 name,
@@ -197,6 +199,8 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
+        import_map: &rustc_hash::FxHashMap<String, String>,
+        sep: &str,
     ) -> Option<(String, crate::utils::Range, Option<Vec<ExpressionStep>>)> {
         let rule = self.refs.iter().find(|r| r.matches(node, node_kind))?;
         let name = rule.extract_name(node)?;
@@ -210,7 +214,7 @@ impl LanguageSpec {
             .and_then(|(extract, cc)| {
                 let receiver_node = extract.resolve(node)?;
                 let mut chain = Vec::new();
-                self.build_expression_chain(&receiver_node, &mut chain, cc);
+                self.build_expression_chain(&receiver_node, &mut chain, cc, import_map, sep);
                 chain.push(ExpressionStep::Call(name.clone()));
                 if chain.len() > 1 { Some(chain) } else { None }
             });
@@ -221,11 +225,14 @@ impl LanguageSpec {
     /// Recursively walk a receiver expression, building the chain
     /// from innermost (base) to outermost (final call).
     /// All node kind recognition is driven by `ChainConfig`.
+    /// Type names in `New` steps are resolved via `import_map`.
     fn build_expression_chain(
         &self,
         node: &Node<StrDoc<SupportLang>>,
         chain: &mut Vec<ExpressionStep>,
         cc: &crate::dsl::types::ChainConfig,
+        import_map: &rustc_hash::FxHashMap<String, String>,
+        sep: &str,
     ) {
         let kind = node.kind();
         let kind_ref = kind.as_ref();
@@ -252,7 +259,10 @@ impl LanguageSpec {
         for &(ctor_kind, type_field) in cc.constructor {
             if kind_ref == ctor_kind {
                 if let Some(type_node) = node.field(type_field) {
-                    chain.push(ExpressionStep::New(type_node.text().to_string()));
+                    let bare = type_node.text().to_string();
+                    let resolved =
+                        crate::dsl::extractors::resolve_type_via_map(&bare, import_map, sep);
+                    chain.push(ExpressionStep::New(resolved));
                 }
                 return;
             }
@@ -262,7 +272,7 @@ impl LanguageSpec {
         for &(fa_kind, obj_field, member_field) in cc.field_access {
             if kind_ref == fa_kind {
                 if let Some(obj) = node.field(obj_field) {
-                    self.build_expression_chain(&obj, chain, cc);
+                    self.build_expression_chain(&obj, chain, cc, import_map, sep);
                 }
                 if let Some(field) = node.field(member_field) {
                     chain.push(ExpressionStep::Field(field.text().to_string()));
@@ -276,7 +286,7 @@ impl LanguageSpec {
             if let Some(extract) = &rule.receiver_extract
                 && let Some(recv) = extract.resolve(node)
             {
-                self.build_expression_chain(&recv, chain, cc);
+                self.build_expression_chain(&recv, chain, cc, import_map, sep);
             }
             if let Some(name) = rule.extract_name(node) {
                 chain.push(ExpressionStep::Call(name));
@@ -356,21 +366,39 @@ impl LanguageSpec {
                 }
             }
         } else if let Some(full_path) = rule.extract_name(node) {
-            let (path, name) = if rule.should_split() {
-                rule.split_path_name(&full_path)
+            // Check for wildcard child (e.g. `asterisk` in `import com.example.*`).
+            let has_wildcard_child = rule
+                .wildcard_child_kind
+                .is_some_and(|wk| node.children().any(|c| c.kind().as_ref() == wk));
+
+            if has_wildcard_child {
+                // Wildcard import: path is the full extracted name, no split needed.
+                imports.push(CanonicalImport {
+                    import_type: label,
+                    path: full_path,
+                    name: None,
+                    alias: None,
+                    scope_fqn: None,
+                    range,
+                    wildcard: true,
+                });
             } else {
-                (full_path, rule.extract_symbol(node))
-            };
-            let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
-            imports.push(CanonicalImport {
-                import_type: label,
-                path,
-                name,
-                alias: rule.extract_alias(node),
-                scope_fqn: None,
-                range,
-                wildcard: is_wildcard,
-            });
+                let (path, name) = if rule.should_split() {
+                    rule.split_path_name(&full_path)
+                } else {
+                    (full_path, rule.extract_symbol(node))
+                };
+                let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
+                imports.push(CanonicalImport {
+                    import_type: label,
+                    path,
+                    name,
+                    alias: rule.extract_alias(node),
+                    scope_fqn: None,
+                    range,
+                    wildcard: is_wildcard,
+                });
+            }
         }
     }
 }

@@ -191,7 +191,6 @@ impl HasRules for KotlinRules {
                 ImportStrategy::WildcardImport,
                 ImportStrategy::SamePackage,
                 ImportStrategy::SameFile,
-                ImportStrategy::GlobalName { max_candidates: 3 },
             ],
             ChainMode::TypeFlow {
                 type_fields: &["user_type", "type"],

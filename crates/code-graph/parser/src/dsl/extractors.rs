@@ -306,7 +306,7 @@ pub fn metadata() -> MetadataRule {
 
 /// Resolve a bare type name to a full FQN using the pre-built import map.
 /// O(1) hashmap lookup instead of linear scan.
-fn resolve_type_via_map(
+pub fn resolve_type_via_map(
     bare_name: &str,
     import_map: &rustc_hash::FxHashMap<String, String>,
     _sep: &str,
