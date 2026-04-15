@@ -5862,8 +5862,8 @@ dependencies = [
  "petgraph 0.8.3",
  "rustc-hash",
  "serde",
- "serde_json",
  "serde_yaml",
+ "tabled",
  "tempfile",
  "tokio",
 ]

@@ -1,19 +1,19 @@
-//! Convert a `CodeGraph` into Arrow `RecordBatch`es for lance-graph.
-//!
-//! Uses arrow 56 to match lance-graph's expected types.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow_56::array::{Int64Builder, StringBuilder};
+use arrow_56::array::{Array, ArrayBuilder, Int64Builder, StringBuilder};
 use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
 use code_graph_linker::v2::graph::*;
 use rustc_hash::FxHashMap;
 
-pub type LanceDatasets = HashMap<String, RecordBatch>;
+pub(crate) type LanceDatasets = HashMap<String, RecordBatch>;
+type NodeIds = FxHashMap<petgraph::graph::NodeIndex, i64>;
 
-pub fn to_lance_datasets(graph: &CodeGraph, ctx: &RowContext<'_>) -> anyhow::Result<LanceDatasets> {
+pub(crate) fn to_lance_datasets(
+    graph: &CodeGraph,
+    ctx: &RowContext<'_>,
+) -> anyhow::Result<LanceDatasets> {
     let ids = graph.assign_ids(ctx.project_id, ctx.branch);
     let mut datasets = HashMap::new();
 
@@ -30,22 +30,26 @@ pub fn to_lance_datasets(graph: &CodeGraph, ctx: &RowContext<'_>) -> anyhow::Res
     Ok(datasets)
 }
 
-struct EdgeRow {
-    source_id: i64,
-    target_id: i64,
-    edge_kind: String,
-    source_node_kind: String,
-    target_node_kind: String,
+fn make_batch(
+    fields: &[(&str, DataType, bool)],
+    columns: Vec<Box<dyn ArrayBuilder>>,
+) -> anyhow::Result<RecordBatch> {
+    let schema = Arc::new(Schema::new(
+        fields
+            .iter()
+            .map(|(n, dt, null)| Field::new(*n, dt.clone(), *null))
+            .collect::<Vec<_>>(),
+    ));
+    let arrays: Vec<Arc<dyn Array>> = columns.into_iter().map(|mut b| b.finish()).collect();
+    Ok(RecordBatch::try_new(schema, arrays)?)
 }
 
-fn build_directory_batch(
-    graph: &CodeGraph,
-    ids: &FxHashMap<petgraph::graph::NodeIndex, i64>,
-) -> anyhow::Result<RecordBatch> {
+fn build_directory_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
     let dirs: Vec<_> = graph.directories().collect();
-    let mut id_b = Int64Builder::with_capacity(dirs.len());
-    let mut path_b = StringBuilder::with_capacity(dirs.len(), dirs.len() * 32);
-    let mut name_b = StringBuilder::with_capacity(dirs.len(), dirs.len() * 16);
+    let n = dirs.len();
+    let mut id_b = Int64Builder::with_capacity(n);
+    let mut path_b = StringBuilder::with_capacity(n, n * 32);
+    let mut name_b = StringBuilder::with_capacity(n, n * 16);
 
     for (idx, d) in &dirs {
         id_b.append_value(ids[idx]);
@@ -53,32 +57,24 @@ fn build_directory_batch(
         name_b.append_value(&d.name);
     }
 
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::Int64, false),
-        Field::new("path", DataType::Utf8, false),
-        Field::new("name", DataType::Utf8, false),
-    ]));
-
-    Ok(RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(id_b.finish()),
-            Arc::new(path_b.finish()),
-            Arc::new(name_b.finish()),
+    make_batch(
+        &[
+            ("id", DataType::Int64, false),
+            ("path", DataType::Utf8, false),
+            ("name", DataType::Utf8, false),
         ],
-    )?)
+        vec![Box::new(id_b), Box::new(path_b), Box::new(name_b)],
+    )
 }
 
-fn build_file_batch(
-    graph: &CodeGraph,
-    ids: &FxHashMap<petgraph::graph::NodeIndex, i64>,
-) -> anyhow::Result<RecordBatch> {
+fn build_file_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
     let files: Vec<_> = graph.files().collect();
-    let mut id_b = Int64Builder::with_capacity(files.len());
-    let mut path_b = StringBuilder::with_capacity(files.len(), files.len() * 32);
-    let mut name_b = StringBuilder::with_capacity(files.len(), files.len() * 16);
-    let mut ext_b = StringBuilder::with_capacity(files.len(), files.len() * 4);
-    let mut lang_b = StringBuilder::with_capacity(files.len(), files.len() * 8);
+    let n = files.len();
+    let mut id_b = Int64Builder::with_capacity(n);
+    let mut path_b = StringBuilder::with_capacity(n, n * 32);
+    let mut name_b = StringBuilder::with_capacity(n, n * 16);
+    let mut ext_b = StringBuilder::with_capacity(n, n * 4);
+    let mut lang_b = StringBuilder::with_capacity(n, n * 8);
 
     for (idx, f) in &files {
         id_b.append_value(ids[idx]);
@@ -88,41 +84,36 @@ fn build_file_batch(
         lang_b.append_value(f.language.names()[0]);
     }
 
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::Int64, false),
-        Field::new("path", DataType::Utf8, false),
-        Field::new("name", DataType::Utf8, false),
-        Field::new("extension", DataType::Utf8, false),
-        Field::new("language", DataType::Utf8, false),
-    ]));
-
-    Ok(RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(id_b.finish()),
-            Arc::new(path_b.finish()),
-            Arc::new(name_b.finish()),
-            Arc::new(ext_b.finish()),
-            Arc::new(lang_b.finish()),
+    make_batch(
+        &[
+            ("id", DataType::Int64, false),
+            ("path", DataType::Utf8, false),
+            ("name", DataType::Utf8, false),
+            ("extension", DataType::Utf8, false),
+            ("language", DataType::Utf8, false),
         ],
-    )?)
+        vec![
+            Box::new(id_b),
+            Box::new(path_b),
+            Box::new(name_b),
+            Box::new(ext_b),
+            Box::new(lang_b),
+        ],
+    )
 }
 
-fn build_definition_batch(
-    graph: &CodeGraph,
-    ids: &FxHashMap<petgraph::graph::NodeIndex, i64>,
-) -> anyhow::Result<RecordBatch> {
+fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
     let defs: Vec<_> = graph.definitions().collect();
-    let cap = defs.len();
-    let mut id_b = Int64Builder::with_capacity(cap);
-    let mut fp_b = StringBuilder::with_capacity(cap, cap * 32);
-    let mut fqn_b = StringBuilder::with_capacity(cap, cap * 48);
-    let mut name_b = StringBuilder::with_capacity(cap, cap * 16);
-    let mut dt_b = StringBuilder::with_capacity(cap, cap * 16);
-    let mut sl_b = Int64Builder::with_capacity(cap);
-    let mut el_b = Int64Builder::with_capacity(cap);
-    let mut sb_b = Int64Builder::with_capacity(cap);
-    let mut eb_b = Int64Builder::with_capacity(cap);
+    let n = defs.len();
+    let mut id_b = Int64Builder::with_capacity(n);
+    let mut fp_b = StringBuilder::with_capacity(n, n * 32);
+    let mut fqn_b = StringBuilder::with_capacity(n, n * 48);
+    let mut name_b = StringBuilder::with_capacity(n, n * 16);
+    let mut dt_b = StringBuilder::with_capacity(n, n * 16);
+    let mut sl_b = Int64Builder::with_capacity(n);
+    let mut el_b = Int64Builder::with_capacity(n);
+    let mut sb_b = Int64Builder::with_capacity(n);
+    let mut eb_b = Int64Builder::with_capacity(n);
 
     for (idx, fp, d) in &defs {
         id_b.append_value(ids[idx]);
@@ -136,46 +127,41 @@ fn build_definition_batch(
         eb_b.append_value(d.range.byte_offset.1 as i64);
     }
 
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::Int64, false),
-        Field::new("file_path", DataType::Utf8, false),
-        Field::new("fqn", DataType::Utf8, false),
-        Field::new("name", DataType::Utf8, false),
-        Field::new("definition_type", DataType::Utf8, false),
-        Field::new("start_line", DataType::Int64, false),
-        Field::new("end_line", DataType::Int64, false),
-        Field::new("start_byte", DataType::Int64, false),
-        Field::new("end_byte", DataType::Int64, false),
-    ]));
-
-    Ok(RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(id_b.finish()),
-            Arc::new(fp_b.finish()),
-            Arc::new(fqn_b.finish()),
-            Arc::new(name_b.finish()),
-            Arc::new(dt_b.finish()),
-            Arc::new(sl_b.finish()),
-            Arc::new(el_b.finish()),
-            Arc::new(sb_b.finish()),
-            Arc::new(eb_b.finish()),
+    make_batch(
+        &[
+            ("id", DataType::Int64, false),
+            ("file_path", DataType::Utf8, false),
+            ("fqn", DataType::Utf8, false),
+            ("name", DataType::Utf8, false),
+            ("definition_type", DataType::Utf8, false),
+            ("start_line", DataType::Int64, false),
+            ("end_line", DataType::Int64, false),
+            ("start_byte", DataType::Int64, false),
+            ("end_byte", DataType::Int64, false),
         ],
-    )?)
+        vec![
+            Box::new(id_b),
+            Box::new(fp_b),
+            Box::new(fqn_b),
+            Box::new(name_b),
+            Box::new(dt_b),
+            Box::new(sl_b),
+            Box::new(el_b),
+            Box::new(sb_b),
+            Box::new(eb_b),
+        ],
+    )
 }
 
-fn build_import_batch(
-    graph: &CodeGraph,
-    ids: &FxHashMap<petgraph::graph::NodeIndex, i64>,
-) -> anyhow::Result<RecordBatch> {
+fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
     let imports: Vec<_> = graph.imports().collect();
-    let cap = imports.len();
-    let mut id_b = Int64Builder::with_capacity(cap);
-    let mut fp_b = StringBuilder::with_capacity(cap, cap * 32);
-    let mut it_b = StringBuilder::with_capacity(cap, cap * 16);
-    let mut path_b = StringBuilder::with_capacity(cap, cap * 32);
-    let mut name_b = StringBuilder::with_capacity(cap, cap * 16);
-    let mut alias_b = StringBuilder::with_capacity(cap, cap * 16);
+    let n = imports.len();
+    let mut id_b = Int64Builder::with_capacity(n);
+    let mut fp_b = StringBuilder::with_capacity(n, n * 32);
+    let mut it_b = StringBuilder::with_capacity(n, n * 16);
+    let mut path_b = StringBuilder::with_capacity(n, n * 32);
+    let mut name_b = StringBuilder::with_capacity(n, n * 16);
+    let mut alias_b = StringBuilder::with_capacity(n, n * 16);
 
     for (idx, fp, imp) in &imports {
         id_b.append_value(ids[idx]);
@@ -192,32 +178,35 @@ fn build_import_batch(
         }
     }
 
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::Int64, false),
-        Field::new("file_path", DataType::Utf8, false),
-        Field::new("import_type", DataType::Utf8, false),
-        Field::new("path", DataType::Utf8, false),
-        Field::new("name", DataType::Utf8, true),
-        Field::new("alias", DataType::Utf8, true),
-    ]));
-
-    Ok(RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(id_b.finish()),
-            Arc::new(fp_b.finish()),
-            Arc::new(it_b.finish()),
-            Arc::new(path_b.finish()),
-            Arc::new(name_b.finish()),
-            Arc::new(alias_b.finish()),
+    make_batch(
+        &[
+            ("id", DataType::Int64, false),
+            ("file_path", DataType::Utf8, false),
+            ("import_type", DataType::Utf8, false),
+            ("path", DataType::Utf8, false),
+            ("name", DataType::Utf8, true),
+            ("alias", DataType::Utf8, true),
         ],
-    )?)
+        vec![
+            Box::new(id_b),
+            Box::new(fp_b),
+            Box::new(it_b),
+            Box::new(path_b),
+            Box::new(name_b),
+            Box::new(alias_b),
+        ],
+    )
 }
 
-fn build_edge_rows(
-    graph: &CodeGraph,
-    ids: &FxHashMap<petgraph::graph::NodeIndex, i64>,
-) -> Vec<EdgeRow> {
+struct EdgeRow {
+    source_id: i64,
+    target_id: i64,
+    edge_kind: String,
+    source_node_kind: String,
+    target_node_kind: String,
+}
+
+fn build_edge_rows(graph: &CodeGraph, ids: &NodeIds) -> Vec<EdgeRow> {
     graph
         .graph
         .edge_indices()
@@ -245,10 +234,10 @@ fn group_edges_by_kind(rows: Vec<EdgeRow>) -> HashMap<String, Vec<EdgeRow>> {
 }
 
 fn build_edge_batch(rows: &[EdgeRow]) -> anyhow::Result<RecordBatch> {
-    let cap = rows.len();
-    let mut src_b = Int64Builder::with_capacity(cap);
-    let mut tgt_b = Int64Builder::with_capacity(cap);
-    let mut kind_b = StringBuilder::with_capacity(cap, cap * 16);
+    let n = rows.len();
+    let mut src_b = Int64Builder::with_capacity(n);
+    let mut tgt_b = Int64Builder::with_capacity(n);
+    let mut kind_b = StringBuilder::with_capacity(n, n * 16);
 
     for row in rows {
         src_b.append_value(row.source_id);
@@ -256,18 +245,12 @@ fn build_edge_batch(rows: &[EdgeRow]) -> anyhow::Result<RecordBatch> {
         kind_b.append_value(&row.edge_kind);
     }
 
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("source_id", DataType::Int64, false),
-        Field::new("target_id", DataType::Int64, false),
-        Field::new("edge_kind", DataType::Utf8, false),
-    ]));
-
-    Ok(RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(src_b.finish()),
-            Arc::new(tgt_b.finish()),
-            Arc::new(kind_b.finish()),
+    make_batch(
+        &[
+            ("source_id", DataType::Int64, false),
+            ("target_id", DataType::Int64, false),
+            ("edge_kind", DataType::Utf8, false),
         ],
-    )?)
+        vec![Box::new(src_b), Box::new(tgt_b), Box::new(kind_b)],
+    )
 }
