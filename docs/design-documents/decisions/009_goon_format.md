@@ -57,9 +57,24 @@ Claude-Mem's 3-layer progressive disclosure pattern reduced context consumption 
 
 ## Decision
 
+### Design approach
+
+We analyzed 316 AI coding sessions (83 Claude Code, 233 Codex) to find how models naturally format graph query results when given freedom. Only one session (c73bc421) contained a model formatting actual graph response data. Across ~30 formatting calls in that session, the model consistently chose:
+
+- `[Type] id key=value key=value` for nodes (type-tagged, one entity per line)
+- `Source(id) --RELATIONSHIP--> Target(id)` for edges (arrow notation)
+- Vertical `key: value` per line when dumping all columns on a single entity
+- Grouping by type via separate queries (bash loop with `=== TYPE ===` headers)
+- Summary count at the top (`Rows: 5`)
+- Natural language summary after a batch of queries (markdown table)
+
+The model never used `tabulate`, `pandas`, `rich`, or any table library. It never produced columnar/CSV-style output. All formatting was f-string based with inline `key=value` pairs.
+
+GOON follows this natural format with two targeted efficiency adjustments: (1) nodes grouped under type headers with count annotations so the type tag does not repeat per line, and (2) edges grouped under relationship type headers so the relationship name does not repeat per line. These adjustments align with the ICLR 2024 "incident encoding" finding while matching the model's natural preference for type-grouped, key=value data.
+
 ### GOON encoding specification
 
-GOON is a line-oriented text format. Each response has four sections, always in this order:
+GOON is a line-oriented text format. Each response has four sections:
 
 ```
 @header
@@ -68,7 +83,7 @@ GOON is a line-oriented text format. Each response has four sections, always in 
 @hints
 ```
 
-Sections are delimited by `@`-prefixed markers. Within `@nodes` and `@edges`, entity types and relationship types are subsection headers. Data rows use pipe (`|`) delimiters. Strings containing pipes or newlines are quoted.
+Sections are delimited by `@`-prefixed markers. Empty sections are omitted.
 
 #### `@header`
 
@@ -78,46 +93,46 @@ Query metadata. One line per field.
 @header
 query_type:traversal
 nodes:10
-edges:8
+edges:5
 has_more:true
 total_rows:47
 ```
 
-Fields: `query_type` (always present), node and edge counts, pagination info (when cursor was requested). This costs ~30 tokens and tells the agent what it got back.
+Fields: `query_type` (always present), node and edge counts, pagination info (when cursor was requested).
 
 #### `@nodes`
 
-Nodes grouped by entity type. Each type block starts with a type header declaring column names, then compact rows.
+Nodes grouped by entity type. Each type group starts with `TypeName(count):` then one line per entity. Each line starts with the integer id, followed by `key=value` pairs. String values containing spaces are quoted.
 
 ```
 @nodes
-User[3]{id,username,name,state}
-1|alice|Alice Smith|active
-2|bob|Bob Chen|active
-3|carol|Carol Davis|blocked
+User(3):
+1 username=alice name="Alice Smith" state=active
+2 username=bob name="Bob Chen" state=active
+3 username=carol name="Carol Davis" state=blocked
 
-MergeRequest[5]{id,iid,title,state}
-42|101|Fix auth bug|merged
-43|102|Add caching layer|merged
-44|103|Refactor pipeline|opened
-45|104|Update docs|merged
-46|105|Remove dead code|closed
+MergeRequest(5):
+42 iid=101 title="Fix auth bug" state=merged
+43 iid=102 title="Add caching layer" state=merged
+44 iid=103 title="Refactor pipeline" state=opened
+45 iid=104 title="Update docs" state=merged
+46 iid=105 title="Remove dead code" state=closed
 ```
 
-The type header format: `TypeName[count]{col1,col2,...}`. The count annotation `[N]` lets the agent validate it processed all rows. Column order matches the header. `id` is always the first column.
+The `(count)` annotation lets the agent validate it processed all rows. The id is always first with no `id=` prefix since it is always present and always an integer. Null properties are omitted (the key simply does not appear). Boolean values are `true`/`false`. Datetime values use ISO 8601.
 
-Null values are empty between delimiters (`42||untitled|merged` means iid is null). Boolean values are `t`/`f`. Datetime values use ISO 8601.
+This format mirrors what the model naturally produces: `[Type] id key=value key=value`. The type tag moves to a group header to avoid repeating it on every line.
 
-For aggregation queries with `group_by`, computed columns are appended after entity properties:
+For aggregation queries with `group_by`, computed columns appear as additional `key=value` pairs:
 
 ```
 @nodes
-User[5]{id,username,mr_count}
-1|alice|47
-2|bob|31
-3|carol|28
-4|dave|22
-5|eve|19
+User(5):
+1677357 username=terrichu mr_count=14617
+64248 username=stanhu mr_count=2063
+113870 username=iamphill mr_count=1658
+15139 username=rspeicher mr_count=1566
+128633 username=rymai mr_count=1562
 ```
 
 For ungrouped (scalar) aggregation, `@nodes` is empty and results go in `@header`:
@@ -125,31 +140,32 @@ For ungrouped (scalar) aggregation, `@nodes` is empty and results go in `@header
 ```
 @header
 query_type:aggregation
-agg:total=42,avg_size=128.5
+total=42
+avg_size=128.5
 ```
 
 #### `@edges`
 
-Edges grouped by relationship type. Each type block has a header and rows.
+Edges grouped by relationship type. Arrow notation matches the model's natural `Source(id) --REL--> Target(id)` pattern, with the relationship name in the group header instead of repeated per line.
 
 ```
 @edges
-AUTHORED[5]{from,to}
-User:1->MergeRequest:42
-User:1->MergeRequest:43
-User:2->MergeRequest:44
-User:2->MergeRequest:45
-User:3->MergeRequest:46
+AUTHORED(5):
+User:1 --> MergeRequest:42
+User:1 --> MergeRequest:43
+User:2 --> MergeRequest:44
+User:2 --> MergeRequest:45
+User:3 --> MergeRequest:46
 
-MEMBER_OF[3]{from,to}
-User:1->Project:101
-User:2->Project:101
-User:3->Project:102
+MEMBER_OF(3):
+User:1 --> Project:101
+User:2 --> Project:101
+User:3 --> Project:102
 ```
 
-Edge references use `Type:id` handles that correspond to nodes in `@nodes`. The `{from,to}` header is always present. For variable-length traversals, edges include depth: `{from,to,depth}` with rows like `User:1->Project:101|2`. For path finding, edges include path_id and step: `{from,to,path_id,step}` with rows like `User:1->MergeRequest:42|0|0`.
+Edge references use `Type:id` handles that correspond to nodes in `@nodes`. For variable-length traversals, edges include depth as a trailing key=value: `User:1 --> Project:101 depth=2`. For path finding, edges include path_id and step: `User:1 --> MergeRequest:42 path=0 step=0`.
 
-When `@edges` is empty (search, scalar aggregation), the section is omitted entirely.
+When `@edges` is empty (search, scalar aggregation), the section is omitted.
 
 #### `@hints`
 
@@ -161,11 +177,11 @@ label:User=username,MergeRequest=title,Project=name
 next:User-[AUTHORED]->MergeRequest,User-[MEMBER_OF]->Project,MergeRequest-[IN_PROJECT]->Project
 ```
 
-`label` maps entity types to their human-readable label field from the ontology. The agent should use these when presenting results to the user.
+`label` maps entity types to their label field from the ontology. The agent uses these when presenting results to the user.
 
-`next` lists available relationship traversals from the entity types present in the response. The agent can use these to plan follow-up queries without a schema lookup. Only outgoing edges from materialized node types are included.
+`next` lists available relationship traversals from the entity types in the response. Only outgoing edges from materialized node types are included.
 
-When pagination is active (`has_more:true` in header), the agent can issue a follow-up query with `cursor: { offset: N, page_size: M }` to fetch the next page.
+When pagination is active (`has_more:true` in header), the agent issues a follow-up query with `cursor: { offset: N, page_size: M }`.
 
 ### Examples from staging queries
 
@@ -175,37 +191,32 @@ These examples are from actual staging queries (`staging.gitlab.com/api/v4/orbit
 
 Query: merged MergeRequests, limit 5.
 
-**Current JSON response** (~850 tokens):
-```json
-{"query_type":"search","nodes":[{"type":"MergeRequest","id":3796072,"state":"merged","title":"Test todos_count_format helper...","iid":12075},...],"edges":[]}
-```
+JSON response is ~850 tokens. GOON encoding (~250 tokens):
 
-**GOON encoding** (~220 tokens):
 ```
 @header
 query_type:search
 nodes:5
 
 @nodes
-MergeRequest[5]{id,iid,title,state}
-3796072|12075|Test todos_count_format helper at the correct level to improve speed|merged
-9612987|653|admin_user_path correction|merged
-9613808|3038|Add commit full time tooltip to `commited_ago`|merged
-899439|750|Refactor repo restrictions docs|merged
-648214|103|Refactor Refs to preserve their target objects instead of just a string representation|merged
+MergeRequest(5):
+3796072 iid=12075 title="Test todos_count_format helper at the correct level to improve speed" state=merged
+9612987 iid=653 title="admin_user_path correction" state=merged
+9613808 iid=3038 title="Add commit full time tooltip to `commited_ago`" state=merged
+899439 iid=750 title="Refactor repo restrictions docs" state=merged
+648214 iid=103 title="Refactor Refs to preserve their target objects instead of just a string representation" state=merged
 
 @hints
 label:MergeRequest=title
 next:MergeRequest-[IN_PROJECT]->Project,MergeRequest-[FROM_BRANCH]->Branch,MergeRequest-[TARGETS]->Branch
 ```
 
-74% token reduction.
+~70% token reduction.
 
 #### Traversal
 
 Query: User -[AUTHORED]-> MergeRequest, limit 5.
 
-**GOON encoding** (~280 tokens):
 ```
 @header
 query_type:traversal
@@ -213,27 +224,27 @@ nodes:10
 edges:5
 
 @nodes
-User[5]{id,username}
-513969|jacobvosmaer-gitlab
-288833|singingwolfboy
-378152|niijv
-163582|gforcada
-357032|tmaier
+User(5):
+513969 username=jacobvosmaer-gitlab
+288833 username=singingwolfboy
+378152 username=niijv
+163582 username=gforcada
+357032 username=tmaier
 
-MergeRequest[5]{id,iid,title,state}
-3666842|169|Set GL_PROTOCOL during SmartHTTP.PostReceivePack|merged
-202736|53|Improve gitlab flow doc|opened
-604071|512|Fix typo in file_lock.md|opened
-621289|535|Removed duplicated entry|opened
-934416|764|Remove duplicate line on "Integration"|opened
+MergeRequest(5):
+3666842 iid=169 title="Set GL_PROTOCOL during SmartHTTP.PostReceivePack" state=merged
+202736 iid=53 title="Improve gitlab flow doc" state=opened
+604071 iid=512 title="Fix typo in file_lock.md" state=opened
+621289 iid=535 title="Removed duplicated entry" state=opened
+934416 iid=764 title="Remove duplicate line on Integration" state=opened
 
 @edges
-AUTHORED[5]{from,to}
-User:513969->MergeRequest:3666842
-User:288833->MergeRequest:202736
-User:378152->MergeRequest:604071
-User:163582->MergeRequest:621289
-User:357032->MergeRequest:934416
+AUTHORED(5):
+User:513969 --> MergeRequest:3666842
+User:288833 --> MergeRequest:202736
+User:378152 --> MergeRequest:604071
+User:163582 --> MergeRequest:621289
+User:357032 --> MergeRequest:934416
 
 @hints
 label:User=username,MergeRequest=title
@@ -244,7 +255,6 @@ next:User-[MEMBER_OF]->Project,MergeRequest-[IN_PROJECT]->Project
 
 Query: count MergeRequests per User, top 5 by count.
 
-**GOON encoding** (~160 tokens):
 ```
 @header
 query_type:aggregation
@@ -252,12 +262,12 @@ nodes:5
 columns:mr_count=count(mr)
 
 @nodes
-User[5]{id,username,mr_count}
-1677357|terrichu|14617
-64248|stanhu|2063
-113870|iamphill|1658
-15139|rspeicher|1566
-128633|rymai|1562
+User(5):
+1677357 username=terrichu mr_count=14617
+64248 username=stanhu mr_count=2063
+113870 username=iamphill mr_count=1658
+15139 username=rspeicher mr_count=1566
+128633 username=rymai mr_count=1562
 
 @hints
 label:User=username
@@ -268,7 +278,6 @@ next:User-[AUTHORED]->MergeRequest,User-[MEMBER_OF]->Project
 
 Query: outgoing neighbors of User:64248 via AUTHORED.
 
-**GOON encoding** (~320 tokens):
 ```
 @header
 query_type:neighbors
@@ -276,23 +285,23 @@ nodes:6
 edges:5
 
 @nodes
-User[1]{id,username}
-64248|stanhu
+User(1):
+64248 username=stanhu
 
-MergeRequest[5]{id,iid,title,state}
-35121|237|Add more Slack notifications for issue and merge request events|closed
-55033|350|Add merge and issue event notification for HipChat|merged
-55150|352|Fix merge request URL passed to Webhooks|merged
-56054|355|Add channel override to Slack service|closed
-56410|287|Add custom listen_port to nginx config for reverse proxies|merged
+MergeRequest(5):
+35121 iid=237 title="Add more Slack notifications for issue and merge request events" state=closed
+55033 iid=350 title="Add merge and issue event notification for HipChat" state=merged
+55150 iid=352 title="Fix merge request URL passed to Webhooks" state=merged
+56054 iid=355 title="Add channel override to Slack service" state=closed
+56410 iid=287 title="Add custom listen_port to nginx config for reverse proxies" state=merged
 
 @edges
-AUTHORED[5]{from,to}
-User:64248->MergeRequest:35121
-User:64248->MergeRequest:55033
-User:64248->MergeRequest:55150
-User:64248->MergeRequest:56054
-User:64248->MergeRequest:56410
+AUTHORED(5):
+User:64248 --> MergeRequest:35121
+User:64248 --> MergeRequest:55033
+User:64248 --> MergeRequest:55150
+User:64248 --> MergeRequest:56054
+User:64248 --> MergeRequest:56410
 
 @hints
 label:User=username,MergeRequest=title
@@ -303,7 +312,6 @@ next:User-[MEMBER_OF]->Project,MergeRequest-[IN_PROJECT]->Project,MergeRequest-[
 
 Query: shortest path from User:64248 to Project, max_depth 2.
 
-**GOON encoding** (~200 tokens):
 ```
 @header
 query_type:path_finding
@@ -312,20 +320,20 @@ edges:3
 paths:3
 
 @nodes
-User[1]{id,username,name,state}
-64248|stanhu|Stan Hu|active
+User(1):
+64248 username=stanhu name="Stan Hu" state=active
 
-Project[2]{id,name,full_path}
-2009901|gitaly|gitlab-org/gitaly
-4108541|openssh-packages|gitlab-org/openssh-packages
+Project(2):
+2009901 name=gitaly full_path=gitlab-org/gitaly
+4108541 name=openssh-packages full_path=gitlab-org/openssh-packages
 
 @edges
-MEMBER_OF[1]{from,to,path_id,step}
-User:64248->Project:2009901|0|0
+MEMBER_OF(1):
+User:64248 --> Project:2009901 path=0 step=0
 
-CREATOR[2]{from,to,path_id,step}
-User:64248->Project:4108541|1|0
-User:64248->Project:4108541|2|0
+CREATOR(2):
+User:64248 --> Project:4108541 path=1 step=0
+User:64248 --> Project:4108541 path=2 step=0
 
 @hints
 label:User=username,Project=name
@@ -334,13 +342,13 @@ next:Project-[CONTAINS]->File,Project-[CONTAINS]->Directory
 
 ### `query_graph` tool description update
 
-The `query_graph` tool description should include a ~100 token GOON format guide so the agent can parse responses. A single concrete example is enough (the ICLR study found that few-shot examples help even across different graph structures):
+The `query_graph` tool description should include a ~100 token GOON format guide. A single concrete example is enough (the ICLR study found that few-shot examples help even across different graph structures):
 
 ```
 Response format (GOON):
 @header -- query metadata, counts
-@nodes  -- TypeName[count]{col1,col2,...} then pipe-delimited rows
-@edges  -- EDGE_TYPE[count]{from,to} then Type:id->Type:id rows
+@nodes  -- TypeName(count): then "id key=value ..." per line
+@edges  -- REL_TYPE(count): then "Source:id --> Target:id" per line
 @hints  -- label:Type=field, next:traversal options
 
 Example:
@@ -349,15 +357,15 @@ query_type:traversal
 nodes:3
 edges:2
 @nodes
-User[1]{id,username}
-1|alice
-Project[2]{id,name}
-10|Alpha
-11|Beta
+User(1):
+1 username=alice
+Project(2):
+10 name=Alpha
+11 name=Beta
 @edges
-MEMBER_OF[2]{from,to}
-User:1->Project:10
-User:1->Project:11
+MEMBER_OF(2):
+User:1 --> Project:10
+User:1 --> Project:11
 @hints
 label:User=username,Project=name
 ```
@@ -366,13 +374,16 @@ label:User=username,Project=name
 
 | Design choice | Rationale |
 |---------------|-----------|
-| Pipe-delimited columnar rows with header declaration | TOON: 40% fewer tokens than JSON with comparable accuracy. Header-once pattern eliminates per-row key repetition |
-| Edges grouped by relationship type | Incident encoding (ICLR 2024): ranked #1 across COT-BAG, COT, FEW-SHOT. Grouping by type is the incident pattern applied to typed graphs |
-| `Type:id` integer handles | Integer node encoding improves arithmetic performance (degree, count). Named labels preserved via `@hints.label` for non-numeric tasks |
-| `@hints.next` with GitLab vocabulary | Application-context framing: 42.8% to 60.8% improvement. Semantic relationship names (AUTHORED, MEMBER_OF) outperform generic labels |
-| Count annotations `[N]` on type headers | TOON's array-length declarations help LLMs validate data completeness |
-| Empty sections omitted | Dense encodings with irrelevant edges degrade performance; fewer distractors is better |
-| Pagination via cursor, not bulk | Agent fetches what it needs, keeping context lean |
+| `key=value` pairs per entity line | This is the format models naturally produce when formatting graph data (observed across 30 formatting calls in session c73bc421). No header lookup needed to interpret a line |
+| Nodes grouped under `TypeName(count):` | Incident encoding (ICLR 2024, ranked #1 across COT-BAG, COT, FEW-SHOT). Avoids repeating `[Type]` on every line while preserving type grouping |
+| Arrow notation `Source:id --> Target:id` | Models naturally produce this format for edge data. Immediately readable without parsing rules |
+| Edges grouped under `REL_TYPE(count):` | The model achieved this only by running separate queries per relationship type. GOON provides it in a single response |
+| Integer id first with no `id=` prefix | Always present, always an integer. Saves 3 tokens per line |
+| `Type:id` handles in edges | Integer node encoding improves arithmetic performance (ICLR 2024). Named labels preserved via `@hints.label` |
+| `@hints.next` with GitLab vocabulary | Application-context framing: 42.8% to 60.8% accuracy improvement. Semantic relationship names outperform generic labels |
+| Count annotations on type headers | Lets the agent validate it processed all rows |
+| Null properties omitted | Avoids blank values. The model naturally skips missing fields when formatting |
+| Empty sections omitted | Dense encodings degrade performance; fewer distractors is better |
 
 ### Implementation
 
@@ -398,13 +409,17 @@ Binary formats save bytes but not tokens. LLMs tokenize text, not bytes. A 500-b
 
 Natural language is the least token-efficient encoding. "User alice authored merge request 42 titled Fix auth bug which is merged" is 15 tokens. `42|101|Fix auth bug|merged` is 9 tokens. At scale the difference compounds. Natural language also cannot be programmatically parsed by the agent for follow-up queries.
 
+### Pipe-delimited columnar tables (TOON-style)
+
+Declare column names once as a header row (`User[5]{id,username,state}`), then emit values as `1|alice|active`. This is ~10-15% more token-efficient than `key=value` for large result sets because key names are not repeated per row. We considered this initially, but analysis of 316 AI coding sessions showed that models never produce or prefer columnar/CSV-style output when formatting graph data. They consistently use inline `key=value` pairs. A format the model naturally reads is worth the small token cost.
+
 ### Return the same JSON as `format=raw`
 
 This is the current behavior. It works but wastes 40-60% of tokens on structural syntax (`{`, `}`, `"key":`, commas) that carry no information for the LLM. Over a multi-turn session this crowds out the agent's reasoning context.
 
 ### Use JSON with abbreviated keys
 
-Shortening `"username"` to `"u"` saves tokens but destroys readability. The LLM must maintain a key mapping across the response. TOON-style headers achieve the same savings while keeping full column names declared once and visible.
+Shortening `"username"` to `"u"` saves tokens but destroys readability. The LLM needs to maintain a key mapping across the response. The `key=value` format keeps full names inline at comparable token cost.
 
 ### Omit `@hints` to save tokens
 
@@ -414,16 +429,17 @@ The `@hints` section costs ~50-80 tokens. Without it, the agent must call `get_g
 
 What improves:
 
-- 40-74% token reduction depending on query type and result size
-- Encoding aligns with the patterns that performed best in the ICLR 2024 graph encoding study
+- 50-70% token reduction depending on query type and result size
+- Format matches what models naturally produce and consume when working with graph data (validated against 316 session transcripts)
+- Encoding aligns with incident encoding patterns from the ICLR 2024 graph encoding study
 - `@hints` lets agents explore the graph across multiple turns without calling `get_graph_schema` each time
 - `orbit query --format=llm` produces human-scannable text instead of dense JSON
 
 What gets harder:
 
 - GOON is a GKG-specific format. Changes to `GraphResponse` structure need corresponding updates to the GOON serializer.
-- Pipe-delimited text needs escaping rules for values containing pipes, newlines, or leading/trailing whitespace.
-- GOON output is text, so any formatting change (column order, whitespace, delimiter choice) breaks snapshot tests. This is intentional: snapshots catch unintended format drift.
+- String quoting: values containing spaces need quotes. Values containing quotes need escaping. More complex than pipe-delimited (which only needs pipe escaping).
+- GOON output is text, so any formatting change breaks snapshot tests. This is intentional: snapshots catch unintended format drift.
 
 ## References
 
