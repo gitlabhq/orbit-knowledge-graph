@@ -8,8 +8,8 @@ data:
         <!-- Cap server to 75% of container memory limit -->
         <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
 
-        <!-- Reduce caches for low-memory environment -->
-        <mark_cache_size>268435456</mark_cache_size>  <!-- 256 MB -->
+        <!-- Reduce caches (docs: mark_cache min 500 MB) -->
+        <mark_cache_size>524288000</mark_cache_size>  <!-- 500 MB -->
         <uncompressed_cache_size>16777216</uncompressed_cache_size>  <!-- 16 MB -->
 
         <!-- Limit background merges -->
@@ -17,6 +17,12 @@ data:
         <merge_tree>
             <merge_max_block_size>1024</merge_max_block_size>
         </merge_tree>
+
+        <!-- Disable system logs to save memory -->
+        <asynchronous_metric_log remove="1"/>
+        <metric_log remove="1"/>
+        <text_log remove="1"/>
+        <trace_log remove="1"/>
     </clickhouse>
   low_memory_users.xml: |
     <clickhouse>
@@ -27,6 +33,12 @@ data:
                 <!-- Spill to disk before OOM -->
                 <max_bytes_before_external_group_by>536870912</max_bytes_before_external_group_by>
                 <max_bytes_before_external_sort>536870912</max_bytes_before_external_sort>
+                <!-- Reduce parallelism for low memory -->
+                <max_block_size>8192</max_block_size>
+                <max_threads>1</max_threads>
+                <max_download_threads>1</max_download_threads>
+                <input_format_parallel_parsing>0</input_format_parallel_parsing>
+                <output_format_parallel_formatting>0</output_format_parallel_formatting>
             </default>
         </profiles>
     </clickhouse>
