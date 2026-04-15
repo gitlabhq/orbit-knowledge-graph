@@ -115,6 +115,7 @@ async fn data_correctness() {
         edge_cases::cross_namespace_isolation_no_leakage,
         edge_cases::cross_namespace_narrow_scope_returns_all_authors,
         edge_cases::cross_namespace_aggregation_respects_scope,
+        edge_cases::neighbors_cross_namespace_no_false_positives,
         // non-default redaction id_column
         edge_cases::non_default_redaction_id_entity_traversal,
         edge_cases::non_default_redaction_id_denies_unauthorized,

@@ -4,7 +4,7 @@ use compiler::{
     EdgeMeta, QueryType, ResultContext, neighbor_is_outgoing_column, relationship_type_column,
 };
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
 use shared::PipelineOutput;
@@ -12,7 +12,17 @@ use types::{QueryResult, QueryResultRow};
 
 use super::{ResultFormatter, column_value_to_json};
 
-#[derive(Debug, Serialize, Deserialize)]
+/// Keys that collide with `GraphNode`'s fixed struct fields under
+/// `#[serde(flatten)]`. If an ontology property strips to one of
+/// these names after alias removal, the serialized JSON would get
+/// duplicate keys and deserialization would silently shadow the
+/// struct field. Filter them out before inserting into `properties`.
+fn is_reserved_node_key(key: &str) -> bool {
+    key == "type" || key == "id"
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphResponse {
     pub query_type: String,
     pub nodes: Vec<GraphNode>,
@@ -23,7 +33,8 @@ pub struct GraphResponse {
     pub pagination: Option<PaginationResponse>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct ColumnDescriptor {
     pub name: String,
     pub function: String,
@@ -35,13 +46,15 @@ pub struct ColumnDescriptor {
     pub value: Option<Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct PaginationResponse {
     pub has_more: bool,
     pub total_rows: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphNode {
     #[serde(rename = "type")]
     pub entity_type: String,
@@ -50,7 +63,8 @@ pub struct GraphNode {
     pub properties: serde_json::Map<String, Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphEdge {
     pub from: String,
     pub from_id: i64,
@@ -186,6 +200,7 @@ impl GraphFormatter {
     ) -> serde_json::Map<String, Value> {
         row.entity_properties(alias, edge_prefixes)
             .into_iter()
+            .filter(|(k, _)| !is_reserved_node_key(k))
             .map(|(k, v)| (k, column_value_to_json(&v)))
             .collect()
     }
@@ -314,7 +329,9 @@ impl GraphFormatter {
                 let mut properties = Self::extract_node_properties(row, &node.alias, edge_prefixes);
 
                 for col_name in &agg_col_names {
-                    if let Some(value) = row.get(col_name) {
+                    if !is_reserved_node_key(col_name)
+                        && let Some(value) = row.get(col_name)
+                    {
                         properties.insert(col_name.clone(), column_value_to_json(value));
                     }
                 }
@@ -350,7 +367,9 @@ impl GraphFormatter {
                 node_map.entry(key).or_insert_with(|| {
                     let mut properties = serde_json::Map::new();
                     for (k, value) in &node_ref.properties {
-                        properties.insert(k.clone(), column_value_to_json(value));
+                        if !is_reserved_node_key(k) {
+                            properties.insert(k.clone(), column_value_to_json(value));
+                        }
                     }
                     GraphNode {
                         entity_type: node_ref.entity_type.clone(),
@@ -422,7 +441,9 @@ impl GraphFormatter {
 
             let mut neighbor_props = serde_json::Map::new();
             for (key, value) in &neighbor.properties {
-                neighbor_props.insert(key.clone(), column_value_to_json(value));
+                if !is_reserved_node_key(key) {
+                    neighbor_props.insert(key.clone(), column_value_to_json(value));
+                }
             }
             let neighbor_key = (neighbor.entity_type.clone(), neighbor.id);
             node_map.entry(neighbor_key).or_insert_with(|| GraphNode {
@@ -560,5 +581,98 @@ mod tests {
             assert!(!node.properties.keys().any(|k| k.starts_with("_gkg_")));
             assert!(node.properties.contains_key("name"));
         }
+    }
+
+    #[test]
+    fn property_named_type_does_not_corrupt_entity_type() {
+        // If a ClickHouse column strips to "type" after alias removal
+        // (e.g. `p_type`), it would collide with GraphNode's `entity_type`
+        // field (renamed to "type" via serde). Verify the filter prevents this.
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("_gkg_p_id", DataType::Int64, false),
+            Field::new("_gkg_p_type", DataType::Utf8, false),
+            Field::new("p_name", DataType::Utf8, false),
+            Field::new("p_type", DataType::Utf8, false),
+            Field::new("p_id", DataType::Int64, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(vec![42])),
+                Arc::new(StringArray::from(vec!["Project"])),
+                Arc::new(StringArray::from(vec!["Alpha"])),
+                Arc::new(StringArray::from(vec!["wrong_type_value"])),
+                Arc::new(Int64Array::from(vec![999])),
+            ],
+        )
+        .unwrap();
+
+        let mut result_ctx = ResultContext::new();
+        result_ctx.add_node("p", "Project");
+        result_ctx.query_type = Some(QueryType::Search);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+
+        let output = PipelineOutput {
+            row_count: qr.authorized_count(),
+            redacted_count: 0,
+            query_type: "search".to_string(),
+            raw_query_strings: vec![],
+            compiled: Arc::new(CompiledQueryContext {
+                query_type: QueryType::Search,
+                base: ParameterizedQuery {
+                    sql: String::new(),
+                    params: HashMap::new(),
+                    result_context: result_ctx.clone(),
+                    query_config: Default::default(),
+                    dialect: Default::default(),
+                },
+                hydration: HydrationPlan::None,
+                input: serde_json::from_value(serde_json::json!({
+                    "query_type": "search",
+                    "node": {"id": "p", "entity": "Project"},
+                    "limit": 10
+                }))
+                .unwrap(),
+            }),
+            query_result: qr,
+            result_context: result_ctx,
+            execution_log: vec![],
+            pagination: None,
+        };
+
+        let formatter = GraphFormatter;
+        let response = formatter.build_response(&output);
+
+        assert_eq!(response.nodes.len(), 1);
+        let node = &response.nodes[0];
+        assert_eq!(
+            node.entity_type, "Project",
+            "entity_type must come from _gkg_p_type"
+        );
+        assert_eq!(node.id, 42, "id must come from _gkg_p_id");
+        assert!(
+            !node.properties.contains_key("type"),
+            "properties must not contain 'type' (would collide with entity_type under flatten)"
+        );
+        assert!(
+            !node.properties.contains_key("id"),
+            "properties must not contain 'id' (would collide with id under flatten)"
+        );
+        assert_eq!(
+            node.properties.get("name").and_then(|v| v.as_str()),
+            Some("Alpha"),
+            "non-reserved properties should still be present"
+        );
+
+        // Verify serialized JSON has exactly one "type" key with correct value
+        let json = serde_json::to_value(node).unwrap();
+        assert_eq!(json["type"], "Project");
+        assert_eq!(json["id"], 42);
+        assert_eq!(json["name"], "Alpha");
+        assert_eq!(
+            json.get("type").and_then(|v| v.as_str()),
+            Some("Project"),
+            "serialized 'type' must be the entity type, not the p_type column value"
+        );
     }
 }

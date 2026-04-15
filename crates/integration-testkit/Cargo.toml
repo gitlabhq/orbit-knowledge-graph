@@ -12,7 +12,7 @@ gkg-utils = { path = "../utils" }
 futures = { workspace = true }
 gkg-server = { path = "../gkg-server" }
 ontology = { path = "../ontology" }
-query-engine = { path = "../query-engine" }
+query-engine = { path = "../query-engine", features = ["testutils"] }
 rustls = { workspace = true }
 sqlparser = { workspace = true }
 serde_json = { workspace = true }

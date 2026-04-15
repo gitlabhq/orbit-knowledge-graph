@@ -3,6 +3,10 @@ name = "query-engine"
 version.workspace = true
 edition = "2024"
 
+[features]
+default = []
+testutils = ["formatters/testutils"]
+
 [dependencies]
 compiler = { path = "compiler" }
 types = { path = "types" }
