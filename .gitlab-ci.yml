@@ -505,7 +505,7 @@ code-indexing-benchmark-v2-linux:
     - saas-linux-large-amd64
   variables:
     ARCH: "linux-x86_64"
-    SCENARIO: index-v2
+    SCENARIO: v2
   parallel:
     matrix:
       - GROUP: [python, java, kotlin, csharp]
@@ -569,7 +569,7 @@ code-indexing-benchmark-v2-analyze:
   needs:
     - code-indexing-benchmark-v2-linux
   variables:
-    SCENARIO: index-v2
+    SCENARIO: v2
 
 # Build Stage
 
