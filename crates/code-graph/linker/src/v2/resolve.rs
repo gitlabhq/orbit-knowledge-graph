@@ -1,13 +1,13 @@
 //! Resolution engine: resolves references to graph edges.
 //!
-//! Operates on `&CodeGraph` (the single source of truth) plus
-//! `&[CanonicalResult]` (for reference data that isn't in the graph).
+//! Operates on `&CodeGraph` (the single source of truth).
 //! All definition/import lookups go through `CodeGraph`'s indexes.
 
 use code_graph_types::{EdgeKind, ExpressionStep, IStr, NodeKind, Relationship};
 use indicatif::{ProgressBar, ProgressStyle};
 use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
 
 use super::graph::{CodeGraph, GraphEdge};
@@ -49,11 +49,14 @@ fn apply_import_strategies(
     file_node: NodeIndex,
     name: &str,
     sep: &str,
+    import_cache: &mut FxHashMap<NodeIndex, Vec<NodeIndex>>,
 ) -> Vec<NodeIndex> {
     for strategy in strategies {
         let candidates = match strategy {
             ImportStrategy::ScopeFqnWalk => scope_fqn_walk(graph, file_node, name, sep),
-            ImportStrategy::ExplicitImport => explicit_import(graph, file_node, name, sep),
+            ImportStrategy::ExplicitImport => {
+                explicit_import(graph, file_node, name, sep, import_cache)
+            }
             ImportStrategy::WildcardImport => wildcard_import(graph, file_node, name, sep),
             ImportStrategy::SamePackage => same_package(graph, file_node, name, sep),
             ImportStrategy::SameFile => same_file(graph, file_node, name),
@@ -141,14 +144,17 @@ fn explicit_import(
     file_node: NodeIndex,
     name: &str,
     sep: &str,
+    import_cache: &mut FxHashMap<NodeIndex, Vec<NodeIndex>>,
 ) -> Vec<NodeIndex> {
     for neighbor in graph.graph.neighbors_directed(file_node, petgraph::Direction::Outgoing) {
         if let Some((_, imp)) = graph.graph[neighbor].as_import() {
             let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
             if imp_name == name {
-                let defs = resolve_import(graph, neighbor, sep);
+                let defs = import_cache
+                    .entry(neighbor)
+                    .or_insert_with(|| resolve_import(graph, neighbor, sep));
                 if !defs.is_empty() {
-                    return defs;
+                    return defs.clone();
                 }
             }
         }
@@ -375,6 +381,8 @@ struct Resolver<'a> {
     ssa: &'a mut SsaResolver,
     sep: &'a str,
     buf: String,
+    import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
+    member_cache: FxHashMap<(IStr, IStr), Vec<NodeIndex>>,
     pub stats: ResolveStats,
     pub last_bare_path: ResolvePath,
     pub last_chain_path: ResolvePath,
@@ -396,10 +404,46 @@ impl<'a> Resolver<'a> {
             settings,
             ssa,
             buf: String::with_capacity(128),
+            import_cache: FxHashMap::default(),
+            member_cache: FxHashMap::default(),
             stats: ResolveStats::default(),
             last_bare_path: ResolvePath::None,
             last_chain_path: ResolvePath::None,
         }
+    }
+
+    fn resolve_import_cached(&mut self, import_idx: NodeIndex) -> Vec<NodeIndex> {
+        if let Some(cached) = self.import_cache.get(&import_idx) {
+            return cached.clone();
+        }
+        let result = resolve_import(self.graph, import_idx, self.sep);
+        self.import_cache.insert(import_idx, result.clone());
+        result
+    }
+
+    fn lookup_member_cached(
+        &mut self,
+        class_fqn: &str,
+        member_name: &str,
+        out: &mut Vec<NodeIndex>,
+    ) -> bool {
+        let key = (IStr::from(class_fqn), IStr::from(member_name));
+        if let Some(cached) = self.member_cache.get(&key) {
+            if !cached.is_empty() {
+                out.extend_from_slice(cached);
+                return true;
+            }
+            return false;
+        }
+        let mut result = Vec::new();
+        self.graph
+            .lookup_member_with_supers(class_fqn, member_name, &mut result);
+        let found = !result.is_empty();
+        if found {
+            out.extend_from_slice(&result);
+        }
+        self.member_cache.insert(key, result);
+        found
     }
 
     fn def_to_types(&self, def: &code_graph_types::CanonicalDefinition) -> SmallVec<[IStr; 2]> {
@@ -442,7 +486,7 @@ impl<'a> Resolver<'a> {
                 self.def_to_types(def)
             }
             Value::Import(idx) => {
-                let defs = resolve_import(self.graph, *idx, self.sep);
+                let defs = self.resolve_import_cached(*idx);
                 defs.iter()
                     .flat_map(|&di| {
                         let def = self.graph.def(di);
@@ -474,6 +518,7 @@ impl<'a> Resolver<'a> {
                         self.file_node,
                         &read.name,
                         self.sep,
+                        &mut self.import_cache,
                     );
                     if !r.is_empty() {
                         self.stats.bare_import_resolved += 1;
@@ -484,9 +529,7 @@ impl<'a> Resolver<'a> {
                 ResolveStage::ImplicitMember => {
                     let mut r = Vec::new();
                     if let Some(type_fqn) = &read.enclosing_type_fqn
-                        && self
-                            .graph
-                            .lookup_member_with_supers(type_fqn, &read.name, &mut r)
+                        && self.lookup_member_cached(type_fqn, &read.name, &mut r)
                     {
                         self.stats.bare_implicit_this_resolved += 1;
                         self.last_bare_path = ResolvePath::BareImplicit;
@@ -518,12 +561,11 @@ impl<'a> Resolver<'a> {
                 }
                 Value::Import(idx) => {
                     self.stats.bare_ssa_import += 1;
-                    result.extend(resolve_import(self.graph, *idx, self.sep));
+                    result.extend(self.resolve_import_cached(*idx));
                 }
                 Value::Type(type_name) => {
                     self.stats.bare_ssa_type += 1;
-                    self.graph
-                        .lookup_member_with_supers(type_name, &read.name, &mut result);
+                    self.lookup_member_cached(type_name, &read.name, &mut result);
                 }
                 Value::Alias(name) => {
                     let alias_reaching = self.ssa.read_variable_stateless(name, read.block);
@@ -533,7 +575,7 @@ impl<'a> Resolver<'a> {
                                 result.push(*idx);
                             }
                             Value::Import(idx) => {
-                                result.extend(resolve_import(self.graph, *idx, self.sep));
+                                result.extend(self.resolve_import_cached(*idx));
                             }
                             _ => {}
                         }
@@ -658,8 +700,7 @@ impl<'a> Resolver<'a> {
                     && let Some(fqn) = enclosing
                 {
                     let mut members = Vec::new();
-                    self.graph
-                        .lookup_member_with_supers(fqn, name, &mut members);
+                    self.lookup_member_cached(fqn, name, &mut members);
                     for &def_idx in &members {
                         let def = self.graph.def(def_idx);
                         types.extend(self.def_to_types(def));
@@ -701,8 +742,7 @@ impl<'a> Resolver<'a> {
 
         for type_name in current_types {
             let before = found_members.len();
-            self.graph
-                .lookup_member_with_supers(type_name, member_name, &mut found_members);
+            self.lookup_member_cached(type_name, member_name, &mut found_members);
             for &def_idx in &found_members[before..] {
                 let def = self.graph.def(def_idx);
                 if matches!(step, ExpressionStep::Call(_)) {
