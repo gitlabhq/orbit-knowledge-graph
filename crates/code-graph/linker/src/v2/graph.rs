@@ -149,7 +149,7 @@ impl CodeGraph {
         }
     }
 
-    /// Add a single file's nodes to the graph. Returns (def_nodes, import_nodes)
+    /// Add a single file's nodes to the graph. Returns (file_node, def_nodes, import_nodes)
     /// so the walker can write `Value::Def(NodeIndex)` immediately.
     ///
     /// Called under a Mutex during the parallel parse+walk phase.
@@ -158,7 +158,7 @@ impl CodeGraph {
         &mut self,
         result: &CanonicalResult,
         _file_order: usize,
-    ) -> (Vec<NodeIndex>, Vec<NodeIndex>) {
+    ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
         let relative_path = self.relative_path(&result.file_path);
         let file_path: Arc<str> = Arc::from(relative_path.as_str());
 
@@ -223,38 +223,29 @@ impl CodeGraph {
                 GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::ImportedSymbol),
             );
         }
-        (def_nodes, import_nodes)
+        (file_node, def_nodes, import_nodes)
     }
 
     /// Finalize the graph after all files have been added.
-    /// Adds directory chains, containment edges, and flattens ancestor chains.
-    pub fn finalize(&mut self, results: &[CanonicalResult]) {
+    /// Adds directory chains, containment edges, and links supertypes.
+    pub fn finalize(&mut self) {
         let mut seen_dir_edges: FxHashSet<(String, String)> = FxHashSet::default();
 
-        // Collect all file paths for directory chain building
-        let file_paths: Vec<String> = results
+        let file_entries: Vec<(String, NodeIndex)> = self
+            .file_index
             .iter()
-            .map(|r| self.relative_path(&r.file_path))
+            .map(|(path, &node)| (path.clone(), node))
             .collect();
 
-        for path in &file_paths {
-            if let Some(dir_idx) = build_directory_chain(path, self, &mut seen_dir_edges)
-                && let Some(&file_node) = self.file_index.get(path)
-            {
+        for (path, file_node) in &file_entries {
+            if let Some(dir_idx) = build_directory_chain(path, self, &mut seen_dir_edges) {
                 self.graph.add_edge(
                     dir_idx,
-                    file_node,
+                    *file_node,
                     GraphEdge::structural(EdgeKind::Contains, NodeKind::Directory, NodeKind::File),
                 );
             }
-        }
-
-        // Containment edges between definitions (per file)
-        for result in results {
-            let file_path = self.relative_path(&result.file_path);
-            if let Some(&file_node) = self.file_index.get(&file_path) {
-                build_containment_edges(file_node, self);
-            }
+            build_containment_edges(*file_node, self);
         }
 
         self.link_supers();
@@ -269,7 +260,7 @@ impl CodeGraph {
         for (i, result) in results.iter().enumerate() {
             cg.add_file_nodes(result, i);
         }
-        cg.finalize(&results);
+        cg.finalize();
         cg
     }
 

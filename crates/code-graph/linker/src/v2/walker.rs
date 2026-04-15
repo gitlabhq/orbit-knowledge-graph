@@ -6,7 +6,8 @@
 //! populated `SsaResolver` with all reaching definitions computed.
 
 use code_graph_types::{
-    BindingKind, CanonicalBinding, CanonicalControlFlow, CanonicalResult, ControlFlowKind, IStr,
+    BindingKind, CanonicalBinding, CanonicalControlFlow, CanonicalReference, CanonicalResult,
+    ControlFlowKind, IStr,
 };
 use rustc_hash::FxHashMap;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -32,10 +33,9 @@ impl HasRoot for treesitter_visit::Root<StrDoc<SupportLang>> {
 /// Prevents stack overflow on deeply nested ASTs.
 const MIN_STACK_REMAINING: usize = 128 * 1024;
 
-/// A recorded reference read, linking back to the canonical data.
+/// A recorded reference read, indexing into the file's references vec.
 #[derive(Debug, Clone)]
 pub struct RecordedRead {
-    pub file_idx: usize,
     pub ref_idx: usize,
     pub block: BlockId,
     /// Interned reference name — avoids 2.2M String clones on elasticsearch.
@@ -51,6 +51,9 @@ pub struct RecordedRead {
 pub struct FileWalkResult {
     pub ssa: SsaResolver,
     pub reads: Vec<RecordedRead>,
+    pub file_node: NodeIndex,
+    /// Moved from CanonicalResult after walking — owns expression chains.
+    pub references: Vec<CanonicalReference>,
 }
 
 impl FileWalkResult {
@@ -59,6 +62,8 @@ impl FileWalkResult {
         Self {
             ssa: SsaResolver::new(),
             reads: Vec::new(),
+            file_node: NodeIndex::new(0),
+            references: Vec::new(),
         }
     }
 }
@@ -70,18 +75,23 @@ impl FileWalkResult {
 /// resolution.
 pub fn walk_file(
     rules: &ResolutionRules,
-    file_idx: usize,
     result: &CanonicalResult,
     root: &Node<StrDoc<SupportLang>>,
     def_nodes: &[NodeIndex],
     import_nodes: &[NodeIndex],
+    file_node: NodeIndex,
 ) -> FileWalkResult {
     let mut ssa = SsaResolver::new();
-    let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result, def_nodes, import_nodes);
+    let mut walker = FileWalker::new(rules, &mut ssa, result, def_nodes, import_nodes);
     walker.walk_node(root);
     let reads = walker.reads;
     ssa.seal_remaining();
-    FileWalkResult { ssa, reads }
+    FileWalkResult {
+        ssa,
+        reads,
+        file_node,
+        references: Vec::new(), // populated by caller after walk
+    }
 }
 
 // ── AST walker (Braun et al.) ───────────────────────────────────
@@ -98,7 +108,6 @@ struct ScopeEntry {
 struct FileWalker<'a> {
     rules: &'a ResolutionRules,
     ssa: &'a mut SsaResolver,
-    file_idx: usize,
     result: &'a CanonicalResult,
     def_nodes: &'a [NodeIndex],
     #[allow(dead_code)]
@@ -118,7 +127,6 @@ impl<'a> FileWalker<'a> {
     fn new(
         rules: &'a ResolutionRules,
         ssa: &'a mut SsaResolver,
-        file_idx: usize,
         result: &'a CanonicalResult,
         def_nodes: &'a [NodeIndex],
         import_nodes: &'a [NodeIndex],
@@ -170,7 +178,6 @@ impl<'a> FileWalker<'a> {
         Self {
             rules,
             ssa,
-            file_idx,
             result,
             def_nodes,
             import_nodes,
@@ -240,7 +247,6 @@ impl<'a> FileWalker<'a> {
             for ref_idx in ref_indices {
                 let reference = &self.result.references[ref_idx];
                 self.reads.push(RecordedRead {
-                    file_idx: self.file_idx,
                     ref_idx,
                     block: self.current_block,
                     name: IStr::from(reference.name.as_str()),

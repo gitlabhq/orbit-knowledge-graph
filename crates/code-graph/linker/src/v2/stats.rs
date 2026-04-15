@@ -1,4 +1,4 @@
-use code_graph_types::CanonicalResult;
+use std::sync::Arc;
 
 // ── SSA Stats ───────────────────────────────────────────────────
 
@@ -252,13 +252,13 @@ fn pct(n: u64, d: u64) -> f64 {
     }
 }
 pub struct FileTimingEntry {
-    pub file_idx: usize,
+    pub file_path: Arc<str>,
     pub num_reads: usize,
     pub duration: std::time::Duration,
     pub thread_id: usize,
 }
 
-pub fn print_long_tail_analysis(results: &[CanonicalResult], timings: &[FileTimingEntry]) {
+pub fn print_long_tail_analysis(timings: &[FileTimingEntry]) {
     if timings.is_empty() {
         return;
     }
@@ -282,7 +282,7 @@ pub fn print_long_tail_analysis(results: &[CanonicalResult], timings: &[FileTimi
 
     eprintln!("  Top 10 slowest files:");
     for entry in by_duration.iter().take(10) {
-        let path = &results[entry.file_idx].file_path;
+        let path: &str = &entry.file_path;
         let display = if path.len() > 60 {
             &path[path.len() - 60..]
         } else {

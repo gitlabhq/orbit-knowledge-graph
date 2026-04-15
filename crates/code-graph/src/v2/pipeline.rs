@@ -93,7 +93,7 @@ where
                 })?;
 
                 // Add this file's nodes to the graph under the lock.
-                let (def_nodes, import_nodes) = {
+                let (file_node, def_nodes, import_nodes) = {
                     let mut g = graph.lock().unwrap();
                     g.add_file_nodes(&result, file_idx)
                 };
@@ -101,11 +101,11 @@ where
                 let walk = if let Some(root) = ast.as_root() {
                     crate::linker::v2::walker::walk_file(
                         &rules,
-                        file_idx,
                         &result,
                         &root,
                         &def_nodes,
                         &import_nodes,
+                        file_node,
                     )
                 } else {
                     FileWalkResult::empty()
@@ -121,28 +121,30 @@ where
         ));
 
         // ── Collect results ─────────────────────────────────────
-        let mut results = Vec::with_capacity(file_outputs.len());
         let mut walks = Vec::with_capacity(file_outputs.len());
         let mut errors = Vec::new();
+        let mut total_defs = 0usize;
+        let mut total_refs = 0usize;
+        let mut total_imports = 0usize;
 
         for output in file_outputs {
             match output {
-                Ok((result, walk)) => {
-                    results.push(result);
+                Ok((mut result, mut walk)) => {
+                    total_defs += result.definitions.len();
+                    total_refs += result.references.len();
+                    total_imports += result.imports.len();
+                    walk.references = std::mem::take(&mut result.references);
                     walks.push(walk);
                 }
                 Err(err) => errors.push(err),
             }
         }
 
-        if !errors.is_empty() && results.is_empty() {
+        if !errors.is_empty() && walks.is_empty() {
             return Err(errors);
         }
 
         // ── Sequential phase ────────────────────────────────────
-        let total_defs: usize = results.iter().map(|r| r.definitions.len()).sum();
-        let total_refs: usize = results.iter().map(|r| r.references.len()).sum();
-        let total_imports: usize = results.iter().map(|r| r.imports.len()).sum();
         eprintln!(
             "[v2] {total_defs} defs, {total_refs} refs, {total_imports} imports, {} errors",
             errors.len()
@@ -150,11 +152,11 @@ where
 
         let t2 = std::time::Instant::now();
         let mut graph = graph.into_inner().unwrap();
-        graph.finalize(&results);
+        graph.finalize();
         eprintln!("[v2] graph finalize: {:.2?}", t2.elapsed());
 
         let t3 = std::time::Instant::now();
-        let result = build_edges(&rules, &graph, &results, &mut walks, &rules.settings);
+        let result = build_edges(&rules, &graph, &mut walks, &rules.settings);
         eprintln!(
             "[v2] resolve: {} edges in {:.2?}",
             result.edges.len(),

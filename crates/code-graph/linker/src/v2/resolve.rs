@@ -4,9 +4,7 @@
 //! `&[CanonicalResult]` (for reference data that isn't in the graph).
 //! All definition/import lookups go through `CodeGraph`'s indexes.
 
-use code_graph_types::{
-    CanonicalImport, CanonicalResult, EdgeKind, ExpressionStep, IStr, NodeKind, Relationship,
-};
+use code_graph_types::{EdgeKind, ExpressionStep, IStr, NodeKind, Relationship};
 use indicatif::{ProgressBar, ProgressStyle};
 use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
@@ -48,19 +46,17 @@ impl Default for ResolveSettings {
 fn apply_import_strategies(
     strategies: &[ImportStrategy],
     graph: &CodeGraph,
-    results: &[CanonicalResult],
-    file_idx: usize,
+    file_node: NodeIndex,
     name: &str,
     sep: &str,
 ) -> Vec<NodeIndex> {
-    let result = &results[file_idx];
     for strategy in strategies {
         let candidates = match strategy {
-            ImportStrategy::ScopeFqnWalk => scope_fqn_walk(graph, result, name, sep),
-            ImportStrategy::ExplicitImport => explicit_import(graph, results, file_idx, name, sep),
-            ImportStrategy::WildcardImport => wildcard_import(graph, results, file_idx, name, sep),
-            ImportStrategy::SamePackage => same_package(graph, result, name, sep),
-            ImportStrategy::SameFile => same_file(graph, results, file_idx, name),
+            ImportStrategy::ScopeFqnWalk => scope_fqn_walk(graph, file_node, name, sep),
+            ImportStrategy::ExplicitImport => explicit_import(graph, file_node, name, sep),
+            ImportStrategy::WildcardImport => wildcard_import(graph, file_node, name, sep),
+            ImportStrategy::SamePackage => same_package(graph, file_node, name, sep),
+            ImportStrategy::SameFile => same_file(graph, file_node, name),
             ImportStrategy::FilePath => vec![],
         };
         if !candidates.is_empty() {
@@ -70,7 +66,8 @@ fn apply_import_strategies(
     vec![]
 }
 
-fn resolve_import(graph: &CodeGraph, import: &CanonicalImport, sep: &str) -> Vec<NodeIndex> {
+fn resolve_import(graph: &CodeGraph, import_idx: NodeIndex, sep: &str) -> Vec<NodeIndex> {
+    let import = graph.import(import_idx);
     let symbol_name = import
         .alias
         .as_deref()
@@ -102,11 +99,17 @@ fn resolve_import(graph: &CodeGraph, import: &CanonicalImport, sep: &str) -> Vec
 
 fn scope_fqn_walk(
     graph: &CodeGraph,
-    result: &CanonicalResult,
+    file_node: NodeIndex,
     name: &str,
     sep: &str,
 ) -> Vec<NodeIndex> {
-    for def in &result.definitions {
+    let defs: Vec<_> = graph
+        .graph
+        .neighbors_directed(file_node, petgraph::Direction::Outgoing)
+        .filter_map(|idx| graph.graph[idx].as_definition().map(|(_, d)| d))
+        .collect();
+
+    for def in &defs {
         if def.is_top_level {
             let candidate = format!("{}{}{}", def.fqn, sep, name);
             let matches = graph.lookup_fqn(&candidate);
@@ -115,7 +118,7 @@ fn scope_fqn_walk(
             }
         }
     }
-    for def in &result.definitions {
+    for def in &defs {
         let fqn_str = def.fqn.to_string();
         let mut current = fqn_str.as_str();
         loop {
@@ -135,17 +138,18 @@ fn scope_fqn_walk(
 
 fn explicit_import(
     graph: &CodeGraph,
-    results: &[CanonicalResult],
-    file_idx: usize,
+    file_node: NodeIndex,
     name: &str,
     sep: &str,
 ) -> Vec<NodeIndex> {
-    for imp in &results[file_idx].imports {
-        let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-        if imp_name == name {
-            let defs = resolve_import(graph, imp, sep);
-            if !defs.is_empty() {
-                return defs;
+    for neighbor in graph.graph.neighbors_directed(file_node, petgraph::Direction::Outgoing) {
+        if let Some((_, imp)) = graph.graph[neighbor].as_import() {
+            let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+            if imp_name == name {
+                let defs = resolve_import(graph, neighbor, sep);
+                if !defs.is_empty() {
+                    return defs;
+                }
             }
         }
     }
@@ -154,34 +158,14 @@ fn explicit_import(
 
 fn wildcard_import(
     graph: &CodeGraph,
-    results: &[CanonicalResult],
-    file_idx: usize,
+    file_node: NodeIndex,
     name: &str,
     sep: &str,
 ) -> Vec<NodeIndex> {
-    for imp in &results[file_idx].imports {
-        if imp.wildcard {
-            let candidate = format!("{}{}{}", imp.path, sep, name);
-            let matches = graph.lookup_fqn(&candidate);
-            if !matches.is_empty() {
-                return matches.to_vec();
-            }
-        }
-    }
-    vec![]
-}
-
-fn same_package(
-    graph: &CodeGraph,
-    result: &CanonicalResult,
-    name: &str,
-    sep: &str,
-) -> Vec<NodeIndex> {
-    for def in &result.definitions {
-        if def.is_top_level {
-            let fqn_str = def.fqn.to_string();
-            if let Some(sep_pos) = fqn_str.rfind(sep) {
-                let candidate = format!("{}{}{}", &fqn_str[..sep_pos], sep, name);
+    for neighbor in graph.graph.neighbors_directed(file_node, petgraph::Direction::Outgoing) {
+        if let Some((_, imp)) = graph.graph[neighbor].as_import() {
+            if imp.wildcard {
+                let candidate = format!("{}{}{}", imp.path, sep, name);
                 let matches = graph.lookup_fqn(&candidate);
                 if !matches.is_empty() {
                     return matches.to_vec();
@@ -192,18 +176,36 @@ fn same_package(
     vec![]
 }
 
-fn same_file(
+fn same_package(
     graph: &CodeGraph,
-    results: &[CanonicalResult],
-    file_idx: usize,
+    file_node: NodeIndex,
     name: &str,
+    sep: &str,
 ) -> Vec<NodeIndex> {
-    let file_path = graph.relative_path(&results[file_idx].file_path);
+    for neighbor in graph.graph.neighbors_directed(file_node, petgraph::Direction::Outgoing) {
+        if let Some((_, def)) = graph.graph[neighbor].as_definition() {
+            if def.is_top_level {
+                let fqn_str = def.fqn.to_string();
+                if let Some(sep_pos) = fqn_str.rfind(sep) {
+                    let candidate = format!("{}{}{}", &fqn_str[..sep_pos], sep, name);
+                    let matches = graph.lookup_fqn(&candidate);
+                    if !matches.is_empty() {
+                        return matches.to_vec();
+                    }
+                }
+            }
+        }
+    }
+    vec![]
+}
+
+fn same_file(graph: &CodeGraph, file_node: NodeIndex, name: &str) -> Vec<NodeIndex> {
+    let file_path = graph.graph[file_node].path();
 
     let by_fqn: Vec<NodeIndex> = graph
         .lookup_fqn(name)
         .iter()
-        .filter(|&&idx| graph.def_in_file(idx, &file_path))
+        .filter(|&&idx| graph.def_in_file(idx, file_path))
         .copied()
         .collect();
     if !by_fqn.is_empty() {
@@ -213,7 +215,7 @@ fn same_file(
     graph
         .lookup_name(name)
         .iter()
-        .filter(|&&idx| graph.def_in_file(idx, &file_path))
+        .filter(|&&idx| graph.def_in_file(idx, file_path))
         .copied()
         .collect()
 }
@@ -228,7 +230,6 @@ pub struct BuildEdgesResult {
 pub fn build_edges(
     rules: &ResolutionRules,
     graph: &CodeGraph,
-    results: &[CanonicalResult],
     walks: &mut [FileWalkResult],
     settings: &ResolveSettings,
 ) -> BuildEdgesResult {
@@ -248,11 +249,10 @@ pub fn build_edges(
             let deadline = settings.per_file_timeout.map(|d| file_start + d);
             let reads = std::mem::take(&mut walk.reads);
             let num_reads = reads.len();
-            let file_idx = reads.first().map(|r| r.file_idx).unwrap_or(0);
-            let file_path = graph.relative_path(&results[file_idx].file_path);
-            let file_node = graph.file_index.get(&file_path).copied().unwrap_or(NodeIndex::new(0));
+            let file_node = walk.file_node;
+            let file_path: std::sync::Arc<str> = graph.graph[file_node].path().into();
             let thread_id = rayon::current_thread_index().unwrap_or(0);
-            let mut resolver = Resolver::new(rules, graph, results, settings, &mut walk.ssa);
+            let mut resolver = Resolver::new(rules, graph, file_node, settings, &mut walk.ssa);
             let mut file_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)> = Vec::new();
 
             for (resolved_count, read) in reads.iter().enumerate() {
@@ -270,8 +270,7 @@ pub fn build_edges(
                     break;
                 }
 
-                let result = &results[read.file_idx];
-                let reference = &result.references[read.ref_idx];
+                let reference = &walk.references[read.ref_idx];
 
                 let t = std::time::Instant::now();
                 let (resolved_defs, path) = if let Some(ref chain) = reference.expression {
@@ -289,7 +288,7 @@ pub fn build_edges(
                 {
                     pb.suspend(|| {
                         eprintln!("\x1b[31m[SLOW] {:.2?} resolving '{}' in {} (chain: {})\x1b[0m",
-                            elapsed, reference.name, result.file_path, reference.expression.is_some());
+                            elapsed, reference.name, &*file_path, reference.expression.is_some());
                     });
                 }
 
@@ -333,7 +332,7 @@ pub fn build_edges(
 
             resolver.stats.ssa.merge(&resolver.ssa.stats);
             let stats = std::mem::take(&mut resolver.stats);
-            let timing = FileTimingEntry { file_idx, num_reads, duration: file_start.elapsed(), thread_id };
+            let timing = FileTimingEntry { file_path: file_path.clone(), num_reads, duration: file_start.elapsed(), thread_id };
             (file_edges, stats, timing)
         })
         .collect();
@@ -349,7 +348,7 @@ pub fn build_edges(
         timings.push(timing);
     }
 
-    print_long_tail_analysis(results, &timings);
+    print_long_tail_analysis(&timings);
     BuildEdgesResult {
         edges: all_edges,
         stats: combined,
@@ -371,7 +370,7 @@ enum ResolvePath {
 struct Resolver<'a> {
     rules: &'a ResolutionRules,
     graph: &'a CodeGraph,
-    results: &'a [CanonicalResult],
+    file_node: NodeIndex,
     settings: &'a ResolveSettings,
     ssa: &'a mut SsaResolver,
     sep: &'a str,
@@ -385,7 +384,7 @@ impl<'a> Resolver<'a> {
     fn new(
         rules: &'a ResolutionRules,
         graph: &'a CodeGraph,
-        results: &'a [CanonicalResult],
+        file_node: NodeIndex,
         settings: &'a ResolveSettings,
         ssa: &'a mut SsaResolver,
     ) -> Self {
@@ -393,7 +392,7 @@ impl<'a> Resolver<'a> {
             sep: rules.fqn_separator,
             rules,
             graph,
-            results,
+            file_node,
             settings,
             ssa,
             buf: String::with_capacity(128),
@@ -443,8 +442,7 @@ impl<'a> Resolver<'a> {
                 self.def_to_types(def)
             }
             Value::Import(idx) => {
-                let import = self.graph.import(*idx);
-                let defs = resolve_import(self.graph, import, self.sep);
+                let defs = resolve_import(self.graph, *idx, self.sep);
                 defs.iter()
                     .flat_map(|&di| {
                         let def = self.graph.def(di);
@@ -473,8 +471,7 @@ impl<'a> Resolver<'a> {
                     let r = apply_import_strategies(
                         &self.rules.import_strategies,
                         self.graph,
-                        self.results,
-                        read.file_idx,
+                        self.file_node,
                         &read.name,
                         self.sep,
                     );
@@ -521,8 +518,7 @@ impl<'a> Resolver<'a> {
                 }
                 Value::Import(idx) => {
                     self.stats.bare_ssa_import += 1;
-                    let import = self.graph.import(*idx);
-                    result.extend(resolve_import(self.graph, import, self.sep));
+                    result.extend(resolve_import(self.graph, *idx, self.sep));
                 }
                 Value::Type(type_name) => {
                     self.stats.bare_ssa_type += 1;
@@ -537,8 +533,7 @@ impl<'a> Resolver<'a> {
                                 result.push(*idx);
                             }
                             Value::Import(idx) => {
-                                let import = self.graph.import(*idx);
-                                result.extend(resolve_import(self.graph, import, self.sep));
+                                result.extend(resolve_import(self.graph, *idx, self.sep));
                             }
                             _ => {}
                         }
@@ -780,7 +775,6 @@ impl<'a> Resolver<'a> {
             _ => return vec![],
         };
         let bare_read = RecordedRead {
-            file_idx: read.file_idx,
             ref_idx: read.ref_idx,
             block: read.block,
             name: IStr::from(last.as_str()),
