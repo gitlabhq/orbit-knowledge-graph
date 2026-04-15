@@ -37,7 +37,8 @@ pub struct RecordedRead {
     pub file_idx: usize,
     pub ref_idx: usize,
     pub block: BlockId,
-    pub name: String,
+    /// Interned reference name — avoids 2.2M String clones on elasticsearch.
+    pub name: IStr,
     /// Pre-computed enclosing definition (for edge source). None = file-level.
     pub enclosing_def: Option<DefRef>,
     /// Pre-computed enclosing type scope FQN (for implicit this / This chains).
@@ -217,7 +218,7 @@ impl<'a> FileWalker<'a> {
                     file_idx: self.file_idx,
                     ref_idx,
                     block: self.current_block,
-                    name: reference.name.clone(),
+                    name: IStr::from(reference.name.as_str()),
                     enclosing_def,
                     enclosing_type_fqn,
                 });

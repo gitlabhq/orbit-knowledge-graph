@@ -276,6 +276,12 @@ pub fn build_edges(
     ctx: &ResolutionContext,
     walks: &mut [FileWalkResult],
 ) -> BuildEdgesResult {
+    // Sort files by ref count descending so large files start first.
+    // Rayon work-stealing can only steal at file boundaries, so starting
+    // big files early prevents the long-tail problem where one 7K-ref
+    // file runs alone while 15 threads are idle.
+    walks.sort_unstable_by(|a, b| b.reads.len().cmp(&a.reads.len()));
+
     let total_reads: u64 = walks.iter().map(|w| w.reads.len() as u64).sum();
     let pb = ProgressBar::new(total_reads);
     pb.set_style(
@@ -875,7 +881,7 @@ impl<'a> Resolver<'a> {
             file_idx: read.file_idx,
             ref_idx: read.ref_idx,
             block: read.block,
-            name: last.clone(),
+            name: IStr::from(last.as_str()),
             enclosing_def: read.enclosing_def,
             enclosing_type_fqn: read.enclosing_type_fqn,
         };
@@ -884,6 +890,22 @@ impl<'a> Resolver<'a> {
 }
 
 fn dedup(result: &mut Vec<DefRef>) {
-    let mut seen = FxHashSet::default();
-    result.retain(|r| seen.insert((r.file_idx, r.def_idx)));
+    if result.len() <= 4 {
+        // O(n²) but n ≤ 4, no allocation.
+        let mut i = 0;
+        while i < result.len() {
+            let key = (result[i].file_idx, result[i].def_idx);
+            if result[..i]
+                .iter()
+                .any(|r| r.file_idx == key.0 && r.def_idx == key.1)
+            {
+                result.swap_remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    } else {
+        let mut seen = FxHashSet::default();
+        result.retain(|r| seen.insert((r.file_idx, r.def_idx)));
+    }
 }
