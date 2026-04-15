@@ -12,6 +12,7 @@ mod server {
     pub mod grpc_tls;
     pub mod health;
     pub mod hydration;
+    pub mod query_cache;
     pub mod redaction;
     pub mod telemetry;
 }

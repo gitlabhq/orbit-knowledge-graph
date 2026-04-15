@@ -445,3 +445,115 @@ async fn in_progress_prevents_redelivery() {
 
     message.ack().await.expect("failed to ack");
 }
+
+// ============================================================================
+// Object Store integration tests
+// ============================================================================
+
+#[tokio::test]
+async fn object_store_put_and_get() {
+    let (_container, url) = start_nats_container().await;
+    let config = default_config(&url);
+    let broker = connect_broker(&config).await;
+
+    let bucket = "test_objects";
+    broker
+        .ensure_object_store_exists(bucket)
+        .await
+        .expect("failed to create object store");
+
+    let data = bytes::Bytes::from("hello object store");
+    broker
+        .object_put(bucket, "test-key", data.clone())
+        .await
+        .expect("failed to put object");
+
+    let retrieved = broker
+        .object_get(bucket, "test-key")
+        .await
+        .expect("failed to get object")
+        .expect("object should exist");
+
+    assert_eq!(retrieved, data.as_ref());
+}
+
+#[tokio::test]
+async fn object_store_get_missing_returns_none() {
+    let (_container, url) = start_nats_container().await;
+    let config = default_config(&url);
+    let broker = connect_broker(&config).await;
+
+    let bucket = "test_objects_miss";
+    broker
+        .ensure_object_store_exists(bucket)
+        .await
+        .expect("failed to create object store");
+
+    let result = broker
+        .object_get(bucket, "nonexistent")
+        .await
+        .expect("get should not error");
+
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn object_store_delete() {
+    let (_container, url) = start_nats_container().await;
+    let config = default_config(&url);
+    let broker = connect_broker(&config).await;
+
+    let bucket = "test_objects_del";
+    broker
+        .ensure_object_store_exists(bucket)
+        .await
+        .expect("failed to create object store");
+
+    broker
+        .object_put(bucket, "to-delete", bytes::Bytes::from("data"))
+        .await
+        .expect("failed to put");
+
+    broker
+        .object_delete(bucket, "to-delete")
+        .await
+        .expect("failed to delete");
+
+    let result = broker
+        .object_get(bucket, "to-delete")
+        .await
+        .expect("get should not error");
+
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn object_store_overwrites_existing() {
+    let (_container, url) = start_nats_container().await;
+    let config = default_config(&url);
+    let broker = connect_broker(&config).await;
+
+    let bucket = "test_objects_overwrite";
+    broker
+        .ensure_object_store_exists(bucket)
+        .await
+        .expect("failed to create object store");
+
+    broker
+        .object_put(bucket, "key", bytes::Bytes::from("v1"))
+        .await
+        .expect("failed to put v1");
+
+    broker
+        .object_put(bucket, "key", bytes::Bytes::from("v2"))
+        .await
+        .expect("failed to put v2");
+
+    let retrieved = broker
+        .object_get(bucket, "key")
+        .await
+        .expect("get failed")
+        .expect("object should exist");
+
+    assert_eq!(retrieved, b"v2");
+}

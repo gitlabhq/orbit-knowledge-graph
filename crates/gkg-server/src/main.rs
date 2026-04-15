@@ -141,14 +141,13 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
-    let mut registry = query_engine::shared::content::ColumnResolverRegistry::new();
-    registry.register(
+    let mut resolver_registry = query_engine::shared::content::ColumnResolverRegistry::new();
+    resolver_registry.register(
         "gitaly",
         Arc::new(content::gitaly::GitalyContentService::new(
             gitlab_client.clone(),
         )),
     );
-    let resolver_registry = Some(Arc::new(registry));
     info!("Content resolution enabled (GitlabClient configured)");
 
     let graph_client = config.graph.build_client();
@@ -158,16 +157,28 @@ async fn run_webserver(
 
     let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
 
-    let grpc_server = GrpcServer::new(
+    let mut grpc_server = GrpcServer::new(
         config.grpc_bind_address,
         validator,
         ontology,
         &config.graph,
         cluster_health,
         tls_config,
-        resolver_registry,
         config.grpc.clone(),
-    );
+    )
+    .with_resolver_registry(Arc::new(resolver_registry));
+    if config.query.default.app_cache_enabled == Some(true) {
+        info!("initializing NATS query cache");
+        let broker = Arc::new(
+            indexer::nats::NatsBroker::connect(&config.nats)
+                .await
+                .map_err(|e| anyhow::anyhow!("NATS connection for query cache failed: {e}"))?,
+        );
+        gkg_server::pipeline::ensure_query_cache_bucket(&broker)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to create query cache bucket: {e}"))?;
+        grpc_server = grpc_server.with_cache_broker(broker);
+    }
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
     tokio::select! {

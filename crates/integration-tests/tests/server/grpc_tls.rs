@@ -42,7 +42,6 @@ fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> G
         &clickhouse_config,
         cluster_health,
         tls_config,
-        None,
         GrpcConfig::default(),
     )
 }

@@ -2,23 +2,31 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use tracing::{info, warn};
 
 use super::blob_stream::BlobStream;
 use super::cache::RepositoryCache;
 use super::changed_path_stream::{ChangeStatus, ChangedPath, ChangedPathStream};
+use super::filtered_archive::build_filtered_archive;
 use super::service::RepositoryService;
 use crate::handler::HandlerError;
 use crate::modules::code::metrics::CodeMetrics;
+use crate::nats::NatsServices;
 
 const SUBMODULE_MODE: u32 = 0o160000;
 const MAX_CHANGED_PATHS: usize = 100_000;
 const MAX_BLOB_OIDS_PER_REQUEST: usize = 5000;
 
+const OBJECT_STORE_BUCKET: &str = "gkg_repo_cache";
+const DEFAULT_MAX_ARCHIVE_BYTES: usize = 500 * 1024 * 1024; // 500 MiB
+
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
     cache: Arc<dyn RepositoryCache>,
+    nats: Option<Arc<dyn NatsServices>>,
     metrics: CodeMetrics,
+    max_archive_bytes: usize,
 }
 
 impl RepositoryResolver {
@@ -30,8 +38,15 @@ impl RepositoryResolver {
         Self {
             repository_service,
             cache,
+            nats: None,
             metrics,
+            max_archive_bytes: DEFAULT_MAX_ARCHIVE_BYTES,
         }
+    }
+
+    pub fn with_object_store(mut self, nats: Arc<dyn NatsServices>) -> Self {
+        self.nats = Some(nats);
+        self
     }
 
     pub async fn resolve(
@@ -49,6 +64,14 @@ impl RepositoryResolver {
             .map_err(|e| HandlerError::Processing(format!("cache lookup failed: {e}")))?;
 
         let Some(cached) = cached else {
+            // L1 miss -- try L2 (Object Store) before downloading from Rails
+            if let Some(path) = self
+                .try_restore_from_object_store(project_id, branch, ref_name)
+                .await
+            {
+                self.metrics.record_resolution_strategy("object_store_hit");
+                return Ok(path);
+            }
             self.metrics.record_resolution_strategy("full_download");
             return self.full_download(project_id, branch, ref_name).await;
         };
@@ -98,10 +121,110 @@ impl RepositoryResolver {
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))?;
 
-        self.cache
+        let path = self
+            .cache
             .extract_archive(project_id, branch, ref_name, archive_stream)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
+            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))?;
+
+        self.upload_to_object_store(project_id, branch, ref_name, &path);
+
+        Ok(path)
+    }
+
+    fn object_store_key(project_id: i64, branch: &str, commit: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let branch_hash = format!("{:x}", Sha256::digest(branch.as_bytes()));
+        format!("{project_id}/{branch_hash}/{commit}.tar.gz")
+    }
+
+    /// Fire-and-forget upload of filtered archive to NATS Object Store.
+    fn upload_to_object_store(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit: &str,
+        repo_path: &std::path::Path,
+    ) {
+        let Some(nats) = &self.nats else { return };
+        let nats = Arc::clone(nats);
+        let key = Self::object_store_key(project_id, branch, commit);
+        let repo_path = repo_path.to_path_buf();
+        let max_bytes = self.max_archive_bytes;
+
+        tokio::spawn(async move {
+            let result =
+                tokio::task::spawn_blocking(move || build_filtered_archive(&repo_path, max_bytes))
+                    .await;
+
+            match result {
+                Ok(Ok(Some(data))) => {
+                    let size = data.len();
+                    if let Err(e) = nats
+                        .object_put(OBJECT_STORE_BUCKET, &key, Bytes::from(data))
+                        .await
+                    {
+                        warn!(key, error = %e, "failed to upload filtered archive to object store");
+                    } else {
+                        info!(key, size, "uploaded filtered archive to object store");
+                    }
+                }
+                Ok(Ok(None)) => {
+                    info!(
+                        key,
+                        max_bytes, "skipped object store upload: archive too large"
+                    );
+                }
+                Ok(Err(e)) => {
+                    warn!(key, error = %e, "failed to build filtered archive");
+                }
+                Err(e) => {
+                    warn!(key, error = %e, "filtered archive task panicked");
+                }
+            }
+        });
+    }
+
+    /// Try to restore a repository from the NATS Object Store (L2 cache).
+    async fn try_restore_from_object_store(
+        &self,
+        project_id: i64,
+        branch: &str,
+        commit: &str,
+    ) -> Option<PathBuf> {
+        let nats = self.nats.as_ref()?;
+        let key = Self::object_store_key(project_id, branch, commit);
+
+        let data = match nats.object_get(OBJECT_STORE_BUCKET, &key).await {
+            Ok(Some(data)) => data,
+            Ok(None) => return None,
+            Err(e) => {
+                warn!(key, error = %e, "object store lookup failed");
+                return None;
+            }
+        };
+
+        info!(
+            key,
+            size = data.len(),
+            "restoring repository from object store"
+        );
+
+        let stream: super::service::ByteStream = Box::pin(futures::stream::once(async {
+            Ok(bytes::Bytes::from(data))
+        }));
+
+        match self
+            .cache
+            .extract_archive(project_id, branch, commit, stream)
+            .await
+        {
+            Ok(path) => Some(path),
+            Err(e) => {
+                warn!(key, error = %e, "failed to extract object store archive");
+                None
+            }
+        }
     }
 
     async fn incremental_update(

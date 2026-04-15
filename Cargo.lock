@@ -4960,6 +4960,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow 58.1.0",
+ "async-nats",
  "async-trait",
  "axum",
  "base64 0.22.1",
@@ -4985,6 +4986,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
@@ -5701,6 +5703,7 @@ dependencies = [
  "gitlab-client",
  "gkg-server-config",
  "gkg-utils",
+ "ignore",
  "internment",
  "moka",
  "ontology",

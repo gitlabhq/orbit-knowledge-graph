@@ -2,6 +2,7 @@
 pub mod blob_stream;
 pub mod cache;
 mod changed_path_stream;
+pub(crate) mod filtered_archive;
 pub mod resolver;
 pub(crate) mod service;
 

@@ -102,6 +102,8 @@ query:
     max_execution_time: 30
     use_query_cache: false
     query_cache_ttl: 60
+    app_cache_enabled: false
+    app_cache_ttl: 60
 
 metrics:
   otel:

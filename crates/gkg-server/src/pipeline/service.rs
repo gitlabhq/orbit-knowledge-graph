@@ -15,8 +15,10 @@ use query_engine::pipeline::{
 use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
 use super::metrics::OTelPipelineObserver;
+use indexer::nats::NatsBroker;
+
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
+    AuthorizationStage, CachedExecutor, HydrationStage, RedactionStage, SecurityStage,
 };
 
 #[derive(Clone)]
@@ -25,6 +27,7 @@ pub struct QueryPipelineService {
     client: Arc<ArrowClickHouseClient>,
     profiling: ProfilingConfig,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
+    cache_broker: Option<Arc<NatsBroker>>,
 }
 
 impl QueryPipelineService {
@@ -38,11 +41,17 @@ impl QueryPipelineService {
             client,
             profiling,
             resolver_registry: None,
+            cache_broker: None,
         }
     }
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
         self.resolver_registry = Some(registry);
+        self
+    }
+
+    pub fn with_cache_broker(mut self, broker: Arc<NatsBroker>) -> Self {
+        self.cache_broker = Some(broker);
         self
     }
 
@@ -64,6 +73,9 @@ impl QueryPipelineService {
         if let Some(registry) = &self.resolver_registry {
             server_extensions.insert(ColumnResolverRegistry::clone(registry));
         }
+        if let Some(broker) = &self.cache_broker {
+            server_extensions.insert(Arc::clone(broker));
+        }
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
@@ -79,7 +91,7 @@ impl QueryPipelineService {
             .await?
             .then(&CompilationStage)
             .await?
-            .then(&ClickHouseExecutor)
+            .then(&CachedExecutor)
             .await?
             .then(&ExtractionStage)
             .await?

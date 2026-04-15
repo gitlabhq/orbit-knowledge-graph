@@ -211,7 +211,9 @@ pub async fn run(
     modules::sdlc::register_handlers(&registry, config, &ontology).await?;
 
     info!("initializing Code handlers");
-    modules::code::register_handlers(&registry, config, &ontology)?;
+    let nats_services: Arc<dyn nats::NatsServices> =
+        Arc::new(nats::NatsServicesImpl::new(broker.clone()));
+    modules::code::register_handlers(&registry, config, &ontology, Some(nats_services))?;
 
     info!("initializing Namespace Deletion handler");
     modules::namespace_deletion::register_handlers(&registry, config, &ontology)?;

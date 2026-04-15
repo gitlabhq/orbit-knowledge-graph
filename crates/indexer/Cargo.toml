@@ -24,10 +24,12 @@ gkg-utils = { path = "../utils" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
+ignore = { workspace = true }
 gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
 moka = { workspace = true }
 ontology = { path = "../ontology" }
+parser-core = { workspace = true }
 query-engine = { path = "../query-engine" }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }

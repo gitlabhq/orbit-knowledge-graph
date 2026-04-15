@@ -25,6 +25,7 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+use crate::nats::NatsServices;
 pub use code_indexing_task_handler::CodeIndexingTaskHandler;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
@@ -45,6 +46,7 @@ pub fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
+    nats_services: Option<Arc<dyn NatsServices>>,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
         tracing::info!("Code handlers disabled (GitLab client not configured)");
@@ -71,7 +73,11 @@ pub fn register_handlers(
 
     let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::default());
 
-    let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
+    let mut resolver =
+        RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
+    if let Some(nats) = nats_services {
+        resolver = resolver.with_object_store(nats);
+    }
 
     let pipeline = Arc::new(indexing_pipeline::CodeIndexingPipeline::new(
         resolver,
