@@ -97,7 +97,7 @@ impl LanguageSpec {
             scope_stack.push(Arc::from(name.as_str()));
         }
 
-        if let Some(m) = self.evaluate_scope(node, &node_kind) {
+        if let Some(m) = self.evaluate_scope(node, &node_kind, imports, sep) {
             let is_top_level =
                 scope_stack.is_empty() || (scope_stack.len() == 1 && scope_stack[0].contains('.'));
 
@@ -156,6 +156,8 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
+        imports: &[code_graph_types::CanonicalImport],
+        sep: &'static str,
     ) -> Option<ScopeMatch> {
         if !self.is_scope_candidate(node_kind) {
             return None;
@@ -174,7 +176,7 @@ impl LanguageSpec {
             def_kind: rule.resolve_def_kind(),
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
-            metadata: rule.extract_metadata(node),
+            metadata: rule.extract_metadata(node, imports, sep),
         })
     }
 

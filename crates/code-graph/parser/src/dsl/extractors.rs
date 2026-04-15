@@ -234,25 +234,40 @@ impl MetadataRule {
         self
     }
 
-    /// Extract metadata from a node. Returns None if all fields are empty.
+    /// Extract metadata from a node. Type names in return_type, type_annotation,
+    /// receiver_type, and super_types are resolved against the file's imports
+    /// to produce full FQNs where possible.
     pub fn extract_metadata(
         &self,
         node: &N<'_>,
+        imports: &[code_graph_types::CanonicalImport],
+        sep: &'static str,
     ) -> Option<Box<code_graph_types::DefinitionMetadata>> {
-        let super_types = self
+        let super_types: Vec<String> = self
             .super_types
             .as_ref()
-            .map(|e| e.extract(node))
+            .map(|e| {
+                e.extract(node)
+                    .into_iter()
+                    .map(|s| resolve_type_via_imports(&s, imports, sep))
+                    .collect()
+            })
             .unwrap_or_default();
-        let return_type = self.return_type.as_ref().and_then(|e| e.extract_name(node));
+        let return_type = self
+            .return_type
+            .as_ref()
+            .and_then(|e| e.extract_name(node))
+            .map(|s| resolve_type_via_imports(&s, imports, sep));
         let type_annotation = self
             .type_annotation
             .as_ref()
-            .and_then(|e| e.extract_name(node));
+            .and_then(|e| e.extract_name(node))
+            .map(|s| resolve_type_via_imports(&s, imports, sep));
         let receiver_type = self
             .receiver_type
             .as_ref()
-            .and_then(|e| e.extract_name(node));
+            .and_then(|e| e.extract_name(node))
+            .map(|s| resolve_type_via_imports(&s, imports, sep));
         let decorators = self
             .decorators
             .as_ref()
@@ -287,6 +302,23 @@ impl MetadataRule {
 
 pub fn metadata() -> MetadataRule {
     MetadataRule::new()
+}
+
+/// Resolve a bare type name to a full FQN using the file's imports.
+/// If the name matches an explicit import (by name or alias), returns
+/// the full path. Otherwise returns the bare name unchanged.
+fn resolve_type_via_imports(
+    bare_name: &str,
+    imports: &[code_graph_types::CanonicalImport],
+    sep: &str,
+) -> String {
+    for imp in imports {
+        let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+        if imp_name == bare_name && !imp.path.is_empty() {
+            return format!("{}{}{}", imp.path, sep, bare_name);
+        }
+    }
+    bare_name.to_string()
 }
 
 #[cfg(test)]

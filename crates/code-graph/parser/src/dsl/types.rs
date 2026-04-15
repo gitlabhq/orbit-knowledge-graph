@@ -90,8 +90,15 @@ impl ScopeRule {
         self.def_kind
     }
 
-    pub(crate) fn extract_metadata(&self, node: &N<'_>) -> Option<Box<DefinitionMetadata>> {
-        self.metadata_rule.as_ref()?.extract_metadata(node)
+    pub(crate) fn extract_metadata(
+        &self,
+        node: &N<'_>,
+        imports: &[code_graph_types::CanonicalImport],
+        sep: &'static str,
+    ) -> Option<Box<DefinitionMetadata>> {
+        self.metadata_rule
+            .as_ref()?
+            .extract_metadata(node, imports, sep)
     }
 
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
