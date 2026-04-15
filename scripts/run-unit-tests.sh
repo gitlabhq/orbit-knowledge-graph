@@ -28,7 +28,11 @@ NON_DOCKER_TESTS=$(
 #
 # integration-tests-codegraph is excluded here — it has its own CI job
 # to avoid pulling code-graph/lance-graph/datafusion deps into this job.
-args=(cargo nextest run --workspace --exclude integration-tests-codegraph --lib --bins)
+args=(cargo nextest run --workspace \
+  --exclude integration-tests-codegraph \
+  --exclude gkg-fuzz \
+  --exclude query-profiler \
+  --lib --bins)
 while IFS= read -r t; do
   [[ -n "$t" ]] && args+=(--test "$t")
 done <<<"$NON_DOCKER_TESTS"
