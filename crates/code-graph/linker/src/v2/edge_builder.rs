@@ -276,12 +276,6 @@ pub fn build_edges(
     ctx: &ResolutionContext,
     walks: &mut [FileWalkResult],
 ) -> BuildEdgesResult {
-    // Sort files by ref count descending so large files start first.
-    // Rayon work-stealing can only steal at file boundaries, so starting
-    // big files early prevents the long-tail problem where one 7K-ref
-    // file runs alone while 15 threads are idle.
-    walks.sort_unstable_by(|a, b| b.reads.len().cmp(&a.reads.len()));
-
     let total_reads: u64 = walks.iter().map(|w| w.reads.len() as u64).sum();
     let pb = ProgressBar::new(total_reads);
     pb.set_style(

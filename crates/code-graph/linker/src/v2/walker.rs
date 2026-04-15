@@ -246,12 +246,16 @@ impl<'a> FileWalker<'a> {
         let def_idx = self.def_by_byte_start.get(&byte_start).copied();
 
         // Compute enclosing_type_fqn for this scope.
+        // Prefer the canonical definition's FQN (source of truth) over build_fqn.
         let enclosing_type_fqn = if is_type_scope {
-            // This IS a type scope — use its FQN.
-            if let Some(ref name) = scope_name {
-                Some(IStr::from(self.build_fqn(name).as_str()))
+            if let Some(di) = def_idx {
+                Some(self.result.definitions[di].fqn.as_istr())
+            } else if scope_name.is_some() {
+                // Type scope matched by AST but no canonical def found — fall back.
+                scope_name
+                    .as_ref()
+                    .map(|name| IStr::from(self.build_fqn(name).as_str()))
             } else {
-                // Type scope without a name — inherit from parent.
                 self.scope_stack.last().and_then(|e| e.enclosing_type_fqn)
             }
         } else {

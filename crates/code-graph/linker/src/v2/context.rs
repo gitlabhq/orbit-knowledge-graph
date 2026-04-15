@@ -70,11 +70,11 @@ impl DefinitionIndex {
         self.by_name.get(name).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    /// Get the FQN as interned string for a definition reference.
-    pub fn def_fqn_istr(&self, def_ref: &DefRef, results: &[CanonicalResult]) -> IStr {
+    /// Get the FQN string for a definition reference.
+    pub fn def_fqn(&self, def_ref: &DefRef, results: &[CanonicalResult]) -> String {
         results[def_ref.file_idx].definitions[def_ref.def_idx]
             .fqn
-            .as_istr()
+            .to_string()
     }
 }
 
@@ -83,33 +83,29 @@ impl DefinitionIndex {
 /// Built from the FQN hierarchy: if a definition's FQN is `Foo.bar`,
 /// then `bar` is a member of `Foo`. Also indexes super_types for
 /// inherited member lookup.
-///
-/// All keys are interned (`IStr`) for zero-allocation cache lookups
-/// and pointer-sized hash comparisons.
 pub struct MemberIndex {
     /// class_fqn → member_name → [DefRef]
-    members: FxHashMap<IStr, FxHashMap<IStr, Vec<DefRef>>>,
+    members: FxHashMap<String, FxHashMap<String, Vec<DefRef>>>,
     /// class_fqn → [super_type_name]
-    supers: FxHashMap<IStr, Vec<IStr>>,
+    supers: FxHashMap<String, Vec<String>>,
     /// Cache for super-type lookups: (class_fqn, member_name) → [DefRef].
-    /// Uses RwLock for thread-safe interior mutability during parallel resolution.
+    /// Keys are interned for zero-allocation cache checks.
     super_cache: std::sync::RwLock<FxHashMap<(IStr, IStr), Vec<DefRef>>>,
 }
 
 impl MemberIndex {
     fn build(results: &[CanonicalResult]) -> Self {
-        let mut members: FxHashMap<IStr, FxHashMap<IStr, Vec<DefRef>>> = FxHashMap::default();
-        let mut supers: FxHashMap<IStr, Vec<IStr>> = FxHashMap::default();
+        let mut members: FxHashMap<String, FxHashMap<String, Vec<DefRef>>> = FxHashMap::default();
+        let mut supers: FxHashMap<String, Vec<String>> = FxHashMap::default();
 
         for (file_idx, result) in results.iter().enumerate() {
             for (def_idx, def) in result.definitions.iter().enumerate() {
                 if let Some(parent_fqn) = def.fqn.parent() {
-                    let parent_istr = IStr::from(parent_fqn.to_string().as_str());
-                    let name_istr = IStr::from(def.name.as_str());
+                    let parent_str = parent_fqn.to_string();
                     members
-                        .entry(parent_istr)
+                        .entry(parent_str)
                         .or_default()
-                        .entry(name_istr)
+                        .entry(def.name.clone())
                         .or_default()
                         .push(DefRef { file_idx, def_idx });
                 }
@@ -117,13 +113,7 @@ impl MemberIndex {
                 if let Some(meta) = &def.metadata
                     && !meta.super_types.is_empty()
                 {
-                    let fqn_istr = def.fqn.as_istr();
-                    let super_istrs: Vec<IStr> = meta
-                        .super_types
-                        .iter()
-                        .map(|s| IStr::from(s.as_str()))
-                        .collect();
-                    supers.insert(fqn_istr, super_istrs);
+                    supers.insert(def.fqn.to_string(), meta.super_types.clone());
                 }
             }
         }
@@ -136,7 +126,7 @@ impl MemberIndex {
     }
 
     /// Look up direct members of a class/interface by name. O(1).
-    fn lookup_member_istr(&self, class_fqn: &IStr, member_name: &IStr) -> &[DefRef] {
+    pub fn lookup_member(&self, class_fqn: &str, member_name: &str) -> &[DefRef] {
         self.members
             .get(class_fqn)
             .and_then(|ms| ms.get(member_name))
@@ -144,30 +134,23 @@ impl MemberIndex {
             .unwrap_or(&[])
     }
 
-    /// Look up direct members by string refs (interns on the fly).
-    pub fn lookup_member(&self, class_fqn: &str, member_name: &str) -> &[DefRef] {
-        let c = IStr::from(class_fqn);
-        let m = IStr::from(member_name);
-        self.lookup_member_istr(&c, &m)
-    }
-
     /// Resolve a type name (possibly bare) to its full FQN(s).
     /// If the name is already a key in the member index, return it as-is.
     /// Otherwise look up by bare name and return all matching FQNs.
     fn resolve_type_fqns(
         &self,
-        type_name: &IStr,
+        type_name: &str,
         results: &[CanonicalResult],
         def_index: &DefinitionIndex,
-    ) -> Vec<IStr> {
+    ) -> Vec<String> {
         if self.members.contains_key(type_name) || self.supers.contains_key(type_name) {
-            return vec![*type_name];
+            return vec![type_name.to_string()];
         }
-        // Bare name → resolve to full FQNs via definition index
+        // Bare name → resolve to full FQNs
         def_index
             .lookup_name(type_name)
             .iter()
-            .map(|def_ref| def_index.def_fqn_istr(def_ref, results))
+            .map(|def_ref| def_index.def_fqn(def_ref, results))
             .collect()
     }
 
@@ -185,22 +168,8 @@ impl MemberIndex {
         def_index: &DefinitionIndex,
         out: &mut Vec<DefRef>,
     ) -> bool {
-        let class_istr = IStr::from(class_fqn);
-        let member_istr = IStr::from(member_name);
-        self.lookup_member_with_supers_istr(&class_istr, &member_istr, results, def_index, out)
-    }
-
-    /// Interned-key version of lookup_member_with_supers.
-    fn lookup_member_with_supers_istr(
-        &self,
-        class_fqn: &IStr,
-        member_name: &IStr,
-        results: &[CanonicalResult],
-        def_index: &DefinitionIndex,
-        out: &mut Vec<DefRef>,
-    ) -> bool {
-        // Check cache first — (IStr, IStr) key is 16 bytes, zero allocation.
-        let cache_key = (*class_fqn, *member_name);
+        // Check cache first — IStr keys are 8 bytes, zero allocation.
+        let cache_key = (IStr::from(class_fqn), IStr::from(member_name));
         if let Some(cached) = self.super_cache.read().unwrap().get(&cache_key) {
             if cached.is_empty() {
                 return false;
@@ -233,8 +202,8 @@ impl MemberIndex {
 
     fn lookup_member_with_supers_uncached(
         &self,
-        class_fqn: &IStr,
-        member_name: &IStr,
+        class_fqn: &str,
+        member_name: &str,
         results: &[CanonicalResult],
         def_index: &DefinitionIndex,
         out: &mut Vec<DefRef>,
@@ -242,7 +211,7 @@ impl MemberIndex {
         let resolved_fqns = self.resolve_type_fqns(class_fqn, results, def_index);
 
         for fqn in &resolved_fqns {
-            let direct = self.lookup_member_istr(fqn, member_name);
+            let direct = self.lookup_member(fqn, member_name);
             if !direct.is_empty() {
                 out.extend_from_slice(direct);
                 return true;
@@ -252,8 +221,8 @@ impl MemberIndex {
         let mut visited = FxHashSet::default();
         let mut queue = std::collections::VecDeque::new();
         for fqn in &resolved_fqns {
-            queue.push_back(*fqn);
-            visited.insert(*fqn);
+            queue.push_back(fqn.clone());
+            visited.insert(fqn.clone());
         }
 
         while let Some(current) = queue.pop_front() {
@@ -262,13 +231,13 @@ impl MemberIndex {
                     let super_fqns = self.resolve_type_fqns(super_name, results, def_index);
 
                     for super_fqn in &super_fqns {
-                        if visited.insert(*super_fqn) {
-                            let found = self.lookup_member_istr(super_fqn, member_name);
+                        if visited.insert(super_fqn.clone()) {
+                            let found = self.lookup_member(super_fqn, member_name);
                             if !found.is_empty() {
                                 out.extend_from_slice(found);
                                 return true;
                             }
-                            queue.push_back(*super_fqn);
+                            queue.push_back(super_fqn.clone());
                         }
                     }
                 }
