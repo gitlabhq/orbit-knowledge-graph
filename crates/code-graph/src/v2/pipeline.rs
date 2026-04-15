@@ -73,7 +73,10 @@ where
         let parser = P::default();
         let rules = R::rules();
         let file_count = files.len();
+        let num_threads = rayon::current_num_threads();
         let t0 = std::time::Instant::now();
+
+        eprintln!("[v2] {file_count} files, {num_threads} threads");
 
         // ── Parallel phase: parse + walk each file, drop AST ────
         let pb = progress_bar(file_count as u64, "Parse + walk");

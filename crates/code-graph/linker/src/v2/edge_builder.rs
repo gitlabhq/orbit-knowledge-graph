@@ -6,6 +6,7 @@
 
 use code_graph_types::{EdgeKind, ExpressionStep, IStr, NodeKind, Relationship};
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use smallvec::{SmallVec, smallvec};
 
@@ -44,75 +45,79 @@ pub fn build_edges(
             .progress_chars("█▓░"),
     );
 
-    let mut edges = Vec::new();
+    let edges: Vec<ResolvedEdge> = walks
+        .par_iter_mut()
+        .flat_map(|walk| {
+            let reads = std::mem::take(&mut walk.reads);
+            let mut resolver = Resolver::new(rules, ctx, &mut walk.ssa);
+            let mut file_edges = Vec::new();
 
-    for walk in walks.iter_mut() {
-        let reads = std::mem::take(&mut walk.reads);
-        let mut resolver = Resolver::new(rules, ctx, &mut walk.ssa);
+            for read in &reads {
+                let result = &ctx.results[read.file_idx];
+                let reference = &result.references[read.ref_idx];
 
-        for read in &reads {
-            let result = &ctx.results[read.file_idx];
-            let reference = &result.references[read.ref_idx];
-
-            let t = std::time::Instant::now();
-            let resolved_defs = if let Some(ref chain) = reference.expression {
-                resolver.resolve_chain(read, chain)
-            } else {
-                resolver.resolve_bare(read)
-            };
-            let elapsed = t.elapsed();
-            if elapsed.as_millis() >= 100 {
-                pb.suspend(|| {
-                    eprintln!(
-                        "\x1b[31m[SLOW] {:.2?} resolving '{}' in {} (chain: {})\x1b[0m",
-                        elapsed,
-                        reference.name,
-                        result.file_path,
-                        reference.expression.is_some(),
-                    );
-                });
-            }
-
-            let source_enclosing = ctx.scopes.enclosing_scope(
-                &result.file_path,
-                reference.range.byte_offset.0,
-                reference.range.byte_offset.1,
-            );
-
-            let (source, source_node, source_def_kind) = match source_enclosing {
-                Some(s) => {
-                    let def_ref = DefRef {
-                        file_idx: s.file_idx,
-                        def_idx: s.def_idx,
-                    };
-                    let (def, _) = ctx.resolve_def(def_ref);
-                    (
-                        EdgeSource::Definition(def_ref),
-                        NodeKind::Definition,
-                        Some(def.kind),
-                    )
+                let t = std::time::Instant::now();
+                let resolved_defs = if let Some(ref chain) = reference.expression {
+                    resolver.resolve_chain(read, chain)
+                } else {
+                    resolver.resolve_bare(read)
+                };
+                let elapsed = t.elapsed();
+                if elapsed.as_millis() >= 100 {
+                    pb.suspend(|| {
+                        eprintln!(
+                            "\x1b[31m[SLOW] {:.2?} resolving '{}' in {} (chain: {})\x1b[0m",
+                            elapsed,
+                            reference.name,
+                            result.file_path,
+                            reference.expression.is_some(),
+                        );
+                    });
                 }
-                None => (EdgeSource::File(read.file_idx), NodeKind::File, None),
-            };
 
-            for target in resolved_defs {
-                let (target_def, _) = ctx.resolve_def(target);
-                edges.push(ResolvedEdge {
-                    relationship: Relationship {
-                        edge_kind: EdgeKind::Calls,
-                        source_node,
-                        target_node: NodeKind::Definition,
-                        source_def_kind,
-                        target_def_kind: Some(target_def.kind),
-                    },
-                    source,
-                    target,
-                    reference_range: reference.range,
-                });
+                let source_enclosing = ctx.scopes.enclosing_scope(
+                    &result.file_path,
+                    reference.range.byte_offset.0,
+                    reference.range.byte_offset.1,
+                );
+
+                let (source, source_node, source_def_kind) = match source_enclosing {
+                    Some(s) => {
+                        let def_ref = DefRef {
+                            file_idx: s.file_idx,
+                            def_idx: s.def_idx,
+                        };
+                        let (def, _) = ctx.resolve_def(def_ref);
+                        (
+                            EdgeSource::Definition(def_ref),
+                            NodeKind::Definition,
+                            Some(def.kind),
+                        )
+                    }
+                    None => (EdgeSource::File(read.file_idx), NodeKind::File, None),
+                };
+
+                for target in resolved_defs {
+                    let (target_def, _) = ctx.resolve_def(target);
+                    file_edges.push(ResolvedEdge {
+                        relationship: Relationship {
+                            edge_kind: EdgeKind::Calls,
+                            source_node,
+                            target_node: NodeKind::Definition,
+                            source_def_kind,
+                            target_def_kind: Some(target_def.kind),
+                        },
+                        source,
+                        target,
+                        reference_range: reference.range,
+                    });
+                }
+                pb.inc(1);
             }
-            pb.inc(1);
-        }
-    }
+
+            file_edges
+        })
+        .collect();
 
     pb.finish_and_clear();
     edges
@@ -129,6 +134,10 @@ struct Resolver<'a> {
     sep: &'a str,
     /// Reusable buffer for FQN construction.
     buf: String,
+    /// Resolution path counters.
+    pub ssa_hits: u64,
+    pub import_fallbacks: u64,
+    pub implicit_this_hits: u64,
 }
 
 impl<'a> Resolver<'a> {
@@ -143,6 +152,9 @@ impl<'a> Resolver<'a> {
             ctx,
             ssa,
             buf: String::with_capacity(128),
+            ssa_hits: 0,
+            import_fallbacks: 0,
+            implicit_this_hits: 0,
         }
     }
 
@@ -238,6 +250,19 @@ impl<'a> Resolver<'a> {
             }
         }
 
+        if !result.is_empty() {
+            self.ssa_hits += 1;
+        }
+
+        // Fast path: if the name doesn't exist anywhere in the definition
+        // index, skip all import strategies and implicit member lookup.
+        // This handles stdlib/third-party references (String, List, etc.)
+        // that will never resolve.
+        if result.is_empty() && self.ctx.definitions.lookup_name(&read.name).is_empty() {
+            dedup(&mut result);
+            return result;
+        }
+
         // Fallback 1: import strategies
         if result.is_empty() {
             result = imports::apply(
@@ -247,6 +272,9 @@ impl<'a> Resolver<'a> {
                 &read.name,
                 self.sep,
             );
+            if !result.is_empty() {
+                self.import_fallbacks += 1;
+            }
         }
 
         // Fallback 2: implicit member lookup on enclosing type
@@ -254,12 +282,14 @@ impl<'a> Resolver<'a> {
             && self.rules.implicit_member_lookup
             && let Some(type_fqn) = &enclosing
         {
-            self.ctx.members.lookup_member_with_supers(
+            if self.ctx.members.lookup_member_with_supers(
                 type_fqn,
                 &read.name,
                 &self.ctx.definitions,
                 &mut result,
-            );
+            ) {
+                self.implicit_this_hits += 1;
+            }
         }
 
         dedup(&mut result);

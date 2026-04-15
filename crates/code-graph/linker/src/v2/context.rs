@@ -101,8 +101,8 @@ pub struct MemberIndex {
     /// class_fqn → [super_type_name]
     supers: FxHashMap<String, Vec<String>>,
     /// Cache for super-type lookups: (class_fqn, member_name) → [DefRef].
-    /// Uses RefCell for interior mutability so callers keep &self.
-    super_cache: std::cell::RefCell<FxHashMap<(String, String), Vec<DefRef>>>,
+    /// Uses RwLock for thread-safe interior mutability during parallel resolution.
+    super_cache: std::sync::RwLock<FxHashMap<(String, String), Vec<DefRef>>>,
 }
 
 impl MemberIndex {
@@ -133,7 +133,7 @@ impl MemberIndex {
         Self {
             members,
             supers,
-            super_cache: std::cell::RefCell::new(FxHashMap::default()),
+            super_cache: std::sync::RwLock::new(FxHashMap::default()),
         }
     }
 
@@ -176,7 +176,7 @@ impl MemberIndex {
     ) -> bool {
         // Check cache first
         let cache_key = (class_fqn.to_string(), member_name.to_string());
-        if let Some(cached) = self.super_cache.borrow().get(&cache_key) {
+        if let Some(cached) = self.super_cache.read().unwrap().get(&cache_key) {
             if cached.is_empty() {
                 return false;
             }
@@ -191,7 +191,8 @@ impl MemberIndex {
 
         // Cache the result (even empty ones to avoid re-BFS)
         self.super_cache
-            .borrow_mut()
+            .write()
+            .unwrap()
             .insert(cache_key, result.clone());
 
         if found {
