@@ -219,6 +219,31 @@ impl CodeGraph {
             );
         }
 
+        // Containment edges between definitions (class→method, module→class, etc.)
+        for (i, def) in result.definitions.iter().enumerate() {
+            let Some(parent_fqn) = def.fqn.parent() else {
+                continue;
+            };
+            // Find the parent def within this file's def_nodes
+            for (j, parent_def) in result.definitions.iter().enumerate() {
+                if j != i
+                    && parent_def.fqn.as_istr() == parent_fqn.as_istr()
+                    && let Some(rel) = containment_relationship(parent_def.kind, def.kind)
+                {
+                    self.graph.add_edge(
+                        def_nodes[j],
+                        def_nodes[i],
+                        GraphEdge {
+                            relationship: rel,
+                            source_definition_range: None,
+                            target_definition_range: None,
+                        },
+                    );
+                    break;
+                }
+            }
+        }
+
         let mut import_nodes = Vec::with_capacity(result.imports.len());
         for imp in &result.imports {
             let imp_node = self.graph.add_node(GraphNode::Import {
@@ -236,13 +261,9 @@ impl CodeGraph {
     }
 
     /// Finalize the graph after all files have been added.
-    /// Builds containment edges between definitions and links supertypes.
-    /// Directory chains are already built during add_file_nodes().
+    /// Directory chains and containment edges are built during add_file_nodes().
+    /// This just links supertypes via Extends edges (cross-file resolution).
     pub fn finalize(&mut self) {
-        let file_nodes: Vec<NodeIndex> = self.file_index.values().copied().collect();
-        for file_node in file_nodes {
-            build_containment_edges(file_node, self);
-        }
         self.link_supers();
     }
 
@@ -530,49 +551,6 @@ fn dir_to_string(dir: &Path) -> String {
 }
 
 
-fn build_containment_edges(file_node: NodeIndex, cg: &mut CodeGraph) {
-    // Collect def nodes for this file from graph neighbors
-    let defs: Vec<(NodeIndex, code_graph_types::IStr, code_graph_types::DefKind)> = cg
-        .graph
-        .neighbors_directed(file_node, petgraph::Direction::Outgoing)
-        .filter_map(|idx| {
-            let (_, def) = cg.graph[idx].as_definition()?;
-            Some((idx, def.fqn.as_istr(), def.kind))
-        })
-        .collect();
-
-    let fqn_to_pos: FxHashMap<code_graph_types::IStr, usize> = defs
-        .iter()
-        .enumerate()
-        .map(|(i, (_, fqn, _))| (*fqn, i))
-        .collect();
-
-    let mut edges = Vec::new();
-    for (i, (idx, _, kind)) in defs.iter().enumerate() {
-        let def = cg.def(*idx);
-        let Some(parent_fqn) = def.fqn.parent() else {
-            continue;
-        };
-        if let Some(&parent_pos) = fqn_to_pos.get(&parent_fqn.as_istr())
-            && parent_pos != i
-            && let Some(rel) = containment_relationship(defs[parent_pos].2, *kind)
-        {
-            edges.push((defs[parent_pos].0, *idx, rel));
-        }
-    }
-
-    for (src, tgt, rel) in edges {
-        cg.graph.add_edge(
-            src,
-            tgt,
-            GraphEdge {
-                relationship: rel,
-                source_definition_range: None,
-                target_definition_range: None,
-            },
-        );
-    }
-}
 
 fn compute_id(components: &[&str]) -> i64 {
     let mut hasher = FxHasher::default();
