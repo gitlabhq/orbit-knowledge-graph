@@ -528,6 +528,20 @@ impl<'a> Resolver<'a> {
 
     // ── Shared primitive ────────────────────────────────────────
 
+    /// Extract type name(s) from a canonical definition.
+    /// Type containers return their FQN; callables return their return type.
+    fn def_to_types(&self, def: &code_graph_types::CanonicalDefinition) -> SmallVec<[IStr; 2]> {
+        if def.kind.is_type_container() {
+            smallvec![def.fqn.as_istr()]
+        } else if let Some(meta) = &def.metadata
+            && let Some(rt) = &meta.return_type
+        {
+            smallvec![IStr::from(rt.as_str())]
+        } else {
+            SmallVec::new()
+        }
+    }
+
     /// Convert an SSA `Value` to type name(s) for member lookup.
     /// Returns interned strings to avoid allocation during chain resolution.
     fn value_to_types(&mut self, value: &Value) -> SmallVec<[IStr; 2]> {
@@ -535,15 +549,7 @@ impl<'a> Resolver<'a> {
             Value::Type(t) => smallvec![*t],
             Value::Def(f, d) => {
                 let def = &self.ctx.results[*f].definitions[*d];
-                if def.kind.is_type_container() {
-                    smallvec![def.fqn.as_istr()]
-                } else if let Some(meta) = &def.metadata
-                    && let Some(rt) = &meta.return_type
-                {
-                    smallvec![IStr::from(rt.as_str())]
-                } else {
-                    SmallVec::new()
-                }
+                self.def_to_types(def)
             }
             _ => SmallVec::new(),
         }
@@ -733,13 +739,36 @@ impl<'a> Resolver<'a> {
         enclosing: Option<&str>,
     ) -> SmallVec<[IStr; 2]> {
         match step {
-            ExpressionStep::Ident(name) => {
+            ExpressionStep::Ident(name) | ExpressionStep::Call(name) => {
                 let reaching = self.ssa.read_variable_stateless(name, block);
-                reaching
+                let mut types: SmallVec<[IStr; 2]> = reaching
                     .values
                     .iter()
                     .flat_map(|v| self.value_to_types(v))
-                    .collect()
+                    .collect();
+
+                // Implicit-this fallback for chain bases: if SSA didn't resolve
+                // the base name and we're inside a type scope, look up the name
+                // as a member of the enclosing type to get its return type.
+                if types.is_empty()
+                    && self.rules.implicit_member_lookup
+                    && let Some(fqn) = enclosing
+                {
+                    let mut members = Vec::new();
+                    self.ctx.members.lookup_member_with_supers(
+                        fqn,
+                        name,
+                        &self.ctx.results,
+                        &self.ctx.definitions,
+                        &mut members,
+                    );
+                    for def_ref in &members {
+                        let (def, _) = self.ctx.resolve_def(*def_ref);
+                        types.extend(self.def_to_types(def));
+                    }
+                }
+
+                types
             }
             ExpressionStep::This => enclosing
                 .map(|fqn| smallvec![IStr::from(fqn)])
