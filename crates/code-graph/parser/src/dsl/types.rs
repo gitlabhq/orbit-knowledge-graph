@@ -13,12 +13,13 @@ pub type LabelFn = fn(&N<'_>) -> &'static str;
 
 /// Shared behavior for scope and reference rules.
 pub trait Rule {
-    fn kind(&self) -> &'static str;
+    fn kinds(&self) -> &[&'static str];
     fn condition(&self) -> Option<&Pred>;
     fn extract(&self) -> &Extract;
 
     fn matches(&self, node: &N<'_>, node_kind: &str) -> bool {
-        self.kind() == node_kind && self.condition().is_none_or(|c| c.test(node))
+        self.kinds().iter().any(|k| *k == node_kind)
+            && self.condition().is_none_or(|c| c.test(node))
     }
 
     fn extract_name(&self, node: &N<'_>) -> Option<String> {
@@ -32,7 +33,7 @@ enum Label {
 }
 
 pub struct ScopeRule {
-    kind: &'static str,
+    pub(crate) kinds: Vec<&'static str>,
     label: Label,
     def_kind: DefKind,
     condition: Option<Pred>,
@@ -42,8 +43,8 @@ pub struct ScopeRule {
 }
 
 impl Rule for ScopeRule {
-    fn kind(&self) -> &'static str {
-        self.kind
+    fn kinds(&self) -> &[&'static str] {
+        &self.kinds
     }
     fn condition(&self) -> Option<&Pred> {
         self.condition.as_ref()
@@ -111,7 +112,20 @@ impl ScopeRule {
 
 pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
     ScopeRule {
-        kind,
+        kinds: vec![kind],
+        label: Label::Static(label),
+        def_kind: DefKind::Other,
+        condition: None,
+        name: Extract::Default,
+        creates_scope: true,
+        metadata_rule: None,
+    }
+}
+
+/// Multi-kind scope: same rule matches any of these node kinds.
+pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
+    ScopeRule {
+        kinds: kinds.to_vec(),
         label: Label::Static(label),
         def_kind: DefKind::Other,
         condition: None,
@@ -123,7 +137,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
 
 pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
     ScopeRule {
-        kind,
+        kinds: vec![kind],
         label: Label::Fn(label_fn),
         def_kind: DefKind::Other,
         condition: None,
@@ -162,7 +176,7 @@ impl ReceiverExtract {
 }
 
 pub struct ReferenceRule {
-    kind: &'static str,
+    pub(crate) kinds: Vec<&'static str>,
     condition: Option<Pred>,
     name: Extract,
     /// How to extract the receiver expression node for chain building.
@@ -186,8 +200,8 @@ pub struct ChainConfig {
 }
 
 impl Rule for ReferenceRule {
-    fn kind(&self) -> &'static str {
-        self.kind
+    fn kinds(&self) -> &[&'static str] {
+        &self.kinds
     }
     fn condition(&self) -> Option<&Pred> {
         self.condition.as_ref()
@@ -227,7 +241,17 @@ impl ReferenceRule {
 
 pub fn reference(kind: &'static str) -> ReferenceRule {
     ReferenceRule {
-        kind,
+        kinds: vec![kind],
+        condition: None,
+        name: Extract::Default,
+        receiver_extract: None,
+    }
+}
+
+/// Multi-kind reference: same rule matches any of these node kinds.
+pub fn references(kinds: &[&'static str]) -> ReferenceRule {
+    ReferenceRule {
+        kinds: kinds.to_vec(),
         condition: None,
         name: Extract::Default,
         receiver_extract: None,
@@ -235,7 +259,7 @@ pub fn reference(kind: &'static str) -> ReferenceRule {
 }
 
 pub struct ImportRule {
-    kind: &'static str,
+    pub(crate) kinds: Vec<&'static str>,
     condition: Option<Pred>,
     /// Extracts the import source/path (e.g. `<stdio.h>`, `os.path`).
     path: Extract,
@@ -267,8 +291,8 @@ pub struct ImportRule {
 }
 
 impl Rule for ImportRule {
-    fn kind(&self) -> &'static str {
-        self.kind
+    fn kinds(&self) -> &[&'static str] {
+        &self.kinds
     }
     fn condition(&self) -> Option<&Pred> {
         self.condition.as_ref()
@@ -370,7 +394,7 @@ impl ImportRule {
 
 pub fn import(kind: &'static str) -> ImportRule {
     ImportRule {
-        kind,
+        kinds: vec![kind],
         condition: None,
         path: Extract::Default,
         symbol: None,
@@ -479,7 +503,7 @@ impl<L: DslLanguage> code_graph_types::CanonicalParser for DslParser<L> {
 // ── Binding rules ───────────────────────────────────────────────
 
 pub struct BindingRule {
-    pub kind: &'static str,
+    pub kinds: Vec<&'static str>,
     pub binding_kind: code_graph_types::BindingKind,
     pub name_fields: &'static [&'static str],
     pub value_field: Option<&'static str>,
@@ -492,7 +516,7 @@ pub struct BindingRule {
 
 pub fn binding(kind: &'static str, binding_kind: code_graph_types::BindingKind) -> BindingRule {
     BindingRule {
-        kind,
+        kinds: vec![kind],
         binding_kind,
         name_fields: &["left"],
         value_field: Some("right"),
@@ -581,7 +605,7 @@ impl BindingRule {
 // ── Branch rules ────────────────────────────────────────────────
 
 pub struct BranchRule {
-    pub kind: &'static str,
+    pub kinds: Vec<&'static str>,
     pub branch_kinds: &'static [&'static str],
     pub condition_field: Option<&'static str>,
     pub catch_all_kind: Option<&'static str>,
@@ -589,7 +613,7 @@ pub struct BranchRule {
 
 pub fn branch(kind: &'static str) -> BranchRule {
     BranchRule {
-        kind,
+        kinds: vec![kind],
         branch_kinds: &[],
         condition_field: None,
         catch_all_kind: None,
@@ -616,14 +640,14 @@ impl BranchRule {
 // ── Loop rules ──────────────────────────────────────────────────
 
 pub struct LoopRule {
-    pub kind: &'static str,
+    pub kinds: Vec<&'static str>,
     pub body_field: &'static str,
     pub iter_field: Option<&'static str>,
 }
 
 pub fn loop_rule(kind: &'static str) -> LoopRule {
     LoopRule {
-        kind,
+        kinds: vec![kind],
         body_field: "body",
         iter_field: None,
     }
@@ -668,7 +692,7 @@ impl LanguageSpec {
         refs: Vec<ReferenceRule>,
         imports: Vec<ImportRule>,
     ) -> Self {
-        let scope_kinds = scopes.iter().map(|r| r.kind).collect();
+        let scope_kinds = scopes.iter().flat_map(|r| r.kinds.iter().copied()).collect();
         Self {
             name,
             scopes,

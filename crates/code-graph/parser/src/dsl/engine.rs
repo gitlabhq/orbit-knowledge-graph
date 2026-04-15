@@ -180,7 +180,7 @@ impl LanguageSpec {
         }
 
         // Extract bindings
-        if let Some(rule) = self.bindings.iter().find(|b| b.kind == node_kind_ref)
+        if let Some(rule) = self.bindings.iter().find(|b| b.kinds.iter().any(|k| *k == node_kind_ref))
             && let Some(name) = rule.extract_name(node)
         {
             let type_annotation = rule.extract_type_annotation(node);
@@ -201,7 +201,7 @@ impl LanguageSpec {
         }
 
         // Extract branches
-        if let Some(rule) = self.branches.iter().find(|b| b.kind == node_kind_ref) {
+        if let Some(rule) = self.branches.iter().find(|b| b.kinds.iter().any(|k| *k == node_kind_ref)) {
             let byte_range = (node.range().start, node.range().end);
             let mut children = Vec::new();
 
@@ -238,7 +238,7 @@ impl LanguageSpec {
         }
 
         // Extract loops
-        if let Some(rule) = self.loops.iter().find(|l| l.kind == node_kind_ref) {
+        if let Some(rule) = self.loops.iter().find(|l| l.kinds.iter().any(|k| *k == node_kind_ref)) {
             let byte_range = (node.range().start, node.range().end);
             let mut children = Vec::new();
 
@@ -403,7 +403,7 @@ impl LanguageSpec {
         }
 
         // Call expression with object field (method_invocation, call_expression)
-        if let Some(rule) = self.refs.iter().find(|r| r.kind() == kind_ref) {
+        if let Some(rule) = self.refs.iter().find(|r| r.kinds().iter().any(|k| *k == kind_ref)) {
             if let Some(extract) = &rule.receiver_extract
                 && let Some(recv) = extract.resolve(node)
             {

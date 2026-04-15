@@ -155,16 +155,23 @@ impl ResolutionRules {
         use std::collections::HashSet;
 
         let mut seen = HashSet::new();
-        spec.scopes
-            .iter()
-            .filter(|s| s.creates_scope)
-            .filter(|s| seen.insert(s.kind()))
-            .map(|s| IsolatedScopeRule {
-                node_kind: s.kind(),
-                is_type_scope: s.get_def_kind().is_type_container(),
-                name_field: "name",
-            })
-            .collect()
+        let mut result = Vec::new();
+        for s in &spec.scopes {
+            if !s.creates_scope {
+                continue;
+            }
+            let is_type_scope = s.get_def_kind().is_type_container();
+            for &kind in s.kinds() {
+                if seen.insert(kind) {
+                    result.push(IsolatedScopeRule {
+                        node_kind: kind,
+                        is_type_scope,
+                        name_field: "name",
+                    });
+                }
+            }
+        }
+        result
     }
 }
 
