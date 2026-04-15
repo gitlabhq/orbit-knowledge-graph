@@ -28,6 +28,11 @@ pub enum Value {
     /// A type name (for type-flow languages: resolve members on this type).
     /// Interned for zero-cost cloning during chain resolution.
     Type(Intern<str>),
+    /// Deferred name resolution: "I'm whatever this name resolves to."
+    /// Written for bindings like `b = getService()` where the walker
+    /// records the RHS name without resolving it. The resolver follows
+    /// the alias by doing an SSA read for the aliased name.
+    Alias(Intern<str>),
     /// Dead end — parameter, literal, or otherwise unresolvable.
     Opaque,
     /// Internal: a phi node (will be resolved to concrete values).

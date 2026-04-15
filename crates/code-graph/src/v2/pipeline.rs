@@ -137,7 +137,7 @@ where
         eprintln!("[v2] indexes: {:.2?}", t2.elapsed());
 
         let t3 = std::time::Instant::now();
-        let result = build_edges(&rules, &ctx, &mut walks);
+        let result = build_edges(&rules, &ctx, &mut walks, &rules.settings);
         let resolved_edges = result.edges;
         eprintln!(
             "[v2] resolve: {} edges in {:.2?}",
@@ -225,14 +225,11 @@ impl HasRules for NoRules {
             spec,
             vec![],
             vec![],
-            vec![],
-            vec![],
             crate::linker::v2::rules::ChainMode::ValueFlow,
             crate::linker::v2::rules::ReceiverMode::None,
             ".",
             &[],
             None,
-            false,
         )
     }
 }

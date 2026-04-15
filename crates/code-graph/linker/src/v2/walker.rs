@@ -5,15 +5,15 @@
 //! processes bindings, and records reference reads. The output is a
 //! populated `SsaResolver` with all reaching definitions computed.
 
-use code_graph_types::{CanonicalResult, IStr};
+use code_graph_types::{
+    BindingKind, CanonicalBinding, CanonicalControlFlow, CanonicalResult, ControlFlowKind, IStr,
+};
 use rustc_hash::FxHashMap;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use parser_core::dsl::types::Rule as DslRule;
-
-use super::context::DefRef;
-use super::rules::{BindingKind, ChainMode, ResolutionRules};
+use super::resolve::DefRef;
+use super::rules::ResolutionRules;
 use super::ssa::{BlockId, SsaResolver, Value};
 
 /// Trait for AST types that can provide a tree-sitter root for walking.
@@ -104,8 +104,9 @@ struct FileWalker<'a> {
     current_block: BlockId,
     scope_stack: Vec<ScopeEntry>,
     ref_by_range_start: FxHashMap<usize, Vec<usize>>,
-    /// byte_offset_start → def_idx for matching scopes to canonical definitions.
     def_by_byte_start: FxHashMap<usize, usize>,
+    binding_by_byte_start: FxHashMap<usize, usize>,
+    cf_by_byte_start: FxHashMap<usize, usize>,
 
     reads: Vec<RecordedRead>,
 }
@@ -151,6 +152,18 @@ impl<'a> FileWalker<'a> {
             def_by_byte_start.insert(d.range.byte_offset.0, idx);
         }
 
+        // Index parsed bindings by byte offset
+        let mut binding_by_byte_start: FxHashMap<usize, usize> = FxHashMap::default();
+        for (idx, b) in result.bindings.iter().enumerate() {
+            binding_by_byte_start.insert(b.range.byte_offset.0, idx);
+        }
+
+        // Index parsed control flow by byte offset
+        let mut cf_by_byte_start: FxHashMap<usize, usize> = FxHashMap::default();
+        for (idx, cf) in result.control_flow.iter().enumerate() {
+            cf_by_byte_start.insert(cf.byte_range.0, idx);
+        }
+
         Self {
             rules,
             ssa,
@@ -166,6 +179,8 @@ impl<'a> FileWalker<'a> {
             }],
             ref_by_range_start,
             def_by_byte_start,
+            binding_by_byte_start,
+            cf_by_byte_start,
             reads: Vec::new(),
         }
     }
@@ -175,10 +190,11 @@ impl<'a> FileWalker<'a> {
             return;
         }
 
+        let byte_start = node.range().start;
+
+        // Scope-creating nodes (matched by AST node kind)
         let kind = node.kind();
         let kind_ref = kind.as_ref();
-
-        // Scope-creating nodes
         if let Some(scope_rule) = self.rules.scopes().iter().find(|s| s.node_kind == kind_ref) {
             self.enter_scope(node, scope_rule.is_type_scope);
             self.walk_children(node);
@@ -186,29 +202,33 @@ impl<'a> FileWalker<'a> {
             return;
         }
 
-        // Branch nodes (if/else, try/catch, match)
-        if let Some(branch_rule) = self.rules.branches.iter().find(|b| b.node_kind == kind_ref) {
-            self.walk_branch(node, branch_rule);
-            return;
+        // Control flow: branches and loops (matched by byte offset + node kind
+        // against parsed CanonicalControlFlow).
+        if let Some(&cf_idx) = self.cf_by_byte_start.get(&byte_start) {
+            let cf = &self.result.control_flow[cf_idx];
+            if cf.node_kind == kind_ref {
+                self.cf_by_byte_start.remove(&byte_start);
+                match cf.kind {
+                    ControlFlowKind::Branch { has_catch_all } => {
+                        self.walk_branch_from_cf(node, cf, has_catch_all);
+                    }
+                    ControlFlowKind::Loop => {
+                        self.walk_loop_from_cf(node, cf);
+                    }
+                }
+                return;
+            }
         }
 
-        // Loop nodes
-        if let Some(loop_rule) = self.rules.loops.iter().find(|l| l.node_kind == kind_ref) {
-            self.walk_loop(node, loop_rule);
-            return;
+        // Bindings (matched by byte offset against parsed CanonicalBinding).
+        // Pure writeVariable — no AST inspection, no SSA reads.
+        if let Some(binding_idx) = self.binding_by_byte_start.remove(&byte_start) {
+            let binding = &self.result.bindings[binding_idx];
+            self.handle_binding_from_parsed(binding);
         }
 
-        // Binding nodes
-        if let Some(binding_rule) = self.rules.bindings.iter().find(|b| b.node_kind == kind_ref) {
-            self.handle_binding(node, binding_rule);
-        }
-
-        // Match canonical references by byte offset — this is the primary
-        // mechanism for recording reads. The DSL parser already extracted
-        // references; we just need to assign them to the correct SSA block.
-        let byte_start = node.range().start;
+        // References (matched by byte offset against parsed CanonicalReference).
         if let Some(ref_indices) = self.ref_by_range_start.remove(&byte_start) {
-            // Pre-compute scope context from the stack (free — no interval tree).
             let enclosing_def = self.innermost_def();
             let enclosing_type_fqn = self.scope_stack.last().and_then(|e| e.enclosing_type_fqn);
 
@@ -300,17 +320,6 @@ impl<'a> FileWalker<'a> {
         }
     }
 
-    /// Resolve a bare type name to a full FQN using the current file's definitions.
-    /// Import-based resolution is handled at parse time in extract_metadata.
-    fn resolve_local_type(&self, bare_name: &str) -> String {
-        for def in &self.result.definitions {
-            if *def.name == *bare_name && def.kind.is_type_container() {
-                return def.fqn.to_string();
-            }
-        }
-        bare_name.to_string()
-    }
-
     /// Build a dotted FQN from the scope stack names + a new name.
     fn build_fqn(&self, name: &str) -> String {
         let sep = self.rules.fqn_separator;
@@ -331,157 +340,166 @@ impl<'a> FileWalker<'a> {
             .find(|d| d.name == class_name)
             .and_then(|d| d.metadata.as_ref())
             .and_then(|m| m.super_types.first())
-            .map(|s| self.resolve_local_type(s))
+            .cloned()
     }
 
-    /// Branch handling per Braun et al. §2.3 (Figure 3b).
-    /// Each arm gets its own block; they merge at a join point.
-    fn walk_branch(
+    /// Branch handling per Braun et al. §2.3 (Figure 3b), driven by
+    /// parsed `CanonicalControlFlow`. No AST rule matching — the parser
+    /// already identified the branch structure.
+    fn walk_branch_from_cf(
         &mut self,
         node: &Node<StrDoc<SupportLang>>,
-        branch_rule: &super::rules::BranchRule,
+        cf: &CanonicalControlFlow,
+        has_catch_all: bool,
     ) {
         let pre_block = self.current_block;
 
-        // Walk condition in current block
-        if let Some(cond_field) = branch_rule.condition_field
-            && let Some(cond_node) = node.field(cond_field)
-        {
-            self.walk_node(&cond_node);
+        // Walk condition children in current block
+        for child_cf in &cf.children {
+            if child_cf.is_condition {
+                for child in node.children() {
+                    let cs = child.range().start;
+                    let ce = child.range().end;
+                    if cs >= child_cf.byte_range.0 && ce <= child_cf.byte_range.1 {
+                        self.walk_node(&child);
+                    }
+                }
+            }
         }
 
         // Create a block for each branch arm
+        let branch_ranges: Vec<(usize, usize)> = cf
+            .children
+            .iter()
+            .filter(|c| !c.is_condition)
+            .map(|c| c.byte_range)
+            .collect();
+
         let mut branch_blocks = Vec::new();
         for child in node.children() {
-            let child_kind = child.kind();
-            if branch_rule
-                .branch_kinds
-                .iter()
-                .any(|&k| k == child_kind.as_ref())
-            {
+            let cs = child.range().start;
+            let ce = child.range().end;
+            if branch_ranges.iter().any(|&(s, e)| cs >= s && ce <= e) {
                 let branch_block = self.ssa.add_block();
                 self.ssa.add_predecessor(branch_block, pre_block);
                 self.ssa.seal_block(branch_block);
 
                 self.current_block = branch_block;
-                self.walk_children(&child);
-                branch_blocks.push(self.current_block);
-            } else if branch_rule.condition_field.is_some_and(|f| {
-                node.field(f)
-                    .is_some_and(|n| n.range().start == child.range().start)
-            }) {
-                // Skip condition — already walked
-            } else {
-                self.current_block = pre_block;
                 self.walk_node(&child);
+                branch_blocks.push(self.current_block);
+            } else {
+                // Condition or other non-branch child — walk in pre_block
+                let is_condition = cf
+                    .children
+                    .iter()
+                    .any(|c| c.is_condition && cs >= c.byte_range.0 && ce <= c.byte_range.1);
+                if !is_condition {
+                    self.current_block = pre_block;
+                    self.walk_node(&child);
+                }
             }
         }
 
-        // Create join block
+        // Join block
         let join_block = self.ssa.add_block();
         for &bb in &branch_blocks {
             self.ssa.add_predecessor(join_block, bb);
         }
-        // No catch-all → pre_block also flows to join
-        let has_catch_all = branch_rule
-            .catch_all_kind
-            .is_some_and(|catch_kind| node.children().any(|c| c.kind().as_ref() == catch_kind));
         if !has_catch_all {
             self.ssa.add_predecessor(join_block, pre_block);
         }
         self.ssa.seal_block(join_block);
-
         self.current_block = join_block;
     }
 
-    /// Loop handling per Braun et al. §2.3 (Figure 3a).
-    /// Unsealed header → body → back-edge → seal header → exit.
-    fn walk_loop(&mut self, node: &Node<StrDoc<SupportLang>>, loop_rule: &super::rules::LoopRule) {
+    /// Loop handling per Braun et al. §2.3 (Figure 3a), driven by
+    /// parsed `CanonicalControlFlow`.
+    fn walk_loop_from_cf(&mut self, node: &Node<StrDoc<SupportLang>>, cf: &CanonicalControlFlow) {
         let pre_block = self.current_block;
 
-        // Walk iteration expression in pre_block
-        if let Some(iter_field) = loop_rule.iter_field
-            && let Some(iter_node) = node.field(iter_field)
-        {
-            self.walk_node(&iter_node);
+        // Walk iteration expression (is_condition children) in pre_block
+        for child_cf in &cf.children {
+            if child_cf.is_condition {
+                for child in node.children() {
+                    let cs = child.range().start;
+                    let ce = child.range().end;
+                    if cs >= child_cf.byte_range.0 && ce <= child_cf.byte_range.1 {
+                        self.walk_node(&child);
+                    }
+                }
+            }
         }
 
-        // Create loop header — DON'T seal (back-edge coming)
+        // Loop header — DON'T seal (back-edge coming)
         let header = self.ssa.add_block();
         self.ssa.add_predecessor(header, pre_block);
 
-        // Create body block
+        // Body block
         let body_block = self.ssa.add_block();
         self.ssa.add_predecessor(body_block, header);
         self.ssa.seal_block(body_block);
-
         self.current_block = body_block;
 
-        // Walk loop body
-        if let Some(body_node) = node.field(loop_rule.body_field) {
-            self.walk_children(&body_node);
+        // Walk body children
+        let body_ranges: Vec<(usize, usize)> = cf
+            .children
+            .iter()
+            .filter(|c| !c.is_condition)
+            .map(|c| c.byte_range)
+            .collect();
+
+        if !body_ranges.is_empty() {
+            let mut matched = false;
+            for child in node.children() {
+                let cs = child.range().start;
+                let ce = child.range().end;
+                if body_ranges.iter().any(|&(s, e)| cs >= s && ce <= e) {
+                    matched = true;
+                    self.walk_node(&child);
+                }
+            }
+            if !matched {
+                self.walk_children(node);
+            }
         } else {
             self.walk_children(node);
         }
 
-        // Add back-edge and seal header
+        // Back-edge + seal header
         self.ssa.add_predecessor(header, self.current_block);
         self.ssa.seal_block(header);
 
-        // Create exit block
+        // Exit block
         let exit_block = self.ssa.add_block();
         self.ssa.add_predecessor(exit_block, header);
         self.ssa.seal_block(exit_block);
-
         self.current_block = exit_block;
     }
 
-    fn handle_binding(
-        &mut self,
-        node: &Node<StrDoc<SupportLang>>,
-        binding_rule: &super::rules::BindingRule,
-    ) {
-        let name = match Self::walk_field_chain(node, binding_rule.name_fields) {
-            Some(n) => n.text().to_string(),
-            None => return,
-        };
-
-        let value = match binding_rule.binding_kind {
-            BindingKind::Parameter => self.extract_type_value(node).unwrap_or(Value::Opaque),
+    /// Write a binding to SSA from parsed `CanonicalBinding`.
+    /// No AST inspection, no SSA reads — pure writeVariable.
+    fn handle_binding_from_parsed(&mut self, binding: &CanonicalBinding) {
+        let value = match binding.kind {
             BindingKind::Deletion | BindingKind::ForTarget => Value::Opaque,
-            BindingKind::Assignment | BindingKind::WithAlias => self
-                .extract_type_value(node)
-                .unwrap_or_else(|| self.resolve_binding_value(node, binding_rule)),
+            BindingKind::Parameter | BindingKind::Assignment | BindingKind::WithAlias => {
+                if let Some(ref type_ann) = binding.type_annotation {
+                    Value::type_of(type_ann)
+                } else if let Some(ref rhs) = binding.rhs_name {
+                    Value::Alias(IStr::from(rhs.as_str()))
+                } else {
+                    Value::Opaque
+                }
+            }
         };
 
-        // Instance attribute bindings (e.g. self.db = ...) are written to
-        // the enclosing class block so sibling methods can see them.
-        let is_instance_attr = binding_rule
-            .instance_attr_prefixes
-            .iter()
-            .any(|prefix| name.starts_with(prefix));
-        let target_block = if is_instance_attr {
+        let target_block = if binding.instance_attr {
             self.enclosing_class_block().unwrap_or(self.current_block)
         } else {
             self.current_block
         };
-        self.ssa.write_variable(&name, target_block, value);
+        self.ssa.write_variable(&binding.name, target_block, value);
     }
 
-    /// Walk a chain of field names to reach a nested node.
-    /// e.g. `&["declarator", "name"]` → `node.field("declarator")?.field("name")?`
-    fn walk_field_chain<'b>(
-        node: &Node<'b, StrDoc<SupportLang>>,
-        fields: &[&str],
-    ) -> Option<Node<'b, StrDoc<SupportLang>>> {
-        let mut current = node.clone();
-        for &field in fields {
-            current = current.field(field)?;
-        }
-        Some(current)
-    }
-
-    /// Find the innermost scope that has a canonical definition.
     fn innermost_def(&self) -> Option<DefRef> {
         self.scope_stack.iter().rev().find_map(|e| {
             e.def_idx.map(|def_idx| DefRef {
@@ -491,124 +509,11 @@ impl<'a> FileWalker<'a> {
         })
     }
 
-    /// Find the enclosing class scope's block.
     fn enclosing_class_block(&self) -> Option<BlockId> {
         self.scope_stack
             .iter()
             .rev()
             .find(|e| e.is_type_scope)
             .map(|e| e.block)
-    }
-
-    /// Extract a type annotation from a node, producing `Value::Type`.
-    /// Only active for `ChainMode::TypeFlow` — reads field names and
-    /// skip list from the per-language config.
-    fn extract_type_value(&self, node: &Node<StrDoc<SupportLang>>) -> Option<Value> {
-        let (type_fields, skip_types) = match &self.rules.chain_mode {
-            ChainMode::TypeFlow {
-                type_fields,
-                skip_types,
-            } => (type_fields, skip_types),
-            ChainMode::ValueFlow => return None,
-        };
-
-        for &field_name in type_fields.iter() {
-            if let Some(type_node) = node.field(field_name) {
-                let type_text = type_node.text().to_string();
-                if !skip_types.iter().any(|&s| s == type_text) {
-                    let resolved = self.resolve_local_type(&type_text);
-                    return Some(Value::type_of(&resolved));
-                }
-            }
-        }
-        None
-    }
-
-    /// Resolve a binding's RHS value through the SSA.
-    ///
-    /// Extracts the meaningful name from the RHS expression — unwrapping
-    /// call expressions to get the callee name (e.g. `Database()` → `Database`).
-    /// For TypeFlow, promotes Def values with return_type to Value::Type.
-    fn resolve_binding_value(
-        &mut self,
-        node: &Node<StrDoc<SupportLang>>,
-        binding_rule: &super::rules::BindingRule,
-    ) -> Value {
-        if let Some(value_field) = binding_rule.value_field {
-            if let Some(value_node) = node.field(value_field) {
-                let name = self.extract_rhs_name(&value_node);
-                if let Some(name) = name {
-                    let reaching = self.ssa.read_variable_stateless(&name, self.current_block);
-                    if !reaching.values.is_empty() {
-                        let value = reaching.values[0].clone();
-                        self.maybe_promote_to_type(value)
-                    } else {
-                        Value::Opaque
-                    }
-                } else {
-                    Value::Opaque
-                }
-            } else {
-                Value::Opaque
-            }
-        } else {
-            Value::Opaque
-        }
-    }
-
-    /// Extract the resolvable name from an RHS expression node.
-    ///
-    /// Unwraps call expressions to find the callee:
-    /// - `Database()` → `"Database"` (call whose function is an identifier)
-    /// - `foo` → `"foo"` (bare identifier)
-    /// - `a + b` → `None` (not a simple name)
-    ///
-    /// Uses the language spec's reference rules and chain config to
-    /// identify calls and identifiers — no hardcoded node kinds.
-    fn extract_rhs_name(&self, node: &Node<StrDoc<SupportLang>>) -> Option<String> {
-        let kind = node.kind();
-        let kind_ref = kind.as_ref();
-
-        let spec = self.rules.language_spec.as_ref();
-
-        // Check reference rules from the language spec (call expressions)
-        if let Some(spec) = spec
-            && let Some(ref_rule) = spec.refs.iter().find(|r| r.kind() == kind_ref)
-        {
-            return ref_rule.extract_name(node);
-        }
-
-        // Check if it's a known identifier node kind
-        if let Some(spec) = spec
-            && let Some(cc) = &spec.chain_config
-            && cc.ident_kinds.contains(&kind_ref)
-        {
-            return Some(node.text().to_string());
-        }
-
-        None
-    }
-
-    /// For TypeFlow: if a value is Def and the definition has return_type
-    /// metadata, promote to Value::Type(return_type). This allows
-    /// `x = getService(); x.query()` to resolve through the return type.
-    fn maybe_promote_to_type(&self, value: Value) -> Value {
-        if !matches!(self.rules.chain_mode, ChainMode::TypeFlow { .. }) {
-            return value;
-        }
-        match &value {
-            Value::Def(file_idx, def_idx) if *file_idx == self.file_idx => self
-                .result
-                .definitions
-                .get(*def_idx)
-                .and_then(|d| d.metadata.as_ref())
-                .and_then(|m| m.return_type.as_ref())
-                .map(|rt| Value::type_of(rt))
-                .unwrap_or(value),
-            // Cross-file defs can't be checked here (walker only has
-            // current file). The chain resolver handles cross-file
-            // return_type lookup via ctx.results.
-            _ => value,
-        }
     }
 }

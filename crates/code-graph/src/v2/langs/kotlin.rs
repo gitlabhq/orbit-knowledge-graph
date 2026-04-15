@@ -5,8 +5,12 @@ use parser_core::dsl::types::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
+use code_graph_types::BindingKind;
+
 use crate::linker::v2::HasRules;
-use crate::linker::v2::rules::*;
+use crate::linker::v2::rules::{
+    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage,
+};
 
 // ── DSL parser spec ─────────────────────────────────────────────
 
@@ -143,6 +147,57 @@ impl DslLanguage for KotlinDsl {
     fn package_node() -> Option<(&'static str, Extract)> {
         Some(("package_header", Extract::Default))
     }
+
+    fn bindings() -> Vec<BindingRule> {
+        let kotlin_type = |rule: BindingRule| {
+            rule.typed(
+                &["user_type", "type"],
+                &[
+                    "Int", "Long", "Short", "Byte", "Float", "Double", "Boolean", "Char", "Unit",
+                    "Nothing", "String",
+                ],
+            )
+        };
+        vec![
+            kotlin_type(
+                binding("property_declaration", BindingKind::Assignment)
+                    .name_from(&["name"])
+                    .value_from("value"),
+            ),
+            kotlin_type(
+                binding("variable_declaration", BindingKind::Assignment)
+                    .name_from(&["name"])
+                    .no_value(),
+            ),
+            kotlin_type(
+                binding("value_parameter", BindingKind::Parameter)
+                    .name_from(&["simple_identifier"])
+                    .no_value(),
+            ),
+            binding("assignment", BindingKind::Assignment)
+                .name_from(&["directly_assignable_expression"])
+                .value_from("expression"),
+        ]
+    }
+
+    fn branches() -> Vec<BranchRule> {
+        vec![
+            branch("if_expression")
+                .branches(&["control_structure_body"])
+                .condition("condition")
+                .catch_all("control_structure_body"),
+            branch("when_expression").branches(&["when_entry"]),
+            branch("try_expression").branches(&["statements", "catch_block", "finally_block"]),
+        ]
+    }
+
+    fn loops() -> Vec<LoopRule> {
+        vec![
+            loop_rule("for_statement").iter_over("expression"),
+            loop_rule("while_statement"),
+            loop_rule("do_while_statement"),
+        ]
+    }
 }
 
 // ── Resolution rules ────────────────────────────────────────────
@@ -159,31 +214,9 @@ impl HasRules for KotlinRules {
             scopes,
             spec,
             vec![
-                branch("if_expression")
-                    .branches(&["control_structure_body"])
-                    .condition("condition")
-                    .catch_all("control_structure_body"),
-                branch("when_expression").branches(&["when_entry"]),
-                branch("try_expression").branches(&["statements", "catch_block", "finally_block"]),
-            ],
-            vec![
-                loop_rule("for_statement").iter_over("expression"),
-                loop_rule("while_statement"),
-                loop_rule("do_while_statement"),
-            ],
-            vec![
-                binding("property_declaration", BindingKind::Assignment)
-                    .name_from(&["name"])
-                    .value_from("value"),
-                binding("variable_declaration", BindingKind::Assignment)
-                    .name_from(&["name"])
-                    .no_value(),
-                binding("value_parameter", BindingKind::Parameter)
-                    .name_from(&["simple_identifier"])
-                    .no_value(),
-                binding("assignment", BindingKind::Assignment)
-                    .name_from(&["directly_assignable_expression"])
-                    .value_from("expression"),
+                ResolveStage::SSA,
+                ResolveStage::ImportStrategies,
+                ResolveStage::ImplicitMember,
             ],
             vec![
                 ImportStrategy::ScopeFqnWalk,
@@ -203,7 +236,6 @@ impl HasRules for KotlinRules {
             ".",
             &["this", "self"],
             Some("super"),
-            true,
         )
     }
 }

@@ -101,17 +101,20 @@ pub enum ReceiverMode {
     Keyword,
 }
 
+/// A stage in bare-name resolution. The resolver runs stages in order,
+/// stopping at the first one that produces results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveStage {
+    /// Read SSA values (Def, Import, Type) for the name in the current block.
+    SSA,
+    /// Run the configured import strategies (ExplicitImport, WildcardImport, etc.).
+    ImportStrategies,
+    /// Look up the name as a member of the enclosing type (implicit `this`/`self`).
+    ImplicitMember,
+}
+
 // ── Top-level config ────────────────────────────────────────────
 
-/// Complete declarative configuration for a language.
-///
-/// The `FileWalker` interprets the AST-walking rules (scopes, branches,
-/// loops, bindings) to drive the SSA engine per Braun et al.
-/// The `RulesResolver` interprets the resolution rules (import strategies,
-/// chain mode, receiver) to chase imports and produce call edges.
-///
-/// Scopes are derived from `language_spec.scopes` (mapping `DefKind` →
-/// `ScopeKind`). References are handled entirely by `language_spec.refs`.
 pub struct ResolutionRules {
     pub name: &'static str,
 
@@ -122,6 +125,7 @@ pub struct ResolutionRules {
     pub bindings: Vec<BindingRule>,
 
     // Resolution
+    pub bare_stages: Vec<ResolveStage>,
     pub import_strategies: Vec<ImportStrategy>,
     pub chain_mode: ChainMode,
     pub receiver: ReceiverMode,
@@ -137,49 +141,50 @@ pub struct ResolutionRules {
     /// that has super_types metadata. e.g. `"super"` for Java/Kotlin/Python.
     pub super_name: Option<&'static str>,
 
-    /// Whether bare names in a method body should fall back to member
-    /// lookup on the enclosing type scope (class/interface/module).
-    /// True for Java/Kotlin (implicit `this`), false for Python (explicit `self`).
-    pub implicit_member_lookup: bool,
-
     /// The DSL language spec. Provides chain extraction config, reference
     /// rules with receiver fields, and scope rules for deriving walker scopes.
     pub language_spec: Option<parser_core::dsl::types::LanguageSpec>,
+
+    /// Operational tuning: timeouts, thresholds, limits.
+    pub settings: super::ResolveSettings,
 }
 
 impl ResolutionRules {
-    /// Construct resolution rules with scopes derived from the language spec.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &'static str,
         scopes: Vec<IsolatedScopeRule>,
         language_spec: parser_core::dsl::types::LanguageSpec,
-        branches: Vec<BranchRule>,
-        loops: Vec<LoopRule>,
-        bindings: Vec<BindingRule>,
+        bare_stages: Vec<ResolveStage>,
         import_strategies: Vec<ImportStrategy>,
         chain_mode: ChainMode,
         receiver: ReceiverMode,
         fqn_separator: &'static str,
         self_names: &'static [&'static str],
         super_name: Option<&'static str>,
-        implicit_member_lookup: bool,
     ) -> Self {
         Self {
             name,
             scopes,
-            branches,
-            loops,
-            bindings,
+            branches: vec![],
+            loops: vec![],
+            bindings: vec![],
+            bare_stages,
             import_strategies,
             chain_mode,
             receiver,
             fqn_separator,
             self_names,
             super_name,
-            implicit_member_lookup,
             language_spec: Some(language_spec),
+            settings: super::ResolveSettings::default(),
         }
+    }
+
+    /// Override the default resolve settings.
+    pub fn with_settings(mut self, settings: super::ResolveSettings) -> Self {
+        self.settings = settings;
+        self
     }
 
     /// Access the scope rules.

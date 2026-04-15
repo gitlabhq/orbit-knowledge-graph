@@ -1,12 +1,14 @@
 use code_graph_config::Language;
-use code_graph_types::DefKind;
+use code_graph_types::{BindingKind, DefKind};
 use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
 use parser_core::dsl::types::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::linker::v2::HasRules;
-use crate::linker::v2::rules::*;
+use crate::linker::v2::rules::{
+    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage,
+};
+use crate::linker::v2::{HasRules, ResolveSettings};
 
 // ── DSL parser spec ─────────────────────────────────────────────
 
@@ -128,6 +130,74 @@ impl DslLanguage for JavaDsl {
     fn package_node() -> Option<(&'static str, Extract)> {
         Some(("package_declaration", Extract::Default))
     }
+
+    fn bindings() -> Vec<BindingRule> {
+        let java_type = |rule: BindingRule| {
+            rule.typed(
+                &["type"],
+                &[
+                    "int", "long", "short", "byte", "float", "double", "boolean", "char", "void",
+                    "String",
+                ],
+            )
+        };
+        vec![
+            java_type(
+                binding("local_variable_declaration", BindingKind::Assignment)
+                    .name_from(&["declarator", "name"]),
+            ),
+            java_type(
+                binding("field_declaration", BindingKind::Assignment)
+                    .name_from(&["declarator", "name"])
+                    .instance_attrs(&["this."]),
+            ),
+            java_type(
+                binding("formal_parameter", BindingKind::Parameter)
+                    .name_from(&["name"])
+                    .no_value(),
+            ),
+            binding("catch_formal_parameter", BindingKind::Parameter)
+                .name_from(&["name"])
+                .no_value(),
+            java_type(
+                binding("resource", BindingKind::Assignment)
+                    .name_from(&["name"])
+                    .value_from("value"),
+            ),
+            binding("assignment_expression", BindingKind::Assignment)
+                .name_from(&["left"])
+                .value_from("right"),
+        ]
+    }
+
+    fn branches() -> Vec<BranchRule> {
+        vec![
+            branch("if_statement")
+                .branches(&["block", "else_clause"])
+                .condition("condition")
+                .catch_all("else_clause"),
+            branch("try_statement").branches(&["block", "catch_clause", "finally_clause"]),
+            branch("try_with_resources_statement").branches(&[
+                "block",
+                "catch_clause",
+                "finally_clause",
+            ]),
+            branch("switch_expression").branches(&["switch_block_statement_group", "switch_rule"]),
+            branch("switch_statement").branches(&["switch_block_statement_group"]),
+            branch("ternary_expression")
+                .branches(&["consequence", "alternative"])
+                .catch_all("alternative"),
+        ]
+    }
+
+    fn loops() -> Vec<LoopRule> {
+        vec![
+            loop_rule("for_statement"),
+            loop_rule("while_statement"),
+            loop_rule("enhanced_for_statement").iter_over("value"),
+            loop_rule("do_statement"),
+        ]
+    }
 }
 
 // ── Resolution rules ────────────────────────────────────────────
@@ -144,47 +214,9 @@ impl HasRules for JavaRules {
             scopes,
             spec,
             vec![
-                branch("if_statement")
-                    .branches(&["block", "else_clause"])
-                    .condition("condition")
-                    .catch_all("else_clause"),
-                branch("try_statement").branches(&["block", "catch_clause", "finally_clause"]),
-                branch("try_with_resources_statement").branches(&[
-                    "block",
-                    "catch_clause",
-                    "finally_clause",
-                ]),
-                branch("switch_expression")
-                    .branches(&["switch_block_statement_group", "switch_rule"]),
-                branch("switch_statement").branches(&["switch_block_statement_group"]),
-                branch("ternary_expression")
-                    .branches(&["consequence", "alternative"])
-                    .catch_all("alternative"),
-            ],
-            vec![
-                loop_rule("for_statement"),
-                loop_rule("while_statement"),
-                loop_rule("enhanced_for_statement").iter_over("value"),
-                loop_rule("do_statement"),
-            ],
-            vec![
-                binding("local_variable_declaration", BindingKind::Assignment)
-                    .name_from(&["declarator", "name"]),
-                binding("field_declaration", BindingKind::Assignment)
-                    .name_from(&["declarator", "name"])
-                    .instance_attrs(&["this."]),
-                binding("formal_parameter", BindingKind::Parameter)
-                    .name_from(&["name"])
-                    .no_value(),
-                binding("catch_formal_parameter", BindingKind::Parameter)
-                    .name_from(&["name"])
-                    .no_value(),
-                binding("resource", BindingKind::Assignment)
-                    .name_from(&["name"])
-                    .value_from("value"),
-                binding("assignment_expression", BindingKind::Assignment)
-                    .name_from(&["left"])
-                    .value_from("right"),
+                ResolveStage::SSA,
+                ResolveStage::ImportStrategies,
+                ResolveStage::ImplicitMember,
             ],
             vec![
                 ImportStrategy::ScopeFqnWalk,
@@ -204,8 +236,11 @@ impl HasRules for JavaRules {
             ".",
             &["this", "self"],
             Some("super"),
-            true,
         )
+        .with_settings(ResolveSettings {
+            per_file_timeout: Some(std::time::Duration::from_millis(10000)),
+            ..ResolveSettings::default()
+        })
     }
 }
 

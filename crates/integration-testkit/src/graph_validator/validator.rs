@@ -76,8 +76,11 @@ async fn run_query_block(
         }
     };
 
-    print_result(label, &block.query, &batch);
-    check_assertions(label, severity, &block.assert, &batch)
+    let failures = check_assertions(label, severity, &block.assert, &batch);
+    if !failures.is_empty() {
+        print_result(label, &block.query, &batch);
+    }
+    failures
 }
 
 fn print_result(label: &str, query: &str, batch: &RecordBatch) {

@@ -1,27 +1,488 @@
-//! Edge builder: converts per-file SSA walk results into resolved call edges.
+//! Resolution engine: indexes, import strategies, and reference resolver.
 //!
-//! Takes per-file `FileWalkResult`s (SSA graph + recorded reads) and the
-//! `ResolutionContext` (indexes), resolves each reference read to concrete
-//! definitions, and produces `ResolvedEdge`s for the graph.
+//! This module owns the full resolve pipeline:
+//! - `ResolutionContext` + indexes (definitions, members, ancestors)
+//! - Import resolution strategies (explicit, wildcard, same-package, etc.)
+//! - `Resolver` struct that resolves bare names and expression chains
+//! - `build_edges()` entry point that drives parallel per-file resolution
 
-use code_graph_types::{EdgeKind, ExpressionStep, IStr, NodeKind, Relationship};
+use code_graph_types::{
+    CanonicalDefinition, CanonicalImport, CanonicalResult, EdgeKind, ExpressionStep, IStr,
+    NodeKind, Range, Relationship,
+};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::{SmallVec, smallvec};
 
-use super::context::{DefRef, ResolutionContext};
-
-/// Maximum chain depth before we stop walking and resolve only the last step.
-/// Fluent builder chains (e.g. `builder.startObject().field().endObject()`)
-/// can be 30+ steps. Beyond this depth, the call graph value is minimal
-/// and the cost is linear in chain length.
-const MAX_CHAIN_DEPTH: usize = 10;
-use super::edges::{EdgeSource, ResolvedEdge};
-use super::imports;
-use super::rules::ResolutionRules;
+use super::rules::{ImportStrategy, ResolutionRules};
 use super::ssa::{SsaResolver, SsaStats, Value};
 use super::walker::{FileWalkResult, RecordedRead};
+
+// ── DefRef ──────────────────────────────────────────────────────
+
+/// Lightweight reference to a definition: file index + definition index.
+#[derive(Clone, Copy, Debug)]
+pub struct DefRef {
+    pub file_idx: usize,
+    pub def_idx: usize,
+}
+
+// ── Edge types ──────────────────────────────────────────────────
+
+/// Source of a resolved edge — either a definition or a file (for module-level calls).
+#[derive(Debug, Clone, Copy)]
+pub enum EdgeSource {
+    Definition(DefRef),
+    File(usize),
+}
+
+impl EdgeSource {
+    pub fn file_idx(&self) -> usize {
+        match self {
+            EdgeSource::Definition(d) => d.file_idx,
+            EdgeSource::File(f) => *f,
+        }
+    }
+}
+
+/// A resolved edge produced by reference resolution.
+#[derive(Debug, Clone)]
+pub struct ResolvedEdge {
+    pub relationship: Relationship,
+    pub source: EdgeSource,
+    pub target: DefRef,
+    pub reference_range: Range,
+}
+
+// ── ResolutionContext + indexes ──────────────────────────────────
+
+/// Shared resolution context built from all parsed results for a language.
+///
+/// Owns canonical results and pre-built indexes. ASTs are not stored
+/// here — they are dropped after the parallel walk phase.
+pub struct ResolutionContext {
+    pub root_path: String,
+    pub results: Vec<CanonicalResult>,
+    pub definitions: DefinitionIndex,
+    pub members: MemberIndex,
+}
+
+impl ResolutionContext {
+    pub fn build(results: Vec<CanonicalResult>, root_path: String) -> Self {
+        let definitions = DefinitionIndex::build(&results);
+        let mut members = MemberIndex::build(&results);
+        members.flatten_supers(&results, &definitions);
+
+        Self {
+            root_path,
+            results,
+            definitions,
+            members,
+        }
+    }
+
+    /// Resolve a DefRef to the actual definition + file path.
+    pub fn resolve_def(&self, r: DefRef) -> (&CanonicalDefinition, &str) {
+        let result = &self.results[r.file_idx];
+        (&result.definitions[r.def_idx], &result.file_path)
+    }
+}
+
+/// Index of all definitions across files.
+pub struct DefinitionIndex {
+    by_fqn: FxHashMap<String, Vec<DefRef>>,
+    by_name: FxHashMap<String, Vec<DefRef>>,
+}
+
+impl DefinitionIndex {
+    fn build(results: &[CanonicalResult]) -> Self {
+        let mut by_fqn: FxHashMap<String, Vec<DefRef>> = FxHashMap::default();
+        let mut by_name: FxHashMap<String, Vec<DefRef>> = FxHashMap::default();
+
+        for (file_idx, result) in results.iter().enumerate() {
+            for (def_idx, def) in result.definitions.iter().enumerate() {
+                let r = DefRef { file_idx, def_idx };
+                let fqn_str = def.fqn.to_string();
+                by_fqn.entry(fqn_str).or_default().push(r);
+                by_name.entry(def.name.clone()).or_default().push(r);
+            }
+        }
+
+        Self { by_fqn, by_name }
+    }
+
+    pub fn lookup_fqn(&self, fqn: &str) -> &[DefRef] {
+        self.by_fqn.get(fqn).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    pub fn lookup_name(&self, name: &str) -> &[DefRef] {
+        self.by_name.get(name).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    pub fn def_fqn(&self, def_ref: &DefRef, results: &[CanonicalResult]) -> String {
+        results[def_ref.file_idx].definitions[def_ref.def_idx]
+            .fqn
+            .to_string()
+    }
+}
+
+/// Index of class/interface members with pre-flattened ancestor chains.
+pub struct MemberIndex {
+    members: FxHashMap<String, FxHashMap<String, Vec<DefRef>>>,
+    supers: FxHashMap<String, Vec<String>>,
+    ancestors: FxHashMap<String, Vec<String>>,
+}
+
+impl MemberIndex {
+    fn build(results: &[CanonicalResult]) -> Self {
+        let mut members: FxHashMap<String, FxHashMap<String, Vec<DefRef>>> = FxHashMap::default();
+        let mut supers: FxHashMap<String, Vec<String>> = FxHashMap::default();
+
+        for (file_idx, result) in results.iter().enumerate() {
+            for (def_idx, def) in result.definitions.iter().enumerate() {
+                if let Some(parent_fqn) = def.fqn.parent() {
+                    let parent_str = parent_fqn.to_string();
+                    members
+                        .entry(parent_str)
+                        .or_default()
+                        .entry(def.name.clone())
+                        .or_default()
+                        .push(DefRef { file_idx, def_idx });
+                }
+                if let Some(meta) = &def.metadata
+                    && !meta.super_types.is_empty()
+                {
+                    supers.insert(def.fqn.to_string(), meta.super_types.clone());
+                }
+            }
+        }
+
+        Self {
+            members,
+            supers,
+            ancestors: FxHashMap::default(),
+        }
+    }
+
+    fn flatten_supers(&mut self, results: &[CanonicalResult], def_index: &DefinitionIndex) {
+        let type_fqns: Vec<String> = self.supers.keys().cloned().collect();
+        for fqn in type_fqns {
+            if self.ancestors.contains_key(&fqn) {
+                continue;
+            }
+            let chain = self.compute_ancestor_chain(&fqn, results, def_index);
+            self.ancestors.insert(fqn, chain);
+        }
+    }
+
+    fn compute_ancestor_chain(
+        &self,
+        class_fqn: &str,
+        results: &[CanonicalResult],
+        def_index: &DefinitionIndex,
+    ) -> Vec<String> {
+        let mut chain = Vec::new();
+        let mut visited = FxHashSet::default();
+        let mut queue = std::collections::VecDeque::new();
+
+        let root_fqns = self.resolve_type_fqns(class_fqn, results, def_index);
+        for fqn in &root_fqns {
+            visited.insert(fqn.clone());
+            queue.push_back(fqn.clone());
+        }
+
+        while let Some(current) = queue.pop_front() {
+            if let Some(super_names) = self.supers.get(&current) {
+                for super_name in super_names {
+                    let super_fqns = self.resolve_type_fqns(super_name, results, def_index);
+                    for super_fqn in super_fqns {
+                        if visited.insert(super_fqn.clone()) {
+                            chain.push(super_fqn.clone());
+                            queue.push_back(super_fqn);
+                        }
+                    }
+                }
+            }
+        }
+
+        chain
+    }
+
+    fn resolve_type_fqns(
+        &self,
+        type_name: &str,
+        results: &[CanonicalResult],
+        def_index: &DefinitionIndex,
+    ) -> Vec<String> {
+        if self.members.contains_key(type_name) || self.supers.contains_key(type_name) {
+            return vec![type_name.to_string()];
+        }
+        def_index
+            .lookup_name(type_name)
+            .iter()
+            .map(|def_ref| def_index.def_fqn(def_ref, results))
+            .collect()
+    }
+
+    pub fn lookup_member(&self, class_fqn: &str, member_name: &str) -> &[DefRef] {
+        self.members
+            .get(class_fqn)
+            .and_then(|ms| ms.get(member_name))
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn lookup_member_with_supers(
+        &self,
+        class_fqn: &str,
+        member_name: &str,
+        results: &[CanonicalResult],
+        def_index: &DefinitionIndex,
+        out: &mut Vec<DefRef>,
+    ) -> bool {
+        let direct = self.lookup_member(class_fqn, member_name);
+        if !direct.is_empty() {
+            out.extend_from_slice(direct);
+            return true;
+        }
+
+        if let Some(chain) = self.ancestors.get(class_fqn) {
+            for ancestor_fqn in chain {
+                let found = self.lookup_member(ancestor_fqn, member_name);
+                if !found.is_empty() {
+                    out.extend_from_slice(found);
+                    return true;
+                }
+            }
+        }
+
+        if !self.ancestors.contains_key(class_fqn) && !self.members.contains_key(class_fqn) {
+            let resolved_fqns: Vec<String> = def_index
+                .lookup_name(class_fqn)
+                .iter()
+                .map(|def_ref| def_index.def_fqn(def_ref, results))
+                .collect();
+
+            for fqn in &resolved_fqns {
+                let direct = self.lookup_member(fqn, member_name);
+                if !direct.is_empty() {
+                    out.extend_from_slice(direct);
+                    return true;
+                }
+                if let Some(chain) = self.ancestors.get(fqn.as_str()) {
+                    for ancestor_fqn in chain {
+                        let found = self.lookup_member(ancestor_fqn, member_name);
+                        if !found.is_empty() {
+                            out.extend_from_slice(found);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+}
+
+// ── Import resolution strategies ────────────────────────────────
+
+fn apply_import_strategies(
+    strategies: &[ImportStrategy],
+    ctx: &ResolutionContext,
+    file_idx: usize,
+    name: &str,
+    sep: &str,
+) -> Vec<DefRef> {
+    let result = &ctx.results[file_idx];
+
+    for strategy in strategies {
+        let candidates = match strategy {
+            ImportStrategy::ScopeFqnWalk => scope_fqn_walk(ctx, result, name, sep),
+            ImportStrategy::ExplicitImport => explicit_import(ctx, file_idx, name, sep),
+            ImportStrategy::WildcardImport => wildcard_import(ctx, file_idx, name, sep),
+            ImportStrategy::SamePackage => same_package(ctx, result, name, sep),
+            ImportStrategy::SameFile => same_file(ctx, file_idx, name),
+            ImportStrategy::FilePath => vec![],
+        };
+        if !candidates.is_empty() {
+            return candidates;
+        }
+    }
+
+    vec![]
+}
+
+fn resolve_import(ctx: &ResolutionContext, import: &CanonicalImport, sep: &str) -> Vec<DefRef> {
+    let symbol_name = import
+        .alias
+        .as_deref()
+        .or(import.name.as_deref())
+        .unwrap_or("");
+
+    if symbol_name.is_empty() || import.wildcard {
+        return vec![];
+    }
+
+    let full_fqn = if import.path.is_empty() {
+        symbol_name.to_string()
+    } else {
+        format!("{}{}{}", import.path, sep, symbol_name)
+    };
+
+    let by_fqn = ctx.definitions.lookup_fqn(&full_fqn);
+    if !by_fqn.is_empty() {
+        return by_fqn.to_vec();
+    }
+
+    if !import.path.is_empty() {
+        let by_path = ctx.definitions.lookup_fqn(&import.path);
+        if !by_path.is_empty() {
+            return by_path.to_vec();
+        }
+    }
+
+    vec![]
+}
+
+fn scope_fqn_walk(
+    ctx: &ResolutionContext,
+    result: &CanonicalResult,
+    name: &str,
+    sep: &str,
+) -> Vec<DefRef> {
+    for def in &result.definitions {
+        if def.is_top_level {
+            let candidate = format!("{}{}{}", def.fqn, sep, name);
+            let matches = ctx.definitions.lookup_fqn(&candidate);
+            if !matches.is_empty() {
+                return matches.to_vec();
+            }
+        }
+    }
+
+    for def in &result.definitions {
+        let fqn_str = def.fqn.to_string();
+        let mut current = fqn_str.as_str();
+        loop {
+            let candidate = format!("{}{}{}", current, sep, name);
+            let matches = ctx.definitions.lookup_fqn(&candidate);
+            if !matches.is_empty() {
+                return matches.to_vec();
+            }
+            match current.rfind(sep) {
+                Some(pos) => current = &current[..pos],
+                None => break,
+            }
+        }
+    }
+
+    vec![]
+}
+
+fn explicit_import(ctx: &ResolutionContext, file_idx: usize, name: &str, sep: &str) -> Vec<DefRef> {
+    let result = &ctx.results[file_idx];
+    for imp in &result.imports {
+        let imp_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+        if imp_name == name {
+            let defs = resolve_import(ctx, imp, sep);
+            if !defs.is_empty() {
+                return defs;
+            }
+        }
+    }
+    vec![]
+}
+
+fn wildcard_import(ctx: &ResolutionContext, file_idx: usize, name: &str, sep: &str) -> Vec<DefRef> {
+    let result = &ctx.results[file_idx];
+    for imp in &result.imports {
+        if imp.wildcard {
+            let candidate = format!("{}{}{}", imp.path, sep, name);
+            let matches = ctx.definitions.lookup_fqn(&candidate);
+            if !matches.is_empty() {
+                return matches.to_vec();
+            }
+        }
+    }
+    vec![]
+}
+
+fn same_package(
+    ctx: &ResolutionContext,
+    result: &CanonicalResult,
+    name: &str,
+    sep: &str,
+) -> Vec<DefRef> {
+    for def in &result.definitions {
+        if def.is_top_level {
+            let fqn_str = def.fqn.to_string();
+            if let Some(sep_pos) = fqn_str.rfind(sep) {
+                let pkg = &fqn_str[..sep_pos];
+                let candidate = format!("{}{}{}", pkg, sep, name);
+                let matches = ctx.definitions.lookup_fqn(&candidate);
+                if !matches.is_empty() {
+                    return matches.to_vec();
+                }
+            }
+        }
+    }
+    vec![]
+}
+
+fn same_file(ctx: &ResolutionContext, file_idx: usize, name: &str) -> Vec<DefRef> {
+    let by_fqn = ctx.definitions.lookup_fqn(name);
+    let same_file: Vec<DefRef> = by_fqn
+        .iter()
+        .filter(|r| r.file_idx == file_idx)
+        .copied()
+        .collect();
+    if !same_file.is_empty() {
+        return same_file;
+    }
+
+    ctx.definitions
+        .lookup_name(name)
+        .iter()
+        .filter(|r| r.file_idx == file_idx)
+        .copied()
+        .collect()
+}
+
+// ── ResolveSettings ─────────────────────────────────────────────
+
+/// Tunable knobs for the resolution stage.
+#[derive(Debug, Clone)]
+pub struct ResolveSettings {
+    pub per_file_timeout: Option<std::time::Duration>,
+    pub max_chain_depth: usize,
+    pub slow_ref_threshold: Option<std::time::Duration>,
+    /// When a chain base can't resolve, fall back to resolve_bare on the
+    /// last step. Disable for strict zero-heuristic mode.
+    pub chain_fallback: bool,
+    /// Mid-chain recovery: try reading "base.member" as a compound SSA
+    /// key when type-walking produces no results.
+    pub compound_key_recovery: bool,
+    /// On chain bases, fall back to implicit member lookup on the
+    /// enclosing type when SSA produces no types. Separate from
+    /// `ImplicitMember` in `bare_stages` (which controls bare name
+    /// fallback).
+    pub implicit_this_on_base: bool,
+}
+
+impl Default for ResolveSettings {
+    fn default() -> Self {
+        Self {
+            per_file_timeout: None,
+            max_chain_depth: 10,
+            slow_ref_threshold: Some(std::time::Duration::from_millis(100)),
+            chain_fallback: true,
+            compound_key_recovery: true,
+            implicit_this_on_base: true,
+        }
+    }
+}
 
 // ── Resolution statistics ───────────────────────────────────────
 
@@ -76,6 +537,12 @@ pub struct ResolveStats {
     pub edges_from_chain: u64,
     pub edges_from_chain_fallback: u64,
 
+    // ── Timeout stats ──
+    /// Number of files that hit the per-file timeout.
+    pub timed_out_files: u64,
+    /// Number of references skipped due to per-file timeout.
+    pub timed_out_refs: u64,
+
     // ── SSA stats (aggregated from per-file SsaResolvers) ──
     pub ssa: SsaStats,
 }
@@ -107,6 +574,8 @@ impl ResolveStats {
         self.edges_from_bare_implicit += other.edges_from_bare_implicit;
         self.edges_from_chain += other.edges_from_chain;
         self.edges_from_chain_fallback += other.edges_from_chain_fallback;
+        self.timed_out_files += other.timed_out_files;
+        self.timed_out_refs += other.timed_out_refs;
         self.ssa.merge(&other.ssa);
     }
 
@@ -219,6 +688,13 @@ impl ResolveStats {
             pct(self.edges_from_chain_fallback, total_edges)
         );
 
+        if self.timed_out_files > 0 {
+            eprintln!(
+                "  Timeouts: {} files, {} refs skipped",
+                self.timed_out_files, self.timed_out_refs
+            );
+        }
+
         eprintln!("  SSA:");
         eprintln!("    reads:              {:>8}", self.ssa.reads);
         eprintln!("    writes:             {:>8}", self.ssa.writes);
@@ -275,6 +751,7 @@ pub fn build_edges(
     rules: &ResolutionRules,
     ctx: &ResolutionContext,
     walks: &mut [FileWalkResult],
+    settings: &ResolveSettings,
 ) -> BuildEdgesResult {
     let total_reads: u64 = walks.iter().map(|w| w.reads.len() as u64).sum();
     let pb = ProgressBar::new(total_reads);
@@ -288,14 +765,38 @@ pub fn build_edges(
         .par_iter_mut()
         .map(|walk| {
             let file_start = std::time::Instant::now();
+            let deadline = settings
+                .per_file_timeout
+                .map(|d| file_start + d);
             let reads = std::mem::take(&mut walk.reads);
             let num_reads = reads.len();
             let file_idx = reads.first().map(|r| r.file_idx).unwrap_or(0);
             let thread_id = rayon::current_thread_index().unwrap_or(0);
-            let mut resolver = Resolver::new(rules, ctx, &mut walk.ssa);
+            let mut resolver = Resolver::new(rules, ctx, settings, &mut walk.ssa);
             let mut file_edges = Vec::new();
 
-            for read in &reads {
+            for (resolved_count, read) in reads.iter().enumerate() {
+                // Check per-file timeout.
+                if let Some(dl) = deadline
+                    && std::time::Instant::now() > dl
+                {
+                    let skipped = (num_reads - resolved_count) as u64;
+                    resolver.stats.timed_out_files = 1;
+                    resolver.stats.timed_out_refs = skipped;
+                    let file_path = &ctx.results[file_idx].file_path;
+                    pb.suspend(|| {
+                        eprintln!(
+                            "\x1b[33m[TIMEOUT] {} after {:.2?} ({} refs resolved, {} skipped)\x1b[0m",
+                            file_path,
+                            file_start.elapsed(),
+                            resolved_count,
+                            skipped,
+                        );
+                    });
+                    pb.inc(skipped);
+                    break;
+                }
+
                 let result = &ctx.results[read.file_idx];
                 let reference = &result.references[read.ref_idx];
 
@@ -312,7 +813,9 @@ pub fn build_edges(
                     (defs, path)
                 };
                 let elapsed = t.elapsed();
-                if elapsed.as_millis() >= 100 {
+                if let Some(threshold) = settings.slow_ref_threshold
+                    && elapsed >= threshold
+                {
                     pb.suspend(|| {
                         eprintln!(
                             "\x1b[31m[SLOW] {:.2?} resolving '{}' in {} (chain: {})\x1b[0m",
@@ -496,6 +999,7 @@ enum ResolvePath {
 struct Resolver<'a> {
     rules: &'a ResolutionRules,
     ctx: &'a ResolutionContext,
+    settings: &'a ResolveSettings,
     ssa: &'a mut SsaResolver,
     sep: &'a str,
     /// Reusable buffer for FQN construction.
@@ -512,12 +1016,14 @@ impl<'a> Resolver<'a> {
     fn new(
         rules: &'a ResolutionRules,
         ctx: &'a ResolutionContext,
+        settings: &'a ResolveSettings,
         ssa: &'a mut SsaResolver,
     ) -> Self {
         Self {
             sep: rules.fqn_separator,
             rules,
             ctx,
+            settings,
             ssa,
             buf: String::with_capacity(128),
             stats: ResolveStats::default(),
@@ -542,8 +1048,36 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// Follow `Value::Alias` chains via SSA reads. Returns concrete values
+    /// (Def, Import, Type, Opaque) with all aliases resolved.
+    fn resolve_aliases(
+        &mut self,
+        values: &[Value],
+        block: super::ssa::BlockId,
+    ) -> SmallVec<[Value; 4]> {
+        let mut out = SmallVec::new();
+        for v in values {
+            match v {
+                Value::Alias(name) => {
+                    let reaching = self.ssa.read_variable_stateless(name, block);
+                    // Recurse once to handle chained aliases (bounded by SSA depth)
+                    for av in &reaching.values {
+                        if matches!(av, Value::Alias(_)) {
+                            // Don't recurse infinitely — treat as opaque
+                            out.push(av.clone());
+                        } else {
+                            out.push(av.clone());
+                        }
+                    }
+                }
+                other => out.push(other.clone()),
+            }
+        }
+        out
+    }
+
     /// Convert an SSA `Value` to type name(s) for member lookup.
-    /// Returns interned strings to avoid allocation during chain resolution.
+    /// Aliases must be resolved before calling this (via `resolve_aliases`).
     fn value_to_types(&mut self, value: &Value) -> SmallVec<[IStr; 2]> {
         match value {
             Value::Type(t) => smallvec![*t],
@@ -551,18 +1085,87 @@ impl<'a> Resolver<'a> {
                 let def = &self.ctx.results[*f].definitions[*d];
                 self.def_to_types(def)
             }
+            Value::Import(f, i) => {
+                let import = &self.ctx.results[*f].imports[*i];
+                let defs = resolve_import(self.ctx, import, self.sep);
+                defs.iter()
+                    .flat_map(|def_ref| {
+                        let def = &self.ctx.results[def_ref.file_idx].definitions[def_ref.def_idx];
+                        self.def_to_types(def)
+                    })
+                    .collect()
+            }
             _ => SmallVec::new(),
         }
     }
 
     // ── Bare name resolution ────────────────────────────────────
 
-    /// Resolve a bare name (no expression chain) via SSA + fallbacks.
+    /// Resolve a bare name (no expression chain).
+    ///
+    /// Runs stages from `rules.bare_stages` in order, stopping at the
+    /// first one that produces results. The ordering is fully declarative
+    /// — no hardcoded fallback chain.
     fn resolve_bare(&mut self, read: &RecordedRead) -> Vec<DefRef> {
+        use super::rules::ResolveStage;
+
         self.last_bare_path = ResolvePath::None;
 
-        let reaching = self.ssa.read_variable_stateless(&read.name, read.block);
+        for stage in &self.rules.bare_stages {
+            let result = match stage {
+                ResolveStage::SSA => self.resolve_bare_ssa(read),
+                ResolveStage::ImportStrategies => {
+                    // Fast path: if the name doesn't exist in the definition
+                    // index at all, skip import strategies entirely.
+                    if self.ctx.definitions.lookup_name(&read.name).is_empty() {
+                        self.stats.bare_early_exit_unknown += 1;
+                        continue;
+                    }
+                    let r = apply_import_strategies(
+                        &self.rules.import_strategies,
+                        self.ctx,
+                        read.file_idx,
+                        &read.name,
+                        self.sep,
+                    );
+                    if !r.is_empty() {
+                        self.stats.bare_import_resolved += 1;
+                        self.last_bare_path = ResolvePath::BareImport;
+                    }
+                    r
+                }
+                ResolveStage::ImplicitMember => {
+                    let mut r = Vec::new();
+                    if let Some(type_fqn) = &read.enclosing_type_fqn
+                        && self.ctx.members.lookup_member_with_supers(
+                            type_fqn,
+                            &read.name,
+                            &self.ctx.results,
+                            &self.ctx.definitions,
+                            &mut r,
+                        )
+                    {
+                        self.stats.bare_implicit_this_resolved += 1;
+                        self.last_bare_path = ResolvePath::BareImplicit;
+                    }
+                    r
+                }
+            };
 
+            if !result.is_empty() {
+                let mut result = result;
+                dedup(&mut result);
+                return result;
+            }
+        }
+
+        self.stats.bare_unresolved += 1;
+        vec![]
+    }
+
+    /// SSA stage: read reaching definitions and resolve Def/Import/Type values.
+    fn resolve_bare_ssa(&mut self, read: &RecordedRead) -> Vec<DefRef> {
+        let reaching = self.ssa.read_variable_stateless(&read.name, read.block);
         let mut result = Vec::new();
 
         for value in &reaching.values {
@@ -577,7 +1180,7 @@ impl<'a> Resolver<'a> {
                 Value::Import(f, i) => {
                     self.stats.bare_ssa_import += 1;
                     let import = &self.ctx.results[*f].imports[*i];
-                    result.extend(imports::resolve_import(self.ctx, import, self.sep));
+                    result.extend(resolve_import(self.ctx, import, self.sep));
                 }
                 Value::Type(type_name) => {
                     self.stats.bare_ssa_type += 1;
@@ -589,6 +1192,26 @@ impl<'a> Resolver<'a> {
                         &mut result,
                     );
                 }
+                Value::Alias(name) => {
+                    // Follow the alias via SSA: read the aliased name in
+                    // the same block to get the underlying Def/Import/Type.
+                    let alias_reaching = self.ssa.read_variable_stateless(name, read.block);
+                    for av in &alias_reaching.values {
+                        match av {
+                            Value::Def(f, d) => {
+                                result.push(DefRef {
+                                    file_idx: *f,
+                                    def_idx: *d,
+                                });
+                            }
+                            Value::Import(f, i) => {
+                                let import = &self.ctx.results[*f].imports[*i];
+                                result.extend(resolve_import(self.ctx, import, self.sep));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -596,54 +1219,7 @@ impl<'a> Resolver<'a> {
         if !result.is_empty() {
             self.stats.bare_ssa_resolved += 1;
             self.last_bare_path = ResolvePath::BareSsa;
-            dedup(&mut result);
-            return result;
         }
-
-        // Fast path: if the name doesn't exist anywhere in the definition
-        // index, skip all import strategies and implicit member lookup.
-        if result.is_empty() && self.ctx.definitions.lookup_name(&read.name).is_empty() {
-            self.stats.bare_early_exit_unknown += 1;
-            self.stats.bare_unresolved += 1;
-            return result;
-        }
-
-        // Fallback 1: import strategies
-        if result.is_empty() {
-            result = imports::apply(
-                &self.rules.import_strategies,
-                self.ctx,
-                read.file_idx,
-                &read.name,
-                self.sep,
-            );
-            if !result.is_empty() {
-                self.stats.bare_import_resolved += 1;
-                self.last_bare_path = ResolvePath::BareImport;
-            }
-        }
-
-        // Fallback 2: implicit member lookup on enclosing type
-        if result.is_empty()
-            && self.rules.implicit_member_lookup
-            && let Some(type_fqn) = &read.enclosing_type_fqn
-            && self.ctx.members.lookup_member_with_supers(
-                type_fqn,
-                &read.name,
-                &self.ctx.results,
-                &self.ctx.definitions,
-                &mut result,
-            )
-        {
-            self.stats.bare_implicit_this_resolved += 1;
-            self.last_bare_path = ResolvePath::BareImplicit;
-        }
-
-        if result.is_empty() {
-            self.stats.bare_unresolved += 1;
-        }
-
-        dedup(&mut result);
         result
     }
 
@@ -657,8 +1233,9 @@ impl<'a> Resolver<'a> {
             return vec![];
         }
 
-        let effective_chain = if chain.len() > MAX_CHAIN_DEPTH {
-            &chain[chain.len() - MAX_CHAIN_DEPTH..]
+        let max_depth = self.settings.max_chain_depth;
+        let effective_chain = if chain.len() > max_depth {
+            &chain[chain.len() - max_depth..]
         } else {
             chain
         };
@@ -676,16 +1253,23 @@ impl<'a> Resolver<'a> {
         let mut current_types = self.resolve_base(&effective_chain[0], read.block, enclosing_str);
 
         if current_types.is_empty() {
-            self.stats.chain_fallback_fired += 1;
-            let result = self.chain_fallback(read, chain);
-            if !result.is_empty() {
-                self.stats.chain_fallback_resolved += 1;
-                self.last_chain_path = ResolvePath::ChainFallback;
+            if self.settings.chain_fallback {
+                self.stats.chain_fallback_fired += 1;
+                let result = self.chain_fallback(read, chain);
+                if !result.is_empty() {
+                    self.stats.chain_fallback_resolved += 1;
+                    self.last_chain_path = ResolvePath::ChainFallback;
+                }
+                return result;
             }
-            return result;
+            return vec![];
         }
 
-        let mut compound_key = self.compound_key_base(&effective_chain[0]);
+        let mut compound_key = if self.settings.compound_key_recovery {
+            self.compound_key_base(&effective_chain[0])
+        } else {
+            String::new()
+        };
 
         for (i, step) in effective_chain[1..].iter().enumerate() {
             let is_last = i == effective_chain.len() - 2;
@@ -741,17 +1325,16 @@ impl<'a> Resolver<'a> {
         match step {
             ExpressionStep::Ident(name) | ExpressionStep::Call(name) => {
                 let reaching = self.ssa.read_variable_stateless(name, block);
-                let mut types: SmallVec<[IStr; 2]> = reaching
-                    .values
-                    .iter()
-                    .flat_map(|v| self.value_to_types(v))
-                    .collect();
+                let values = self.resolve_aliases(&reaching.values, block);
+                let mut types: SmallVec<[IStr; 2]> =
+                    values.iter().flat_map(|v| self.value_to_types(v)).collect();
 
-                // Implicit-this fallback for chain bases: if SSA didn't resolve
-                // the base name and we're inside a type scope, look up the name
-                // as a member of the enclosing type to get its return type.
                 if types.is_empty()
-                    && self.rules.implicit_member_lookup
+                    && self.settings.implicit_this_on_base
+                    && self
+                        .rules
+                        .bare_stages
+                        .contains(&super::rules::ResolveStage::ImplicitMember)
                     && let Some(fqn) = enclosing
                 {
                     let mut members = Vec::new();

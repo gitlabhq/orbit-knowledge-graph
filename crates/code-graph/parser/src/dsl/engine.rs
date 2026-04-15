@@ -5,7 +5,8 @@ use treesitter_visit::{Node, SupportLang};
 
 use code_graph_config::Language;
 use code_graph_types::{
-    CanonicalDefinition, CanonicalImport, CanonicalReference, CanonicalResult, DefKind,
+    CanonicalBinding, CanonicalControlFlow, CanonicalDefinition, CanonicalImport,
+    CanonicalReference, CanonicalResult, ControlFlowChild, ControlFlowKind, DefKind,
     DefinitionMetadata, ExpressionStep, Fqn, ReferenceStatus,
 };
 
@@ -43,6 +44,8 @@ impl LanguageSpec {
         let mut defs = Vec::new();
         let mut refs = Vec::new();
         let mut imports = Vec::new();
+        let mut bindings = Vec::new();
+        let mut control_flow = Vec::new();
         let mut scope_stack: Vec<Arc<str>> = Vec::new();
         let mut import_map = rustc_hash::FxHashMap::default();
 
@@ -59,6 +62,8 @@ impl LanguageSpec {
             &mut defs,
             &mut refs,
             &mut imports,
+            &mut bindings,
+            &mut control_flow,
             &mut import_map,
             sep,
         );
@@ -76,6 +81,8 @@ impl LanguageSpec {
             definitions: defs,
             imports,
             references: refs,
+            bindings,
+            control_flow,
         };
 
         Ok((result, ast))
@@ -89,6 +96,8 @@ impl LanguageSpec {
         defs: &mut Vec<CanonicalDefinition>,
         refs: &mut Vec<CanonicalReference>,
         imports: &mut Vec<CanonicalImport>,
+        bindings: &mut Vec<CanonicalBinding>,
+        control_flow: &mut Vec<CanonicalControlFlow>,
         import_map: &mut rustc_hash::FxHashMap<String, String>,
         sep: &'static str,
     ) {
@@ -97,17 +106,18 @@ impl LanguageSpec {
         }
 
         let node_kind = node.kind();
+        let node_kind_ref = node_kind.as_ref();
         let mut pushed_scope = false;
 
         // Check for package/namespace node (pushes scope, no definition)
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
-            && node_kind.as_ref() == pkg_kind
+            && node_kind_ref == pkg_kind
             && let Some(name) = pkg_extract.extract_name(node)
         {
             scope_stack.push(Arc::from(name.as_str()));
         }
 
-        if let Some(m) = self.evaluate_scope(node, &node_kind, import_map, sep) {
+        if let Some(m) = self.evaluate_scope(node, node_kind_ref, import_map, sep) {
             let is_top_level =
                 scope_stack.is_empty() || (scope_stack.len() == 1 && scope_stack[0].contains('.'));
 
@@ -137,7 +147,7 @@ impl LanguageSpec {
         }
 
         if let Some((name, range, expression)) =
-            self.evaluate_reference(node, &node_kind, import_map, sep)
+            self.evaluate_reference(node, node_kind_ref, import_map, sep)
         {
             refs.push(CanonicalReference {
                 reference_type: "Call",
@@ -153,9 +163,8 @@ impl LanguageSpec {
         let import_count_before = imports.len();
         let handled = self.custom_import_fn.is_some_and(|f| f(node, imports));
         if !handled {
-            self.evaluate_imports(node, &node_kind, imports);
+            self.evaluate_imports(node, node_kind_ref, imports);
         }
-        // Update import map with any newly added imports
         for imp in &imports[import_count_before..] {
             if !imp.wildcard && !imp.path.is_empty() {
                 let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
@@ -165,8 +174,107 @@ impl LanguageSpec {
             }
         }
 
+        // Extract bindings
+        if let Some(rule) = self.bindings.iter().find(|b| b.kind == node_kind_ref)
+            && let Some(name) = rule.extract_name(node)
+        {
+            let type_annotation = rule.extract_type_annotation(node);
+            let rhs_name = rule.extract_rhs_name(node, self);
+            let instance_attr = rule
+                .instance_attr_prefixes
+                .iter()
+                .any(|prefix| name.starts_with(prefix));
+
+            bindings.push(CanonicalBinding {
+                name,
+                kind: rule.binding_kind,
+                range: canonical_range(&node_to_range(node)),
+                type_annotation,
+                rhs_name,
+                instance_attr,
+            });
+        }
+
+        // Extract branches
+        if let Some(rule) = self.branches.iter().find(|b| b.kind == node_kind_ref) {
+            let byte_range = (node.range().start, node.range().end);
+            let mut children = Vec::new();
+
+            // Condition child (walked in pre-branch block)
+            if let Some(cond_field) = rule.condition_field
+                && let Some(cond_node) = node.field(cond_field)
+            {
+                children.push(ControlFlowChild {
+                    byte_range: (cond_node.range().start, cond_node.range().end),
+                    is_condition: true,
+                });
+            }
+
+            // Branch arms
+            let has_catch_all = rule
+                .catch_all_kind
+                .is_some_and(|catch_kind| node.children().any(|c| c.kind().as_ref() == catch_kind));
+            for child in node.children() {
+                let ck = child.kind();
+                if rule.branch_kinds.iter().any(|&k| k == ck.as_ref()) {
+                    children.push(ControlFlowChild {
+                        byte_range: (child.range().start, child.range().end),
+                        is_condition: false,
+                    });
+                }
+            }
+
+            control_flow.push(CanonicalControlFlow {
+                kind: ControlFlowKind::Branch { has_catch_all },
+                node_kind: node_kind_ref.to_string(),
+                byte_range,
+                children,
+            });
+        }
+
+        // Extract loops
+        if let Some(rule) = self.loops.iter().find(|l| l.kind == node_kind_ref) {
+            let byte_range = (node.range().start, node.range().end);
+            let mut children = Vec::new();
+
+            // Iteration expression (walked in pre-loop block)
+            if let Some(iter_field) = rule.iter_field
+                && let Some(iter_node) = node.field(iter_field)
+            {
+                children.push(ControlFlowChild {
+                    byte_range: (iter_node.range().start, iter_node.range().end),
+                    is_condition: true,
+                });
+            }
+
+            // Loop body
+            if let Some(body_node) = node.field(rule.body_field) {
+                children.push(ControlFlowChild {
+                    byte_range: (body_node.range().start, body_node.range().end),
+                    is_condition: false,
+                });
+            }
+
+            control_flow.push(CanonicalControlFlow {
+                kind: ControlFlowKind::Loop,
+                node_kind: node_kind_ref.to_string(),
+                byte_range,
+                children,
+            });
+        }
+
         for child in node.children() {
-            self.walk(&child, scope_stack, defs, refs, imports, import_map, sep);
+            self.walk(
+                &child,
+                scope_stack,
+                defs,
+                refs,
+                imports,
+                bindings,
+                control_flow,
+                import_map,
+                sep,
+            );
         }
 
         if pushed_scope {

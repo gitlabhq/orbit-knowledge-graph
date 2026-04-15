@@ -7,8 +7,9 @@ mod scope;
 pub use edge::{EdgeKind, NodeKind, Relationship, containment_edge_kind, containment_relationship};
 pub use fqn::Fqn;
 pub use node::{
-    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, CanonicalReference,
-    CanonicalResult, DefKind, DefinitionMetadata, ExpressionStep, ReferenceStatus,
+    BindingKind, CanonicalBinding, CanonicalControlFlow, CanonicalDefinition, CanonicalDirectory,
+    CanonicalFile, CanonicalImport, CanonicalReference, CanonicalResult, ControlFlowChild,
+    ControlFlowKind, DefKind, DefinitionMetadata, ExpressionStep, ReferenceStatus,
 };
 pub use range::{Position, Range};
 pub use scope::{HasRange, ScopeIndex};
