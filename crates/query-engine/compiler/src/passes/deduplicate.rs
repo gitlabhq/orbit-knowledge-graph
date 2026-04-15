@@ -19,15 +19,21 @@
 //!
 
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::node_filter_cte;
 use crate::input::{Input, QueryType};
 use ontology::Ontology;
-use ontology::constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, GL_TABLE_PREFIX, VERSION_COLUMN};
+use ontology::constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, VERSION_COLUMN};
+use regex::Regex;
+
+/// Matches `gl_*` or `v{N}_gl_*` (schema-version-prefixed) table names.
+static GL_TABLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(v\d+_)?gl_").expect("valid regex"));
 
 fn is_node_table(table: &str, edge_tables: &HashSet<String>) -> bool {
-    table.starts_with(GL_TABLE_PREFIX) && !edge_tables.contains(table)
+    GL_TABLE_RE.is_match(table) && !edge_tables.contains(table)
 }
 
 fn is_edge_table(table: &str, edge_tables: &HashSet<String>) -> bool {
@@ -900,5 +906,16 @@ mod tests {
         let arm2 = &q.union_all[0];
         assert!(!arm2.group_by.is_empty(), "second arm should have GROUP BY");
         assert!(arm2.having.is_some(), "second arm should have HAVING");
+    }
+
+    #[test]
+    fn gl_table_regex_matches_prefixed_and_unprefixed() {
+        assert!(GL_TABLE_RE.is_match("gl_user"));
+        assert!(GL_TABLE_RE.is_match("gl_edge"));
+        assert!(GL_TABLE_RE.is_match("v1_gl_user"));
+        assert!(GL_TABLE_RE.is_match("v99_gl_merge_request"));
+        assert!(!GL_TABLE_RE.is_match("siphon_users"));
+        assert!(!GL_TABLE_RE.is_match("checkpoint"));
+        assert!(!GL_TABLE_RE.is_match("v1_checkpoint"));
     }
 }

@@ -2,37 +2,40 @@ use std::sync::Arc;
 
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 use gkg_server::graph_stats::GraphStatsService;
-use integration_testkit::run_subtests_shared;
-use ontology::Ontology;
+use integration_testkit::{load_ontology, run_subtests_shared, t};
 
 async fn setup(ctx: &TestContext) {
-    ctx.execute(
-        "INSERT INTO gl_user (id, username, name, state, user_type) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, username, name, state, user_type) VALUES
          (1, 'alice', 'Alice Admin', 'active', 'human'),
          (2, 'bob', 'Bob Builder', 'active', 'human')",
-    )
+        t("gl_user")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_group (id, name, visibility_level, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
          (100, 'Public Group', 'public', '1/100/'),
          (101, 'Private Group', 'private', '1/101/')",
-    )
+        t("gl_group")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_project (id, name, visibility_level, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
          (1000, 'Public Project', 'public', '1/100/1000/'),
          (1001, 'Private Project', 'private', '1/101/1001/'),
          (1002, 'Internal Project', 'internal', '1/100/1002/')",
-    )
+        t("gl_project")
+    ))
     .await;
 
-    ctx.execute(
-        "INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
          (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
          (2001, 2, 'Fix bug B', 'opened', 'fix-b', 'main', '1/101/1001/')",
-    )
+        t("gl_merge_request")
+    ))
     .await;
 
     ctx.optimize_all().await;
@@ -40,7 +43,7 @@ async fn setup(ctx: &TestContext) {
 
 fn build_service(ctx: &TestContext) -> GraphStatsService {
     let client = Arc::new(ctx.create_client());
-    let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+    let ontology = Arc::new(load_ontology());
     GraphStatsService::new(client, ontology)
 }
 
@@ -65,7 +68,7 @@ fn find_item(domain: &gkg_server::proto::GraphStatsDomain, name: &str) -> i64 {
 
 #[tokio::test]
 async fn graph_stats() {
-    let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     setup(&ctx).await;
 
     run_subtests_shared!(
@@ -125,7 +128,7 @@ async fn non_matching_traversal_path_returns_zeros(ctx: &TestContext) {
 
 async fn all_domains_present_in_response(ctx: &TestContext) {
     let service = build_service(ctx);
-    let ontology = Ontology::load_embedded().expect("ontology must load");
+    let ontology = load_ontology();
 
     let response = service.get_stats("1/").await.expect("should succeed");
 

@@ -1,3 +1,5 @@
+use integration_testkit::t;
+
 use super::common;
 
 use std::sync::Arc;
@@ -18,7 +20,7 @@ const DELETED_NAMESPACE_ID: i64 = 100;
 
 #[tokio::test]
 async fn deletes_namespace_data_and_marks_schedule_complete() {
-    let context = TestContext::new(&[GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
 
     seed_graph_data(&context).await;
@@ -40,58 +42,64 @@ async fn deletes_namespace_data_and_marks_schedule_complete() {
 
 async fn seed_graph_data(context: &TestContext) {
     context
-        .execute(
-            "INSERT INTO gl_project (traversal_path, id, _version, _deleted) VALUES \
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, id, _version, _deleted) VALUES \
              ('1/100/', 1, '2024-01-01 00:00:00.000000', false), \
              ('1/200/', 2, '2024-01-01 00:00:00.000000', false)",
-        )
+            t("gl_project")
+        ))
         .await;
 
     context
-        .execute(
-            "INSERT INTO gl_file (traversal_path, project_id, branch, id, path, name, extension, language, _version, _deleted) VALUES \
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, project_id, branch, id, path, name, extension, language, _version, _deleted) VALUES \
              ('1/100/', 10, 'main', 1, 'src/lib.rs', 'lib.rs', 'rs', 'Rust', '2024-01-01 00:00:00.000000', false), \
              ('1/200/', 20, 'main', 2, 'src/lib.rs', 'lib.rs', 'rs', 'Rust', '2024-01-01 00:00:00.000000', false)",
-        )
+            t("gl_file")
+        ))
         .await;
 
     context
-        .execute(
-            "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) VALUES \
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) VALUES \
              ('1/100/', 1, 'Project', 'has_member', 10, 'User', '2024-01-01 00:00:00.000000', false), \
              ('1/200/', 2, 'Project', 'has_member', 20, 'User', '2024-01-01 00:00:00.000000', false)",
-        )
+            t("gl_edge")
+        ))
         .await;
 }
 
 async fn seed_sdlc_checkpoints(context: &TestContext) {
     context
-        .execute(
-            "INSERT INTO checkpoint (key, watermark, cursor_values) VALUES \
+        .execute(&format!(
+            "INSERT INTO {} (key, watermark, cursor_values) VALUES \
              ('ns.100.Group', '2024-01-01 00:00:00.000000', 'null'), \
              ('ns.100.Project', '2024-01-01 00:00:00.000000', 'null'), \
              ('ns.200.Group', '2024-01-01 00:00:00.000000', 'null')",
-        )
+            t("checkpoint")
+        ))
         .await;
 }
 
 async fn seed_code_checkpoints(context: &TestContext) {
     context
-        .execute(
-            "INSERT INTO code_indexing_checkpoint \
+        .execute(&format!(
+            "INSERT INTO {} \
              (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at) VALUES \
              ('1/100/', 10, 'main', 1, 'abc123', '2024-01-01 00:00:00.000000'), \
              ('1/200/', 20, 'main', 1, 'def456', '2024-01-01 00:00:00.000000')",
-        )
+            t("code_indexing_checkpoint")
+        ))
         .await;
 }
 
 async fn seed_deletion_schedule(context: &TestContext) {
     context
         .execute(&format!(
-            "INSERT INTO namespace_deletion_schedule \
+            "INSERT INTO {} \
              (namespace_id, traversal_path, scheduled_deletion_date) VALUES \
-             ({DELETED_NAMESPACE_ID}, '{DELETED_NAMESPACE_PATH}', '2024-01-01 00:00:00.000000')"
+             ({DELETED_NAMESPACE_ID}, '{DELETED_NAMESPACE_PATH}', '2024-01-01 00:00:00.000000')",
+            t("namespace_deletion_schedule")
         ))
         .await;
 }
@@ -126,22 +134,23 @@ async fn run_deletion_handler(context: &TestContext, ontology: &ontology::Ontolo
 }
 
 async fn assert_graph_data_deleted(context: &TestContext) {
-    for table in ["gl_project", "gl_file", "gl_edge"] {
-        assert_active_row_count(context, table, DELETED_NAMESPACE_PATH, 0).await;
+    for table in [t("gl_project"), t("gl_file"), t("gl_edge")] {
+        assert_active_row_count(context, &table, DELETED_NAMESPACE_PATH, 0).await;
     }
 }
 
 async fn assert_sibling_graph_data_retained(context: &TestContext) {
-    for table in ["gl_project", "gl_file", "gl_edge"] {
-        assert_active_row_count(context, table, SIBLING_NAMESPACE_PATH, 1).await;
+    for table in [t("gl_project"), t("gl_file"), t("gl_edge")] {
+        assert_active_row_count(context, &table, SIBLING_NAMESPACE_PATH, 1).await;
     }
 }
 
 async fn assert_deletion_schedule_marked_complete(context: &TestContext) {
     let result = context
         .query(&format!(
-            "SELECT 1 FROM namespace_deletion_schedule FINAL \
-             WHERE namespace_id = {DELETED_NAMESPACE_ID} AND _deleted = false"
+            "SELECT 1 FROM {} FINAL \
+             WHERE namespace_id = {DELETED_NAMESPACE_ID} AND _deleted = false",
+            t("namespace_deletion_schedule")
         ))
         .await;
     let count = result.first().map_or(0, |batch| batch.num_rows());
@@ -150,10 +159,11 @@ async fn assert_deletion_schedule_marked_complete(context: &TestContext) {
 
 async fn assert_sdlc_checkpoints_deleted(context: &TestContext) {
     let result = context
-        .query(
-            "SELECT key FROM checkpoint FINAL \
+        .query(&format!(
+            "SELECT key FROM {} FINAL \
              WHERE startsWith(key, 'ns.100.') AND _deleted = false",
-        )
+            t("checkpoint")
+        ))
         .await;
     let count = result.first().map_or(0, |b| b.num_rows());
     assert_eq!(
@@ -164,10 +174,11 @@ async fn assert_sdlc_checkpoints_deleted(context: &TestContext) {
 
 async fn assert_sibling_sdlc_checkpoints_retained(context: &TestContext) {
     let result = context
-        .query(
-            "SELECT key FROM checkpoint FINAL \
+        .query(&format!(
+            "SELECT key FROM {} FINAL \
              WHERE startsWith(key, 'ns.200.') AND _deleted = false",
-        )
+            t("checkpoint")
+        ))
         .await;
     let count = result.first().map_or(0, |b| b.num_rows());
     assert_eq!(
@@ -178,10 +189,11 @@ async fn assert_sibling_sdlc_checkpoints_retained(context: &TestContext) {
 
 async fn assert_code_checkpoints_deleted(context: &TestContext) {
     let result = context
-        .query(
-            "SELECT 1 FROM code_indexing_checkpoint FINAL \
+        .query(&format!(
+            "SELECT 1 FROM {} FINAL \
              WHERE startsWith(traversal_path, '1/100/') AND _deleted = false",
-        )
+            t("code_indexing_checkpoint")
+        ))
         .await;
     let count = result.first().map_or(0, |b| b.num_rows());
     assert_eq!(
@@ -192,10 +204,11 @@ async fn assert_code_checkpoints_deleted(context: &TestContext) {
 
 async fn assert_sibling_code_checkpoints_retained(context: &TestContext) {
     let result = context
-        .query(
-            "SELECT 1 FROM code_indexing_checkpoint FINAL \
+        .query(&format!(
+            "SELECT 1 FROM {} FINAL \
              WHERE startsWith(traversal_path, '1/200/') AND _deleted = false",
-        )
+            t("code_indexing_checkpoint")
+        ))
         .await;
     let count = result.first().map_or(0, |b| b.num_rows());
     assert_eq!(

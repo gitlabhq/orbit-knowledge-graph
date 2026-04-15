@@ -5790,6 +5790,13 @@ dependencies = [
  "gkg-server",
  "gkg-server-config",
  "gkg-utils",
+<<<<<<< HEAD
+=======
+ "globset",
+ "lance-graph",
+ "ontology",
+ "petgraph 0.8.3",
+>>>>>>> origin/main
  "query-engine",
  "rustls",
  "serde_json",

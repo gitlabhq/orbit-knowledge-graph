@@ -48,7 +48,7 @@ async fn live_returns_ok() {
 
 #[tokio::test]
 async fn ready_returns_ok_when_clickhouse_healthy() {
-    let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     let router = create_router(ctx.create_client(), None);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
@@ -104,7 +104,7 @@ fn unreachable_gitlab_client() -> Arc<GitlabClient> {
 
 #[tokio::test]
 async fn ready_skips_gitlab_probe_when_no_client() {
-    let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     let router = create_router(ctx.create_client(), None);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
@@ -123,7 +123,7 @@ async fn ready_skips_gitlab_probe_when_no_client() {
 
 #[tokio::test]
 async fn ready_reports_gitlab_unhealthy_when_unreachable() {
-    let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     let router = create_router(ctx.create_client(), Some(unreachable_gitlab_client()));
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;

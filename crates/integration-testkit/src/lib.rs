@@ -12,8 +12,67 @@ pub use assertions::{
 pub use context::TestContext;
 pub use seed::load_seed;
 
+pub fn load_ontology() -> ontology::Ontology {
+    let ont = ontology::Ontology::load_embedded().expect("embedded ontology should load");
+    let prefix = &*TABLE_PREFIX;
+    if prefix.is_empty() {
+        ont
+    } else {
+        ont.with_schema_version_prefix(prefix)
+    }
+}
+
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));
-pub const GRAPH_SCHEMA_SQL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph.sql"));
+
+/// The SCHEMA_VERSION from config/SCHEMA_VERSION, parsed at compile time.
+pub const SCHEMA_VERSION: u32 =
+    const_parse_version(include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).as_bytes());
+
+/// Table name prefix for the current SCHEMA_VERSION.
+/// Version 0 -> "" (empty), version N -> "vN_".
+pub static TABLE_PREFIX: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    if SCHEMA_VERSION == 0 {
+        String::new()
+    } else {
+        format!("v{SCHEMA_VERSION}_")
+    }
+});
+
+/// Returns the prefixed table name for the current SCHEMA_VERSION.
+/// E.g. `t("gl_user")` returns `"v1_gl_user"` when SCHEMA_VERSION=1.
+pub fn t(table: &str) -> String {
+    format!("{}{}", *TABLE_PREFIX, table)
+}
+
+const fn const_parse_version(bytes: &[u8]) -> u32 {
+    let mut n: u32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b >= b'0' && b <= b'9' {
+            n = n * 10 + (b - b'0') as u32;
+        }
+        i += 1;
+    }
+    n
+}
+
+/// Graph DDL with the correct table prefix for the current SCHEMA_VERSION.
+/// Generated from the ontology so integration tests create the same prefixed
+/// tables the indexer writes to at runtime.
+pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
+    use query_engine::compiler::{emit_create_table, generate_graph_tables_with_prefix};
+
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let tables = generate_graph_tables_with_prefix(&ontology, &TABLE_PREFIX);
+    let sql = tables
+        .iter()
+        .map(|t| format!("{};", emit_create_table(t)))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Box::leak(sql.into_boxed_str())
+});
 
 /// Collect spawned task results and panic with a summary of failures.
 pub async fn collect_subtest_results(handles: Vec<(&str, tokio::task::JoinHandle<()>)>) {

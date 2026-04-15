@@ -1,5 +1,3 @@
--- Checkpoint table
-
 CREATE TABLE IF NOT EXISTS checkpoint (
     key String CODEC(ZSTD(1)),
     watermark DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
@@ -9,8 +7,6 @@ CREATE TABLE IF NOT EXISTS checkpoint (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (key)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
-
--- Namespace deletion schedule
 
 CREATE TABLE IF NOT EXISTS namespace_deletion_schedule (
     namespace_id Int64 CODEC(ZSTD(1)),
@@ -22,7 +18,463 @@ CREATE TABLE IF NOT EXISTS namespace_deletion_schedule (
 ORDER BY (namespace_id, traversal_path)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 
--- Graph node tables
+CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(ZSTD(1)),
+    branch String CODEC(ZSTD(1)),
+    last_task_id Int64 CODEC(ZSTD(1)),
+    last_commit Nullable(String) CODEC(ZSTD(1)),
+    indexed_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    _version UInt64,
+    _deleted Bool DEFAULT false,
+    PROJECTION project_lookup (SELECT * ORDER BY project_id)
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, project_id, branch)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_branch (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    name String CODEC(ZSTD(1)),
+    is_default Bool DEFAULT true,
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, project_id, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_definition (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    branch String CODEC(ZSTD(1)),
+    commit_sha String DEFAULT '' CODEC(ZSTD(1)),
+    file_path String CODEC(ZSTD(3)),
+    fqn String CODEC(ZSTD(3)),
+    name String CODEC(ZSTD(1)),
+    definition_type LowCardinality(String) CODEC(LZ4),
+    start_line Int64 CODEC(ZSTD(1)),
+    end_line Int64 CODEC(ZSTD(1)),
+    start_byte Int64 CODEC(ZSTD(1)),
+    end_byte Int64 CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (traversal_path, project_id, branch, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_directory (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    branch String CODEC(ZSTD(1)),
+    commit_sha String DEFAULT '' CODEC(ZSTD(1)),
+    path String CODEC(ZSTD(3)),
+    name String CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (traversal_path, project_id, branch, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_file (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    branch String CODEC(ZSTD(1)),
+    commit_sha String DEFAULT '' CODEC(ZSTD(1)),
+    path String CODEC(ZSTD(3)),
+    name String CODEC(ZSTD(1)),
+    extension LowCardinality(String) CODEC(LZ4),
+    language LowCardinality(String) CODEC(LZ4),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (traversal_path, project_id, branch, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_finding (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    uuid String DEFAULT '' CODEC(ZSTD(1)),
+    name Nullable(String) CODEC(ZSTD(1)),
+    description Nullable(String) CODEC(ZSTD(3)),
+    solution Nullable(String) CODEC(ZSTD(3)),
+    severity LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    deduplicated Bool DEFAULT false,
+    overridden_uuid Nullable(String) CODEC(ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_deduplicated deduplicated TYPE minmax GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_group (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    name Nullable(String) CODEC(ZSTD(1)),
+    description Nullable(String) CODEC(ZSTD(3)),
+    visibility_level LowCardinality(Nullable(String)) CODEC(LZ4),
+    full_path Nullable(String) CODEC(ZSTD(3)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_imported_symbol (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    branch String CODEC(ZSTD(1)),
+    commit_sha String DEFAULT '' CODEC(ZSTD(1)),
+    file_path String CODEC(ZSTD(3)),
+    import_type LowCardinality(String) CODEC(LZ4),
+    import_path String CODEC(ZSTD(3)),
+    identifier_name Nullable(String) CODEC(ZSTD(1)),
+    identifier_alias Nullable(String) CODEC(ZSTD(1)),
+    start_line Int64 CODEC(ZSTD(1)),
+    end_line Int64 CODEC(ZSTD(1)),
+    start_byte Int64 CODEC(ZSTD(1)),
+    end_byte Int64 CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (traversal_path, project_id, branch, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_job (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    name Nullable(String) CODEC(ZSTD(1)),
+    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    ref Nullable(String) CODEC(ZSTD(1)),
+    tag Nullable(Bool),
+    allow_failure Bool DEFAULT false,
+    coverage Nullable(String) CODEC(ZSTD(1)),
+    environment Nullable(String) CODEC(ZSTD(1)),
+    `when` Nullable(String) CODEC(ZSTD(1)),
+    retried Nullable(Bool),
+    failure_reason Nullable(String) CODEC(ZSTD(1)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    started_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    queued_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_status status TYPE set(16) GRANULARITY 2,
+    INDEX idx_allow_failure allow_failure TYPE minmax GRANULARITY 1,
+    INDEX idx_retried retried TYPE minmax GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_label (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    title Nullable(String) CODEC(ZSTD(1)),
+    description Nullable(String) CODEC(ZSTD(3)),
+    color Nullable(String) CODEC(ZSTD(1)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_merge_request (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    iid Nullable(Int64) CODEC(ZSTD(1)),
+    title String DEFAULT '' CODEC(ZSTD(1)),
+    description String DEFAULT '' CODEC(ZSTD(3)),
+    source_branch String DEFAULT '' CODEC(ZSTD(1)),
+    target_branch String DEFAULT '' CODEC(ZSTD(1)),
+    state LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    merge_status LowCardinality(String) DEFAULT 'unchecked' CODEC(LZ4),
+    draft Bool DEFAULT false,
+    squash Bool DEFAULT false,
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    merge_commit_sha Nullable(String) CODEC(ZSTD(1)),
+    discussion_locked Nullable(Bool),
+    prepared_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_state state TYPE set(6) GRANULARITY 2,
+    INDEX idx_draft draft TYPE minmax GRANULARITY 1,
+    INDEX idx_squash squash TYPE minmax GRANULARITY 1,
+    INDEX idx_discussion_locked discussion_locked TYPE minmax GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION by_state_id (SELECT * ORDER BY (state, id)),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    merge_request_id Int64 CODEC(ZSTD(1)),
+    state Nullable(String) CODEC(ZSTD(1)),
+    base_commit_sha Nullable(String) CODEC(ZSTD(1)),
+    head_commit_sha Nullable(String) CODEC(ZSTD(1)),
+    start_commit_sha Nullable(String) CODEC(ZSTD(1)),
+    commits_count Nullable(Int64) CODEC(ZSTD(1)),
+    files_count Nullable(Int64) CODEC(ZSTD(1)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    merge_request_id Int64 CODEC(ZSTD(1)),
+    merge_request_diff_id Int64 CODEC(ZSTD(1)),
+    too_large Bool DEFAULT false,
+    new_path Nullable(String) CODEC(ZSTD(3)),
+    old_path String DEFAULT '' CODEC(ZSTD(3)),
+    new_file Bool DEFAULT false,
+    renamed_file Bool DEFAULT false,
+    deleted_file Bool DEFAULT false,
+    binary Nullable(Bool),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_too_large too_large TYPE minmax GRANULARITY 1,
+    INDEX idx_new_file new_file TYPE minmax GRANULARITY 1,
+    INDEX idx_renamed_file renamed_file TYPE minmax GRANULARITY 1,
+    INDEX idx_deleted_file deleted_file TYPE minmax GRANULARITY 1,
+    INDEX idx_binary binary TYPE minmax GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_milestone (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    iid Nullable(Int64) CODEC(ZSTD(1)),
+    title String DEFAULT '' CODEC(ZSTD(1)),
+    description Nullable(String) CODEC(ZSTD(3)),
+    state Nullable(String) CODEC(ZSTD(1)),
+    due_date Nullable(Date32) CODEC(Delta(4), ZSTD(1)),
+    start_date Nullable(Date32) CODEC(Delta(4), ZSTD(1)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_note (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    note Nullable(String) CODEC(ZSTD(3)),
+    noteable_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    noteable_id Nullable(Int64) CODEC(ZSTD(1)),
+    line_code Nullable(String) CODEC(ZSTD(1)),
+    commit_id Nullable(String) CODEC(ZSTD(1)),
+    discussion_id Nullable(String) CODEC(ZSTD(1)),
+    resolved_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    internal Bool DEFAULT false,
+    confidential Nullable(Bool),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_noteable_type noteable_type TYPE set(14) GRANULARITY 2,
+    INDEX idx_internal internal TYPE minmax GRANULARITY 1,
+    INDEX idx_confidential confidential TYPE minmax GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_pipeline (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    iid Nullable(Int64) CODEC(ZSTD(1)),
+    sha Nullable(String) CODEC(ZSTD(1)),
+    ref Nullable(String) CODEC(ZSTD(1)),
+    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    source LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    tag Bool DEFAULT false,
+    duration Nullable(Int64) CODEC(ZSTD(1)),
+    failure_reason Nullable(String) CODEC(ZSTD(1)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    started_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_status status TYPE set(16) GRANULARITY 2,
+    INDEX idx_tag tag TYPE minmax GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_project (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    name Nullable(String) CODEC(ZSTD(1)),
+    description Nullable(String) CODEC(ZSTD(3)),
+    visibility_level LowCardinality(Nullable(String)) CODEC(LZ4),
+    full_path Nullable(String) CODEC(ZSTD(3)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    archived Nullable(Bool),
+    star_count Nullable(Int64) CODEC(ZSTD(1)),
+    last_activity_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_archived archived TYPE minmax GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_security_scan (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    scan_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    latest Bool DEFAULT true,
+    created_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    updated_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_latest latest TYPE minmax GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_stage (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    name Nullable(String) CODEC(ZSTD(1)),
+    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    position Nullable(Int64) CODEC(ZSTD(1)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_user (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -55,175 +507,104 @@ CREATE TABLE IF NOT EXISTS gl_user (
 ORDER BY (id) PRIMARY KEY (id)
 SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
 
-CREATE TABLE IF NOT EXISTS gl_group (
+CREATE TABLE IF NOT EXISTS gl_vulnerability (
     id Int64 CODEC(Delta(8), ZSTD(1)),
-    name Nullable(String) CODEC(ZSTD(1)),
-    description Nullable(String) CODEC(ZSTD(3)),
-    visibility_level LowCardinality(Nullable(String)) CODEC(LZ4),
-    full_path Nullable(String) CODEC(ZSTD(3)),
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_project (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    name Nullable(String) CODEC(ZSTD(1)),
-    description Nullable(String) CODEC(ZSTD(3)),
-    visibility_level LowCardinality(Nullable(String)) CODEC(LZ4),
-    full_path Nullable(String) CODEC(ZSTD(3)),
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    archived Nullable(Bool),
-    star_count Nullable(Int64) CODEC(ZSTD(1)),
-    last_activity_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_archived archived TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_note (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    note Nullable(String) CODEC(ZSTD(3)),
-    noteable_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    noteable_id Nullable(Int64) CODEC(ZSTD(1)),
-    line_code Nullable(String) CODEC(ZSTD(1)),
-    commit_id Nullable(String) CODEC(ZSTD(1)),
-    discussion_id Nullable(String) CODEC(ZSTD(1)),
-    resolved_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    internal Bool DEFAULT false,
-    confidential Nullable(Bool),
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_noteable_type noteable_type TYPE set(14) GRANULARITY 2,
-    INDEX idx_internal internal TYPE minmax GRANULARITY 1,
-    INDEX idx_confidential confidential TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_merge_request (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    iid Nullable(Int64) CODEC(ZSTD(1)),
     title String DEFAULT '' CODEC(ZSTD(1)),
-    description String DEFAULT '' CODEC(ZSTD(3)),
-    source_branch String DEFAULT '' CODEC(ZSTD(1)),
-    target_branch String DEFAULT '' CODEC(ZSTD(1)),
+    description Nullable(String) CODEC(ZSTD(3)),
     state LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    merge_status LowCardinality(String) DEFAULT 'unchecked' CODEC(LZ4),
-    draft Bool DEFAULT false,
-    squash Bool DEFAULT false,
+    severity LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    report_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    resolved_on_default_branch Bool DEFAULT false,
+    present_on_default_branch Bool DEFAULT true,
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    merge_commit_sha Nullable(String) CODEC(ZSTD(1)),
-    discussion_locked Nullable(Bool),
-    prepared_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    detected_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    resolved_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    confirmed_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    dismissed_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
-    INDEX idx_state state TYPE set(6) GRANULARITY 2,
-    INDEX idx_draft draft TYPE minmax GRANULARITY 1,
-    INDEX idx_squash squash TYPE minmax GRANULARITY 1,
-    INDEX idx_discussion_locked discussion_locked TYPE minmax GRANULARITY 1,
+    INDEX idx_state state TYPE set(4) GRANULARITY 2,
+    INDEX idx_severity severity TYPE set(8) GRANULARITY 2,
+    INDEX idx_report_type report_type TYPE set(4) GRANULARITY 2,
+    INDEX idx_resolved_on_default_branch resolved_on_default_branch TYPE minmax GRANULARITY 1,
+    INDEX idx_present_on_default_branch present_on_default_branch TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_state_id (SELECT * ORDER BY (state, id))
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
-CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
+CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     id Int64 CODEC(Delta(8), ZSTD(1)),
-    merge_request_id Int64 CODEC(ZSTD(1)),
-    state Nullable(String) CODEC(ZSTD(1)),
-    base_commit_sha Nullable(String) CODEC(ZSTD(1)),
-    head_commit_sha Nullable(String) CODEC(ZSTD(1)),
-    start_commit_sha Nullable(String) CODEC(ZSTD(1)),
-    commits_count Nullable(Int64) CODEC(ZSTD(1)),
-    files_count Nullable(Int64) CODEC(ZSTD(1)),
+    external_type String DEFAULT '' CODEC(ZSTD(1)),
+    external_id String DEFAULT '' CODEC(ZSTD(1)),
+    name String DEFAULT '' CODEC(ZSTD(1)),
+    url Nullable(String) CODEC(ZSTD(1)),
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
-CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
+CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     id Int64 CODEC(Delta(8), ZSTD(1)),
-    merge_request_id Int64 CODEC(ZSTD(1)),
-    merge_request_diff_id Int64 CODEC(ZSTD(1)),
-    too_large Bool DEFAULT false,
-    new_path Nullable(String) CODEC(ZSTD(3)),
-    old_path String DEFAULT '' CODEC(ZSTD(3)),
-    new_file Bool DEFAULT false,
-    renamed_file Bool DEFAULT false,
-    deleted_file Bool DEFAULT false,
-    binary Nullable(Bool),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_too_large too_large TYPE minmax GRANULARITY 1,
-    INDEX idx_new_file new_file TYPE minmax GRANULARITY 1,
-    INDEX idx_renamed_file renamed_file TYPE minmax GRANULARITY 1,
-    INDEX idx_deleted_file deleted_file TYPE minmax GRANULARITY 1,
-    INDEX idx_binary binary TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_milestone (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    iid Nullable(Int64) CODEC(ZSTD(1)),
-    title String DEFAULT '' CODEC(ZSTD(1)),
+    uuid String DEFAULT '' CODEC(ZSTD(1)),
+    name String DEFAULT '' CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
-    state Nullable(String) CODEC(ZSTD(1)),
-    due_date Nullable(Date32) CODEC(Delta(4), ZSTD(1)),
-    start_date Nullable(Date32) CODEC(Delta(4), ZSTD(1)),
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    solution Nullable(String) CODEC(ZSTD(3)),
+    cve Nullable(String) CODEC(ZSTD(1)),
+    location Nullable(String) CODEC(ZSTD(3)),
+    location_fingerprint String DEFAULT '' CODEC(ZSTD(1)),
+    severity LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    report_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    detection_method LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    created_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    updated_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    detected_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
-CREATE TABLE IF NOT EXISTS gl_label (
+CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     id Int64 CODEC(Delta(8), ZSTD(1)),
-    title Nullable(String) CODEC(ZSTD(1)),
-    description Nullable(String) CODEC(ZSTD(3)),
-    color Nullable(String) CODEC(ZSTD(1)),
+    external_id String DEFAULT '' CODEC(ZSTD(1)),
+    name String DEFAULT '' CODEC(ZSTD(1)),
+    vendor LowCardinality(String) DEFAULT 'GitLab' CODEC(LZ4),
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -249,12 +630,14 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     INDEX idx_work_item_type work_item_type TYPE set(10) GRANULARITY 2,
     INDEX idx_confidential confidential TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
--- Edge table: namespace-scoped PK with adjacency projections
 
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
@@ -275,7 +658,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
       GROUP BY relationship_kind, source_kind, target_id, traversal_path
     ),
     PROJECTION node_edge_counts (
-      SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), count()
+      SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
       GROUP BY traversal_path, source_kind, target_kind, relationship_kind
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
@@ -283,307 +666,3 @@ ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, 
 PRIMARY KEY (traversal_path, source_id, relationship_kind)
 SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
--- CI graph tables
-
-CREATE TABLE IF NOT EXISTS gl_pipeline (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    iid Nullable(Int64) CODEC(ZSTD(1)),
-    sha Nullable(String) CODEC(ZSTD(1)),
-    ref Nullable(String) CODEC(ZSTD(1)),
-    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    source LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    tag Bool DEFAULT false,
-    duration Nullable(Int64) CODEC(ZSTD(1)),
-    failure_reason Nullable(String) CODEC(ZSTD(1)),
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    started_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_status status TYPE set(16) GRANULARITY 2,
-    INDEX idx_tag tag TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_status_id (SELECT * ORDER BY (status, id))
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_stage (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    name Nullable(String) CODEC(ZSTD(1)),
-    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    position Nullable(Int64) CODEC(ZSTD(1)),
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_job (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    name Nullable(String) CODEC(ZSTD(1)),
-    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    ref Nullable(String) CODEC(ZSTD(1)),
-    tag Nullable(Bool),
-    allow_failure Bool DEFAULT false,
-    coverage Nullable(String) CODEC(ZSTD(1)),
-    environment Nullable(String) CODEC(ZSTD(1)),
-    `when` Nullable(String) CODEC(ZSTD(1)),
-    retried Nullable(Bool),
-    failure_reason Nullable(String) CODEC(ZSTD(1)),
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    started_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    queued_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_status status TYPE set(16) GRANULARITY 2,
-    INDEX idx_allow_failure allow_failure TYPE minmax GRANULARITY 1,
-    INDEX idx_retried retried TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_status_id (SELECT * ORDER BY (status, id))
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
--- Security graph tables
-
-CREATE TABLE IF NOT EXISTS gl_vulnerability (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    title String DEFAULT '' CODEC(ZSTD(1)),
-    description Nullable(String) CODEC(ZSTD(3)),
-    state LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    severity LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    report_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    resolved_on_default_branch Bool DEFAULT false,
-    present_on_default_branch Bool DEFAULT true,
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    detected_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    resolved_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    confirmed_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    dismissed_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_state state TYPE set(4) GRANULARITY 2,
-    INDEX idx_severity severity TYPE set(8) GRANULARITY 2,
-    INDEX idx_report_type report_type TYPE set(4) GRANULARITY 2,
-    INDEX idx_resolved_on_default_branch resolved_on_default_branch TYPE minmax GRANULARITY 1,
-    INDEX idx_present_on_default_branch present_on_default_branch TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    external_id String DEFAULT '' CODEC(ZSTD(1)),
-    name String DEFAULT '' CODEC(ZSTD(1)),
-    vendor LowCardinality(String) DEFAULT 'GitLab' CODEC(LZ4),
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    external_type String DEFAULT '' CODEC(ZSTD(1)),
-    external_id String DEFAULT '' CODEC(ZSTD(1)),
-    name String DEFAULT '' CODEC(ZSTD(1)),
-    url Nullable(String) CODEC(ZSTD(1)),
-    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_finding (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    uuid String DEFAULT '' CODEC(ZSTD(1)),
-    name Nullable(String) CODEC(ZSTD(1)),
-    description Nullable(String) CODEC(ZSTD(3)),
-    solution Nullable(String) CODEC(ZSTD(3)),
-    severity LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    deduplicated Bool DEFAULT false,
-    overridden_uuid Nullable(String) CODEC(ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_deduplicated deduplicated TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_security_scan (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    scan_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    latest Bool DEFAULT true,
-    created_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
-    updated_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_latest latest TYPE minmax GRANULARITY 1,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    uuid String DEFAULT '' CODEC(ZSTD(1)),
-    name String DEFAULT '' CODEC(ZSTD(1)),
-    description Nullable(String) CODEC(ZSTD(3)),
-    solution Nullable(String) CODEC(ZSTD(3)),
-    cve Nullable(String) CODEC(ZSTD(1)),
-    location Nullable(String) CODEC(ZSTD(3)),
-    location_fingerprint String DEFAULT '' CODEC(ZSTD(1)),
-    severity LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    report_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    detection_method LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    created_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
-    updated_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
-    detected_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_branch (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
-    name String CODEC(ZSTD(1)),
-    is_default Bool DEFAULT true,
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, project_id, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
--- Code indexing tables
-
-CREATE TABLE IF NOT EXISTS gl_directory (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
-    branch String CODEC(ZSTD(1)),
-    commit_sha String DEFAULT '' CODEC(ZSTD(1)),
-    path String CODEC(ZSTD(3)),
-    name String CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_file (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
-    branch String CODEC(ZSTD(1)),
-    commit_sha String DEFAULT '' CODEC(ZSTD(1)),
-    path String CODEC(ZSTD(3)),
-    name String CODEC(ZSTD(1)),
-    extension LowCardinality(String) CODEC(LZ4),
-    language LowCardinality(String) CODEC(LZ4),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_definition (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
-    branch String CODEC(ZSTD(1)),
-    commit_sha String DEFAULT '' CODEC(ZSTD(1)),
-    file_path String CODEC(ZSTD(3)),
-    fqn String CODEC(ZSTD(3)),
-    name String CODEC(ZSTD(1)),
-    definition_type LowCardinality(String) CODEC(LZ4),
-    start_line Int64 CODEC(ZSTD(1)),
-    end_line Int64 CODEC(ZSTD(1)),
-    start_byte Int64 CODEC(ZSTD(1)),
-    end_byte Int64 CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS gl_imported_symbol (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
-    branch String CODEC(ZSTD(1)),
-    commit_sha String DEFAULT '' CODEC(ZSTD(1)),
-    file_path String CODEC(ZSTD(3)),
-    import_type LowCardinality(String) CODEC(LZ4),
-    import_path String CODEC(ZSTD(3)),
-    identifier_name Nullable(String) CODEC(ZSTD(1)),
-    identifier_alias Nullable(String) CODEC(ZSTD(1)),
-    start_line Int64 CODEC(ZSTD(1)),
-    end_line Int64 CODEC(ZSTD(1)),
-    start_byte Int64 CODEC(ZSTD(1)),
-    end_byte Int64 CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
-) ENGINE = ReplacingMergeTree(_version)
-ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
-
-CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
-    traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(ZSTD(1)),
-    branch String CODEC(ZSTD(1)),
-    last_task_id Int64 CODEC(ZSTD(1)),
-    last_commit Nullable(String) CODEC(ZSTD(1)),
-    indexed_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
-    _version UInt64,
-    _deleted Bool DEFAULT false,
-    PROJECTION project_lookup (SELECT * ORDER BY project_id)
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, project_id, branch)
-SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;

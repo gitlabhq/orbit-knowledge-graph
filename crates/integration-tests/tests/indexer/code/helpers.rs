@@ -24,7 +24,7 @@ use indexer::modules::code::{
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
-use integration_testkit::TestContext;
+use integration_testkit::{TestContext, t};
 use parking_lot::Mutex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -379,8 +379,9 @@ pub fn handler_context(clickhouse: &TestContext) -> HandlerContext {
 pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
     let branches = clickhouse
         .query(&format!(
-            "SELECT name FROM gl_branch FINAL \
-             WHERE project_id = {project_id} AND _deleted = false"
+            "SELECT name FROM {} FINAL \
+             WHERE project_id = {project_id} AND _deleted = false",
+            t("gl_branch")
         ))
         .await;
     assert!(
@@ -390,7 +391,8 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
 
     let files = clickhouse
         .query(&format!(
-            "SELECT path FROM gl_file WHERE project_id = {project_id}"
+            "SELECT path FROM {} WHERE project_id = {project_id}",
+            t("gl_file")
         ))
         .await;
     assert!(
@@ -400,7 +402,8 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
 
     let definitions = clickhouse
         .query(&format!(
-            "SELECT name FROM gl_definition WHERE project_id = {project_id}"
+            "SELECT name FROM {} WHERE project_id = {project_id}",
+            t("gl_definition")
         ))
         .await;
     assert!(
@@ -409,11 +412,12 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
     );
 
     let defines_edges = clickhouse
-        .query(
-            "SELECT source_id FROM gl_edge \
+        .query(&format!(
+            "SELECT source_id FROM {} \
              WHERE source_kind = 'File' AND target_kind = 'Definition' \
              AND relationship_kind = 'DEFINES'",
-        )
+            t("gl_edge")
+        ))
         .await;
     assert!(
         defines_edges.first().is_some_and(|b| b.num_rows() > 0),

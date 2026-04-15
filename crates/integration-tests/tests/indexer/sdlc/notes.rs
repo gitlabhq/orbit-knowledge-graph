@@ -1,5 +1,6 @@
 use arrow::array::StringArray;
 use gkg_utils::arrow::ArrowUtils;
+use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, handler_context,
@@ -27,10 +28,11 @@ pub async fn processes_notes_with_edges(ctx: &TestContext) {
     assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "Note", "1/100/", 3).await;
 
     let has_note_edges = ctx
-        .query(
-            "SELECT source_kind FROM gl_edge FINAL \
+        .query(&format!(
+            "SELECT source_kind FROM {} FINAL \
              WHERE relationship_kind = 'HAS_NOTE' ORDER BY target_id",
-        )
+            t("gl_edge")
+        ))
         .await;
     assert!(!has_note_edges.is_empty(), "HAS_NOTE edges should exist");
     assert_eq!(has_note_edges[0].num_rows(), 3);
@@ -65,7 +67,10 @@ pub async fn filters_out_system_notes(ctx: &TestContext) {
     assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "Note", "1/100/", 2).await;
 
     let has_note_edges = ctx
-        .query("SELECT 1 FROM gl_edge FINAL WHERE relationship_kind = 'HAS_NOTE'")
+        .query(&format!(
+            "SELECT 1 FROM {} FINAL WHERE relationship_kind = 'HAS_NOTE'",
+            t("gl_edge")
+        ))
         .await;
     assert_eq!(has_note_edges[0].num_rows(), 2);
 }
