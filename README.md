@@ -94,6 +94,7 @@ Filtered by `knowledge graph` label:
 | [gitlab-org/orbit/knowledge-graph](https://gitlab.com/gitlab-org/orbit/knowledge-graph) | Main GKG service -- 19 Rust crates covering parsing, indexing, query compilation, serving, testing, and infrastructure. Single `gkg-server` binary runs in 4 modes (webserver, indexer, scheduler, health-check). |
 | [gitlab-org/orbit/build-images](https://gitlab.com/gitlab-org/orbit/build-images) | CI builder images (Rust toolchain, pre-compiled tools, sccache) used by the knowledge-graph pipeline |
 | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Official production Helm chart for GKG (v1.0.0, application chart, uses [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks) patterns) |
+| [gitlab-org/orbit/gkg-e2e-harness](https://gitlab.com/gitlab-org/orbit/gkg-e2e-harness) | GKE cluster bootstrap for e2e tests (cert-manager, GitLab Agent config) |
 | [gitlab-org/orbit/documentation/orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and session notes (Feb 3-5, 2026) |
 
 ### Analytics (Siphon)
@@ -134,6 +135,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) -- GCP sandbox environment details (dev/sandbox only) |
 | Operational runbooks | [docs/dev/runbooks/](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs/dev/runbooks) -- indexing pipelines, configuration, troubleshooting |
 | Local GDK-connected development | [docs/dev/local-development.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/local-development.md) -- `mise run dev` to launch the full local stack against an existing GDK |
+| E2E testing harness | [docs/dev/e2e-testing.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/e2e-testing.md) -- full-stack e2e tests on GKE (GitLab + Siphon + GKG), runs in CI on MRs |
 | [Design Specs (Figma)](https://www.figma.com/design/GOrqDStp1E1SE0Ms7lVbXF/--588317--Orbit-GA-Designs?t=SLZ2CosGuBAzjC6r-0) | UI/UX design specs and visual references for Orbit GA features |
 
 ---
