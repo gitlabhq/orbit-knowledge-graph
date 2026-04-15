@@ -510,11 +510,8 @@ code-indexing-benchmark-v2-linux:
     matrix:
       - GROUP: [python, java, kotlin, csharp]
 
-code-indexing-benchmark-analyze:
+.code-indexing-benchmark-analyze-template:
   stage: benchmark
-  needs:
-    - code-indexing-benchmark-linux
-    - code-indexing-benchmark-v2-linux
   allow_failure: true
   extends:
     - .job-template
@@ -531,34 +528,48 @@ code-indexing-benchmark-analyze:
   script:
     - |
       gitlab-xtasks benchmark analyze \
-        --pattern "gkg-benchmark-*.json" \
+        --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
         --output-format markdown \
         --pipeline-url "$CI_PIPELINE_URL" \
         --job-url "$CI_JOB_URL" \
         --branch "$CI_COMMIT_REF_NAME" \
-        --output-file gkg-benchmark-results.md
+        --output-file "gkg-benchmark-${SCENARIO}-results.md"
 
       gitlab-xtasks benchmark analyze \
-        --pattern "gkg-benchmark-*.json" \
+        --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
         --output-format json \
         --pipeline-url "$CI_PIPELINE_URL" \
         --job-url "$CI_JOB_URL" \
         --branch "$CI_COMMIT_REF_NAME" \
-        --output-file gkg-benchmark-results.json
+        --output-file "gkg-benchmark-${SCENARIO}-results.json"
 
       if [[ -n "$CI_MERGE_REQUEST_IID" ]]; then
         gitlab-xtasks comment post \
           --type add-or-edit \
-          --unique-id "code-indexing-benchmark-comment" \
+          --unique-id "code-indexing-benchmark-${SCENARIO}-comment" \
           --token "$BENCHMARK_GITLAB_TOKEN" \
-          --file-path gkg-benchmark-results.md
+          --file-path "gkg-benchmark-${SCENARIO}-results.md"
       fi
   artifacts:
     paths:
-      - gkg-benchmark-results.md
-      - gkg-benchmark-results.json
+      - gkg-benchmark-*-results.md
+      - gkg-benchmark-*-results.json
       - gkg-benchmark-*.json
     expire_in: 1 week
+
+code-indexing-benchmark-analyze:
+  extends: .code-indexing-benchmark-analyze-template
+  needs:
+    - code-indexing-benchmark-linux
+  variables:
+    SCENARIO: index
+
+code-indexing-benchmark-v2-analyze:
+  extends: .code-indexing-benchmark-analyze-template
+  needs:
+    - code-indexing-benchmark-v2-linux
+  variables:
+    SCENARIO: index-v2
 
 # Build Stage
 
