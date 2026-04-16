@@ -70,7 +70,7 @@ pub struct CanonicalDefinition {
     pub range: Range,
     /// Whether this is a top-level (not nested inside another definition).
     pub is_top_level: bool,
-    /// Inline metadata — None fields cost nothing (Option<IStr> = 8 bytes).
+    /// Boxed metadata — `None` for most definitions keeps the common case small.
     pub metadata: Option<Box<DefinitionMetadata>>,
 }
 

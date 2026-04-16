@@ -195,7 +195,7 @@ where
         report_rss("after finalize (graph + indexes + source bytes)");
 
         // ── Phase 2: fused walk+resolve ────────────────────────
-        // Three strategies per file: kept AST (no re-parse), re-parse, or skip.
+        // Re-parse from disk per file, or skip on Phase 1 error.
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "Phase 2: resolve");
 
