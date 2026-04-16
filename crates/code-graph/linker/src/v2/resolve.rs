@@ -461,7 +461,7 @@ impl<'a> Resolver<'a> {
         } else if let Some(meta) = &def.metadata
             && let Some(rt) = &meta.return_type
         {
-            smallvec![IStr::from(rt.as_str())]
+            smallvec![*rt]
         } else {
             SmallVec::new()
         }
@@ -758,7 +758,7 @@ impl<'a> Resolver<'a> {
                     if let Some(meta) = &def.metadata
                         && let Some(rt) = &meta.return_type
                     {
-                        next_types.push(IStr::from(rt.as_str()));
+                        next_types.push(*rt);
                     }
                     if matches!(
                         def.kind,
@@ -771,7 +771,7 @@ impl<'a> Resolver<'a> {
                     && let Some(meta) = &def.metadata
                     && let Some(ta) = &meta.type_annotation
                 {
-                    next_types.push(IStr::from(ta.as_str()));
+                    next_types.push(*ta);
                 }
             }
         }

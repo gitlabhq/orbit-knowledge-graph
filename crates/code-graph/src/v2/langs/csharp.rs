@@ -76,7 +76,12 @@ mod tests {
             "namespace MyApp {\n    public class Controller {\n        public void Index() {}\n    }\n}\n",
         );
         assert!(result.definitions.len() >= 2);
-        assert!(result.definitions.iter().any(|d| d.name == "Controller"));
+        assert!(
+            result
+                .definitions
+                .iter()
+                .any(|d| d.name.as_ref() == "Controller")
+        );
     }
 
     #[test]

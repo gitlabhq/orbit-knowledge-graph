@@ -249,7 +249,7 @@ mod tests {
     fn class_with_methods() {
         let result = parse("class Calculator {\n    fun add(a: Int, b: Int): Int = a + b\n}\n");
         assert_eq!(result.definitions.len(), 2);
-        assert_eq!(result.definitions[0].name, "Calculator");
+        assert_eq!(result.definitions[0].name.as_ref(), "Calculator");
         assert_eq!(result.definitions[0].kind, DefKind::Class);
     }
 
@@ -259,7 +259,7 @@ mod tests {
         let service = result
             .definitions
             .iter()
-            .find(|d| d.name == "Service")
+            .find(|d| d.name.as_ref() == "Service")
             .unwrap();
         assert_eq!(service.fqn.to_string(), "com.example.Service");
     }
@@ -267,7 +267,11 @@ mod tests {
     #[test]
     fn super_types() {
         let result = parse("open class Animal\nclass Dog : Animal() {\n}\n");
-        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
+        let dog = result
+            .definitions
+            .iter()
+            .find(|d| d.name.as_ref() == "Dog")
+            .unwrap();
         if let Some(meta) = &dog.metadata {
             assert!(!meta.super_types.is_empty());
         }

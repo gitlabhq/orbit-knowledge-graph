@@ -609,7 +609,7 @@ mod tests {
             defs.len()
         );
 
-        let names: Vec<&str> = defs.iter().map(|(_, _, d)| d.name.as_str()).collect();
+        let names: Vec<&str> = defs.iter().map(|(_, _, d)| d.name.as_ref()).collect();
         assert!(names.contains(&"simple_function"));
         assert!(names.contains(&"module_lambda"));
         assert!(names.contains(&"SimpleClass"));
