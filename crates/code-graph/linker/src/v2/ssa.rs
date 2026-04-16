@@ -74,6 +74,10 @@ struct PhiNode {
     block: BlockId,
     variable: VarName,
     operands: SmallVec<[Value; 2]>,
+    /// Witness caching (Section 3.1): first two distinct non-self operands.
+    /// If both are still valid and distinct, the phi is non-trivial without
+    /// scanning all operands.
+    witnesses: [Option<Value>; 2],
 }
 
 // ── Block ───────────────────────────────────────────────────────
@@ -288,16 +292,25 @@ impl SsaResolver {
             block,
             variable,
             operands: SmallVec::new(),
+            witnesses: [None, None],
         });
         id
     }
 
     fn add_phi_operands(&mut self, variable: VarName, phi_id: PhiId) {
         let block = self.phis[phi_id.0].block;
-        // Copy predecessors to avoid borrow conflict (SmallVec: stack-allocated for ≤2).
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
         for pred in preds {
             let val = self.read_variable_internal(variable, pred);
+            // Update witnesses: track first two distinct non-self operands.
+            if val != Value::Phi(phi_id) {
+                let phi = &mut self.phis[phi_id.0];
+                if phi.witnesses[0].is_none() {
+                    phi.witnesses[0] = Some(val.clone());
+                } else if phi.witnesses[1].is_none() && phi.witnesses[0].as_ref() != Some(&val) {
+                    phi.witnesses[1] = Some(val.clone());
+                }
+            }
             self.phis[phi_id.0].operands.push(val);
         }
     }
@@ -305,9 +318,17 @@ impl SsaResolver {
     /// Remove trivial phi: if it references only one real value (plus itself),
     /// replace it with that value.
     fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> Value {
+        // Witness cache fast path: if both witnesses are still distinct
+        // and neither is the phi itself, the phi is non-trivial.
+        let w = &self.phis[phi_id.0].witnesses;
+        if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref()) {
+            if w0 != w1 && *w0 != Value::Phi(phi_id) && *w1 != Value::Phi(phi_id) {
+                return Value::Phi(phi_id);
+            }
+        }
+
         let mut same: Option<Value> = None;
 
-        // Iterate by index to avoid cloning the operands vec.
         for i in 0..self.phis[phi_id.0].operands.len() {
             let op = self.phis[phi_id.0].operands[i].clone();
             if op == Value::Phi(phi_id) || Some(&op) == same.as_ref() {
@@ -341,11 +362,19 @@ impl SsaResolver {
             .map(|(i, _)| PhiId(i))
             .collect();
 
-        // Replace this phi in all users' operands
+        // Replace this phi in all users' operands and invalidate witnesses
+        let phi_val = Value::Phi(phi_id);
         for user_id in &phi_users {
-            for op in &mut self.phis[user_id.0].operands {
-                if *op == Value::Phi(phi_id) {
+            let user = &mut self.phis[user_id.0];
+            for op in &mut user.operands {
+                if *op == phi_val {
                     *op = replacement.clone();
+                }
+            }
+            // Invalidate witnesses — they may reference the removed phi
+            for w in &mut user.witnesses {
+                if w.as_ref() == Some(&phi_val) {
+                    *w = None;
                 }
             }
         }
