@@ -424,7 +424,7 @@ impl GraphDef {
             definition_type: def.definition_type,
             kind: def.kind,
             name: pool.alloc(&def.name),
-            fqn: pool.alloc(&def.fqn.to_string()),
+            fqn: pool.alloc(def.fqn.as_str()),
             fqn_sep: def.fqn.separator(),
             range: def.range,
             is_top_level: def.is_top_level,

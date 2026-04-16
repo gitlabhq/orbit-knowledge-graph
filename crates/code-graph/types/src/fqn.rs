@@ -65,6 +65,11 @@ impl Fqn {
         self.cached
     }
 
+    /// The full FQN as a string slice (borrows from the intern table).
+    pub fn as_str(&self) -> &str {
+        self.cached.as_ref()
+    }
+
     /// The leaf name (last segment).
     pub fn name(&self) -> &str {
         self.parts.last().map(|p| p.as_ref()).unwrap_or("")
