@@ -373,6 +373,7 @@ impl LanguageSpec {
 
     /// Lightweight walk: only scope + import rules. No refs, bindings, or
     /// control flow. Used by `parse_defs_only` for Phase 1.
+    #[allow(clippy::too_many_arguments)]
     fn walk_defs_only(
         &self,
         node: &Node<StrDoc<SupportLang>>,

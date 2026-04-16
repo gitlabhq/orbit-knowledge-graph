@@ -59,13 +59,11 @@ fn report_rss(label: &str) {
     if let Ok(output) = std::process::Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "rss="])
         .output()
-    {
-        if let Ok(rss) = String::from_utf8_lossy(&output.stdout)
+        && let Ok(rss) = String::from_utf8_lossy(&output.stdout)
             .trim()
             .parse::<u64>()
-        {
-            eprintln!("[mem] {label}: {:.1} MB", rss as f64 / 1024.0);
-        }
+    {
+        eprintln!("[mem] {label}: {:.1} MB", rss as f64 / 1024.0);
     }
 }
 
@@ -614,8 +612,7 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let source = std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
-        dispatch_language(language, vec![(path.to_string(), source)], "/")
+        dispatch_language(language, vec![path.to_string()], "/")
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"))
     }
