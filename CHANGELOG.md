@@ -1,3 +1,36 @@
+## [0.27.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.26.1...v0.27.0) (2026-04-16)
+
+### Features
+
+* **ci:** add v2 code-graph benchmarks and extract integration-tests-codegraph crate ([81527c7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/81527c75cf66d22c61fc404b1530e8610eb69b62)) by Michael Usachenko
+* **code-graph:** code graph construction pipeline with SSA-based generic resolver ([04cc67e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/04cc67ee92a5f972e97f17ff12aa3d0102d89792)) by Michael Usachenko
+* **code-graph:** graph-native operations, batched resolve, DSL ergonomics ([bd0f965](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bd0f965ed45a5aa3aee3762c5e19b7809c5aafa7)) by Michael Usachenko
+* **code-graph:** type-flow resolution and ast-driven walking for ssa ([9954c9e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9954c9e942614ffaca5c0ce7c69da48d720298ce)) by Michael Usachenko
+* **code-graph:** v2 pipeline performance + zero-fuzz resolution ([570e335](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/570e33548db8d9679f97a26762da4852a4f1024b)) by Michael Usachenko
+* **config:** add migration-completion schedule task ([2a33dfa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2a33dfae82adfc87e43f4a620abecdd4b14a5e63)) by Bohdan Parkhomchuk
+* **e2e:** add e2e test harness with Robot Framework ([9b7a102](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9b7a1026488b70cdf22ed267e000b610383ac4ed)) by Bohdan Parkhomchuk
+* **ontology:** add tp_count projections and update node_edge_counts ([4f7ff16](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4f7ff162a8e0870cbe0408909e069fd3fbd16182)) by Michael Angelo Rivera
+* **ontology:** generate local DuckDB DDL from ontology ([dd848f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dd848f91ffd7e1e0629fb7dbd7f016646c8dae10)) by Michael Usachenko
+* **ontology:** wire multi-edge-table routing through compiler and indexer ([bfb2765](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bfb2765c6143c96e6638b216e9cca61b4de68c5e)) by Michael Usachenko
+* **perf:** enable mimalloc allocator for gkg-server and orbit CLI ([2960896](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/29608969d46718c81fabb8cee4a00794d60544da)) by Michael Angelo Rivera
+
+### Fixes
+
+* **dev:** support HTTPS and Unix socket GDK setups in native dev script ([e9730f5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e9730f5541a36cf2dc98f211c915c0ca7a267e10)) by Dmitry Gruzd
+* **e2e:** simplify siphon setup and add smoke test ([20ca312](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/20ca31277885ce30ba4aab8454c6162ff05b3d93)) by Bohdan Parkhomchuk
+* **neighbors:** center node properties not hydrated in neighbors query response ([edefe9f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/edefe9f19a973b9ca17bef1a4d501062c6ff3210)) by Michael Usachenko
+* **query-engine:** harden GraphResponse serde and add cross-namespace neighbors test ([e40a810](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e40a8104e795db8826e5fdb11d30f66e038b9d5e)) by Michael Usachenko
+* **server:** reject queries from users with no enabled namespaces ([cb7f4f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cb7f4f2549d0b2d3814ce1a1ebf4bd0066ce8e27)) by Michael Angelo Rivera
+* **testkit:** generate graph DDL with SCHEMA_VERSION prefix ([3e71ea2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3e71ea245dacbb99854328acb7e2e229758bab3b)) by Michael Angelo Rivera
+
+### Other
+
+* **config:** fix stale references and complete config documentation ([581d019](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/581d019bbc3b2dbf903c420260ae8368edca9cae)) by Michael Angelo Rivera
+* **deps:** remove 21 unused dependencies ([56bbdf9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/56bbdf9567c8f36b6f6a5f12b87f2bd6e177364e)) by Michael Angelo Rivera
+* **dev:** remove in-repo helm charts and e2e test harness ([2a7526e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2a7526eb95d5dd7f5515859e402c351196c35871)) by Michael Angelo Rivera
+* **dev:** remove Tilt local development path ([8851f1c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8851f1c97bcfda6473817b027f5016ccd8ae3649)) by Michael Angelo Rivera
+* establish fuzzing framework ([4253f48](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4253f485f45aab716c8c33b7f84513cb19742803)) by Gus Gray
+
 ## [0.26.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.26.0...v0.26.1) (2026-04-13)
 
 ### Fixes
