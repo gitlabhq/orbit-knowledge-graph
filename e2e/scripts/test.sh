@@ -44,11 +44,25 @@ log "Tests failed"
 echo ""
 $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null
 
-echo ""
-log "Diagnostics:"
-for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_GKG"; do
+DIAG_DIR="${E2E_DIR}/diagnostics"
+mkdir -p "$DIAG_DIR"
+
+log "Collecting diagnostics to $DIAG_DIR"
+for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_SIPHON" "$NS_GKG"; do
+  ns_short="${ns#e2e-${E2E_SHA}-}"
   echo "--- $ns ---"
-  $KC get pods -n "$ns" --no-headers 2>/dev/null || echo "  namespace not found"
+  $KC get pods -n "$ns" --no-headers 2>/dev/null | tee "$DIAG_DIR/${ns_short}-pods.txt" || true
+
+  $KC get events -n "$ns" --sort-by=.lastTimestamp 2>/dev/null > "$DIAG_DIR/${ns_short}-events.txt" || true
+
+  for pod in $($KC get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+    restarts=$($KC get pod "$pod" -n "$ns" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo 0)
+    reason=$($KC get pod "$pod" -n "$ns" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}' 2>/dev/null)
+    if [[ "$restarts" -gt 0 || -n "$reason" ]]; then
+      echo "  $pod: restarts=$restarts reason=${reason:-unknown}"
+      $KC logs "$pod" -n "$ns" --previous --tail=50 > "$DIAG_DIR/${ns_short}-${pod}-previous.log" 2>/dev/null || true
+    fi
+  done
   echo ""
 done
 
