@@ -20,11 +20,17 @@ impl DslLanguage for CSharpDsl {
     fn scopes() -> Vec<ScopeRule> {
         vec![
             scope("namespace_declaration", "Namespace").def_kind(DefKind::Other),
-            scope("class_declaration", "Class").def_kind(DefKind::Class),
+            scopes(
+                &[
+                    "class_declaration",
+                    "struct_declaration",
+                    "enum_declaration",
+                    "record_declaration",
+                ],
+                "Class",
+            )
+            .def_kind(DefKind::Class),
             scope("interface_declaration", "Interface").def_kind(DefKind::Interface),
-            scope("struct_declaration", "Struct").def_kind(DefKind::Class),
-            scope("enum_declaration", "Enum").def_kind(DefKind::Class),
-            scope("record_declaration", "Record").def_kind(DefKind::Class),
             scope("method_declaration", "Method").def_kind(DefKind::Method),
             scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("property_declaration", "Property")

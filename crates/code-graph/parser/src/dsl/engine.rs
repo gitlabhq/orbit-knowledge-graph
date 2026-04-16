@@ -180,7 +180,11 @@ impl LanguageSpec {
         }
 
         // Extract bindings
-        if let Some(rule) = self.bindings.iter().find(|b| b.kind == node_kind_ref)
+        if let Some(&rule_idx) = self
+            .binding_dispatch
+            .get(node_kind_ref)
+            .and_then(|v| v.first())
+            && let rule = &self.bindings[rule_idx]
             && let Some(name) = rule.extract_name(node)
         {
             let type_annotation = rule.extract_type_annotation(node);
@@ -201,7 +205,12 @@ impl LanguageSpec {
         }
 
         // Extract branches
-        if let Some(rule) = self.branches.iter().find(|b| b.kind == node_kind_ref) {
+        if let Some(&rule_idx) = self
+            .branch_dispatch
+            .get(node_kind_ref)
+            .and_then(|v| v.first())
+        {
+            let rule = &self.branches[rule_idx];
             let byte_range = (node.range().start, node.range().end);
             let mut children = Vec::new();
 
@@ -238,7 +247,12 @@ impl LanguageSpec {
         }
 
         // Extract loops
-        if let Some(rule) = self.loops.iter().find(|l| l.kind == node_kind_ref) {
+        if let Some(&rule_idx) = self
+            .loop_dispatch
+            .get(node_kind_ref)
+            .and_then(|v| v.first())
+        {
+            let rule = &self.loops[rule_idx];
             let byte_range = (node.range().start, node.range().end);
             let mut children = Vec::new();
 
@@ -295,15 +309,12 @@ impl LanguageSpec {
         import_map: &rustc_hash::FxHashMap<String, String>,
         sep: &'static str,
     ) -> Option<ScopeMatch> {
-        if !self.is_scope_candidate(node_kind) {
-            return None;
-        }
-
-        let rule = self
-            .scopes
+        let indices = self.scope_dispatch.get(node_kind)?;
+        let rule = indices
             .iter()
             .rev()
-            .find(|r| r.matches(node, node_kind))?;
+            .map(|&i| &self.scopes[i])
+            .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
 
         let name = rule.extract_name(node)?;
         Some(ScopeMatch {
@@ -323,7 +334,11 @@ impl LanguageSpec {
         import_map: &rustc_hash::FxHashMap<String, String>,
         sep: &str,
     ) -> Option<(String, crate::utils::Range, Option<Vec<ExpressionStep>>)> {
-        let rule = self.refs.iter().find(|r| r.matches(node, node_kind))?;
+        let indices = self.ref_dispatch.get(node_kind)?;
+        let rule = indices
+            .iter()
+            .map(|&i| &self.refs[i])
+            .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
         let name = rule.extract_name(node)?;
 
         // Build expression chain if the rule declares an object field
@@ -403,7 +418,8 @@ impl LanguageSpec {
         }
 
         // Call expression with object field (method_invocation, call_expression)
-        if let Some(rule) = self.refs.iter().find(|r| r.kind() == kind_ref) {
+        if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
+            let rule = &self.refs[rule_idx];
             if let Some(extract) = &rule.receiver_extract
                 && let Some(recv) = extract.resolve(node)
             {
@@ -428,7 +444,14 @@ impl LanguageSpec {
         node_kind: &str,
         imports: &mut Vec<CanonicalImport>,
     ) {
-        let Some(rule) = self.imports.iter().find(|r| r.matches(node, node_kind)) else {
+        let Some(indices) = self.import_dispatch.get(node_kind) else {
+            return;
+        };
+        let Some(rule) = indices
+            .iter()
+            .map(|&i| &self.imports[i])
+            .find(|r| r.condition().is_none_or(|c| c.test(node)))
+        else {
             return;
         };
 
