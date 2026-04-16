@@ -905,7 +905,7 @@ where
             _ => return vec![],
         };
         let iname = self.file_arena.alloc_str(last);
-        self.resolve_bare(&iname, enclosing_scope_fqn)
+        self.resolve_bare(iname, enclosing_scope_fqn)
     }
 
     // ── Resolution helpers ──────────────────────────────────

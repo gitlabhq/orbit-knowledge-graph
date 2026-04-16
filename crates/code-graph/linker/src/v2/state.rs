@@ -314,6 +314,12 @@ pub struct StringPool {
     index: Vec<(u32, u32)>,
 }
 
+impl Default for StringPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StringPool {
     pub fn new() -> Self {
         Self {
@@ -580,6 +586,12 @@ impl Default for FileArena {
 /// Allocated once per walker, reused via `clear()` + `write!()` or `push_str()`.
 /// Avoids per-call `format!()` heap allocations in hot paths.
 pub struct ScratchBuf(String);
+
+impl Default for ScratchBuf {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ScratchBuf {
     pub fn new() -> Self {
