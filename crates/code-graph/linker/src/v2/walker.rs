@@ -13,7 +13,7 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use super::graph::{CodeGraph, GraphEdge, GraphNode};
-use super::resolve::{ResolveSettings, apply_import_strategies, resolve_import};
+use super::imports::{ResolveSettings, apply_import_strategies, resolve_import};
 use super::rules::ResolutionRules;
 use super::ssa::{BlockId, SsaResolver, Value};
 use super::stats::ResolveStats;
