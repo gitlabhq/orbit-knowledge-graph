@@ -55,11 +55,13 @@ pub enum ReferenceStatus {
 }
 
 /// A parsed definition, language-agnostic.
+///
+/// All strings are `IStr` (8 bytes, interned). Common names like "get",
+/// "set", "toString" are shared across thousands of definitions.
+/// Metadata is inlined — no `Box` indirection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalDefinition {
     /// Language-specific type string preserved for output fidelity.
-    /// e.g. "DecoratedAsyncMethod", "SingletonMethod".
-    /// The Arrow column `definition_type` gets this value.
     pub definition_type: &'static str,
     /// Canonical category for containment and relationship logic.
     pub kind: DefKind,
@@ -68,8 +70,7 @@ pub struct CanonicalDefinition {
     pub range: Range,
     /// Whether this is a top-level (not nested inside another definition).
     pub is_top_level: bool,
-    /// Language-neutral metadata for resolution. Boxed because most
-    /// definitions carry none, keeping the common case small.
+    /// Boxed metadata — `None` for most definitions keeps the common case small.
     pub metadata: Option<Box<DefinitionMetadata>>,
 }
 

@@ -32,8 +32,14 @@ pub async fn run_yaml_suite(yaml: &str) {
     );
 
     let ctx = RowContext::empty();
-    let datasets =
-        to_lance_datasets(&result.graph, &ctx).expect("Failed to convert graph to datasets");
+    let mut datasets = std::collections::HashMap::new();
+    for graph in &result.graphs {
+        let graph_datasets =
+            to_lance_datasets(graph, &ctx).expect("Failed to convert graph to datasets");
+        // NOTE: extend overwrites duplicate keys. Fine for single-language tests.
+        // Multi-language tests would need RecordBatch concat per table name.
+        datasets.extend(graph_datasets);
+    }
     let config = make_graph_config().expect("Failed to build graph config");
 
     let failures = run_suite(&suite, &datasets, &config).await;

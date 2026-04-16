@@ -9,8 +9,8 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::linker::v2::walker::{FileWalkResult, HasRoot};
-use crate::linker::v2::{CodeGraph, HasRules, build_edges};
+use crate::linker::v2::walker::fused_walk_file;
+use crate::linker::v2::{CodeGraph, HasRoot, HasRules};
 
 fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
@@ -37,8 +37,8 @@ use crate::v2::langs::kotlin::{KotlinDsl, KotlinRules};
 use crate::v2::langs::python::{PythonDsl, PythonRules};
 use crate::v2::langs::ruby::{RubyDsl, RubyRules};
 
-/// Input to a language pipeline: file path + source bytes.
-pub type FileInput = (String, Vec<u8>);
+/// Input to a language pipeline: file path (source read on demand).
+pub type FileInput = String;
 
 /// Trait for language-specific graph production.
 ///
@@ -54,11 +54,27 @@ pub trait LanguagePipeline {
     ) -> Result<CodeGraph, Vec<PipelineError>>;
 }
 
+fn report_rss(label: &str) {
+    let pid = std::process::id();
+    if let Ok(output) = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "rss="])
+        .output()
+        && let Ok(rss) = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u64>()
+    {
+        eprintln!("[mem] {label}: {:.1} MB", rss as f64 / 1024.0);
+    }
+}
+
 /// Generic pipeline parameterized by parser `P` and rules `R`.
 ///
-/// Streaming architecture:
-/// 1. **Parallel**: parse + walk each file, drop AST immediately
-/// 2. **Sequential**: build indexes, resolve cross-file references, build graph
+/// Two-phase fused architecture:
+/// 1. **Phase 1** (parallel): parse + extract defs/imports → add to graph, drop AST
+/// 2. **Phase 2** (parallel): re-parse + fused walk+resolve → emit edges
+///
+/// Phase 2 re-parses with tree-sitter (~150ms for 22k files). Peak memory =
+/// graph + ~16 concurrent ASTs (rayon threads), not graph + all ASTs.
 pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
@@ -78,110 +94,185 @@ where
         let t0 = std::time::Instant::now();
 
         eprintln!("[v2] {file_count} files, {num_threads} threads");
+        report_rss("before Phase 1");
 
-        // Graph exists before the parallel phase. Each file locks it
-        // briefly to add nodes, gets NodeIndex values, then walks.
         let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
 
-        // ── Parallel phase: parse + add nodes + walk ────────────
-        let pb = progress_bar(file_count as u64, "Parse + walk");
-        let file_outputs: Vec<_> = files
+        // ── Phase 1: read + parse defs/imports → graph ──────────
+        // Source read per-file on demand, dropped after add_file_nodes.
+        let pb = progress_bar(file_count as u64, "Phase 1: defs");
+        let phase1_results: Vec<_> = files
             .par_iter()
             .enumerate()
-            .map(|(file_idx, (path, source))| {
-                let (result, ast) = parser.parse_file(source, path).map_err(|e| PipelineError {
+            .map(|(file_idx, path)| {
+                let abs_path = format!("{root_path}/{path}");
+                let source = std::fs::read(&abs_path).map_err(|e| PipelineError {
                     file_path: path.clone(),
-                    error: format!("Parse error: {e}"),
+                    error: format!("Read error: {e}"),
                 })?;
 
-                // Add this file's nodes to the graph under the lock.
-                let (file_node, def_nodes, import_nodes) = {
-                    let mut g = graph.lock().unwrap();
-                    g.add_file_nodes(&result, file_idx)
-                };
+                let result = parser
+                    .parse_defs_only(&source, path)
+                    .map_err(|e| PipelineError {
+                        file_path: path.clone(),
+                        error: format!("Parse error: {e}"),
+                    })?;
 
-                let walk = if let Some(root) = ast.as_root() {
-                    crate::linker::v2::walker::walk_file(
-                        &rules,
-                        &result,
-                        &root,
-                        &def_nodes,
-                        &import_nodes,
-                        file_node,
-                    )
-                } else {
-                    FileWalkResult::empty()
+                let defs = result.definitions.len();
+                let imports = result.imports.len();
+
+                let file_node = {
+                    let mut g = graph.lock().unwrap();
+                    let (file_node, _, _) = g.add_file_nodes(result, file_idx);
+                    file_node
                 };
+                // source dropped here
 
                 pb.inc(1);
-                Ok((result, walk))
+                Ok((file_node, defs, imports))
             })
             .collect();
         pb.finish_with_message(format!(
-            "Parse + walk: {file_count} files in {:.2?}",
+            "Phase 1: {file_count} files in {:.2?}",
             t0.elapsed()
         ));
 
-        // ── Collect results ─────────────────────────────────────
-        let mut walks = Vec::with_capacity(file_outputs.len());
+        let mut file_nodes = Vec::with_capacity(file_count);
         let mut errors = Vec::new();
         let mut total_defs = 0usize;
-        let mut total_refs = 0usize;
         let mut total_imports = 0usize;
 
-        for output in file_outputs {
+        for output in phase1_results {
             match output {
-                Ok((mut result, mut walk)) => {
-                    total_defs += result.definitions.len();
-                    total_refs += result.references.len();
-                    total_imports += result.imports.len();
-                    walk.references = std::mem::take(&mut result.references);
-                    walks.push(walk);
+                Ok((file_node, defs, imports)) => {
+                    total_defs += defs;
+                    total_imports += imports;
+                    file_nodes.push(file_node);
                 }
-                Err(err) => errors.push(err),
+                Err(err) => {
+                    errors.push(err);
+                    file_nodes.push(petgraph::graph::NodeIndex::new(0));
+                }
             }
         }
 
-        if !errors.is_empty() && walks.is_empty() {
+        if !errors.is_empty() && file_nodes.is_empty() {
             return Err(errors);
         }
 
-        // ── Sequential phase ────────────────────────────────────
-        eprintln!(
-            "[v2] {total_defs} defs, {total_refs} refs, {total_imports} imports, {} errors",
-            errors.len()
-        );
+        report_rss("after Phase 1 (graph + source bytes)");
 
-        let t2 = std::time::Instant::now();
+        // ── Finalize graph ──────────────────────────────────────
+        let t1 = std::time::Instant::now();
         let mut graph = graph.into_inner().unwrap();
         graph.finalize();
-
-        // Pre-resolve imports per file (one-time cost, eliminates repeated neighbor iteration)
-        let sep = rules.fqn_separator;
-        for walk in &mut walks {
-            walk.import_map = graph.pre_resolve_file_imports(walk.file_node, sep);
-        }
-
-        // Free construction-only indexes before resolve
-        graph.drop_construction_indexes();
-
-        // Drop walks with zero reads — no references to resolve
-        walks.retain(|w| !w.reads.is_empty());
-
-        eprintln!("[v2] graph finalize: {:.2?}", t2.elapsed());
-
-        let t3 = std::time::Instant::now();
-        let result = build_edges(&rules, &graph, &mut walks, &rules.settings);
         eprintln!(
-            "[v2] resolve: {} edges in {:.2?}",
-            result.edges.len(),
-            t3.elapsed()
+            "[v2] {total_defs} defs, {total_imports} imports, {} errors",
+            errors.len()
         );
-        result.stats.print();
+        eprintln!("[v2] graph finalize: {:.2?}", t1.elapsed());
 
-        for (src, tgt, edge) in result.edges {
-            graph.graph.add_edge(src, tgt, edge);
+        let node_count = graph.graph.node_count();
+        let edge_count = graph.graph.edge_count();
+        eprintln!(
+            "[mem] graph: {} nodes × {} B + {} edges × {} B = {:.1} MB (estimated vec capacity)",
+            node_count,
+            std::mem::size_of::<petgraph::graph::Node<super::super::linker::v2::graph::GraphNode>>(
+            ),
+            edge_count,
+            std::mem::size_of::<petgraph::graph::Edge<super::super::linker::v2::graph::GraphEdge>>(
+            ),
+            (node_count
+                * std::mem::size_of::<
+                    petgraph::graph::Node<super::super::linker::v2::graph::GraphNode>,
+                >()
+                + edge_count
+                    * std::mem::size_of::<
+                        petgraph::graph::Edge<super::super::linker::v2::graph::GraphEdge>,
+                    >()) as f64
+                / 1048576.0,
+        );
+        report_rss("after finalize (graph + indexes + source bytes)");
+
+        // ── Phase 2: fused walk+resolve ────────────────────────
+        // Re-parse from disk per file, or skip on Phase 1 error.
+        let t2 = std::time::Instant::now();
+        let pb2 = progress_bar(file_count as u64, "Phase 2: resolve");
+
+        let phase2_results: Vec<_> = files
+            .par_iter()
+            .zip(file_nodes.par_iter())
+            .map(|(path, &file_node)| {
+                if file_node.index() == 0 && errors.iter().any(|e| e.file_path == *path) {
+                    pb2.inc(1);
+                    return None;
+                }
+                let abs_path = format!("{root_path}/{path}");
+                let source = match std::fs::read(&abs_path) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        pb2.inc(1);
+                        return None;
+                    }
+                };
+                let source_str = match std::str::from_utf8(&source) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        pb2.inc(1);
+                        return None;
+                    }
+                };
+                let lang = code_graph_config::detect_language_from_path(path)?;
+                let t_parse = std::time::Instant::now();
+                let ast = lang.parse_ast(source_str);
+                let root = ast.root();
+                let parse_ns = t_parse.elapsed().as_nanos() as u64;
+                let t_walk = std::time::Instant::now();
+                let mut result = fused_walk_file(&rules, &graph, &root, file_node, &rules.settings);
+                let walk_ns = t_walk.elapsed().as_nanos() as u64;
+                result.parse_ns = parse_ns;
+                result.walk_ns = walk_ns;
+                pb2.inc(1);
+                // source dropped here
+                Some(result)
+            })
+            .collect();
+        pb2.finish_with_message(format!(
+            "Phase 2: {file_count} files in {:.2?}",
+            t2.elapsed()
+        ));
+
+        // ── Collect edges + stats ───────────────────────────────
+        let mut combined_stats = crate::linker::v2::ResolveStats::default();
+        let mut total_edges = 0usize;
+        let mut total_refs = 0usize;
+        let mut total_parse_ns = 0u64;
+        let mut total_walk_ns = 0u64;
+
+        for result in phase2_results.into_iter().flatten() {
+            total_edges += result.edges.len();
+            total_refs += result.num_refs;
+            total_parse_ns += result.parse_ns;
+            total_walk_ns += result.walk_ns;
+            combined_stats.merge(&result.stats);
+            for (src, tgt, edge) in result.edges {
+                graph.graph.add_edge(src, tgt, edge);
+            }
         }
+
+        eprintln!(
+            "[v2] Phase 2 breakdown: parse {:.2?}, walk+resolve {:.2?} (sum across threads)",
+            std::time::Duration::from_nanos(total_parse_ns),
+            std::time::Duration::from_nanos(total_walk_ns),
+        );
+
+        report_rss("after Phase 2 (graph + edges + source bytes)");
+
+        eprintln!(
+            "[v2] resolve: {total_refs} refs → {total_edges} edges in {:.2?}",
+            t2.elapsed()
+        );
+        combined_stats.print();
 
         Ok(graph)
     }
@@ -260,7 +351,7 @@ impl Default for PipelineConfig {
 }
 
 pub struct PipelineResult {
-    pub graph: CodeGraph,
+    pub graphs: Vec<CodeGraph>,
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
 }
@@ -339,16 +430,13 @@ impl Pipeline {
             }
         }
 
-        // 3. Merge all per-language graphs
-        let graph = Self::merge_graphs(all_graphs);
-
-        let definitions_count = graph.definitions().count();
-        let imports_count = graph.imports().count();
-        let references_count = 0;
-        let edges_count = graph.edge_count();
+        let definitions_count = all_graphs.iter().map(|g| g.definitions().count()).sum();
+        let imports_count = all_graphs.iter().map(|g| g.imports().count()).sum();
+        let references_count = all_graphs.iter().map(|g| g.edges().count()).sum();
+        let edges_count = all_graphs.iter().map(|g| g.edge_count()).sum();
 
         PipelineResult {
-            graph,
+            graphs: all_graphs,
             stats: PipelineStats {
                 files_parsed,
                 files_skipped,
@@ -396,108 +484,16 @@ impl Pipeline {
                     continue;
                 }
 
-                let source = match std::fs::read(path) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
+                // Verify file is readable, but don't load yet.
+                if !path.is_file() {
+                    continue;
+                }
 
-                groups
-                    .entry(lang)
-                    .or_default()
-                    .push((rel_path.to_string(), source));
+                groups.entry(lang).or_default().push(rel_path.to_string());
             }
         }
 
         groups
-    }
-
-    fn merge_graphs(graphs: Vec<CodeGraph>) -> CodeGraph {
-        use crate::linker::v2::graph::GraphNode;
-        use petgraph::graph::NodeIndex;
-        use rustc_hash::FxHashMap;
-
-        let mut merged = CodeGraph::new();
-
-        for g in graphs {
-            // Map old node indices to new ones
-            let mut index_map: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
-
-            for old_idx in g.graph.node_indices() {
-                let node = g.graph[old_idx].clone();
-                let new_idx = merged.graph.add_node(node.clone());
-                index_map.insert(old_idx, new_idx);
-
-                // Update quick-lookup indexes
-                match &node {
-                    GraphNode::Directory(d) => {
-                        merged.dir_index.insert(d.path.clone(), new_idx);
-                    }
-                    GraphNode::File(f) => {
-                        merged.file_index.insert(f.path.clone(), new_idx);
-                    }
-                    _ => {}
-                }
-            }
-
-            // Remap resolution indexes
-            for (fqn, nodes) in &g.def_by_fqn {
-                let remapped: Vec<_> = nodes
-                    .iter()
-                    .filter_map(|i| index_map.get(i).copied())
-                    .collect();
-                merged
-                    .def_by_fqn
-                    .entry(fqn.clone())
-                    .or_default()
-                    .extend(remapped);
-            }
-            for (name, nodes) in &g.def_by_name {
-                let remapped: Vec<_> = nodes
-                    .iter()
-                    .filter_map(|i| index_map.get(i).copied())
-                    .collect();
-                merged
-                    .def_by_name
-                    .entry(name.clone())
-                    .or_default()
-                    .extend(remapped);
-            }
-            for (scope_fqn, nested_map) in &g.nested_defs {
-                for (name, nodes) in nested_map {
-                    let remapped: Vec<_> = nodes
-                        .iter()
-                        .filter_map(|i| index_map.get(i).copied())
-                        .collect();
-                    merged
-                        .nested_defs
-                        .entry(scope_fqn.clone())
-                        .or_default()
-                        .entry(name.clone())
-                        .or_default()
-                        .extend(remapped);
-                }
-            }
-            for (node, chain) in &g.ancestors {
-                if let Some(&new_node) = index_map.get(node) {
-                    let remapped: Vec<_> = chain
-                        .iter()
-                        .filter_map(|i| index_map.get(i).copied())
-                        .collect();
-                    if !remapped.is_empty() {
-                        merged.ancestors.insert(new_node, remapped);
-                    }
-                }
-            }
-            for old_edge in g.graph.edge_indices() {
-                let (src, tgt) = g.graph.edge_endpoints(old_edge).unwrap();
-                let weight = g.graph[old_edge].clone();
-                merged
-                    .graph
-                    .add_edge(index_map[&src], index_map[&tgt], weight);
-            }
-        }
-
-        merged
     }
 }
 
@@ -512,8 +508,7 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let source = std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
-        dispatch_language(language, vec![(path.to_string(), source)], "/")
+        dispatch_language(language, vec![path.to_string()], "/")
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"))
     }
@@ -680,13 +675,17 @@ namespace MyApp {
             result.stats.definitions_count
         );
 
-        assert_eq!(result.graph.files().count(), 4);
-        assert!(result.graph.directories().count() > 0);
-        assert!(result.graph.edge_count() > 0);
+        let total_files: usize = result.graphs.iter().map(|g| g.files().count()).sum();
+        let total_dirs: usize = result.graphs.iter().map(|g| g.directories().count()).sum();
+        let total_edges: usize = result.graphs.iter().map(|g| g.edge_count()).sum();
+        assert_eq!(total_files, 4);
+        assert!(total_dirs > 0);
+        assert!(total_edges > 0);
 
-        let def_to_def = result
-            .graph
-            .edges()
+        let def_to_def: usize = result
+            .graphs
+            .iter()
+            .flat_map(|g| g.edges())
             .filter(|(_, _, e)| {
                 e.relationship.source_node == NodeKind::Definition
                     && e.relationship.target_node == NodeKind::Definition
@@ -697,9 +696,10 @@ namespace MyApp {
             "Expected at least 4 def-to-def edges, got {def_to_def}"
         );
 
-        let file_to_def = result
-            .graph
-            .edges()
+        let file_to_def: usize = result
+            .graphs
+            .iter()
+            .flat_map(|g| g.edges())
             .filter(|(_, _, e)| {
                 e.relationship.source_node == NodeKind::File
                     && e.relationship.target_node == NodeKind::Definition

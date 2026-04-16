@@ -2,36 +2,62 @@ use crate::IStr;
 use smallvec::SmallVec;
 use std::sync::Arc;
 
-/// A fully qualified name as an ordered sequence of string parts.
+/// A fully qualified name as interned parts + cached joined string.
 ///
-/// The separator is language-determined ("::" for Ruby/Rust/TS, "." for
-/// Python/Java/Kotlin/C#). The joined string is cached as an `IStr`
-/// (interned) to avoid repeated allocation on `to_string()`.
+/// Parts are `IStr` (8 bytes each, interned). Higher-scope parts like
+/// "com", "example" are shared across thousands of FQNs at zero cost.
+/// SmallVec inlines up to 4 parts (no heap allocation for typical FQNs).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Fqn {
-    parts: Arc<SmallVec<[Arc<str>; 4]>>,
+    parts: SmallVec<[IStr; 4]>,
     separator: &'static str,
-    /// Cached joined representation (interned).
     cached: IStr,
 }
 
 impl Fqn {
-    pub fn new(parts: SmallVec<[Arc<str>; 4]>, separator: &'static str) -> Self {
-        let joined = parts
-            .iter()
-            .map(|p| p.as_ref())
-            .collect::<Vec<_>>()
-            .join(separator);
+    pub fn from_parts(parts: &[&str], separator: &'static str) -> Self {
+        let iparts: SmallVec<[IStr; 4]> = parts.iter().map(|s| IStr::from(*s)).collect();
+        let joined = parts.join(separator);
         Self {
-            parts: Arc::new(parts),
+            parts: iparts,
             separator,
             cached: IStr::from(joined.as_str()),
         }
     }
 
-    pub fn from_parts(parts: &[&str], separator: &'static str) -> Self {
-        let sv: SmallVec<[Arc<str>; 4]> = parts.iter().map(|s| Arc::from(*s)).collect();
-        Self::new(sv, separator)
+    /// Build an FQN from a scope stack plus a leaf name.
+    pub fn from_scope(scope: &[Arc<str>], name: &str, separator: &'static str) -> Self {
+        let mut iparts: SmallVec<[IStr; 4]> =
+            scope.iter().map(|s| IStr::from(s.as_ref())).collect();
+        iparts.push(IStr::from(name));
+        let joined = iparts
+            .iter()
+            .map(|p| p.as_ref())
+            .collect::<Vec<_>>()
+            .join(separator);
+        Self {
+            parts: iparts,
+            separator,
+            cached: IStr::from(joined.as_str()),
+        }
+    }
+
+    /// Build an FQN from just a scope stack (no additional leaf).
+    pub fn from_scope_only(scope: &[Arc<str>], separator: &'static str) -> Option<Self> {
+        if scope.is_empty() {
+            return None;
+        }
+        let iparts: SmallVec<[IStr; 4]> = scope.iter().map(|s| IStr::from(s.as_ref())).collect();
+        let joined = iparts
+            .iter()
+            .map(|p| p.as_ref())
+            .collect::<Vec<_>>()
+            .join(separator);
+        Some(Self {
+            parts: iparts,
+            separator,
+            cached: IStr::from(joined.as_str()),
+        })
     }
 
     /// The cached interned string representation.
@@ -50,13 +76,17 @@ impl Fqn {
         if self.parts.len() <= 1 {
             return None;
         }
-        let parent_parts: SmallVec<[Arc<str>; 4]> =
-            self.parts[..self.parts.len() - 1].iter().cloned().collect();
-        Some(Self::new(parent_parts, self.separator))
-    }
-
-    pub fn parts(&self) -> &[Arc<str>] {
-        &self.parts
+        let parent_parts: SmallVec<[IStr; 4]> = self.parts[..self.parts.len() - 1].into();
+        let joined = parent_parts
+            .iter()
+            .map(|p| p.as_ref())
+            .collect::<Vec<_>>()
+            .join(self.separator);
+        Some(Self {
+            parts: parent_parts,
+            separator: self.separator,
+            cached: IStr::from(joined.as_str()),
+        })
     }
 
     pub fn separator(&self) -> &'static str {
@@ -69,24 +99,6 @@ impl Fqn {
 
     pub fn is_empty(&self) -> bool {
         self.parts.is_empty()
-    }
-
-    /// Build an FQN from a scope stack plus a leaf name.
-    pub fn from_scope(scope: &[Arc<str>], name: &str, separator: &'static str) -> Self {
-        let mut parts: SmallVec<[Arc<str>; 4]> = scope.iter().cloned().collect();
-        parts.push(Arc::from(name));
-        Self::new(parts, separator)
-    }
-
-    /// Build an FQN from just a scope stack (no additional leaf).
-    /// Returns None if the scope is empty.
-    pub fn from_scope_only(scope: &[Arc<str>], separator: &'static str) -> Option<Self> {
-        if scope.is_empty() {
-            None
-        } else {
-            let parts: SmallVec<[Arc<str>; 4]> = scope.iter().cloned().collect();
-            Some(Self::new(parts, separator))
-        }
     }
 }
 
@@ -116,9 +128,9 @@ mod tests {
     }
 
     #[test]
-    fn name_empty_fqn() {
-        let fqn = Fqn::new(SmallVec::new(), "::");
-        assert_eq!(fqn.name(), "");
+    fn name_single_part() {
+        let fqn = Fqn::from_parts(&["A"], ".");
+        assert_eq!(fqn.name(), "A");
     }
 
     #[test]
@@ -136,10 +148,9 @@ mod tests {
     }
 
     #[test]
-    fn parts_accessible() {
+    fn len_counts_parts() {
         let fqn = Fqn::from_parts(&["x", "y"], "::");
-        assert_eq!(fqn.parts().len(), 2);
-        assert_eq!(fqn.parts()[0].as_ref(), "x");
+        assert_eq!(fqn.len(), 2);
     }
 
     #[test]

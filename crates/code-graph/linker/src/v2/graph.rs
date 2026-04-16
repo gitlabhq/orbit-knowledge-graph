@@ -10,23 +10,35 @@ use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
+use smallvec::SmallVec;
+
+/// Hash a string key for index lookups. Uses FxHash for speed.
+#[inline]
+pub(crate) fn hash_key(s: &str) -> u64 {
+    let mut h = FxHasher::default();
+    s.hash(&mut h);
+    h.finish()
+}
 
 // ── Node + Edge types ───────────────────────────────────────────
 
-/// A node in the code graph.
+/// A node in the code graph. Lightweight labels — heavy data lives
+/// in dense vecs on `CodeGraph` (defs, imports) indexed by `DefId`/`ImportId`.
 #[derive(Debug, Clone)]
 pub enum GraphNode {
     Directory(CanonicalDirectory),
     File(CanonicalFile),
-    Definition {
-        file_path: Arc<str>,
-        def: CanonicalDefinition,
-    },
-    Import {
-        file_path: Arc<str>,
-        import: CanonicalImport,
-    },
+    Definition { file_path: Arc<str>, id: DefId },
+    Import { file_path: Arc<str>, id: ImportId },
 }
+
+/// Index into `CodeGraph::defs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DefId(pub u32);
+
+/// Index into `CodeGraph::imports`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ImportId(pub u32);
 
 impl GraphNode {
     pub fn path(&self) -> &str {
@@ -35,23 +47,6 @@ impl GraphNode {
             GraphNode::File(f) => &f.path,
             GraphNode::Definition { file_path, .. } => file_path,
             GraphNode::Import { file_path, .. } => file_path,
-        }
-    }
-
-    pub fn name(&self) -> &str {
-        match self {
-            GraphNode::Directory(d) => &d.name,
-            GraphNode::File(f) => &f.name,
-            GraphNode::Definition { def, .. } => &def.name,
-            GraphNode::Import { import, .. } => import.name.as_deref().unwrap_or("*"),
-        }
-    }
-
-    pub fn range(&self) -> Range {
-        match self {
-            GraphNode::Directory(_) | GraphNode::File(_) => Range::empty(),
-            GraphNode::Definition { def, .. } => def.range,
-            GraphNode::Import { import, .. } => import.range,
         }
     }
 
@@ -69,16 +64,16 @@ impl GraphNode {
         }
     }
 
-    pub fn as_definition(&self) -> Option<(&Arc<str>, &CanonicalDefinition)> {
+    pub fn def_id(&self) -> Option<DefId> {
         match self {
-            GraphNode::Definition { file_path, def } => Some((file_path, def)),
+            GraphNode::Definition { id, .. } => Some(*id),
             _ => None,
         }
     }
 
-    pub fn as_import(&self) -> Option<(&Arc<str>, &CanonicalImport)> {
+    pub fn import_id(&self) -> Option<ImportId> {
         match self {
-            GraphNode::Import { file_path, import } => Some((file_path, import)),
+            GraphNode::Import { id, .. } => Some(*id),
             _ => None,
         }
     }
@@ -112,18 +107,24 @@ impl GraphEdge {
 pub struct CodeGraph {
     pub graph: DiGraph<GraphNode, GraphEdge>,
 
+    /// Dense storage for definitions, indexed by `DefId`.
+    pub defs: Vec<CanonicalDefinition>,
+    /// Dense storage for imports, indexed by `ImportId`.
+    pub imports: Vec<CanonicalImport>,
+
     // Structural indexes
     pub dir_index: FxHashMap<String, NodeIndex>,
     pub file_index: FxHashMap<String, NodeIndex>,
 
-    // Resolution indexes
-    pub def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
-    pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
-    pub nested_defs: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
+    // Resolution indexes — u64 hash keys (no String pointer chase on lookup),
+    // SmallVec<[_; 8]> values (inline, no heap pointer chase).
+    // Lookups verify via graph.defs[].name to handle hash collisions (~10⁻⁹ risk).
+    pub def_by_fqn: FxHashMap<u64, SmallVec<[NodeIndex; 8]>>,
+    pub def_by_name: FxHashMap<u64, SmallVec<[NodeIndex; 8]>>,
+    pub nested_defs: FxHashMap<u64, FxHashMap<u64, SmallVec<[NodeIndex; 8]>>>,
 
     /// Pre-computed ancestor chains from Extends edges.
-    /// Built once during finalize(), used during resolve for hierarchy lookups.
-    pub ancestors: FxHashMap<NodeIndex, Vec<NodeIndex>>,
+    pub ancestors: FxHashMap<NodeIndex, SmallVec<[NodeIndex; 8]>>,
 
     pub root_path: String,
 }
@@ -139,6 +140,8 @@ impl CodeGraph {
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
+            defs: Vec::new(),
+            imports: Vec::new(),
             dir_index: FxHashMap::default(),
             file_index: FxHashMap::default(),
 
@@ -157,7 +160,7 @@ impl CodeGraph {
     /// Does NOT add directory nodes or flatten supers — call `finalize()` after.
     pub fn add_file_nodes(
         &mut self,
-        result: &CanonicalResult,
+        result: CanonicalResult,
         _file_order: usize,
     ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
         let relative_path = self.relative_path(&result.file_path);
@@ -186,26 +189,31 @@ impl CodeGraph {
             );
         }
 
+        // First pass: add graph nodes, build indexes (borrow defs).
+        let def_base = self.defs.len() as u32;
         let mut def_nodes = Vec::with_capacity(result.definitions.len());
-        for def in result.definitions.iter() {
+        for (i, def) in result.definitions.iter().enumerate() {
+            let id = DefId(def_base + i as u32);
             let def_node = self.graph.add_node(GraphNode::Definition {
                 file_path: file_path.clone(),
-                def: def.clone(),
+                id,
             });
             def_nodes.push(def_node);
 
-            let fqn_str = def.fqn.to_string();
-            self.def_by_fqn.entry(fqn_str).or_default().push(def_node);
+            self.def_by_fqn
+                .entry(hash_key(&def.fqn.to_string()))
+                .or_default()
+                .push(def_node);
             self.def_by_name
-                .entry(def.name.clone())
+                .entry(hash_key(&def.name))
                 .or_default()
                 .push(def_node);
 
             if let Some(parent_fqn) = def.fqn.parent() {
                 self.nested_defs
-                    .entry(parent_fqn.to_string())
+                    .entry(hash_key(&parent_fqn.to_string()))
                     .or_default()
-                    .entry(def.name.clone())
+                    .entry(hash_key(&def.name))
                     .or_default()
                     .push(def_node);
             }
@@ -217,12 +225,11 @@ impl CodeGraph {
             );
         }
 
-        // Containment edges between definitions (class→method, module→class, etc.)
+        // Containment edges (borrow defs).
         for (i, def) in result.definitions.iter().enumerate() {
             let Some(parent_fqn) = def.fqn.parent() else {
                 continue;
             };
-            // Find the parent def within this file's def_nodes
             for (j, parent_def) in result.definitions.iter().enumerate() {
                 if j != i
                     && parent_def.fqn.as_istr() == parent_fqn.as_istr()
@@ -238,11 +245,17 @@ impl CodeGraph {
             }
         }
 
+        // Move defs into dense storage (no clone).
+        self.defs.extend(result.definitions);
+
+        // Move imports into dense storage (no clone).
         let mut import_nodes = Vec::with_capacity(result.imports.len());
-        for imp in &result.imports {
+        let import_base = self.imports.len() as u32;
+        for (i, _) in result.imports.iter().enumerate() {
+            let id = ImportId(import_base + i as u32);
             let imp_node = self.graph.add_node(GraphNode::Import {
                 file_path: file_path.clone(),
-                import: imp.clone(),
+                id,
             });
             import_nodes.push(imp_node);
             self.graph.add_edge(
@@ -251,6 +264,8 @@ impl CodeGraph {
                 GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::ImportedSymbol),
             );
         }
+        self.imports.extend(result.imports);
+
         (file_node, def_nodes, import_nodes)
     }
 
@@ -296,7 +311,7 @@ impl CodeGraph {
                 continue;
             }
 
-            let mut chain = Vec::new();
+            let mut chain: SmallVec<[NodeIndex; 8]> = SmallVec::new();
             let mut bfs = Bfs::new(&extends_only, idx);
             bfs.next(&extends_only); // skip self
             while let Some(ancestor) = bfs.next(&extends_only) {
@@ -363,7 +378,7 @@ impl CodeGraph {
     /// `add_file_nodes()` + `finalize()` instead.
     pub fn from_results(results: Vec<CanonicalResult>, root_path: String) -> Self {
         let mut cg = Self::new_with_root(root_path);
-        for (i, result) in results.iter().enumerate() {
+        for (i, result) in results.into_iter().enumerate() {
             cg.add_file_nodes(result, i);
         }
         cg.finalize();
@@ -389,9 +404,10 @@ impl CodeGraph {
             .graph
             .neighbors_directed(file_node, petgraph::Direction::Outgoing)
         {
-            let Some((_, imp)) = self.graph[neighbor].as_import() else {
+            let Some(import_id) = self.graph[neighbor].import_id() else {
                 continue;
             };
+            let imp = &self.imports[import_id.0 as usize];
             if imp.wildcard {
                 continue;
             }
@@ -406,9 +422,19 @@ impl CodeGraph {
                 format!("{}{}{}", imp.path, sep, name)
             };
 
-            let mut defs = self.lookup_fqn(&full_fqn).to_vec();
+            let mut defs: Vec<_> = self
+                .lookup_fqn(&full_fqn)
+                .iter()
+                .copied()
+                .filter(|&idx| *self.def(idx).fqn.as_istr() == *full_fqn)
+                .collect();
             if defs.is_empty() && !imp.path.is_empty() {
-                defs = self.lookup_fqn(&imp.path).to_vec();
+                defs = self
+                    .lookup_fqn(&imp.path)
+                    .iter()
+                    .copied()
+                    .filter(|&idx| *self.def(idx).fqn.as_istr() == *imp.path)
+                    .collect();
             }
             if !defs.is_empty() {
                 map.entry(name.to_string()).or_insert(defs);
@@ -421,22 +447,22 @@ impl CodeGraph {
 
     pub fn lookup_fqn(&self, fqn: &str) -> &[NodeIndex] {
         self.def_by_fqn
-            .get(fqn)
+            .get(&hash_key(fqn))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
     pub fn lookup_name(&self, name: &str) -> &[NodeIndex] {
         self.def_by_name
-            .get(name)
+            .get(&hash_key(name))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
     pub fn lookup_nested(&self, scope_fqn: &str, member_name: &str) -> &[NodeIndex] {
         self.nested_defs
-            .get(scope_fqn)
-            .and_then(|ms| ms.get(member_name))
+            .get(&hash_key(scope_fqn))
+            .and_then(|ms| ms.get(&hash_key(member_name)))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
@@ -447,33 +473,56 @@ impl CodeGraph {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        // Resolve scope_fqn to NodeIndex(es): try FQN first, then bare name
+        let sk = hash_key(scope_fqn);
         let start_nodes = self
             .def_by_fqn
-            .get(scope_fqn)
-            .or_else(|| self.def_by_name.get(scope_fqn));
+            .get(&sk)
+            .or_else(|| self.def_by_name.get(&sk));
 
         let Some(start_nodes) = start_nodes else {
             return false;
         };
 
+        let mk = hash_key(member_name);
+
         for &start in start_nodes {
+            // Verify: start node must actually match scope_fqn (hash collision guard)
+            let actual_fqn = self.def_fqn(start);
+            if &*actual_fqn != scope_fqn && self.def(start).name != scope_fqn {
+                continue;
+            }
+
             // Check direct nested defs first
-            let fqn = self.def_fqn(start);
-            let found = self.lookup_nested(&fqn, member_name);
-            if !found.is_empty() {
-                out.extend_from_slice(found);
-                return true;
+            if let Some(inner) = self.nested_defs.get(&hash_key(&actual_fqn))
+                && let Some(candidates) = inner.get(&mk)
+            {
+                let before = out.len();
+                for &idx in candidates {
+                    if self.def(idx).name == member_name {
+                        out.push(idx);
+                    }
+                }
+                if out.len() > before {
+                    return true;
+                }
             }
 
             // Walk pre-computed ancestor chain (no BFS)
             if let Some(chain) = self.ancestors.get(&start) {
                 for &ancestor in chain {
                     let ancestor_fqn = self.def_fqn(ancestor);
-                    let found = self.lookup_nested(&ancestor_fqn, member_name);
-                    if !found.is_empty() {
-                        out.extend_from_slice(found);
-                        return true;
+                    if let Some(inner) = self.nested_defs.get(&hash_key(&ancestor_fqn))
+                        && let Some(candidates) = inner.get(&mk)
+                    {
+                        let before = out.len();
+                        for &idx in candidates {
+                            if self.def(idx).name == member_name {
+                                out.push(idx);
+                            }
+                        }
+                        if out.len() > before {
+                            return true;
+                        }
                     }
                 }
             }
@@ -488,14 +537,14 @@ impl CodeGraph {
 
     pub fn def(&self, idx: NodeIndex) -> &CanonicalDefinition {
         match &self.graph[idx] {
-            GraphNode::Definition { def, .. } => def,
+            GraphNode::Definition { id, .. } => &self.defs[id.0 as usize],
             other => panic!("Expected Definition, got {other:?}"),
         }
     }
 
     pub fn import(&self, idx: NodeIndex) -> &CanonicalImport {
         match &self.graph[idx] {
-            GraphNode::Import { import, .. } => import,
+            GraphNode::Import { id, .. } => &self.imports[id.0 as usize],
             other => panic!("Expected Import, got {other:?}"),
         }
     }
@@ -521,15 +570,23 @@ impl CodeGraph {
     pub fn definitions(
         &self,
     ) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &CanonicalDefinition)> {
-        self.graph
-            .node_indices()
-            .filter_map(|idx| self.graph[idx].as_definition().map(|(p, d)| (idx, p, d)))
+        self.graph.node_indices().filter_map(|idx| {
+            if let GraphNode::Definition { file_path, id } = &self.graph[idx] {
+                Some((idx, file_path, &self.defs[id.0 as usize]))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn imports(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &CanonicalImport)> {
-        self.graph
-            .node_indices()
-            .filter_map(|idx| self.graph[idx].as_import().map(|(p, i)| (idx, p, i)))
+        self.graph.node_indices().filter_map(|idx| {
+            if let GraphNode::Import { file_path, id } = &self.graph[idx] {
+                Some((idx, file_path, &self.imports[id.0 as usize]))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn edges(&self) -> impl Iterator<Item = (&GraphNode, &GraphNode, &GraphEdge)> {
@@ -555,13 +612,13 @@ impl CodeGraph {
         let mut edges = Vec::new();
 
         for idx in self.graph.node_indices() {
-            if let GraphNode::Definition { def, .. } = &self.graph[idx]
-                && let Some(meta) = &def.metadata
+            if let GraphNode::Definition { id, .. } = &self.graph[idx]
+                && let Some(meta) = &self.defs[id.0 as usize].metadata
                 && !meta.super_types.is_empty()
             {
                 for super_name in &meta.super_types {
                     let targets = self.resolve_type_to_nodes(super_name);
-                    for &target in targets {
+                    for &target in &targets {
                         if target != idx {
                             edges.push((idx, target));
                         }
@@ -584,16 +641,29 @@ impl CodeGraph {
     }
 
     /// Resolve a type name (FQN or bare name) to graph NodeIndexes.
-    fn resolve_type_to_nodes(&self, name: &str) -> &[NodeIndex] {
-        if let Some(nodes) = self.def_by_fqn.get(name)
-            && !nodes.is_empty()
-        {
-            return nodes;
+    /// Verifies hash lookups against actual strings to guard against collisions.
+    fn resolve_type_to_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 4]> {
+        let k = hash_key(name);
+        if let Some(nodes) = self.def_by_fqn.get(&k) {
+            let verified: SmallVec<[NodeIndex; 4]> = nodes
+                .iter()
+                .copied()
+                .filter(|&idx| &*self.def(idx).fqn.as_istr() == name)
+                .collect();
+            if !verified.is_empty() {
+                return verified;
+            }
         }
         self.def_by_name
-            .get(name)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+            .get(&k)
+            .map(|nodes| {
+                nodes
+                    .iter()
+                    .copied()
+                    .filter(|&idx| self.def(idx).name == name)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Assign stable IDs to all nodes for Arrow serialization.
@@ -604,17 +674,21 @@ impl CodeGraph {
             let id = match &self.graph[idx] {
                 GraphNode::Directory(d) => compute_id(&[&pid, branch, "dir", &d.path]),
                 GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
-                GraphNode::Definition { file_path, def } => {
+                GraphNode::Definition { file_path, id } => {
+                    let def = &self.defs[id.0 as usize];
                     compute_id(&[&pid, branch, "def", file_path, &def.fqn.to_string()])
                 }
-                GraphNode::Import { file_path, import } => compute_id(&[
-                    &pid,
-                    branch,
-                    "import",
-                    file_path,
-                    &import.path,
-                    import.name.as_deref().unwrap_or("*"),
-                ]),
+                GraphNode::Import { file_path, id } => {
+                    let import = &self.imports[id.0 as usize];
+                    compute_id(&[
+                        &pid,
+                        branch,
+                        "import",
+                        file_path,
+                        &import.path,
+                        import.name.as_deref().unwrap_or("*"),
+                    ])
+                }
             };
             ids.insert(idx, id);
         }
