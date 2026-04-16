@@ -12,13 +12,7 @@ use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
 
-/// Hash a string key for index lookups. Uses FxHash for speed.
-#[inline]
-pub(crate) fn hash_key(s: &str) -> u64 {
-    let mut h = FxHasher::default();
-    s.hash(&mut h);
-    h.finish()
-}
+use super::state::GraphIndexes;
 
 // ── Node + Edge types ───────────────────────────────────────────
 
@@ -103,7 +97,7 @@ impl GraphEdge {
 // ── CodeGraph ───────────────────────────────────────────────────
 
 /// The complete code graph — petgraph-backed directed graph with
-/// resolution indexes for the walker and resolver.
+/// verified resolution indexes.
 pub struct CodeGraph {
     pub graph: DiGraph<GraphNode, GraphEdge>,
 
@@ -112,19 +106,9 @@ pub struct CodeGraph {
     /// Dense storage for imports, indexed by `ImportId`.
     pub imports: Vec<CanonicalImport>,
 
-    // Structural indexes
-    pub dir_index: FxHashMap<String, NodeIndex>,
-    pub file_index: FxHashMap<String, NodeIndex>,
-
-    // Resolution indexes — u64 hash keys (no String pointer chase on lookup),
-    // SmallVec<[_; 8]> values (inline, no heap pointer chase).
-    // Lookups verify via graph.defs[].name to handle hash collisions (~10⁻⁹ risk).
-    pub def_by_fqn: FxHashMap<u64, SmallVec<[NodeIndex; 8]>>,
-    pub def_by_name: FxHashMap<u64, SmallVec<[NodeIndex; 8]>>,
-    pub nested_defs: FxHashMap<u64, FxHashMap<u64, SmallVec<[NodeIndex; 8]>>>,
-
-    /// Pre-computed ancestor chains from Extends edges.
-    pub ancestors: FxHashMap<NodeIndex, SmallVec<[NodeIndex; 8]>>,
+    /// All resolution and construction indexes. Lookups go through
+    /// `VerifiedMap`/`NestedMap` — no raw hash access possible.
+    pub indexes: GraphIndexes,
 
     pub root_path: String,
 }
@@ -142,13 +126,7 @@ impl CodeGraph {
             graph: DiGraph::new(),
             defs: Vec::new(),
             imports: Vec::new(),
-            dir_index: FxHashMap::default(),
-            file_index: FxHashMap::default(),
-
-            def_by_fqn: FxHashMap::default(),
-            def_by_name: FxHashMap::default(),
-            nested_defs: FxHashMap::default(),
-            ancestors: FxHashMap::default(),
+            indexes: GraphIndexes::new(),
             root_path: String::new(),
         }
     }
@@ -178,7 +156,9 @@ impl CodeGraph {
             language: result.language,
             size: result.file_size,
         }));
-        self.file_index.insert(relative_path.clone(), file_node);
+        if let Some(fi) = &mut self.indexes.file_index {
+            fi.insert(relative_path.clone(), file_node);
+        }
 
         // Build directory chain and dir→file edge inline.
         if let Some(dir_idx) = self.ensure_directory_chain(&relative_path) {
@@ -200,22 +180,13 @@ impl CodeGraph {
             });
             def_nodes.push(def_node);
 
-            self.def_by_fqn
-                .entry(hash_key(&def.fqn.to_string()))
-                .or_default()
-                .push(def_node);
-            self.def_by_name
-                .entry(hash_key(&def.name))
-                .or_default()
-                .push(def_node);
+            self.indexes.by_fqn.insert(&def.fqn.to_string(), def_node);
+            self.indexes.by_name.insert(&def.name, def_node);
 
             if let Some(parent_fqn) = def.fqn.parent() {
-                self.nested_defs
-                    .entry(hash_key(&parent_fqn.to_string()))
-                    .or_default()
-                    .entry(hash_key(&def.name))
-                    .or_default()
-                    .push(def_node);
+                self.indexes
+                    .nested
+                    .insert(&parent_fqn.to_string(), &def.name, def_node);
             }
 
             self.graph.add_edge(
@@ -272,8 +243,7 @@ impl CodeGraph {
     /// Free indexes only needed during graph construction.
     /// Call after finalize() and pre_resolve_file_imports().
     pub fn drop_construction_indexes(&mut self) {
-        self.dir_index = FxHashMap::default();
-        self.file_index = FxHashMap::default();
+        self.indexes.drop_construction_indexes();
     }
 
     /// Finalize the graph after all files have been added.
@@ -318,7 +288,7 @@ impl CodeGraph {
                 chain.push(ancestor);
             }
             if !chain.is_empty() {
-                self.ancestors.insert(idx, chain);
+                self.indexes.ancestors.insert(idx, chain);
             }
         }
     }
@@ -327,6 +297,7 @@ impl CodeGraph {
     /// Returns the immediate parent directory's NodeIndex.
     /// Only creates edges when a directory is first seen, so no dedup set needed.
     fn ensure_directory_chain(&mut self, file_path: &str) -> Option<NodeIndex> {
+        let dir_index = self.indexes.dir_index.as_mut()?;
         let path = Path::new(file_path);
         let mut parent_dirs: Vec<String> = Vec::new();
         let mut current = path.parent();
@@ -337,7 +308,7 @@ impl CodeGraph {
         parent_dirs.reverse();
 
         for dir_path in &parent_dirs {
-            if !self.dir_index.contains_key(dir_path) {
+            if !dir_index.contains_key(dir_path) {
                 let name = Path::new(dir_path)
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
@@ -348,12 +319,11 @@ impl CodeGraph {
                         path: dir_path.clone(),
                         name,
                     }));
-                self.dir_index.insert(dir_path.clone(), idx);
+                dir_index.insert(dir_path.clone(), idx);
 
-                // Parent was created/exists from a previous iteration — add edge.
                 if let Some(parent_dir) = Path::new(dir_path).parent() {
                     let parent_str = dir_to_string(parent_dir);
-                    if let Some(&parent_idx) = self.dir_index.get(&parent_str) {
+                    if let Some(&parent_idx) = dir_index.get(&parent_str) {
                         self.graph.add_edge(
                             parent_idx,
                             idx,
@@ -369,7 +339,7 @@ impl CodeGraph {
         }
 
         let parent_dir = dir_to_string(path.parent()?);
-        self.dir_index.get(&parent_dir).copied()
+        dir_index.get(&parent_dir).copied()
     }
 
     /// Build the complete graph from parsed results in a single pass.
@@ -423,18 +393,16 @@ impl CodeGraph {
             };
 
             let mut defs: Vec<_> = self
-                .lookup_fqn(&full_fqn)
-                .iter()
-                .copied()
-                .filter(|&idx| *self.def(idx).fqn.as_istr() == *full_fqn)
-                .collect();
+                .indexes
+                .by_fqn
+                .lookup(&full_fqn, |idx| *self.def(idx).fqn.as_istr() == *full_fqn)
+                .to_vec();
             if defs.is_empty() && !imp.path.is_empty() {
                 defs = self
-                    .lookup_fqn(&imp.path)
-                    .iter()
-                    .copied()
-                    .filter(|&idx| *self.def(idx).fqn.as_istr() == *imp.path)
-                    .collect();
+                    .indexes
+                    .by_fqn
+                    .lookup(&imp.path, |idx| *self.def(idx).fqn.as_istr() == *imp.path)
+                    .to_vec();
             }
             if !defs.is_empty() {
                 map.entry(name.to_string()).or_insert(defs);
@@ -444,85 +412,58 @@ impl CodeGraph {
     }
 
     // ── Resolution lookups ──────────────────────────────────
+    //
+    // All lookups go through VerifiedMap/NestedMap on self.indexes.
+    // No raw hash access. Verification is structural.
 
-    pub fn lookup_fqn(&self, fqn: &str) -> &[NodeIndex] {
-        self.def_by_fqn
-            .get(&hash_key(fqn))
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
-    pub fn lookup_name(&self, name: &str) -> &[NodeIndex] {
-        self.def_by_name
-            .get(&hash_key(name))
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
-    pub fn lookup_nested(&self, scope_fqn: &str, member_name: &str) -> &[NodeIndex] {
-        self.nested_defs
-            .get(&hash_key(scope_fqn))
-            .and_then(|ms| ms.get(&hash_key(member_name)))
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
+    /// Look up definitions by scope FQN + member name, walking the
+    /// inheritance hierarchy (Extends → ancestors).
     pub fn lookup_nested_with_hierarchy(
         &self,
         scope_fqn: &str,
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let sk = hash_key(scope_fqn);
-        let start_nodes = self
-            .def_by_fqn
-            .get(&sk)
-            .or_else(|| self.def_by_name.get(&sk));
-
-        let Some(start_nodes) = start_nodes else {
+        // Find start nodes: scope_fqn could be a full FQN or a bare name.
+        let mut start_nodes = self
+            .indexes
+            .by_fqn
+            .lookup(scope_fqn, |idx| *self.def(idx).fqn.as_istr() == *scope_fqn);
+        if start_nodes.is_empty() {
+            start_nodes = self
+                .indexes
+                .by_name
+                .lookup(scope_fqn, |idx| self.def(idx).name == scope_fqn);
+        }
+        if start_nodes.is_empty() {
             return false;
-        };
+        }
 
-        let mk = hash_key(member_name);
+        let verify_member = |idx: NodeIndex| self.def(idx).name == member_name;
 
-        for &start in start_nodes {
-            // Verify: start node must actually match scope_fqn (hash collision guard)
+        for &start in &start_nodes {
             let actual_fqn = self.def_fqn(start);
-            if &*actual_fqn != scope_fqn && self.def(start).name != scope_fqn {
-                continue;
-            }
 
-            // Check direct nested defs first
-            if let Some(inner) = self.nested_defs.get(&hash_key(&actual_fqn))
-                && let Some(candidates) = inner.get(&mk)
+            // Check direct nested defs
+            if self
+                .indexes
+                .nested
+                .lookup_into(&actual_fqn, member_name, verify_member, out)
             {
-                let before = out.len();
-                for &idx in candidates {
-                    if self.def(idx).name == member_name {
-                        out.push(idx);
-                    }
-                }
-                if out.len() > before {
-                    return true;
-                }
+                return true;
             }
 
-            // Walk pre-computed ancestor chain (no BFS)
-            if let Some(chain) = self.ancestors.get(&start) {
+            // Walk pre-computed ancestor chain
+            if let Some(chain) = self.indexes.ancestors.get(&start) {
                 for &ancestor in chain {
                     let ancestor_fqn = self.def_fqn(ancestor);
-                    if let Some(inner) = self.nested_defs.get(&hash_key(&ancestor_fqn))
-                        && let Some(candidates) = inner.get(&mk)
-                    {
-                        let before = out.len();
-                        for &idx in candidates {
-                            if self.def(idx).name == member_name {
-                                out.push(idx);
-                            }
-                        }
-                        if out.len() > before {
-                            return true;
-                        }
+                    if self.indexes.nested.lookup_into(
+                        &ancestor_fqn,
+                        member_name,
+                        verify_member,
+                        out,
+                    ) {
+                        return true;
                     }
                 }
             }
@@ -641,29 +582,17 @@ impl CodeGraph {
     }
 
     /// Resolve a type name (FQN or bare name) to graph NodeIndexes.
-    /// Verifies hash lookups against actual strings to guard against collisions.
-    fn resolve_type_to_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 4]> {
-        let k = hash_key(name);
-        if let Some(nodes) = self.def_by_fqn.get(&k) {
-            let verified: SmallVec<[NodeIndex; 4]> = nodes
-                .iter()
-                .copied()
-                .filter(|&idx| &*self.def(idx).fqn.as_istr() == name)
-                .collect();
-            if !verified.is_empty() {
-                return verified;
-            }
+    fn resolve_type_to_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
+        let by_fqn = self
+            .indexes
+            .by_fqn
+            .lookup(name, |idx| *self.def(idx).fqn.as_istr() == *name);
+        if !by_fqn.is_empty() {
+            return by_fqn;
         }
-        self.def_by_name
-            .get(&k)
-            .map(|nodes| {
-                nodes
-                    .iter()
-                    .copied()
-                    .filter(|&idx| self.def(idx).name == name)
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.indexes
+            .by_name
+            .lookup(name, |idx| self.def(idx).name == name)
     }
 
     /// Assign stable IDs to all nodes for Arrow serialization.
@@ -1027,10 +956,40 @@ mod tests {
             "/repo".to_string(),
         );
 
-        assert_eq!(cg.lookup_fqn("Foo").len(), 1);
-        assert_eq!(cg.lookup_fqn("Foo.bar").len(), 1);
-        assert_eq!(cg.lookup_name("Foo").len(), 1);
-        assert_eq!(cg.lookup_name("bar").len(), 1);
-        assert_eq!(cg.lookup_nested("Foo", "bar").len(), 1);
+        assert_eq!(
+            cg.indexes
+                .by_fqn
+                .lookup("Foo", |idx| *cg.def(idx).fqn.as_istr() == *"Foo")
+                .len(),
+            1
+        );
+        assert_eq!(
+            cg.indexes
+                .by_fqn
+                .lookup("Foo.bar", |idx| *cg.def(idx).fqn.as_istr() == *"Foo.bar")
+                .len(),
+            1
+        );
+        assert_eq!(
+            cg.indexes
+                .by_name
+                .lookup("Foo", |idx| cg.def(idx).name == "Foo")
+                .len(),
+            1
+        );
+        assert_eq!(
+            cg.indexes
+                .by_name
+                .lookup("bar", |idx| cg.def(idx).name == "bar")
+                .len(),
+            1
+        );
+        assert_eq!(
+            cg.indexes
+                .nested
+                .lookup("Foo", "bar", |idx| cg.def(idx).name == "bar")
+                .len(),
+            1
+        );
     }
 }

@@ -67,7 +67,7 @@ pub fn fused_walk_file(
             GraphNode::Definition { id, .. } => {
                 let def = &graph.defs[id.0 as usize];
                 ssa.write_variable(&def.name, module_block, Value::Def(neighbor));
-                ssa_names.insert(super::graph::hash_key(&def.name));
+                ssa_names.insert(super::state::hash_name(&def.name));
                 defs_by_byte.insert(
                     def.range.byte_offset.0,
                     (neighbor, def.kind.is_type_container()),
@@ -83,7 +83,7 @@ pub fn fused_walk_file(
                         .unwrap_or("");
                     if !name.is_empty() {
                         ssa.write_variable(name, module_block, Value::Import(neighbor));
-                        ssa_names.insert(super::graph::hash_key(name));
+                        ssa_names.insert(super::state::hash_name(name));
                         if !import.path.is_empty() {
                             import_name_map
                                 .insert(name.to_string(), format!("{}{sep}{name}", import.path));
@@ -305,14 +305,14 @@ impl<'a> FusedFileWalker<'a> {
                 self.build_fqn(name)
             };
             for &self_name in self.rules.self_names {
-                self.ssa_names.insert(super::graph::hash_key(self_name));
+                self.ssa_names.insert(super::state::hash_name(self_name));
                 self.ssa
                     .write_variable(self_name, new_block, Value::type_of(&scope_fqn));
             }
             if let Some(super_name) = self.rules.super_name
                 && let Some(super_type) = self.find_super_type(name)
             {
-                self.ssa_names.insert(super::graph::hash_key(super_name));
+                self.ssa_names.insert(super::state::hash_name(super_name));
                 self.ssa
                     .write_variable(super_name, new_block, Value::type_of(&super_type));
             }
@@ -491,7 +491,7 @@ impl<'a> FusedFileWalker<'a> {
         } else {
             self.current_block
         };
-        self.ssa_names.insert(super::graph::hash_key(&name));
+        self.ssa_names.insert(super::state::hash_name(&name));
         self.ssa.write_variable(&name, target_block, value);
     }
 
@@ -502,8 +502,8 @@ impl<'a> FusedFileWalker<'a> {
         // and doesn't exist as any definition in the graph, no resolution
         // path can produce a result. Skip the entire pipeline.
         if expression.is_none()
-            && !self.ssa_names.contains(&super::graph::hash_key(name))
-            && self.graph.lookup_name(name).is_empty()
+            && !self.ssa_names.contains(&super::state::hash_name(name))
+            && !self.graph.indexes.by_name.contains(name)
         {
             self.stats.bare_refs += 1;
             self.stats.bare_unresolved += 1;
@@ -569,7 +569,7 @@ impl<'a> FusedFileWalker<'a> {
             let result = match stage {
                 ResolveStage::SSA => self.resolve_bare_ssa(name),
                 ResolveStage::ImportStrategies => {
-                    if self.graph.lookup_name(name).is_empty() {
+                    if !self.graph.indexes.by_name.contains(name) {
                         self.stats.bare_early_exit_unknown += 1;
                         continue;
                     }
@@ -611,7 +611,7 @@ impl<'a> FusedFileWalker<'a> {
     }
 
     fn resolve_bare_ssa(&mut self, name: &IStr) -> Vec<NodeIndex> {
-        if !self.ssa_names.contains(&super::graph::hash_key(name)) {
+        if !self.ssa_names.contains(&super::state::hash_name(name)) {
             return vec![];
         }
         let reaching = self.ssa.read_variable_stateless(name, self.current_block);
@@ -755,7 +755,7 @@ impl<'a> FusedFileWalker<'a> {
             ExpressionStep::Ident(name) | ExpressionStep::Call(name) => {
                 if !self
                     .ssa_names
-                    .contains(&super::graph::hash_key(name.as_str()))
+                    .contains(&super::state::hash_name(name.as_str()))
                 {
                     return SmallVec::new();
                 }

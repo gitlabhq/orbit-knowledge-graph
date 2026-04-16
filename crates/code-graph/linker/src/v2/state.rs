@@ -37,9 +37,12 @@ use bumpalo::collections::String as BumpString;
 // ── Hash key ────────────────────────────────────────────────────
 
 /// Hash a string for use as an index key. FxHash for speed.
-/// Internal to this module — callers interact through VerifiedMap/NestedMap.
+///
+/// Used internally by VerifiedMap/NestedMap. Also public for
+/// `ssa_names: FxHashSet<u64>` in the walker, which uses conservative
+/// hash-based membership checks (collision = extra work, never wrong edges).
 #[inline]
-fn hash_key(s: &str) -> u64 {
+pub fn hash_name(s: &str) -> u64 {
     let mut h = FxHasher::default();
     s.hash(&mut h);
     h.finish()
@@ -80,7 +83,7 @@ impl<const N: usize> VerifiedMap<N> {
 
     /// Insert a value under the given string key.
     pub fn insert(&mut self, key: &str, value: NodeIndex) {
-        self.inner.entry(hash_key(key)).or_default().push(value);
+        self.inner.entry(hash_name(key)).or_default().push(value);
     }
 
     /// Look up entries for `key`, returning only those that pass `verify`.
@@ -92,7 +95,7 @@ impl<const N: usize> VerifiedMap<N> {
         key: &str,
         verify: impl Fn(NodeIndex) -> bool,
     ) -> SmallVec<[NodeIndex; N]> {
-        match self.inner.get(&hash_key(key)) {
+        match self.inner.get(&hash_name(key)) {
             Some(candidates) => candidates
                 .iter()
                 .copied()
@@ -110,7 +113,7 @@ impl<const N: usize> VerifiedMap<N> {
         verify: impl Fn(NodeIndex) -> bool,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let Some(candidates) = self.inner.get(&hash_key(key)) else {
+        let Some(candidates) = self.inner.get(&hash_name(key)) else {
             return false;
         };
         let before = out.len();
@@ -127,7 +130,7 @@ impl<const N: usize> VerifiedMap<N> {
     /// extra work but never wrong edges — callers use this for early-skip
     /// decisions where "maybe yes" is safe.
     pub fn contains(&self, key: &str) -> bool {
-        self.inner.contains_key(&hash_key(key))
+        self.inner.contains_key(&hash_name(key))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -167,9 +170,9 @@ impl NestedMap {
     /// Insert a member under a scope.
     pub fn insert(&mut self, scope: &str, member: &str, value: NodeIndex) {
         self.inner
-            .entry(hash_key(scope))
+            .entry(hash_name(scope))
             .or_default()
-            .entry(hash_key(member))
+            .entry(hash_name(member))
             .or_default()
             .push(value);
     }
@@ -188,10 +191,10 @@ impl NestedMap {
         member: &str,
         verify_member: impl Fn(NodeIndex) -> bool,
     ) -> SmallVec<[NodeIndex; 8]> {
-        let Some(inner) = self.inner.get(&hash_key(scope)) else {
+        let Some(inner) = self.inner.get(&hash_name(scope)) else {
             return SmallVec::new();
         };
-        let Some(candidates) = inner.get(&hash_key(member)) else {
+        let Some(candidates) = inner.get(&hash_name(member)) else {
             return SmallVec::new();
         };
         candidates
@@ -209,10 +212,10 @@ impl NestedMap {
         verify_member: impl Fn(NodeIndex) -> bool,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let Some(inner) = self.inner.get(&hash_key(scope)) else {
+        let Some(inner) = self.inner.get(&hash_name(scope)) else {
             return false;
         };
-        let Some(candidates) = inner.get(&hash_key(member)) else {
+        let Some(candidates) = inner.get(&hash_name(member)) else {
             return false;
         };
         let before = out.len();
