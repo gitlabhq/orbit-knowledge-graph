@@ -163,7 +163,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | Domain | `gitlab.gkg.dev` |
 | Secrets | GCP Secret Manager -> External Secrets Operator |
 
-See the [server configuration runbook](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/server_configuration.md) for full config reference.
+GCP sandbox infrastructure (GKE cluster, VMs, networking) is managed via the GCP console and Helm charts. See the [Terraform section](#terraform--iac) for IaC references and the [server configuration runbook](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/server_configuration.md) for application config.
 
 ### Staging (gitlab-helmfiles managed)
 

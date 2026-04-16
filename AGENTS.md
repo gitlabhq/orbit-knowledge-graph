@@ -88,21 +88,25 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/formatters` | Result formatters (graph, raw row, goon) |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema_version.rs`), migration orchestrator (`schema_migration.rs`), migration completion detection and table cleanup (`migration_completion.rs`) |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
-| `code-graph` | Parent crate for code parsing and graph construction; re-exports `treesitter-visit`, `parser-core`, `code-graph-linker` |
+| `code-graph` | Parent crate for code parsing and graph construction; re-exports `treesitter-visit`, `parser-core`, `code-graph-linker`, `code-graph-config`, `code-graph-types` |
 | `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper |
-| `code-graph/parser` | Multi-language parser (7 langs), tree-sitter + swc, extracts definitions/imports/references |
+| `code-graph/parser` | Multi-language parser (8 langs: Ruby, TypeScript, JavaScript, Python, Kotlin, Java, C#, Rust), tree-sitter + Prism (Ruby) + swc (TS/JS), extracts definitions/imports/references |
 | `code-graph/linker` | Builds in-memory property graphs from parsed code, `AsRecordBatch<RowContext>` impls for all node types, `ResolvedEdge` for edge serialization |
+| `code-graph/config` | Language detection and configuration (language enum, extension-to-language mapping) |
+| `code-graph/types` | Core type definitions for code-graph nodes and edges (definitions, imports, references, bindings, FQN, `CanonicalParser` trait) |
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`), Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `siphon-proto` | Protobuf types for CDC replication events |
-| `labkit-rs` | Logging, correlation IDs, OpenTelemetry metrics |
+| `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |
 | `health-check` | K8s readiness/liveness probes |
 | `cli` | Local `orbit index`, `orbit query`, and `orbit compile` commands; DuckDB pipeline with hydration + virtual column resolution from filesystem; workspace management (`Workspace`, `GitInfo`, manifest in DuckDB) |
 | `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, CLI test harness (`cli` module) for CLI integration tests |
 | `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness, graph formatting) + cli (concurrency, worktrees); depends on gkg-server, compiler, integration-testkit |
+| `integration-tests-codegraph` | Code-graph-specific integration tests (linker, lance-graph) |
+| `fuzz` | Fuzz testing harness (bolero) for the query compiler, code parsers, and indexer message handling |
 | `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |
 
 ## Code quality

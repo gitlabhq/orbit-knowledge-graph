@@ -175,13 +175,13 @@ engine:
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `handlers.global_handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
+| `engine.handlers.global-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
 
 #### SDLC namespace handler
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `handlers.namespace_handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
+| `engine.handlers.namespace-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
 
 ### Retry strategy by handler type
 
@@ -202,25 +202,25 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 |------|-------------|-------------|-------------|
 | Global dispatch | `schedule.tasks.global.cron` | `0 */1 * * * *` (every minute) | Publishes `GlobalIndexingRequest` |
 | Namespace dispatch | `schedule.tasks.namespace.cron` | `0 */1 * * * *` (every minute) | Publishes per-namespace requests |
-| Code task dispatch | `schedule.tasks.code_indexing_task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
-| Code backfill | `schedule.tasks.namespace_code_backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
-| Table cleanup | `schedule.tasks.table_cleanup.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Runs `OPTIMIZE TABLE ... FINAL CLEANUP` |
-| Namespace deletion | `schedule.tasks.namespace_deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
-| Migration completion | `schedule.tasks.migration_completion.cron` | `0 */5 * * * *` (every 5 minutes) | Detects completed schema migrations |
+| Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
+| Code backfill | `schedule.tasks.namespace-code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
+| Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Runs `OPTIMIZE TABLE ... FINAL CLEANUP` |
+| Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
+| Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
 ### Code dispatch task settings
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `schedule.tasks.code_indexing_task.events_stream_name` | `siphon_stream_main_db` | NATS stream for Siphon CDC events |
-| `schedule.tasks.code_indexing_task.batch_size` | `100` | CDC events to process per cycle |
+| `schedule.tasks.code-indexing-task.events_stream_name` | `siphon_stream_main_db` | NATS stream for Siphon CDC events |
+| `schedule.tasks.code-indexing-task.batch_size` | `100` | CDC events to process per cycle |
 
 ### Code backfill task settings
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `schedule.tasks.namespace_code_backfill.events_stream_name` | `siphon_stream_main_db` | NATS stream for namespace events |
-| `schedule.tasks.namespace_code_backfill.batch_size` | `100` | Events to process per cycle |
+| `schedule.tasks.namespace-code-backfill.events_stream_name` | `siphon_stream_main_db` | NATS stream for namespace events |
+| `schedule.tasks.namespace-code-backfill.batch_size` | `100` | Events to process per cycle |
 
 ## GitLab client
 
@@ -261,7 +261,7 @@ Example: `info,gkg_server=debug,gkg_indexer=trace`
 
 These settings are used by the Webserver mode.
 
-### HTTP / gRPC bind addresses
+### General
 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
@@ -306,9 +306,9 @@ query:
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `query.default.max_execution_time` | None | ClickHouse `max_execution_time` in seconds |
-| `query.default.use_query_cache` | None | Enable ClickHouse query cache |
-| `query.default.query_cache_ttl` | None | Query cache TTL in seconds |
+| `query.default.max_execution_time` | `30` | ClickHouse `max_execution_time` in seconds |
+| `query.default.use_query_cache` | `false` | Enable ClickHouse query cache |
+| `query.default.query_cache_ttl` | `60` | Query cache TTL in seconds |
 
 ## Schema management
 
@@ -343,7 +343,7 @@ Increase SDLC batch sizes for large namespaces:
 ```yaml
 engine:
   handlers:
-    namespace_handler:
+    namespace-handler:
       datalake_batch_size: 5000000
 ```
 
@@ -362,7 +362,7 @@ Increase the code dispatch batch size:
 ```yaml
 schedule:
   tasks:
-    code_indexing_task:
+    code-indexing-task:
       batch_size: 500
 ```
 
@@ -503,17 +503,17 @@ engine:
       max_attempts: 5
       retry_interval_secs: 60
     namespace-deletion:
-      concurrency_group: sdlc
+      concurrency_group: code
       max_attempts: 1
 
 schedule:
   tasks:
-    table_cleanup:
+    table-cleanup:
       cron: "0 0 3 * * *"
-    namespace_deletion:
+    namespace-deletion:
       cron: "0 0 3 * * *"
-    migration_completion:
-      cron: "0 */5 * * * *"
+    migration-completion:
+      cron: "0 */1 * * * *"
 
 metrics:
   log_level: info,gkg_server=debug
