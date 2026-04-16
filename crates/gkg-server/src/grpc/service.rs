@@ -67,6 +67,11 @@ impl KnowledgeGraphServiceImpl {
         self.pipeline = self.pipeline.with_resolver_registry(registry);
         self
     }
+
+    pub fn with_cache_broker(mut self, broker: Arc<indexer::nats::NatsBroker>) -> Self {
+        self.pipeline = self.pipeline.with_cache_broker(broker);
+        self
+    }
 }
 
 type ExecuteQueryStream =

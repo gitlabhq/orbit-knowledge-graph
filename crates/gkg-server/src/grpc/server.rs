@@ -53,6 +53,11 @@ impl GrpcServer {
         self
     }
 
+    pub fn with_cache_broker(mut self, broker: Arc<indexer::nats::NatsBroker>) -> Self {
+        self.service = self.service.with_cache_broker(broker);
+        self
+    }
+
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }

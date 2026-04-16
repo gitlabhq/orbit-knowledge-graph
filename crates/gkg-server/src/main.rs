@@ -157,7 +157,7 @@ async fn run_webserver(
 
     let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
 
-    let grpc_server = GrpcServer::new(
+    let mut grpc_server = GrpcServer::new(
         config.grpc_bind_address,
         validator,
         ontology,
@@ -167,6 +167,17 @@ async fn run_webserver(
         config.grpc.clone(),
     )
     .with_resolver_registry(Arc::new(resolver_registry));
+
+    if config.query.default.graph_query_cache_enabled == Some(true) {
+        info!("initializing NATS connection for graph query cache");
+        let broker = Arc::new(
+            indexer::nats::NatsBroker::connect(&config.nats)
+                .await
+                .map_err(|e| anyhow::anyhow!("NATS connection for query cache failed: {e}"))?,
+        );
+        grpc_server = grpc_server.with_cache_broker(broker);
+    }
+
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
     tokio::select! {
