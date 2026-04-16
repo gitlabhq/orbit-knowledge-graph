@@ -104,9 +104,17 @@ impl CodeIndexingTaskHandler {
 
         let branch = self.resolve_branch(request).await?;
 
-        if let Some(reason) = self.skip_reason(request, &branch).await {
-            self.metrics.record_outcome(reason);
-            return Ok(());
+        match self.skip_reason(request, &branch).await {
+            Some("skipped_checkpoint") => {
+                self.metrics.record_outcome("skipped_checkpoint");
+                return Ok(());
+            }
+            Some(reason) => {
+                self.metrics.record_outcome(reason);
+                self.republish(context, request).await;
+                return Ok(());
+            }
+            None => {}
         }
 
         info!(
@@ -215,6 +223,50 @@ impl CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
+    async fn republish(&self, ctx: &HandlerContext, request: &CodeIndexingTaskRequest) {
+        let envelope = match crate::types::Envelope::new(request) {
+            Ok(e) => e,
+            Err(e) => {
+                warn!(
+                    task_id = request.task_id,
+                    project_id = request.project_id,
+                    error = %e,
+                    "failed to serialize debounced task for re-publish"
+                );
+                return;
+            }
+        };
+
+        match ctx
+            .nats
+            .publish(&request.publish_subscription(), &envelope)
+            .await
+        {
+            Ok(()) => {
+                debug!(
+                    task_id = request.task_id,
+                    project_id = request.project_id,
+                    "re-published debounced task"
+                );
+            }
+            Err(crate::nats::NatsError::PublishDuplicate) => {
+                debug!(
+                    task_id = request.task_id,
+                    project_id = request.project_id,
+                    "debounced task already in-flight, skipping re-publish"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    task_id = request.task_id,
+                    project_id = request.project_id,
+                    error = %e,
+                    "failed to re-publish debounced task"
+                );
+            }
+        }
+    }
+
     async fn try_acquire_lock(
         &self,
         ctx: &HandlerContext,
@@ -448,7 +500,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skips_task_within_debounce_window() {
+    async fn debounce_re_publishes_task_to_nats() {
         let ctx = TestContext::new();
         // Checkpoint was set just now (within the default 30s debounce window)
         // with a lower task_id so checkpoint skip does not trigger
@@ -458,8 +510,14 @@ mod tests {
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
         assert!(result.is_ok());
-        // Should not have acquired a lock because debounce skipped it
         assert!(!ctx.lock_exists(123, "main"));
+
+        let published = ctx.mock_nats.get_published();
+        assert_eq!(published.len(), 1, "debounced task should be re-published");
+        assert!(
+            published[0].0.subject.contains("123"),
+            "re-published subject should contain the project_id"
+        );
     }
 
     #[tokio::test]
