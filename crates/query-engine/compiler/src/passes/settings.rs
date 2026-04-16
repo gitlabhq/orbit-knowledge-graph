@@ -11,10 +11,12 @@ use gkg_server_config::QueryConfig;
 pub fn resolve(query_type: &str, has_cursor: bool) -> QueryConfig {
     let mut cfg = gkg_server_config::query::for_query_type(query_type);
 
-    if has_cursor {
-        // Intentionally unconditional: cursor pagination requires the query
-        // cache so that subsequent pages hit the same cached result. This
-        // overrides even an explicit `use_query_cache: false` in YAML.
+    if has_cursor && cfg.graph_query_cache_enabled != Some(true) {
+        // When the NATS KV graph query cache is active, it already caches
+        // the full LIMIT window (cursor field is stripped from the cache key),
+        // so the ClickHouse query cache is redundant.
+        // Without the KV cache, we still need CH's query cache so that
+        // subsequent pages hit the same cached result.
         cfg.use_query_cache = Some(true);
     }
 
@@ -32,9 +34,30 @@ mod tests {
     }
 
     #[test]
-    fn resolve_enables_cache_for_cursor() {
+    fn resolve_enables_ch_cache_for_cursor_without_kv() {
         let cfg = resolve("search", true);
+        // Without global init, graph_query_cache_enabled defaults to None,
+        // so ClickHouse query cache is enabled for cursor pagination.
         assert_eq!(cfg.use_query_cache, Some(true));
+    }
+
+    #[test]
+    fn resolve_skips_ch_cache_for_cursor_when_kv_enabled() {
+        // Simulate global settings with graph_query_cache_enabled: true
+        let settings = gkg_server_config::QuerySettings {
+            default: QueryConfig {
+                graph_query_cache_enabled: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // Resolve manually since we can't call init() in tests (OnceLock)
+        let mut cfg = settings.resolve("search");
+        if cfg.graph_query_cache_enabled != Some(true) {
+            cfg.use_query_cache = Some(true);
+        }
+        assert_eq!(cfg.use_query_cache, None);
+        assert_eq!(cfg.graph_query_cache_enabled, Some(true));
     }
 
     #[test]

@@ -132,11 +132,20 @@ impl PipelineStage for CachedExecutor {
 
 /// Cache key from the query JSON and security context.
 /// JSON is canonicalized via RFC 8785 (JCS) -- keys sorted, no whitespace.
+/// The `cursor` field is stripped so all pages of the same query share one
+/// cache entry (the full LIMIT window is cached, cursor slicing happens
+/// after authorization in userspace).
 /// Traversal paths are sorted to ensure deterministic keys regardless
 /// of the order Rails sends them.
 fn compute_cache_key(query_json: &str, org_id: i64, traversal_paths: &[String]) -> String {
     let canonical = serde_json::from_str::<serde_json::Value>(query_json)
         .ok()
+        .map(|mut v| {
+            if let Some(obj) = v.as_object_mut() {
+                obj.remove("cursor");
+            }
+            v
+        })
         .and_then(|v| serde_json_canonicalizer::to_string(&v).ok())
         .unwrap_or_else(|| query_json.to_string());
 
@@ -259,6 +268,24 @@ mod tests {
         let k1 = compute_cache_key(r#"{"a":1}"#, 1, &["1/".to_string()]);
         let k2 = compute_cache_key(r#"{"a":1}"#, 1, &["1/2/".to_string()]);
         assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn cache_key_ignores_cursor_field() {
+        let paths = vec!["1/".to_string()];
+        let k1 = compute_cache_key(
+            r#"{"query_type":"search","limit":100,"cursor":{"offset":0,"page_size":20}}"#,
+            1,
+            &paths,
+        );
+        let k2 = compute_cache_key(
+            r#"{"query_type":"search","limit":100,"cursor":{"offset":40,"page_size":20}}"#,
+            1,
+            &paths,
+        );
+        let k3 = compute_cache_key(r#"{"query_type":"search","limit":100}"#, 1, &paths);
+        assert_eq!(k1, k2, "different cursor offsets should produce same key");
+        assert_eq!(k1, k3, "with and without cursor should produce same key");
     }
 
     #[test]
