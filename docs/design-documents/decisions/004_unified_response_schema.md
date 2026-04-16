@@ -280,6 +280,18 @@ The user can always switch.
 
 `GraphFormatter` in Rust replaces `RawRowFormatter` as the default. `GoonFormatter` handles LLM output (GOON/TOON format). `ResultContext` was extended with `EdgeMeta` to carry edge column metadata through the pipeline. A JSON Schema at `crates/gkg-server/schemas/query_response.json` is the shared contract between server and frontend. On the frontend side, `graph_transform.js` goes away entirely, replaced by ~30 lines of `buildGraphData()` that passes nodes and edges straight to Three.js.
 
+### Format versioning
+
+Every response includes a `format_version` field (semver string, e.g. `"1.0.0"`). Major bumps signal breaking shape changes, minor bumps signal new optional fields, patch bumps signal formatting bug fixes. The version is loaded at compile time from `config/RAW_OUTPUT_FORMAT_VERSION` and appears in:
+
+1. The JSON response body as the first field (`format_version: "1.0.0"`)
+2. The proto `QueryMetadata.format_version` field alongside `format_name` ("raw" or "goon")
+3. The JSON Schema `$id` (`schemas/query_response/v1`)
+
+The `ResultFormatter` trait exposes `format_name()` and `format_version()` so the gRPC service stamps version metadata without hardcoding. CI enforces that changes to formatter code or the response schema require a version bump (`scripts/check-response-schema-version.sh`).
+
+GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) will be added in a follow-up MR alongside the actual GOON encoding (ADR 009).
+
 ## Consequences
 
 **What improves:**

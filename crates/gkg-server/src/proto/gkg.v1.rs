@@ -64,6 +64,12 @@ pub struct QueryMetadata {
     /// rows returned after redaction (and cursor slicing if applicable)
     #[prost(int32, tag = "3")]
     pub row_count: i32,
+    /// semver string, e.g. "1.0.0"
+    #[prost(string, tag = "4")]
+    pub format_version: ::prost::alloc::string::String,
+    /// "raw" or "goon"
+    #[prost(string, tag = "5")]
+    pub format_name: ::prost::alloc::string::String,
 }
 /// Server-sent error when query compilation or execution fails.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

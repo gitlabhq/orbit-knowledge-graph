@@ -10,6 +10,8 @@ use serde_json::Value;
 use shared::PipelineOutput;
 use types::{QueryResult, QueryResultRow};
 
+use semver::Version;
+
 use super::{ResultFormatter, column_value_to_json};
 
 /// Keys that collide with `GraphNode`'s fixed struct fields under
@@ -24,6 +26,7 @@ fn is_reserved_node_key(key: &str) -> bool {
 #[derive(Debug, Serialize)]
 #[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphResponse {
+    pub format_version: String,
     pub query_type: String,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
@@ -86,6 +89,14 @@ type EdgeKey = (String, i64, String, i64, String, Option<i64>);
 pub struct GraphFormatter;
 
 impl ResultFormatter for GraphFormatter {
+    fn format_name(&self) -> &'static str {
+        "raw"
+    }
+
+    fn format_version(&self) -> &Version {
+        &super::RAW_OUTPUT_FORMAT_VERSION
+    }
+
     fn format(&self, output: &PipelineOutput) -> Value {
         serde_json::to_value(self.build_response(output)).unwrap_or(Value::Null)
     }
@@ -157,6 +168,7 @@ impl GraphFormatter {
         });
 
         GraphResponse {
+            format_version: super::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type,
             nodes: node_map.into_values().collect(),
             edges,

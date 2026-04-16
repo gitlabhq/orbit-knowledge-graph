@@ -523,6 +523,7 @@ mod tests {
                 "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3}}"#,
         );
         let resp = GraphResponse {
+            format_version: "1.0.0".to_string(),
             query_type: "path_finding".to_string(),
             nodes: vec![make_node("User", 1, &[]), make_node("Project", 1000, &[])],
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
@@ -842,6 +843,7 @@ mod tests {
                 "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3}}"#,
         );
         let resp = GraphResponse {
+            format_version: "1.0.0".to_string(),
             query_type: "path_finding".to_string(),
             nodes: vec![make_node("User", 1, &[]), make_node("Project", 1000, &[])],
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],

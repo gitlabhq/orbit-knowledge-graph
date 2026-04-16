@@ -15,6 +15,7 @@ shared = { path = "../shared" }
 types = { path = "../types" }
 compiler = { path = "../compiler" }
 serde = { workspace = true }
+semver = { version = "1.0", features = ["serde"] }
 serde_json = { workspace = true }
 
 [dev-dependencies]

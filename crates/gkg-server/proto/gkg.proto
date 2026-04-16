@@ -83,6 +83,8 @@ message QueryMetadata {
   string query_type = 1;              // e.g. "traversal", "aggregation", "search"
   repeated string raw_query_strings = 2; // compiled ClickHouse SQL(s) for debugging
   int32 row_count = 3;                // rows returned after redaction (and cursor slicing if applicable)
+  string format_version = 4;          // semver string, e.g. "1.0.0"
+  string format_name = 5;             // "raw" or "goon"
 }
 
 // Server-sent error when query compilation or execution fails.

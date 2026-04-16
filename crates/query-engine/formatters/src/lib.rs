@@ -2,6 +2,9 @@ mod goon;
 mod graph;
 mod raw_row;
 
+use std::sync::LazyLock;
+
+use semver::Version;
 use serde_json::{Value, json};
 
 use gkg_utils::arrow::ColumnValue;
@@ -13,7 +16,16 @@ pub use graph::{
 };
 pub use raw_row::row_to_json;
 
+pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
+    include_str!(concat!(env!("CONFIG_DIR"), "/RAW_OUTPUT_FORMAT_VERSION"))
+        .trim()
+        .parse()
+        .expect("RAW_OUTPUT_FORMAT_VERSION must be valid semver")
+});
+
 pub trait ResultFormatter: Send + Sync {
+    fn format_name(&self) -> &'static str;
+    fn format_version(&self) -> &Version;
     fn format(&self, output: &PipelineOutput) -> Value;
 }
 

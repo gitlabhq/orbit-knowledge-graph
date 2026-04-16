@@ -33,6 +33,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Integration tests with Docker testcontainers (`integration-test`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
+- Response format version bumped when formatter code or response schema changes (`response-schema-version-check`)
 
 ## Where to find things
 
@@ -55,6 +56,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Query test fixtures | `fixtures/queries/` |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
 | Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |
+| RAW output format version | `config/RAW_OUTPUT_FORMAT_VERSION` (semver, bump when `graph.rs` or `query_response.json` changes) |
 | Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
 | gRPC service definition | `crates/gkg-server/proto/gkg.proto` |

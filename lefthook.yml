@@ -31,3 +31,10 @@ pre-commit:
       glob:
         - "config/graph.sql"
         - "config/ontology/**/*.yaml"
+    - name: response-schema-version-check
+      run: bash ./scripts/check-response-schema-version.sh
+      glob:
+        - "crates/query-engine/formatters/src/graph.rs"
+        - "crates/query-engine/formatters/src/goon.rs"
+        - "crates/gkg-server/schemas/query_response.json"
+        - "crates/gkg-server/schemas/goon_format.md"

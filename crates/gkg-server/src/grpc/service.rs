@@ -144,11 +144,13 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
                             use crate::proto::execute_query_result::Content;
 
-                            let formatted = if use_llm_format {
-                                GoonFormatter.format(&output)
+                            let formatter: &dyn ResultFormatter = if use_llm_format {
+                                &GoonFormatter
                             } else {
-                                GraphFormatter.format(&output)
+                                &GraphFormatter
                             };
+
+                            let formatted = formatter.format(&output);
 
                             let content = if use_llm_format {
                                 Some(Content::FormattedText(formatted.to_string()))
@@ -160,6 +162,8 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                                 query_type: output.query_type,
                                 raw_query_strings: output.raw_query_strings,
                                 row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                                format_version: formatter.format_version().to_string(),
+                                format_name: formatter.format_name().to_string(),
                             });
 
                             let _ = tx

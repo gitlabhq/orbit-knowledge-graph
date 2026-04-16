@@ -445,6 +445,8 @@ type QueryMetadata struct {
 	QueryType       string                 `protobuf:"bytes,1,opt,name=query_type,json=queryType,proto3" json:"query_type,omitempty"`                     // e.g. "traversal", "aggregation", "search"
 	RawQueryStrings []string               `protobuf:"bytes,2,rep,name=raw_query_strings,json=rawQueryStrings,proto3" json:"raw_query_strings,omitempty"` // compiled ClickHouse SQL(s) for debugging
 	RowCount        int32                  `protobuf:"varint,3,opt,name=row_count,json=rowCount,proto3" json:"row_count,omitempty"`                       // rows returned after redaction (and cursor slicing if applicable)
+	FormatVersion   string                 `protobuf:"bytes,4,opt,name=format_version,json=formatVersion,proto3" json:"format_version,omitempty"`         // semver string, e.g. "1.0.0"
+	FormatName      string                 `protobuf:"bytes,5,opt,name=format_name,json=formatName,proto3" json:"format_name,omitempty"`                  // "raw" or "goon"
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -498,6 +500,20 @@ func (x *QueryMetadata) GetRowCount() int32 {
 		return x.RowCount
 	}
 	return 0
+}
+
+func (x *QueryMetadata) GetFormatVersion() string {
+	if x != nil {
+		return x.FormatVersion
+	}
+	return ""
+}
+
+func (x *QueryMetadata) GetFormatName() string {
+	if x != nil {
+		return x.FormatName
+	}
+	return ""
 }
 
 // Server-sent error when query compilation or execution fails.
@@ -2147,12 +2163,15 @@ const file_gkg_proto_rawDesc = "" +
 	"resultJson\x12'\n" +
 	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedText\x121\n" +
 	"\bmetadata\x18\x03 \x01(\v2\x15.gkg.v1.QueryMetadataR\bmetadataB\t\n" +
-	"\acontent\"w\n" +
+	"\acontent\"\xbf\x01\n" +
 	"\rQueryMetadata\x12\x1d\n" +
 	"\n" +
 	"query_type\x18\x01 \x01(\tR\tqueryType\x12*\n" +
 	"\x11raw_query_strings\x18\x02 \x03(\tR\x0frawQueryStrings\x12\x1b\n" +
-	"\trow_count\x18\x03 \x01(\x05R\browCount\"A\n" +
+	"\trow_count\x18\x03 \x01(\x05R\browCount\x12%\n" +
+	"\x0eformat_version\x18\x04 \x01(\tR\rformatVersion\x12\x1f\n" +
+	"\vformat_name\x18\x05 \x01(\tR\n" +
+	"formatName\"A\n" +
 	"\x11ExecuteQueryError\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\"j\n" +
