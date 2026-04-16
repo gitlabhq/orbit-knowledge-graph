@@ -15,6 +15,7 @@ pub enum SupportLang {
     Tsx,
     JavaScript,
     Java,
+    Go,
     CSharp,
     Kotlin,
     Rust,
@@ -66,6 +67,11 @@ impl LanguageExt for SupportLang {
             Self::Java => tree_sitter_java::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-java"))]
             Self::Java => panic!("tree-sitter-java feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-go")]
+            Self::Go => tree_sitter_go::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-go"))]
+            Self::Go => panic!("tree-sitter-go feature not enabled"),
 
             #[cfg(feature = "tree-sitter-c-sharp")]
             Self::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),

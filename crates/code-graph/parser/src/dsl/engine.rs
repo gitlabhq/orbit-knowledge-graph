@@ -151,30 +151,36 @@ impl LanguageSpec {
             });
         }
 
-        if let Some((name, range, expression)) =
-            self.evaluate_reference(node, node_kind_ref, import_map, sep)
-        {
-            refs.push(CanonicalReference {
-                reference_type: "Call",
-                name,
-                range: canonical_range(&range),
-                scope_fqn: Fqn::from_scope_only(scope_stack, sep),
-                status: ReferenceStatus::Unresolved,
-                target_fqn: None,
-                expression,
-            });
-        }
+        let custom_scope_handled = self
+            .custom_scope_fn
+            .is_some_and(|f| f(node, defs, scope_stack, sep));
 
-        let import_count_before = imports.len();
-        let handled = self.custom_import_fn.is_some_and(|f| f(node, imports));
-        if !handled {
-            self.evaluate_imports(node, node_kind_ref, imports);
-        }
-        for imp in &imports[import_count_before..] {
-            if !imp.wildcard && !imp.path.is_empty() {
-                let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-                if !name.is_empty() {
-                    import_map.insert(name.to_string(), format!("{}{}{}", imp.path, sep, name));
+        if !custom_scope_handled {
+            if let Some((name, range, expression)) =
+                self.evaluate_reference(node, node_kind_ref, import_map, sep)
+            {
+                refs.push(CanonicalReference {
+                    reference_type: "Call",
+                    name,
+                    range: canonical_range(&range),
+                    scope_fqn: Fqn::from_scope_only(scope_stack, sep),
+                    status: ReferenceStatus::Unresolved,
+                    target_fqn: None,
+                    expression,
+                });
+            }
+
+            let import_count_before = imports.len();
+            let handled = self.custom_import_fn.is_some_and(|f| f(node, imports));
+            if !handled {
+                self.evaluate_imports(node, node_kind_ref, imports);
+            }
+            for imp in &imports[import_count_before..] {
+                if !imp.wildcard && !imp.path.is_empty() {
+                    let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+                    if !name.is_empty() {
+                        import_map.insert(name.to_string(), format!("{}{}{}", imp.path, sep, name));
+                    }
                 }
             }
         }

@@ -9,6 +9,8 @@ pub enum Extract {
     Default,
     /// Always returns None. Used when the parent node has no path/name to extract.
     None,
+    /// Extract the node's own text directly (for leaf nodes like identifiers).
+    Text,
     /// Extract text from a named field (e.g. `node.field("name")`).
     Field(&'static str),
     /// Extract text from the first child of this node kind.
@@ -24,6 +26,7 @@ impl Extract {
         match self {
             Extract::Default => default_name(node),
             Extract::None => None,
+            Extract::Text => Some(node.text().to_string()),
             Extract::Field(name) => node.field(name).map(|n| n.text().to_string()),
             Extract::ChildOfKind(kind) => node
                 .children()

@@ -31,9 +31,11 @@ fn spinner(msg: &str) -> ProgressBar {
     pb
 }
 use crate::v2::langs::csharp::CSharpDsl;
+use crate::v2::langs::go::{GoDsl, GoRules};
 use crate::v2::langs::java::{JavaDsl, JavaRules};
 use crate::v2::langs::kotlin::{KotlinDsl, KotlinRules};
 use crate::v2::langs::python::{PythonDsl, PythonRules};
+use crate::v2::langs::ruby::{RubyDsl, RubyRules};
 
 /// Input to a language pipeline: file path + source bytes.
 pub type FileInput = (String, Vec<u8>);
@@ -207,36 +209,40 @@ macro_rules! register_v2_pipelines {
     };
 }
 
-/// No-op rules for languages without resolution (parse-only).
-pub struct NoRules;
-impl HasRules for NoRules {
-    fn rules() -> crate::linker::v2::ResolutionRules {
-        let spec = CSharpDsl::spec();
-        let scopes = crate::linker::v2::ResolutionRules::derive_scopes(&spec);
-        crate::linker::v2::ResolutionRules::new(
-            "noop",
-            scopes,
-            spec,
-            vec![],
-            vec![],
-            crate::linker::v2::rules::ChainMode::ValueFlow,
-            crate::linker::v2::rules::ReceiverMode::None,
-            ".",
-            &[],
-            None,
-        )
-    }
+/// No-op rules: parse + chain resolution only, no SSA import strategies.
+macro_rules! no_op_rules {
+    ($name:ident, $dsl:ty, $sep:expr) => {
+        pub struct $name;
+        impl HasRules for $name {
+            fn rules() -> crate::linker::v2::ResolutionRules {
+                let spec = <$dsl>::spec();
+                let scopes = crate::linker::v2::ResolutionRules::derive_scopes(&spec);
+                crate::linker::v2::ResolutionRules::new(
+                    stringify!($name),
+                    scopes,
+                    spec,
+                    vec![],
+                    vec![],
+                    crate::linker::v2::rules::ChainMode::ValueFlow,
+                    crate::linker::v2::rules::ReceiverMode::None,
+                    $sep,
+                    &[],
+                    None,
+                )
+            }
+        }
+    };
 }
 
+no_op_rules!(CSharpNoRules, CSharpDsl, ".");
+
 register_v2_pipelines! {
-    // Generic: DSL parser + rules-based SSA resolver
     Python  => GenericPipeline<DslParser<PythonDsl>, PythonRules>,
     Java    => GenericPipeline<DslParser<JavaDsl>, JavaRules>,
     Kotlin  => GenericPipeline<DslParser<KotlinDsl>, KotlinRules>,
-    CSharp  => GenericPipeline<DslParser<CSharpDsl>, NoRules>,
-
-    // Custom: full control over parse + link
-    Ruby    => crate::v2::custom::ruby::RubyPipeline,
+    CSharp  => GenericPipeline<DslParser<CSharpDsl>, CSharpNoRules>,
+    Go      => GenericPipeline<DslParser<GoDsl>, GoRules>,
+    Ruby    => GenericPipeline<DslParser<RubyDsl>, RubyRules>,
 }
 
 pub struct PipelineConfig {
