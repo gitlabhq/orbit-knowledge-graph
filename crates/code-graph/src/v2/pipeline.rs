@@ -125,14 +125,14 @@ where
                         error: format!("Parse error: {e}"),
                     })?;
 
-                let file_node = {
-                    let mut g = graph.lock().unwrap();
-                    let (file_node, _, _) = g.add_file_nodes(&result, file_idx);
-                    file_node
-                };
-
                 let defs = result.definitions.len();
                 let imports = result.imports.len();
+
+                let file_node = {
+                    let mut g = graph.lock().unwrap();
+                    let (file_node, _, _) = g.add_file_nodes(result, file_idx);
+                    file_node
+                };
 
                 pb.inc(1);
                 Ok((file_node, defs, imports))

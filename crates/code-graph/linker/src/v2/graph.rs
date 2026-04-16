@@ -150,7 +150,7 @@ impl CodeGraph {
     /// Does NOT add directory nodes or flatten supers — call `finalize()` after.
     pub fn add_file_nodes(
         &mut self,
-        result: &CanonicalResult,
+        result: CanonicalResult,
         _file_order: usize,
     ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
         let relative_path = self.relative_path(&result.file_path);
@@ -179,18 +179,21 @@ impl CodeGraph {
             );
         }
 
+        // First pass: add graph nodes, build indexes (borrow defs).
+        let def_base = self.defs.len() as u32;
         let mut def_nodes = Vec::with_capacity(result.definitions.len());
-        for def in result.definitions.iter() {
-            let id = DefId(self.defs.len() as u32);
-            self.defs.push(def.clone());
+        for (i, def) in result.definitions.iter().enumerate() {
+            let id = DefId(def_base + i as u32);
             let def_node = self.graph.add_node(GraphNode::Definition {
                 file_path: file_path.clone(),
                 id,
             });
             def_nodes.push(def_node);
 
-            let fqn_str = def.fqn.to_string();
-            self.def_by_fqn.entry(fqn_str).or_default().push(def_node);
+            self.def_by_fqn
+                .entry(def.fqn.to_string())
+                .or_default()
+                .push(def_node);
             self.def_by_name
                 .entry(def.name.clone())
                 .or_default()
@@ -212,12 +215,11 @@ impl CodeGraph {
             );
         }
 
-        // Containment edges between definitions (class→method, module→class, etc.)
+        // Containment edges (borrow defs).
         for (i, def) in result.definitions.iter().enumerate() {
             let Some(parent_fqn) = def.fqn.parent() else {
                 continue;
             };
-            // Find the parent def within this file's def_nodes
             for (j, parent_def) in result.definitions.iter().enumerate() {
                 if j != i
                     && parent_def.fqn.as_istr() == parent_fqn.as_istr()
@@ -233,10 +235,14 @@ impl CodeGraph {
             }
         }
 
+        // Move defs into dense storage (no clone).
+        self.defs.extend(result.definitions);
+
+        // Move imports into dense storage (no clone).
         let mut import_nodes = Vec::with_capacity(result.imports.len());
-        for imp in &result.imports {
-            let id = ImportId(self.imports.len() as u32);
-            self.imports.push(imp.clone());
+        let import_base = self.imports.len() as u32;
+        for (i, _) in result.imports.iter().enumerate() {
+            let id = ImportId(import_base + i as u32);
             let imp_node = self.graph.add_node(GraphNode::Import {
                 file_path: file_path.clone(),
                 id,
@@ -248,6 +254,8 @@ impl CodeGraph {
                 GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::ImportedSymbol),
             );
         }
+        self.imports.extend(result.imports);
+
         (file_node, def_nodes, import_nodes)
     }
 
@@ -360,7 +368,7 @@ impl CodeGraph {
     /// `add_file_nodes()` + `finalize()` instead.
     pub fn from_results(results: Vec<CanonicalResult>, root_path: String) -> Self {
         let mut cg = Self::new_with_root(root_path);
-        for (i, result) in results.iter().enumerate() {
+        for (i, result) in results.into_iter().enumerate() {
             cg.add_file_nodes(result, i);
         }
         cg.finalize();
