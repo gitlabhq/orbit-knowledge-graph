@@ -2,6 +2,7 @@ pub mod graph;
 pub mod imports;
 pub mod rules;
 pub mod ssa;
+pub mod state;
 pub mod stats;
 pub mod walker;
 
