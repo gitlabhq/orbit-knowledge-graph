@@ -18,7 +18,7 @@ pub trait Rule {
     fn extract(&self) -> &Extract;
 
     fn matches(&self, node: &N<'_>, node_kind: &str) -> bool {
-        self.kinds().iter().any(|k| *k == node_kind)
+        self.kinds().contains(&node_kind)
             && self.condition().is_none_or(|c| c.test(node))
     }
 
