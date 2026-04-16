@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use code_graph::v2::custom::ruby::RubyPipeline;
-use code_graph::v2::{LanguagePipeline, Pipeline, PipelineConfig, PipelineOutput};
+use code_graph::v2::pipeline::dispatch_by_tag;
+use code_graph::v2::{Pipeline, PipelineConfig, PipelineOutput};
 use code_graph_linker::v2::graph::RowContext;
 
 use super::assertions::{Severity, TestSuite};
@@ -30,24 +30,15 @@ fn arrow58_to_arrow56(
     reader.into_iter().next().unwrap().unwrap()
 }
 
-/// Run a custom pipeline and collect its output as lance-compatible datasets.
-fn run_custom_pipeline(pipeline_name: &str, files: &[String], root: &str) -> LanceDatasets {
-    let output = match pipeline_name {
-        "ruby_prism" => RubyPipeline::process_files(files, root)
-            .unwrap_or_else(|e| panic!("custom pipeline {pipeline_name} failed: {e:?}")),
-        other => panic!("unknown pipeline: {other}"),
-    };
-
+fn output_to_datasets(output: PipelineOutput) -> LanceDatasets {
     match output {
-        PipelineOutput::Batches(batches) => {
-            let mut datasets = HashMap::new();
-            for (table, batch) in &batches {
-                datasets.insert(table.clone(), arrow58_to_arrow56(batch));
-            }
-            datasets
-        }
-        PipelineOutput::Graph(_) => {
-            panic!("custom pipeline {pipeline_name} returned Graph, expected Batches")
+        PipelineOutput::Batches(batches) => batches
+            .iter()
+            .map(|(table, batch)| (table.clone(), arrow58_to_arrow56(batch)))
+            .collect(),
+        PipelineOutput::Graph(graph) => {
+            let ctx = RowContext::empty();
+            to_lance_datasets(&graph, &ctx).expect("Failed to convert graph to datasets")
         }
     }
 }
@@ -91,13 +82,16 @@ pub async fn run_yaml_suite(yaml: &str) {
             }
             datasets
         }
-        Some(name) => {
+        Some(tag) => {
             let files: Vec<String> = suite
                 .fixtures
                 .iter()
                 .map(|f| format!("{root}/{}", f.path))
                 .collect();
-            run_custom_pipeline(name, &files, &root)
+            let output = dispatch_by_tag(tag, &files, &root)
+                .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
+                .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
+            output_to_datasets(output)
         }
     };
 

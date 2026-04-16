@@ -304,20 +304,68 @@ where
 
 /// Registration macro for v2 pipelines.
 ///
-/// Generates `dispatch_language` which routes files to the correct
-/// `LanguagePipeline` implementation per language.
+/// Generates `dispatch_language` (production, by `Language` enum) and
+/// `dispatch_by_tag` (testing, by string tag).
 ///
-/// Adding a new language: implement `LanguagePipeline` (or use
-/// `GenericPipeline<YourParser>`), add one line here.
+/// Pipeline types are wrapped in `[]` so commas inside generics don't
+/// break the macro.
+///
+/// ```ignore
+/// register_v2_pipelines! {
+///     Python => [GenericPipeline<DslParser<PythonDsl>, PythonRules>],
+///     Ruby   => [GenericPipeline<DslParser<RubyDsl>, RubyRules>],
+///     Tag("ruby_prism") => [RubyPipeline],
+/// }
+/// ```
 macro_rules! register_v2_pipelines {
-    ($( $variant:ident => $pipeline:ty ),+ $(,)?) => {
+    // Entry points: match first entry directly to avoid catch-all recursion.
+    (Tag($tag:literal) => $p:tt , $($rest:tt)*) => {
+        register_v2_pipelines!(@munch [] [[$tag => $p]] $($rest)*);
+    };
+    ($v:ident => $p:tt , $($rest:tt)*) => {
+        register_v2_pipelines!(@munch [[$v => $p]] [] $($rest)*);
+    };
+    // Done: emit both dispatch functions.
+    (@munch [$($langs:tt)*] [$($tags:tt)*]) => {
+        register_v2_pipelines!(@emit_lang $($langs)*);
+        register_v2_pipelines!(@emit_tag $($tags)*);
+    };
+    // Tag entry (must be before ident arm — first-match-wins).
+    (@munch [$($langs:tt)*] [$($tags:tt)*] Tag($tag:literal) => $pipeline:tt , $($rest:tt)*) => {
+        register_v2_pipelines!(@munch [$($langs)*] [$($tags)* [$tag => $pipeline]] $($rest)*);
+    };
+    (@munch [$($langs:tt)*] [$($tags:tt)*] Tag($tag:literal) => $pipeline:tt) => {
+        register_v2_pipelines!(@munch [$($langs)*] [$($tags)* [$tag => $pipeline]]);
+    };
+    // Language entry.
+    (@munch [$($langs:tt)*] [$($tags:tt)*] $variant:ident => $pipeline:tt , $($rest:tt)*) => {
+        register_v2_pipelines!(@munch [$($langs)* [$variant => $pipeline]] [$($tags)*] $($rest)*);
+    };
+    (@munch [$($langs:tt)*] [$($tags:tt)*] $variant:ident => $pipeline:tt) => {
+        register_v2_pipelines!(@munch [$($langs)* [$variant => $pipeline]] [$($tags)*]);
+    };
+    // Emit language dispatch.
+    (@emit_lang $( [$variant:ident => [$($pipeline:tt)*]] )* ) => {
         fn dispatch_language(
             language: Language,
             files: &[FileInput],
             root_path: &str,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             Some(match language {
-                $(Language::$variant => <$pipeline>::process_files(files, root_path),)+
+                $(Language::$variant => <$($pipeline)*>::process_files(files, root_path),)*
+                _ => return None,
+            })
+        }
+    };
+    // Emit tag dispatch.
+    (@emit_tag $( [$tag:literal => [$($pipeline:tt)*]] )* ) => {
+        pub fn dispatch_by_tag(
+            tag: &str,
+            files: &[FileInput],
+            root_path: &str,
+        ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
+            Some(match tag {
+                $($tag => <$($pipeline)*>::process_files(files, root_path),)*
                 _ => return None,
             })
         }
@@ -351,13 +399,16 @@ macro_rules! no_op_rules {
 
 no_op_rules!(CSharpNoRules, CSharpDsl, ".");
 
+use crate::v2::custom::ruby::RubyPipeline;
+
 register_v2_pipelines! {
-    Python  => GenericPipeline<DslParser<PythonDsl>, PythonRules>,
-    Java    => GenericPipeline<DslParser<JavaDsl>, JavaRules>,
-    Kotlin  => GenericPipeline<DslParser<KotlinDsl>, KotlinRules>,
-    CSharp  => GenericPipeline<DslParser<CSharpDsl>, CSharpNoRules>,
-    Go      => GenericPipeline<DslParser<GoDsl>, GoRules>,
-    Ruby    => GenericPipeline<DslParser<RubyDsl>, RubyRules>,
+    Python  => [GenericPipeline<DslParser<PythonDsl>, PythonRules>],
+    Java    => [GenericPipeline<DslParser<JavaDsl>, JavaRules>],
+    Kotlin  => [GenericPipeline<DslParser<KotlinDsl>, KotlinRules>],
+    CSharp  => [GenericPipeline<DslParser<CSharpDsl>, CSharpNoRules>],
+    Go      => [GenericPipeline<DslParser<GoDsl>, GoRules>],
+    Ruby    => [GenericPipeline<DslParser<RubyDsl>, RubyRules>],
+    Tag("ruby_prism") => [RubyPipeline],
 }
 
 pub struct PipelineConfig {
@@ -546,9 +597,13 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        dispatch_language(language, vec![path.to_string()], "/")
+        let output = dispatch_language(language, &[path.to_string()], "/")
             .unwrap_or_else(|| panic!("Language {language} not supported"))
-            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"))
+            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
+        match output {
+            PipelineOutput::Graph(g) => *g,
+            PipelineOutput::Batches(_) => panic!("expected Graph output"),
+        }
     }
 
     // ── Python fixture ──────────────────────────────────────────────
