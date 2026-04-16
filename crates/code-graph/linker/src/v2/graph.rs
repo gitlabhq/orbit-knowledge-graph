@@ -493,17 +493,17 @@ impl CodeGraph {
             }
 
             // Check direct nested defs first
-            if let Some(inner) = self.nested_defs.get(&hash_key(&actual_fqn)) {
-                if let Some(candidates) = inner.get(&mk) {
-                    let before = out.len();
-                    for &idx in candidates {
-                        if self.def(idx).name == member_name {
-                            out.push(idx);
-                        }
+            if let Some(inner) = self.nested_defs.get(&hash_key(&actual_fqn))
+                && let Some(candidates) = inner.get(&mk)
+            {
+                let before = out.len();
+                for &idx in candidates {
+                    if self.def(idx).name == member_name {
+                        out.push(idx);
                     }
-                    if out.len() > before {
-                        return true;
-                    }
+                }
+                if out.len() > before {
+                    return true;
                 }
             }
 
@@ -511,17 +511,17 @@ impl CodeGraph {
             if let Some(chain) = self.ancestors.get(&start) {
                 for &ancestor in chain {
                     let ancestor_fqn = self.def_fqn(ancestor);
-                    if let Some(inner) = self.nested_defs.get(&hash_key(&ancestor_fqn)) {
-                        if let Some(candidates) = inner.get(&mk) {
-                            let before = out.len();
-                            for &idx in candidates {
-                                if self.def(idx).name == member_name {
-                                    out.push(idx);
-                                }
+                    if let Some(inner) = self.nested_defs.get(&hash_key(&ancestor_fqn))
+                        && let Some(candidates) = inner.get(&mk)
+                    {
+                        let before = out.len();
+                        for &idx in candidates {
+                            if self.def(idx).name == member_name {
+                                out.push(idx);
                             }
-                            if out.len() > before {
-                                return true;
-                            }
+                        }
+                        if out.len() > before {
+                            return true;
                         }
                     }
                 }
