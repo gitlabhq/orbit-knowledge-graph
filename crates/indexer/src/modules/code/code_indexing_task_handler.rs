@@ -148,9 +148,10 @@ impl CodeIndexingTaskHandler {
                 task_id = request.task_id,
                 project_id,
                 branch = %branch,
-                "lock held by another indexer, skipping"
+                "lock held by another indexer, re-publishing"
             );
             self.metrics.record_outcome("skipped_lock");
+            self.republish(context, request).await;
             return Ok(());
         }
 
@@ -447,7 +448,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skips_when_lock_already_held() {
+    async fn lock_contention_re_publishes_task() {
         let ctx = TestContext::new();
         ctx.set_lock(123, "main");
 
@@ -455,6 +456,13 @@ mod tests {
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
         assert!(result.is_ok());
+
+        let published = ctx.mock_nats.get_published();
+        assert_eq!(
+            published.len(),
+            1,
+            "lock-contended task should be re-published"
+        );
     }
 
     #[tokio::test]
