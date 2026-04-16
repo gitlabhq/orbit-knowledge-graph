@@ -58,11 +58,11 @@ pub trait LanguagePipeline {
 /// Generic pipeline parameterized by parser `P` and rules `R`.
 ///
 /// Two-phase fused architecture:
-/// 1. **Phase 1** (parallel): parse + extract defs/imports → add to graph, keep AST
-/// 2. **Phase 2** (parallel): fused walk+resolve on kept ASTs → emit edges, drop AST
+/// 1. **Phase 1** (parallel): parse + extract defs/imports → add to graph, drop AST
+/// 2. **Phase 2** (parallel): re-parse + fused walk+resolve → emit edges
 ///
-/// Single parse per file. No CanonicalResult accumulation, no FileWalkResult,
-/// no RecordedRead. ASTs kept alive between phases, dropped per-file in Phase 2.
+/// Phase 2 re-parses with tree-sitter (~150ms for 22k files). Peak memory =
+/// graph + ~16 concurrent ASTs (rayon threads), not graph + all ASTs.
 pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
@@ -86,16 +86,16 @@ where
         let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
 
         // ── Phase 1: parse + extract defs/imports → graph ───────
-        // ASTs kept alive for Phase 2 (no re-parse).
         let pb = progress_bar(file_count as u64, "Phase 1: defs");
-        let phase1_results: Vec<Result<_, PipelineError>> = files
+        let phase1_results: Vec<_> = files
             .par_iter()
             .enumerate()
             .map(|(file_idx, (path, source))| {
-                let (result, ast) = parser.parse_file(source, path).map_err(|e| PipelineError {
-                    file_path: path.clone(),
-                    error: format!("Parse error: {e}"),
-                })?;
+                let (result, _ast) =
+                    parser.parse_file(source, path).map_err(|e| PipelineError {
+                        file_path: path.clone(),
+                        error: format!("Parse error: {e}"),
+                    })?;
 
                 let file_node = {
                     let mut g = graph.lock().unwrap();
@@ -103,12 +103,8 @@ where
                     file_node
                 };
 
-                let total_defs = result.definitions.len();
-                let total_imports = result.imports.len();
-                // CanonicalResult dropped, AST kept
-
                 pb.inc(1);
-                Ok((file_node, ast, total_defs, total_imports))
+                Ok((file_node, result.definitions.len(), result.imports.len()))
             })
             .collect();
         pb.finish_with_message(format!(
@@ -116,28 +112,26 @@ where
             t0.elapsed()
         ));
 
-        // ── Collect Phase 1 results ─────────────────────────────
-        let mut file_entries: Vec<(petgraph::graph::NodeIndex, Option<P::Ast>)> =
-            Vec::with_capacity(file_count);
+        let mut file_nodes = Vec::with_capacity(file_count);
         let mut errors = Vec::new();
         let mut total_defs = 0usize;
         let mut total_imports = 0usize;
 
         for output in phase1_results {
             match output {
-                Ok((file_node, ast, defs, imports)) => {
+                Ok((file_node, defs, imports)) => {
                     total_defs += defs;
                     total_imports += imports;
-                    file_entries.push((file_node, Some(ast)));
+                    file_nodes.push(file_node);
                 }
                 Err(err) => {
                     errors.push(err);
-                    file_entries.push((petgraph::graph::NodeIndex::new(0), None));
+                    file_nodes.push(petgraph::graph::NodeIndex::new(0));
                 }
             }
         }
 
-        if !errors.is_empty() && file_entries.iter().all(|(_, ast)| ast.is_none()) {
+        if !errors.is_empty() && file_nodes.is_empty() {
             return Err(errors);
         }
 
@@ -151,18 +145,30 @@ where
         );
         eprintln!("[v2] graph finalize: {:.2?}", t1.elapsed());
 
-        // ── Phase 2: fused walk+resolve on kept ASTs ────────────
+        // ── Phase 2: re-parse + fused walk+resolve ──────────────
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "Phase 2: resolve");
 
-        let phase2_results: Vec<_> = file_entries
-            .par_iter_mut()
-            .map(|(file_node, ast_slot)| {
-                let ast = ast_slot.take()?;
-                let root = ast.as_root()?;
-                let result = fused_walk_file(&rules, &graph, &root, *file_node, &rules.settings);
+        let phase2_results: Vec<_> = files
+            .par_iter()
+            .zip(file_nodes.par_iter())
+            .map(|((path, source), &file_node)| {
+                if file_node.index() == 0 && errors.iter().any(|e| e.file_path == *path) {
+                    pb2.inc(1);
+                    return None;
+                }
+                let source_str = match std::str::from_utf8(source) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        pb2.inc(1);
+                        return None;
+                    }
+                };
+                let lang = code_graph_config::detect_language_from_path(path)?;
+                let ast = lang.parse_ast(source_str);
+                let root = ast.root();
+                let result = fused_walk_file(&rules, &graph, &root, file_node, &rules.settings);
                 pb2.inc(1);
-                // AST dropped here (taken from slot)
                 Some(result)
             })
             .collect();
