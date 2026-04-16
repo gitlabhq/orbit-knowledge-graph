@@ -118,8 +118,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
     for (idx, fp, d) in &defs {
         id_b.append_value(ids[idx]);
         fp_b.append_value(fp.as_ref());
-        fqn_b.append_value(d.fqn.to_string());
-        name_b.append_value(&d.name);
+        fqn_b.append_value(graph.str(d.fqn));
+        name_b.append_value(graph.str(d.name));
         dt_b.append_value(d.definition_type);
         sl_b.append_value(d.range.start.line as i64);
         el_b.append_value(d.range.end.line as i64);
@@ -154,7 +154,7 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
 }
 
 fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
-    let imports: Vec<_> = graph.imports().collect();
+    let imports: Vec<_> = graph.imports_iter().collect();
     let n = imports.len();
     let mut id_b = Int64Builder::with_capacity(n);
     let mut fp_b = StringBuilder::with_capacity(n, n * 32);
@@ -167,13 +167,13 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
         id_b.append_value(ids[idx]);
         fp_b.append_value(fp.as_ref());
         it_b.append_value(imp.import_type);
-        path_b.append_value(&imp.path);
-        match &imp.name {
-            Some(n) => name_b.append_value(n),
+        path_b.append_value(graph.str(imp.path));
+        match imp.name {
+            Some(id) => name_b.append_value(graph.str(id)),
             None => name_b.append_null(),
         }
-        match &imp.alias {
-            Some(a) => alias_b.append_value(a),
+        match imp.alias {
+            Some(id) => alias_b.append_value(graph.str(id)),
             None => alias_b.append_null(),
         }
     }

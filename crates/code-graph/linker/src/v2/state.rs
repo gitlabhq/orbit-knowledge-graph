@@ -290,159 +290,129 @@ impl Default for GraphIndexes {
     }
 }
 
-// ── Arena-backed graph types ────────────────────────────────────
+// ── String pool ─────────────────────────────────────────────────
 
-/// Arena-backed FQN. All strings live in [`GraphArena`].
+/// Index into [`StringPool`]. 4 bytes, Copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StrId(u32);
+
+/// Pool of interned strings for graph-level storage.
 ///
-/// Replaces `Fqn` (which uses `IStr` / global `RwLock`) for graph storage.
-/// `as_str()` is zero-cost (returns the pre-joined cached `&str`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GraphFqn<'a> {
-    parts: SmallVec<[&'a str; 4]>,
-    cached: &'a str,
-    separator: &'static str,
+/// Owned by `CodeGraph`. No lifetime parameter, no global lock, no memory
+/// leak. Strings are `Box<str>` (16 bytes: ptr+len, no unused capacity).
+/// Dropped in bulk when the graph is dropped.
+///
+/// All `GraphDef` / `GraphImport` fields reference strings via [`StrId`].
+/// Access: `pool.get(id) -> &str` (one Vec index).
+pub struct StringPool {
+    strings: Vec<Box<str>>,
 }
 
-impl<'a> GraphFqn<'a> {
-    /// Build from parts, allocating the joined string into the arena.
-    pub fn new(parts: &[&str], separator: &'static str, arena: &'a GraphArena) -> Self {
-        let arena_parts: SmallVec<[&'a str; 4]> =
-            parts.iter().map(|s| arena.alloc_str(s)).collect();
-        let joined = parts.join(separator);
-        let cached = arena.alloc_str(&joined);
+impl StringPool {
+    pub fn new() -> Self {
         Self {
-            parts: arena_parts,
-            cached,
-            separator,
+            strings: Vec::new(),
         }
     }
 
-    /// Convert from a `code_graph_types::Fqn`, copying strings into the arena.
-    pub fn from_fqn(fqn: &code_graph_types::Fqn, arena: &'a GraphArena) -> Self {
-        let fqn_str = fqn.to_string();
-        let cached = arena.alloc_str(&fqn_str);
-        // Split the cached string to get parts that reference the arena.
-        let parts: SmallVec<[&'a str; 4]> = cached.split(fqn.separator()).collect();
+    pub fn with_capacity(cap: usize) -> Self {
         Self {
-            parts,
-            cached,
-            separator: fqn.separator(),
+            strings: Vec::with_capacity(cap),
         }
     }
 
-    /// The full FQN string, zero-cost (pre-cached in arena).
+    /// Allocate a string into the pool. Returns an ID for later retrieval.
+    pub fn alloc(&mut self, s: &str) -> StrId {
+        let id = StrId(self.strings.len() as u32);
+        self.strings.push(s.into());
+        id
+    }
+
+    /// Retrieve a string by ID.
     #[inline]
-    pub fn as_str(&self) -> &'a str {
-        self.cached
-    }
-
-    /// The leaf name (last segment).
-    pub fn name(&self) -> &'a str {
-        self.parts.last().copied().unwrap_or("")
-    }
-
-    /// Parent FQN (everything except last segment). Allocates into arena.
-    pub fn parent(&self, arena: &'a GraphArena) -> Option<Self> {
-        if self.parts.len() <= 1 {
-            return None;
-        }
-        let parent_parts: SmallVec<[&'a str; 4]> = self.parts[..self.parts.len() - 1].into();
-        let joined = parent_parts
-            .iter()
-            .copied()
-            .collect::<Vec<_>>()
-            .join(self.separator);
-        let cached = arena.alloc_str(&joined);
-        Some(Self {
-            parts: parent_parts,
-            cached,
-            separator: self.separator,
-        })
-    }
-
-    pub fn separator(&self) -> &'static str {
-        self.separator
+    pub fn get(&self, id: StrId) -> &str {
+        &self.strings[id.0 as usize]
     }
 
     pub fn len(&self) -> usize {
-        self.parts.len()
+        self.strings.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.parts.is_empty()
+        self.strings.is_empty()
     }
 }
 
-impl std::fmt::Display for GraphFqn<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.cached)
+impl Default for StringPool {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-/// Arena-backed definition. Stored in `CodeGraph.defs`.
+// ── Pool-backed graph types ─────────────────────────────────────
+
+/// Pool-backed definition. Stored in `CodeGraph.defs`.
 ///
 /// Replaces `CanonicalDefinition` for graph storage. All strings are
-/// `&'a str` referencing the [`GraphArena`] — no heap allocations.
+/// [`StrId`] referencing the graph's [`StringPool`].
 #[derive(Debug, Clone)]
-pub struct GraphDef<'a> {
+pub struct GraphDef {
     pub definition_type: &'static str,
     pub kind: DefKind,
-    pub name: &'a str,
-    pub fqn: GraphFqn<'a>,
+    pub name: StrId,
+    pub fqn: StrId,
+    pub fqn_sep: &'static str,
     pub range: Range,
     pub is_top_level: bool,
-    pub metadata: Option<Box<GraphDefMeta<'a>>>,
+    pub metadata: Option<Box<GraphDefMeta>>,
 }
 
-/// Arena-backed definition metadata.
+/// Pool-backed definition metadata.
 #[derive(Debug, Clone, Default)]
-pub struct GraphDefMeta<'a> {
-    pub super_types: SmallVec<[&'a str; 2]>,
-    pub return_type: Option<&'a str>,
-    pub type_annotation: Option<&'a str>,
-    pub receiver_type: Option<&'a str>,
-    pub decorators: SmallVec<[&'a str; 2]>,
-    pub companion_of: Option<&'a str>,
+pub struct GraphDefMeta {
+    pub super_types: SmallVec<[StrId; 2]>,
+    pub return_type: Option<StrId>,
+    pub type_annotation: Option<StrId>,
+    pub receiver_type: Option<StrId>,
+    pub decorators: SmallVec<[StrId; 2]>,
+    pub companion_of: Option<StrId>,
 }
 
-/// Arena-backed import. Stored in `CodeGraph.imports`.
-///
-/// Replaces `CanonicalImport` for graph storage. All strings are
-/// `&'a str` referencing the [`GraphArena`].
+/// Pool-backed import. Stored in `CodeGraph.imports`.
 #[derive(Debug, Clone)]
-pub struct GraphImport<'a> {
+pub struct GraphImport {
     pub import_type: &'static str,
-    pub path: &'a str,
-    pub name: Option<&'a str>,
-    pub alias: Option<&'a str>,
-    pub scope_fqn: Option<GraphFqn<'a>>,
+    pub path: StrId,
+    pub name: Option<StrId>,
+    pub alias: Option<StrId>,
     pub range: Range,
     pub wildcard: bool,
 }
 
 // ── Conversion from parser types ────────────────────────────────
 
-impl<'a> GraphDef<'a> {
-    /// Convert from parser's `CanonicalDefinition`, allocating strings into arena.
+impl GraphDef {
+    /// Convert from parser's `CanonicalDefinition`, allocating strings into pool.
     pub fn from_canonical(
         def: &code_graph_types::CanonicalDefinition,
-        arena: &'a GraphArena,
+        pool: &mut StringPool,
     ) -> Self {
         let metadata = def.metadata.as_ref().map(|m| {
             Box::new(GraphDefMeta {
-                super_types: m.super_types.iter().map(|s| arena.alloc_str(s)).collect(),
-                return_type: m.return_type.as_deref().map(|s| arena.alloc_str(s)),
-                type_annotation: m.type_annotation.as_deref().map(|s| arena.alloc_str(s)),
-                receiver_type: m.receiver_type.as_deref().map(|s| arena.alloc_str(s)),
-                decorators: m.decorators.iter().map(|s| arena.alloc_str(s)).collect(),
-                companion_of: m.companion_of.as_deref().map(|s| arena.alloc_str(s)),
+                super_types: m.super_types.iter().map(|s| pool.alloc(s)).collect(),
+                return_type: m.return_type.as_deref().map(|s| pool.alloc(s)),
+                type_annotation: m.type_annotation.as_deref().map(|s| pool.alloc(s)),
+                receiver_type: m.receiver_type.as_deref().map(|s| pool.alloc(s)),
+                decorators: m.decorators.iter().map(|s| pool.alloc(s)).collect(),
+                companion_of: m.companion_of.as_deref().map(|s| pool.alloc(s)),
             })
         });
         Self {
             definition_type: def.definition_type,
             kind: def.kind,
-            name: arena.alloc_str(&def.name),
-            fqn: GraphFqn::from_fqn(&def.fqn, arena),
+            name: pool.alloc(&def.name),
+            fqn: pool.alloc(&def.fqn.to_string()),
+            fqn_sep: def.fqn.separator(),
             range: def.range,
             is_top_level: def.is_top_level,
             metadata,
@@ -450,15 +420,14 @@ impl<'a> GraphDef<'a> {
     }
 }
 
-impl<'a> GraphImport<'a> {
-    /// Convert from parser's `CanonicalImport`, allocating strings into arena.
-    pub fn from_canonical(imp: &code_graph_types::CanonicalImport, arena: &'a GraphArena) -> Self {
+impl GraphImport {
+    /// Convert from parser's `CanonicalImport`, allocating strings into pool.
+    pub fn from_canonical(imp: &code_graph_types::CanonicalImport, pool: &mut StringPool) -> Self {
         Self {
             import_type: imp.import_type,
-            path: arena.alloc_str(&imp.path),
-            name: imp.name.as_deref().map(|s| arena.alloc_str(s)),
-            alias: imp.alias.as_deref().map(|s| arena.alloc_str(s)),
-            scope_fqn: imp.scope_fqn.as_ref().map(|f| GraphFqn::from_fqn(f, arena)),
+            path: pool.alloc(&imp.path),
+            name: imp.name.as_deref().map(|s| pool.alloc(s)),
+            alias: imp.alias.as_deref().map(|s| pool.alloc(s)),
             range: imp.range,
             wildcard: imp.wildcard,
         }
@@ -974,49 +943,34 @@ mod tests {
         assert!(indexes.by_name.lookup("com.Foo", |_| true).is_empty());
     }
 
-    // ── GraphFqn ────────────────────────────────────────────
+    // ── StringPool ───────────────────────────────────────────
 
     #[test]
-    fn graph_fqn_new() {
-        let arena = GraphArena::new();
-        let fqn = GraphFqn::new(&["com", "example", "Foo"], ".", &arena);
-        assert_eq!(fqn.as_str(), "com.example.Foo");
-        assert_eq!(fqn.name(), "Foo");
-        assert_eq!(fqn.len(), 3);
+    fn string_pool_alloc_and_get() {
+        let mut pool = StringPool::new();
+        let id = pool.alloc("hello");
+        assert_eq!(pool.get(id), "hello");
     }
 
     #[test]
-    fn graph_fqn_display() {
-        let arena = GraphArena::new();
-        let fqn = GraphFqn::new(&["User", "find"], "::", &arena);
-        assert_eq!(format!("{fqn}"), "User::find");
+    fn string_pool_multiple() {
+        let mut pool = StringPool::new();
+        let a = pool.alloc("foo");
+        let b = pool.alloc("bar");
+        let c = pool.alloc("baz");
+        assert_eq!(pool.get(a), "foo");
+        assert_eq!(pool.get(b), "bar");
+        assert_eq!(pool.get(c), "baz");
+        assert_eq!(pool.len(), 3);
     }
 
     #[test]
-    fn graph_fqn_parent() {
-        let arena = GraphArena::new();
-        let fqn = GraphFqn::new(&["A", "B", "C"], ".", &arena);
-        let parent = fqn.parent(&arena).unwrap();
-        assert_eq!(parent.as_str(), "A.B");
-        assert_eq!(parent.name(), "B");
-        assert_eq!(parent.len(), 2);
-    }
-
-    #[test]
-    fn graph_fqn_parent_single_returns_none() {
-        let arena = GraphArena::new();
-        let fqn = GraphFqn::new(&["A"], ".", &arena);
-        assert!(fqn.parent(&arena).is_none());
-    }
-
-    #[test]
-    fn graph_fqn_from_canonical() {
-        let arena = GraphArena::new();
-        let canonical = code_graph_types::Fqn::from_parts(&["com", "example", "Bar"], ".");
-        let gfqn = GraphFqn::from_fqn(&canonical, &arena);
-        assert_eq!(gfqn.as_str(), "com.example.Bar");
-        assert_eq!(gfqn.name(), "Bar");
-        assert_eq!(gfqn.len(), 3);
+    fn string_pool_duplicates_not_deduped() {
+        let mut pool = StringPool::new();
+        let a = pool.alloc("same");
+        let b = pool.alloc("same");
+        assert_ne!(a, b);
+        assert_eq!(pool.get(a), pool.get(b));
     }
 
     // ── GraphDef / GraphImport ──────────────────────────────
@@ -1025,7 +979,7 @@ mod tests {
     fn graph_def_from_canonical() {
         use code_graph_types::*;
 
-        let arena = GraphArena::new();
+        let mut pool = StringPool::new();
         let cdef = CanonicalDefinition {
             definition_type: "Class",
             kind: DefKind::Class,
@@ -1042,21 +996,21 @@ mod tests {
                 companion_of: None,
             })),
         };
-        let gdef = GraphDef::from_canonical(&cdef, &arena);
+        let gdef = GraphDef::from_canonical(&cdef, &mut pool);
 
-        assert_eq!(gdef.name, "UserService");
-        assert_eq!(gdef.fqn.as_str(), "com.example.UserService");
+        assert_eq!(pool.get(gdef.name), "UserService");
+        assert_eq!(pool.get(gdef.fqn), "com.example.UserService");
         assert_eq!(gdef.kind, DefKind::Class);
         assert!(gdef.is_top_level);
         let meta = gdef.metadata.as_ref().unwrap();
-        assert_eq!(meta.super_types.as_slice(), &["BaseService"]);
+        assert_eq!(pool.get(meta.super_types[0]), "BaseService");
     }
 
     #[test]
     fn graph_import_from_canonical() {
         use code_graph_types::*;
 
-        let arena = GraphArena::new();
+        let mut pool = StringPool::new();
         let cimp = CanonicalImport {
             import_type: "FromImport",
             path: "app.services".to_string(),
@@ -1066,11 +1020,11 @@ mod tests {
             range: Range::new(Position::new(1, 0), Position::new(1, 30), (0, 30)),
             wildcard: false,
         };
-        let gimp = GraphImport::from_canonical(&cimp, &arena);
+        let gimp = GraphImport::from_canonical(&cimp, &mut pool);
 
-        assert_eq!(gimp.path, "app.services");
-        assert_eq!(gimp.name, Some("AuthService"));
-        assert_eq!(gimp.alias, Some("Auth"));
+        assert_eq!(pool.get(gimp.path), "app.services");
+        assert_eq!(pool.get(gimp.name.unwrap()), "AuthService");
+        assert_eq!(pool.get(gimp.alias.unwrap()), "Auth");
         assert!(!gimp.wildcard);
     }
 }

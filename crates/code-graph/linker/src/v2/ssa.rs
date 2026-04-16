@@ -479,6 +479,7 @@ impl Default for SsaResolver<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use petgraph::graph::NodeIndex;
 
     #[test]
     fn single_block_write_read() {

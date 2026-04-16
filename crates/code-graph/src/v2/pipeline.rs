@@ -7,6 +7,7 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::linker::v2::walker::fused_walk_file;
 use crate::linker::v2::{CodeGraph, HasRoot, HasRules};
@@ -46,12 +47,11 @@ pub type FileInput = String;
 ///   parse+walk → resolve → graph flow.
 /// - **Custom**: implement directly for languages that need full control
 ///   over parsing and linking (e.g. Ruby).
-pub trait LanguagePipeline<'a> {
+pub trait LanguagePipeline {
     fn process_files(
         files: Vec<FileInput>,
         root_path: &str,
-        arena: &'a crate::linker::v2::GraphArena,
-    ) -> Result<CodeGraph<'a>, Vec<PipelineError>>;
+    ) -> Result<CodeGraph, Vec<PipelineError>>;
 }
 
 fn report_rss(label: &str) {
@@ -77,7 +77,7 @@ fn report_rss(label: &str) {
 /// graph + ~16 concurrent ASTs (rayon threads), not graph + all ASTs.
 pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
-impl<'a, P, R> LanguagePipeline<'a> for GenericPipeline<P, R>
+impl<P, R> LanguagePipeline for GenericPipeline<P, R>
 where
     P: CanonicalParser + Default + Sync + Send,
     P::Ast: HasRoot + Send,
@@ -86,8 +86,7 @@ where
     fn process_files(
         files: Vec<FileInput>,
         root_path: &str,
-        arena: &'a crate::linker::v2::GraphArena,
-    ) -> Result<CodeGraph<'a>, Vec<PipelineError>> {
+    ) -> Result<CodeGraph, Vec<PipelineError>> {
         let parser = P::default();
         let rules = R::rules();
         let file_count = files.len();
@@ -97,57 +96,74 @@ where
         eprintln!("[v2] {file_count} files, {num_threads} threads");
         report_rss("before Phase 1");
 
-        let mut graph = CodeGraph::new_with_root(root_path.to_string());
-
-        // ── Phase 1a: parallel parse defs/imports ───────────────
+        // ── Phase 1: parallel parse + add to graph under Mutex ──
+        let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
         let pb = progress_bar(file_count as u64, "Phase 1: defs");
-        let parse_results: Vec<_> = files
+        let errors = Mutex::new(Vec::new());
+        let total_defs = std::sync::atomic::AtomicUsize::new(0);
+        let total_imports = std::sync::atomic::AtomicUsize::new(0);
+
+        let phase1_results: Vec<_> = files
             .par_iter()
-            .map(|path| {
+            .enumerate()
+            .map(|(file_idx, path)| {
                 let abs_path = format!("{root_path}/{path}");
-                let source = std::fs::read(&abs_path).map_err(|e| PipelineError {
-                    file_path: path.clone(),
-                    error: format!("Read error: {e}"),
-                })?;
+                let source = match std::fs::read(&abs_path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        errors.lock().unwrap().push(PipelineError {
+                            file_path: path.clone(),
+                            error: format!("Read error: {e}"),
+                        });
+                        pb.inc(1);
+                        return None;
+                    }
+                };
 
-                let result = parser
-                    .parse_defs_only(&source, path)
-                    .map_err(|e| PipelineError {
-                        file_path: path.clone(),
-                        error: format!("Parse error: {e}"),
-                    })?;
+                let result = match parser.parse_defs_only(&source, path) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        errors.lock().unwrap().push(PipelineError {
+                            file_path: path.clone(),
+                            error: format!("Parse error: {e}"),
+                        });
+                        pb.inc(1);
+                        return None;
+                    }
+                };
 
+                total_defs.fetch_add(
+                    result.definitions.len(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                total_imports.fetch_add(result.imports.len(), std::sync::atomic::Ordering::Relaxed);
+
+                let file_node = {
+                    let mut g = graph.lock().unwrap();
+                    let (file_node, _, _) = g.add_file_nodes(result, file_idx);
+                    file_node
+                };
                 pb.inc(1);
-                Ok(result)
+                Some(file_node)
             })
             .collect();
+
         pb.finish_with_message(format!(
             "Phase 1: {file_count} files in {:.2?}",
             t0.elapsed()
         ));
 
-        // ── Phase 1b: sequential graph construction with arena ──
-        let mut file_nodes = Vec::with_capacity(file_count);
-        let mut errors = Vec::new();
-        let mut total_defs = 0usize;
-        let mut total_imports = 0usize;
+        let mut graph = graph.into_inner().unwrap();
+        let errors = errors.into_inner().unwrap();
+        let total_defs = total_defs.load(std::sync::atomic::Ordering::Relaxed);
+        let total_imports = total_imports.load(std::sync::atomic::Ordering::Relaxed);
 
-        for (file_idx, output) in parse_results.into_iter().enumerate() {
-            match output {
-                Ok(result) => {
-                    total_defs += result.definitions.len();
-                    total_imports += result.imports.len();
-                    let (file_node, _, _) = graph.add_file_nodes(result, file_idx, arena);
-                    file_nodes.push(file_node);
-                }
-                Err(err) => {
-                    errors.push(err);
-                    file_nodes.push(petgraph::graph::NodeIndex::new(0));
-                }
-            }
-        }
+        let file_nodes: Vec<_> = phase1_results
+            .into_iter()
+            .map(|opt| opt.unwrap_or(petgraph::graph::NodeIndex::new(0)))
+            .collect();
 
-        if !errors.is_empty() && file_nodes.is_empty() {
+        if !errors.is_empty() && file_nodes.iter().all(|n| n.index() == 0) {
             return Err(errors);
         }
 
@@ -189,69 +205,64 @@ where
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "Phase 2: resolve");
 
-        let phase2_results: Vec<_> = {
-            let graph_ref = &graph;
-            let rules_ref = &rules;
-            files
-                .par_iter()
-                .zip(file_nodes.par_iter())
-                .map(|(path, &file_node)| {
-                    if file_node.index() == 0 && errors.iter().any(|e| e.file_path == *path) {
-                        pb2.inc(1);
-                        return None;
-                    }
-                    let abs_path = format!("{root_path}/{path}");
-                    let source = match std::fs::read(&abs_path) {
-                        Ok(s) => s,
-                        Err(_) => {
-                            pb2.inc(1);
-                            return None;
-                        }
-                    };
-                    let source_str = match std::str::from_utf8(&source) {
-                        Ok(s) => s,
-                        Err(_) => {
-                            pb2.inc(1);
-                            return None;
-                        }
-                    };
-                    let lang = code_graph_config::detect_language_from_path(path)?;
-                    let t_parse = std::time::Instant::now();
-                    let ast = lang.parse_ast(source_str);
-                    let root = ast.root();
-                    let parse_ns = t_parse.elapsed().as_nanos() as u64;
-                    let file_arena = crate::linker::v2::state::FileArena::with_capacity(4096);
-                    let t_walk = std::time::Instant::now();
-                    let mut result = fused_walk_file(
-                        rules_ref,
-                        graph_ref,
-                        &root,
-                        file_node,
-                        &rules_ref.settings,
-                        &file_arena,
-                    );
-                    let walk_ns = t_walk.elapsed().as_nanos() as u64;
-                    result.parse_ns = parse_ns;
-                    result.walk_ns = walk_ns;
-                    pb2.inc(1);
-                    // source dropped here
-                    Some(result)
-                })
-                .collect()
-        }; // drop graph_ref/rules_ref
-        pb2.finish_with_message(format!(
-            "Phase 2: {file_count} files in {:.2?}",
-            t2.elapsed()
-        ));
-
-        // ── Collect edges + stats ───────────────────────────────
         let mut combined_stats = crate::linker::v2::ResolveStats::default();
         let mut total_edges = 0usize;
         let mut total_refs = 0usize;
         let mut total_parse_ns = 0u64;
         let mut total_walk_ns = 0u64;
 
-        for result in phase2_results.into_iter().flatten() {
+        let phase2_edges: Vec<_> = files
+            .par_iter()
+            .zip(file_nodes.par_iter())
+            .map(|(path, &file_node)| {
+                if file_node.index() == 0 && errors.iter().any(|e| e.file_path == *path) {
+                    pb2.inc(1);
+                    return None;
+                }
+                let abs_path = format!("{root_path}/{path}");
+                let source = match std::fs::read(&abs_path) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        pb2.inc(1);
+                        return None;
+                    }
+                };
+                let source_str = match std::str::from_utf8(&source) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        pb2.inc(1);
+                        return None;
+                    }
+                };
+                let lang = code_graph_config::detect_language_from_path(path)?;
+                let t_parse = std::time::Instant::now();
+                let ast = lang.parse_ast(source_str);
+                let root = ast.root();
+                let parse_ns = t_parse.elapsed().as_nanos() as u64;
+                let file_arena = crate::linker::v2::state::FileArena::with_capacity(4096);
+                let t_walk = std::time::Instant::now();
+                let mut result = fused_walk_file(
+                    &rules,
+                    &graph,
+                    &root,
+                    file_node,
+                    &rules.settings,
+                    &file_arena,
+                );
+                let walk_ns = t_walk.elapsed().as_nanos() as u64;
+                result.parse_ns = parse_ns;
+                result.walk_ns = walk_ns;
+                pb2.inc(1);
+                Some(result)
+            })
+            .collect();
+        pb2.finish_with_message(format!(
+            "Phase 2: {file_count} files in {:.2?}",
+            t2.elapsed()
+        ));
+
+        // Collect edges + stats (graph exclusively owned again).
+        for result in phase2_edges.into_iter().flatten() {
             total_edges += result.edges.len();
             total_refs += result.num_refs;
             total_parse_ns += result.parse_ns;
@@ -289,14 +300,13 @@ where
 /// `GenericPipeline<YourParser>`), add one line here.
 macro_rules! register_v2_pipelines {
     ($( $variant:ident => $pipeline:ty ),+ $(,)?) => {
-        fn dispatch_language<'a>(
+        fn dispatch_language(
             language: Language,
             files: Vec<FileInput>,
             root_path: &str,
-            arena: &'a crate::linker::v2::GraphArena,
-        ) -> Option<Result<CodeGraph<'a>, Vec<PipelineError>>> {
+        ) -> Option<Result<CodeGraph, Vec<PipelineError>>> {
             Some(match language {
-                $(Language::$variant => <$pipeline>::process_files(files, root_path, arena),)+
+                $(Language::$variant => <$pipeline>::process_files(files, root_path),)+
                 _ => return None,
             })
         }
@@ -353,8 +363,8 @@ impl Default for PipelineConfig {
     }
 }
 
-pub struct PipelineResult<'a> {
-    pub graphs: Vec<CodeGraph<'a>>,
+pub struct PipelineResult {
+    pub graphs: Vec<CodeGraph>,
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
 }
@@ -383,11 +393,7 @@ impl Pipeline {
         Self { config }
     }
 
-    pub fn run<'a>(
-        &self,
-        root: &Path,
-        arena: &'a crate::linker::v2::GraphArena,
-    ) -> PipelineResult<'a> {
+    pub fn run(&self, root: &Path) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
 
         // 1. Walk filesystem, group files by language
@@ -404,7 +410,7 @@ impl Pipeline {
         ));
 
         // 2. Process each language through its pipeline
-        let mut all_graphs: Vec<CodeGraph<'a>> = Vec::new();
+        let mut all_graphs: Vec<CodeGraph> = Vec::new();
         let mut all_errors: Vec<PipelineError> = Vec::new();
         let mut files_parsed = 0usize;
         let mut files_skipped = 0usize;
@@ -414,7 +420,7 @@ impl Pipeline {
             eprintln!("[v2] processing {language}: {file_count} files");
             let t_lang = std::time::Instant::now();
 
-            match dispatch_language(language, files, &root_str, arena) {
+            match dispatch_language(language, files, &root_str) {
                 Some(Ok(graph)) => {
                     eprintln!(
                         "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
@@ -514,12 +520,8 @@ mod tests {
         format!("{manifest}/parser/src/{relative}")
     }
 
-    fn parse_fixture_file<'a>(
-        path: &str,
-        language: Language,
-        arena: &'a crate::linker::v2::GraphArena,
-    ) -> CodeGraph<'a> {
-        dispatch_language(language, vec![path.to_string()], "/", arena)
+    fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
+        dispatch_language(language, vec![path.to_string()], "/")
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"))
     }
@@ -528,9 +530,8 @@ mod tests {
 
     #[test]
     fn python_definitions_fixture() {
-        let arena = crate::linker::v2::GraphArena::new();
         let path = fixture_path("python/fixtures/definitions.py");
-        let cg = parse_fixture_file(&path, Language::Python, &arena);
+        let cg = parse_fixture_file(&path, Language::Python);
 
         let defs: Vec<_> = cg.definitions().collect();
         assert!(
@@ -539,7 +540,10 @@ mod tests {
             defs.len()
         );
 
-        let names: Vec<&str> = defs.iter().map(|(_, _, d)| d.name).collect();
+        let names: Vec<&str> = defs
+            .iter()
+            .map(|(_, _, d)| cg.strings.get(d.name))
+            .collect();
         assert!(names.contains(&"simple_function"));
         assert!(names.contains(&"module_lambda"));
         assert!(names.contains(&"SimpleClass"));
@@ -556,9 +560,8 @@ mod tests {
 
     #[test]
     fn java_comprehensive_fixture() {
-        let arena = crate::linker::v2::GraphArena::new();
         let path = fixture_path("java/fixtures/ComprehensiveJavaDefinitions.java");
-        let cg = parse_fixture_file(&path, Language::Java, &arena);
+        let cg = parse_fixture_file(&path, Language::Java);
 
         let defs: Vec<_> = cg.definitions().collect();
         assert!(
@@ -576,9 +579,8 @@ mod tests {
 
     #[test]
     fn kotlin_comprehensive_fixture() {
-        let arena = crate::linker::v2::GraphArena::new();
         let path = fixture_path("kotlin/fixtures/ComprehensiveKotlinDefinitions.kt");
-        let cg = parse_fixture_file(&path, Language::Kotlin, &arena);
+        let cg = parse_fixture_file(&path, Language::Kotlin);
 
         let defs: Vec<_> = cg.definitions().collect();
         assert!(
@@ -596,9 +598,8 @@ mod tests {
 
     #[test]
     fn csharp_comprehensive_fixture() {
-        let arena = crate::linker::v2::GraphArena::new();
         let path = fixture_path("csharp/fixtures/ComprehensiveCSharp.cs");
-        let cg = parse_fixture_file(&path, Language::CSharp, &arena);
+        let cg = parse_fixture_file(&path, Language::CSharp);
 
         let defs: Vec<_> = cg.definitions().collect();
         assert!(

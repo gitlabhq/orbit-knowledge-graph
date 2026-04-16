@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use code_graph_types::{
-    CanonicalDirectory, CanonicalFile, CanonicalResult, DefKind, EdgeKind, NodeKind, Range,
-    Relationship, containment_relationship,
+    CanonicalDirectory, CanonicalFile, CanonicalResult, EdgeKind, NodeKind, Range, Relationship,
+    containment_relationship,
 };
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -12,7 +12,7 @@ use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
 
-use super::state::{GraphArena, GraphDef, GraphFqn, GraphImport, GraphIndexes};
+use super::state::{GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
 
 // ── Node + Edge types ───────────────────────────────────────────
 
@@ -90,32 +90,31 @@ impl GraphEdge {
 
 // ── CodeGraph ───────────────────────────────────────────────────
 
-/// The complete code graph with arena-backed storage.
+/// The complete code graph. No lifetime parameter.
 ///
-/// All definition and import strings live in the [`GraphArena`] (`'a`).
-/// The arena is owned externally (by the pipeline) and must outlive
-/// this graph.
-pub struct CodeGraph<'a> {
+/// All definition/import strings live in the owned [`StringPool`].
+/// Access strings via `self.str(id)`.
+pub struct CodeGraph {
     pub graph: DiGraph<GraphNode, GraphEdge>,
 
-    /// Dense storage for definitions, indexed by `DefId`.
-    /// All strings are `&'a str` from the arena.
-    pub defs: Vec<GraphDef<'a>>,
-    /// Dense storage for imports, indexed by `ImportId`.
-    pub imports: Vec<GraphImport<'a>>,
+    pub defs: Vec<GraphDef>,
+    pub imports: Vec<GraphImport>,
 
-    /// All resolution and construction indexes.
+    /// All strings for defs/imports. Owned, dropped with the graph.
+    pub strings: StringPool,
+
     pub indexes: GraphIndexes,
 
     pub root_path: String,
 }
 
-impl<'a> CodeGraph<'a> {
+impl CodeGraph {
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
             defs: Vec::new(),
             imports: Vec::new(),
+            strings: StringPool::new(),
             indexes: GraphIndexes::new(),
             root_path: String::new(),
         }
@@ -128,15 +127,17 @@ impl<'a> CodeGraph<'a> {
         }
     }
 
+    /// Resolve a StrId to its string.
+    #[inline]
+    pub fn str(&self, id: StrId) -> &str {
+        self.strings.get(id)
+    }
+
     /// Add a single file's nodes to the graph.
-    ///
-    /// Converts parser's `CanonicalResult` (owned Strings) into arena-backed
-    /// `GraphDef` / `GraphImport` at this boundary.
     pub fn add_file_nodes(
         &mut self,
         result: CanonicalResult,
         _file_order: usize,
-        arena: &'a GraphArena,
     ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
         let relative_path = self.relative_path(&result.file_path);
         let file_path: Arc<str> = Arc::from(relative_path.as_str());
@@ -165,15 +166,14 @@ impl<'a> CodeGraph<'a> {
             );
         }
 
-        // Convert canonical defs → arena-backed GraphDefs and build indexes.
+        // Convert canonical defs → pool-backed GraphDefs.
         let def_base = self.defs.len() as u32;
         let mut def_nodes = Vec::with_capacity(result.definitions.len());
 
-        // First convert all defs to arena-backed types.
-        let graph_defs: Vec<GraphDef<'a>> = result
+        let graph_defs: Vec<GraphDef> = result
             .definitions
             .iter()
-            .map(|d| GraphDef::from_canonical(d, arena))
+            .map(|d| GraphDef::from_canonical(d, &mut self.strings))
             .collect();
 
         for (i, gdef) in graph_defs.iter().enumerate() {
@@ -184,13 +184,15 @@ impl<'a> CodeGraph<'a> {
             });
             def_nodes.push(def_node);
 
-            self.indexes.by_fqn.insert(gdef.fqn.as_str(), def_node);
-            self.indexes.by_name.insert(gdef.name, def_node);
+            let fqn_str = self.strings.get(gdef.fqn);
+            let name_str = self.strings.get(gdef.name);
+            self.indexes.by_fqn.insert(fqn_str, def_node);
+            self.indexes.by_name.insert(name_str, def_node);
 
-            if let Some(parent_fqn) = gdef.fqn.parent(arena) {
-                self.indexes
-                    .nested
-                    .insert(parent_fqn.as_str(), gdef.name, def_node);
+            // Compute parent FQN by string slicing (no allocation needed).
+            if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
+                let parent = &fqn_str[..sep_pos];
+                self.indexes.nested.insert(parent, name_str, def_node);
             }
 
             self.graph.add_edge(
@@ -200,14 +202,16 @@ impl<'a> CodeGraph<'a> {
             );
         }
 
-        // Containment edges (compare arena-backed FQNs).
+        // Containment edges.
         for (i, gdef) in graph_defs.iter().enumerate() {
-            let Some(parent_fqn) = gdef.fqn.parent(arena) else {
+            let fqn_str = self.strings.get(gdef.fqn);
+            let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) else {
                 continue;
             };
+            let parent_fqn = &fqn_str[..sep_pos];
             for (j, parent_def) in graph_defs.iter().enumerate() {
                 if j != i
-                    && parent_def.fqn.as_str() == parent_fqn.as_str()
+                    && self.strings.get(parent_def.fqn) == parent_fqn
                     && let Some(rel) = containment_relationship(parent_def.kind, gdef.kind)
                 {
                     self.graph.add_edge(
@@ -220,16 +224,15 @@ impl<'a> CodeGraph<'a> {
             }
         }
 
-        // Move arena-backed defs into dense storage.
         self.defs.extend(graph_defs);
 
-        // Convert canonical imports → arena-backed GraphImports.
+        // Convert canonical imports → pool-backed GraphImports.
         let mut import_nodes = Vec::with_capacity(result.imports.len());
         let import_base = self.imports.len() as u32;
-        let graph_imports: Vec<GraphImport<'a>> = result
+        let graph_imports: Vec<GraphImport> = result
             .imports
             .iter()
-            .map(|imp| GraphImport::from_canonical(imp, arena))
+            .map(|imp| GraphImport::from_canonical(imp, &mut self.strings))
             .collect();
 
         for (i, _) in graph_imports.iter().enumerate() {
@@ -337,16 +340,10 @@ impl<'a> CodeGraph<'a> {
         dir_index.get(&parent_dir).copied()
     }
 
-    /// Convenience: build complete graph from results in one call.
-    /// Used by tests and custom pipelines.
-    pub fn from_results(
-        results: Vec<CanonicalResult>,
-        root_path: String,
-        arena: &'a GraphArena,
-    ) -> Self {
+    pub fn from_results(results: Vec<CanonicalResult>, root_path: String) -> Self {
         let mut cg = Self::new_with_root(root_path);
         for (i, result) in results.into_iter().enumerate() {
-            cg.add_file_nodes(result, i, arena);
+            cg.add_file_nodes(result, i);
         }
         cg.finalize();
         cg
@@ -378,27 +375,28 @@ impl<'a> CodeGraph<'a> {
             if imp.wildcard {
                 continue;
             }
-            let name = imp.alias.or(imp.name).unwrap_or("");
+            let name = imp.alias.or(imp.name).map(|id| self.str(id)).unwrap_or("");
             if name.is_empty() {
                 continue;
             }
 
-            let full_fqn = if imp.path.is_empty() {
+            let imp_path = self.str(imp.path);
+            let full_fqn = if imp_path.is_empty() {
                 name.to_string()
             } else {
-                format!("{}{}{}", imp.path, sep, name)
+                format!("{imp_path}{sep}{name}")
             };
 
             let mut defs: Vec<_> = self
                 .indexes
                 .by_fqn
-                .lookup(&full_fqn, |idx| self.def(idx).fqn.as_str() == full_fqn)
+                .lookup(&full_fqn, |idx| self.def_fqn(idx) == full_fqn)
                 .to_vec();
-            if defs.is_empty() && !imp.path.is_empty() {
+            if defs.is_empty() && !imp_path.is_empty() {
                 defs = self
                     .indexes
                     .by_fqn
-                    .lookup(imp.path, |idx| self.def(idx).fqn.as_str() == imp.path)
+                    .lookup(imp_path, |idx| self.def_fqn(idx) == imp_path)
                     .to_vec();
             }
             if !defs.is_empty() {
@@ -419,18 +417,18 @@ impl<'a> CodeGraph<'a> {
         let mut start_nodes = self
             .indexes
             .by_fqn
-            .lookup(scope_fqn, |idx| self.def(idx).fqn.as_str() == scope_fqn);
+            .lookup(scope_fqn, |idx| self.def_fqn(idx) == scope_fqn);
         if start_nodes.is_empty() {
             start_nodes = self
                 .indexes
                 .by_name
-                .lookup(scope_fqn, |idx| self.def(idx).name == scope_fqn);
+                .lookup(scope_fqn, |idx| self.def_name(idx) == scope_fqn);
         }
         if start_nodes.is_empty() {
             return false;
         }
 
-        let verify_member = |idx: NodeIndex| self.def(idx).name == member_name;
+        let verify_member = |idx: NodeIndex| self.def_name(idx) == member_name;
 
         for &start in &start_nodes {
             let actual_fqn = self.def_fqn(start);
@@ -464,23 +462,30 @@ impl<'a> CodeGraph<'a> {
         self.graph[def_idx].path() == file_path
     }
 
-    pub fn def(&self, idx: NodeIndex) -> &GraphDef<'a> {
+    pub fn def(&self, idx: NodeIndex) -> &GraphDef {
         match &self.graph[idx] {
             GraphNode::Definition { id, .. } => &self.defs[id.0 as usize],
             other => panic!("Expected Definition, got {other:?}"),
         }
     }
 
-    pub fn import(&self, idx: NodeIndex) -> &GraphImport<'a> {
+    pub fn import(&self, idx: NodeIndex) -> &GraphImport {
         match &self.graph[idx] {
             GraphNode::Import { id, .. } => &self.imports[id.0 as usize],
             other => panic!("Expected Import, got {other:?}"),
         }
     }
 
-    /// Returns the FQN as `&str` (zero-cost, pre-cached in arena).
-    pub fn def_fqn(&self, idx: NodeIndex) -> &'a str {
-        self.def(idx).fqn.as_str()
+    /// Returns the definition name as `&str`.
+    #[inline]
+    pub fn def_name(&self, idx: NodeIndex) -> &str {
+        self.strings.get(self.def(idx).name)
+    }
+
+    /// Returns the FQN as `&str`.
+    #[inline]
+    pub fn def_fqn(&self, idx: NodeIndex) -> &str {
+        self.strings.get(self.def(idx).fqn)
     }
 
     // ── Iterators ───────────────────────────────────────────
@@ -497,7 +502,7 @@ impl<'a> CodeGraph<'a> {
             .filter_map(|idx| self.graph[idx].as_file().map(|f| (idx, f)))
     }
 
-    pub fn definitions(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef<'a>)> {
+    pub fn definitions(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef)> {
         self.graph.node_indices().filter_map(|idx| {
             if let GraphNode::Definition { file_path, id } = &self.graph[idx] {
                 Some((idx, file_path, &self.defs[id.0 as usize]))
@@ -507,7 +512,7 @@ impl<'a> CodeGraph<'a> {
         })
     }
 
-    pub fn imports_iter(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphImport<'a>)> {
+    pub fn imports_iter(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphImport)> {
         self.graph.node_indices().filter_map(|idx| {
             if let GraphNode::Import { file_path, id } = &self.graph[idx] {
                 Some((idx, file_path, &self.imports[id.0 as usize]))
@@ -541,7 +546,8 @@ impl<'a> CodeGraph<'a> {
                 && let Some(meta) = &self.defs[id.0 as usize].metadata
                 && !meta.super_types.is_empty()
             {
-                for super_name in &meta.super_types {
+                for &super_id in &meta.super_types {
+                    let super_name = self.strings.get(super_id);
                     let targets = self.resolve_type_to_nodes(super_name);
                     for &target in &targets {
                         if target != idx {
@@ -569,13 +575,13 @@ impl<'a> CodeGraph<'a> {
         let by_fqn = self
             .indexes
             .by_fqn
-            .lookup(name, |idx| self.def(idx).fqn.as_str() == name);
+            .lookup(name, |idx| self.def_fqn(idx) == name);
         if !by_fqn.is_empty() {
             return by_fqn;
         }
         self.indexes
             .by_name
-            .lookup(name, |idx| self.def(idx).name == name)
+            .lookup(name, |idx| self.def_name(idx) == name)
     }
 
     pub fn assign_ids(&self, project_id: i64, branch: &str) -> FxHashMap<NodeIndex, i64> {
@@ -587,7 +593,7 @@ impl<'a> CodeGraph<'a> {
                 GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
                 GraphNode::Definition { file_path, id } => {
                     let def = &self.defs[id.0 as usize];
-                    compute_id(&[&pid, branch, "def", file_path, def.fqn.as_str()])
+                    compute_id(&[&pid, branch, "def", file_path, self.strings.get(def.fqn)])
                 }
                 GraphNode::Import { file_path, id } => {
                     let import = &self.imports[id.0 as usize];
@@ -596,14 +602,20 @@ impl<'a> CodeGraph<'a> {
                         branch,
                         "import",
                         file_path,
-                        import.path,
-                        import.name.unwrap_or("*"),
+                        self.strings.get(import.path),
+                        import.name.map(|id| self.strings.get(id)).unwrap_or("*"),
                     ])
                 }
             };
             ids.insert(idx, id);
         }
         ids
+    }
+}
+
+impl Default for CodeGraph {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -697,9 +709,12 @@ impl AsRecordBatch<RowContext<'_>> for FileRow<'_> {
     }
 }
 
+/// Definition row for Arrow serialization. Needs the StringPool to
+/// resolve StrIds.
 pub struct DefinitionRow<'a> {
     pub file_path: &'a str,
-    pub def: &'a GraphDef<'a>,
+    pub def: &'a GraphDef,
+    pub pool: &'a StringPool,
     pub id: i64,
 }
 impl AsRecordBatch<RowContext<'_>> for DefinitionRow<'_> {
@@ -710,8 +725,8 @@ impl AsRecordBatch<RowContext<'_>> for DefinitionRow<'_> {
     ) -> Result<(), arrow::error::ArrowError> {
         write_node_header(b, self.id, ctx)?;
         b.col("file_path")?.push_str(self.file_path)?;
-        b.col("fqn")?.push_str(self.def.fqn.as_str())?;
-        b.col("name")?.push_str(self.def.name)?;
+        b.col("fqn")?.push_str(self.pool.get(self.def.fqn))?;
+        b.col("name")?.push_str(self.pool.get(self.def.name))?;
         b.col("definition_type")?
             .push_str(self.def.definition_type)?;
         write_range(b, &self.def.range)?;
@@ -719,9 +734,11 @@ impl AsRecordBatch<RowContext<'_>> for DefinitionRow<'_> {
     }
 }
 
+/// Import row for Arrow serialization.
 pub struct ImportRow<'a> {
     pub file_path: &'a str,
-    pub import: &'a GraphImport<'a>,
+    pub import: &'a GraphImport,
+    pub pool: &'a StringPool,
     pub id: i64,
 }
 impl AsRecordBatch<RowContext<'_>> for ImportRow<'_> {
@@ -733,9 +750,12 @@ impl AsRecordBatch<RowContext<'_>> for ImportRow<'_> {
         write_node_header(b, self.id, ctx)?;
         b.col("file_path")?.push_str(self.file_path)?;
         b.col("import_type")?.push_str(self.import.import_type)?;
-        b.col("import_path")?.push_str(self.import.path)?;
-        b.col("identifier_name")?.push_opt_str(self.import.name)?;
-        b.col("identifier_alias")?.push_opt_str(self.import.alias)?;
+        b.col("import_path")?
+            .push_str(self.pool.get(self.import.path))?;
+        b.col("identifier_name")?
+            .push_opt_str(self.import.name.map(|id| self.pool.get(id)))?;
+        b.col("identifier_alias")?
+            .push_opt_str(self.import.alias.map(|id| self.pool.get(id)))?;
         write_range(b, &self.import.range)?;
         Ok(())
     }
@@ -796,14 +816,12 @@ mod tests {
 
     #[test]
     fn builds_file_and_directory_nodes() {
-        let arena = GraphArena::new();
         let cg = CodeGraph::from_results(
             vec![
                 make_result("/repo/src/main.py", vec![]),
                 make_result("/repo/src/utils/helpers.py", vec![]),
             ],
             "/repo".to_string(),
-            &arena,
         );
 
         let files: Vec<_> = cg.files().map(|(_, f)| &f.path).collect();
@@ -819,11 +837,9 @@ mod tests {
 
     #[test]
     fn builds_directory_containment_edges() {
-        let arena = GraphArena::new();
         let cg = CodeGraph::from_results(
             vec![make_result("/repo/src/utils/helpers.py", vec![])],
             "/repo".to_string(),
-            &arena,
         );
 
         let dir_dir: Vec<_> = cg
@@ -838,11 +854,9 @@ mod tests {
 
     #[test]
     fn builds_dir_to_file_edges() {
-        let arena = GraphArena::new();
         let cg = CodeGraph::from_results(
             vec![make_result("/repo/src/main.py", vec![])],
             "/repo".to_string(),
-            &arena,
         );
 
         let dir_file: Vec<_> = cg
@@ -859,14 +873,12 @@ mod tests {
 
     #[test]
     fn builds_file_to_definition_edges() {
-        let arena = GraphArena::new();
         let cg = CodeGraph::from_results(
             vec![make_result(
                 "/repo/main.py",
                 vec![make_def("Foo", &["Foo"], DefKind::Class)],
             )],
             "/repo".to_string(),
-            &arena,
         );
 
         let file_def: Vec<_> = cg
@@ -881,7 +893,6 @@ mod tests {
 
     #[test]
     fn builds_definition_containment_edges() {
-        let arena = GraphArena::new();
         let cg = CodeGraph::from_results(
             vec![make_result(
                 "/repo/main.py",
@@ -891,7 +902,6 @@ mod tests {
                 ],
             )],
             "/repo".to_string(),
-            &arena,
         );
 
         let def_def: Vec<_> = cg
@@ -915,14 +925,12 @@ mod tests {
 
     #[test]
     fn no_duplicate_directories() {
-        let arena = GraphArena::new();
         let cg = CodeGraph::from_results(
             vec![
                 make_result("/repo/src/a.py", vec![]),
                 make_result("/repo/src/b.py", vec![]),
             ],
             "/repo".to_string(),
-            &arena,
         );
 
         let src_count = cg.directories().filter(|(_, d)| d.path == "src").count();
@@ -931,7 +939,6 @@ mod tests {
 
     #[test]
     fn resolution_indexes_populated() {
-        let arena = GraphArena::new();
         let cg = CodeGraph::from_results(
             vec![make_result(
                 "/repo/main.py",
@@ -941,41 +948,40 @@ mod tests {
                 ],
             )],
             "/repo".to_string(),
-            &arena,
         );
 
         assert_eq!(
             cg.indexes
                 .by_fqn
-                .lookup("Foo", |idx| cg.def(idx).fqn.as_str() == "Foo")
+                .lookup("Foo", |idx| cg.def_fqn(idx) == "Foo")
                 .len(),
             1
         );
         assert_eq!(
             cg.indexes
                 .by_fqn
-                .lookup("Foo.bar", |idx| cg.def(idx).fqn.as_str() == "Foo.bar")
+                .lookup("Foo.bar", |idx| cg.def_fqn(idx) == "Foo.bar")
                 .len(),
             1
         );
         assert_eq!(
             cg.indexes
                 .by_name
-                .lookup("Foo", |idx| cg.def(idx).name == "Foo")
+                .lookup("Foo", |idx| cg.def_name(idx) == "Foo")
                 .len(),
             1
         );
         assert_eq!(
             cg.indexes
                 .by_name
-                .lookup("bar", |idx| cg.def(idx).name == "bar")
+                .lookup("bar", |idx| cg.def_name(idx) == "bar")
                 .len(),
             1
         );
         assert_eq!(
             cg.indexes
                 .nested
-                .lookup("Foo", "bar", |idx| cg.def(idx).name == "bar")
+                .lookup("Foo", "bar", |idx| cg.def_name(idx) == "bar")
                 .len(),
             1
         );

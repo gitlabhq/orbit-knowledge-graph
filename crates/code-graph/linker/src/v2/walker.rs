@@ -37,7 +37,7 @@ pub struct FusedWalkResult {
 /// ancestors pre-computed). Read-only during this phase.
 pub fn fused_walk_file<'g, 'f>(
     rules: &'g ResolutionRules,
-    graph: &'g CodeGraph<'g>,
+    graph: &'g CodeGraph,
     root: &Node<StrDoc<SupportLang>>,
     file_node: NodeIndex,
     settings: &'g ResolveSettings,
@@ -67,8 +67,10 @@ where
         match &graph.graph[neighbor] {
             GraphNode::Definition { id, .. } => {
                 let def = &graph.defs[id.0 as usize];
-                ssa.write_variable(def.name, module_block, Value::Def(neighbor));
-                ssa_names.insert(super::state::hash_name(def.name));
+                let name = graph.str(def.name);
+                let name_f = file_arena.alloc_str(name);
+                ssa.write_variable(name_f, module_block, Value::Def(neighbor));
+                ssa_names.insert(super::state::hash_name(name));
                 defs_by_byte.insert(
                     def.range.byte_offset.0,
                     (neighbor, def.kind.is_type_container()),
@@ -77,13 +79,19 @@ where
             GraphNode::Import { id, .. } => {
                 let import = &graph.imports[id.0 as usize];
                 if !import.wildcard {
-                    let name = import.alias.or(import.name).unwrap_or("");
+                    let name = import
+                        .alias
+                        .or(import.name)
+                        .map(|id| graph.str(id))
+                        .unwrap_or("");
                     if !name.is_empty() {
-                        ssa.write_variable(name, module_block, Value::Import(neighbor));
+                        let name_f = file_arena.alloc_str(name);
+                        ssa.write_variable(name_f, module_block, Value::Import(neighbor));
                         ssa_names.insert(super::state::hash_name(name));
-                        if !import.path.is_empty() {
+                        let imp_path = graph.str(import.path);
+                        if !imp_path.is_empty() {
                             import_name_map
-                                .insert(name.to_string(), format!("{}{sep}{name}", import.path));
+                                .insert(name.to_string(), format!("{imp_path}{sep}{name}"));
                         }
                     }
                 }
@@ -158,7 +166,7 @@ where
 {
     spec: &'g parser_core::dsl::types::LanguageSpec,
     rules: &'g ResolutionRules,
-    graph: &'g CodeGraph<'g>,
+    graph: &'g CodeGraph,
     ssa: SsaResolver<'f>,
     file_node: NodeIndex,
     settings: &'g ResolveSettings,
@@ -304,8 +312,7 @@ where
         // Write self/super SSA variables for type scopes
         if is_type_scope {
             let scope_fqn = if let Some((idx, _)) = def_info {
-                self.file_arena
-                    .alloc_str(&self.graph.def(idx).fqn.to_string())
+                self.file_arena.alloc_str(self.graph.def_fqn(idx))
             } else {
                 self.build_fqn(name)
             };
@@ -356,11 +363,11 @@ where
         {
             if let GraphNode::Definition { id, .. } = &self.graph.graph[neighbor] {
                 let def = &self.graph.defs[id.0 as usize];
-                if def.name == class_name
+                if self.graph.str(def.name) == class_name
                     && let Some(meta) = &def.metadata
-                    && let Some(st) = meta.super_types.first()
+                    && let Some(&st) = meta.super_types.first()
                 {
-                    return Some(st);
+                    return Some(self.file_arena.alloc_str(self.graph.str(st)));
                 }
             }
         }
@@ -827,22 +834,22 @@ where
                 let def = self.graph.def(def_idx);
                 if matches!(step, ExpressionStep::Call(_)) {
                     if let Some(meta) = &def.metadata
-                        && let Some(rt) = &meta.return_type
+                        && let Some(rt) = meta.return_type
                     {
-                        next_types.push(self.file_arena.alloc_str(rt));
+                        next_types.push(self.file_arena.alloc_str(self.graph.str(rt)));
                     }
                     if matches!(
                         def.kind,
                         code_graph_types::DefKind::Class | code_graph_types::DefKind::Constructor
                     ) {
-                        next_types.push(def.fqn.as_str());
+                        next_types.push(self.file_arena.alloc_str(self.graph.def_fqn(def_idx)));
                     }
                 }
                 if matches!(step, ExpressionStep::Field(_))
                     && let Some(meta) = &def.metadata
-                    && let Some(ta) = &meta.type_annotation
+                    && let Some(ta) = meta.type_annotation
                 {
-                    next_types.push(self.file_arena.alloc_str(ta));
+                    next_types.push(self.file_arena.alloc_str(self.graph.str(ta)));
                 }
             }
         }
@@ -936,13 +943,13 @@ where
         found
     }
 
-    fn def_types(&self, def: &super::state::GraphDef<'g>) -> SmallVec<[&'f str; 2]> {
+    fn def_types(&self, def: &super::state::GraphDef) -> SmallVec<[&'f str; 2]> {
         if def.kind.is_type_container() {
-            smallvec![def.fqn.as_str()]
+            smallvec![self.file_arena.alloc_str(self.graph.str(def.fqn))]
         } else if let Some(meta) = &def.metadata
-            && let Some(rt) = &meta.return_type
+            && let Some(rt) = meta.return_type
         {
-            smallvec![*rt]
+            smallvec![self.file_arena.alloc_str(self.graph.str(rt))]
         } else {
             SmallVec::new()
         }

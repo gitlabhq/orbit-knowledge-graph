@@ -149,6 +149,7 @@ pub fn convert_v2_graph(
                     .map(|(idx, file_path, def)| DefinitionRow {
                         file_path,
                         def,
+                        pool: &graph.strings,
                         id: ids[&idx],
                     })
                     .collect();
@@ -156,10 +157,11 @@ pub fn convert_v2_graph(
             }
             "ImportedSymbol" => {
                 let rows: Vec<_> = graph
-                    .imports()
+                    .imports_iter()
                     .map(|(idx, file_path, import)| ImportRow {
                         file_path,
                         import,
+                        pool: &graph.strings,
                         id: ids[&idx],
                     })
                     .collect();
