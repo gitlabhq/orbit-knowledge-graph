@@ -71,20 +71,36 @@ impl CodeIndexingPipeline {
         context.progress.notify_in_progress().await;
 
         let indexed_at = Utc::now();
-        // ref_name for repository resolution: commit SHA preferred, branch as fallback.
-        // commit_sha for storage: only the actual SHA, empty string if unavailable.
-        let _ref_name = request.commit_sha.as_deref().unwrap_or(&request.branch);
         let commit_sha = request.commit_sha.as_deref().unwrap_or("");
-        self.run_indexing(
-            context,
-            request.project_id,
-            &request.branch,
-            commit_sha,
-            &request.traversal_path,
-            indexed_at,
-            &repo_path,
-        )
-        .await?;
+        let indexing_result = self
+            .run_indexing(
+                context,
+                request.project_id,
+                &request.branch,
+                commit_sha,
+                &request.traversal_path,
+                indexed_at,
+                &repo_path,
+            )
+            .await;
+
+        if let Err(error) = self
+            .resolver
+            .cleanup(request.project_id, &request.branch)
+            .await
+        {
+            self.metrics.record_cleanup("failure");
+            warn!(
+                project_id = request.project_id,
+                branch = %request.branch,
+                %error,
+                "failed to clean up downloaded repository from disk"
+            );
+        } else {
+            self.metrics.record_cleanup("success");
+        }
+
+        indexing_result?;
 
         self.set_checkpoint(
             &request.traversal_path,
