@@ -21,7 +21,7 @@ Orbit Status Is Healthy
 
 Enable Feature Flag
     [Arguments]    ${flag}
-    ${headers}=    GitLab Auth Headers
+    ${headers}=    Create Dictionary    PRIVATE-TOKEN=${GITLAB_PAT}
     ${data}=    Create Dictionary    value=true
     ${resp}=    POST    ${GITLAB_URL}/api/v4/features/${flag}
     ...    headers=${headers}    data=${data}    expected_status=any
