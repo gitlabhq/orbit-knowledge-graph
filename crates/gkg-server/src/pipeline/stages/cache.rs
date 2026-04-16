@@ -57,7 +57,13 @@ impl PipelineStage for CachedExecutor {
         }
 
         let ttl_secs = config.graph_query_cache_ttl.unwrap_or(60);
-        let cache_key = compute_cache_key(&compiled.base.sql, &compiled.base.render());
+
+        let security_ctx = ctx.security_context()?;
+        let cache_key = compute_cache_key(
+            &ctx.query_json,
+            security_ctx.org_id,
+            &security_ctx.traversal_paths,
+        );
 
         let start = Instant::now();
         match broker.kv_get(QUERY_CACHE_BUCKET, &cache_key).await {
@@ -124,13 +130,34 @@ impl PipelineStage for CachedExecutor {
     }
 }
 
-fn compute_cache_key(sql: &str, rendered: &str) -> String {
+/// Cache key from the query JSON and security context.
+/// The JSON is normalized (whitespace-insensitive) via minification.
+/// Traversal paths are sorted to ensure deterministic keys regardless
+/// of the order Rails sends them.
+fn compute_cache_key(query_json: &str, org_id: i64, traversal_paths: &[String]) -> String {
+    let normalized = normalize_json(query_json);
+
+    let mut sorted_paths = traversal_paths.to_vec();
+    sorted_paths.sort();
+
     let mut hasher = Sha256::new();
-    hasher.update((sql.len() as u64).to_le_bytes());
-    hasher.update(sql.as_bytes());
-    hasher.update((rendered.len() as u64).to_le_bytes());
-    hasher.update(rendered.as_bytes());
+    hasher.update(org_id.to_le_bytes());
+    hasher.update((normalized.len() as u64).to_le_bytes());
+    hasher.update(normalized.as_bytes());
+    for path in &sorted_paths {
+        hasher.update((path.len() as u64).to_le_bytes());
+        hasher.update(path.as_bytes());
+    }
     format!("{:x}", hasher.finalize())
+}
+
+/// Minify JSON to normalize whitespace differences.
+/// Parsing and re-serializing ensures `{"a": 1}` and `{ "a" : 1 }` hash identically.
+fn normalize_json(json: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(json) {
+        Ok(val) => serde_json::to_string(&val).unwrap_or_else(|_| json.to_string()),
+        Err(_) => json.to_string(),
+    }
 }
 
 fn serialize_batches(batches: &[RecordBatch]) -> Result<Vec<u8>, PipelineError> {
@@ -195,15 +222,47 @@ mod tests {
 
     #[test]
     fn cache_key_deterministic() {
-        let k1 = compute_cache_key("SELECT 1", "SELECT 1");
-        let k2 = compute_cache_key("SELECT 1", "SELECT 1");
+        let paths = vec!["1/".to_string()];
+        let k1 = compute_cache_key(r#"{"a":1}"#, 1, &paths);
+        let k2 = compute_cache_key(r#"{"a":1}"#, 1, &paths);
         assert_eq!(k1, k2);
     }
 
     #[test]
     fn cache_key_differs_for_different_queries() {
-        let k1 = compute_cache_key("SELECT 1", "SELECT 1");
-        let k2 = compute_cache_key("SELECT 2", "SELECT 2");
+        let paths = vec!["1/".to_string()];
+        let k1 = compute_cache_key(r#"{"a":1}"#, 1, &paths);
+        let k2 = compute_cache_key(r#"{"a":2}"#, 1, &paths);
         assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn cache_key_normalizes_whitespace() {
+        let paths = vec!["1/".to_string()];
+        let k1 = compute_cache_key(r#"{"a": 1}"#, 1, &paths);
+        let k2 = compute_cache_key(r#"{  "a" :  1  }"#, 1, &paths);
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn cache_key_differs_for_different_orgs() {
+        let paths = vec!["1/".to_string()];
+        let k1 = compute_cache_key(r#"{"a":1}"#, 1, &paths);
+        let k2 = compute_cache_key(r#"{"a":1}"#, 2, &paths);
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn cache_key_differs_for_different_traversal_paths() {
+        let k1 = compute_cache_key(r#"{"a":1}"#, 1, &["1/".to_string()]);
+        let k2 = compute_cache_key(r#"{"a":1}"#, 1, &["1/2/".to_string()]);
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn cache_key_stable_regardless_of_path_order() {
+        let k1 = compute_cache_key(r#"{"a":1}"#, 1, &["1/".into(), "1/2/".into()]);
+        let k2 = compute_cache_key(r#"{"a":1}"#, 1, &["1/2/".into(), "1/".into()]);
+        assert_eq!(k1, k2);
     }
 }
