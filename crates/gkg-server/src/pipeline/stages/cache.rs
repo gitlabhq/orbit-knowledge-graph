@@ -131,33 +131,27 @@ impl PipelineStage for CachedExecutor {
 }
 
 /// Cache key from the query JSON and security context.
-/// The JSON is normalized (whitespace-insensitive) via minification.
+/// JSON is canonicalized via RFC 8785 (JCS) -- keys sorted, no whitespace.
 /// Traversal paths are sorted to ensure deterministic keys regardless
 /// of the order Rails sends them.
 fn compute_cache_key(query_json: &str, org_id: i64, traversal_paths: &[String]) -> String {
-    let normalized = normalize_json(query_json);
+    let canonical = serde_json::from_str::<serde_json::Value>(query_json)
+        .ok()
+        .and_then(|v| serde_json_canonicalizer::to_string(&v).ok())
+        .unwrap_or_else(|| query_json.to_string());
 
     let mut sorted_paths = traversal_paths.to_vec();
     sorted_paths.sort();
 
     let mut hasher = Sha256::new();
     hasher.update(org_id.to_le_bytes());
-    hasher.update((normalized.len() as u64).to_le_bytes());
-    hasher.update(normalized.as_bytes());
+    hasher.update((canonical.len() as u64).to_le_bytes());
+    hasher.update(canonical.as_bytes());
     for path in &sorted_paths {
         hasher.update((path.len() as u64).to_le_bytes());
         hasher.update(path.as_bytes());
     }
     format!("{:x}", hasher.finalize())
-}
-
-/// Minify JSON to normalize whitespace differences.
-/// Parsing and re-serializing ensures `{"a": 1}` and `{ "a" : 1 }` hash identically.
-fn normalize_json(json: &str) -> String {
-    match serde_json::from_str::<serde_json::Value>(json) {
-        Ok(val) => serde_json::to_string(&val).unwrap_or_else(|_| json.to_string()),
-        Err(_) => json.to_string(),
-    }
 }
 
 fn serialize_batches(batches: &[RecordBatch]) -> Result<Vec<u8>, PipelineError> {
@@ -241,6 +235,14 @@ mod tests {
         let paths = vec!["1/".to_string()];
         let k1 = compute_cache_key(r#"{"a": 1}"#, 1, &paths);
         let k2 = compute_cache_key(r#"{  "a" :  1  }"#, 1, &paths);
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn cache_key_normalizes_key_order() {
+        let paths = vec!["1/".to_string()];
+        let k1 = compute_cache_key(r#"{"a":1,"b":2}"#, 1, &paths);
+        let k2 = compute_cache_key(r#"{"b":2,"a":1}"#, 1, &paths);
         assert_eq!(k1, k2);
     }
 
