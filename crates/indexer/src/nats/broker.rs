@@ -12,7 +12,7 @@ use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
 use async_nats::jetstream::kv::{CreateErrorKind, Store as KvStore, UpdateErrorKind};
 use async_nats::jetstream::object_store::{
-    Config as ObjectStoreConfig, ObjectStore as NatsObjectStore,
+    Config as ObjectStoreConfig, GetErrorKind, ObjectStore as NatsObjectStore,
 };
 use async_nats::jetstream::stream::Stream;
 use bytes::Bytes;
@@ -642,14 +642,17 @@ impl NatsBroker {
             ..Default::default()
         };
 
-        let store = self
-            .jetstream
-            .create_object_store(config)
-            .await
-            .map_err(|e| NatsError::ObjectStore {
-                bucket: bucket.to_string(),
-                message: e.to_string(),
-            })?;
+        let store = match self.jetstream.get_object_store(bucket).await {
+            Ok(store) => store,
+            Err(_) => self
+                .jetstream
+                .create_object_store(config)
+                .await
+                .map_err(|e| NatsError::ObjectStore {
+                    bucket: bucket.to_string(),
+                    message: e.to_string(),
+                })?,
+        };
 
         info!(bucket, "object store ready");
 
@@ -722,18 +725,12 @@ impl NatsBroker {
                     })?;
                 Ok(Some(data))
             }
-            Err(e) => {
-                let err_str = e.to_string();
-                if err_str.contains("not found") {
-                    Ok(None)
-                } else {
-                    Err(NatsError::ObjectStoreGet {
-                        bucket: bucket.to_string(),
-                        name: name.to_string(),
-                        message: err_str,
-                    })
-                }
-            }
+            Err(e) if e.kind() == GetErrorKind::NotFound => Ok(None),
+            Err(e) => Err(NatsError::ObjectStoreGet {
+                bucket: bucket.to_string(),
+                name: name.to_string(),
+                message: e.to_string(),
+            }),
         }
     }
 
