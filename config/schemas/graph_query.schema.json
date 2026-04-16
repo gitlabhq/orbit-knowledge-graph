@@ -255,10 +255,12 @@
         },
         "node_ids": {
           "type": "array",
-          "description": "Specific node IDs to filter by",
+          "description": "Specific node IDs to filter by. Accepts integers or digit strings.",
           "items": {
-            "type": "integer",
-            "minimum": 1
+            "oneOf": [
+              { "type": "integer" },
+              { "type": "string", "pattern": "^-?[0-9]+$", "maxLength": 20 }
+            ]
           },
           "minItems": 1,
           "maxItems": 500
@@ -295,18 +297,22 @@
     },
     "IdRange": {
       "type": "object",
-      "description": "Inclusive ID range filter",
+      "description": "Inclusive ID range filter. Endpoints accept integers or digit strings.",
       "required": ["start", "end"],
       "properties": {
         "start": {
-          "type": "integer",
           "description": "Start of ID range (inclusive)",
-          "minimum": 1
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string", "pattern": "^-?[0-9]+$", "maxLength": 20 }
+          ]
         },
         "end": {
-          "type": "integer",
           "description": "End of ID range (inclusive)",
-          "minimum": 1
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string", "pattern": "^-?[0-9]+$", "maxLength": 20 }
+          ]
         }
       },
       "additionalProperties": false

@@ -251,7 +251,7 @@ pub struct InputNode {
     pub columns: Option<ColumnSelection>,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, InputFilter>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_id_vec")]
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub id_property: String,
@@ -318,8 +318,42 @@ where
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputIdRange {
+    #[serde(deserialize_with = "deserialize_id")]
     pub start: i64,
+    #[serde(deserialize_with = "deserialize_id")]
     pub end: i64,
+}
+
+/// Accepts either a JSON integer or a JSON string of digits. Supports the
+/// server response convention (IDs serialized as strings to avoid JavaScript
+/// precision loss) so consumers can round-trip IDs without casting.
+fn deserialize_id<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Value::deserialize(deserializer)? {
+        Value::Number(n) => n
+            .as_i64()
+            .ok_or_else(|| serde::de::Error::custom("id out of i64 range")),
+        Value::String(s) => s.parse::<i64>().map_err(serde::de::Error::custom),
+        _ => Err(serde::de::Error::custom("id must be an integer or string")),
+    }
+}
+
+fn deserialize_id_vec<'de, D>(deserializer: D) -> Result<Vec<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw: Vec<Value> = Vec::deserialize(deserializer)?;
+    raw.into_iter()
+        .map(|v| match v {
+            Value::Number(n) => n
+                .as_i64()
+                .ok_or_else(|| serde::de::Error::custom("id out of i64 range")),
+            Value::String(s) => s.parse::<i64>().map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom("id must be an integer or string")),
+        })
+        .collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -827,5 +861,41 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
+    }
+
+    #[test]
+    fn node_ids_accepts_integers_and_strings() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "node_ids": [1, "9007199254740993", -42]
+            }
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.nodes[0].node_ids, vec![1, 9_007_199_254_740_993, -42]);
+    }
+
+    #[test]
+    fn id_range_accepts_integers_and_strings() {
+        let input = parse_input(
+            r#"{
+            "query_type": "search",
+            "node": {
+                "id": "u",
+                "entity": "User",
+                "id_range": {"start": 1, "end": "9007199254740993"}
+            }
+        }"#,
+        )
+        .unwrap();
+
+        let range = input.nodes[0].id_range.as_ref().unwrap();
+        assert_eq!(range.start, 1);
+        assert_eq!(range.end, 9_007_199_254_740_993);
     }
 }
