@@ -85,14 +85,14 @@ pub(crate) fn resolve_import(
     let by_fqn = graph
         .indexes
         .by_fqn
-        .lookup(&full_fqn, |idx| *graph.def(idx).fqn.as_istr() == *full_fqn);
+        .lookup(&full_fqn, |idx| *graph.def(idx).fqn.as_str() == *full_fqn);
     if !by_fqn.is_empty() {
         return by_fqn.to_vec();
     }
 
     if !import.path.is_empty() {
         let by_path = graph.indexes.by_fqn.lookup(&import.path, |idx| {
-            *graph.def(idx).fqn.as_istr() == *import.path
+            *graph.def(idx).fqn.as_str() == *import.path
         });
         if !by_path.is_empty() {
             return by_path.to_vec();
@@ -120,9 +120,10 @@ fn scope_fqn_walk(
     for def in &defs {
         if def.is_top_level {
             let candidate = format!("{}{}{}", def.fqn, sep, name);
-            let matches = graph.indexes.by_fqn.lookup(&candidate, |idx| {
-                *graph.def(idx).fqn.as_istr() == *candidate
-            });
+            let matches = graph
+                .indexes
+                .by_fqn
+                .lookup(&candidate, |idx| *graph.def(idx).fqn.as_str() == *candidate);
             if !matches.is_empty() {
                 return matches.to_vec();
             }
@@ -133,9 +134,10 @@ fn scope_fqn_walk(
         let mut current = fqn_str.as_str();
         loop {
             let candidate = format!("{}{}{}", current, sep, name);
-            let matches = graph.indexes.by_fqn.lookup(&candidate, |idx| {
-                *graph.def(idx).fqn.as_istr() == *candidate
-            });
+            let matches = graph
+                .indexes
+                .by_fqn
+                .lookup(&candidate, |idx| *graph.def(idx).fqn.as_str() == *candidate);
             if !matches.is_empty() {
                 return matches.to_vec();
             }
@@ -167,9 +169,10 @@ fn wildcard_import(
             && imp.wildcard
         {
             let candidate = format!("{}{}{}", imp.path, sep, name);
-            let matches = graph.indexes.by_fqn.lookup(&candidate, |idx| {
-                *graph.def(idx).fqn.as_istr() == *candidate
-            });
+            let matches = graph
+                .indexes
+                .by_fqn
+                .lookup(&candidate, |idx| *graph.def(idx).fqn.as_str() == *candidate);
             if !matches.is_empty() {
                 return matches.to_vec();
             }
@@ -190,9 +193,10 @@ fn same_package(graph: &CodeGraph, file_node: NodeIndex, name: &str, sep: &str) 
             let fqn_str = def.fqn.to_string();
             if let Some(sep_pos) = fqn_str.rfind(sep) {
                 let candidate = format!("{}{}{}", &fqn_str[..sep_pos], sep, name);
-                let matches = graph.indexes.by_fqn.lookup(&candidate, |idx| {
-                    *graph.def(idx).fqn.as_istr() == *candidate
-                });
+                let matches = graph
+                    .indexes
+                    .by_fqn
+                    .lookup(&candidate, |idx| *graph.def(idx).fqn.as_str() == *candidate);
                 if !matches.is_empty() {
                     return matches.to_vec();
                 }
@@ -208,7 +212,7 @@ fn same_file(graph: &CodeGraph, file_node: NodeIndex, name: &str) -> Vec<NodeInd
     let by_fqn: Vec<NodeIndex> = graph
         .indexes
         .by_fqn
-        .lookup(name, |idx| *graph.def(idx).fqn.as_istr() == *name)
+        .lookup(name, |idx| *graph.def(idx).fqn.as_str() == *name)
         .into_iter()
         .filter(|&idx| graph.def_in_file(idx, file_path))
         .collect();

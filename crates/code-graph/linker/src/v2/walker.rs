@@ -5,7 +5,7 @@
 //! matching DSL dispatch tables for scopes/refs/bindings/branches/loops
 //! and resolving references inline against the graph.
 
-use code_graph_types::{BindingKind, EdgeKind, ExpressionStep, IStr, NodeKind, Relationship};
+use code_graph_types::{BindingKind, EdgeKind, ExpressionStep, NodeKind, Relationship};
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
@@ -15,8 +15,9 @@ use treesitter_visit::{Node, SupportLang};
 use super::graph::{CodeGraph, GraphEdge, GraphNode};
 use super::imports::{ResolveSettings, apply_import_strategies, resolve_import};
 use super::rules::ResolutionRules;
-use super::ssa::{BlockId, SsaResolver, Value};
+use super::ssa::SsaResolver;
 use super::state::FileArena;
+use super::state::{BlockId, Value};
 use super::stats::ResolveStats;
 
 const MIN_STACK_REMAINING: usize = 128 * 1024;
@@ -34,14 +35,17 @@ pub struct FusedWalkResult {
 ///
 /// The graph must be finalized (defs indexed, extends linked,
 /// ancestors pre-computed). Read-only during this phase.
-pub fn fused_walk_file(
-    rules: &ResolutionRules,
-    graph: &CodeGraph,
+pub fn fused_walk_file<'g, 'f>(
+    rules: &'g ResolutionRules,
+    graph: &'g CodeGraph<'g>,
     root: &Node<StrDoc<SupportLang>>,
     file_node: NodeIndex,
-    settings: &ResolveSettings,
-    file_arena: &FileArena,
-) -> FusedWalkResult {
+    settings: &'g ResolveSettings,
+    file_arena: &'f FileArena,
+) -> FusedWalkResult
+where
+    'g: 'f,
+{
     let spec = rules
         .language_spec
         .as_ref()
@@ -52,12 +56,7 @@ pub fn fused_walk_file(
     let module_block = ssa.add_block();
     ssa.seal_block(module_block);
 
-    // Build import name→FQN map for chain expression building.
     let mut import_name_map: FxHashMap<String, String> = FxHashMap::default();
-
-    // Initialize SSA with all defs and imports from graph neighbors.
-    // This handles forward references: all defs visible from module block.
-    // Also builds ssa_names set for O(1) "can this name resolve?" checks.
     let mut defs_by_byte: FxHashMap<usize, (NodeIndex, bool)> = FxHashMap::default();
     let mut ssa_names: rustc_hash::FxHashSet<u64> = rustc_hash::FxHashSet::default();
 
@@ -68,8 +67,8 @@ pub fn fused_walk_file(
         match &graph.graph[neighbor] {
             GraphNode::Definition { id, .. } => {
                 let def = &graph.defs[id.0 as usize];
-                ssa.write_variable(&def.name, module_block, Value::Def(neighbor));
-                ssa_names.insert(super::state::hash_name(&def.name));
+                ssa.write_variable(def.name, module_block, Value::Def(neighbor));
+                ssa_names.insert(super::state::hash_name(def.name));
                 defs_by_byte.insert(
                     def.range.byte_offset.0,
                     (neighbor, def.kind.is_type_container()),
@@ -78,11 +77,7 @@ pub fn fused_walk_file(
             GraphNode::Import { id, .. } => {
                 let import = &graph.imports[id.0 as usize];
                 if !import.wildcard {
-                    let name = import
-                        .alias
-                        .as_deref()
-                        .or(import.name.as_deref())
-                        .unwrap_or("");
+                    let name = import.alias.or(import.name).unwrap_or("");
                     if !name.is_empty() {
                         ssa.write_variable(name, module_block, Value::Import(neighbor));
                         ssa_names.insert(super::state::hash_name(name));
@@ -103,13 +98,13 @@ pub fn fused_walk_file(
         spec,
         rules,
         graph,
-        ssa: &mut ssa,
+        ssa,
         file_node,
         settings,
         file_arena,
-        import_map: &import_map,
-        import_name_map: &import_name_map,
-        defs_by_byte: &defs_by_byte,
+        import_map,
+        import_name_map,
+        defs_by_byte,
         current_block: module_block,
         scope_stack: vec![ScopeEntry {
             block: module_block,
@@ -144,38 +139,42 @@ pub fn fused_walk_file(
 
 // ── Scope stack entry ───────────────────────────────────────────
 
-struct ScopeEntry<'a> {
+struct ScopeEntry<'f> {
     block: BlockId,
     is_type_scope: bool,
-    name: Option<&'a str>,
+    name: Option<&'f str>,
     def_node: Option<NodeIndex>,
-    enclosing_scope_fqn: Option<IStr>,
+    enclosing_scope_fqn: Option<&'f str>,
 }
 
 // ── Fused walker ────────────────────────────────────────────────
 
-struct FusedFileWalker<'a> {
-    spec: &'a parser_core::dsl::types::LanguageSpec,
-    rules: &'a ResolutionRules,
-    graph: &'a CodeGraph,
-    ssa: &'a mut SsaResolver,
+/// `'g` = graph/arena lifetime (long-lived, from pipeline).
+/// `'f` = file/walk lifetime (per-file arena + SSA).
+/// Constraint: `'g: 'f` — graph strings coerce to file lifetime.
+struct FusedFileWalker<'g, 'f>
+where
+    'g: 'f,
+{
+    spec: &'g parser_core::dsl::types::LanguageSpec,
+    rules: &'g ResolutionRules,
+    graph: &'g CodeGraph<'g>,
+    ssa: SsaResolver<'f>,
     file_node: NodeIndex,
-    settings: &'a ResolveSettings,
-    file_arena: &'a FileArena,
-    import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
-    import_name_map: &'a FxHashMap<String, String>,
-    defs_by_byte: &'a FxHashMap<usize, (NodeIndex, bool)>,
+    settings: &'g ResolveSettings,
+    file_arena: &'f FileArena,
+    import_map: FxHashMap<String, Vec<NodeIndex>>,
+    import_name_map: FxHashMap<String, String>,
+    defs_by_byte: FxHashMap<usize, (NodeIndex, bool)>,
 
     current_block: BlockId,
-    scope_stack: Vec<ScopeEntry<'a>>,
+    scope_stack: Vec<ScopeEntry<'f>>,
     edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
     stats: ResolveStats,
     num_refs: usize,
 
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
-    nested_cache: FxHashMap<(&'a str, &'a str), Vec<NodeIndex>>,
-    /// Hashed names written to SSA. read_variable for names not in this set
-    /// will always return Opaque — skip the predecessor traversal.
+    nested_cache: FxHashMap<(&'f str, &'f str), Vec<NodeIndex>>,
     ssa_names: rustc_hash::FxHashSet<u64>,
     sep: &'static str,
     last_bare_path: ResolvePath,
@@ -192,7 +191,10 @@ enum ResolvePath {
     ChainFallback,
 }
 
-impl<'a> FusedFileWalker<'a> {
+impl<'g, 'f> FusedFileWalker<'g, 'f>
+where
+    'g: 'f,
+{
     // ── AST walk ────────────────────────────────────────────
 
     fn walk_node(&mut self, node: &Node<StrDoc<SupportLang>>) {
@@ -206,7 +208,7 @@ impl<'a> FusedFileWalker<'a> {
         // 1. Scope matching
         if let Some(info) =
             self.spec
-                .match_scope(node, node_kind_ref, self.import_name_map, self.sep)
+                .match_scope(node, node_kind_ref, &self.import_name_map, self.sep)
         {
             self.enter_scope(node, &info.name, info.creates_scope, info.is_type_scope);
             self.walk_children(node);
@@ -251,7 +253,7 @@ impl<'a> FusedFileWalker<'a> {
         // 5. Reference matching → resolve inline
         if let Some((name, expression)) =
             self.spec
-                .match_reference(node, node_kind_ref, self.import_name_map, self.sep)
+                .match_reference(node, node_kind_ref, &self.import_name_map, self.sep)
         {
             self.num_refs += 1;
             self.resolve_reference_inline(&name, expression.as_deref());
@@ -310,14 +312,14 @@ impl<'a> FusedFileWalker<'a> {
             for &self_name in self.rules.self_names {
                 self.ssa_names.insert(super::state::hash_name(self_name));
                 self.ssa
-                    .write_variable(self_name, new_block, Value::type_of(&scope_fqn));
+                    .write_variable(self_name, new_block, Value::type_of(scope_fqn));
             }
             if let Some(super_name) = self.rules.super_name
                 && let Some(super_type) = self.find_super_type(name)
             {
                 self.ssa_names.insert(super::state::hash_name(super_name));
                 self.ssa
-                    .write_variable(super_name, new_block, Value::type_of(&super_type));
+                    .write_variable(super_name, new_block, Value::type_of(super_type));
             }
         }
 
@@ -339,15 +341,14 @@ impl<'a> FusedFileWalker<'a> {
         }
     }
 
-    fn build_fqn(&self, name: &str) -> &'a str {
+    fn build_fqn(&self, name: &str) -> &'f str {
         let mut parts: Vec<&str> = self.scope_stack.iter().filter_map(|e| e.name).collect();
         parts.push(name);
         let joined = parts.join(self.sep);
         self.file_arena.alloc_str(&joined)
     }
 
-    fn find_super_type(&self, class_name: &str) -> Option<String> {
-        // Look up the def by name in graph neighbors
+    fn find_super_type(&self, class_name: &str) -> Option<&'f str> {
         for neighbor in self
             .graph
             .graph
@@ -359,7 +360,7 @@ impl<'a> FusedFileWalker<'a> {
                     && let Some(meta) = &def.metadata
                     && let Some(st) = meta.super_types.first()
                 {
-                    return Some(st.clone());
+                    return Some(st);
                 }
             }
         }
@@ -473,9 +474,9 @@ impl<'a> FusedFileWalker<'a> {
             BindingKind::Deletion | BindingKind::ForTarget => Value::Opaque,
             BindingKind::Parameter | BindingKind::Assignment | BindingKind::WithAlias => {
                 if let Some(ref type_ann) = rule.extract_type_annotation(node) {
-                    Value::type_of(type_ann)
+                    Value::type_of(self.file_arena.alloc_str(type_ann))
                 } else if let Some(ref rhs) = rule.extract_rhs_name(node, self.spec) {
-                    Value::Alias(IStr::from(rhs.as_str()))
+                    Value::Alias(self.file_arena.alloc_str(rhs))
                 } else {
                     Value::Opaque
                 }
@@ -491,8 +492,9 @@ impl<'a> FusedFileWalker<'a> {
         } else {
             self.current_block
         };
-        self.ssa_names.insert(super::state::hash_name(&name));
-        self.ssa.write_variable(&name, target_block, value);
+        let name = self.file_arena.alloc_str(&name);
+        self.ssa_names.insert(super::state::hash_name(name));
+        self.ssa.write_variable(name, target_block, value);
     }
 
     // ── Inline reference resolution ─────────────────────────
@@ -513,14 +515,14 @@ impl<'a> FusedFileWalker<'a> {
         let enclosing_def = self.innermost_def();
         let enclosing_scope_fqn = self.scope_stack.last().and_then(|e| e.enclosing_scope_fqn);
 
+        let name_arena = self.file_arena.alloc_str(name);
         let (resolved_defs, path) = if let Some(chain) = expression {
             self.stats.chain_refs += 1;
             let defs = self.resolve_chain(chain, enclosing_scope_fqn);
             (defs, self.last_chain_path)
         } else {
             self.stats.bare_refs += 1;
-            let iname = IStr::from(name);
-            let defs = self.resolve_bare(&iname, enclosing_scope_fqn);
+            let defs = self.resolve_bare(name_arena, enclosing_scope_fqn);
             (defs, self.last_bare_path)
         };
 
@@ -561,7 +563,11 @@ impl<'a> FusedFileWalker<'a> {
     }
 
     // ── Bare resolution (SSA → import strategies → implicit) ─
-    fn resolve_bare(&mut self, name: &IStr, enclosing_scope_fqn: Option<IStr>) -> Vec<NodeIndex> {
+    fn resolve_bare(
+        &mut self,
+        name: &'f str,
+        enclosing_scope_fqn: Option<&'f str>,
+    ) -> Vec<NodeIndex> {
         use super::rules::ResolveStage;
         self.last_bare_path = ResolvePath::None;
 
@@ -579,7 +585,7 @@ impl<'a> FusedFileWalker<'a> {
                         self.file_node,
                         name,
                         self.sep,
-                        self.import_map,
+                        &self.import_map,
                     );
                     if !r.is_empty() {
                         self.stats.bare_import_resolved += 1;
@@ -610,7 +616,7 @@ impl<'a> FusedFileWalker<'a> {
         vec![]
     }
 
-    fn resolve_bare_ssa(&mut self, name: &IStr) -> Vec<NodeIndex> {
+    fn resolve_bare_ssa(&mut self, name: &'f str) -> Vec<NodeIndex> {
         if !self.ssa_names.contains(&super::state::hash_name(name)) {
             return vec![];
         }
@@ -661,7 +667,7 @@ impl<'a> FusedFileWalker<'a> {
     fn resolve_chain(
         &mut self,
         chain: &[ExpressionStep],
-        enclosing_scope_fqn: Option<IStr>,
+        enclosing_scope_fqn: Option<&'f str>,
     ) -> Vec<NodeIndex> {
         self.last_chain_path = ResolvePath::None;
         if chain.is_empty() {
@@ -750,7 +756,7 @@ impl<'a> FusedFileWalker<'a> {
         &mut self,
         step: &ExpressionStep,
         enclosing: Option<&str>,
-    ) -> SmallVec<[IStr; 2]> {
+    ) -> SmallVec<[&'f str; 2]> {
         match step {
             ExpressionStep::Ident(name) | ExpressionStep::Call(name) => {
                 if !self
@@ -759,9 +765,10 @@ impl<'a> FusedFileWalker<'a> {
                 {
                     return SmallVec::new();
                 }
+                let name = self.file_arena.alloc_str(name);
                 let reaching = self.ssa.read_variable_stateless(name, self.current_block);
                 let values = self.resolve_aliases(&reaching.values);
-                let mut types: SmallVec<[IStr; 2]> =
+                let mut types: SmallVec<[&'f str; 2]> =
                     values.iter().flat_map(|v| self.value_types(v)).collect();
 
                 if types.is_empty()
@@ -782,7 +789,7 @@ impl<'a> FusedFileWalker<'a> {
                 types
             }
             ExpressionStep::This => enclosing
-                .map(|fqn| smallvec![IStr::from(fqn)])
+                .map(|fqn| smallvec![self.file_arena.alloc_str(fqn)])
                 .unwrap_or_default(),
             ExpressionStep::Super => self
                 .rules
@@ -799,17 +806,17 @@ impl<'a> FusedFileWalker<'a> {
                         .collect()
                 })
                 .unwrap_or_default(),
-            ExpressionStep::New(type_name) => smallvec![IStr::from(type_name.as_ref())],
+            ExpressionStep::New(type_name) => smallvec![self.file_arena.alloc_str(type_name)],
             _ => SmallVec::new(),
         }
     }
 
     fn walk_step(
         &mut self,
-        current_types: &[IStr],
+        current_types: &[&'f str],
         step: &ExpressionStep,
         member_name: &str,
-    ) -> (SmallVec<[IStr; 2]>, Vec<NodeIndex>) {
+    ) -> (SmallVec<[&'f str; 2]>, Vec<NodeIndex>) {
         let mut next_types = SmallVec::new();
         let mut found_nested = Vec::new();
 
@@ -822,20 +829,20 @@ impl<'a> FusedFileWalker<'a> {
                     if let Some(meta) = &def.metadata
                         && let Some(rt) = &meta.return_type
                     {
-                        next_types.push(IStr::from(rt.as_str()));
+                        next_types.push(self.file_arena.alloc_str(rt));
                     }
                     if matches!(
                         def.kind,
                         code_graph_types::DefKind::Class | code_graph_types::DefKind::Constructor
                     ) {
-                        next_types.push(def.fqn.as_istr());
+                        next_types.push(def.fqn.as_str());
                     }
                 }
                 if matches!(step, ExpressionStep::Field(_))
                     && let Some(meta) = &def.metadata
                     && let Some(ta) = &meta.type_annotation
                 {
-                    next_types.push(IStr::from(ta.as_str()));
+                    next_types.push(self.file_arena.alloc_str(ta));
                 }
             }
         }
@@ -864,15 +871,14 @@ impl<'a> FusedFileWalker<'a> {
         &mut self,
         compound_key: &mut String,
         member_name: &str,
-    ) -> SmallVec<[IStr; 2]> {
+    ) -> SmallVec<[&'f str; 2]> {
         if compound_key.is_empty() {
             return SmallVec::new();
         }
         compound_key.push_str(self.sep);
         compound_key.push_str(member_name);
-        let reaching = self
-            .ssa
-            .read_variable_stateless(compound_key, self.current_block);
+        let key = self.file_arena.alloc_str(compound_key);
+        let reaching = self.ssa.read_variable_stateless(key, self.current_block);
         reaching
             .values
             .iter()
@@ -883,13 +889,13 @@ impl<'a> FusedFileWalker<'a> {
     fn chain_fallback(
         &mut self,
         chain: &[ExpressionStep],
-        enclosing_scope_fqn: Option<IStr>,
+        enclosing_scope_fqn: Option<&'f str>,
     ) -> Vec<NodeIndex> {
         let last = match chain.last() {
             Some(ExpressionStep::Call(n) | ExpressionStep::Field(n)) => n,
             _ => return vec![],
         };
-        let iname = IStr::from(last.as_str());
+        let iname = self.file_arena.alloc_str(last);
         self.resolve_bare(&iname, enclosing_scope_fqn)
     }
 
@@ -930,19 +936,19 @@ impl<'a> FusedFileWalker<'a> {
         found
     }
 
-    fn def_types(&self, def: &code_graph_types::CanonicalDefinition) -> SmallVec<[IStr; 2]> {
+    fn def_types(&self, def: &super::state::GraphDef<'g>) -> SmallVec<[&'f str; 2]> {
         if def.kind.is_type_container() {
-            smallvec![def.fqn.as_istr()]
+            smallvec![def.fqn.as_str()]
         } else if let Some(meta) = &def.metadata
             && let Some(rt) = &meta.return_type
         {
-            smallvec![IStr::from(rt.as_str())]
+            smallvec![*rt]
         } else {
             SmallVec::new()
         }
     }
 
-    fn resolve_aliases(&mut self, values: &[Value]) -> SmallVec<[Value; 4]> {
+    fn resolve_aliases(&mut self, values: &[Value<'f>]) -> SmallVec<[Value<'f>; 4]> {
         let mut out = SmallVec::new();
         for v in values {
             match v {
@@ -952,13 +958,13 @@ impl<'a> FusedFileWalker<'a> {
                         out.push(av.clone());
                     }
                 }
-                other => out.push(other.clone()),
+                other => out.push((*other).clone()),
             }
         }
         out
     }
 
-    fn value_types(&mut self, value: &Value) -> SmallVec<[IStr; 2]> {
+    fn value_types(&mut self, value: &Value<'f>) -> SmallVec<[&'f str; 2]> {
         match value {
             Value::Type(t) => smallvec![*t],
             Value::Def(idx) => {

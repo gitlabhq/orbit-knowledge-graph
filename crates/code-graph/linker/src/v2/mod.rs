@@ -9,7 +9,8 @@ pub mod walker;
 pub use graph::{CodeGraph, GraphEdge, GraphNode};
 pub use imports::ResolveSettings;
 pub use rules::{HasRules, ResolutionRules};
-pub use ssa::{BlockId, ReachingDefs, SsaResolver, Value};
+pub use ssa::SsaResolver;
+pub use state::{BlockId, GraphArena, GraphDef, GraphFqn, GraphImport, ReachingDefs, Value};
 pub use stats::{FileTimingEntry, ResolveStats, SsaStats, print_long_tail_analysis};
 
 /// Trait for AST types that can provide a tree-sitter root for walking.
