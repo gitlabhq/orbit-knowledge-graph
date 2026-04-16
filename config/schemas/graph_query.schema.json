@@ -255,7 +255,7 @@
         },
         "node_ids": {
           "type": "array",
-          "description": "Specific node IDs to filter by. Accepts integers or digit strings; strings let consumers round-trip Int64 IDs that exceed JavaScript's Number.MAX_SAFE_INTEGER. Negative values are permitted because the code-graph indexer casts FxHasher output to i64.",
+          "description": "Specific node IDs to filter by. Accepts integers or digit strings.",
           "items": {
             "oneOf": [
               { "type": "integer" },
@@ -297,7 +297,7 @@
     },
     "IdRange": {
       "type": "object",
-      "description": "Inclusive ID range filter. Endpoints accept integers or digit strings. Negative values are permitted (see node_ids for rationale).",
+      "description": "Inclusive ID range filter. Endpoints accept integers or digit strings.",
       "required": ["start", "end"],
       "properties": {
         "start": {
