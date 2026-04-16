@@ -50,7 +50,8 @@ if [ -n "$SHA" ]; then
   E2E_SHA="$SHA" \
   E2E_JWT_KEY=x E2E_CH_DEFAULT_PASS=x E2E_CH_SIPHON_PASS=x \
   E2E_CH_DATALAKE_PASS=x E2E_CH_GRAPH_PASS=x E2E_CH_GRAPH_READ_PASS=x \
-  E2E_PG_SIPHON_PASS=x E2E_CH_GITLAB_PASS=x \
+  E2E_PG_SIPHON_PASS=x E2E_CH_GITLAB_PASS=x E2E_ROOT_CA_B64=x \
+  E2E_GITLAB_ROOT_PASS=x \
   helmfile --file helmfile.yaml.gotmpl destroy 2>/dev/null || true
 else
   echo "==> No SHA specified, deleting namespaces directly (skipping helmfile destroy)"

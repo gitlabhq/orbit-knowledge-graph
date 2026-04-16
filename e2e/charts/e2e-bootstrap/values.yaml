@@ -1,0 +1,14 @@
+namespaces:
+  nats: ""
+  clickhouse: ""
+  gitlab: ""
+  siphon: ""
+
+secrets:
+  jwtKey: ""
+  rootCABase64: ""
+  chGitlabPass: ""
+  chDatalakePass: ""
+  chGraphPass: ""
+  chGraphReadPass: ""
+  gitlabRootPass: ""

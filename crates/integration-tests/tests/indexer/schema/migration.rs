@@ -212,3 +212,24 @@ async fn held_lock_causes_timeout() {
         "error should mention lock timeout"
     );
 }
+
+#[tokio::test]
+async fn read_active_version_returns_none_on_empty_table() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+    ensure_version_table(&client).await.unwrap();
+
+    let version = read_active_version(&client).await.unwrap();
+    assert_eq!(version, None, "empty version table should return None");
+}
+
+#[tokio::test]
+async fn read_active_version_returns_some_after_write() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+    ensure_version_table(&client).await.unwrap();
+
+    write_schema_version(&client, 1).await.unwrap();
+    let version = read_active_version(&client).await.unwrap();
+    assert_eq!(version, Some(1));
+}

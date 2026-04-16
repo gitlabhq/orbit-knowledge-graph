@@ -127,6 +127,18 @@ The query pipeline instruments end-to-end query execution from security check th
 | `gkg.query.pipeline.error.content_resolution_failed` | Counter | count | `reason` (content_resolution) | Virtual column resolution from remote service failed |
 | `gkg.query.pipeline.error.streaming_failed` | Counter | count | `reason` (streaming) | Streaming channel unavailable during authorization |
 
+*Content resolution metrics (`gkg_content_resolution`):*
+
+The content resolution subsystem instruments Gitaly interactions during virtual column resolution. Duration histogram buckets target Gitaly call latency (1 ms to 5 s). Duration and total metrics carry an `outcome` label (`gitaly_direct` or `error`; Phase 2 will add `cache_hit` and `cache_miss`).
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.content.resolve.duration` | Histogram | s | `outcome` | Time spent resolving content from Gitaly |
+| `gkg.content.resolve` | Counter | count | `outcome` | Total content resolution attempts |
+| `gkg.content.resolve.batch_size` | Histogram | count | | Number of rows per content resolution batch |
+| `gkg.content.blob.size` | Histogram | bytes | | Size of resolved blob content in bytes |
+| `gkg.content.gitaly.calls` | Counter | count | | Total list\_blobs RPCs issued to Gitaly |
+
 *Query engine metrics (`gkg_query_engine`):*
 
 The query engine fires counters during compilation to track security-relevant rejections. Each counter uses a `reason` label for low-cardinality breakdown. Counters marked "server layer" are exported for the gRPC/HTTP layer to increment.

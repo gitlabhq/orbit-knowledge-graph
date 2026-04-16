@@ -4,11 +4,10 @@ use std::io::Write;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::get;
 use base64::Engine;
 use clickhouse_client::ClickHouseConfigurationExt;
 use flate2::Compression;
@@ -36,7 +35,7 @@ pub struct CodeIndexingDeps {
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
-    _cache_dir: tempfile::TempDir,
+    cache_dir: tempfile::TempDir,
 }
 
 impl CodeIndexingDeps {
@@ -73,8 +72,12 @@ impl CodeIndexingDeps {
             repository_service,
             checkpoint_store,
             metrics,
-            _cache_dir: cache_dir,
+            cache_dir,
         }
+    }
+
+    pub fn cache_dir_path(&self) -> &std::path::Path {
+        self.cache_dir.path()
     }
 
     pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
@@ -89,7 +92,7 @@ impl CodeIndexingDeps {
 }
 
 // ---------------------------------------------------------------------------
-// Mock GitLab server — serves /api/v4/internal/orbit/project/... endpoints
+// Mock GitLab server -- serves /api/v4/internal/orbit/project/... endpoints
 // ---------------------------------------------------------------------------
 
 struct MockState {
@@ -102,8 +105,6 @@ struct ProjectData {
     /// in the handler using the ref from the request query, so the Gitaly
     /// `<slug>-<ref>/` prefix matches whatever commit SHA the indexer asks for.
     archive_files: Vec<(String, Vec<u8>)>,
-    changed_paths_ndjson: Option<String>,
-    blobs: HashMap<String, Vec<u8>>,
 }
 
 pub struct MockGitlabServer {
@@ -125,14 +126,6 @@ impl MockGitlabServer {
             .route(
                 "/api/v4/internal/orbit/project/{project_id}/repository/archive",
                 get(handle_download_archive),
-            )
-            .route(
-                "/api/v4/internal/orbit/project/{project_id}/repository/changed_paths",
-                get(handle_changed_paths),
-            )
-            .route(
-                "/api/v4/internal/orbit/project/{project_id}/repository/list_blobs",
-                post(handle_list_blobs),
             )
             .with_state(Arc::clone(&state));
 
@@ -169,8 +162,6 @@ impl MockGitlabServer {
             ProjectData {
                 default_branch: default_branch.to_string(),
                 archive_files,
-                changed_paths_ndjson: None,
-                blobs: HashMap::new(),
             },
         );
     }
@@ -182,20 +173,6 @@ impl MockGitlabServer {
                 .iter()
                 .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
                 .collect();
-        }
-    }
-
-    pub fn set_changed_paths(&self, project_id: i64, ndjson: &str) {
-        let mut projects = self.state.projects.lock();
-        if let Some(project) = projects.get_mut(&project_id) {
-            project.changed_paths_ndjson = Some(ndjson.to_string());
-        }
-    }
-
-    pub fn add_blob(&self, project_id: i64, oid: &str, content: &[u8]) {
-        let mut projects = self.state.projects.lock();
-        if let Some(project) = projects.get_mut(&project_id) {
-            project.blobs.insert(oid.to_string(), content.to_vec());
         }
     }
 }
@@ -231,8 +208,6 @@ async fn handle_download_archive(
     let projects = state.projects.lock();
     match projects.get(&project_id) {
         Some(p) => {
-            // Build the archive on-the-fly with the Gitaly prefix so the
-            // ref in the directory name matches the commit SHA the indexer sent.
             let files: Vec<(&str, &str)> = p
                 .archive_files
                 .iter()
@@ -246,85 +221,6 @@ async fn handle_download_archive(
                 .collect();
             let archive = build_tar_gz(&files, &query.ref_name);
             (StatusCode::OK, archive).into_response()
-        }
-        None => StatusCode::NOT_FOUND.into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-struct ChangedPathsQuery {
-    #[allow(dead_code)]
-    left_tree_revision: String,
-    #[allow(dead_code)]
-    right_tree_revision: String,
-}
-
-async fn handle_changed_paths(
-    State(state): State<Arc<MockState>>,
-    Path(project_id): Path<i64>,
-    Query(_query): Query<ChangedPathsQuery>,
-) -> impl IntoResponse {
-    let projects = state.projects.lock();
-    match projects.get(&project_id) {
-        Some(p) => match &p.changed_paths_ndjson {
-            Some(ndjson) => (StatusCode::OK, ndjson.clone()).into_response(),
-            None => StatusCode::NOT_FOUND.into_response(),
-        },
-        None => StatusCode::NOT_FOUND.into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-struct ListBlobsRequest {
-    revisions: Vec<String>,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-struct MockListBlobsResponse {
-    #[prost(message, repeated, tag = "1")]
-    blobs: Vec<MockBlobChunk>,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-struct MockBlobChunk {
-    #[prost(string, tag = "1")]
-    oid: String,
-    #[prost(int64, tag = "2")]
-    size: i64,
-    #[prost(bytes = "vec", tag = "3")]
-    data: Vec<u8>,
-    #[prost(bytes = "vec", tag = "4")]
-    path: Vec<u8>,
-}
-
-async fn handle_list_blobs(
-    State(state): State<Arc<MockState>>,
-    Path(project_id): Path<i64>,
-    axum::Json(body): axum::Json<ListBlobsRequest>,
-) -> impl IntoResponse {
-    use prost::Message;
-
-    let projects = state.projects.lock();
-    match projects.get(&project_id) {
-        Some(p) => {
-            let chunks: Vec<MockBlobChunk> = body
-                .revisions
-                .iter()
-                .filter_map(|oid| {
-                    p.blobs.get(oid).map(|data| MockBlobChunk {
-                        oid: oid.clone(),
-                        size: data.len() as i64,
-                        data: data.clone(),
-                        path: Vec::new(),
-                    })
-                })
-                .collect();
-            let response = MockListBlobsResponse { blobs: chunks };
-            let frame = response.encode_to_vec();
-            let mut buf = Vec::with_capacity(4 + frame.len());
-            buf.extend_from_slice(&(frame.len() as u32).to_be_bytes());
-            buf.extend_from_slice(&frame);
-            (StatusCode::OK, Bytes::from(buf)).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }

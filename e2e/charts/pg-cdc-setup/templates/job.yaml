@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "0"
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: pg-setup
+        image: postgres:17-alpine
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          until pg_isready -h {{ .Values.pgHost }} -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "Running CDC setup SQL..."
+          PGPASSWORD="$PG_PASS" psql -h {{ .Values.pgHost }} -U postgres -d gitlabhq_production \
+            -v ON_ERROR_STOP=1 -f /sql/setup.sql
+          echo "CDC setup complete."
+        env:
+        - name: PG_PASS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.pgPasswordSecret }}
+              key: {{ .Values.pgPasswordKey }}
+        volumeMounts:
+        - name: sql
+          mountPath: /sql
+          readOnly: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: sql
+        configMap:
+          name: {{ .Release.Name }}-sql

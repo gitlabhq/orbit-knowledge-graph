@@ -16,6 +16,17 @@ repositories:
     url: https://gitlab.com/api/v4/projects/76780115/packages/helm/stable
 
 releases:
+  # --- Phase: bootstrap (namespaces + secrets) ---
+  - name: bootstrap
+    namespace: e2e-{{ $sha }}-gkg
+    createNamespace: true
+    chart: charts/e2e-bootstrap
+    labels:
+      phase: bootstrap
+      component: bootstrap
+    values:
+      - values/bootstrap.yaml.gotmpl
+
   # --- Phase: infra ---
   - name: nats
     namespace: e2e-{{ $sha }}-nats
@@ -25,6 +36,8 @@ releases:
     labels:
       phase: infra
       component: nats
+    needs:
+      - e2e-{{ $sha }}-gkg/bootstrap
     values:
       - values/nats.yaml
 
@@ -35,6 +48,8 @@ releases:
     labels:
       phase: infra
       component: clickhouse
+    needs:
+      - e2e-{{ $sha }}-gkg/bootstrap
     values:
       - values/clickhouse.yaml.gotmpl
 
@@ -46,11 +61,25 @@ releases:
     labels:
       phase: infra
       component: gitlab
+    needs:
+      - e2e-{{ $sha }}-gkg/bootstrap
     timeout: 1200
     values:
       - values/gitlab.yaml.gotmpl
 
   # --- Phase: pipeline ---
+  - name: pg-cdc-setup
+    namespace: e2e-{{ $sha }}-gitlab
+    chart: charts/pg-cdc-setup
+    labels:
+      phase: pipeline
+      component: pg-cdc-setup
+    needs:
+      - e2e-{{ $sha }}-gitlab/gitlab
+    timeout: 120
+    values:
+      - values/pg-cdc-setup.yaml.gotmpl
+
   - name: siphon
     namespace: e2e-{{ $sha }}-siphon
     createNamespace: true
@@ -62,13 +91,12 @@ releases:
     needs:
       - e2e-{{ $sha }}-nats/nats
       - e2e-{{ $sha }}-clickhouse/clickhouse
-      - e2e-{{ $sha }}-gitlab/gitlab
+      - e2e-{{ $sha }}-gitlab/pg-cdc-setup
     values:
       - values/siphon.yaml.gotmpl
 
   - name: gkg
     namespace: e2e-{{ $sha }}-gkg
-    createNamespace: true
     chart: oci://registry.gitlab.com/gitlab-org/orbit/gkg-helm-charts/gkg
     version: {{ $v.gkg.chart }}
     labels:

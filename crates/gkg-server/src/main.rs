@@ -105,7 +105,12 @@ async fn main() -> anyhow::Result<()> {
             let graph = config.graph.build_client();
             let active_version = schema::version::read_active_version(&graph)
                 .await?
-                .unwrap_or(0);
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no active schema version in ClickHouse — \
+                         indexer must run first to initialize the schema"
+                    )
+                })?;
             let prefix = schema::version::table_prefix(active_version);
             info!(version = active_version, table_prefix = %prefix, "resolved active schema version");
             let ontology =
