@@ -98,6 +98,13 @@ define_languages! {
         separator: ".",
         names: ["java"],
     },
+    Go => {
+        support_lang: Go,
+        extensions: ["go"],
+        exclude: ["_test.go"],
+        separator: ".",
+        names: ["go", "golang"],
+    },
     Rust => {
         support_lang: Rust,
         extensions: ["rs"],
