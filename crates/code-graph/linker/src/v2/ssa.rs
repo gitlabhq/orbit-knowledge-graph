@@ -204,6 +204,7 @@ impl SsaResolver {
         let num_preds = self.blocks[block.0].predecessors.len();
 
         if !sealed {
+            // Incomplete CFG: defer with operandless phi (Algorithm 4)
             self.stats.unsealed_hits += 1;
             let phi_id = self.new_phi(block, variable);
             self.incomplete_phis
@@ -218,14 +219,58 @@ impl SsaResolver {
             let pred = self.blocks[block.0].predecessors[0];
             val = self.read_variable_internal(variable, pred);
         } else {
-            let phi_id = self.new_phi(block, variable);
-            self.write_variable_interned(variable, block, Value::Phi(phi_id));
-            self.add_phi_operands(variable, phi_id);
-            val = self.try_remove_trivial_phi(phi_id);
+            // Marker algorithm (Section 3.3): mark block before recursing.
+            // Only place a phi if we detect a cycle (hit the marker) or
+            // find different values from predecessors.
+            val = self.read_variable_marker(variable, block);
         }
 
         self.write_variable_interned(variable, block, val.clone());
         val
+    }
+
+    /// Marker algorithm: mark block, collect values from predecessors,
+    /// only create a phi if values differ or a cycle was detected.
+    fn read_variable_marker(&mut self, variable: VarName, block: BlockId) -> Value {
+        // Place a marker: write Opaque as sentinel so recursive lookups
+        // that reach this block again will find the marker and stop.
+        self.write_variable_interned(variable, block, Value::Opaque);
+
+        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
+        let mut same: Option<Value> = None;
+        let mut need_phi = false;
+
+        for &pred in &preds {
+            let pred_val = self.read_variable_internal(variable, pred);
+            // Ignore the marker sentinel (indicates a cycle back to this block)
+            if pred_val == Value::Opaque {
+                need_phi = true;
+                continue;
+            }
+            match &same {
+                None => same = Some(pred_val),
+                Some(s) if *s == pred_val => {}
+                Some(_) => {
+                    need_phi = true;
+                    // Still need to collect remaining operands for the phi
+                    break;
+                }
+            }
+        }
+
+        if !need_phi {
+            // All predecessors agree (or only one non-cycle predecessor).
+            // No phi needed — zero temporary allocations.
+            self.stats.markers_elided += 1;
+            return same.unwrap_or(Value::Opaque);
+        }
+
+        // Different values or cycle detected: fall back to phi creation.
+        // Re-collect all operands properly with cycle-breaking phi.
+        let phi_id = self.new_phi(block, variable);
+        self.write_variable_interned(variable, block, Value::Phi(phi_id));
+        self.add_phi_operands(variable, phi_id);
+        self.try_remove_trivial_phi(phi_id)
     }
 
     /// Internal write that takes an already-interned name.

@@ -19,6 +19,8 @@ pub struct SsaStats {
     pub phis_created: u64,
     /// Phi nodes that were trivially eliminated (collapsed to single value).
     pub phis_trivial: u64,
+    /// Marker algorithm: phi elided because all predecessors agree.
+    pub markers_elided: u64,
     /// Total variable writes.
     pub writes: u64,
     /// Total blocks created.
@@ -34,6 +36,7 @@ impl SsaStats {
         self.dead_end_hits += other.dead_end_hits;
         self.phis_created += other.phis_created;
         self.phis_trivial += other.phis_trivial;
+        self.markers_elided += other.markers_elided;
         self.writes += other.writes;
         self.blocks_created += other.blocks_created;
     }
@@ -240,6 +243,9 @@ impl ResolveStats {
             self.ssa.phis_trivial,
             pct(self.ssa.phis_trivial, self.ssa.phis_created)
         );
+        if self.ssa.markers_elided > 0 {
+            eprintln!("    markers elided:     {:>8}", self.ssa.markers_elided);
+        }
         eprintln!("    blocks created:     {:>8}", self.ssa.blocks_created);
     }
 }
