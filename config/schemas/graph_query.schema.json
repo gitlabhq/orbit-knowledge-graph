@@ -259,7 +259,7 @@
           "items": {
             "oneOf": [
               { "type": "integer" },
-              { "type": "string", "pattern": "^-?[0-9]+$" }
+              { "type": "string", "pattern": "^-?[0-9]+$", "maxLength": 20 }
             ]
           },
           "minItems": 1,
@@ -304,14 +304,14 @@
           "description": "Start of ID range (inclusive)",
           "oneOf": [
             { "type": "integer" },
-            { "type": "string", "pattern": "^-?[0-9]+$" }
+            { "type": "string", "pattern": "^-?[0-9]+$", "maxLength": 20 }
           ]
         },
         "end": {
           "description": "End of ID range (inclusive)",
           "oneOf": [
             { "type": "integer" },
-            { "type": "string", "pattern": "^-?[0-9]+$" }
+            { "type": "string", "pattern": "^-?[0-9]+$", "maxLength": 20 }
           ]
         }
       },
