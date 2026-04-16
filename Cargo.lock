@@ -5863,6 +5863,7 @@ dependencies = [
  "anyhow",
  "arrow 56.2.0",
  "arrow 58.1.0",
+ "arrow-ipc 58.1.0",
  "code-graph",
  "code-graph-linker",
  "globset",

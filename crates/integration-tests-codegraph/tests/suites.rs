@@ -84,3 +84,9 @@ yaml_test!(
     kotlin_intrafile_resolution,
     "kotlin/intrafile_resolution.yaml"
 );
+
+// Ruby (custom pipeline)
+yaml_test!(
+    ruby_prism_custom_pipeline,
+    "ruby/prism_custom_pipeline.yaml"
+);
