@@ -1,0 +1,9 @@
+{{- range list .Values.namespaces.nats .Values.namespaces.clickhouse .Values.namespaces.gitlab .Values.namespaces.siphon }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ . }}
+  annotations:
+    helm.sh/resource-policy: keep
+{{- end }}

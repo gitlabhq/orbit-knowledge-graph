@@ -1,0 +1,4 @@
+pgHost: gitlab-postgresql
+pgPasswordSecret: gitlab-postgresql-password
+pgPasswordKey: postgresql-postgres-password
+siphonPassword: ""

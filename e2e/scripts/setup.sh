@@ -1,18 +1,31 @@
 #!/usr/bin/env bash
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-PHASES_DIR="$E2E_DIR/scripts/phases"
-
 log "E2E Setup (SHA: $E2E_SHA)"
 
-source "$PHASES_DIR/00-namespaces.sh"
-source "$PHASES_DIR/01-secrets.sh"
-source "$PHASES_DIR/02-infra.sh"
-source "$PHASES_DIR/03-wait-infra.sh"
-source "$PHASES_DIR/04-pg-siphon.sh"
-source "$PHASES_DIR/06-pipeline.sh"
-source "$PHASES_DIR/07-seed-toolbox.sh"
+# Generate random credentials
+log "Generating secrets"
+export E2E_JWT_KEY=$(openssl rand -base64 32)
+export E2E_CH_DEFAULT_PASS=$(openssl rand -base64 24)
+export E2E_CH_SIPHON_PASS=$(openssl rand -base64 24)
+export E2E_CH_DATALAKE_PASS=$(openssl rand -base64 24)
+export E2E_CH_GRAPH_PASS=$(openssl rand -base64 24)
+export E2E_CH_GRAPH_READ_PASS=$(openssl rand -base64 24)
+export E2E_PG_SIPHON_PASS=$(openssl rand -base64 24)
+export E2E_CH_GITLAB_PASS=$(openssl rand -base64 24)
+
+# Root CA for gRPC TLS (pre-existing cluster resource from cert-manager)
+log "Extracting root CA from cert-manager"
+export E2E_ROOT_CA_B64=$($KC get secret root-ca-secret -n cert-manager \
+  -o jsonpath='{.data.ca\.crt}')
+
+# Deploy all components via helmfile (bootstrap → infra → pipeline)
+log "Deploying via helmfile"
+cd "$E2E_DIR"
+helmfile --file helmfile.yaml.gotmpl sync
+
+# Seed GitLab with test data (requires running GitLab instance)
+source "$E2E_DIR/scripts/phases/07-seed-toolbox.sh"
 
 log "Setup complete (SHA: $E2E_SHA)"
-log "Namespaces: $NS_NATS $NS_CH $NS_GITLAB $NS_SIPHON $NS_GKG"
 log "Run: E2E_SHA=$E2E_SHA scripts/test.sh"
