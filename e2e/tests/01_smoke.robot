@@ -59,6 +59,7 @@ Feature Flags Are Enabled
     Enable Feature Flag    knowledge_graph_infra
     Enable Feature Flag    knowledge_graph
     Wait Until Keyword Succeeds    30s    3s    Feature Flag Is Enabled    knowledge_graph_infra
+    Wait Until Keyword Succeeds    30s    3s    Feature Flag Is Enabled    knowledge_graph
 
 Orbit Is Healthy
     [Documentation]    Wait for all components (GKG, Siphon, NATS, ClickHouse) to report healthy
