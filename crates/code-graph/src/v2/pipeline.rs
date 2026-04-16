@@ -46,7 +46,7 @@ pub type FileInput = String;
 /// - **Batches**: raw Arrow `RecordBatch`es keyed by table name (custom
 ///   pipelines that bypass `CodeGraph` entirely).
 pub enum PipelineOutput {
-    Graph(CodeGraph),
+    Graph(Box<CodeGraph>),
     Batches(Vec<(String, arrow::record_batch::RecordBatch)>),
 }
 
@@ -298,7 +298,7 @@ where
         );
         combined_stats.print();
 
-        Ok(PipelineOutput::Graph(graph))
+        Ok(PipelineOutput::Graph(Box::new(graph)))
     }
 }
 
@@ -442,7 +442,7 @@ impl Pipeline {
                         graph.edge_count()
                     );
                     files_parsed += file_count;
-                    all_graphs.push(graph);
+                    all_graphs.push(*graph);
                 }
                 Some(Ok(PipelineOutput::Batches(batches))) => {
                     let row_count: usize = batches.iter().map(|(_, b)| b.num_rows()).sum();

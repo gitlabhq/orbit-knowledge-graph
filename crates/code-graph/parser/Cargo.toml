@@ -27,7 +27,7 @@ rust-lapper = { workspace = true }
 internment = { workspace = true, features = ["arc"] }
 
 # Ruby parser
-ruby-prism = "1.7.0"
+ruby-prism = { workspace = true }
 
 # SWC (TypeScript/JavaScript)
 swc_common = "18.0.1"
