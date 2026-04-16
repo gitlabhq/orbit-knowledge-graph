@@ -37,6 +37,9 @@ pub enum Value {
     Alias(Intern<str>),
     /// Dead end — parameter, literal, or otherwise unresolvable.
     Opaque,
+    /// Internal: cycle-detection sentinel for the marker algorithm.
+    /// Distinct from Opaque so genuine dead-end blocks aren't misidentified as cycles.
+    Marker,
     /// Internal: a phi node (will be resolved to concrete values).
     Phi(PhiId),
 }
@@ -74,6 +77,10 @@ struct PhiNode {
     block: BlockId,
     variable: VarName,
     operands: SmallVec<[Value; 2]>,
+    /// Witness caching (Section 3.1): first two distinct non-self operands.
+    /// If both are still valid and distinct, the phi is non-trivial without
+    /// scanning all operands.
+    witnesses: [Option<Value>; 2],
 }
 
 // ── Block ───────────────────────────────────────────────────────
@@ -165,12 +172,26 @@ impl SsaResolver {
     }
 
     /// Record a variable definition: `variable` is defined as `value` in `block`.
+    /// On-the-fly copy propagation (Section 3.1): if the value is an alias
+    /// to another variable, resolve it immediately instead of deferring.
     pub fn write_variable(&mut self, variable: &str, block: BlockId, value: Value) {
         let var = Intern::from(variable);
+        let resolved = if let Value::Alias(ref alias_name) = value {
+            // Copy propagation: look up what the aliased variable holds
+            // right now and store that directly. Avoids indirection during reads.
+            let alias_val = self.read_variable_internal(*alias_name, block);
+            if alias_val != Value::Opaque {
+                alias_val
+            } else {
+                value
+            }
+        } else {
+            value
+        };
         self.current_def
             .entry(var)
             .or_default()
-            .insert(block, value);
+            .insert(block, resolved);
         self.stats.writes += 1;
     }
 
@@ -204,6 +225,7 @@ impl SsaResolver {
         let num_preds = self.blocks[block.0].predecessors.len();
 
         if !sealed {
+            // Incomplete CFG: defer with operandless phi (Algorithm 4)
             self.stats.unsealed_hits += 1;
             let phi_id = self.new_phi(block, variable);
             self.incomplete_phis
@@ -218,14 +240,58 @@ impl SsaResolver {
             let pred = self.blocks[block.0].predecessors[0];
             val = self.read_variable_internal(variable, pred);
         } else {
-            let phi_id = self.new_phi(block, variable);
-            self.write_variable_interned(variable, block, Value::Phi(phi_id));
-            self.add_phi_operands(variable, phi_id);
-            val = self.try_remove_trivial_phi(phi_id);
+            // Marker algorithm (Section 3.3): mark block before recursing.
+            // Only place a phi if we detect a cycle (hit the marker) or
+            // find different values from predecessors.
+            val = self.read_variable_marker(variable, block);
         }
 
         self.write_variable_interned(variable, block, val.clone());
         val
+    }
+
+    /// Marker algorithm: mark block, collect values from predecessors,
+    /// only create a phi if values differ or a cycle was detected.
+    fn read_variable_marker(&mut self, variable: VarName, block: BlockId) -> Value {
+        // Place a marker sentinel so recursive lookups that reach this
+        // block again will detect the cycle. Distinct from Opaque so
+        // genuine dead-end values aren't misidentified as cycles.
+        self.write_variable_interned(variable, block, Value::Marker);
+
+        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
+        let mut same: Option<Value> = None;
+        let mut need_phi = false;
+
+        for &pred in &preds {
+            let pred_val = self.read_variable_internal(variable, pred);
+            if pred_val == Value::Marker {
+                need_phi = true;
+                continue;
+            }
+            match &same {
+                None => same = Some(pred_val),
+                Some(s) if *s == pred_val => {}
+                Some(_) => {
+                    need_phi = true;
+                    // Still need to collect remaining operands for the phi
+                    break;
+                }
+            }
+        }
+
+        if !need_phi {
+            // All predecessors agree (or only one non-cycle predecessor).
+            // No phi needed — zero temporary allocations.
+            self.stats.markers_elided += 1;
+            return same.unwrap_or(Value::Opaque);
+        }
+
+        // Different values or cycle detected: fall back to phi creation.
+        // Re-collect all operands properly with cycle-breaking phi.
+        let phi_id = self.new_phi(block, variable);
+        self.write_variable_interned(variable, block, Value::Phi(phi_id));
+        self.add_phi_operands(variable, phi_id);
+        self.try_remove_trivial_phi(phi_id)
     }
 
     /// Internal write that takes an already-interned name.
@@ -243,16 +309,25 @@ impl SsaResolver {
             block,
             variable,
             operands: SmallVec::new(),
+            witnesses: [None, None],
         });
         id
     }
 
     fn add_phi_operands(&mut self, variable: VarName, phi_id: PhiId) {
         let block = self.phis[phi_id.0].block;
-        // Copy predecessors to avoid borrow conflict (SmallVec: stack-allocated for ≤2).
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
         for pred in preds {
             let val = self.read_variable_internal(variable, pred);
+            // Update witnesses: track first two distinct non-self operands.
+            if val != Value::Phi(phi_id) {
+                let phi = &mut self.phis[phi_id.0];
+                if phi.witnesses[0].is_none() {
+                    phi.witnesses[0] = Some(val.clone());
+                } else if phi.witnesses[1].is_none() && phi.witnesses[0].as_ref() != Some(&val) {
+                    phi.witnesses[1] = Some(val.clone());
+                }
+            }
             self.phis[phi_id.0].operands.push(val);
         }
     }
@@ -260,9 +335,19 @@ impl SsaResolver {
     /// Remove trivial phi: if it references only one real value (plus itself),
     /// replace it with that value.
     fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> Value {
+        // Witness cache fast path: if both witnesses are still distinct
+        // and neither is the phi itself, the phi is non-trivial.
+        let w = &self.phis[phi_id.0].witnesses;
+        if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref())
+            && w0 != w1
+            && *w0 != Value::Phi(phi_id)
+            && *w1 != Value::Phi(phi_id)
+        {
+            return Value::Phi(phi_id);
+        }
+
         let mut same: Option<Value> = None;
 
-        // Iterate by index to avoid cloning the operands vec.
         for i in 0..self.phis[phi_id.0].operands.len() {
             let op = self.phis[phi_id.0].operands[i].clone();
             if op == Value::Phi(phi_id) || Some(&op) == same.as_ref() {
@@ -296,11 +381,19 @@ impl SsaResolver {
             .map(|(i, _)| PhiId(i))
             .collect();
 
-        // Replace this phi in all users' operands
+        // Replace this phi in all users' operands and invalidate witnesses
+        let phi_val = Value::Phi(phi_id);
         for user_id in &phi_users {
-            for op in &mut self.phis[user_id.0].operands {
-                if *op == Value::Phi(phi_id) {
+            let user = &mut self.phis[user_id.0];
+            for op in &mut user.operands {
+                if *op == phi_val {
                     *op = replacement.clone();
+                }
+            }
+            // Invalidate witnesses — they may reference the removed phi
+            for w in &mut user.witnesses {
+                if w.as_ref() == Some(&phi_val) {
+                    *w = None;
                 }
             }
         }
@@ -311,6 +404,110 @@ impl SsaResolver {
         }
 
         replacement
+    }
+
+    /// Remove redundant phi SCCs (Algorithm 5, Section 3.2 of Braun et al.).
+    /// Handles irreducible control flow where sets of phis reference only
+    /// each other plus one external value. Call after SSA construction is complete.
+    pub fn remove_redundant_phis(&mut self) {
+        let phi_indices: Vec<PhiId> = (0..self.phis.len()).map(PhiId).collect();
+        self.remove_redundant_phis_inner(&phi_indices);
+    }
+
+    fn remove_redundant_phis_inner(&mut self, phi_ids: &[PhiId]) {
+        if phi_ids.is_empty() {
+            return;
+        }
+
+        // Build a petgraph DiGraph of the phi subgraph for SCC computation.
+        let mut phi_graph = petgraph::graph::DiGraph::<PhiId, ()>::new();
+        let mut phi_to_node: FxHashMap<PhiId, petgraph::graph::NodeIndex> = FxHashMap::default();
+
+        for &pid in phi_ids {
+            let n = phi_graph.add_node(pid);
+            phi_to_node.insert(pid, n);
+        }
+        for &pid in phi_ids {
+            for op in &self.phis[pid.0].operands {
+                if let Value::Phi(p) = op
+                    && let (Some(&src), Some(&tgt)) = (phi_to_node.get(&pid), phi_to_node.get(p))
+                {
+                    phi_graph.add_edge(src, tgt, ());
+                }
+            }
+        }
+
+        // petgraph's tarjan_scc returns SCCs in reverse topological order
+        let sccs = petgraph::algo::tarjan_scc(&phi_graph);
+
+        // Process in reverse (tarjan_scc returns reverse topo order)
+        for scc_nodes in sccs.iter().rev() {
+            if scc_nodes.len() <= 1 {
+                continue;
+            }
+
+            let scc: Vec<PhiId> = scc_nodes.iter().map(|&n| phi_graph[n]).collect();
+            let scc_set: FxHashSet<PhiId> = scc.iter().copied().collect();
+            let mut outer_ops: FxHashSet<Value> = FxHashSet::default();
+            let mut inner: Vec<PhiId> = Vec::new();
+
+            for &pid in &scc {
+                let mut is_inner = true;
+                for op in &self.phis[pid.0].operands {
+                    if let Value::Phi(p) = op {
+                        if !scc_set.contains(p) {
+                            outer_ops.insert(op.clone());
+                            is_inner = false;
+                        }
+                    } else {
+                        outer_ops.insert(op.clone());
+                        is_inner = false;
+                    }
+                }
+                if is_inner {
+                    inner.push(pid);
+                }
+            }
+
+            if outer_ops.len() == 1 {
+                // All phis in the SCC produce the same value — collapse.
+                // Build reverse map first to avoid O(|SCC| × |total_phis|).
+                let replacement = outer_ops.into_iter().next().unwrap();
+                let mut users: FxHashMap<PhiId, Vec<usize>> = FxHashMap::default();
+                for (i, phi) in self.phis.iter().enumerate() {
+                    for op in &phi.operands {
+                        if let Value::Phi(p) = op
+                            && scc_set.contains(p)
+                        {
+                            users.entry(*p).or_default().push(i);
+                        }
+                    }
+                }
+
+                for &pid in &scc {
+                    let variable = self.phis[pid.0].variable;
+                    let block = self.phis[pid.0].block;
+                    if let Some(block_defs) = self.current_def.get_mut(&variable)
+                        && block_defs.get(&block) == Some(&Value::Phi(pid))
+                    {
+                        block_defs.insert(block, replacement.clone());
+                    }
+                    if let Some(user_indices) = users.get(&pid) {
+                        for &ui in user_indices {
+                            for op in &mut self.phis[ui].operands {
+                                if *op == Value::Phi(pid) {
+                                    *op = replacement.clone();
+                                }
+                            }
+                        }
+                    }
+                    self.stats.phis_trivial += 1;
+                }
+            } else if outer_ops.len() > 1 {
+                // Multiple outer values — recurse on inner phis
+                self.remove_redundant_phis_inner(&inner);
+            }
+        }
     }
 
     /// Expand a value into its concrete reaching definitions.
@@ -342,7 +539,7 @@ impl SsaResolver {
                     self.resolve_value_recursive(op, out, visited);
                 }
             }
-            Value::Opaque => {} // don't include opaque in results
+            Value::Opaque | Value::Marker => {} // don't include in results
             other => out.push(other.clone()),
         }
     }
