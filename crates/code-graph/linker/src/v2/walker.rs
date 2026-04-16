@@ -130,6 +130,8 @@ where
         sep,
         last_bare_path: ResolvePath::None,
         last_chain_path: ResolvePath::None,
+        compound_key_buf: String::new(),
+        scratch: String::new(),
     };
 
     walker.walk_node(root);
@@ -187,6 +189,8 @@ where
     sep: &'static str,
     last_bare_path: ResolvePath,
     last_chain_path: ResolvePath,
+    compound_key_buf: String,
+    scratch: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -593,6 +597,7 @@ where
                         name,
                         self.sep,
                         &self.import_map,
+                        &mut self.scratch,
                     );
                     if !r.is_empty() {
                         self.stats.bare_import_resolved += 1;
@@ -712,11 +717,11 @@ where
             return vec![];
         }
 
-        let mut compound_key = if self.settings.compound_key_recovery {
-            self.compound_key_base(&effective_chain[0])
+        if self.settings.compound_key_recovery {
+            self.init_compound_key(&effective_chain[0]);
         } else {
-            String::new()
-        };
+            self.compound_key_buf.clear();
+        }
 
         for (i, step) in effective_chain[1..].iter().enumerate() {
             let is_last = i == effective_chain.len() - 2;
@@ -736,14 +741,14 @@ where
             }
 
             if next_types.is_empty() && found_nested.is_empty() {
-                let recovered = self.compound_key_step(&mut compound_key, member_name);
+                let recovered = self.compound_key_step(member_name);
                 if !recovered.is_empty() {
                     self.stats.chain_compound_key_recovered += 1;
                     current_types = recovered;
                     continue;
                 }
             } else {
-                compound_key.clear();
+                self.compound_key_buf.clear();
             }
 
             {
@@ -856,35 +861,31 @@ where
         (next_types, found_nested)
     }
 
-    fn compound_key_base(&self, step: &ExpressionStep) -> String {
+    fn init_compound_key(&mut self, step: &ExpressionStep) {
+        self.compound_key_buf.clear();
         match step {
-            ExpressionStep::Ident(n) => n.clone(),
-            ExpressionStep::This => self
-                .rules
-                .self_names
-                .first()
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            ExpressionStep::Super => self
-                .rules
-                .super_name
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            _ => String::new(),
+            ExpressionStep::Ident(n) => self.compound_key_buf.push_str(n),
+            ExpressionStep::This => {
+                if let Some(s) = self.rules.self_names.first() {
+                    self.compound_key_buf.push_str(s);
+                }
+            }
+            ExpressionStep::Super => {
+                if let Some(s) = self.rules.super_name {
+                    self.compound_key_buf.push_str(s);
+                }
+            }
+            _ => {}
         }
     }
 
-    fn compound_key_step(
-        &mut self,
-        compound_key: &mut String,
-        member_name: &str,
-    ) -> SmallVec<[&'f str; 2]> {
-        if compound_key.is_empty() {
+    fn compound_key_step(&mut self, member_name: &str) -> SmallVec<[&'f str; 2]> {
+        if self.compound_key_buf.is_empty() {
             return SmallVec::new();
         }
-        compound_key.push_str(self.sep);
-        compound_key.push_str(member_name);
-        let key = self.file_arena.alloc_str(compound_key);
+        self.compound_key_buf.push_str(self.sep);
+        self.compound_key_buf.push_str(member_name);
+        let key = self.file_arena.alloc_str(&self.compound_key_buf);
         let reaching = self.ssa.read_variable_stateless(key, self.current_block);
         reaching
             .values
@@ -912,7 +913,7 @@ where
         if let Some(cached) = self.import_cache.get(&import_idx) {
             return cached.clone();
         }
-        let result = resolve_import(self.graph, import_idx, self.sep);
+        let result = resolve_import(self.graph, import_idx, self.sep, &mut self.scratch);
         self.import_cache.insert(import_idx, result.clone());
         result
     }

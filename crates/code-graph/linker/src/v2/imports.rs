@@ -3,6 +3,8 @@
 //! All lookups go through `CodeGraph.indexes` (VerifiedMap).
 //! String access goes through `CodeGraph.str(id)` (StringPool).
 
+use std::fmt::Write;
+
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
 
@@ -43,13 +45,14 @@ pub(crate) fn apply_import_strategies(
     name: &str,
     sep: &str,
     import_map: &FxHashMap<String, Vec<NodeIndex>>,
+    scratch: &mut String,
 ) -> Vec<NodeIndex> {
     for strategy in strategies {
         let candidates = match strategy {
-            ImportStrategy::ScopeFqnWalk => scope_fqn_walk(graph, file_node, name, sep),
+            ImportStrategy::ScopeFqnWalk => scope_fqn_walk(graph, file_node, name, sep, scratch),
             ImportStrategy::ExplicitImport => explicit_import(import_map, name),
-            ImportStrategy::WildcardImport => wildcard_import(graph, file_node, name, sep),
-            ImportStrategy::SamePackage => same_package(graph, file_node, name, sep),
+            ImportStrategy::WildcardImport => wildcard_import(graph, file_node, name, sep, scratch),
+            ImportStrategy::SamePackage => same_package(graph, file_node, name, sep, scratch),
             ImportStrategy::SameFile => same_file(graph, file_node, name),
             ImportStrategy::FilePath => vec![],
         };
@@ -64,6 +67,7 @@ pub(crate) fn resolve_import(
     graph: &CodeGraph,
     import_idx: NodeIndex,
     sep: &str,
+    scratch: &mut String,
 ) -> Vec<NodeIndex> {
     let import = graph.import(import_idx);
     let symbol_name = import
@@ -76,16 +80,18 @@ pub(crate) fn resolve_import(
     }
 
     let imp_path = graph.str(import.path);
-    let full_fqn = if imp_path.is_empty() {
-        symbol_name.to_string()
+    scratch.clear();
+    if imp_path.is_empty() {
+        scratch.push_str(symbol_name);
     } else {
-        format!("{imp_path}{sep}{symbol_name}")
-    };
+        write!(scratch, "{imp_path}{sep}{symbol_name}").unwrap();
+    }
 
+    let key = scratch.as_str();
     let by_fqn = graph
         .indexes
         .by_fqn
-        .lookup(&full_fqn, |idx| graph.def_fqn(idx) == full_fqn);
+        .lookup(key, |idx| graph.def_fqn(idx) == key);
     if !by_fqn.is_empty() {
         return by_fqn.to_vec();
     }
@@ -107,6 +113,7 @@ fn scope_fqn_walk(
     file_node: NodeIndex,
     name: &str,
     sep: &str,
+    scratch: &mut String,
 ) -> Vec<NodeIndex> {
     let def_ids: Vec<_> = graph
         .graph
@@ -118,11 +125,13 @@ fn scope_fqn_walk(
         let def = &graph.defs[did.0 as usize];
         if def.is_top_level {
             let fqn = graph.str(def.fqn);
-            let candidate = format!("{fqn}{sep}{name}");
+            scratch.clear();
+            write!(scratch, "{fqn}{sep}{name}").unwrap();
+            let key = scratch.as_str();
             let matches = graph
                 .indexes
                 .by_fqn
-                .lookup(&candidate, |idx| graph.def_fqn(idx) == candidate);
+                .lookup(key, |idx| graph.def_fqn(idx) == key);
             if !matches.is_empty() {
                 return matches.to_vec();
             }
@@ -133,11 +142,13 @@ fn scope_fqn_walk(
         let fqn_str = graph.str(def.fqn);
         let mut current = fqn_str;
         loop {
-            let candidate = format!("{current}{sep}{name}");
+            scratch.clear();
+            write!(scratch, "{current}{sep}{name}").unwrap();
+            let key = scratch.as_str();
             let matches = graph
                 .indexes
                 .by_fqn
-                .lookup(&candidate, |idx| graph.def_fqn(idx) == candidate);
+                .lookup(key, |idx| graph.def_fqn(idx) == key);
             if !matches.is_empty() {
                 return matches.to_vec();
             }
@@ -159,6 +170,7 @@ fn wildcard_import(
     file_node: NodeIndex,
     name: &str,
     sep: &str,
+    scratch: &mut String,
 ) -> Vec<NodeIndex> {
     for neighbor in graph
         .graph
@@ -169,11 +181,13 @@ fn wildcard_import(
             && imp.wildcard
         {
             let path = graph.str(imp.path);
-            let candidate = format!("{path}{sep}{name}");
+            scratch.clear();
+            write!(scratch, "{path}{sep}{name}").unwrap();
+            let key = scratch.as_str();
             let matches = graph
                 .indexes
                 .by_fqn
-                .lookup(&candidate, |idx| graph.def_fqn(idx) == candidate);
+                .lookup(key, |idx| graph.def_fqn(idx) == key);
             if !matches.is_empty() {
                 return matches.to_vec();
             }
@@ -182,7 +196,13 @@ fn wildcard_import(
     vec![]
 }
 
-fn same_package(graph: &CodeGraph, file_node: NodeIndex, name: &str, sep: &str) -> Vec<NodeIndex> {
+fn same_package(
+    graph: &CodeGraph,
+    file_node: NodeIndex,
+    name: &str,
+    sep: &str,
+    scratch: &mut String,
+) -> Vec<NodeIndex> {
     for neighbor in graph
         .graph
         .neighbors_directed(file_node, petgraph::Direction::Outgoing)
@@ -193,11 +213,13 @@ fn same_package(graph: &CodeGraph, file_node: NodeIndex, name: &str, sep: &str) 
         {
             let fqn_str = graph.str(def.fqn);
             if let Some(sep_pos) = fqn_str.rfind(sep) {
-                let candidate = format!("{}{sep}{name}", &fqn_str[..sep_pos]);
+                scratch.clear();
+                write!(scratch, "{}{sep}{name}", &fqn_str[..sep_pos]).unwrap();
+                let key = scratch.as_str();
                 let matches = graph
                     .indexes
                     .by_fqn
-                    .lookup(&candidate, |idx| graph.def_fqn(idx) == candidate);
+                    .lookup(key, |idx| graph.def_fqn(idx) == key);
                 if !matches.is_empty() {
                     return matches.to_vec();
                 }
