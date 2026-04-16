@@ -18,6 +18,10 @@ impl SecurityStage {
             as i64;
         let traversal_paths = if claims.admin {
             vec![format!("{}/", org_id)]
+        } else if claims.group_traversal_ids.is_empty() {
+            return Err(SecurityError(
+                "no enabled namespaces for this user".to_string(),
+            ));
         } else {
             claims.group_traversal_ids.clone()
         };
@@ -96,5 +100,12 @@ mod tests {
         let claims = make_claims(false, vec!["1/22/".into(), "1/33/".into()], Some(1));
         let ctx = SecurityStage::build_context(&claims).unwrap();
         assert_eq!(ctx.traversal_paths, vec!["1/22/", "1/33/"]);
+    }
+
+    #[test]
+    fn non_admin_with_empty_traversal_ids_returns_error() {
+        let claims = make_claims(false, vec![], Some(1));
+        let err = SecurityStage::build_context(&claims).unwrap_err();
+        assert!(err.to_string().contains("no enabled namespaces"));
     }
 }
