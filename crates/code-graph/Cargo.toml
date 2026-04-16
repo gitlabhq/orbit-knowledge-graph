@@ -13,6 +13,7 @@ ignore = { workspace = true }
 indicatif = { workspace = true }
 log = { workspace = true }
 petgraph = { workspace = true }
+smallvec = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
 

@@ -2115,6 +2115,7 @@ dependencies = [
  "petgraph 0.8.3",
  "rayon",
  "rustc-hash",
+ "smallvec",
  "tempfile",
  "treesitter-visit",
 ]

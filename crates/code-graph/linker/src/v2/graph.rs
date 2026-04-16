@@ -10,6 +10,7 @@ use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
+use smallvec::SmallVec;
 
 // ── Node + Edge types ───────────────────────────────────────────
 
@@ -107,14 +108,14 @@ pub struct CodeGraph {
     pub dir_index: FxHashMap<String, NodeIndex>,
     pub file_index: FxHashMap<String, NodeIndex>,
 
-    // Resolution indexes
-    pub def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
-    pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
-    pub nested_defs: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
+    // Resolution indexes — SmallVec inlines up to 2 entries (common case),
+    // eliminating a heap pointer chase on every lookup.
+    pub def_by_fqn: FxHashMap<String, SmallVec<[NodeIndex; 8]>>,
+    pub def_by_name: FxHashMap<String, SmallVec<[NodeIndex; 8]>>,
+    pub nested_defs: FxHashMap<String, FxHashMap<String, SmallVec<[NodeIndex; 8]>>>,
 
     /// Pre-computed ancestor chains from Extends edges.
-    /// Built once during finalize(), used during resolve for hierarchy lookups.
-    pub ancestors: FxHashMap<NodeIndex, Vec<NodeIndex>>,
+    pub ancestors: FxHashMap<NodeIndex, SmallVec<[NodeIndex; 8]>>,
 
     pub root_path: String,
 }
@@ -301,7 +302,7 @@ impl CodeGraph {
                 continue;
             }
 
-            let mut chain = Vec::new();
+            let mut chain: SmallVec<[NodeIndex; 8]> = SmallVec::new();
             let mut bfs = Bfs::new(&extends_only, idx);
             bfs.next(&extends_only); // skip self
             while let Some(ancestor) = bfs.next(&extends_only) {

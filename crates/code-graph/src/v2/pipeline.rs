@@ -351,7 +351,7 @@ impl Default for PipelineConfig {
 }
 
 pub struct PipelineResult {
-    pub graph: CodeGraph,
+    pub graphs: Vec<CodeGraph>,
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
 }
@@ -430,16 +430,13 @@ impl Pipeline {
             }
         }
 
-        // 3. Merge all per-language graphs
-        let graph = Self::merge_graphs(all_graphs);
-
-        let definitions_count = graph.definitions().count();
-        let imports_count = graph.imports().count();
-        let references_count = 0;
-        let edges_count = graph.edge_count();
+        let definitions_count = all_graphs.iter().map(|g| g.definitions().count()).sum();
+        let imports_count = all_graphs.iter().map(|g| g.imports().count()).sum();
+        let references_count = all_graphs.iter().map(|g| g.edges().count()).sum();
+        let edges_count = all_graphs.iter().map(|g| g.edge_count()).sum();
 
         PipelineResult {
-            graph,
+            graphs: all_graphs,
             stats: PipelineStats {
                 files_parsed,
                 files_skipped,
@@ -497,107 +494,6 @@ impl Pipeline {
         }
 
         groups
-    }
-
-    fn merge_graphs(graphs: Vec<CodeGraph>) -> CodeGraph {
-        use crate::linker::v2::graph::GraphNode;
-        use petgraph::graph::NodeIndex;
-        use rustc_hash::FxHashMap;
-
-        let mut merged = CodeGraph::new();
-
-        for g in graphs {
-            // Offsets for remapping DefId/ImportId from source graph to merged
-            let def_offset = merged.defs.len() as u32;
-            let import_offset = merged.imports.len() as u32;
-            merged.defs.extend(g.defs);
-            merged.imports.extend(g.imports);
-
-            // Map old node indices to new ones
-            let mut index_map: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
-
-            for old_idx in g.graph.node_indices() {
-                let mut node = g.graph[old_idx].clone();
-                // Remap dense vec IDs
-                match &mut node {
-                    GraphNode::Definition { id, .. } => id.0 += def_offset,
-                    GraphNode::Import { id, .. } => id.0 += import_offset,
-                    _ => {}
-                }
-                let new_idx = merged.graph.add_node(node.clone());
-                index_map.insert(old_idx, new_idx);
-
-                // Update quick-lookup indexes
-                match &node {
-                    GraphNode::Directory(d) => {
-                        merged.dir_index.insert(d.path.clone(), new_idx);
-                    }
-                    GraphNode::File(f) => {
-                        merged.file_index.insert(f.path.clone(), new_idx);
-                    }
-                    _ => {}
-                }
-            }
-
-            // Remap resolution indexes
-            for (fqn, nodes) in &g.def_by_fqn {
-                let remapped: Vec<_> = nodes
-                    .iter()
-                    .filter_map(|i| index_map.get(i).copied())
-                    .collect();
-                merged
-                    .def_by_fqn
-                    .entry(fqn.clone())
-                    .or_default()
-                    .extend(remapped);
-            }
-            for (name, nodes) in &g.def_by_name {
-                let remapped: Vec<_> = nodes
-                    .iter()
-                    .filter_map(|i| index_map.get(i).copied())
-                    .collect();
-                merged
-                    .def_by_name
-                    .entry(name.clone())
-                    .or_default()
-                    .extend(remapped);
-            }
-            for (scope_fqn, nested_map) in &g.nested_defs {
-                for (name, nodes) in nested_map {
-                    let remapped: Vec<_> = nodes
-                        .iter()
-                        .filter_map(|i| index_map.get(i).copied())
-                        .collect();
-                    merged
-                        .nested_defs
-                        .entry(scope_fqn.clone())
-                        .or_default()
-                        .entry(name.clone())
-                        .or_default()
-                        .extend(remapped);
-                }
-            }
-            for (node, chain) in &g.ancestors {
-                if let Some(&new_node) = index_map.get(node) {
-                    let remapped: Vec<_> = chain
-                        .iter()
-                        .filter_map(|i| index_map.get(i).copied())
-                        .collect();
-                    if !remapped.is_empty() {
-                        merged.ancestors.insert(new_node, remapped);
-                    }
-                }
-            }
-            for old_edge in g.graph.edge_indices() {
-                let (src, tgt) = g.graph.edge_endpoints(old_edge).unwrap();
-                let weight = g.graph[old_edge].clone();
-                merged
-                    .graph
-                    .add_edge(index_map[&src], index_map[&tgt], weight);
-            }
-        }
-
-        merged
     }
 }
 
@@ -779,12 +675,12 @@ namespace MyApp {
             result.stats.definitions_count
         );
 
-        assert_eq!(result.graph.files().count(), 4);
-        assert!(result.graph.directories().count() > 0);
-        assert!(result.graph.edge_count() > 0);
+        let graph = &result.graphs[0];
+        assert_eq!(graph.files().count(), 4);
+        assert!(graph.directories().count() > 0);
+        assert!(graph.edge_count() > 0);
 
-        let def_to_def = result
-            .graph
+        let def_to_def = graph
             .edges()
             .filter(|(_, _, e)| {
                 e.relationship.source_node == NodeKind::Definition
@@ -796,8 +692,7 @@ namespace MyApp {
             "Expected at least 4 def-to-def edges, got {def_to_def}"
         );
 
-        let file_to_def = result
-            .graph
+        let file_to_def = graph
             .edges()
             .filter(|(_, _, e)| {
                 e.relationship.source_node == NodeKind::File
