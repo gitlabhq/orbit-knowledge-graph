@@ -972,6 +972,24 @@
       "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default.",
       "type": "object",
       "properties": {
+        "graph_query_cache_enabled": {
+          "description": "NATS KV cache for graph query results (webserver).\nExcluded from ClickHouse SETTINGS (app-level only).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "writeOnly": true
+        },
+        "graph_query_cache_ttl": {
+          "description": "Graph query cache TTL in seconds.\nExcluded from ClickHouse SETTINGS (app-level only).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "writeOnly": true
+        },
         "max_execution_time": {
           "description": "ClickHouse `max_execution_time` in seconds.",
           "type": [

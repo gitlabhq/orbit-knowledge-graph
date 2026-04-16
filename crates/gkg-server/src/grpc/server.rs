@@ -18,13 +18,12 @@ use super::service::KnowledgeGraphServiceImpl;
 
 pub struct GrpcServer {
     addr: SocketAddr,
-    service: KnowledgeGraphServiceServer<KnowledgeGraphServiceImpl>,
+    service: KnowledgeGraphServiceImpl,
     tls_config: Option<ServerTlsConfig>,
     grpc_config: GrpcConfig,
 }
 
 impl GrpcServer {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
@@ -32,7 +31,6 @@ impl GrpcServer {
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
-        resolver_registry: Option<Arc<ColumnResolverRegistry>>,
         grpc_config: GrpcConfig,
     ) -> Self {
         let service = KnowledgeGraphServiceImpl::new(
@@ -40,15 +38,24 @@ impl GrpcServer {
             ontology,
             clickhouse_config,
             cluster_health,
-            resolver_registry,
             grpc_config.stream_timeout_secs,
         );
         Self {
             addr,
-            service: KnowledgeGraphServiceServer::new(service),
+            service,
             tls_config,
             grpc_config,
         }
+    }
+
+    pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
+        self.service = self.service.with_resolver_registry(registry);
+        self
+    }
+
+    pub fn with_cache_broker(mut self, broker: Arc<indexer::nats::NatsBroker>) -> Self {
+        self.service = self.service.with_cache_broker(broker);
+        self
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -76,7 +83,7 @@ impl GrpcServer {
             .layer(labkit::grpc::GrpcMetricsLayer::new())
             .layer(labkit::grpc::GrpcTraceLayer::new())
             .layer(labkit::grpc::GrpcCorrelationLayer::new())
-            .add_service(self.service)
+            .add_service(KnowledgeGraphServiceServer::new(self.service))
             .serve(self.addr)
             .await
     }
@@ -101,7 +108,6 @@ mod tests {
             ontology,
             &clickhouse_config,
             cluster_health,
-            None,
             None,
             GrpcConfig::default(),
         );

@@ -888,6 +888,7 @@ mod tests {
             max_execution_time: None,
             use_query_cache: Some(true),
             query_cache_ttl: Some(60),
+            ..Default::default()
         };
         let result = codegen(&Node::Insert(Box::new(ins)), empty_ctx(), cfg).unwrap();
         assert!(
@@ -1021,6 +1022,7 @@ mod tests {
             max_execution_time: None,
             use_query_cache: Some(true),
             query_cache_ttl: Some(60),
+            ..Default::default()
         };
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), cfg).unwrap();
         assert!(
