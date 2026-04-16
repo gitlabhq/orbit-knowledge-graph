@@ -10,6 +10,8 @@ use tracing::{debug, warn};
 
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 
+use super::metrics;
+
 /// Gitaly-specific parameters extracted from a hydrated entity row.
 ///
 /// `revision` is the git ref used in `<revision>:<path>` for `list_blobs`.
@@ -50,6 +52,8 @@ impl ColumnResolver for GitalyContentService {
         rows: &[&PropertyRow],
         _ctx: &ResolverContext,
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
+        let mut timer = metrics::start_resolve(rows.len());
+
         // Pre-compute keys alongside requests so they can be reused for
         // deduplication and final lookup without cloning strings twice.
         let requests: Vec<Option<(GitalyBlobRequest, FileKey)>> = rows
@@ -86,6 +90,7 @@ impl ColumnResolver for GitalyContentService {
                 .collect();
             let keys = keys.clone();
             async move {
+                metrics::record_gitaly_call();
                 let stream = match client.list_blobs(project_id, &revisions).await {
                     Ok(s) => s,
                     Err(e) => {
@@ -107,11 +112,14 @@ impl ColumnResolver for GitalyContentService {
                 blobs
                     .into_iter()
                     .zip(keys.iter())
-                    .filter_map(|(blob, key)| match String::from_utf8(blob.data) {
-                        Ok(text) => Some((key.clone(), text)),
-                        Err(_) => {
-                            debug!(project_id, path = %key.2, "skipping binary blob");
-                            None
+                    .filter_map(|(blob, key)| {
+                        metrics::record_blob_bytes(blob.data.len() as u64);
+                        match String::from_utf8(blob.data) {
+                            Ok(text) => Some((key.clone(), text)),
+                            Err(_) => {
+                                debug!(project_id, path = %key.2, "skipping binary blob");
+                                None
+                            }
                         }
                     })
                     .collect::<Vec<_>>()
@@ -125,6 +133,8 @@ impl ColumnResolver for GitalyContentService {
         {
             file_cache.insert(key, Some(text));
         }
+
+        timer.set_outcome("gitaly_direct");
 
         // For each row, look up cached content and extract the byte-range slice.
         // Non-UTF-8 blobs were already filtered during fetch, so their cache
