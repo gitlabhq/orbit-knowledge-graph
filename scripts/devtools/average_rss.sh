@@ -26,7 +26,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ORBIT_BIN="$REPO_ROOT/target/release/orbit"
 
 echo "Building orbit binary..." >&2
-cargo build --bin orbit --release --features duckdb-client/bundled 2>&1 >&2
+cargo build --bin orbit --release --features duckdb-client/bundled >&2
 if [ $? -ne 0 ]; then
   echo '{"error": "Failed to build orbit binary"}' >&2
   exit 1

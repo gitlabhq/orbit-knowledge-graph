@@ -158,14 +158,14 @@ where
         let total_defs = total_defs.load(std::sync::atomic::Ordering::Relaxed);
         let total_imports = total_imports.load(std::sync::atomic::Ordering::Relaxed);
 
+        if !errors.is_empty() && phase1_results.iter().all(|n| n.is_none()) {
+            return Err(errors);
+        }
+
         let file_nodes: Vec<_> = phase1_results
             .into_iter()
             .map(|opt| opt.unwrap_or(petgraph::graph::NodeIndex::new(0)))
             .collect();
-
-        if !errors.is_empty() && file_nodes.iter().all(|n| n.index() == 0) {
-            return Err(errors);
-        }
 
         report_rss("after Phase 1 (graph + source bytes)");
 
