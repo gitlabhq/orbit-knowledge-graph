@@ -303,7 +303,7 @@ impl<'a> FusedFileWalker<'a> {
                 && let Some(super_type) = self.find_super_type(name)
             {
                 self.ssa
-                    .write_variable(super_name, new_block, Value::Type(super_type));
+                    .write_variable(super_name, new_block, Value::type_of(&super_type));
             }
         }
 
@@ -335,7 +335,8 @@ impl<'a> FusedFileWalker<'a> {
         parts.join(self.sep)
     }
 
-    fn find_super_type(&self, class_name: &str) -> Option<IStr> {
+    fn find_super_type(&self, class_name: &str) -> Option<String> {
+        // Look up the def by name in graph neighbors
         for neighbor in self
             .graph
             .graph
@@ -343,11 +344,11 @@ impl<'a> FusedFileWalker<'a> {
         {
             if let GraphNode::Definition { id, .. } = &self.graph.graph[neighbor] {
                 let def = &self.graph.defs[id.0 as usize];
-                if def.name.as_ref() == class_name
+                if def.name == class_name
                     && let Some(meta) = &def.metadata
                     && let Some(st) = meta.super_types.first()
                 {
-                    return Some(*st);
+                    return Some(st.clone());
                 }
             }
         }
@@ -788,7 +789,7 @@ impl<'a> FusedFileWalker<'a> {
                     if let Some(meta) = &def.metadata
                         && let Some(rt) = &meta.return_type
                     {
-                        next_types.push(*rt);
+                        next_types.push(IStr::from(rt.as_str()));
                     }
                     if matches!(
                         def.kind,
@@ -801,7 +802,7 @@ impl<'a> FusedFileWalker<'a> {
                     && let Some(meta) = &def.metadata
                     && let Some(ta) = &meta.type_annotation
                 {
-                    next_types.push(*ta);
+                    next_types.push(IStr::from(ta.as_str()));
                 }
             }
         }
@@ -904,7 +905,7 @@ impl<'a> FusedFileWalker<'a> {
         } else if let Some(meta) = &def.metadata
             && let Some(rt) = &meta.return_type
         {
-            smallvec![*rt]
+            smallvec![IStr::from(rt.as_str())]
         } else {
             SmallVec::new()
         }

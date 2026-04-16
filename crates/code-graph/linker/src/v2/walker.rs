@@ -314,7 +314,7 @@ impl<'a> FileWalker<'a> {
                 && let Some(super_type) = self.find_super_type(name)
             {
                 self.ssa
-                    .write_variable(super_name, new_block, Value::Type(super_type));
+                    .write_variable(super_name, new_block, Value::type_of(&super_type));
             }
         }
 
@@ -349,14 +349,14 @@ impl<'a> FileWalker<'a> {
     }
 
     /// Look up the first super_type for a class by name from canonical defs.
-    fn find_super_type(&self, class_name: &str) -> Option<IStr> {
+    fn find_super_type(&self, class_name: &str) -> Option<String> {
         self.result
             .definitions
             .iter()
-            .find(|d| d.name.as_ref() == class_name)
+            .find(|d| d.name == class_name)
             .and_then(|d| d.metadata.as_ref())
             .and_then(|m| m.super_types.first())
-            .copied()
+            .cloned()
     }
 
     /// Branch handling per Braun et al. §2.3 (Figure 3b), driven by

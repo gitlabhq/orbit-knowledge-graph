@@ -1,5 +1,5 @@
 use code_graph_config::Language;
-use code_graph_types::{BindingKind, CanonicalImport, DefKind, IStr};
+use code_graph_types::{BindingKind, CanonicalImport, DefKind};
 use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
 use parser_core::dsl::types::{
     BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LoopRule, ReferenceRule,
@@ -144,15 +144,15 @@ fn ruby_extract_attr_methods(
         if arg.kind().as_ref() != "simple_symbol" {
             continue;
         }
-        let name_str = arg.text().trim_start_matches(':').to_string();
-        if name_str.is_empty() {
+        let name = arg.text().trim_start_matches(':').to_string();
+        if name.is_empty() {
             continue;
         }
-        let fqn = code_graph_types::Fqn::from_scope(scope_stack, &name_str, sep);
+        let fqn = code_graph_types::Fqn::from_scope(scope_stack, &name, sep);
         defs.push(code_graph_types::CanonicalDefinition {
             definition_type: "Attribute",
             kind: DefKind::Property,
-            name: IStr::from(name_str.as_str()),
+            name,
             fqn,
             range: code_graph_types::Range::empty(),
             is_top_level: false,
@@ -222,7 +222,7 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
         return true;
     };
 
-    let name = path.rsplit('/').next().map(IStr::from);
+    let name = path.rsplit('/').next().map(|s| s.to_string());
 
     let import_type = if method == "require_relative" {
         "RequireRelative"
@@ -232,7 +232,7 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
 
     imports.push(CanonicalImport {
         import_type,
-        path: IStr::from(path.as_str()),
+        path,
         name,
         alias: None,
         scope_fqn: None,

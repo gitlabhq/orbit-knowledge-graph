@@ -306,11 +306,11 @@ mod tests {
         let result = parse("class Calculator:\n    def add(self, a, b):\n        return a + b\n");
 
         assert_eq!(result.definitions.len(), 2);
-        assert_eq!(result.definitions[0].name.as_ref(), "Calculator");
+        assert_eq!(result.definitions[0].name, "Calculator");
         assert_eq!(result.definitions[0].kind, DefKind::Class);
         assert!(result.definitions[0].is_top_level);
 
-        assert_eq!(result.definitions[1].name.as_ref(), "add");
+        assert_eq!(result.definitions[1].name, "add");
         // FQN includes module prefix from file path (test.py → "test")
         assert_eq!(result.definitions[1].fqn.to_string(), "test.Calculator.add");
     }
@@ -318,11 +318,7 @@ mod tests {
     #[test]
     fn super_types() {
         let result = parse("class Dog(Animal, Serializable):\n    pass\n");
-        let dog = result
-            .definitions
-            .iter()
-            .find(|d| d.name.as_ref() == "Dog")
-            .unwrap();
+        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         let meta = dog.metadata.as_ref().expect("should have metadata");
         assert_eq!(meta.super_types.len(), 2);
     }
@@ -333,7 +329,7 @@ mod tests {
         let greet = result
             .definitions
             .iter()
-            .find(|d| d.name.as_ref() == "greet")
+            .find(|d| d.name == "greet")
             .unwrap();
         let meta = greet.metadata.as_ref().expect("should have metadata");
         assert_eq!(meta.return_type.as_deref(), Some("str"));
@@ -350,7 +346,7 @@ mod tests {
     fn imports() {
         let result = parse("import os\nfrom pathlib import Path\n");
         assert!(result.imports.len() >= 2);
-        assert!(result.imports.iter().any(|i| i.path.as_ref() == "os"));
+        assert!(result.imports.iter().any(|i| i.path == "os"));
         assert!(
             result
                 .imports

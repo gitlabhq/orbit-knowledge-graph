@@ -246,14 +246,13 @@ impl MetadataRule {
         import_map: &rustc_hash::FxHashMap<String, String>,
         sep: &'static str,
     ) -> Option<Box<code_graph_types::DefinitionMetadata>> {
-        use code_graph_types::IStr;
-        let super_types: Vec<IStr> = self
+        let super_types: Vec<String> = self
             .super_types
             .as_ref()
             .map(|e| {
                 e.extract(node)
                     .into_iter()
-                    .map(|s| IStr::from(resolve_type_via_map(&s, import_map, sep).as_str()))
+                    .map(|s| resolve_type_via_map(&s, import_map, sep))
                     .collect()
             })
             .unwrap_or_default();
@@ -261,32 +260,26 @@ impl MetadataRule {
             .return_type
             .as_ref()
             .and_then(|e| e.extract_name(node))
-            .map(|s| IStr::from(resolve_type_via_map(&s, import_map, sep).as_str()));
+            .map(|s| resolve_type_via_map(&s, import_map, sep));
         let type_annotation = self
             .type_annotation
             .as_ref()
             .and_then(|e| e.extract_name(node))
-            .map(|s| IStr::from(resolve_type_via_map(&s, import_map, sep).as_str()));
+            .map(|s| resolve_type_via_map(&s, import_map, sep));
         let receiver_type = self
             .receiver_type
             .as_ref()
             .and_then(|e| e.extract_name(node))
-            .map(|s| IStr::from(resolve_type_via_map(&s, import_map, sep).as_str()));
-        let decorators: Vec<IStr> = self
+            .map(|s| resolve_type_via_map(&s, import_map, sep));
+        let decorators = self
             .decorators
             .as_ref()
-            .map(|e| {
-                e.extract(node)
-                    .into_iter()
-                    .map(|s| IStr::from(s.as_str()))
-                    .collect()
-            })
+            .map(|e| e.extract(node))
             .unwrap_or_default();
         let companion_of = self
             .companion_of
             .as_ref()
-            .and_then(|e| e.extract_name(node))
-            .map(|s| IStr::from(s.as_str()));
+            .and_then(|e| e.extract_name(node));
 
         let has_data = !super_types.is_empty()
             || return_type.is_some()

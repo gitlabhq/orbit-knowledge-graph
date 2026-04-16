@@ -107,10 +107,10 @@ pub struct CodeGraph {
     pub dir_index: FxHashMap<String, NodeIndex>,
     pub file_index: FxHashMap<String, NodeIndex>,
 
-    // Resolution indexes (IStr keys — interned, 8 bytes, deduped)
-    pub def_by_fqn: FxHashMap<IStr, Vec<NodeIndex>>,
-    pub def_by_name: FxHashMap<IStr, Vec<NodeIndex>>,
-    pub nested_defs: FxHashMap<IStr, FxHashMap<IStr, Vec<NodeIndex>>>,
+    // Resolution indexes
+    pub def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
+    pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
+    pub nested_defs: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
 
     /// Pre-computed ancestor chains from Extends edges.
     /// Built once during finalize(), used during resolve for hierarchy lookups.
@@ -189,17 +189,18 @@ impl CodeGraph {
             });
             def_nodes.push(def_node);
 
-            self.def_by_fqn
-                .entry(def.fqn.as_istr())
+            let fqn_str = def.fqn.to_string();
+            self.def_by_fqn.entry(fqn_str).or_default().push(def_node);
+            self.def_by_name
+                .entry(def.name.clone())
                 .or_default()
                 .push(def_node);
-            self.def_by_name.entry(def.name).or_default().push(def_node);
 
             if let Some(parent_fqn) = def.fqn.parent() {
                 self.nested_defs
-                    .entry(parent_fqn.as_istr())
+                    .entry(parent_fqn.to_string())
                     .or_default()
-                    .entry(def.name)
+                    .entry(def.name.clone())
                     .or_default()
                     .push(def_node);
             }
@@ -417,27 +418,23 @@ impl CodeGraph {
     // ── Resolution lookups ──────────────────────────────────
 
     pub fn lookup_fqn(&self, fqn: &str) -> &[NodeIndex] {
-        let key = IStr::from(fqn);
         self.def_by_fqn
-            .get(&key)
+            .get(fqn)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
     pub fn lookup_name(&self, name: &str) -> &[NodeIndex] {
-        let key = IStr::from(name);
         self.def_by_name
-            .get(&key)
+            .get(name)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
     pub fn lookup_nested(&self, scope_fqn: &str, member_name: &str) -> &[NodeIndex] {
-        let sk = IStr::from(scope_fqn);
-        let mk = IStr::from(member_name);
         self.nested_defs
-            .get(&sk)
-            .and_then(|ms| ms.get(&mk))
+            .get(scope_fqn)
+            .and_then(|ms| ms.get(member_name))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
@@ -448,11 +445,11 @@ impl CodeGraph {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let sk = IStr::from(scope_fqn);
+        // Resolve scope_fqn to NodeIndex(es): try FQN first, then bare name
         let start_nodes = self
             .def_by_fqn
-            .get(&sk)
-            .or_else(|| self.def_by_name.get(&sk));
+            .get(scope_fqn)
+            .or_else(|| self.def_by_name.get(scope_fqn));
 
         let Some(start_nodes) = start_nodes else {
             return false;
@@ -594,14 +591,13 @@ impl CodeGraph {
 
     /// Resolve a type name (FQN or bare name) to graph NodeIndexes.
     fn resolve_type_to_nodes(&self, name: &str) -> &[NodeIndex] {
-        let key = IStr::from(name);
-        if let Some(nodes) = self.def_by_fqn.get(&key)
+        if let Some(nodes) = self.def_by_fqn.get(name)
             && !nodes.is_empty()
         {
             return nodes;
         }
         self.def_by_name
-            .get(&key)
+            .get(name)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }

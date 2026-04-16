@@ -7,7 +7,7 @@ use code_graph_config::Language;
 use code_graph_types::{
     CanonicalBinding, CanonicalControlFlow, CanonicalDefinition, CanonicalImport,
     CanonicalReference, CanonicalResult, ControlFlowChild, ControlFlowKind, DefKind,
-    DefinitionMetadata, ExpressionStep, Fqn, IStr, ReferenceStatus,
+    DefinitionMetadata, ExpressionStep, Fqn, ReferenceStatus,
 };
 
 use crate::utils::node_to_range;
@@ -151,7 +151,7 @@ impl LanguageSpec {
             defs.push(CanonicalDefinition {
                 definition_type: m.label,
                 kind: m.def_kind,
-                name: IStr::from(m.name.as_str()),
+                name: m.name,
                 fqn,
                 range: canonical_range(&m.range),
                 is_top_level,
@@ -481,11 +481,11 @@ impl LanguageSpec {
 
                 if alias_kind.is_some_and(|ak| ak == ck.as_ref()) {
                     if let Some(name_node) = child.field("name") {
-                        let alias = child.field("alias").map(|a| IStr::from(a.text().as_ref()));
+                        let alias = child.field("alias").map(|a| a.text().to_string());
                         imports.push(CanonicalImport {
                             import_type: label,
-                            path: IStr::from(base_path.as_str()),
-                            name: Some(IStr::from(name_node.text().as_ref())),
+                            path: base_path.clone(),
+                            name: Some(name_node.text().to_string()),
                             alias,
                             scope_fqn: None,
                             range,
@@ -498,12 +498,9 @@ impl LanguageSpec {
                         continue;
                     }
                     let (path, name) = if base_path.is_empty() {
-                        (IStr::from(child_text.as_str()), None)
+                        (child_text, None)
                     } else {
-                        (
-                            IStr::from(base_path.as_str()),
-                            Some(IStr::from(child_text.as_str())),
-                        )
+                        (base_path.clone(), Some(child_text))
                     };
                     imports.push(CanonicalImport {
                         import_type: label,
@@ -517,8 +514,8 @@ impl LanguageSpec {
                 } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
                     imports.push(CanonicalImport {
                         import_type: label,
-                        path: IStr::from(base_path.as_str()),
-                        name: Some(IStr::from(rule.wildcard_symbol)),
+                        path: base_path.clone(),
+                        name: Some(rule.wildcard_symbol.to_string()),
                         alias: None,
                         scope_fqn: None,
                         range,
@@ -533,9 +530,10 @@ impl LanguageSpec {
                 .is_some_and(|wk| node.children().any(|c| c.kind().as_ref() == wk));
 
             if has_wildcard_child {
+                // Wildcard import: path is the full extracted name, no split needed.
                 imports.push(CanonicalImport {
                     import_type: label,
-                    path: IStr::from(full_path.as_str()),
+                    path: full_path,
                     name: None,
                     alias: None,
                     scope_fqn: None,
@@ -551,9 +549,9 @@ impl LanguageSpec {
                 let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
                 imports.push(CanonicalImport {
                     import_type: label,
-                    path: IStr::from(path.as_str()),
-                    name: name.map(|n| IStr::from(n.as_str())),
-                    alias: rule.extract_alias(node).map(|a| IStr::from(a.as_str())),
+                    path,
+                    name,
+                    alias: rule.extract_alias(node),
                     scope_fqn: None,
                     range,
                     wildcard: is_wildcard,

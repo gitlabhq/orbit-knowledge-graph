@@ -1,4 +1,3 @@
-use crate::IStr;
 use crate::fqn::Fqn;
 use crate::range::Range;
 use code_graph_config::Language;
@@ -57,37 +56,43 @@ pub enum ReferenceStatus {
 
 /// A parsed definition, language-agnostic.
 ///
-/// String fields use `IStr` (8 bytes, interned). Common names like "get",
+/// All strings are `IStr` (8 bytes, interned). Common names like "get",
 /// "set", "toString" are shared across thousands of definitions.
+/// Metadata is inlined — no `Box` indirection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalDefinition {
     /// Language-specific type string preserved for output fidelity.
     pub definition_type: &'static str,
     /// Canonical category for containment and relationship logic.
     pub kind: DefKind,
-    pub name: IStr,
+    pub name: String,
     pub fqn: Fqn,
     pub range: Range,
     /// Whether this is a top-level (not nested inside another definition).
     pub is_top_level: bool,
+    /// Inline metadata — None fields cost nothing (Option<IStr> = 8 bytes).
     pub metadata: Option<Box<DefinitionMetadata>>,
 }
 
 /// Resolution-relevant metadata extracted by the parser.
+///
+/// Flat struct with optional fields — each parser fills in what its
+/// language provides. The resolver reads whichever fields are present
+/// without knowing the source language.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefinitionMetadata {
     /// Super types (class parents, implemented interfaces).
-    pub super_types: Vec<IStr>,
-    /// Return type of a method/function.
-    pub return_type: Option<IStr>,
+    pub super_types: Vec<String>,
+    /// Return type of a method/function. `None` for void/untyped.
+    pub return_type: Option<String>,
     /// Type annotation on a field/parameter/variable.
-    pub type_annotation: Option<IStr>,
+    pub type_annotation: Option<String>,
     /// Receiver type for extension functions (Kotlin).
-    pub receiver_type: Option<IStr>,
+    pub receiver_type: Option<String>,
     /// Decorators/annotations (Python's `@classmethod`, etc.).
-    pub decorators: Vec<IStr>,
+    pub decorators: Vec<String>,
     /// If this is a companion object, the FQN of the owning class.
-    pub companion_of: Option<IStr>,
+    pub companion_of: Option<String>,
 }
 
 /// A parsed import, language-agnostic.
@@ -95,11 +100,15 @@ pub struct DefinitionMetadata {
 pub struct CanonicalImport {
     /// Language-specific import type (e.g. "RequireRelative", "FromImport").
     pub import_type: &'static str,
-    pub path: IStr,
-    pub name: Option<IStr>,
-    pub alias: Option<IStr>,
+    pub path: String,
+    pub name: Option<String>,
+    pub alias: Option<String>,
     pub scope_fqn: Option<Fqn>,
     pub range: Range,
+    /// Whether this is a wildcard import (e.g. `from foo import *`,
+    /// `import java.util.*`). Set by the parser; the resolver uses
+    /// this to drive wildcard import lookup instead of matching on
+    /// `import_type` strings.
     pub wildcard: bool,
 }
 

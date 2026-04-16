@@ -1,5 +1,5 @@
 use code_graph_config::Language;
-use code_graph_types::{BindingKind, CanonicalImport, DefKind, IStr};
+use code_graph_types::{BindingKind, CanonicalImport, DefKind};
 use parser_core::dsl::extractors::{Extract, field, metadata};
 use parser_core::dsl::predicates::*;
 use parser_core::dsl::types::*;
@@ -157,11 +157,9 @@ fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
 
     imports.push(CanonicalImport {
         import_type: "Import",
-        path: IStr::from(import_path.as_str()),
-        name: pkg_name.map(|s| IStr::from(s.as_str())),
-        alias: alias
-            .filter(|_| !is_blank && !is_dot)
-            .map(|s| IStr::from(s.as_str())),
+        path: import_path,
+        name: pkg_name,
+        alias: alias.filter(|_| !is_blank && !is_dot),
         scope_fqn: None,
         range: code_graph_types::Range::empty(),
         wildcard: is_dot,
