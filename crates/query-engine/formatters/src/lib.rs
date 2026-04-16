@@ -46,6 +46,18 @@ pub trait ResultFormatter: Send + Sync {
     /// (e.g. `GoonFormatter` before ADR 009 ships).
     fn format_version(&self) -> Option<&Version>;
     fn format(&self, output: &PipelineOutput) -> Value;
+
+    /// Format the output and return it alongside the stamped version string
+    /// and format name. Callers use this to build transport metadata without
+    /// re-querying the trait for each field separately.
+    fn format_stamped(&self, output: &PipelineOutput) -> (Value, String, FormatName) {
+        let formatted = self.format(output);
+        let version = self
+            .format_version()
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        (formatted, version, self.format_name())
+    }
 }
 
 pub fn column_value_to_json(value: &ColumnValue) -> Value {
