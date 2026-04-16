@@ -21,7 +21,7 @@ enum ResponseFormat {
 // the payload body. Mirrors ResponseFormat but in response context.
 enum FormatName {
   FORMAT_NAME_RAW = 0;
-  FORMAT_NAME_LLM = 1;
+  FORMAT_NAME_GOON = 1;
 }
 
 // Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag

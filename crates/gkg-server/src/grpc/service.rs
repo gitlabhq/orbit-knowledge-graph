@@ -30,7 +30,7 @@ use super::auth::extract_claims;
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
         FormatName::Raw => ProtoFormatName::Raw,
-        FormatName::Llm => ProtoFormatName::Llm,
+        FormatName::Goon => ProtoFormatName::Goon,
     }
 }
 

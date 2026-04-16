@@ -10,7 +10,7 @@ pub struct GoonFormatter;
 
 impl ResultFormatter for GoonFormatter {
     fn format_name(&self) -> FormatName {
-        FormatName::Llm
+        FormatName::Goon
     }
 
     fn format_version(&self) -> Option<&Version> {
@@ -31,8 +31,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_name_is_llm() {
-        assert_eq!(GoonFormatter.format_name(), FormatName::Llm);
+    fn format_name_is_goon() {
+        assert_eq!(GoonFormatter.format_name(), FormatName::Goon);
     }
 
     #[test]

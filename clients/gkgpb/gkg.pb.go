@@ -82,19 +82,19 @@ func (ResponseFormat) EnumDescriptor() ([]byte, []int) {
 type FormatName int32
 
 const (
-	FormatName_FORMAT_NAME_RAW FormatName = 0
-	FormatName_FORMAT_NAME_LLM FormatName = 1
+	FormatName_FORMAT_NAME_RAW  FormatName = 0
+	FormatName_FORMAT_NAME_GOON FormatName = 1
 )
 
 // Enum value maps for FormatName.
 var (
 	FormatName_name = map[int32]string{
 		0: "FORMAT_NAME_RAW",
-		1: "FORMAT_NAME_LLM",
+		1: "FORMAT_NAME_GOON",
 	}
 	FormatName_value = map[string]int32{
-		"FORMAT_NAME_RAW": 0,
-		"FORMAT_NAME_LLM": 1,
+		"FORMAT_NAME_RAW":  0,
+		"FORMAT_NAME_GOON": 1,
 	}
 )
 
@@ -2344,11 +2344,11 @@ const file_gkg_proto_rawDesc = "" +
 	"\x05count\x18\x02 \x01(\x03R\x05count*B\n" +
 	"\x0eResponseFormat\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_RAW\x10\x00\x12\x17\n" +
-	"\x13RESPONSE_FORMAT_LLM\x10\x01*6\n" +
+	"\x13RESPONSE_FORMAT_LLM\x10\x01*7\n" +
 	"\n" +
 	"FormatName\x12\x13\n" +
-	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x13\n" +
-	"\x0fFORMAT_NAME_LLM\x10\x01* \n" +
+	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x14\n" +
+	"\x10FORMAT_NAME_GOON\x10\x01* \n" +
 	"\tQueryType\x12\x13\n" +
 	"\x0fQUERY_TYPE_JSON\x10\x00*\x86\x01\n" +
 	"\rClusterStatus\x12\x1e\n" +

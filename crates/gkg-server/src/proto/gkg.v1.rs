@@ -402,7 +402,7 @@ impl ResponseFormat {
 #[repr(i32)]
 pub enum FormatName {
     Raw = 0,
-    Llm = 1,
+    Goon = 1,
 }
 impl FormatName {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -412,14 +412,14 @@ impl FormatName {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Self::Raw => "FORMAT_NAME_RAW",
-            Self::Llm => "FORMAT_NAME_LLM",
+            Self::Goon => "FORMAT_NAME_GOON",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "FORMAT_NAME_RAW" => Some(Self::Raw),
-            "FORMAT_NAME_LLM" => Some(Self::Llm),
+            "FORMAT_NAME_GOON" => Some(Self::Goon),
             _ => None,
         }
     }
