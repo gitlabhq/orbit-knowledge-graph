@@ -9,10 +9,11 @@
 pub mod app;
 pub mod clickhouse;
 pub mod engine;
-
 pub mod gitlab;
+pub mod graph_status;
 pub mod grpc;
 pub mod health_check;
+pub mod indexing_progress;
 pub mod metrics;
 pub mod nats;
 pub mod query;
@@ -31,6 +32,7 @@ pub use engine::{
     SiphonCodeIndexingTaskDispatcherConfig, TableCleanupConfig,
 };
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
+pub use graph_status::GraphStatusConfig;
 pub use grpc::GrpcConfig;
 pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};

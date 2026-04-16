@@ -12,14 +12,13 @@ use tracing::{Instrument, info, instrument};
 
 use crate::auth::{Claims, JwtValidator};
 use crate::cluster_health::ClusterHealthChecker;
-use crate::graph_stats::GraphStatsService;
+use crate::graph_status::GraphStatusService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
-    ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
-    GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
-    GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse, ListToolsRequest,
-    ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
-    SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
+    ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
+    GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse,
+    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
+    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
@@ -46,7 +45,7 @@ pub struct KnowledgeGraphServiceImpl {
     tool_service: ToolService,
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
-    graph_stats: GraphStatsService,
+    graph_status: Option<GraphStatusService>,
     stream_timeout_secs: u64,
 }
 
@@ -65,14 +64,13 @@ impl KnowledgeGraphServiceImpl {
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
         );
-        let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {
             validator,
             ontology,
             tool_service,
             pipeline,
             cluster_health,
-            graph_stats,
+            graph_status: None,
             stream_timeout_secs,
         }
     }
@@ -84,6 +82,20 @@ impl KnowledgeGraphServiceImpl {
 
     pub fn with_cache_broker(mut self, broker: Arc<indexer::nats::NatsBroker>) -> Self {
         self.pipeline = self.pipeline.with_cache_broker(broker);
+        self
+    }
+
+    pub fn with_graph_status(
+        mut self,
+        nats: Arc<dyn indexer::nats::NatsServices>,
+        ontology: Arc<Ontology>,
+        staleness_threshold_secs: u64,
+    ) -> Self {
+        self.graph_status = Some(GraphStatusService::new(
+            nats,
+            ontology,
+            staleness_threshold_secs,
+        ));
         self
     }
 }
@@ -260,11 +272,11 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(response))
     }
 
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
-    async fn get_graph_stats(
+    #[instrument(skip(self, request), fields(user_id, source_type))]
+    async fn get_graph_status(
         &self,
-        request: Request<GetGraphStatsRequest>,
-    ) -> Result<Response<GetGraphStatsResponse>, Status> {
+        request: Request<GetGraphStatusRequest>,
+    ) -> Result<Response<GetGraphStatusResponse>, Status> {
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
         tracing::Span::current().record("source_type", &claims.source_type);
@@ -273,9 +285,11 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let req = request.get_ref();
         authorize_traversal_path(&claims, &req.traversal_path)?;
 
-        info!(traversal_path = %req.traversal_path, "Fetching graph stats for user");
+        let service = self.graph_status.as_ref().ok_or_else(|| {
+            Status::unavailable("graph status not available (NATS not configured)")
+        })?;
 
-        let response = self.graph_stats.get_stats(&req.traversal_path).await?;
+        let response = service.get_status(&req.traversal_path).await?;
         Ok(Response::new(response))
     }
 }

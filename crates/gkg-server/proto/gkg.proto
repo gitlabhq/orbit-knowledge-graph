@@ -46,9 +46,9 @@ service KnowledgeGraphService {
   // Used by GET /api/v4/orbit/status.
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
 
-  // Returns entity counts per domain, scoped by traversal_path prefix.
-  // Used by admin dashboards to inspect graph coverage.
-  rpc GetGraphStats(GetGraphStatsRequest) returns (GetGraphStatsResponse);
+  // Returns graph indexing status and entity counts, scoped by traversal_path prefix.
+  // Used by admin dashboards to inspect graph coverage and indexing progress.
+  rpc GetGraphStatus(GetGraphStatusRequest) returns (GetGraphStatusResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -278,27 +278,72 @@ message ReplicaStatus {
 }
 
 // ---------------------------------------------------------------------------
-// GetGraphStats — unary, returns entity counts grouped by domain
+// GetGraphStatus — unary, returns indexing status and entity counts
 // ---------------------------------------------------------------------------
 
-// Request for graph entity counts scoped by traversal_path prefix.
-message GetGraphStatsRequest {
-  string traversal_path = 1;  // traversal_path prefix to scope counts (e.g. "1/2/")
+enum GraphState {
+  GRAPH_STATE_PENDING = 0;
+  GRAPH_STATE_INDEXING = 1;
+  GRAPH_STATE_IDLE = 2;
 }
 
-// Response containing entity counts grouped by domain.
-message GetGraphStatsResponse {
-  repeated GraphStatsDomain domains = 1;
+enum EntityStatus {
+  ENTITY_STATUS_PENDING = 0;
+  reserved 1;
+  ENTITY_STATUS_COMPLETED = 2;
 }
 
-// Entity counts for a single domain (e.g. "ci", "core", "plan").
-message GraphStatsDomain {
+message GetGraphStatusRequest {
+  string traversal_path = 1;
+}
+
+message GetGraphStatusResponse {
+  GraphState state = 1;
+  bool initial_backfill_done = 2;
+  string updated_at = 3;
+  repeated GraphStatusDomain domains = 4;
+  map<string, int64> edge_counts = 5;
+  SdlcProgress sdlc = 6;
+  CodeOverview code = 7;
+  bool stale = 8;
+}
+
+message GraphStatusDomain {
   string name = 1;
-  repeated GraphStatsItem items = 2;
+  repeated GraphStatusItem items = 2;
 }
 
-// Count for a single entity type (e.g. "Project": 42).
-message GraphStatsItem {
+message GraphStatusItem {
   string name = 1;
-  int64 count = 2;
+  EntityStatus status = 2;
+  int64 count = 3;
+}
+
+message SdlcProgress {
+  string last_completed_at = 1;
+  string last_started_at = 2;
+  int64 last_duration_ms = 3;
+  int64 cycle_count = 4;
+  string last_error = 5;
+}
+
+message CodeOverview {
+  int32 projects_indexed = 1;
+  int32 projects_total = 2;
+  string last_indexed_at = 3;
+  repeated ProjectCodeOverview projects = 4;
+}
+
+message ProjectCodeOverview {
+  int64 project_id = 1;
+  string traversal_path = 2;
+  string updated_at = 3;
+  map<string, BranchCodeStats> branches = 4;
+}
+
+message BranchCodeStats {
+  string commit = 1;
+  string indexed_at = 2;
+  map<string, int64> node_counts = 3;
+  map<string, int64> edge_counts = 4;
 }

@@ -337,34 +337,94 @@ pub struct ReplicaStatus {
     #[prost(int32, tag = "2")]
     pub desired: i32,
 }
-/// Request for graph entity counts scoped by traversal_path prefix.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetGraphStatsRequest {
-    /// traversal_path prefix to scope counts (e.g. "1/2/")
+pub struct GetGraphStatusRequest {
     #[prost(string, tag = "1")]
     pub traversal_path: ::prost::alloc::string::String,
 }
-/// Response containing entity counts grouped by domain.
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetGraphStatsResponse {
-    #[prost(message, repeated, tag = "1")]
-    pub domains: ::prost::alloc::vec::Vec<GraphStatsDomain>,
+pub struct GetGraphStatusResponse {
+    #[prost(enumeration = "GraphState", tag = "1")]
+    pub state: i32,
+    #[prost(bool, tag = "2")]
+    pub initial_backfill_done: bool,
+    #[prost(string, tag = "3")]
+    pub updated_at: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "4")]
+    pub domains: ::prost::alloc::vec::Vec<GraphStatusDomain>,
+    #[prost(map = "string, int64", tag = "5")]
+    pub edge_counts: ::std::collections::HashMap<::prost::alloc::string::String, i64>,
+    #[prost(message, optional, tag = "6")]
+    pub sdlc: ::core::option::Option<SdlcProgress>,
+    #[prost(message, optional, tag = "7")]
+    pub code: ::core::option::Option<CodeOverview>,
+    #[prost(bool, tag = "8")]
+    pub stale: bool,
 }
-/// Entity counts for a single domain (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GraphStatsDomain {
+pub struct GraphStatusDomain {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
-    pub items: ::prost::alloc::vec::Vec<GraphStatsItem>,
+    pub items: ::prost::alloc::vec::Vec<GraphStatusItem>,
 }
-/// Count for a single entity type (e.g. "Project": 42).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GraphStatsItem {
+pub struct GraphStatusItem {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(int64, tag = "2")]
+    #[prost(enumeration = "EntityStatus", tag = "2")]
+    pub status: i32,
+    #[prost(int64, tag = "3")]
     pub count: i64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SdlcProgress {
+    #[prost(string, tag = "1")]
+    pub last_completed_at: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub last_started_at: ::prost::alloc::string::String,
+    #[prost(int64, tag = "3")]
+    pub last_duration_ms: i64,
+    #[prost(int64, tag = "4")]
+    pub cycle_count: i64,
+    #[prost(string, tag = "5")]
+    pub last_error: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CodeOverview {
+    #[prost(int32, tag = "1")]
+    pub projects_indexed: i32,
+    #[prost(int32, tag = "2")]
+    pub projects_total: i32,
+    #[prost(string, tag = "3")]
+    pub last_indexed_at: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "4")]
+    pub projects: ::prost::alloc::vec::Vec<ProjectCodeOverview>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ProjectCodeOverview {
+    #[prost(int64, tag = "1")]
+    pub project_id: i64,
+    #[prost(string, tag = "2")]
+    pub traversal_path: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub updated_at: ::prost::alloc::string::String,
+    #[prost(map = "string, message", tag = "4")]
+    pub branches: ::std::collections::HashMap<
+        ::prost::alloc::string::String,
+        BranchCodeStats,
+    >,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BranchCodeStats {
+    #[prost(string, tag = "1")]
+    pub commit: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub indexed_at: ::prost::alloc::string::String,
+    #[prost(map = "string, int64", tag = "3")]
+    pub node_counts: ::std::collections::HashMap<::prost::alloc::string::String, i64>,
+    #[prost(map = "string, int64", tag = "4")]
+    pub edge_counts: ::std::collections::HashMap<::prost::alloc::string::String, i64>,
 }
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
@@ -476,6 +536,61 @@ impl ClusterStatus {
             "CLUSTER_STATUS_HEALTHY" => Some(Self::Healthy),
             "CLUSTER_STATUS_DEGRADED" => Some(Self::Degraded),
             "CLUSTER_STATUS_UNHEALTHY" => Some(Self::Unhealthy),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum GraphState {
+    Pending = 0,
+    Indexing = 1,
+    Idle = 2,
+}
+impl GraphState {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Pending => "GRAPH_STATE_PENDING",
+            Self::Indexing => "GRAPH_STATE_INDEXING",
+            Self::Idle => "GRAPH_STATE_IDLE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "GRAPH_STATE_PENDING" => Some(Self::Pending),
+            "GRAPH_STATE_INDEXING" => Some(Self::Indexing),
+            "GRAPH_STATE_IDLE" => Some(Self::Idle),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum EntityStatus {
+    Pending = 0,
+    Completed = 2,
+}
+impl EntityStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Pending => "ENTITY_STATUS_PENDING",
+            Self::Completed => "ENTITY_STATUS_COMPLETED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ENTITY_STATUS_PENDING" => Some(Self::Pending),
+            "ENTITY_STATUS_COMPLETED" => Some(Self::Completed),
             _ => None,
         }
     }
@@ -686,13 +801,13 @@ pub mod knowledge_graph_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Returns entity counts per domain, scoped by traversal_path prefix.
-        /// Used by admin dashboards to inspect graph coverage.
-        pub async fn get_graph_stats(
+        /// Returns graph indexing status and entity counts, scoped by traversal_path prefix.
+        /// Used by admin dashboards to inspect graph coverage and indexing progress.
+        pub async fn get_graph_status(
             &mut self,
-            request: impl tonic::IntoRequest<super::GetGraphStatsRequest>,
+            request: impl tonic::IntoRequest<super::GetGraphStatusRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::GetGraphStatsResponse>,
+            tonic::Response<super::GetGraphStatusResponse>,
             tonic::Status,
         > {
             self.inner
@@ -705,12 +820,12 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/GetGraphStats",
+                "/gkg.v1.KnowledgeGraphService/GetGraphStatus",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetGraphStats"),
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetGraphStatus"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -774,13 +889,13 @@ pub mod knowledge_graph_service_server {
             tonic::Response<super::GetClusterHealthResponse>,
             tonic::Status,
         >;
-        /// Returns entity counts per domain, scoped by traversal_path prefix.
-        /// Used by admin dashboards to inspect graph coverage.
-        async fn get_graph_stats(
+        /// Returns graph indexing status and entity counts, scoped by traversal_path prefix.
+        /// Used by admin dashboards to inspect graph coverage and indexing progress.
+        async fn get_graph_status(
             &self,
-            request: tonic::Request<super::GetGraphStatsRequest>,
+            request: tonic::Request<super::GetGraphStatusRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::GetGraphStatsResponse>,
+            tonic::Response<super::GetGraphStatusResponse>,
             tonic::Status,
         >;
     }
@@ -1056,25 +1171,25 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/GetGraphStats" => {
+                "/gkg.v1.KnowledgeGraphService/GetGraphStatus" => {
                     #[allow(non_camel_case_types)]
-                    struct GetGraphStatsSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct GetGraphStatusSvc<T: KnowledgeGraphService>(pub Arc<T>);
                     impl<
                         T: KnowledgeGraphService,
-                    > tonic::server::UnaryService<super::GetGraphStatsRequest>
-                    for GetGraphStatsSvc<T> {
-                        type Response = super::GetGraphStatsResponse;
+                    > tonic::server::UnaryService<super::GetGraphStatusRequest>
+                    for GetGraphStatusSvc<T> {
+                        type Response = super::GetGraphStatusResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::GetGraphStatsRequest>,
+                            request: tonic::Request<super::GetGraphStatusRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::get_graph_stats(
+                                <T as KnowledgeGraphService>::get_graph_status(
                                         &inner,
                                         request,
                                     )
@@ -1089,7 +1204,7 @@ pub mod knowledge_graph_service_server {
                     let max_encoding_message_size = self.max_encoding_message_size;
                     let inner = self.inner.clone();
                     let fut = async move {
-                        let method = GetGraphStatsSvc(inner);
+                        let method = GetGraphStatusSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

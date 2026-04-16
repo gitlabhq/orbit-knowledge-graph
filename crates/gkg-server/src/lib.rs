@@ -2,7 +2,7 @@ pub mod auth;
 pub mod cli;
 pub mod cluster_health;
 pub mod content;
-pub mod graph_stats;
+pub mod graph_status;
 pub mod grpc;
 pub mod health_check;
 pub mod pipeline;

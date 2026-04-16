@@ -38,6 +38,7 @@ pub mod locking;
 pub mod metrics;
 pub mod modules;
 pub mod nats;
+pub mod progress;
 pub mod scheduler;
 pub mod schema;
 pub mod topic;
@@ -98,6 +99,8 @@ pub struct IndexerConfig {
     pub health_bind_address: SocketAddr,
     #[serde(default)]
     pub schema: SchemaConfig,
+    #[serde(default)]
+    pub graph_status: gkg_server_config::GraphStatusConfig,
 }
 
 impl Default for IndexerConfig {
@@ -111,6 +114,7 @@ impl Default for IndexerConfig {
             schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
             schema: SchemaConfig::default(),
+            graph_status: gkg_server_config::GraphStatusConfig::default(),
         }
     }
 }

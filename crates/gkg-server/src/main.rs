@@ -99,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
                 schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
                 schema: config.schema.clone(),
+                graph_status: config.graph_status.clone(),
             };
             indexer::run(&indexer_config, ontology, shutdown)
                 .await
@@ -169,7 +170,7 @@ async fn run_webserver(
     let mut grpc_server = GrpcServer::new(
         config.grpc_bind_address,
         validator,
-        ontology,
+        Arc::clone(&ontology),
         &config.graph,
         cluster_health,
         tls_config,
@@ -177,14 +178,26 @@ async fn run_webserver(
     )
     .with_resolver_registry(Arc::new(resolver_registry));
 
-    if config.query.default.graph_query_cache_enabled == Some(true) {
-        info!("initializing NATS connection for graph query cache");
-        let broker = Arc::new(
-            indexer::nats::NatsBroker::connect(&config.nats)
-                .await
-                .map_err(|e| anyhow::anyhow!("NATS connection for query cache failed: {e}"))?,
+    let broker: Option<Arc<indexer::nats::NatsBroker>> =
+        match indexer::nats::NatsBroker::connect(&config.nats).await {
+            Ok(b) => Some(Arc::new(b)),
+            Err(e) => {
+                tracing::warn!("NATS not available, graph status and query cache disabled: {e}");
+                None
+            }
+        };
+
+    if let Some(ref broker) = broker {
+        if config.query.default.graph_query_cache_enabled == Some(true) {
+            grpc_server = grpc_server.with_cache_broker(Arc::clone(broker));
+        }
+        let nats_svc: Arc<dyn indexer::nats::NatsServices> =
+            Arc::new(indexer::nats::NatsServicesImpl::new(Arc::clone(broker)));
+        grpc_server = grpc_server.with_graph_status(
+            nats_svc,
+            Arc::clone(&ontology),
+            config.graph_status.staleness_threshold_secs,
         );
-        grpc_server = grpc_server.with_cache_broker(broker);
     }
 
     info!(addr = %config.grpc_bind_address, "gRPC server starting");

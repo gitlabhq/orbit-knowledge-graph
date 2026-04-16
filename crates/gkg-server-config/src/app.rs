@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::clickhouse::ClickHouseConfiguration;
 use crate::engine::{EngineConfiguration, ScheduleConfig};
 use crate::gitlab::{GitlabClientConfiguration, GitlabConfig};
+use crate::graph_status::GraphStatusConfig;
 use crate::grpc::GrpcConfig;
 use crate::health_check::HealthCheckConfig;
 use crate::metrics::MetricsConfig;
@@ -79,6 +80,8 @@ pub struct AppConfig {
     pub grpc: GrpcConfig,
     #[serde(default)]
     pub schema: SchemaConfig,
+    #[serde(default)]
+    pub graph_status: GraphStatusConfig,
 }
 
 impl AppConfig {

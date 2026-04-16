@@ -58,6 +58,18 @@ impl GrpcServer {
         self
     }
 
+    pub fn with_graph_status(
+        mut self,
+        nats: Arc<dyn indexer::nats::NatsServices>,
+        ontology: Arc<ontology::Ontology>,
+        staleness_threshold_secs: u64,
+    ) -> Self {
+        self.service = self
+            .service
+            .with_graph_status(nats, ontology, staleness_threshold_secs);
+        self
+    }
+
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }

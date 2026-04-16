@@ -115,3 +115,7 @@ metrics:
 
 schema:
   max_retained_versions: 2
+
+graph-status:
+  staleness-threshold-secs: 120
+  debounce-secs: 10
