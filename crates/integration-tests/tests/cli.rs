@@ -257,11 +257,13 @@ fn nested_repos_indexed_separately() {
 
     // Different project IDs (different canonical paths)
     let app_id = nodes_where(&files, "name", "app.py")[0]["id"]
-        .as_i64()
-        .unwrap();
+        .as_str()
+        .unwrap()
+        .to_string();
     let helper_id = nodes_where(&files, "name", "helper.py")[0]["id"]
-        .as_i64()
-        .unwrap();
+        .as_str()
+        .unwrap()
+        .to_string();
     assert_ne!(app_id, helper_id);
 }
 

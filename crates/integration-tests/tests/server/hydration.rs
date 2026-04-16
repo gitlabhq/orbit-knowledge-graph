@@ -336,7 +336,7 @@ async fn path_finding_json_format(ctx: &TestContext) {
     assert!(path.len() >= 2);
 
     let first = path[0].as_object().unwrap();
-    assert_eq!(first.get("id").unwrap().as_i64().unwrap(), 1);
+    assert_eq!(first.get("id").unwrap().as_str().unwrap(), "1");
     assert_eq!(first.get("entity_type").unwrap().as_str().unwrap(), "User");
     assert!(
         first.len() > 2,

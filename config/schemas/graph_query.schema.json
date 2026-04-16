@@ -255,10 +255,12 @@
         },
         "node_ids": {
           "type": "array",
-          "description": "Specific node IDs to filter by",
+          "description": "Specific node IDs to filter by. Accepts integers or digit strings; strings let consumers round-trip Int64 IDs that exceed JavaScript's Number.MAX_SAFE_INTEGER.",
           "items": {
-            "type": "integer",
-            "minimum": 1
+            "oneOf": [
+              { "type": "integer", "minimum": 1 },
+              { "type": "string", "pattern": "^-?[0-9]+$" }
+            ]
           },
           "minItems": 1,
           "maxItems": 500
@@ -295,18 +297,22 @@
     },
     "IdRange": {
       "type": "object",
-      "description": "Inclusive ID range filter",
+      "description": "Inclusive ID range filter. Endpoints accept integers or digit strings.",
       "required": ["start", "end"],
       "properties": {
         "start": {
-          "type": "integer",
           "description": "Start of ID range (inclusive)",
-          "minimum": 1
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "pattern": "^-?[0-9]+$" }
+          ]
         },
         "end": {
-          "type": "integer",
           "description": "End of ID range (inclusive)",
-          "minimum": 1
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "pattern": "^-?[0-9]+$" }
+          ]
         }
       },
       "additionalProperties": false

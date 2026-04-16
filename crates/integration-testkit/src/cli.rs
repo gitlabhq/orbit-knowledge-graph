@@ -73,7 +73,10 @@ pub fn edge_count(v: &Value) -> usize {
 }
 
 pub fn sorted_node_ids(v: &Value) -> Vec<i64> {
-    let mut ids: Vec<i64> = nodes(v).iter().map(|n| n["id"].as_i64().unwrap()).collect();
+    let mut ids: Vec<i64> = nodes(v)
+        .iter()
+        .map(|n| n["id"].as_str().unwrap().parse().unwrap())
+        .collect();
     ids.sort();
     ids
 }

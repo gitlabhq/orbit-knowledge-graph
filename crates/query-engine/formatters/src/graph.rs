@@ -12,6 +12,27 @@ use types::{QueryResult, QueryResultRow};
 
 use super::{ResultFormatter, column_value_to_json};
 
+mod id_as_string {
+    use serde::Serializer;
+
+    pub fn serialize<S>(value: &i64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    #[cfg(feature = "testutils")]
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<i64, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::Deserialize;
+        let s = String::deserialize(deserializer)?;
+        s.parse::<i64>().map_err(serde::de::Error::custom)
+    }
+}
+
 /// Keys that collide with `GraphNode`'s fixed struct fields under
 /// `#[serde(flatten)]`. If an ontology property strips to one of
 /// these names after alias removal, the serialized JSON would get
@@ -58,6 +79,7 @@ pub struct PaginationResponse {
 pub struct GraphNode {
     #[serde(rename = "type")]
     pub entity_type: String,
+    #[serde(with = "id_as_string")]
     pub id: i64,
     #[serde(flatten)]
     pub properties: serde_json::Map<String, Value>,
@@ -67,8 +89,10 @@ pub struct GraphNode {
 #[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphEdge {
     pub from: String,
+    #[serde(with = "id_as_string")]
     pub from_id: i64,
     pub to: String,
+    #[serde(with = "id_as_string")]
     pub to_id: i64,
     #[serde(rename = "type")]
     pub edge_type: String,
@@ -667,12 +691,44 @@ mod tests {
         // Verify serialized JSON has exactly one "type" key with correct value
         let json = serde_json::to_value(node).unwrap();
         assert_eq!(json["type"], "Project");
-        assert_eq!(json["id"], 42);
+        assert_eq!(json["id"], "42");
         assert_eq!(json["name"], "Alpha");
         assert_eq!(
             json.get("type").and_then(|v| v.as_str()),
             Some("Project"),
             "serialized 'type' must be the entity type, not the p_type column value"
         );
+    }
+
+    #[test]
+    fn ids_serialize_as_strings_preserving_precision() {
+        let beyond_safe = 9_007_199_254_740_993_i64; // 2^53 + 1
+
+        let node = GraphNode {
+            entity_type: "File".to_string(),
+            id: beyond_safe,
+            properties: serde_json::Map::new(),
+        };
+        let json = serde_json::to_value(&node).unwrap();
+        assert!(json["id"].is_string(), "id must serialize as a string");
+        assert_eq!(
+            json["id"].as_str().unwrap(),
+            "9007199254740993",
+            "string must preserve exact digits beyond Number.MAX_SAFE_INTEGER"
+        );
+
+        let edge = GraphEdge {
+            from: "User".to_string(),
+            from_id: beyond_safe,
+            to: "File".to_string(),
+            to_id: -beyond_safe,
+            edge_type: "AUTHORED".to_string(),
+            depth: None,
+            path_id: None,
+            step: None,
+        };
+        let json = serde_json::to_value(&edge).unwrap();
+        assert_eq!(json["from_id"].as_str().unwrap(), "9007199254740993");
+        assert_eq!(json["to_id"].as_str().unwrap(), "-9007199254740993");
     }
 }
