@@ -132,7 +132,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | [Internal program page](https://internal.gitlab.com/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/) | R&D PMO program landing page ([source](https://gitlab.com/gitlab-com/content-sites/internal-handbook/blob/main/content/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/_index.md)) |
 | [orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and summary (Feb 3-5, 2026): architecture, indexing, query engine, infra, DIP, deployment, billing |
 | [Readiness reviews (old)](https://gitlab.com/gitlab-com/gl-infra/readiness) | Legacy readiness repo. Siphon review [MR !231](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/231) (open, 78 comments), NATS review [MR !240](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/240) (merged). |
-| In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) -- GCP sandbox environment details (dev/sandbox only) |
+| Server configuration | [docs/dev/runbooks/indexer_configuration.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/indexer_configuration.md) -- config loading, env vars, tuning, Helm chart mapping |
 | Operational runbooks | [docs/dev/runbooks/](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs/dev/runbooks) -- indexing pipelines, configuration, troubleshooting |
 | Local GDK-connected development | [docs/dev/local-development.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/local-development.md) -- `mise run dev` to launch the full local stack against an existing GDK |
 | E2E testing harness | [docs/dev/e2e-testing.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/e2e-testing.md) -- full-stack e2e tests on GKE (GitLab + Siphon + GKG), runs in CI on MRs |
@@ -163,7 +163,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | Domain | `gitlab.gkg.dev` |
 | Secrets | GCP Secret Manager -> External Secrets Operator |
 
-See [`docs/dev/INFRASTRUCTURE.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) for full details.
+See the [server configuration runbook](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/indexer_configuration.md) for full config reference.
 
 ### Staging (gitlab-helmfiles managed)
 
@@ -265,7 +265,7 @@ Jerome Ng (@jeromezng, usage billing system architect).
 |---|---|
 | SDLC indexing | [`docs/dev/runbooks/sdlc_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/sdlc_indexing.md) |
 | Code indexing | [`docs/dev/runbooks/code_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/code_indexing.md) |
-| Indexer configuration | [`docs/dev/runbooks/indexer_configuration.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/indexer_configuration.md) |
+| Server configuration | [`docs/dev/runbooks/indexer_configuration.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/indexer_configuration.md) |
 | Production runbook | TODO |
 
 ### Observability

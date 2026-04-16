@@ -1,6 +1,6 @@
-# Indexer configuration runbook
+# Server configuration runbook
 
-Reference for all configurable knobs in the GKG indexer and dispatcher.
+Reference for all configurable knobs in the GKG server. All four modes (Webserver, Indexer, DispatchIndexing, HealthCheck) share the same `AppConfig` struct and loading mechanism.
 
 ## Configuration loading
 
@@ -20,14 +20,16 @@ GKG_ENGINE__MAX_CONCURRENT_WORKERS=16
 
 ## Server modes
 
-The indexer binary (`gkg-server`) runs in one of four modes via `--mode`:
+The binary (`gkg-server`) runs in one of four modes via `--mode`:
 
-| Mode | Purpose |
-|------|---------|
-| `Indexer` | Consumes NATS messages and runs indexing handlers |
-| `DispatchIndexing` | Runs the scheduler loop that publishes indexing requests |
+| Mode | Purpose | Key config sections |
+|------|---------|---------------------|
+| `Webserver` | HTTP/gRPC query server | `bind_address`, `grpc_bind_address`, `grpc`, `tls`, `query`, `graph`, `gitlab` |
+| `Indexer` | Consumes NATS messages and runs indexing handlers | `nats`, `engine`, `graph`, `datalake`, `gitlab`, `schedule`, `schema` |
+| `DispatchIndexing` | Runs the scheduler loop that publishes indexing requests | `nats`, `graph`, `datalake`, `schedule`, `schema` |
+| `HealthCheck` | K8s readiness/liveness probes | `health_check`, `graph`, `datalake` |
 
-The `Indexer` and `DispatchIndexing` modes share the same configuration structure but use different sections.
+All modes share the same configuration structure.
 
 ## NATS
 
@@ -38,6 +40,9 @@ The `Indexer` and `DispatchIndexing` modes share the same configuration structur
 | `nats.url` | `GKG_NATS__URL` | `localhost:4222` | Broker address |
 | `nats.username` | `GKG_NATS__USERNAME` | None | Auth username |
 | `nats.password` | `GKG_NATS__PASSWORD` | None | Auth password |
+| `nats.tls_ca_cert_path` | `GKG_NATS__TLS_CA_CERT_PATH` | None | CA cert (PEM) for TLS. Setting any TLS path enables TLS. |
+| `nats.tls_cert_path` | `GKG_NATS__TLS_CERT_PATH` | None | Client cert (PEM) for mTLS. Must pair with `tls_key_path`. |
+| `nats.tls_key_path` | `GKG_NATS__TLS_KEY_PATH` | None | Client key (PEM) for mTLS. Must pair with `tls_cert_path`. |
 | `nats.connection_timeout_secs` | | `10` | Connection timeout |
 | `nats.request_timeout_secs` | | `5` | Request timeout |
 
@@ -50,6 +55,7 @@ The `Indexer` and `DispatchIndexing` modes share the same configuration structur
 | `nats.max_deliver` | | `5` | Max redelivery attempts. `None` = unlimited. |
 | `nats.batch_size` | | `10` | Messages fetched per batch |
 | `nats.subscription_buffer_size` | | `100` | Internal channel buffer between fetch loop and handler |
+| `nats.fetch_expires_secs` | | `5` | Server-side timeout for batch fetch (clamped to min 1s) |
 
 ### Stream
 
@@ -159,7 +165,7 @@ engine:
       max_attempts: 5
       retry_interval_secs: 60
     namespace-deletion:
-      concurrency_group: sdlc
+      concurrency_group: code
       max_attempts: 1
 ```
 
@@ -188,18 +194,19 @@ engine:
 
 ## Scheduler configuration
 
-Scheduled tasks run in `DispatchIndexing` mode. Each task can have an `interval_secs` cadence. Tasks without an interval run on every scheduler loop iteration.
+Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Tasks without a cron expression fall back to a 60-second interval.
 
 Distributed locking via NATS KV ensures only one dispatcher instance runs each task per interval.
 
-| Task | Config path | Default interval | Description |
-|------|-------------|-----------------|-------------|
-| Global dispatch | `schedule.tasks.global.interval_secs` | None (every cycle) | Publishes `GlobalIndexingRequest` |
-| Namespace dispatch | `schedule.tasks.namespace.interval_secs` | None (every cycle) | Publishes per-namespace requests |
-| Code task dispatch | `schedule.tasks.code_indexing_task.interval_secs` | None (every cycle) | Consumes Siphon CDC push events |
-| Code backfill | `schedule.tasks.namespace_code_backfill.interval_secs` | None (every cycle) | Backfills newly enabled namespaces |
-| Table cleanup | `schedule.tasks.table_cleanup.interval_secs` | `86400` (24h) | Runs `OPTIMIZE TABLE ... FINAL CLEANUP` |
-| Namespace deletion | `schedule.tasks.namespace_deletion.interval_secs` | `86400` (24h) | Schedules and executes namespace deletions |
+| Task | Config path | Default cron | Description |
+|------|-------------|-------------|-------------|
+| Global dispatch | `schedule.tasks.global.cron` | `0 */1 * * * *` (every minute) | Publishes `GlobalIndexingRequest` |
+| Namespace dispatch | `schedule.tasks.namespace.cron` | `0 */1 * * * *` (every minute) | Publishes per-namespace requests |
+| Code task dispatch | `schedule.tasks.code_indexing_task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
+| Code backfill | `schedule.tasks.namespace_code_backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
+| Table cleanup | `schedule.tasks.table_cleanup.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Runs `OPTIMIZE TABLE ... FINAL CLEANUP` |
+| Namespace deletion | `schedule.tasks.namespace_deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
+| Migration completion | `schedule.tasks.migration_completion.cron` | `0 */5 * * * *` (every 5 minutes) | Detects completed schema migrations |
 
 ### Code dispatch task settings
 
@@ -250,10 +257,70 @@ Example: `info,gkg_server=debug,gkg_indexer=trace`
 | `metrics.prometheus.enabled` | `false` | Expose `/metrics` endpoint |
 | `metrics.prometheus.port` | `9394` | Prometheus scrape port |
 
+## Webserver
+
+These settings are used by the Webserver mode.
+
+### HTTP / gRPC bind addresses
+
+| Config path | Env var | Default | Description |
+|-------------|---------|---------|-------------|
+| `bind_address` | `GKG_BIND_ADDRESS` | `127.0.0.1:4200` | HTTP server bind address |
+| `grpc_bind_address` | `GKG_GRPC_BIND_ADDRESS` | `127.0.0.1:50054` | gRPC server bind address |
+| `jwt_clock_skew_secs` | `GKG_JWT_CLOCK_SKEW_SECS` | `60` | Allowed JWT clock skew in seconds |
+| `health_check_url` | `GKG_HEALTH_CHECK_URL` | None | Optional health check URL |
+
+### TLS
+
+| Config path | Env var | Default | Description |
+|-------------|---------|---------|-------------|
+| `tls.cert_path` | `GKG_TLS__CERT_PATH` | None | TLS certificate path (PEM) |
+| `tls.key_path` | `GKG_TLS__KEY_PATH` | None | TLS private key path (PEM) |
+
+### gRPC tuning
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `grpc.keepalive_interval_secs` | `20` | HTTP/2 keepalive ping interval |
+| `grpc.keepalive_timeout_secs` | `20` | Keepalive ping timeout |
+| `grpc.tcp_keepalive_secs` | `60` | TCP keepalive interval |
+| `grpc.connection_window_size` | `2097152` (2 MB) | HTTP/2 connection flow control window |
+| `grpc.stream_window_size` | `1048576` (1 MB) | HTTP/2 stream flow control window |
+| `grpc.concurrency_limit` | `256` | Max concurrent requests |
+| `grpc.max_connection_age_secs` | `300` (5 min) | Max connection age (for L4 ILB rebalancing) |
+| `grpc.stream_timeout_secs` | `60` | Stream timeout |
+
+### Query settings
+
+Supports default settings and per-query-type overrides (e.g. `aggregation`, `traversal`, `search`):
+
+```yaml
+query:
+  default:
+    max_execution_time: 30
+    use_query_cache: false
+    query_cache_ttl: 60
+  aggregation:
+    max_execution_time: 60
+```
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `query.default.max_execution_time` | None | ClickHouse `max_execution_time` in seconds |
+| `query.default.use_query_cache` | None | Enable ClickHouse query cache |
+| `query.default.query_cache_ttl` | None | Query cache TTL in seconds |
+
+## Schema management
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `schema.max_retained_versions` | `2` | Number of schema version table-sets to retain (min 2) |
+
 ## Health check
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
+| `health_check.bind_address` | `0.0.0.0:4201` | HealthCheck mode bind address |
 | `indexer_health_bind_address` | `0.0.0.0:4202` | Health check server address for Indexer mode |
 | `dispatcher_health_bind_address` | `0.0.0.0:4203` | Health check server address for DispatchIndexing mode |
 
@@ -442,9 +509,11 @@ engine:
 schedule:
   tasks:
     table_cleanup:
-      interval_secs: 86400
+      cron: "0 0 3 * * *"
     namespace_deletion:
-      interval_secs: 86400
+      cron: "0 0 3 * * *"
+    migration_completion:
+      cron: "0 */5 * * * *"
 
 metrics:
   log_level: info,gkg_server=debug
