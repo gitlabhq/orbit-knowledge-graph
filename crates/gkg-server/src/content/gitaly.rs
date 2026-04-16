@@ -82,6 +82,7 @@ impl ColumnResolver for GitalyContentService {
         }
 
         // Fetch and drain all project blob streams concurrently.
+        // Each future returns (blobs, had_error) so we can track partial failures.
         let futures = by_project.iter().map(|(&project_id, keys)| {
             let client = Arc::clone(&self.client);
             let revisions: Vec<String> = keys
@@ -99,42 +100,44 @@ impl ColumnResolver for GitalyContentService {
                             error = %e,
                             "list_blobs failed, content will be missing for this project"
                         );
-                        return vec![];
+                        return (vec![], true);
                     }
                 };
 
                 let (blobs, err) = BlobStream::new(stream).drain().await;
 
+                let had_error = err.is_some();
                 if let Some(e) = err {
                     warn!(project_id, error = %e, "blob stream decode error");
                 }
 
-                blobs
+                let results = blobs
                     .into_iter()
                     .zip(keys.iter())
-                    .filter_map(|(blob, key)| {
-                        metrics::record_blob_bytes(blob.data.len() as u64);
-                        match String::from_utf8(blob.data) {
-                            Ok(text) => Some((key.clone(), text)),
-                            Err(_) => {
-                                debug!(project_id, path = %key.2, "skipping binary blob");
-                                None
-                            }
+                    .filter_map(|(blob, key)| match String::from_utf8(blob.data) {
+                        Ok(text) => {
+                            metrics::record_blob_bytes(text.len() as u64);
+                            Some((key.clone(), text))
+                        }
+                        Err(_) => {
+                            debug!(project_id, path = %key.2, "skipping binary blob");
+                            None
                         }
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>();
+                (results, had_error)
             }
         });
 
-        for (key, text) in futures::future::join_all(futures)
-            .await
-            .into_iter()
-            .flatten()
-        {
-            file_cache.insert(key, Some(text));
+        let mut had_errors = false;
+        for (blobs, errored) in futures::future::join_all(futures).await {
+            had_errors |= errored;
+            for (key, text) in blobs {
+                file_cache.insert(key, Some(text));
+            }
         }
 
-        timer.set_outcome("gitaly_direct");
+        timer.set_outcome(if had_errors { "error" } else { "gitaly_direct" });
 
         // For each row, look up cached content and extract the byte-range slice.
         // Non-UTF-8 blobs were already filtered during fetch, so their cache
