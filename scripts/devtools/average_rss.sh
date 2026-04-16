@@ -20,8 +20,20 @@ fi
 # Configuration: Sampling interval in seconds (default: 0.025 = 25ms)
 SAMPLING_INTERVAL=${2:-0.025}
 
+# Build the binary first
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ORBIT_BIN="$REPO_ROOT/target/release/orbit"
+
+echo "Building orbit binary..." >&2
+cargo build --bin orbit --release --features duckdb-client/bundled 2>&1 >&2
+if [ $? -ne 0 ]; then
+  echo '{"error": "Failed to build orbit binary"}' >&2
+  exit 1
+fi
+
 # Start the process in the background
-cargo run --release --bin orbit index $V2_FLAG "$1" > /dev/null 2>&1 &
+"$ORBIT_BIN" index $V2_FLAG "$1" > /dev/null 2>&1 &
 PROCESS_PID=$!
 
 # Wait a moment for the process to start

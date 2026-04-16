@@ -188,9 +188,9 @@ pub fn convert_v2_graph(
             EdgeRow {
                 source_id: ids.get(&src).copied().unwrap_or(0),
                 target_id: ids.get(&tgt).copied().unwrap_or(0),
-                edge_kind: edge.relationship.edge_kind.to_string(),
-                source_node_kind: edge.relationship.source_node.to_string(),
-                target_node_kind: edge.relationship.target_node.to_string(),
+                edge_kind: edge.relationship.edge_kind.as_ref(),
+                source_node_kind: edge.relationship.source_node.as_ref(),
+                target_node_kind: edge.relationship.target_node.as_ref(),
             }
         })
         .collect();

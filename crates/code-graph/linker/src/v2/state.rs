@@ -8,19 +8,22 @@
 //! function. There is no API to get raw unverified results — the collision
 //! bug class is structurally impossible.
 //!
-//! ## Arena allocation
+//! ## String storage
 //!
-//! Two arena scopes eliminate per-string heap allocation and Drop overhead:
+//! Three tiers eliminate per-string heap allocation and Drop overhead:
 //!
-//! - **[`GraphArena`]** (`'arena`): per-language, lives as long as the graph.
-//!   Holds all definition names, FQN strings, import paths, metadata strings.
-//!   Allocated during Phase 1 under the Mutex, read-only in Phase 2.
+//! - **[`StringPool`]**: graph-level, contiguous `Vec<u8>` buffer. Owns all
+//!   definition names, FQN strings, import paths, metadata strings. Accessed
+//!   via [`StrId`]. Dropped with the graph.
 //!
-//! - **[`FileArena`]** (`'file`): per-file, thread-local. Holds all scratch
-//!   strings for walker caches, scope names, constructed FQNs. Created at
-//!   Phase 2 file start, dropped wholesale when `FusedWalkResult` is returned.
-//!   Output (`Vec<(NodeIndex, NodeIndex, GraphEdge)>`) contains no arena refs,
-//!   so `'file` never escapes the walk.
+//! - **[`FileArena`]** (`'file`): per-file, thread-local bump allocator.
+//!   Holds walker scratch strings (scope names, cache keys, constructed FQNs).
+//!   Created at Phase 2 file start, dropped wholesale when `FusedWalkResult`
+//!   is returned. Output contains no arena refs, so `'file` never escapes.
+//!
+//! - **[`ScratchBuf`]**: reusable heap `String` for transient lookup keys.
+//!   Allocated once per walker, reused via `clear()` + `write!()`. For
+//!   strings that are used once for a lookup and immediately discarded.
 //!
 //! This module is designed to be adopted incrementally: existing code in
 //! `graph.rs` and `walker.rs` can migrate to these types one map at a time.
@@ -495,71 +498,7 @@ impl ReachingDefs<'_> {
     }
 }
 
-// ── Arenas ──────────────────────────────────────────────────────
-
-/// Per-language arena for graph-lifetime strings.
-///
-/// Wraps a [`bumpalo::Bump`] allocator. All strings allocated here live
-/// as long as the `CodeGraph` that references them. Allocated during Phase 1
-/// (under Mutex), read-only during Phase 2.
-///
-/// # What goes here
-///
-/// - `CanonicalDefinition.name` → `&'arena str`
-/// - `CanonicalDefinition.fqn` parts → `&'arena str`
-/// - `CanonicalImport.path`, `.name`, `.alias` → `&'arena str`
-/// - `DefinitionMetadata.super_types`, `.return_type`, `.type_annotation` → `&'arena str`
-/// - Directory/file path strings in `GraphNode` variants
-///
-/// # Lifecycle
-///
-/// ```text
-/// let arena = GraphArena::new();           // pipeline start
-/// let graph = LinkerGraph::new(&arena);    // graph borrows 'arena
-/// // Phase 1: arena.alloc_str() under Mutex
-/// // Phase 2: &arena.0 is Send+Sync, read-only
-/// // pipeline end: drop graph, then drop arena
-/// ```
-pub struct GraphArena(Bump);
-
-impl GraphArena {
-    pub fn new() -> Self {
-        Self(Bump::new())
-    }
-
-    /// Allocate with a capacity hint (bytes). Reduces early reallocations
-    /// for large repos. Rule of thumb: ~50 bytes per file for names/paths.
-    pub fn with_capacity(bytes: usize) -> Self {
-        Self(Bump::with_capacity(bytes))
-    }
-
-    /// Copy a string into the arena, returning a reference that lives as
-    /// long as the arena.
-    #[inline]
-    pub fn alloc_str(&self, s: &str) -> &str {
-        self.0.alloc_str(s)
-    }
-
-    /// Allocate a string by formatting into the arena. Avoids a temporary
-    /// `String` allocation for constructed FQNs like `"{parent}.{name}"`.
-    pub fn alloc_fmt(&self, args: std::fmt::Arguments<'_>) -> &str {
-        use std::fmt::Write;
-        let mut w = BumpString::new_in(&self.0);
-        w.write_fmt(args).expect("fmt into bump");
-        w.into_bump_str()
-    }
-
-    /// Total bytes allocated by this arena (including waste from alignment).
-    pub fn allocated_bytes(&self) -> usize {
-        self.0.allocated_bytes()
-    }
-}
-
-impl Default for GraphArena {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// ── Arena ───────────────────────────────────────────────────────
 
 /// Per-file arena for walker scratch strings.
 ///
@@ -631,6 +570,54 @@ impl FileArena {
 impl Default for FileArena {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Scratch buffer ─────────────────────────────────────────────
+
+/// Reusable heap `String` for transient lookups.
+///
+/// Allocated once per walker, reused via `clear()` + `write!()` or `push_str()`.
+/// Avoids per-call `format!()` heap allocations in hot paths.
+pub struct ScratchBuf(String);
+
+impl ScratchBuf {
+    pub fn new() -> Self {
+        Self(String::new())
+    }
+
+    /// Clear and write formatted content. Returns `&str` for immediate use.
+    #[inline]
+    pub fn set_fmt(&mut self, args: std::fmt::Arguments<'_>) -> &str {
+        self.0.clear();
+        std::fmt::Write::write_fmt(&mut self.0, args).unwrap();
+        &self.0
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    #[inline]
+    pub fn push_str(&mut self, s: &str) {
+        self.0.push_str(s);
+    }
+
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl std::fmt::Write for ScratchBuf {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0.write_str(s)
     }
 }
 
@@ -805,58 +792,6 @@ mod tests {
 
         let result = map.lookup("Foo", "bar", |idx| idx == n1);
         assert_eq!(result.as_slice(), &[n1]);
-    }
-
-    // ── GraphArena ───────────────────────────────────────────
-
-    #[test]
-    fn graph_arena_alloc_str() {
-        let arena = GraphArena::new();
-        let s1 = arena.alloc_str("UserService");
-        let s2 = arena.alloc_str("get_user");
-        assert_eq!(s1, "UserService");
-        assert_eq!(s2, "get_user");
-        // Different allocations, different pointers
-        assert!(!std::ptr::eq(s1.as_ptr(), s2.as_ptr()));
-    }
-
-    #[test]
-    fn graph_arena_alloc_str_deduplicates_nothing() {
-        // Arena does NOT deduplicate — two allocs of the same string
-        // produce independent copies. This is intentional: dedup would
-        // require a lookup table (IStr's problem). Arena trades memory
-        // for zero-lock, zero-fragmentation allocation.
-        let arena = GraphArena::new();
-        let s1 = arena.alloc_str("Foo");
-        let s2 = arena.alloc_str("Foo");
-        assert_eq!(s1, s2);
-        assert!(!std::ptr::eq(s1.as_ptr(), s2.as_ptr()));
-    }
-
-    #[test]
-    fn graph_arena_alloc_fmt() {
-        let arena = GraphArena::new();
-        let parent = "com.example";
-        let name = "UserService";
-        let fqn = arena.alloc_fmt(format_args!("{}.{}", parent, name));
-        assert_eq!(fqn, "com.example.UserService");
-    }
-
-    #[test]
-    fn graph_arena_allocated_bytes_grows() {
-        let arena = GraphArena::new();
-        let before = arena.allocated_bytes();
-        arena.alloc_str("a]reasonably long string that forces allocation");
-        let after = arena.allocated_bytes();
-        assert!(after > before);
-    }
-
-    #[test]
-    fn graph_arena_with_capacity() {
-        let arena = GraphArena::with_capacity(1024 * 1024); // 1MB
-        // Should not panic, pre-allocates backing storage
-        let s = arena.alloc_str("test");
-        assert_eq!(s, "test");
     }
 
     // ── FileArena ───────────────────────────────────────────

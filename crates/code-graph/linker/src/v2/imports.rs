@@ -3,13 +3,12 @@
 //! All lookups go through `CodeGraph.indexes` (VerifiedMap).
 //! String access goes through `CodeGraph.str(id)` (StringPool).
 
-use std::fmt::Write;
-
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
 
 use super::graph::CodeGraph;
 use super::rules::ImportStrategy;
+use super::state::ScratchBuf;
 
 // ── ResolveSettings ─────────────────────────────────────────────
 
@@ -45,7 +44,7 @@ pub(crate) fn apply_import_strategies(
     name: &str,
     sep: &str,
     import_map: &FxHashMap<String, Vec<NodeIndex>>,
-    scratch: &mut String,
+    scratch: &mut ScratchBuf,
 ) -> Vec<NodeIndex> {
     for strategy in strategies {
         let candidates = match strategy {
@@ -67,7 +66,7 @@ pub(crate) fn resolve_import(
     graph: &CodeGraph,
     import_idx: NodeIndex,
     sep: &str,
-    scratch: &mut String,
+    scratch: &mut ScratchBuf,
 ) -> Vec<NodeIndex> {
     let import = graph.import(import_idx);
     let symbol_name = import
@@ -80,14 +79,13 @@ pub(crate) fn resolve_import(
     }
 
     let imp_path = graph.str(import.path);
-    scratch.clear();
-    if imp_path.is_empty() {
+    let key = if imp_path.is_empty() {
+        scratch.clear();
         scratch.push_str(symbol_name);
+        scratch.as_str()
     } else {
-        write!(scratch, "{imp_path}{sep}{symbol_name}").unwrap();
-    }
-
-    let key = scratch.as_str();
+        scratch.set_fmt(format_args!("{imp_path}{sep}{symbol_name}"))
+    };
     let by_fqn = graph
         .indexes
         .by_fqn
@@ -113,7 +111,7 @@ fn scope_fqn_walk(
     file_node: NodeIndex,
     name: &str,
     sep: &str,
-    scratch: &mut String,
+    scratch: &mut ScratchBuf,
 ) -> Vec<NodeIndex> {
     let def_ids: Vec<_> = graph
         .graph
@@ -125,9 +123,7 @@ fn scope_fqn_walk(
         let def = &graph.defs[did.0 as usize];
         if def.is_top_level {
             let fqn = graph.str(def.fqn);
-            scratch.clear();
-            write!(scratch, "{fqn}{sep}{name}").unwrap();
-            let key = scratch.as_str();
+            let key = scratch.set_fmt(format_args!("{fqn}{sep}{name}"));
             let matches = graph
                 .indexes
                 .by_fqn
@@ -142,9 +138,7 @@ fn scope_fqn_walk(
         let fqn_str = graph.str(def.fqn);
         let mut current = fqn_str;
         loop {
-            scratch.clear();
-            write!(scratch, "{current}{sep}{name}").unwrap();
-            let key = scratch.as_str();
+            let key = scratch.set_fmt(format_args!("{current}{sep}{name}"));
             let matches = graph
                 .indexes
                 .by_fqn
@@ -170,7 +164,7 @@ fn wildcard_import(
     file_node: NodeIndex,
     name: &str,
     sep: &str,
-    scratch: &mut String,
+    scratch: &mut ScratchBuf,
 ) -> Vec<NodeIndex> {
     for neighbor in graph
         .graph
@@ -181,9 +175,7 @@ fn wildcard_import(
             && imp.wildcard
         {
             let path = graph.str(imp.path);
-            scratch.clear();
-            write!(scratch, "{path}{sep}{name}").unwrap();
-            let key = scratch.as_str();
+            let key = scratch.set_fmt(format_args!("{path}{sep}{name}"));
             let matches = graph
                 .indexes
                 .by_fqn
@@ -201,7 +193,7 @@ fn same_package(
     file_node: NodeIndex,
     name: &str,
     sep: &str,
-    scratch: &mut String,
+    scratch: &mut ScratchBuf,
 ) -> Vec<NodeIndex> {
     for neighbor in graph
         .graph
@@ -213,9 +205,7 @@ fn same_package(
         {
             let fqn_str = graph.str(def.fqn);
             if let Some(sep_pos) = fqn_str.rfind(sep) {
-                scratch.clear();
-                write!(scratch, "{}{sep}{name}", &fqn_str[..sep_pos]).unwrap();
-                let key = scratch.as_str();
+                let key = scratch.set_fmt(format_args!("{}{sep}{name}", &fqn_str[..sep_pos]));
                 let matches = graph
                     .indexes
                     .by_fqn

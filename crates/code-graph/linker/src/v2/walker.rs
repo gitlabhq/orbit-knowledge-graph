@@ -17,6 +17,7 @@ use super::imports::{ResolveSettings, apply_import_strategies, resolve_import};
 use super::rules::ResolutionRules;
 use super::ssa::SsaResolver;
 use super::state::FileArena;
+use super::state::ScratchBuf;
 use super::state::{BlockId, Value};
 use super::stats::ResolveStats;
 
@@ -130,8 +131,8 @@ where
         sep,
         last_bare_path: ResolvePath::None,
         last_chain_path: ResolvePath::None,
-        compound_key_buf: String::new(),
-        scratch: String::new(),
+        compound_key_buf: ScratchBuf::new(),
+        scratch: ScratchBuf::new(),
     };
 
     walker.walk_node(root);
@@ -189,8 +190,8 @@ where
     sep: &'static str,
     last_bare_path: ResolvePath,
     last_chain_path: ResolvePath,
-    compound_key_buf: String,
-    scratch: String,
+    compound_key_buf: ScratchBuf,
+    scratch: ScratchBuf,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -885,7 +886,7 @@ where
         }
         self.compound_key_buf.push_str(self.sep);
         self.compound_key_buf.push_str(member_name);
-        let key = self.file_arena.alloc_str(&self.compound_key_buf);
+        let key = self.file_arena.alloc_str(self.compound_key_buf.as_str());
         let reaching = self.ssa.read_variable_stateless(key, self.current_block);
         reaching
             .values

@@ -96,15 +96,11 @@ impl GraphEdge {
 /// Access strings via `self.str(id)`.
 pub struct CodeGraph {
     pub graph: DiGraph<GraphNode, GraphEdge>,
-
     pub defs: Vec<GraphDef>,
     pub imports: Vec<GraphImport>,
-
     /// All strings for defs/imports. Owned, dropped with the graph.
     pub strings: StringPool,
-
     pub indexes: GraphIndexes,
-
     pub root_path: String,
 }
 
@@ -761,21 +757,21 @@ impl AsRecordBatch<RowContext<'_>> for ImportRow<'_> {
     }
 }
 
-pub struct EdgeRow {
+pub struct EdgeRow<'a> {
     pub source_id: i64,
     pub target_id: i64,
-    pub edge_kind: String,
-    pub source_node_kind: String,
-    pub target_node_kind: String,
+    pub edge_kind: &'a str,
+    pub source_node_kind: &'a str,
+    pub target_node_kind: &'a str,
 }
 
-impl AsRecordBatch for EdgeRow {
+impl AsRecordBatch for EdgeRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), arrow::error::ArrowError> {
         b.col("source_id")?.push_int(self.source_id)?;
-        b.col("source_kind")?.push_str(&self.source_node_kind)?;
-        b.col("relationship_kind")?.push_str(&self.edge_kind)?;
+        b.col("source_kind")?.push_str(self.source_node_kind)?;
+        b.col("relationship_kind")?.push_str(self.edge_kind)?;
         b.col("target_id")?.push_int(self.target_id)?;
-        b.col("target_kind")?.push_str(&self.target_node_kind)?;
+        b.col("target_kind")?.push_str(self.target_node_kind)?;
         Ok(())
     }
 }

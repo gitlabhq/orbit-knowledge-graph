@@ -433,7 +433,7 @@ impl BatchBuilder {
             let col = match spec.col_type {
                 ColumnType::Int => Col::Int(Int64Builder::with_capacity(cap), spec.nullable),
                 ColumnType::Str => {
-                    Col::Str(StringBuilder::with_capacity(cap, cap * 32), spec.nullable)
+                    Col::Str(StringBuilder::with_capacity(cap, cap * 8), spec.nullable)
                 }
             };
             index.insert(spec.name.clone(), names.len());
