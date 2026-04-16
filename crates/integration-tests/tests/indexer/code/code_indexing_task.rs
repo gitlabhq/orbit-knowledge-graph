@@ -1,7 +1,6 @@
 use arrow::array::{BooleanArray, Int64Array, StringArray};
 use gkg_utils::arrow::ArrowUtils;
 use indexer::handler::Handler;
-use indexer::modules::code::CodeIndexingTaskHandler;
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
@@ -130,81 +129,8 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
     );
 }
 
-#[tokio::test]
-async fn incremental_update_applies_changed_paths_and_blobs() {
-    let project_id: i64 = 3;
-
-    let clickhouse = integration_testkit::TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        *integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
-
-    let mock = MockGitlabServer::start().await;
-    mock.add_project(
-        project_id,
-        "main",
-        &[(
-            "src/Main.java",
-            "public class Main {
-            public void save() { validate(); }
-            public void validate() {}
-        }",
-        )],
-    );
-
-    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    let handler = deps.code_indexing_task_handler();
-
-    index_code(&handler, &clickhouse, project_id, "commit1", 1, "/inc-test").await;
-
-    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-    assert_active_definitions(
-        &clickhouse,
-        project_id,
-        "src/Main.java",
-        &["Main", "save", "validate"],
-    )
-    .await;
-
-    let modified_main = "public class Main { public void run() {} }";
-    let new_other = "public class Other { public void execute() {} }";
-
-    mock.set_changed_paths(
-        project_id,
-        &[
-            r#"{"path":"src/Main.java","status":"MODIFIED","old_path":"","new_mode":33188,"old_mode":33188,"old_blob_id":"old_main","new_blob_id":"blob_main_v2"}"#,
-            r#"{"path":"src/Other.java","status":"ADDED","old_path":"","new_mode":33188,"old_mode":0,"old_blob_id":"","new_blob_id":"blob_other"}"#,
-        ]
-        .join("\n"),
-    );
-    mock.add_blob(project_id, "blob_main_v2", modified_main.as_bytes());
-    mock.add_blob(project_id, "blob_other", new_other.as_bytes());
-
-    index_code(&handler, &clickhouse, project_id, "commit2", 2, "/inc-test").await;
-
-    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-    assert_active_definitions(&clickhouse, project_id, "src/Main.java", &["Main", "run"]).await;
-    assert_no_active_definitions_named(
-        &clickhouse,
-        project_id,
-        "src/Main.java",
-        &["save", "validate"],
-    )
-    .await;
-
-    assert_file_is_active(&clickhouse, project_id, "src/Other.java").await;
-    assert_active_definitions(
-        &clickhouse,
-        project_id,
-        "src/Other.java",
-        &["Other", "execute"],
-    )
-    .await;
-}
-
 async fn index_code(
-    handler: &CodeIndexingTaskHandler,
+    handler: &indexer::modules::code::CodeIndexingTaskHandler,
     clickhouse: &integration_testkit::TestContext,
     project_id: i64,
     commit_sha: &str,
@@ -324,21 +250,6 @@ async fn count_active_edges(
         ))
         .await;
     result.first().map_or(0, |b| b.num_rows())
-}
-
-async fn assert_no_active_definitions_named(
-    clickhouse: &integration_testkit::TestContext,
-    project_id: i64,
-    file_path: &str,
-    names: &[&str],
-) {
-    let active = query_active_definition_names(clickhouse, project_id, file_path).await;
-    for name in names {
-        assert!(
-            !active.contains(&name.to_string()),
-            "definition '{name}' in '{file_path}' should not be active, but found in {active:?}"
-        );
-    }
 }
 
 async fn assert_no_active_definitions(

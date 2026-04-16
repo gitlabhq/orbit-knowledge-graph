@@ -46,9 +46,7 @@ impl CodeMetrics {
 
         let repository_resolution_strategy = meter
             .u64_counter("gkg.indexer.code.repository.resolution")
-            .with_description(
-                "Repository resolution strategy used (cache_hit, incremental, full_download, full_download_fallback)",
-            )
+            .with_description("Repository resolution strategy used (full_download)")
             .build();
 
         let indexing_duration = meter

@@ -93,7 +93,7 @@ graph LR
     Dispatcher --> IntNATS["NATS JetStream<br/>(GKG_INDEXER stream)"]
     Backfill --> IntNATS
     IntNATS --> Handler["CodeIndexingTaskHandler<br/>(Indexer mode)"]
-    Handler --> Rails["Rails internal API<br/>(archive download | incremental fetch)"]
+    Handler --> Rails["Rails internal API<br/>(archive download)"]
     Rails --> CodeGraph["code-graph<br/>(parse + analyze)"]
     CodeGraph --> Arrow["ArrowConverter"]
     Arrow --> ClickHouse["ClickHouse"]
@@ -111,7 +111,7 @@ graph LR
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
 | ClickHouse | Columnar OLAP database storing the datalake and the property graph |
-| Rails internal API | Proxies repository operations: project info lookups, archive downloads, changed path diffs (NDJSON), and blob streaming (length-delimited protobuf) |
+| Rails internal API | Proxies repository operations: project info lookups, archive downloads, and blob streaming for content resolution (length-delimited protobuf) |
 
 For background on Siphon CDC, NATS, and ClickHouse architecture, see the
 [SDLC indexing design document](sdlc_indexing.md).
@@ -187,7 +187,7 @@ Example NATS KV:
 - Value: `{ "worker_id": String, "started_at": Instant }`
 - TTL: 60 seconds
 
-After acquiring the lock, the service resolves the repository using a three-tier strategy: if the branch is already cached at the same commit, the cached files are reused directly. If the cache exists at an older commit, an incremental update fetches only the changed paths and their blob content from the Rails internal API, applying renames, deletions, and writes to the cache. If no cache exists or the incremental update fails (e.g. due to a force push), the service falls back to downloading the full repository archive. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions.
+After acquiring the lock, the service downloads the full repository archive from the Rails internal API. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. After indexing completes (or fails), the downloaded files are immediately deleted from disk to prevent unbounded storage growth across indexer pods.
 
 #### Transform (call graph construction)
 
@@ -259,11 +259,12 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 
 1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
-3. Resolves the repository via `RepositoryResolver`, which checks the local disk cache and applies one of three strategies: cache hit (same commit), incremental update (fetch only changed files via `changed_paths` + `list_blobs` streaming endpoints), or full archive download as a fallback
+3. Downloads the full repository archive via the Rails internal API
 4. Runs the streaming indexing pipeline to produce the graph
-5. Converts the graph to Arrow record batches and writes them to ClickHouse
-6. Cleans up stale data from the previous indexing run
-7. Updates the checkpoint and releases the lock
+5. Deletes the downloaded repository from disk
+6. Converts the graph to Arrow record batches and writes them to ClickHouse
+7. Cleans up stale data from the previous indexing run
+8. Updates the checkpoint and releases the lock
 
 ##### Storage in ClickHouse
 
@@ -304,16 +305,17 @@ The `code_indexing_checkpoint` table records the last successfully indexed point
                            |- 2. Resolve default branch from Rails (if not provided)
                            |- 3. Check checkpoint (skip already-indexed commits)
                            |- 4. Acquire distributed lock via NATS KV
-                           |- 5. Resolve repository (cache hit, incremental update, or full download)
+                           |- 5. Download full repository archive
                            |- 6. Run indexing pipeline
                            |       |- File discovery (respects .gitignore)
                            |       |- Async file reads
                            |       |- CPU-bound parsing (bounded parallelism)
                            |       \- Analysis phase -> graph
-                           |- 7. Convert graph to Arrow record batches
-                           |- 8. Write to ClickHouse (6 tables)
-                           |- 9. Clean up stale data
-                           \- 10. Update checkpoint, release lock
+                           |- 7. Delete downloaded repository from disk
+                           |- 8. Convert graph to Arrow record batches
+                           |- 9. Write to ClickHouse (6 tables)
+                           |- 10. Clean up stale data
+                           \- 11. Update checkpoint, release lock
 ```
 
 ### Differences from the original local tool
@@ -324,7 +326,7 @@ tool. Here are the main architectural differences in the current service:
 | Aspect | Original (local) | Current (service) |
 |---|---|---|
 | Graph database | lbug (embedded) | ClickHouse |
-| Code access | Local filesystem | Rails internal API (incremental fetch with full archive fallback) |
+| Code access | Local filesystem | Rails internal API (full archive download, no disk cache) |
 | Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC → dispatcher → internal NATS stream |
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
