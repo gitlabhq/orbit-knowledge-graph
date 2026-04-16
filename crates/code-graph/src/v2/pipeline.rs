@@ -38,8 +38,8 @@ use crate::v2::langs::kotlin::{KotlinDsl, KotlinRules};
 use crate::v2::langs::python::{PythonDsl, PythonRules};
 use crate::v2::langs::ruby::{RubyDsl, RubyRules};
 
-/// Input to a language pipeline: file path + source bytes.
-pub type FileInput = (String, Vec<u8>);
+/// Input to a language pipeline: file path (source read on demand).
+pub type FileInput = String;
 
 /// Trait for language-specific graph production.
 ///
@@ -97,29 +97,25 @@ where
         let t0 = std::time::Instant::now();
 
         eprintln!("[v2] {file_count} files, {num_threads} threads");
-
-        let total_source_bytes: usize = files.iter().map(|(_, s)| s.len()).sum();
-        let total_path_bytes: usize = files.iter().map(|(p, _)| p.len()).sum();
-        eprintln!(
-            "[mem] source bytes: {:.1} MB, path bytes: {:.1} MB, Vec overhead: {:.1} MB",
-            total_source_bytes as f64 / 1048576.0,
-            total_path_bytes as f64 / 1048576.0,
-            (file_count * (std::mem::size_of::<FileInput>())) as f64 / 1048576.0,
-        );
         report_rss("before Phase 1");
 
         let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
 
-        // ── Phase 1: parse + extract defs/imports → graph ───────
+        // ── Phase 1: read + parse defs/imports → graph ──────────
+        // Source read per-file on demand, dropped after add_file_nodes.
         let pb = progress_bar(file_count as u64, "Phase 1: defs");
-        // Phase 1: parse + extract defs/imports → graph, drop AST.
-        // Record ref count to skip zero-ref files in Phase 2.
         let phase1_results: Vec<_> = files
             .par_iter()
             .enumerate()
-            .map(|(file_idx, (path, source))| {
+            .map(|(file_idx, path)| {
+                let abs_path = format!("{root_path}/{path}");
+                let source = std::fs::read(&abs_path).map_err(|e| PipelineError {
+                    file_path: path.clone(),
+                    error: format!("Read error: {e}"),
+                })?;
+
                 let result = parser
-                    .parse_defs_only(source, path)
+                    .parse_defs_only(&source, path)
                     .map_err(|e| PipelineError {
                         file_path: path.clone(),
                         error: format!("Parse error: {e}"),
@@ -133,6 +129,7 @@ where
                     let (file_node, _, _) = g.add_file_nodes(result, file_idx);
                     file_node
                 };
+                // source dropped here
 
                 pb.inc(1);
                 Ok((file_node, defs, imports))
@@ -208,12 +205,20 @@ where
         let phase2_results: Vec<_> = files
             .par_iter()
             .zip(file_nodes.par_iter())
-            .map(|((path, source), &file_node)| {
+            .map(|(path, &file_node)| {
                 if file_node.index() == 0 && errors.iter().any(|e| e.file_path == *path) {
                     pb2.inc(1);
                     return None;
                 }
-                let source_str = match std::str::from_utf8(source) {
+                let abs_path = format!("{root_path}/{path}");
+                let source = match std::fs::read(&abs_path) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        pb2.inc(1);
+                        return None;
+                    }
+                };
+                let source_str = match std::str::from_utf8(&source) {
                     Ok(s) => s,
                     Err(_) => {
                         pb2.inc(1);
@@ -231,6 +236,7 @@ where
                 result.parse_ns = parse_ns;
                 result.walk_ns = walk_ns;
                 pb2.inc(1);
+                // source dropped here
                 Some(result)
             })
             .collect();
@@ -484,15 +490,12 @@ impl Pipeline {
                     continue;
                 }
 
-                let source = match std::fs::read(path) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
+                // Verify file is readable, but don't load yet.
+                if !path.is_file() {
+                    continue;
+                }
 
-                groups
-                    .entry(lang)
-                    .or_default()
-                    .push((rel_path.to_string(), source));
+                groups.entry(lang).or_default().push(rel_path.to_string());
             }
         }
 
