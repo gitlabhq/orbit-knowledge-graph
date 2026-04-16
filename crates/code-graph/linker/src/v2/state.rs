@@ -296,56 +296,60 @@ impl Default for GraphIndexes {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StrId(u32);
 
-/// Pool of interned strings for graph-level storage.
+/// Pool of strings for graph-level storage.
+///
+/// Strings are packed contiguously in a single `Vec<u8>` buffer. An index
+/// `Vec` stores `(offset, len)` pairs for O(1) retrieval. One large
+/// allocation instead of ~500K individual `Box<str>` heap allocs.
 ///
 /// Owned by `CodeGraph`. No lifetime parameter, no global lock, no memory
-/// leak. Strings are `Box<str>` (16 bytes: ptr+len, no unused capacity).
-/// Dropped in bulk when the graph is dropped.
-///
-/// All `GraphDef` / `GraphImport` fields reference strings via [`StrId`].
-/// Access: `pool.get(id) -> &str` (one Vec index).
+/// leak, no unsafe. Dropped in bulk when the graph is dropped.
 pub struct StringPool {
-    strings: Vec<Box<str>>,
+    /// Contiguous UTF-8 byte buffer. All strings packed end-to-end.
+    buf: Vec<u8>,
+    /// (byte_offset, byte_len) into `buf` for each StrId.
+    index: Vec<(u32, u32)>,
 }
 
 impl StringPool {
     pub fn new() -> Self {
         Self {
-            strings: Vec::new(),
+            buf: Vec::new(),
+            index: Vec::new(),
         }
     }
 
     pub fn with_capacity(cap: usize) -> Self {
         Self {
-            strings: Vec::with_capacity(cap),
+            buf: Vec::with_capacity(cap * 32),
+            index: Vec::with_capacity(cap),
         }
     }
 
-    /// Allocate a string into the pool. Returns an ID for later retrieval.
+    /// Append a string to the pool. Returns an ID for later retrieval.
     pub fn alloc(&mut self, s: &str) -> StrId {
-        let id = StrId(self.strings.len() as u32);
-        self.strings.push(s.into());
+        let id = StrId(self.index.len() as u32);
+        let offset = self.buf.len() as u32;
+        self.buf.extend_from_slice(s.as_bytes());
+        self.index.push((offset, s.len() as u32));
         id
     }
 
     /// Retrieve a string by ID.
     #[inline]
     pub fn get(&self, id: StrId) -> &str {
-        &self.strings[id.0 as usize]
+        let (offset, len) = self.index[id.0 as usize];
+        let bytes = &self.buf[offset as usize..(offset + len) as usize];
+        // alloc() only accepts &str (valid UTF-8), and buf is append-only.
+        std::str::from_utf8(bytes).expect("StringPool: invalid UTF-8")
     }
 
     pub fn len(&self) -> usize {
-        self.strings.len()
+        self.index.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.strings.is_empty()
-    }
-}
-
-impl Default for StringPool {
-    fn default() -> Self {
-        Self::new()
+        self.index.is_empty()
     }
 }
 
