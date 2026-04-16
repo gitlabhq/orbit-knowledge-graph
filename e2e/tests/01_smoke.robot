@@ -22,8 +22,11 @@ Orbit Status Is Healthy
 Enable Feature Flag
     [Arguments]    ${flag}
     ${headers}=    GitLab Auth Headers
+    ${data}=    Create Dictionary    value=true
     ${resp}=    POST    ${GITLAB_URL}/api/v4/features/${flag}
-    ...    headers=${headers}    data=value=true    expected_status=201
+    ...    headers=${headers}    data=${data}    expected_status=any
+    Should Be True    ${resp.status_code} in [200, 201]
+    ...    Failed to enable ${flag}: ${resp.status_code} ${resp.text}
 
 Feature Flag Is Enabled
     [Arguments]    ${flag}
