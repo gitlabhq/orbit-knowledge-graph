@@ -11,3 +11,4 @@ secrets:
   chDatalakePass: ""
   chGraphPass: ""
   chGraphReadPass: ""
+  gitlabRootPass: ""

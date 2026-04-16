@@ -5,7 +5,6 @@ Library    String
 
 *** Variables ***
 ${GITLAB_URL}     %{GITLAB_URL}
-${GITLAB_PAT}     %{GITLAB_PAT}
 
 *** Keywords ***
 GitLab Auth Headers
