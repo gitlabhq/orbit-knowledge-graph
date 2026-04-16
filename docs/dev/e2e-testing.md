@@ -33,13 +33,13 @@ Siphon CDC, and all four GKG modes (webserver, indexer, dispatcher, health-check
 
 ```bash
 # Local
-scripts/setup.sh          # deploy full stack
-scripts/test.sh           # run Robot Framework tests
-scripts/teardown.sh -y    # cleanup
+e2e/scripts/setup.sh          # deploy full stack
+e2e/scripts/test.sh           # run Robot Framework tests
+e2e/scripts/teardown.sh -y    # cleanup
 
 # Specific SHA
-E2E_SHA=abc1234 scripts/setup.sh
-E2E_SHA=abc1234 scripts/test.sh
+E2E_SHA=abc1234 e2e/scripts/setup.sh
+E2E_SHA=abc1234 e2e/scripts/test.sh
 
 # CI runs automatically on MR via e2e-build + e2e jobs
 ```
@@ -73,7 +73,6 @@ consumers update automatically.
 
 ## Key files
 
-- `e2e/CONTEXT.md` — full reference with secrets, TLS, DNS, known issues
 - `e2e/helmfile.yaml.gotmpl` — all helm releases
 - `e2e/values/` — per-component helm values (`.gotmpl` for templated ones)
 - `e2e/charts/` — local charts (ClickHouse, robot-runner)
