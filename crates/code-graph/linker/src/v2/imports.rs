@@ -15,7 +15,7 @@ fn verify_fqn(graph: &CodeGraph, candidates: &[NodeIndex], expected_fqn: &str) -
     candidates
         .iter()
         .copied()
-        .filter(|&idx| graph.def(idx).fqn.to_string() == expected_fqn)
+        .filter(|&idx| &*graph.def(idx).fqn.as_istr() == expected_fqn)
         .collect()
 }
 
@@ -204,7 +204,7 @@ fn same_file(graph: &CodeGraph, file_node: NodeIndex, name: &str) -> Vec<NodeInd
     let by_fqn: Vec<NodeIndex> = graph
         .lookup_fqn(name)
         .iter()
-        .filter(|&&idx| graph.def(idx).fqn.to_string() == name) // verify hash
+        .filter(|&&idx| &*graph.def(idx).fqn.as_istr() == name) // verify hash
         .filter(|&&idx| graph.def_in_file(idx, file_path))
         .copied()
         .collect();

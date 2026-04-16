@@ -426,14 +426,14 @@ impl CodeGraph {
                 .lookup_fqn(&full_fqn)
                 .iter()
                 .copied()
-                .filter(|&idx| self.def(idx).fqn.to_string() == full_fqn)
+                .filter(|&idx| &*self.def(idx).fqn.as_istr() == full_fqn)
                 .collect();
             if defs.is_empty() && !imp.path.is_empty() {
                 defs = self
                     .lookup_fqn(&imp.path)
                     .iter()
                     .copied()
-                    .filter(|&idx| self.def(idx).fqn.to_string() == imp.path)
+                    .filter(|&idx| &*self.def(idx).fqn.as_istr() == imp.path)
                     .collect();
             }
             if !defs.is_empty() {
