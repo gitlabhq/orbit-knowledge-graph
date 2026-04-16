@@ -426,14 +426,14 @@ impl CodeGraph {
                 .lookup_fqn(&full_fqn)
                 .iter()
                 .copied()
-                .filter(|&idx| &*self.def(idx).fqn.as_istr() == full_fqn)
+                .filter(|&idx| *self.def(idx).fqn.as_istr() == *full_fqn)
                 .collect();
             if defs.is_empty() && !imp.path.is_empty() {
                 defs = self
                     .lookup_fqn(&imp.path)
                     .iter()
                     .copied()
-                    .filter(|&idx| &*self.def(idx).fqn.as_istr() == imp.path)
+                    .filter(|&idx| *self.def(idx).fqn.as_istr() == *imp.path)
                     .collect();
             }
             if !defs.is_empty() {
@@ -483,23 +483,46 @@ impl CodeGraph {
             return false;
         };
 
+        let mk = hash_key(member_name);
+
         for &start in start_nodes {
+            // Verify: start node must actually match scope_fqn (hash collision guard)
+            let actual_fqn = self.def_fqn(start);
+            if &*actual_fqn != scope_fqn && self.def(start).name != scope_fqn {
+                continue;
+            }
+
             // Check direct nested defs first
-            let fqn = self.def_fqn(start);
-            let found = self.lookup_nested(&fqn, member_name);
-            if !found.is_empty() {
-                out.extend_from_slice(found);
-                return true;
+            if let Some(inner) = self.nested_defs.get(&hash_key(&actual_fqn)) {
+                if let Some(candidates) = inner.get(&mk) {
+                    let before = out.len();
+                    for &idx in candidates {
+                        if self.def(idx).name == member_name {
+                            out.push(idx);
+                        }
+                    }
+                    if out.len() > before {
+                        return true;
+                    }
+                }
             }
 
             // Walk pre-computed ancestor chain (no BFS)
             if let Some(chain) = self.ancestors.get(&start) {
                 for &ancestor in chain {
                     let ancestor_fqn = self.def_fqn(ancestor);
-                    let found = self.lookup_nested(&ancestor_fqn, member_name);
-                    if !found.is_empty() {
-                        out.extend_from_slice(found);
-                        return true;
+                    if let Some(inner) = self.nested_defs.get(&hash_key(&ancestor_fqn)) {
+                        if let Some(candidates) = inner.get(&mk) {
+                            let before = out.len();
+                            for &idx in candidates {
+                                if self.def(idx).name == member_name {
+                                    out.push(idx);
+                                }
+                            }
+                            if out.len() > before {
+                                return true;
+                            }
+                        }
                     }
                 }
             }
@@ -595,7 +618,7 @@ impl CodeGraph {
             {
                 for super_name in &meta.super_types {
                     let targets = self.resolve_type_to_nodes(super_name);
-                    for &target in targets {
+                    for &target in &targets {
                         if target != idx {
                             edges.push((idx, target));
                         }
@@ -618,17 +641,29 @@ impl CodeGraph {
     }
 
     /// Resolve a type name (FQN or bare name) to graph NodeIndexes.
-    fn resolve_type_to_nodes(&self, name: &str) -> &[NodeIndex] {
+    /// Verifies hash lookups against actual strings to guard against collisions.
+    fn resolve_type_to_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 4]> {
         let k = hash_key(name);
-        if let Some(nodes) = self.def_by_fqn.get(&k)
-            && !nodes.is_empty()
-        {
-            return nodes;
+        if let Some(nodes) = self.def_by_fqn.get(&k) {
+            let verified: SmallVec<[NodeIndex; 4]> = nodes
+                .iter()
+                .copied()
+                .filter(|&idx| &*self.def(idx).fqn.as_istr() == name)
+                .collect();
+            if !verified.is_empty() {
+                return verified;
+            }
         }
         self.def_by_name
             .get(&k)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+            .map(|nodes| {
+                nodes
+                    .iter()
+                    .copied()
+                    .filter(|&idx| self.def(idx).name == name)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Assign stable IDs to all nodes for Arrow serialization.

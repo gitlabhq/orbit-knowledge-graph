@@ -922,10 +922,10 @@ impl<'a> FusedFileWalker<'a> {
             return false;
         }
         let mut result = Vec::new();
+        // lookup_nested_with_hierarchy verifies both scope_fqn and member_name
+        // against actual strings (hash collision guard).
         self.graph
             .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
-        // Verify: filter out hash collisions by checking actual def name.
-        result.retain(|&idx| self.graph.def(idx).name == member_name);
         let found = !result.is_empty();
         if found {
             out.extend_from_slice(&result);
