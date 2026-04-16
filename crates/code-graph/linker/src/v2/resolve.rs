@@ -151,13 +151,13 @@ fn wildcard_import(
         .graph
         .neighbors_directed(file_node, petgraph::Direction::Outgoing)
     {
-        if let Some((_, imp)) = graph.graph[neighbor].as_import() {
-            if imp.wildcard {
-                let candidate = format!("{}{}{}", imp.path, sep, name);
-                let matches = graph.lookup_fqn(&candidate);
-                if !matches.is_empty() {
-                    return matches.to_vec();
-                }
+        if let Some((_, imp)) = graph.graph[neighbor].as_import()
+            && imp.wildcard
+        {
+            let candidate = format!("{}{}{}", imp.path, sep, name);
+            let matches = graph.lookup_fqn(&candidate);
+            if !matches.is_empty() {
+                return matches.to_vec();
             }
         }
     }
@@ -169,15 +169,15 @@ fn same_package(graph: &CodeGraph, file_node: NodeIndex, name: &str, sep: &str) 
         .graph
         .neighbors_directed(file_node, petgraph::Direction::Outgoing)
     {
-        if let Some((_, def)) = graph.graph[neighbor].as_definition() {
-            if def.is_top_level {
-                let fqn_str = def.fqn.to_string();
-                if let Some(sep_pos) = fqn_str.rfind(sep) {
-                    let candidate = format!("{}{}{}", &fqn_str[..sep_pos], sep, name);
-                    let matches = graph.lookup_fqn(&candidate);
-                    if !matches.is_empty() {
-                        return matches.to_vec();
-                    }
+        if let Some((_, def)) = graph.graph[neighbor].as_definition()
+            && def.is_top_level
+        {
+            let fqn_str = def.fqn.to_string();
+            if let Some(sep_pos) = fqn_str.rfind(sep) {
+                let candidate = format!("{}{}{}", &fqn_str[..sep_pos], sep, name);
+                let matches = graph.lookup_fqn(&candidate);
+                if !matches.is_empty() {
+                    return matches.to_vec();
                 }
             }
         }

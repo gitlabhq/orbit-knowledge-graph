@@ -585,10 +585,10 @@ impl CodeGraph {
 
     /// Resolve a type name (FQN or bare name) to graph NodeIndexes.
     fn resolve_type_to_nodes(&self, name: &str) -> &[NodeIndex] {
-        if let Some(nodes) = self.def_by_fqn.get(name) {
-            if !nodes.is_empty() {
-                return nodes;
-            }
+        if let Some(nodes) = self.def_by_fqn.get(name)
+            && !nodes.is_empty()
+        {
+            return nodes;
         }
         self.def_by_name
             .get(name)
