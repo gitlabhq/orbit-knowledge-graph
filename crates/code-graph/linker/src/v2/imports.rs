@@ -5,9 +5,33 @@
 
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 use super::graph::CodeGraph;
 use super::rules::ImportStrategy;
+
+/// Verify FQN lookup results against actual def FQNs (hash collision guard).
+/// Verify FQN lookup results against actual def FQNs (hash collision guard).
+fn verify_fqn(graph: &CodeGraph, candidates: &[NodeIndex], expected_fqn: &str) -> Vec<NodeIndex> {
+    candidates
+        .iter()
+        .copied()
+        .filter(|&idx| graph.def(idx).fqn.to_string() == expected_fqn)
+        .collect()
+}
+
+/// Verify name lookup results against actual def names (hash collision guard).
+pub(crate) fn verify_name(
+    graph: &CodeGraph,
+    candidates: &[NodeIndex],
+    expected_name: &str,
+) -> Vec<NodeIndex> {
+    candidates
+        .iter()
+        .copied()
+        .filter(|&idx| graph.def(idx).name == expected_name)
+        .collect()
+}
 
 // ── ResolveSettings ─────────────────────────────────────────────
 
@@ -83,13 +107,13 @@ pub(crate) fn resolve_import(
 
     let by_fqn = graph.lookup_fqn(&full_fqn);
     if !by_fqn.is_empty() {
-        return by_fqn.to_vec();
+        return verify_fqn(graph, by_fqn, &full_fqn);
     }
 
     if !import.path.is_empty() {
         let by_path = graph.lookup_fqn(&import.path);
         if !by_path.is_empty() {
-            return by_path.to_vec();
+            return verify_fqn(graph, by_path, &import.path);
         }
     }
     vec![]
@@ -116,7 +140,7 @@ fn scope_fqn_walk(
             let candidate = format!("{}{}{}", def.fqn, sep, name);
             let matches = graph.lookup_fqn(&candidate);
             if !matches.is_empty() {
-                return matches.to_vec();
+                return verify_fqn(graph, matches, &candidate);
             }
         }
     }
@@ -127,7 +151,7 @@ fn scope_fqn_walk(
             let candidate = format!("{}{}{}", current, sep, name);
             let matches = graph.lookup_fqn(&candidate);
             if !matches.is_empty() {
-                return matches.to_vec();
+                return verify_fqn(graph, matches, &candidate);
             }
             match current.rfind(sep) {
                 Some(pos) => current = &current[..pos],
@@ -159,7 +183,7 @@ fn wildcard_import(
             let candidate = format!("{}{}{}", imp.path, sep, name);
             let matches = graph.lookup_fqn(&candidate);
             if !matches.is_empty() {
-                return matches.to_vec();
+                return verify_fqn(graph, matches, &candidate);
             }
         }
     }
@@ -180,7 +204,7 @@ fn same_package(graph: &CodeGraph, file_node: NodeIndex, name: &str, sep: &str) 
                 let candidate = format!("{}{}{}", &fqn_str[..sep_pos], sep, name);
                 let matches = graph.lookup_fqn(&candidate);
                 if !matches.is_empty() {
-                    return matches.to_vec();
+                    return verify_fqn(graph, matches, &candidate);
                 }
             }
         }
@@ -194,6 +218,7 @@ fn same_file(graph: &CodeGraph, file_node: NodeIndex, name: &str) -> Vec<NodeInd
     let by_fqn: Vec<NodeIndex> = graph
         .lookup_fqn(name)
         .iter()
+        .filter(|&&idx| graph.def(idx).fqn.to_string() == name) // verify hash
         .filter(|&&idx| graph.def_in_file(idx, file_path))
         .copied()
         .collect();
@@ -204,6 +229,7 @@ fn same_file(graph: &CodeGraph, file_node: NodeIndex, name: &str) -> Vec<NodeInd
     graph
         .lookup_name(name)
         .iter()
+        .filter(|&&idx| graph.def(idx).name == name) // verify hash
         .filter(|&&idx| graph.def_in_file(idx, file_path))
         .copied()
         .collect()

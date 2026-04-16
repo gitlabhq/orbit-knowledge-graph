@@ -14,7 +14,7 @@ use smallvec::SmallVec;
 
 /// Hash a string key for index lookups. Uses FxHash for speed.
 #[inline]
-fn hash_key(s: &str) -> u64 {
+pub(crate) fn hash_key(s: &str) -> u64 {
     let mut h = FxHasher::default();
     s.hash(&mut h);
     h.finish()

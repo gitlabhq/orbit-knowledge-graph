@@ -57,7 +57,7 @@ pub fn fused_walk_file(
     // This handles forward references: all defs visible from module block.
     // Also builds ssa_names set for O(1) "can this name resolve?" checks.
     let mut defs_by_byte: FxHashMap<usize, (NodeIndex, bool)> = FxHashMap::default();
-    let mut ssa_names: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    let mut ssa_names: rustc_hash::FxHashSet<u64> = rustc_hash::FxHashSet::default();
 
     for neighbor in graph
         .graph
@@ -67,7 +67,7 @@ pub fn fused_walk_file(
             GraphNode::Definition { id, .. } => {
                 let def = &graph.defs[id.0 as usize];
                 ssa.write_variable(&def.name, module_block, Value::Def(neighbor));
-                ssa_names.insert(def.name.clone());
+                ssa_names.insert(super::graph::hash_key(&def.name));
                 defs_by_byte.insert(
                     def.range.byte_offset.0,
                     (neighbor, def.kind.is_type_container()),
@@ -83,7 +83,7 @@ pub fn fused_walk_file(
                         .unwrap_or("");
                     if !name.is_empty() {
                         ssa.write_variable(name, module_block, Value::Import(neighbor));
-                        ssa_names.insert(name.to_string());
+                        ssa_names.insert(super::graph::hash_key(name));
                         if !import.path.is_empty() {
                             import_name_map
                                 .insert(name.to_string(), format!("{}{sep}{name}", import.path));
@@ -171,9 +171,9 @@ struct FusedFileWalker<'a> {
 
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
-    /// Names written to SSA. read_variable for names not in this set
+    /// Hashed names written to SSA. read_variable for names not in this set
     /// will always return Opaque — skip the predecessor traversal.
-    ssa_names: rustc_hash::FxHashSet<String>,
+    ssa_names: rustc_hash::FxHashSet<u64>,
     buf: String,
     sep: &'static str,
     last_bare_path: ResolvePath,
@@ -305,14 +305,14 @@ impl<'a> FusedFileWalker<'a> {
                 self.build_fqn(name)
             };
             for &self_name in self.rules.self_names {
-                self.ssa_names.insert(self_name.to_string());
+                self.ssa_names.insert(super::graph::hash_key(self_name));
                 self.ssa
                     .write_variable(self_name, new_block, Value::type_of(&scope_fqn));
             }
             if let Some(super_name) = self.rules.super_name
                 && let Some(super_type) = self.find_super_type(name)
             {
-                self.ssa_names.insert(super_name.to_string());
+                self.ssa_names.insert(super::graph::hash_key(super_name));
                 self.ssa
                     .write_variable(super_name, new_block, Value::type_of(&super_type));
             }
@@ -491,7 +491,7 @@ impl<'a> FusedFileWalker<'a> {
         } else {
             self.current_block
         };
-        self.ssa_names.insert(name.clone());
+        self.ssa_names.insert(super::graph::hash_key(&name));
         self.ssa.write_variable(&name, target_block, value);
     }
 
@@ -502,7 +502,7 @@ impl<'a> FusedFileWalker<'a> {
         // and doesn't exist as any definition in the graph, no resolution
         // path can produce a result. Skip the entire pipeline.
         if expression.is_none()
-            && !self.ssa_names.contains(name)
+            && !self.ssa_names.contains(&super::graph::hash_key(name))
             && self.graph.lookup_name(name).is_empty()
         {
             self.stats.bare_refs += 1;
@@ -611,7 +611,7 @@ impl<'a> FusedFileWalker<'a> {
     }
 
     fn resolve_bare_ssa(&mut self, name: &IStr) -> Vec<NodeIndex> {
-        if !self.ssa_names.contains(&**name as &str) {
+        if !self.ssa_names.contains(&super::graph::hash_key(&**name)) {
             return vec![];
         }
         let reaching = self.ssa.read_variable_stateless(name, self.current_block);
@@ -753,7 +753,10 @@ impl<'a> FusedFileWalker<'a> {
     ) -> SmallVec<[IStr; 2]> {
         match step {
             ExpressionStep::Ident(name) | ExpressionStep::Call(name) => {
-                if !self.ssa_names.contains(name.as_str()) {
+                if !self
+                    .ssa_names
+                    .contains(&super::graph::hash_key(name.as_str()))
+                {
                     return SmallVec::new();
                 }
                 let reaching = self.ssa.read_variable_stateless(name, self.current_block);
@@ -921,6 +924,8 @@ impl<'a> FusedFileWalker<'a> {
         let mut result = Vec::new();
         self.graph
             .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
+        // Verify: filter out hash collisions by checking actual def name.
+        result.retain(|&idx| self.graph.def(idx).name == member_name);
         let found = !result.is_empty();
         if found {
             out.extend_from_slice(&result);
