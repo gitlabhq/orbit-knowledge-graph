@@ -232,7 +232,8 @@
         { "datasource": "Prometheus", "expr": "sum(rate(gkg_query_pipeline_error_security_rejected_total{job=\"gkg-webserver\"}[5m]) * 60)", "legendFormat": "security_rejected", "refId": "A" },
         { "datasource": "Prometheus", "expr": "sum(rate(gkg_query_pipeline_error_execution_failed_total{job=\"gkg-webserver\"}[5m]) * 60)", "legendFormat": "execution_failed", "refId": "B" },
         { "datasource": "Prometheus", "expr": "sum(rate(gkg_query_pipeline_error_authorization_failed_total{job=\"gkg-webserver\"}[5m]) * 60)", "legendFormat": "authorization_failed", "refId": "C" },
-        { "datasource": "Prometheus", "expr": "sum(rate(gkg_query_pipeline_error_streaming_failed_total{job=\"gkg-webserver\"}[5m]) * 60)", "legendFormat": "streaming_failed", "refId": "D" }
+        { "datasource": "Prometheus", "expr": "sum(rate(gkg_query_pipeline_error_streaming_failed_total{job=\"gkg-webserver\"}[5m]) * 60)", "legendFormat": "streaming_failed", "refId": "D" },
+        { "datasource": "Prometheus", "expr": "sum(rate(gkg_query_pipeline_error_content_resolution_failed_total{job=\"gkg-webserver\"}[5m]) * 60)", "legendFormat": "content_resolution_failed", "refId": "E" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -296,6 +297,121 @@
         "tooltip": { "mode": "multi" }
       },
       "description": "Rows redacted per query by the authorization/redaction stage."
+    },
+    {
+      "title": "Content Resolution",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "Content resolution rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 37 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "datasource": "Prometheus", "expr": "sum by (outcome) (rate(gkg_content_resolve_total{job=\"gkg-webserver\"}[5m]) * 60)", "legendFormat": "{{ outcome }}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "auto" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "description": "Content resolution attempts per minute by outcome (gitaly_direct, error)."
+    },
+    {
+      "title": "Content resolution duration (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 37 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "datasource": "Prometheus", "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(gkg_content_resolve_duration_seconds_bucket{job=\"gkg-webserver\"}[5m])))", "legendFormat": "p95 {{ outcome }}", "refId": "A" },
+        { "datasource": "Prometheus", "expr": "histogram_quantile(0.5, sum by (le, outcome) (rate(gkg_content_resolve_duration_seconds_bucket{job=\"gkg-webserver\"}[5m])))", "legendFormat": "p50 {{ outcome }}", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "auto" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "description": "Gitaly content resolution latency by outcome (p50, p95). Covers 1ms to 5s range."
+    },
+    {
+      "title": "Gitaly calls / min",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 37 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "datasource": "Prometheus", "expr": "sum(rate(gkg_content_gitaly_calls_total{job=\"gkg-webserver\"}[5m]) * 60)", "legendFormat": "list_blobs RPCs", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "auto" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "description": "Number of list_blobs RPCs issued to Gitaly per minute."
+    },
+    {
+      "title": "Batch size distribution",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 45 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "datasource": "Prometheus", "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{job=\"gkg-webserver\"}[5m])))", "legendFormat": "p95", "refId": "A" },
+        { "datasource": "Prometheus", "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{job=\"gkg-webserver\"}[5m])))", "legendFormat": "p50", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "auto" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "description": "Distribution of batch sizes (rows per content resolution call)."
+    },
+    {
+      "title": "Blob size distribution",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 45 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "datasource": "Prometheus", "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_blob_size_By_bucket{job=\"gkg-webserver\"}[5m])))", "legendFormat": "p95", "refId": "A" },
+        { "datasource": "Prometheus", "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_blob_size_By_bucket{job=\"gkg-webserver\"}[5m])))", "legendFormat": "p50", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "auto" },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "description": "Distribution of resolved blob sizes in bytes."
     }
   ],
   "schemaVersion": 39,
