@@ -57,3 +57,38 @@ pub fn column_value_to_json(value: &ColumnValue) -> Value {
         ColumnValue::Null => Value::Null,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_response_schema_id_major_matches_raw_output_format_version() {
+        // The `$id` in crates/gkg-server/schemas/query_response.json ends with
+        // `/vN` where N is the major component of RAW_OUTPUT_FORMAT_VERSION.
+        // Guards against the two drifting silently when the semver major bumps.
+        let schema: Value = serde_json::from_str(include_str!(concat!(
+            env!("GKG_SERVER_SCHEMAS_DIR"),
+            "/query_response.json"
+        )))
+        .expect("query_response.json must be valid JSON");
+
+        let id = schema
+            .get("$id")
+            .and_then(Value::as_str)
+            .expect("query_response.json must declare $id");
+
+        let id_major: u64 = id
+            .rsplit('/')
+            .next()
+            .and_then(|seg| seg.strip_prefix('v'))
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("$id '{id}' must end with /vN"));
+
+        assert_eq!(
+            id_major, RAW_OUTPUT_FORMAT_VERSION.major,
+            "query_response.json $id '{id}' does not match RAW_OUTPUT_FORMAT_VERSION major ({})",
+            RAW_OUTPUT_FORMAT_VERSION.major,
+        );
+    }
+}
