@@ -675,13 +675,17 @@ namespace MyApp {
             result.stats.definitions_count
         );
 
-        let graph = &result.graphs[0];
-        assert_eq!(graph.files().count(), 4);
-        assert!(graph.directories().count() > 0);
-        assert!(graph.edge_count() > 0);
+        let total_files: usize = result.graphs.iter().map(|g| g.files().count()).sum();
+        let total_dirs: usize = result.graphs.iter().map(|g| g.directories().count()).sum();
+        let total_edges: usize = result.graphs.iter().map(|g| g.edge_count()).sum();
+        assert_eq!(total_files, 4);
+        assert!(total_dirs > 0);
+        assert!(total_edges > 0);
 
-        let def_to_def = graph
-            .edges()
+        let def_to_def: usize = result
+            .graphs
+            .iter()
+            .flat_map(|g| g.edges())
             .filter(|(_, _, e)| {
                 e.relationship.source_node == NodeKind::Definition
                     && e.relationship.target_node == NodeKind::Definition
@@ -692,8 +696,10 @@ namespace MyApp {
             "Expected at least 4 def-to-def edges, got {def_to_def}"
         );
 
-        let file_to_def = graph
-            .edges()
+        let file_to_def: usize = result
+            .graphs
+            .iter()
+            .flat_map(|g| g.edges())
             .filter(|(_, _, e)| {
                 e.relationship.source_node == NodeKind::File
                     && e.relationship.target_node == NodeKind::Definition

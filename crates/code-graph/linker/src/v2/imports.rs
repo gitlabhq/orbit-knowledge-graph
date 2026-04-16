@@ -5,7 +5,6 @@
 
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
-use smallvec::SmallVec;
 
 use super::graph::CodeGraph;
 use super::rules::ImportStrategy;
@@ -17,19 +16,6 @@ fn verify_fqn(graph: &CodeGraph, candidates: &[NodeIndex], expected_fqn: &str) -
         .iter()
         .copied()
         .filter(|&idx| graph.def(idx).fqn.to_string() == expected_fqn)
-        .collect()
-}
-
-/// Verify name lookup results against actual def names (hash collision guard).
-pub(crate) fn verify_name(
-    graph: &CodeGraph,
-    candidates: &[NodeIndex],
-    expected_name: &str,
-) -> Vec<NodeIndex> {
-    candidates
-        .iter()
-        .copied()
-        .filter(|&idx| graph.def(idx).name == expected_name)
         .collect()
 }
 

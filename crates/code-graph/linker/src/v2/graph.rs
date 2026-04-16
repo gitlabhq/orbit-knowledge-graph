@@ -422,9 +422,19 @@ impl CodeGraph {
                 format!("{}{}{}", imp.path, sep, name)
             };
 
-            let mut defs = self.lookup_fqn(&full_fqn).to_vec();
+            let mut defs: Vec<_> = self
+                .lookup_fqn(&full_fqn)
+                .iter()
+                .copied()
+                .filter(|&idx| self.def(idx).fqn.to_string() == full_fqn)
+                .collect();
             if defs.is_empty() && !imp.path.is_empty() {
-                defs = self.lookup_fqn(&imp.path).to_vec();
+                defs = self
+                    .lookup_fqn(&imp.path)
+                    .iter()
+                    .copied()
+                    .filter(|&idx| self.def(idx).fqn.to_string() == imp.path)
+                    .collect();
             }
             if !defs.is_empty() {
                 map.entry(name.to_string()).or_insert(defs);

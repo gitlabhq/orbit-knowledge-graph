@@ -611,7 +611,7 @@ impl<'a> FusedFileWalker<'a> {
     }
 
     fn resolve_bare_ssa(&mut self, name: &IStr) -> Vec<NodeIndex> {
-        if !self.ssa_names.contains(&super::graph::hash_key(&**name)) {
+        if !self.ssa_names.contains(&super::graph::hash_key(name)) {
             return vec![];
         }
         let reaching = self.ssa.read_variable_stateless(name, self.current_block);
