@@ -592,52 +592,53 @@ async fn index_repo_v2(
         }
     }
 
-    let graph = v2_result.graph;
+    let graphs = v2_result.graphs;
 
     // Convert to Arrow and write to DuckDB
-    let local_data = duckdb_client::convert_v2_graph(
-        &graph,
-        git.project_id,
-        &git.branch,
-        &git.commit_sha,
-        ontology,
-    )
-    .context("failed to convert v2 graph data to Arrow")?;
+    for graph in &graphs {
+        let local_data = duckdb_client::convert_v2_graph(
+            graph,
+            git.project_id,
+            &git.branch,
+            &git.commit_sha,
+            ontology,
+        )
+        .context("failed to convert v2 graph data to Arrow")?;
 
-    let db_path = store.db_path();
-    let client =
-        duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB for writing")?;
+        let db_path = store.db_path();
+        let client = duckdb_client::DuckDbClient::open(&db_path)
+            .context("failed to open DuckDB for writing")?;
 
-    let node_tables: Vec<String> = ontology
-        .local_entity_names()
-        .iter()
-        .map(|name| {
-            ontology
-                .get_node(name)
-                .expect("local entity must exist")
-                .destination_table
-                .clone()
-        })
-        .collect();
-    let edge_table = ontology
-        .local_edge_table_name()
-        .context("local_db.edge_table.name must be configured")?;
+        let node_tables: Vec<String> = ontology
+            .local_entity_names()
+            .iter()
+            .map(|name| {
+                ontology
+                    .get_node(name)
+                    .expect("local entity must exist")
+                    .destination_table
+                    .clone()
+            })
+            .collect();
+        let edge_table = ontology
+            .local_edge_table_name()
+            .context("local_db.edge_table.name must be configured")?;
 
-    client
-        .delete_project(git.project_id, &node_tables, edge_table)
-        .context("failed to clear existing project data")?;
-    client
-        .insert_graph(local_data)
-        .context("failed to insert graph data")?;
-    workspace::set_status(
-        &client,
-        &key,
-        git.project_id,
-        workspace::RepoStatus::Indexed,
-        None,
-        Some(git),
-    )?;
-
+        client
+            .delete_project(git.project_id, &node_tables, edge_table)
+            .context("failed to clear existing project data")?;
+        client
+            .insert_graph(local_data)
+            .context("failed to insert graph data")?;
+        workspace::set_status(
+            &client,
+            &key,
+            git.project_id,
+            workspace::RepoStatus::Indexed,
+            None,
+            Some(git),
+        )?;
+    }
     // Return a minimal v1-compatible result for stats output
     Ok(RepositoryIndexingResult {
         total_processing_time: std::time::Duration::ZERO,

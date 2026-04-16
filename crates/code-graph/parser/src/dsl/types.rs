@@ -518,6 +518,18 @@ impl<L: DslLanguage> code_graph_types::CanonicalParser for DslParser<L> {
     }
 }
 
+impl<L: DslLanguage> DslParser<L> {
+    /// Parse for defs+imports only (skip refs/bindings/cf). No AST returned.
+    pub fn parse_defs_only(
+        &self,
+        source: &[u8],
+        file_path: &str,
+    ) -> anyhow::Result<code_graph_types::CanonicalResult> {
+        let spec = L::spec();
+        Ok(spec.parse_defs_only(source, file_path, L::language())?)
+    }
+}
+
 // ── Binding rules ───────────────────────────────────────────────
 
 pub struct BindingRule {
@@ -572,7 +584,7 @@ impl BindingRule {
     }
 
     /// Extract the binding name from an AST node by walking the field chain.
-    pub(crate) fn extract_name(&self, node: &N<'_>) -> Option<String> {
+    pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
         let mut current = node.clone();
         for &field in self.name_fields {
             current = current.field(field)?;
@@ -583,7 +595,7 @@ impl BindingRule {
     /// Extract a type annotation from the AST node, if configured.
     /// Returns the bare type name as written in source (e.g. `"Builder"`).
     /// Resolution to FQN is the resolver's job.
-    pub(crate) fn extract_type_annotation(&self, node: &N<'_>) -> Option<String> {
+    pub fn extract_type_annotation(&self, node: &N<'_>) -> Option<String> {
         for &field_name in self.type_fields {
             if let Some(type_node) = node.field(field_name) {
                 let text = type_node.text().to_string();
@@ -597,7 +609,7 @@ impl BindingRule {
 
     /// Extract the RHS callee name from a binding's value field.
     /// Unwraps call expressions: `Database()` → "Database".
-    pub(crate) fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
+    pub fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
         let value_node = node.field(self.value_field?)?;
         let vk = value_node.kind();
         let vk_ref = vk.as_ref();
@@ -743,12 +755,12 @@ pub struct LanguageSpec {
 
     // Dispatch tables: node_kind → indices into the corresponding rule Vec.
     // Built once at construction, O(1) lookup per node during walk.
-    pub(crate) scope_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub(crate) ref_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub(crate) import_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub(crate) binding_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub(crate) branch_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub(crate) loop_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub scope_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub ref_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub import_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub binding_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub branch_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    pub loop_dispatch: FxHashMap<&'static str, Vec<usize>>,
 }
 
 impl LanguageSpec {

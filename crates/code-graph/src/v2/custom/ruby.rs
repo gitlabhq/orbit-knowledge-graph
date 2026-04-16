@@ -9,9 +9,7 @@ impl LanguagePipeline for RubyPipeline {
         files: Vec<FileInput>,
         root_path: &str,
     ) -> Result<CodeGraph, Vec<PipelineError>> {
-        for (path, source) in &files {
-            let _ = (path, source);
-        }
+        let _ = &files;
         Ok(CodeGraph::from_results(vec![], root_path.to_string()))
     }
 }
