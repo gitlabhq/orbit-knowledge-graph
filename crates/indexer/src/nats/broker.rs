@@ -11,9 +11,6 @@ use async_nats::jetstream::Context;
 use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
 use async_nats::jetstream::kv::{CreateErrorKind, Store as KvStore, UpdateErrorKind};
-use async_nats::jetstream::object_store::{
-    Config as ObjectStoreConfig, GetErrorKind, ObjectStore as NatsObjectStore,
-};
 use async_nats::jetstream::stream::Stream;
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
@@ -50,7 +47,6 @@ pub struct NatsBroker {
     config: NatsConfiguration,
     streams: RwLock<HashMap<Arc<str>, Stream>>,
     kv_stores: RwLock<HashMap<String, KvStore>>,
-    object_stores: RwLock<HashMap<String, NatsObjectStore>>,
     subscription_handles: Mutex<Vec<JoinHandle<()>>>,
     cancellation_token: CancellationToken,
 }
@@ -76,7 +72,6 @@ impl NatsBroker {
             config: config.clone(),
             streams: RwLock::new(HashMap::new()),
             kv_stores: RwLock::new(HashMap::new()),
-            object_stores: RwLock::new(HashMap::new()),
             subscription_handles: Mutex::new(Vec::new()),
             cancellation_token: CancellationToken::new(),
         })
@@ -632,119 +627,6 @@ impl NatsBroker {
             bucket: bucket.to_string(),
             message: e.to_string(),
         })
-    }
-
-    // ---- Object Store operations ----
-
-    pub async fn ensure_object_store_exists(&self, bucket: &str) -> Result<(), NatsError> {
-        let config = ObjectStoreConfig {
-            bucket: bucket.to_string(),
-            ..Default::default()
-        };
-
-        let store = match self.jetstream.get_object_store(bucket).await {
-            Ok(store) => store,
-            Err(_) => self
-                .jetstream
-                .create_object_store(config)
-                .await
-                .map_err(|e| NatsError::ObjectStore {
-                    bucket: bucket.to_string(),
-                    message: e.to_string(),
-                })?,
-        };
-
-        info!(bucket, "object store ready");
-
-        let mut cache = self.object_stores.write().await;
-        cache.insert(bucket.to_string(), store);
-        Ok(())
-    }
-
-    async fn get_or_create_object_store(&self, bucket: &str) -> Result<NatsObjectStore, NatsError> {
-        {
-            let cache = self.object_stores.read().await;
-            if let Some(store) = cache.get(bucket) {
-                return Ok(store.clone());
-            }
-        }
-
-        let mut cache = self.object_stores.write().await;
-        if let Some(store) = cache.get(bucket) {
-            return Ok(store.clone());
-        }
-
-        let store = match self.jetstream.get_object_store(bucket).await {
-            Ok(store) => store,
-            Err(_) => self
-                .jetstream
-                .create_object_store(ObjectStoreConfig {
-                    bucket: bucket.to_string(),
-                    ..Default::default()
-                })
-                .await
-                .map_err(|e| NatsError::ObjectStore {
-                    bucket: bucket.to_string(),
-                    message: e.to_string(),
-                })?,
-        };
-
-        cache.insert(bucket.to_string(), store.clone());
-        Ok(store)
-    }
-
-    pub async fn object_put(&self, bucket: &str, name: &str, data: Bytes) -> Result<(), NatsError> {
-        let store = self.get_or_create_object_store(bucket).await?;
-        let mut reader = &data[..];
-        store
-            .put(name, &mut reader)
-            .await
-            .map_err(|e| NatsError::ObjectStorePut {
-                bucket: bucket.to_string(),
-                name: name.to_string(),
-                message: e.to_string(),
-            })?;
-        Ok(())
-    }
-
-    pub async fn object_get(&self, bucket: &str, name: &str) -> Result<Option<Vec<u8>>, NatsError> {
-        use tokio::io::AsyncReadExt;
-
-        let store = self.get_or_create_object_store(bucket).await?;
-
-        match store.get(name).await {
-            Ok(mut object) => {
-                let mut data = Vec::new();
-                object
-                    .read_to_end(&mut data)
-                    .await
-                    .map_err(|e| NatsError::ObjectStoreGet {
-                        bucket: bucket.to_string(),
-                        name: name.to_string(),
-                        message: e.to_string(),
-                    })?;
-                Ok(Some(data))
-            }
-            Err(e) if e.kind() == GetErrorKind::NotFound => Ok(None),
-            Err(e) => Err(NatsError::ObjectStoreGet {
-                bucket: bucket.to_string(),
-                name: name.to_string(),
-                message: e.to_string(),
-            }),
-        }
-    }
-
-    pub async fn object_delete(&self, bucket: &str, name: &str) -> Result<(), NatsError> {
-        let store = self.get_or_create_object_store(bucket).await?;
-        store
-            .delete(name)
-            .await
-            .map_err(|e| NatsError::ObjectStoreDelete {
-                bucket: bucket.to_string(),
-                name: name.to_string(),
-                message: e.to_string(),
-            })?;
-        Ok(())
     }
 }
 

@@ -168,18 +168,6 @@ impl NatsServices for MockNatsServices {
             .collect();
         Ok(messages)
     }
-
-    async fn object_put(&self, _bucket: &str, _name: &str, _data: Bytes) -> Result<(), NatsError> {
-        Ok(())
-    }
-
-    async fn object_get(&self, _bucket: &str, _name: &str) -> Result<Option<Vec<u8>>, NatsError> {
-        Ok(None)
-    }
-
-    async fn object_delete(&self, _bucket: &str, _name: &str) -> Result<(), NatsError> {
-        Ok(())
-    }
 }
 
 /// Mock destination for testing.

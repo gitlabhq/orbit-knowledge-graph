@@ -365,26 +365,5 @@ mod tests {
         ) -> Result<Vec<crate::nats::NatsMessage>, NatsError> {
             unimplemented!()
         }
-
-        async fn object_put(
-            &self,
-            _bucket: &str,
-            _name: &str,
-            _data: bytes::Bytes,
-        ) -> Result<(), NatsError> {
-            unimplemented!()
-        }
-
-        async fn object_get(
-            &self,
-            _bucket: &str,
-            _name: &str,
-        ) -> Result<Option<Vec<u8>>, NatsError> {
-            unimplemented!()
-        }
-
-        async fn object_delete(&self, _bucket: &str, _name: &str) -> Result<(), NatsError> {
-            unimplemented!()
-        }
     }
 }

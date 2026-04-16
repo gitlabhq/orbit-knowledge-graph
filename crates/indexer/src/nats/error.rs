@@ -67,30 +67,6 @@ pub enum NatsError {
 
     #[error("KV keys listing failed for '{bucket}': {message}")]
     KvKeys { bucket: String, message: String },
-
-    #[error("object store operation failed for '{bucket}': {message}")]
-    ObjectStore { bucket: String, message: String },
-
-    #[error("object store put failed for '{bucket}/{name}': {message}")]
-    ObjectStorePut {
-        bucket: String,
-        name: String,
-        message: String,
-    },
-
-    #[error("object store get failed for '{bucket}/{name}': {message}")]
-    ObjectStoreGet {
-        bucket: String,
-        name: String,
-        message: String,
-    },
-
-    #[error("object store delete failed for '{bucket}/{name}': {message}")]
-    ObjectStoreDelete {
-        bucket: String,
-        name: String,
-        message: String,
-    },
 }
 
 pub(crate) fn map_connect_error(error: async_nats::ConnectError) -> NatsError {

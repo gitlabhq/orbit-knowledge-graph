@@ -87,17 +87,6 @@ pub trait NatsServices: Send + Sync {
         subscription: &Subscription,
         batch_size: usize,
     ) -> Result<Vec<NatsMessage>, NatsError>;
-
-    async fn object_put(
-        &self,
-        bucket: &str,
-        name: &str,
-        data: bytes::Bytes,
-    ) -> Result<(), NatsError>;
-
-    async fn object_get(&self, bucket: &str, name: &str) -> Result<Option<Vec<u8>>, NatsError>;
-
-    async fn object_delete(&self, bucket: &str, name: &str) -> Result<(), NatsError>;
 }
 
 pub struct NatsServicesImpl {
@@ -148,22 +137,5 @@ impl NatsServices for NatsServicesImpl {
         batch_size: usize,
     ) -> Result<Vec<NatsMessage>, NatsError> {
         self.broker.consume_pending(subscription, batch_size).await
-    }
-
-    async fn object_put(
-        &self,
-        bucket: &str,
-        name: &str,
-        data: bytes::Bytes,
-    ) -> Result<(), NatsError> {
-        self.broker.object_put(bucket, name, data).await
-    }
-
-    async fn object_get(&self, bucket: &str, name: &str) -> Result<Option<Vec<u8>>, NatsError> {
-        self.broker.object_get(bucket, name).await
-    }
-
-    async fn object_delete(&self, bucket: &str, name: &str) -> Result<(), NatsError> {
-        self.broker.object_delete(bucket, name).await
     }
 }
