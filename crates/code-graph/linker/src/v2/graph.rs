@@ -12,6 +12,14 @@ use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
 
+/// Hash a string key for index lookups. Uses FxHash for speed.
+#[inline]
+fn hash_key(s: &str) -> u64 {
+    let mut h = FxHasher::default();
+    s.hash(&mut h);
+    h.finish()
+}
+
 // ── Node + Edge types ───────────────────────────────────────────
 
 /// A node in the code graph. Lightweight labels — heavy data lives
@@ -108,11 +116,12 @@ pub struct CodeGraph {
     pub dir_index: FxHashMap<String, NodeIndex>,
     pub file_index: FxHashMap<String, NodeIndex>,
 
-    // Resolution indexes — SmallVec<[_; 8]> inlines up to 8 entries (32 bytes),
-    // eliminating a heap pointer chase on every lookup.
-    pub def_by_fqn: FxHashMap<String, SmallVec<[NodeIndex; 8]>>,
-    pub def_by_name: FxHashMap<String, SmallVec<[NodeIndex; 8]>>,
-    pub nested_defs: FxHashMap<String, FxHashMap<String, SmallVec<[NodeIndex; 8]>>>,
+    // Resolution indexes — u64 hash keys (no String pointer chase on lookup),
+    // SmallVec<[_; 8]> values (inline, no heap pointer chase).
+    // Lookups verify via graph.defs[].name to handle hash collisions (~10⁻⁹ risk).
+    pub def_by_fqn: FxHashMap<u64, SmallVec<[NodeIndex; 8]>>,
+    pub def_by_name: FxHashMap<u64, SmallVec<[NodeIndex; 8]>>,
+    pub nested_defs: FxHashMap<u64, FxHashMap<u64, SmallVec<[NodeIndex; 8]>>>,
 
     /// Pre-computed ancestor chains from Extends edges.
     pub ancestors: FxHashMap<NodeIndex, SmallVec<[NodeIndex; 8]>>,
@@ -192,19 +201,19 @@ impl CodeGraph {
             def_nodes.push(def_node);
 
             self.def_by_fqn
-                .entry(def.fqn.to_string())
+                .entry(hash_key(&def.fqn.to_string()))
                 .or_default()
                 .push(def_node);
             self.def_by_name
-                .entry(def.name.clone())
+                .entry(hash_key(&def.name))
                 .or_default()
                 .push(def_node);
 
             if let Some(parent_fqn) = def.fqn.parent() {
                 self.nested_defs
-                    .entry(parent_fqn.to_string())
+                    .entry(hash_key(&parent_fqn.to_string()))
                     .or_default()
-                    .entry(def.name.clone())
+                    .entry(hash_key(&def.name))
                     .or_default()
                     .push(def_node);
             }
@@ -428,22 +437,22 @@ impl CodeGraph {
 
     pub fn lookup_fqn(&self, fqn: &str) -> &[NodeIndex] {
         self.def_by_fqn
-            .get(fqn)
+            .get(&hash_key(fqn))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
     pub fn lookup_name(&self, name: &str) -> &[NodeIndex] {
         self.def_by_name
-            .get(name)
+            .get(&hash_key(name))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
     pub fn lookup_nested(&self, scope_fqn: &str, member_name: &str) -> &[NodeIndex] {
         self.nested_defs
-            .get(scope_fqn)
-            .and_then(|ms| ms.get(member_name))
+            .get(&hash_key(scope_fqn))
+            .and_then(|ms| ms.get(&hash_key(member_name)))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
@@ -454,11 +463,11 @@ impl CodeGraph {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        // Resolve scope_fqn to NodeIndex(es): try FQN first, then bare name
+        let sk = hash_key(scope_fqn);
         let start_nodes = self
             .def_by_fqn
-            .get(scope_fqn)
-            .or_else(|| self.def_by_name.get(scope_fqn));
+            .get(&sk)
+            .or_else(|| self.def_by_name.get(&sk));
 
         let Some(start_nodes) = start_nodes else {
             return false;
@@ -600,13 +609,14 @@ impl CodeGraph {
 
     /// Resolve a type name (FQN or bare name) to graph NodeIndexes.
     fn resolve_type_to_nodes(&self, name: &str) -> &[NodeIndex] {
-        if let Some(nodes) = self.def_by_fqn.get(name)
+        let k = hash_key(name);
+        if let Some(nodes) = self.def_by_fqn.get(&k)
             && !nodes.is_empty()
         {
             return nodes;
         }
         self.def_by_name
-            .get(name)
+            .get(&k)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
