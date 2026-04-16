@@ -18,7 +18,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - **ClickHouse = datalake + graph.** Datalake DB holds raw Siphon rows; graph DB holds indexed property graph tables. The indexer transforms between them.
 - **Ontology-driven graph.** YAML in `config/ontology/nodes/` and `config/ontology/edges/` drives ETL, query validation, redaction, and edge table routing. New entity types start there, not in Rust. Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`). Schema: `config/schemas/ontology.schema.json`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
-- **Layered configuration.** `AppConfig` in `crates/gkg-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/indexer_configuration.md` for full reference.
+- **Layered configuration.** `AppConfig` in `crates/gkg-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
 ## What CI enforces
@@ -60,7 +60,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
 | Server config structure | `crates/gkg-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` |
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/gkg-server-config/src/query.rs` |
-| Configuration runbook | `docs/dev/runbooks/indexer_configuration.md` |
+| Configuration runbook | `docs/dev/runbooks/server_configuration.md` |
 | Local development guide | `docs/dev/local-development.md` |
 | Local development (`mise run dev`) | `scripts/gkg-native-dev.sh`, `docs/dev/local-development.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
