@@ -4,83 +4,25 @@
 //! Static Single Assignment Form", CC 2013) adapted for code-graph reference
 //! resolution.
 //!
-//! Performance: variable names are interned (`Intern<str>`) so HashMap keys
-//! are pointer-sized. Blocks use `SmallVec` for predecessors (most have ≤2).
-//! `Value::Type` uses `Intern<str>` for zero-cost cloning.
+//! All string data (variable names, type/alias values) is arena-backed via
+//! `FileArena`. No `Intern<str>`, no global RwLock, no memory leak.
 
+use super::state::{BlockId, PhiId, ReachingDefs, Value};
 use super::stats::SsaStats;
-use internment::Intern;
-use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
-use std::fmt;
-
-/// Interned variable name. Pointer-sized, O(1) clone and hash.
-pub type VarName = Intern<str>;
-
-// ── Value ───────────────────────────────────────────────────────
-
-/// A value in the SSA graph — what a variable resolves to.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Value {
-    /// A definition node in the graph.
-    Def(NodeIndex),
-    /// An import node in the graph.
-    Import(NodeIndex),
-    /// A type name (for type-flow languages: resolve members on this type).
-    /// Interned for zero-cost cloning during chain resolution.
-    Type(Intern<str>),
-    /// Deferred name resolution: "I'm whatever this name resolves to."
-    /// Written for bindings like `b = getService()` where the walker
-    /// records the RHS name without resolving it. The resolver follows
-    /// the alias by doing an SSA read for the aliased name.
-    Alias(Intern<str>),
-    /// Dead end — parameter, literal, or otherwise unresolvable.
-    Opaque,
-    /// Internal: cycle-detection sentinel for the marker algorithm.
-    /// Distinct from Opaque so genuine dead-end blocks aren't misidentified as cycles.
-    Marker,
-    /// Internal: a phi node (will be resolved to concrete values).
-    Phi(PhiId),
-}
-
-impl Value {
-    /// Create a Type value from a string (interned).
-    pub fn type_of(s: &str) -> Self {
-        Self::Type(Intern::from(s))
-    }
-
-    /// Create a Type value from an owned String (interned).
-    pub fn type_from_string(s: String) -> Self {
-        Self::Type(Intern::from(s.as_str()))
-    }
-}
-
-/// Identifier for a phi node in the SSA graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PhiId(usize);
-
-/// Identifier for a basic block in the SSA graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BlockId(pub usize);
-
-impl fmt::Display for BlockId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "b{}", self.0)
-    }
-}
 
 // ── Phi node ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-struct PhiNode {
+struct PhiNode<'a> {
     block: BlockId,
-    variable: VarName,
-    operands: SmallVec<[Value; 2]>,
+    variable: &'a str,
+    operands: SmallVec<[Value<'a>; 2]>,
     /// Witness caching (Section 3.1): first two distinct non-self operands.
     /// If both are still valid and distinct, the phi is non-trivial without
     /// scanning all operands.
-    witnesses: [Option<Value>; 2],
+    witnesses: [Option<Value<'a>>; 2],
 }
 
 // ── Block ───────────────────────────────────────────────────────
@@ -91,40 +33,24 @@ struct Block {
     sealed: bool,
 }
 
-// ── Read result ─────────────────────────────────────────────────
-
-/// The concrete values a variable resolves to at a given program point.
-/// Phi nodes are fully resolved into their constituent concrete values.
-#[derive(Debug, Clone, Default)]
-pub struct ReachingDefs {
-    pub values: SmallVec<[Value; 2]>,
-}
-
-impl ReachingDefs {
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
-}
-
 // ── SSA Resolver ────────────────────────────────────────────────
 
 /// SSA-based reaching definitions resolver (Braun et al. algorithm).
 ///
-/// Create blocks, write variable definitions, read variable uses.
-/// The resolver handles phi insertion and trivial phi elimination
-/// automatically at control-flow join points.
-pub struct SsaResolver {
+/// All variable names and string values are `&'a str` backed by
+/// [`FileArena`]. No `Intern<str>`, no global RwLock.
+pub struct SsaResolver<'a> {
     blocks: Vec<Block>,
-    phis: Vec<PhiNode>,
+    phis: Vec<PhiNode<'a>>,
     /// current_def[variable][block] = value
-    current_def: FxHashMap<VarName, FxHashMap<BlockId, Value>>,
+    current_def: FxHashMap<&'a str, FxHashMap<BlockId, Value<'a>>>,
     /// Incomplete phis for unsealed blocks: block → variable → phi_id
-    incomplete_phis: FxHashMap<BlockId, FxHashMap<VarName, PhiId>>,
+    incomplete_phis: FxHashMap<BlockId, FxHashMap<&'a str, PhiId>>,
     /// Counters for SSA operations.
     pub stats: SsaStats,
 }
 
-impl SsaResolver {
+impl<'a> SsaResolver<'a> {
     pub fn new() -> Self {
         Self {
             blocks: Vec::with_capacity(32),
@@ -174,38 +100,38 @@ impl SsaResolver {
     /// Record a variable definition: `variable` is defined as `value` in `block`.
     /// On-the-fly copy propagation (Section 3.1): if the value is an alias
     /// to another variable, resolve it immediately instead of deferring.
-    pub fn write_variable(&mut self, variable: &str, block: BlockId, value: Value) {
-        let var = Intern::from(variable);
-        let resolved = if let Value::Alias(ref alias_name) = value {
-            // Copy propagation: look up what the aliased variable holds
-            // right now and store that directly. Avoids indirection during reads.
-            let alias_val = self.read_variable_internal(*alias_name, block);
+    pub fn write_variable(&mut self, variable: &'a str, block: BlockId, value: Value<'a>) {
+        let resolved = if let Value::Alias(alias_name) = value {
+            let alias_val = self.read_variable_internal(alias_name, block);
             if alias_val != Value::Opaque {
                 alias_val
             } else {
-                value
+                Value::Alias(alias_name)
             }
         } else {
             value
         };
         self.current_def
-            .entry(var)
+            .entry(variable)
             .or_default()
             .insert(block, resolved);
         self.stats.writes += 1;
     }
 
     /// Look up a variable's reaching definitions without recording the read.
-    pub fn read_variable_stateless(&mut self, variable: &str, block: BlockId) -> ReachingDefs {
+    pub fn read_variable_stateless(
+        &mut self,
+        variable: &'a str,
+        block: BlockId,
+    ) -> ReachingDefs<'a> {
         self.stats.reads += 1;
-        let var = Intern::from(variable);
-        let value = self.read_variable_internal(var, block);
+        let value = self.read_variable_internal(variable, block);
         self.resolve_value(&value)
     }
 
     // ── Internal: Braun et al. algorithm ────────────────────────
 
-    fn read_variable_internal(&mut self, variable: VarName, block: BlockId) -> Value {
+    fn read_variable_internal(&mut self, variable: &'a str, block: BlockId) -> Value<'a> {
         // Local value numbering: check current block first
         if let Some(block_defs) = self.current_def.get(&variable)
             && let Some(value) = block_defs.get(&block)
@@ -219,7 +145,7 @@ impl SsaResolver {
         self.read_variable_recursive(variable, block)
     }
 
-    fn read_variable_recursive(&mut self, variable: VarName, block: BlockId) -> Value {
+    fn read_variable_recursive(&mut self, variable: &'a str, block: BlockId) -> Value<'a> {
         let val;
         let sealed = self.blocks[block.0].sealed;
         let num_preds = self.blocks[block.0].predecessors.len();
@@ -252,14 +178,14 @@ impl SsaResolver {
 
     /// Marker algorithm: mark block, collect values from predecessors,
     /// only create a phi if values differ or a cycle was detected.
-    fn read_variable_marker(&mut self, variable: VarName, block: BlockId) -> Value {
+    fn read_variable_marker(&mut self, variable: &'a str, block: BlockId) -> Value<'a> {
         // Place a marker sentinel so recursive lookups that reach this
         // block again will detect the cycle. Distinct from Opaque so
         // genuine dead-end values aren't misidentified as cycles.
         self.write_variable_interned(variable, block, Value::Marker);
 
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
-        let mut same: Option<Value> = None;
+        let mut same: Option<Value<'a>> = None;
         let mut need_phi = false;
 
         for &pred in &preds {
@@ -295,14 +221,14 @@ impl SsaResolver {
     }
 
     /// Internal write that takes an already-interned name.
-    fn write_variable_interned(&mut self, variable: VarName, block: BlockId, value: Value) {
+    fn write_variable_interned(&mut self, variable: &'a str, block: BlockId, value: Value<'a>) {
         self.current_def
             .entry(variable)
             .or_default()
             .insert(block, value);
     }
 
-    fn new_phi(&mut self, block: BlockId, variable: VarName) -> PhiId {
+    fn new_phi(&mut self, block: BlockId, variable: &'a str) -> PhiId {
         self.stats.phis_created += 1;
         let id = PhiId(self.phis.len());
         self.phis.push(PhiNode {
@@ -314,7 +240,7 @@ impl SsaResolver {
         id
     }
 
-    fn add_phi_operands(&mut self, variable: VarName, phi_id: PhiId) {
+    fn add_phi_operands(&mut self, variable: &'a str, phi_id: PhiId) {
         let block = self.phis[phi_id.0].block;
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
         for pred in preds {
@@ -334,7 +260,7 @@ impl SsaResolver {
 
     /// Remove trivial phi: if it references only one real value (plus itself),
     /// replace it with that value.
-    fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> Value {
+    fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> Value<'a> {
         // Witness cache fast path: if both witnesses are still distinct
         // and neither is the phi itself, the phi is non-trivial.
         let w = &self.phis[phi_id.0].witnesses;
@@ -346,7 +272,7 @@ impl SsaResolver {
             return Value::Phi(phi_id);
         }
 
-        let mut same: Option<Value> = None;
+        let mut same: Option<Value<'a>> = None;
 
         for i in 0..self.phis[phi_id.0].operands.len() {
             let op = self.phis[phi_id.0].operands[i].clone();
@@ -448,7 +374,7 @@ impl SsaResolver {
 
             let scc: Vec<PhiId> = scc_nodes.iter().map(|&n| phi_graph[n]).collect();
             let scc_set: FxHashSet<PhiId> = scc.iter().copied().collect();
-            let mut outer_ops: FxHashSet<Value> = FxHashSet::default();
+            let mut outer_ops: FxHashSet<Value<'a>> = FxHashSet::default();
             let mut inner: Vec<PhiId> = Vec::new();
 
             for &pid in &scc {
@@ -512,12 +438,24 @@ impl SsaResolver {
 
     /// Expand a value into its concrete reaching definitions.
     /// Phi nodes are recursively expanded. Cycles are handled via visited set.
-    fn resolve_value(&self, value: &Value) -> ReachingDefs {
+    fn resolve_value(&self, value: &Value<'a>) -> ReachingDefs<'a> {
+        // Fast path: non-Phi values resolve directly without allocating HashSets.
+        match value {
+            Value::Def(_) | Value::Import(_) | Value::Type(_) | Value::Alias(_) => {
+                return ReachingDefs {
+                    values: smallvec::smallvec![value.clone()],
+                };
+            }
+            Value::Opaque | Value::Marker => {
+                return ReachingDefs::default();
+            }
+            Value::Phi(_) => {} // fall through to full resolution
+        }
+
         let mut values = SmallVec::new();
         let mut visited = FxHashSet::default();
         self.resolve_value_recursive(value, &mut values, &mut visited);
 
-        // Deduplicate
         let mut seen = FxHashSet::default();
         values.retain(|v| seen.insert(v.clone()));
 
@@ -526,8 +464,8 @@ impl SsaResolver {
 
     fn resolve_value_recursive(
         &self,
-        value: &Value,
-        out: &mut SmallVec<[Value; 2]>,
+        value: &Value<'a>,
+        out: &mut SmallVec<[Value<'a>; 2]>,
         visited: &mut FxHashSet<PhiId>,
     ) {
         match value {
@@ -545,7 +483,7 @@ impl SsaResolver {
     }
 }
 
-impl Default for SsaResolver {
+impl Default for SsaResolver<'_> {
     fn default() -> Self {
         Self::new()
     }
@@ -554,6 +492,7 @@ impl Default for SsaResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use petgraph::graph::NodeIndex;
 
     #[test]
     fn single_block_write_read() {

@@ -2136,6 +2136,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow 58.1.0",
+ "bumpalo",
  "chrono",
  "code-graph-config",
  "code-graph-types",

@@ -42,6 +42,7 @@ members = [
 [workspace.dependencies]
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "594f02c" }
 arrow = "58.0.0"
+bumpalo = { version = "3.20.2", features = ["collections"] }
 enum-as-inner = "0.7.0"
 datafusion = { version = "53.0.0", default-features = false, features = ["sql", "nested_expressions"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
