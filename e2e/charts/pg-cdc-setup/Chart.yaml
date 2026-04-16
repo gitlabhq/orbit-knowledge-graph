@@ -1,0 +1,5 @@
+apiVersion: v2
+name: pg-cdc-setup
+description: PostgreSQL CDC setup for Siphon replication
+version: 0.1.0
+type: application

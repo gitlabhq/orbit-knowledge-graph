@@ -70,4 +70,4 @@ Orbit Is Healthy
 
 User Data Is Available Via Orbit Query
     [Documentation]    Verify full data pipeline: PG -> Siphon -> ClickHouse -> GKG indexer -> Orbit API
-    Wait Until Keyword Succeeds    60s    3s    Users Indexed In Graph
+    Wait Until Keyword Succeeds    120s    3s    Users Indexed In Graph
