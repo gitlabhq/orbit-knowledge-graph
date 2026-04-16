@@ -435,6 +435,18 @@ pub trait DslLanguage: Send + Sync + Default {
         false
     }
 
+    /// Custom definition extraction for nodes that produce multiple definitions
+    /// from a single AST node (e.g. Ruby's `attr_accessor :name, :email`).
+    /// Called for every AST node. Return `true` if handled.
+    fn custom_scope(
+        _node: &N<'_>,
+        _defs: &mut Vec<code_graph_types::CanonicalDefinition>,
+        _scope_stack: &[std::sync::Arc<str>],
+        _sep: &'static str,
+    ) -> bool {
+        false
+    }
+
     fn chain_config() -> Option<ChainConfig> {
         None
     }
@@ -463,6 +475,7 @@ pub trait DslLanguage: Send + Sync + Default {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
                 .custom_import(Self::custom_import)
+                .custom_scope(Self::custom_scope)
                 .with_bindings(Self::bindings())
                 .with_branches(Self::branches())
                 .with_loops(Self::loops());
@@ -675,6 +688,14 @@ impl LoopRule {
 /// Function type for custom import handling.
 pub type CustomImportFn = fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool;
 
+/// Function type for custom scope/definition handling.
+pub type CustomScopeFn = fn(
+    &N<'_>,
+    &mut Vec<code_graph_types::CanonicalDefinition>,
+    &[std::sync::Arc<str>],
+    &'static str,
+) -> bool;
+
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {
     let mut map: FxHashMap<&'static str, Vec<usize>> = FxHashMap::default();
     for (i, rule) in rules.iter().enumerate() {
@@ -717,6 +738,7 @@ pub struct LanguageSpec {
     pub chain_config: Option<ChainConfig>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,
+    pub(crate) custom_scope_fn: Option<CustomScopeFn>,
     pub(crate) module_from_path: bool,
 
     // Dispatch tables: node_kind → indices into the corresponding rule Vec.
@@ -750,6 +772,7 @@ impl LanguageSpec {
             chain_config: None,
             package_node: None,
             custom_import_fn: None,
+            custom_scope_fn: None,
             module_from_path: false,
             scope_dispatch,
             ref_dispatch,
@@ -792,6 +815,11 @@ impl LanguageSpec {
 
     pub fn custom_import(mut self, f: CustomImportFn) -> Self {
         self.custom_import_fn = Some(f);
+        self
+    }
+
+    pub fn custom_scope(mut self, f: CustomScopeFn) -> Self {
+        self.custom_scope_fn = Some(f);
         self
     }
 
