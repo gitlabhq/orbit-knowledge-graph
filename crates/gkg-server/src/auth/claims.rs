@@ -18,6 +18,6 @@ pub struct Claims {
     #[serde(default)]
     pub group_traversal_ids: Vec<String>,
     pub source_type: String,
-    #[serde(default)]
-    pub session_id: Option<String>,
+    #[serde(default, rename = "session_id")]
+    pub ai_session_id: Option<String>,
 }

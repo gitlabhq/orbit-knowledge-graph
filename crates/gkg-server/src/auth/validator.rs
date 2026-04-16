@@ -82,7 +82,7 @@ mod tests {
             min_access_level: None,
             group_traversal_ids: vec![],
             source_type: "rest".into(),
-            session_id: None,
+            ai_session_id: None,
         };
 
         let token = encode(
