@@ -23,9 +23,32 @@ pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
         .expect("RAW_OUTPUT_FORMAT_VERSION must be valid semver")
 });
 
+/// Concrete encoding of a formatter's output. Mirrors the proto `FormatName`
+/// enum but lives here so the formatters crate stays proto-agnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatName {
+    Unspecified,
+    Raw,
+    Goon,
+    Toon,
+}
+
+impl FormatName {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::Raw => "raw",
+            Self::Goon => "goon",
+            Self::Toon => "toon",
+        }
+    }
+}
+
 pub trait ResultFormatter: Send + Sync {
-    fn format_name(&self) -> &'static str;
-    fn format_version(&self) -> &Version;
+    fn format_name(&self) -> FormatName;
+    /// `None` for stubs that have not yet defined their own version
+    /// (e.g. `GoonFormatter` before ADR 009 ships).
+    fn format_version(&self) -> Option<&Version>;
     fn format(&self, output: &PipelineOutput) -> Value;
 }
 

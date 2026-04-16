@@ -15,16 +15,26 @@ use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_stats::GraphStatsService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
-    ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
-    GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
-    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
-    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
+    ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
+    GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
+    GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse, ListToolsRequest,
+    ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
+    SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
-use query_engine::formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
 use super::auth::extract_claims;
+
+fn proto_format_name(name: FormatName) -> ProtoFormatName {
+    match name {
+        FormatName::Unspecified => ProtoFormatName::Unspecified,
+        FormatName::Raw => ProtoFormatName::Raw,
+        FormatName::Goon => ProtoFormatName::Goon,
+        FormatName::Toon => ProtoFormatName::Toon,
+    }
+}
 
 pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
@@ -162,8 +172,11 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                                 query_type: output.query_type,
                                 raw_query_strings: output.raw_query_strings,
                                 row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
-                                format_version: formatter.format_version().to_string(),
-                                format_name: formatter.format_name().to_string(),
+                                format_version: formatter
+                                    .format_version()
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_default(),
+                                format_name: proto_format_name(formatter.format_name()).into(),
                             });
 
                             let _ = tx

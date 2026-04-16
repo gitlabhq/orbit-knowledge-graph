@@ -16,6 +16,17 @@ enum ResponseFormat {
   RESPONSE_FORMAT_LLM = 1;
 }
 
+// Concrete encoding produced by the server. QueryMetadata carries this
+// alongside format_version so consumers can route/parse without inspecting
+// the payload body. UNSPECIFIED is reserved for stubs that do not yet
+// emit a tagged format.
+enum FormatName {
+  FORMAT_NAME_UNSPECIFIED = 0;
+  FORMAT_NAME_RAW = 1;
+  FORMAT_NAME_GOON = 2;
+  FORMAT_NAME_TOON = 3;
+}
+
 // Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
 // in Rails. JWT auth carries user identity and traversal IDs for authorization.
 service KnowledgeGraphService {
@@ -83,8 +94,8 @@ message QueryMetadata {
   string query_type = 1;              // e.g. "traversal", "aggregation", "search"
   repeated string raw_query_strings = 2; // compiled ClickHouse SQL(s) for debugging
   int32 row_count = 3;                // rows returned after redaction (and cursor slicing if applicable)
-  string format_version = 4;          // semver string, e.g. "1.0.0"
-  string format_name = 5;             // "raw" or "goon"
+  string format_version = 4;          // semver string, e.g. "1.0.0"; empty when FORMAT_NAME_UNSPECIFIED
+  FormatName format_name = 5;
 }
 
 // Server-sent error when query compilation or execution fails.

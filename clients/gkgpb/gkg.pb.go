@@ -76,6 +76,62 @@ func (ResponseFormat) EnumDescriptor() ([]byte, []int) {
 	return file_gkg_proto_rawDescGZIP(), []int{0}
 }
 
+// Concrete encoding produced by the server. QueryMetadata carries this
+// alongside format_version so consumers can route/parse without inspecting
+// the payload body. UNSPECIFIED is reserved for stubs that do not yet
+// emit a tagged format.
+type FormatName int32
+
+const (
+	FormatName_FORMAT_NAME_UNSPECIFIED FormatName = 0
+	FormatName_FORMAT_NAME_RAW         FormatName = 1
+	FormatName_FORMAT_NAME_GOON        FormatName = 2
+	FormatName_FORMAT_NAME_TOON        FormatName = 3
+)
+
+// Enum value maps for FormatName.
+var (
+	FormatName_name = map[int32]string{
+		0: "FORMAT_NAME_UNSPECIFIED",
+		1: "FORMAT_NAME_RAW",
+		2: "FORMAT_NAME_GOON",
+		3: "FORMAT_NAME_TOON",
+	}
+	FormatName_value = map[string]int32{
+		"FORMAT_NAME_UNSPECIFIED": 0,
+		"FORMAT_NAME_RAW":         1,
+		"FORMAT_NAME_GOON":        2,
+		"FORMAT_NAME_TOON":        3,
+	}
+)
+
+func (x FormatName) Enum() *FormatName {
+	p := new(FormatName)
+	*p = x
+	return p
+}
+
+func (x FormatName) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FormatName) Descriptor() protoreflect.EnumDescriptor {
+	return file_gkg_proto_enumTypes[1].Descriptor()
+}
+
+func (FormatName) Type() protoreflect.EnumType {
+	return &file_gkg_proto_enumTypes[1]
+}
+
+func (x FormatName) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FormatName.Descriptor instead.
+func (FormatName) EnumDescriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{1}
+}
+
 // Query language selector. Only JSON DSL is supported today.
 type QueryType int32
 
@@ -104,11 +160,11 @@ func (x QueryType) String() string {
 }
 
 func (QueryType) Descriptor() protoreflect.EnumDescriptor {
-	return file_gkg_proto_enumTypes[1].Descriptor()
+	return file_gkg_proto_enumTypes[2].Descriptor()
 }
 
 func (QueryType) Type() protoreflect.EnumType {
-	return &file_gkg_proto_enumTypes[1]
+	return &file_gkg_proto_enumTypes[2]
 }
 
 func (x QueryType) Number() protoreflect.EnumNumber {
@@ -117,7 +173,7 @@ func (x QueryType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use QueryType.Descriptor instead.
 func (QueryType) EnumDescriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{1}
+	return file_gkg_proto_rawDescGZIP(), []int{2}
 }
 
 type ClusterStatus int32
@@ -156,11 +212,11 @@ func (x ClusterStatus) String() string {
 }
 
 func (ClusterStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_gkg_proto_enumTypes[2].Descriptor()
+	return file_gkg_proto_enumTypes[3].Descriptor()
 }
 
 func (ClusterStatus) Type() protoreflect.EnumType {
-	return &file_gkg_proto_enumTypes[2]
+	return &file_gkg_proto_enumTypes[3]
 }
 
 func (x ClusterStatus) Number() protoreflect.EnumNumber {
@@ -169,7 +225,7 @@ func (x ClusterStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ClusterStatus.Descriptor instead.
 func (ClusterStatus) EnumDescriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{2}
+	return file_gkg_proto_rawDescGZIP(), []int{3}
 }
 
 // Envelope for the execute_query stream. Each message carries exactly one of:
@@ -445,8 +501,8 @@ type QueryMetadata struct {
 	QueryType       string                 `protobuf:"bytes,1,opt,name=query_type,json=queryType,proto3" json:"query_type,omitempty"`                     // e.g. "traversal", "aggregation", "search"
 	RawQueryStrings []string               `protobuf:"bytes,2,rep,name=raw_query_strings,json=rawQueryStrings,proto3" json:"raw_query_strings,omitempty"` // compiled ClickHouse SQL(s) for debugging
 	RowCount        int32                  `protobuf:"varint,3,opt,name=row_count,json=rowCount,proto3" json:"row_count,omitempty"`                       // rows returned after redaction (and cursor slicing if applicable)
-	FormatVersion   string                 `protobuf:"bytes,4,opt,name=format_version,json=formatVersion,proto3" json:"format_version,omitempty"`         // semver string, e.g. "1.0.0"
-	FormatName      string                 `protobuf:"bytes,5,opt,name=format_name,json=formatName,proto3" json:"format_name,omitempty"`                  // "raw" or "goon"
+	FormatVersion   string                 `protobuf:"bytes,4,opt,name=format_version,json=formatVersion,proto3" json:"format_version,omitempty"`         // semver string, e.g. "1.0.0"; empty when FORMAT_NAME_UNSPECIFIED
+	FormatName      FormatName             `protobuf:"varint,5,opt,name=format_name,json=formatName,proto3,enum=gkg.v1.FormatName" json:"format_name,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -509,11 +565,11 @@ func (x *QueryMetadata) GetFormatVersion() string {
 	return ""
 }
 
-func (x *QueryMetadata) GetFormatName() string {
+func (x *QueryMetadata) GetFormatName() FormatName {
 	if x != nil {
 		return x.FormatName
 	}
-	return ""
+	return FormatName_FORMAT_NAME_UNSPECIFIED
 }
 
 // Server-sent error when query compilation or execution fails.
@@ -2163,14 +2219,14 @@ const file_gkg_proto_rawDesc = "" +
 	"resultJson\x12'\n" +
 	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedText\x121\n" +
 	"\bmetadata\x18\x03 \x01(\v2\x15.gkg.v1.QueryMetadataR\bmetadataB\t\n" +
-	"\acontent\"\xbf\x01\n" +
+	"\acontent\"\xd3\x01\n" +
 	"\rQueryMetadata\x12\x1d\n" +
 	"\n" +
 	"query_type\x18\x01 \x01(\tR\tqueryType\x12*\n" +
 	"\x11raw_query_strings\x18\x02 \x03(\tR\x0frawQueryStrings\x12\x1b\n" +
 	"\trow_count\x18\x03 \x01(\x05R\browCount\x12%\n" +
-	"\x0eformat_version\x18\x04 \x01(\tR\rformatVersion\x12\x1f\n" +
-	"\vformat_name\x18\x05 \x01(\tR\n" +
+	"\x0eformat_version\x18\x04 \x01(\tR\rformatVersion\x123\n" +
+	"\vformat_name\x18\x05 \x01(\x0e2\x12.gkg.v1.FormatNameR\n" +
 	"formatName\"A\n" +
 	"\x11ExecuteQueryError\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12\x12\n" +
@@ -2295,7 +2351,13 @@ const file_gkg_proto_rawDesc = "" +
 	"\x05count\x18\x02 \x01(\x03R\x05count*B\n" +
 	"\x0eResponseFormat\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_RAW\x10\x00\x12\x17\n" +
-	"\x13RESPONSE_FORMAT_LLM\x10\x01* \n" +
+	"\x13RESPONSE_FORMAT_LLM\x10\x01*j\n" +
+	"\n" +
+	"FormatName\x12\x1b\n" +
+	"\x17FORMAT_NAME_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fFORMAT_NAME_RAW\x10\x01\x12\x14\n" +
+	"\x10FORMAT_NAME_GOON\x10\x02\x12\x14\n" +
+	"\x10FORMAT_NAME_TOON\x10\x03* \n" +
 	"\tQueryType\x12\x13\n" +
 	"\x0fQUERY_TYPE_JSON\x10\x00*\x86\x01\n" +
 	"\rClusterStatus\x12\x1e\n" +
@@ -2322,92 +2384,94 @@ func file_gkg_proto_rawDescGZIP() []byte {
 	return file_gkg_proto_rawDescData
 }
 
-var file_gkg_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_gkg_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
 var file_gkg_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_gkg_proto_goTypes = []any{
 	(ResponseFormat)(0),              // 0: gkg.v1.ResponseFormat
-	(QueryType)(0),                   // 1: gkg.v1.QueryType
-	(ClusterStatus)(0),               // 2: gkg.v1.ClusterStatus
-	(*ExecuteQueryMessage)(nil),      // 3: gkg.v1.ExecuteQueryMessage
-	(*ExecuteQueryRequest)(nil),      // 4: gkg.v1.ExecuteQueryRequest
-	(*ExecuteQueryResult)(nil),       // 5: gkg.v1.ExecuteQueryResult
-	(*QueryMetadata)(nil),            // 6: gkg.v1.QueryMetadata
-	(*ExecuteQueryError)(nil),        // 7: gkg.v1.ExecuteQueryError
-	(*GetGraphSchemaRequest)(nil),    // 8: gkg.v1.GetGraphSchemaRequest
-	(*GetGraphSchemaResponse)(nil),   // 9: gkg.v1.GetGraphSchemaResponse
-	(*StructuredSchema)(nil),         // 10: gkg.v1.StructuredSchema
-	(*SchemaDomain)(nil),             // 11: gkg.v1.SchemaDomain
-	(*SchemaNode)(nil),               // 12: gkg.v1.SchemaNode
-	(*SchemaProperty)(nil),           // 13: gkg.v1.SchemaProperty
-	(*SchemaEdge)(nil),               // 14: gkg.v1.SchemaEdge
-	(*SchemaEdgeVariant)(nil),        // 15: gkg.v1.SchemaEdgeVariant
-	(*SchemaNodeStyle)(nil),          // 16: gkg.v1.SchemaNodeStyle
-	(*RedactionExchange)(nil),        // 17: gkg.v1.RedactionExchange
-	(*RedactionRequired)(nil),        // 18: gkg.v1.RedactionRequired
-	(*ResourceToAuthorize)(nil),      // 19: gkg.v1.ResourceToAuthorize
-	(*RedactionResponse)(nil),        // 20: gkg.v1.RedactionResponse
-	(*ResourceAuthorization)(nil),    // 21: gkg.v1.ResourceAuthorization
-	(*ListToolsRequest)(nil),         // 22: gkg.v1.ListToolsRequest
-	(*ListToolsResponse)(nil),        // 23: gkg.v1.ListToolsResponse
-	(*ToolDefinition)(nil),           // 24: gkg.v1.ToolDefinition
-	(*GetClusterHealthRequest)(nil),  // 25: gkg.v1.GetClusterHealthRequest
-	(*GetClusterHealthResponse)(nil), // 26: gkg.v1.GetClusterHealthResponse
-	(*StructuredClusterHealth)(nil),  // 27: gkg.v1.StructuredClusterHealth
-	(*ComponentHealth)(nil),          // 28: gkg.v1.ComponentHealth
-	(*ReplicaStatus)(nil),            // 29: gkg.v1.ReplicaStatus
-	(*GetGraphStatsRequest)(nil),     // 30: gkg.v1.GetGraphStatsRequest
-	(*GetGraphStatsResponse)(nil),    // 31: gkg.v1.GetGraphStatsResponse
-	(*GraphStatsDomain)(nil),         // 32: gkg.v1.GraphStatsDomain
-	(*GraphStatsItem)(nil),           // 33: gkg.v1.GraphStatsItem
-	nil,                              // 34: gkg.v1.ResourceAuthorization.AuthorizedEntry
-	nil,                              // 35: gkg.v1.ComponentHealth.MetricsEntry
+	(FormatName)(0),                  // 1: gkg.v1.FormatName
+	(QueryType)(0),                   // 2: gkg.v1.QueryType
+	(ClusterStatus)(0),               // 3: gkg.v1.ClusterStatus
+	(*ExecuteQueryMessage)(nil),      // 4: gkg.v1.ExecuteQueryMessage
+	(*ExecuteQueryRequest)(nil),      // 5: gkg.v1.ExecuteQueryRequest
+	(*ExecuteQueryResult)(nil),       // 6: gkg.v1.ExecuteQueryResult
+	(*QueryMetadata)(nil),            // 7: gkg.v1.QueryMetadata
+	(*ExecuteQueryError)(nil),        // 8: gkg.v1.ExecuteQueryError
+	(*GetGraphSchemaRequest)(nil),    // 9: gkg.v1.GetGraphSchemaRequest
+	(*GetGraphSchemaResponse)(nil),   // 10: gkg.v1.GetGraphSchemaResponse
+	(*StructuredSchema)(nil),         // 11: gkg.v1.StructuredSchema
+	(*SchemaDomain)(nil),             // 12: gkg.v1.SchemaDomain
+	(*SchemaNode)(nil),               // 13: gkg.v1.SchemaNode
+	(*SchemaProperty)(nil),           // 14: gkg.v1.SchemaProperty
+	(*SchemaEdge)(nil),               // 15: gkg.v1.SchemaEdge
+	(*SchemaEdgeVariant)(nil),        // 16: gkg.v1.SchemaEdgeVariant
+	(*SchemaNodeStyle)(nil),          // 17: gkg.v1.SchemaNodeStyle
+	(*RedactionExchange)(nil),        // 18: gkg.v1.RedactionExchange
+	(*RedactionRequired)(nil),        // 19: gkg.v1.RedactionRequired
+	(*ResourceToAuthorize)(nil),      // 20: gkg.v1.ResourceToAuthorize
+	(*RedactionResponse)(nil),        // 21: gkg.v1.RedactionResponse
+	(*ResourceAuthorization)(nil),    // 22: gkg.v1.ResourceAuthorization
+	(*ListToolsRequest)(nil),         // 23: gkg.v1.ListToolsRequest
+	(*ListToolsResponse)(nil),        // 24: gkg.v1.ListToolsResponse
+	(*ToolDefinition)(nil),           // 25: gkg.v1.ToolDefinition
+	(*GetClusterHealthRequest)(nil),  // 26: gkg.v1.GetClusterHealthRequest
+	(*GetClusterHealthResponse)(nil), // 27: gkg.v1.GetClusterHealthResponse
+	(*StructuredClusterHealth)(nil),  // 28: gkg.v1.StructuredClusterHealth
+	(*ComponentHealth)(nil),          // 29: gkg.v1.ComponentHealth
+	(*ReplicaStatus)(nil),            // 30: gkg.v1.ReplicaStatus
+	(*GetGraphStatsRequest)(nil),     // 31: gkg.v1.GetGraphStatsRequest
+	(*GetGraphStatsResponse)(nil),    // 32: gkg.v1.GetGraphStatsResponse
+	(*GraphStatsDomain)(nil),         // 33: gkg.v1.GraphStatsDomain
+	(*GraphStatsItem)(nil),           // 34: gkg.v1.GraphStatsItem
+	nil,                              // 35: gkg.v1.ResourceAuthorization.AuthorizedEntry
+	nil,                              // 36: gkg.v1.ComponentHealth.MetricsEntry
 }
 var file_gkg_proto_depIdxs = []int32{
-	4,  // 0: gkg.v1.ExecuteQueryMessage.request:type_name -> gkg.v1.ExecuteQueryRequest
-	17, // 1: gkg.v1.ExecuteQueryMessage.redaction:type_name -> gkg.v1.RedactionExchange
-	5,  // 2: gkg.v1.ExecuteQueryMessage.result:type_name -> gkg.v1.ExecuteQueryResult
-	7,  // 3: gkg.v1.ExecuteQueryMessage.error:type_name -> gkg.v1.ExecuteQueryError
+	5,  // 0: gkg.v1.ExecuteQueryMessage.request:type_name -> gkg.v1.ExecuteQueryRequest
+	18, // 1: gkg.v1.ExecuteQueryMessage.redaction:type_name -> gkg.v1.RedactionExchange
+	6,  // 2: gkg.v1.ExecuteQueryMessage.result:type_name -> gkg.v1.ExecuteQueryResult
+	8,  // 3: gkg.v1.ExecuteQueryMessage.error:type_name -> gkg.v1.ExecuteQueryError
 	0,  // 4: gkg.v1.ExecuteQueryRequest.format:type_name -> gkg.v1.ResponseFormat
-	1,  // 5: gkg.v1.ExecuteQueryRequest.query_type:type_name -> gkg.v1.QueryType
-	6,  // 6: gkg.v1.ExecuteQueryResult.metadata:type_name -> gkg.v1.QueryMetadata
-	0,  // 7: gkg.v1.GetGraphSchemaRequest.format:type_name -> gkg.v1.ResponseFormat
-	10, // 8: gkg.v1.GetGraphSchemaResponse.structured:type_name -> gkg.v1.StructuredSchema
-	11, // 9: gkg.v1.StructuredSchema.domains:type_name -> gkg.v1.SchemaDomain
-	12, // 10: gkg.v1.StructuredSchema.nodes:type_name -> gkg.v1.SchemaNode
-	14, // 11: gkg.v1.StructuredSchema.edges:type_name -> gkg.v1.SchemaEdge
-	13, // 12: gkg.v1.SchemaNode.properties:type_name -> gkg.v1.SchemaProperty
-	16, // 13: gkg.v1.SchemaNode.style:type_name -> gkg.v1.SchemaNodeStyle
-	15, // 14: gkg.v1.SchemaEdge.variants:type_name -> gkg.v1.SchemaEdgeVariant
-	18, // 15: gkg.v1.RedactionExchange.required:type_name -> gkg.v1.RedactionRequired
-	20, // 16: gkg.v1.RedactionExchange.response:type_name -> gkg.v1.RedactionResponse
-	19, // 17: gkg.v1.RedactionRequired.resources:type_name -> gkg.v1.ResourceToAuthorize
-	21, // 18: gkg.v1.RedactionResponse.authorizations:type_name -> gkg.v1.ResourceAuthorization
-	34, // 19: gkg.v1.ResourceAuthorization.authorized:type_name -> gkg.v1.ResourceAuthorization.AuthorizedEntry
-	24, // 20: gkg.v1.ListToolsResponse.tools:type_name -> gkg.v1.ToolDefinition
-	0,  // 21: gkg.v1.GetClusterHealthRequest.format:type_name -> gkg.v1.ResponseFormat
-	27, // 22: gkg.v1.GetClusterHealthResponse.structured:type_name -> gkg.v1.StructuredClusterHealth
-	2,  // 23: gkg.v1.StructuredClusterHealth.status:type_name -> gkg.v1.ClusterStatus
-	28, // 24: gkg.v1.StructuredClusterHealth.components:type_name -> gkg.v1.ComponentHealth
-	2,  // 25: gkg.v1.ComponentHealth.status:type_name -> gkg.v1.ClusterStatus
-	29, // 26: gkg.v1.ComponentHealth.replicas:type_name -> gkg.v1.ReplicaStatus
-	35, // 27: gkg.v1.ComponentHealth.metrics:type_name -> gkg.v1.ComponentHealth.MetricsEntry
-	32, // 28: gkg.v1.GetGraphStatsResponse.domains:type_name -> gkg.v1.GraphStatsDomain
-	33, // 29: gkg.v1.GraphStatsDomain.items:type_name -> gkg.v1.GraphStatsItem
-	22, // 30: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
-	3,  // 31: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
-	8,  // 32: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
-	25, // 33: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
-	30, // 34: gkg.v1.KnowledgeGraphService.GetGraphStats:input_type -> gkg.v1.GetGraphStatsRequest
-	23, // 35: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
-	3,  // 36: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
-	9,  // 37: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
-	26, // 38: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
-	31, // 39: gkg.v1.KnowledgeGraphService.GetGraphStats:output_type -> gkg.v1.GetGraphStatsResponse
-	35, // [35:40] is the sub-list for method output_type
-	30, // [30:35] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	2,  // 5: gkg.v1.ExecuteQueryRequest.query_type:type_name -> gkg.v1.QueryType
+	7,  // 6: gkg.v1.ExecuteQueryResult.metadata:type_name -> gkg.v1.QueryMetadata
+	1,  // 7: gkg.v1.QueryMetadata.format_name:type_name -> gkg.v1.FormatName
+	0,  // 8: gkg.v1.GetGraphSchemaRequest.format:type_name -> gkg.v1.ResponseFormat
+	11, // 9: gkg.v1.GetGraphSchemaResponse.structured:type_name -> gkg.v1.StructuredSchema
+	12, // 10: gkg.v1.StructuredSchema.domains:type_name -> gkg.v1.SchemaDomain
+	13, // 11: gkg.v1.StructuredSchema.nodes:type_name -> gkg.v1.SchemaNode
+	15, // 12: gkg.v1.StructuredSchema.edges:type_name -> gkg.v1.SchemaEdge
+	14, // 13: gkg.v1.SchemaNode.properties:type_name -> gkg.v1.SchemaProperty
+	17, // 14: gkg.v1.SchemaNode.style:type_name -> gkg.v1.SchemaNodeStyle
+	16, // 15: gkg.v1.SchemaEdge.variants:type_name -> gkg.v1.SchemaEdgeVariant
+	19, // 16: gkg.v1.RedactionExchange.required:type_name -> gkg.v1.RedactionRequired
+	21, // 17: gkg.v1.RedactionExchange.response:type_name -> gkg.v1.RedactionResponse
+	20, // 18: gkg.v1.RedactionRequired.resources:type_name -> gkg.v1.ResourceToAuthorize
+	22, // 19: gkg.v1.RedactionResponse.authorizations:type_name -> gkg.v1.ResourceAuthorization
+	35, // 20: gkg.v1.ResourceAuthorization.authorized:type_name -> gkg.v1.ResourceAuthorization.AuthorizedEntry
+	25, // 21: gkg.v1.ListToolsResponse.tools:type_name -> gkg.v1.ToolDefinition
+	0,  // 22: gkg.v1.GetClusterHealthRequest.format:type_name -> gkg.v1.ResponseFormat
+	28, // 23: gkg.v1.GetClusterHealthResponse.structured:type_name -> gkg.v1.StructuredClusterHealth
+	3,  // 24: gkg.v1.StructuredClusterHealth.status:type_name -> gkg.v1.ClusterStatus
+	29, // 25: gkg.v1.StructuredClusterHealth.components:type_name -> gkg.v1.ComponentHealth
+	3,  // 26: gkg.v1.ComponentHealth.status:type_name -> gkg.v1.ClusterStatus
+	30, // 27: gkg.v1.ComponentHealth.replicas:type_name -> gkg.v1.ReplicaStatus
+	36, // 28: gkg.v1.ComponentHealth.metrics:type_name -> gkg.v1.ComponentHealth.MetricsEntry
+	33, // 29: gkg.v1.GetGraphStatsResponse.domains:type_name -> gkg.v1.GraphStatsDomain
+	34, // 30: gkg.v1.GraphStatsDomain.items:type_name -> gkg.v1.GraphStatsItem
+	23, // 31: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
+	4,  // 32: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
+	9,  // 33: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
+	26, // 34: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
+	31, // 35: gkg.v1.KnowledgeGraphService.GetGraphStats:input_type -> gkg.v1.GetGraphStatsRequest
+	24, // 36: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
+	4,  // 37: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
+	10, // 38: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
+	27, // 39: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
+	32, // 40: gkg.v1.KnowledgeGraphService.GetGraphStats:output_type -> gkg.v1.GetGraphStatsResponse
+	36, // [36:41] is the sub-list for method output_type
+	31, // [31:36] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_gkg_proto_init() }
@@ -2442,7 +2506,7 @@ func file_gkg_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gkg_proto_rawDesc), len(file_gkg_proto_rawDesc)),
-			NumEnums:      3,
+			NumEnums:      4,
 			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,

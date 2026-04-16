@@ -36,5 +36,6 @@ pre-commit:
       glob:
         - "crates/query-engine/formatters/src/graph.rs"
         - "crates/query-engine/formatters/src/goon.rs"
+        - "crates/query-engine/formatters/src/lib.rs"
         - "crates/gkg-server/schemas/query_response.json"
         - "crates/gkg-server/schemas/goon_format.md"
