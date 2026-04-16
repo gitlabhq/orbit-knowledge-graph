@@ -25,19 +25,11 @@ pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
 
 /// Concrete encoding of a formatter's output. Mirrors the proto `FormatName`
 /// enum but lives here so the formatters crate stays proto-agnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum FormatName {
     Raw,
     Goon,
-}
-
-impl FormatName {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Raw => "raw",
-            Self::Goon => "goon",
-        }
-    }
 }
 
 pub trait ResultFormatter: Send + Sync {

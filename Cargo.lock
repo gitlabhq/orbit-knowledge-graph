@@ -4557,6 +4557,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shared",
+ "strum 0.28.0",
  "types",
 ]
 
