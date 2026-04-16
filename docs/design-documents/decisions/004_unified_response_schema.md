@@ -78,7 +78,7 @@ message ExecuteQueryResult {
 }
 ```
 
-Node `id` is always a JSON integer (ClickHouse Int64). All entity primary keys in the ontology are integer-typed. `raw_query_strings` is returned in non-production environments only; production deployments gate it behind a debug flag.
+Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids JavaScript precision loss for values exceeding `Number.MAX_SAFE_INTEGER` (2^53-1), which routinely occurs with hash-based code-graph IDs. Edge `from_id` and `to_id` are also strings. All entity primary keys in the ontology are integer-typed internally but serialized as strings in JSON. On the input side, `node_ids` and `id_range` in the query DSL accept both JSON integers and digit strings so consumers can round-trip IDs without casting. Aggregation column values (`columns[].value`) remain integer-typed; if an aggregate ever needs to return an Int64 that exceeds the JS safe range, that is a separate decision. `raw_query_strings` is returned in non-production environments only; production deployments gate it behind a debug flag.
 
 ### Examples by query type
 
@@ -92,8 +92,8 @@ Nodes only, no edges.
 {
   "query_type": "search",
   "nodes": [
-    { "type": "User", "id": 1, "username": "alice", "name": "Alice", "state": "active" },
-    { "type": "User", "id": 2, "username": "bob", "name": "Bob", "state": "active" }
+    { "type": "User", "id": "1", "username": "alice", "name": "Alice", "state": "active" },
+    { "type": "User", "id": "2", "username": "bob", "name": "Bob", "state": "active" }
   ],
   "edges": []
 }
@@ -109,15 +109,15 @@ Nodes are deduplicated. Edges are instance-level.
 {
   "query_type": "traversal",
   "nodes": [
-    { "type": "User", "id": 1, "username": "alice", "name": "Alice", "state": "active" },
-    { "type": "User", "id": 2, "username": "bob", "name": "Bob", "state": "active" },
-    { "type": "Project", "id": 101, "name": "Alpha", "full_path": "gitlab-org/alpha" },
-    { "type": "Project", "id": 102, "name": "Beta", "full_path": "gitlab-org/beta" }
+    { "type": "User", "id": "1", "username": "alice", "name": "Alice", "state": "active" },
+    { "type": "User", "id": "2", "username": "bob", "name": "Bob", "state": "active" },
+    { "type": "Project", "id": "101", "name": "Alpha", "full_path": "gitlab-org/alpha" },
+    { "type": "Project", "id": "102", "name": "Beta", "full_path": "gitlab-org/beta" }
   ],
   "edges": [
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 101, "type": "MEMBER_OF" },
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 102, "type": "MEMBER_OF" },
-    { "from": "User", "from_id": 2, "to": "Project", "to_id": 101, "type": "MEMBER_OF" }
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "101", "type": "MEMBER_OF" },
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "102", "type": "MEMBER_OF" },
+    { "from": "User", "from_id": "2", "to": "Project", "to_id": "101", "type": "MEMBER_OF" }
   ]
 }
 ```
@@ -132,15 +132,15 @@ Edges carry a `depth` field.
 {
   "query_type": "traversal",
   "nodes": [
-    { "type": "User", "id": 1, "username": "alice" },
-    { "type": "Project", "id": 101, "name": "Alpha" },
-    { "type": "Project", "id": 102, "name": "Beta" },
-    { "type": "Project", "id": 103, "name": "Gamma" }
+    { "type": "User", "id": "1", "username": "alice" },
+    { "type": "Project", "id": "101", "name": "Alpha" },
+    { "type": "Project", "id": "102", "name": "Beta" },
+    { "type": "Project", "id": "103", "name": "Gamma" }
   ],
   "edges": [
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 101, "type": "MEMBER_OF", "depth": 1 },
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 102, "type": "MEMBER_OF", "depth": 2 },
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 103, "type": "MEMBER_OF", "depth": 3 }
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "101", "type": "MEMBER_OF", "depth": 1 },
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "102", "type": "MEMBER_OF", "depth": 2 },
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "103", "type": "MEMBER_OF", "depth": 3 }
   ]
 }
 ```
@@ -153,8 +153,8 @@ Computed values are inlined on the group-by nodes. `columns` describes each aggr
 {
   "query_type": "aggregation",
   "nodes": [
-    { "type": "Project", "id": 101, "name": "Alpha", "mr_count": 15, "avg_mr": 42.7 },
-    { "type": "Project", "id": 102, "name": "Beta", "mr_count": 8, "avg_mr": 23.1 }
+    { "type": "Project", "id": "101", "name": "Alpha", "mr_count": 15, "avg_mr": 42.7 },
+    { "type": "Project", "id": "102", "name": "Beta", "mr_count": 8, "avg_mr": 23.1 }
   ],
   "edges": [],
   "columns": [
@@ -188,16 +188,16 @@ Edges carry `path_id` and `step`. Nodes are deduplicated across paths.
 {
   "query_type": "path_finding",
   "nodes": [
-    { "type": "User", "id": 1, "username": "alice" },
-    { "type": "MergeRequest", "id": 42, "title": "Fix bug" },
-    { "type": "Note", "id": 55, "title": "Design doc" },
-    { "type": "Project", "id": 200, "name": "Omega" }
+    { "type": "User", "id": "1", "username": "alice" },
+    { "type": "MergeRequest", "id": "42", "title": "Fix bug" },
+    { "type": "Note", "id": "55", "title": "Design doc" },
+    { "type": "Project", "id": "200", "name": "Omega" }
   ],
   "edges": [
-    { "from": "User", "from_id": 1, "to": "MergeRequest", "to_id": 42, "type": "AUTHORED", "path_id": 0, "step": 0 },
-    { "from": "MergeRequest", "from_id": 42, "to": "Project", "to_id": 200, "type": "IN_PROJECT", "path_id": 0, "step": 1 },
-    { "from": "User", "from_id": 1, "to": "Note", "to_id": 55, "type": "AUTHORED", "path_id": 1, "step": 0 },
-    { "from": "Note", "from_id": 55, "to": "Project", "to_id": 200, "type": "CONTAINS", "path_id": 1, "step": 1 }
+    { "from": "User", "from_id": "1", "to": "MergeRequest", "to_id": "42", "type": "AUTHORED", "path_id": 0, "step": 0 },
+    { "from": "MergeRequest", "from_id": "42", "to": "Project", "to_id": "200", "type": "IN_PROJECT", "path_id": 0, "step": 1 },
+    { "from": "User", "from_id": "1", "to": "Note", "to_id": "55", "type": "AUTHORED", "path_id": 1, "step": 0 },
+    { "from": "Note", "from_id": "55", "to": "Project", "to_id": "200", "type": "CONTAINS", "path_id": 1, "step": 1 }
   ]
 }
 ```
@@ -212,15 +212,15 @@ Center node plus its neighbors. Edge direction matches the ontology.
 {
   "query_type": "neighbors",
   "nodes": [
-    { "type": "Project", "id": 101, "name": "Alpha", "full_path": "gitlab-org/alpha" },
-    { "type": "MergeRequest", "id": 42, "title": "Fix bug", "state": "merged" },
-    { "type": "User", "id": 1, "username": "alice", "name": "Alice" },
-    { "type": "File", "id": 500, "path": "app/controllers/sessions_controller.rb" }
+    { "type": "Project", "id": "101", "name": "Alpha", "full_path": "gitlab-org/alpha" },
+    { "type": "MergeRequest", "id": "42", "title": "Fix bug", "state": "merged" },
+    { "type": "User", "id": "1", "username": "alice", "name": "Alice" },
+    { "type": "File", "id": "500", "path": "app/controllers/sessions_controller.rb" }
   ],
   "edges": [
-    { "from": "MergeRequest", "from_id": 42, "to": "Project", "to_id": 101, "type": "IN_PROJECT" },
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 101, "type": "MEMBER_OF" },
-    { "from": "Project", "from_id": 101, "to": "File", "to_id": 500, "type": "CONTAINS" }
+    { "from": "MergeRequest", "from_id": "42", "to": "Project", "to_id": "101", "type": "IN_PROJECT" },
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "101", "type": "MEMBER_OF" },
+    { "from": "Project", "from_id": "101", "to": "File", "to_id": "500", "type": "CONTAINS" }
   ]
 }
 ```
@@ -232,7 +232,7 @@ The center node (Project:101) is just another node in the list. Neighbor types a
 **Node:** flat object with `type`, `id`, and properties inline. No wrapper.
 
 ```json
-{ "type": "User", "id": 42, "username": "alice", "name": "Alice Smith", "state": "active" }
+{ "type": "User", "id": "42", "username": "alice", "name": "Alice Smith", "state": "active" }
 ```
 
 The frontend builds composite IDs (`"User:42"`) for deduplication. Property names match the ontology, so the frontend can look up data types from the cached schema. For aggregation queries, computed values (like `mr_count`) are inlined as additional properties on the node.
@@ -248,7 +248,7 @@ Optional fields: `target` (node alias being aggregated), `property` (field being
 **Edge:** two nodes connected by type and ID.
 
 ```json
-{ "from": "User", "from_id": 1, "to": "Project", "to_id": 101, "type": "MEMBER_OF" }
+{ "from": "User", "from_id": "1", "to": "Project", "to_id": "101", "type": "MEMBER_OF" }
 ```
 
 Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path finding).

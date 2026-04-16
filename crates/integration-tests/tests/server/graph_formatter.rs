@@ -36,9 +36,10 @@ fn assert_valid(value: &Value) {
 }
 
 fn find_node<'a>(nodes: &'a [Value], entity_type: &str, id: i64) -> &'a Value {
+    let id_str = id.to_string();
     nodes
         .iter()
-        .find(|n| n["type"] == entity_type && n["id"] == id)
+        .find(|n| n["type"] == entity_type && n["id"].as_str() == Some(&id_str))
         .unwrap_or_else(|| panic!("node {entity_type}:{id} not found in {nodes:?}"))
 }
 
@@ -46,7 +47,7 @@ fn node_ids(nodes: &[Value], entity_type: &str) -> HashSet<i64> {
     nodes
         .iter()
         .filter(|n| n["type"] == entity_type)
-        .filter_map(|n| n["id"].as_i64())
+        .filter_map(|n| n["id"].as_str().and_then(|s| s.parse().ok()))
         .collect()
 }
 
@@ -249,7 +250,7 @@ async fn search_exact_properties(ctx: &TestContext) {
     assert_eq!(alice["username"].as_str().unwrap(), "alice");
     assert_eq!(alice["state"].as_str().unwrap(), "active");
     assert_eq!(alice["name"].as_str().unwrap(), "Alice Admin");
-    assert!(alice["id"].is_i64());
+    assert!(alice["id"].is_string());
     assert!(alice["username"].is_string());
     assert!(
         alice.get("_gkg_u_id").is_none(),
@@ -368,7 +369,7 @@ async fn traversal_single_hop_exact(ctx: &TestContext) {
 
     let alice = find_node(nodes, "User", 1);
     assert_eq!(alice["username"].as_str().unwrap(), "alice");
-    assert!(alice["id"].is_i64());
+    assert!(alice["id"].is_string());
     let bob = find_node(nodes, "User", 2);
     assert_eq!(bob["username"].as_str().unwrap(), "bob");
     let group100 = find_node(nodes, "Group", 100);
@@ -383,7 +384,7 @@ async fn traversal_single_hop_exact(ctx: &TestContext) {
 
     let e_alice_pub = edges
         .iter()
-        .find(|e| e["from_id"] == 1 && e["to_id"] == 100)
+        .find(|e| e["from_id"] == "1" && e["to_id"] == "100")
         .unwrap();
     assert_eq!(e_alice_pub["from"], "User");
     assert_eq!(e_alice_pub["to"], "Group");
@@ -391,23 +392,27 @@ async fn traversal_single_hop_exact(ctx: &TestContext) {
 
     let e_alice_priv = edges
         .iter()
-        .find(|e| e["from_id"] == 1 && e["to_id"] == 101)
+        .find(|e| e["from_id"] == "1" && e["to_id"] == "101")
         .unwrap();
     assert_eq!(e_alice_priv["from"], "User");
     assert_eq!(e_alice_priv["to"], "Group");
 
     assert!(
-        edges.iter().any(|e| e["from_id"] == 2 && e["to_id"] == 101),
+        edges
+            .iter()
+            .any(|e| e["from_id"] == "2" && e["to_id"] == "101"),
         "bob->group101 edge"
     );
     assert!(
-        edges.iter().any(|e| e["from_id"] == 5 && e["to_id"] == 100),
+        edges
+            .iter()
+            .any(|e| e["from_id"] == "5" && e["to_id"] == "100"),
         "unicode->group100 edge"
     );
 
     for edge in edges {
-        assert!(edge["from_id"].is_i64());
-        assert!(edge["to_id"].is_i64());
+        assert!(edge["from_id"].is_string());
+        assert!(edge["to_id"].is_string());
         assert!(
             edge.get("path_id").is_none(),
             "traversal edges should not have path_id"
@@ -459,7 +464,7 @@ async fn traversal_redaction_removes_unauthorized_paths(ctx: &TestContext) {
     let edges = value["edges"].as_array().unwrap();
     for edge in edges {
         assert_eq!(
-            edge["to_id"], 100,
+            edge["to_id"], "100",
             "only edges to authorized group 100 should remain"
         );
     }
@@ -487,7 +492,7 @@ async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
         .map(|n| {
             (
                 n["type"].as_str().unwrap().to_string(),
-                n["id"].as_i64().unwrap(),
+                n["id"].as_str().unwrap().parse::<i64>().unwrap(),
             )
         })
         .collect();
@@ -515,10 +520,10 @@ async fn traversal_with_filter(ctx: &TestContext) {
     let nodes = value["nodes"].as_array().unwrap();
     let users: Vec<&Value> = nodes.iter().filter(|n| n["type"] == "User").collect();
     assert_eq!(users.len(), 1);
-    assert_eq!(users[0]["id"], 4);
+    assert_eq!(users[0]["id"], "4");
     assert_eq!(users[0]["username"].as_str().unwrap(), "diana");
     assert_eq!(users[0]["state"].as_str().unwrap(), "blocked");
-    assert!(users[0]["id"].is_i64());
+    assert!(users[0]["id"].is_string());
 
     let group_ids = node_ids(nodes, "Group");
     assert!(group_ids.contains(&102), "diana is in Internal Group");
@@ -527,8 +532,8 @@ async fn traversal_with_filter(ctx: &TestContext) {
 
     let edges = value["edges"].as_array().unwrap();
     assert_eq!(edges.len(), 1);
-    assert_eq!(edges[0]["from_id"], 4);
-    assert_eq!(edges[0]["to_id"], 102);
+    assert_eq!(edges[0]["from_id"], "4");
+    assert_eq!(edges[0]["to_id"], "102");
     assert_eq!(edges[0]["type"], "MEMBER_OF");
 }
 
@@ -568,7 +573,7 @@ async fn aggregation_count_exact(ctx: &TestContext) {
         "alice is in groups 100 and 101"
     );
     assert_eq!(alice["username"].as_str().unwrap(), "alice");
-    assert!(alice["id"].is_i64());
+    assert!(alice["id"].is_string());
 
     let bob = find_node(nodes, "User", 2);
     assert_eq!(
@@ -657,7 +662,7 @@ async fn path_finding_exact_path(ctx: &TestContext) {
     assert!(node_ids(nodes, "Project").contains(&1000));
 
     for node in nodes {
-        assert!(node["id"].is_i64());
+        assert!(node["id"].is_string());
         assert!(node["type"].is_string());
         assert!(
             node.get("_gkg_path").is_none(),
@@ -673,8 +678,8 @@ async fn path_finding_exact_path(ctx: &TestContext) {
         assert!(edge["from"].is_string());
         assert!(edge["to"].is_string());
         assert!(edge["type"].is_string());
-        assert!(edge["from_id"].is_i64());
-        assert!(edge["to_id"].is_i64());
+        assert!(edge["from_id"].is_string());
+        assert!(edge["to_id"].is_string());
     }
 
     let path_0_edges: Vec<&Value> = edges.iter().filter(|e| e["path_id"] == 0).collect();
@@ -692,16 +697,16 @@ async fn path_finding_exact_path(ctx: &TestContext) {
 
     let hop0 = &path_0_edges[0];
     assert_eq!(hop0["from"], "User");
-    assert_eq!(hop0["from_id"], 1);
+    assert_eq!(hop0["from_id"], "1");
     assert_eq!(hop0["to"], "Group");
-    assert_eq!(hop0["to_id"], 100);
+    assert_eq!(hop0["to_id"], "100");
     assert_eq!(hop0["type"], "MEMBER_OF");
 
     let hop1 = &path_0_edges[1];
     assert_eq!(hop1["from"], "Group");
-    assert_eq!(hop1["from_id"], 100);
+    assert_eq!(hop1["from_id"], "100");
     assert_eq!(hop1["to"], "Project");
-    assert_eq!(hop1["to_id"], 1000);
+    assert_eq!(hop1["to_id"], "1000");
     assert_eq!(hop1["type"], "CONTAINS");
 }
 
@@ -779,15 +784,15 @@ async fn neighbors_outgoing_exact(ctx: &TestContext) {
 
     let nodes = value["nodes"].as_array().unwrap();
     let center = find_node(nodes, "User", 1);
-    assert!(center["id"].is_i64());
+    assert!(center["id"].is_string());
 
     let edges = value["edges"].as_array().unwrap();
     assert!(!edges.is_empty());
     for edge in edges {
         assert_eq!(edge["from"], "User");
-        assert_eq!(edge["from_id"], 1);
+        assert_eq!(edge["from_id"], "1");
         assert!(edge["to"].is_string());
-        assert!(edge["to_id"].is_i64());
+        assert!(edge["to_id"].is_string());
         assert!(edge["type"].is_string());
         assert!(
             edge.get("path_id").is_none(),
@@ -806,7 +811,7 @@ async fn neighbors_outgoing_exact(ctx: &TestContext) {
     let member_targets: HashSet<i64> = edges
         .iter()
         .filter(|e| e["type"] == "MEMBER_OF")
-        .filter_map(|e| e["to_id"].as_i64())
+        .filter_map(|e| e["to_id"].as_str().and_then(|s| s.parse().ok()))
         .collect();
     assert!(
         member_targets.contains(&100),
@@ -820,7 +825,7 @@ async fn neighbors_outgoing_exact(ctx: &TestContext) {
     let authored_targets: HashSet<i64> = edges
         .iter()
         .filter(|e| e["type"] == "AUTHORED")
-        .filter_map(|e| e["to_id"].as_i64())
+        .filter_map(|e| e["to_id"].as_str().and_then(|s| s.parse().ok()))
         .collect();
     assert!(authored_targets.contains(&2000), "alice AUTHORED MR 2000");
 }
@@ -841,15 +846,15 @@ async fn neighbors_incoming_exact(ctx: &TestContext) {
     assert!(!edges.is_empty());
     for edge in edges {
         assert_eq!(edge["to"], "Group");
-        assert_eq!(edge["to_id"], 101);
+        assert_eq!(edge["to_id"], "101");
         assert_eq!(edge["type"], "MEMBER_OF");
-        assert!(edge["from_id"].is_i64());
+        assert!(edge["from_id"].is_string());
         assert!(edge.get("path_id").is_none());
     }
 
     let nodes = value["nodes"].as_array().unwrap();
     let center = find_node(nodes, "Group", 101);
-    assert!(center["id"].is_i64());
+    assert!(center["id"].is_string());
 
     let neighbor_ids = node_ids(nodes, "User");
     assert!(neighbor_ids.contains(&1), "alice is MEMBER_OF group 101");
@@ -861,7 +866,10 @@ async fn neighbors_incoming_exact(ctx: &TestContext) {
         "unicode user is NOT in group 101"
     );
 
-    let from_ids: HashSet<i64> = edges.iter().filter_map(|e| e["from_id"].as_i64()).collect();
+    let from_ids: HashSet<i64> = edges
+        .iter()
+        .filter_map(|e| e["from_id"].as_str().and_then(|s| s.parse().ok()))
+        .collect();
     assert!(from_ids.contains(&1), "alice edge from_id");
     assert!(from_ids.contains(&2), "bob edge from_id");
 }
@@ -880,7 +888,7 @@ async fn neighbors_both_exact(ctx: &TestContext) {
 
     let nodes = value["nodes"].as_array().unwrap();
     let center = find_node(nodes, "Group", 100);
-    assert!(center["id"].is_i64());
+    assert!(center["id"].is_string());
 
     let user_ids = node_ids(nodes, "User");
     assert!(user_ids.contains(&1), "alice is MEMBER_OF group 100");
@@ -906,30 +914,30 @@ async fn neighbors_both_exact(ctx: &TestContext) {
     // MEMBER_OF edges: User→Group (incoming to center), so from=User, to=Group
     assert!(edges.iter().any(|e| {
         e["from"] == "User"
-            && e["from_id"] == 1
+            && e["from_id"] == "1"
             && e["to"] == "Group"
-            && e["to_id"] == 100
+            && e["to_id"] == "100"
             && e["type"] == "MEMBER_OF"
     }));
     assert!(edges.iter().any(|e| {
         e["from"] == "User"
-            && e["from_id"] == 5
+            && e["from_id"] == "5"
             && e["to"] == "Group"
-            && e["to_id"] == 100
+            && e["to_id"] == "100"
             && e["type"] == "MEMBER_OF"
     }));
     // CONTAINS edge: Group→Project (outgoing from center), so from=Group, to=Project
     assert!(edges.iter().any(|e| {
         e["from"] == "Group"
-            && e["from_id"] == 100
+            && e["from_id"] == "100"
             && e["to"] == "Project"
-            && e["to_id"] == 1000
+            && e["to_id"] == "1000"
             && e["type"] == "CONTAINS"
     }));
 
     for edge in edges {
-        assert!(edge["from_id"].is_i64());
-        assert!(edge["to_id"].is_i64());
+        assert!(edge["from_id"].is_string());
+        assert!(edge["to_id"].is_string());
         assert!(edge.get("path_id").is_none());
     }
 }
@@ -956,7 +964,7 @@ async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
     for edge in edges {
         if edge["type"] == "MEMBER_OF" {
             assert_eq!(edge["from"], "User", "MEMBER_OF is outgoing from User");
-            assert_eq!(edge["from_id"], 1);
+            assert_eq!(edge["from_id"], "1");
         }
     }
 }
@@ -981,9 +989,9 @@ async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
     assert!(
         edges.iter().any(|e| {
             e["from"] == "User"
-                && e["from_id"] == 1
+                && e["from_id"] == "1"
                 && e["to"] == "MergeRequest"
-                && e["to_id"] == 2000
+                && e["to_id"] == "2000"
                 && e["type"] == "AUTHORED"
         }),
         "AUTHORED edge should show User as source"
@@ -994,13 +1002,13 @@ async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
     assert!(!has_note_edges.is_empty(), "should have HAS_NOTE edges");
     for edge in &has_note_edges {
         assert_eq!(edge["from"], "MergeRequest", "HAS_NOTE is outgoing from MR");
-        assert_eq!(edge["from_id"], 2000);
+        assert_eq!(edge["from_id"], "2000");
         assert_eq!(edge["to"], "Note");
     }
 
     let note_ids: HashSet<i64> = has_note_edges
         .iter()
-        .filter_map(|e| e["to_id"].as_i64())
+        .filter_map(|e| e["to_id"].as_str().and_then(|s| s.parse().ok()))
         .collect();
     assert!(note_ids.contains(&3000));
     assert!(note_ids.contains(&3002));
@@ -1030,12 +1038,12 @@ async fn neighbors_redaction(ctx: &TestContext) {
     assert!(!group_ids.contains(&102), "group 102 should be redacted");
 
     let center = find_node(nodes, "User", 1);
-    assert!(center["id"].is_i64());
+    assert!(center["id"].is_string());
 
     let edges = value["edges"].as_array().unwrap();
     for edge in edges {
         if edge["type"] == "MEMBER_OF" {
-            let to_id = edge["to_id"].as_i64().unwrap();
+            let to_id: i64 = edge["to_id"].as_str().unwrap().parse().unwrap();
             assert_eq!(
                 to_id, 100,
                 "only authorized group 100 should remain in edges"
@@ -1066,7 +1074,7 @@ async fn giant_string_survives_pipeline(ctx: &TestContext) {
     let nodes = value["nodes"].as_array().unwrap();
     if let Some(text) = nodes
         .iter()
-        .find(|n| n["type"] == "Note" && n["id"] == 3001)
+        .find(|n| n["type"] == "Note" && n["id"] == "3001")
         .and_then(|note| note.get("note"))
     {
         assert_eq!(text.as_str().unwrap().len(), 10_000);
@@ -1091,7 +1099,7 @@ async fn sql_injection_string_preserved(ctx: &TestContext) {
     let nodes = value["nodes"].as_array().unwrap();
     if let Some(text) = nodes
         .iter()
-        .find(|n| n["type"] == "Note" && n["id"] == 3002)
+        .find(|n| n["type"] == "Note" && n["id"] == "3002")
         .and_then(|note| note.get("note"))
     {
         let s = text.as_str().unwrap();
@@ -1283,7 +1291,7 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
         assert!(node["member_count"].is_i64());
         assert!(node["avg_id"].is_f64());
         assert!(node["min_id"].is_i64());
-        assert!(node["id"].is_i64());
+        assert!(node["id"].is_string());
     }
 
     let g100 = find_node(nodes, "Group", 100);
@@ -1487,8 +1495,8 @@ async fn traversal_incoming_direction(ctx: &TestContext) {
     assert!(edges.iter().all(|e| e["type"] == "MEMBER_OF"));
 
     for edge in edges {
-        assert!(edge["from_id"].is_i64());
-        assert!(edge["to_id"].is_i64());
+        assert!(edge["from_id"].is_string());
+        assert!(edge["to_id"].is_string());
         assert!(edge.get("path_id").is_none());
     }
 }
@@ -1520,8 +1528,8 @@ async fn traversal_both_direction(ctx: &TestContext) {
     );
 
     for edge in edges {
-        assert!(edge["from_id"].is_i64());
-        assert!(edge["to_id"].is_i64());
+        assert!(edge["from_id"].is_string());
+        assert!(edge["to_id"].is_string());
     }
 }
 
@@ -1599,7 +1607,7 @@ async fn search_boolean_columns(ctx: &TestContext) {
     let nodes = value["nodes"].as_array().unwrap();
     assert_eq!(nodes.len(), 4, "4 notes seeded");
     assert!(nodes.iter().all(|n| n["type"] == "Note"));
-    assert!(nodes.iter().all(|n| n["id"].is_i64()));
+    assert!(nodes.iter().all(|n| n["id"].is_string()));
 
     let n3000 = find_node(nodes, "Note", 3000);
     assert_eq!(n3000["note"].as_str().unwrap(), "Normal note");
@@ -1640,8 +1648,8 @@ async fn search_datetime_columns(ctx: &TestContext) {
     assert_eq!(nodes.len(), 1);
     let node = &nodes[0];
     assert_eq!(node["type"], "Note");
-    assert_eq!(node["id"], 9000);
-    assert!(node["id"].is_i64());
+    assert_eq!(node["id"], "9000");
+    assert!(node["id"].is_string());
     assert_eq!(node["note"].as_str().unwrap(), "timestamped");
 
     let created = node.get("created_at");
@@ -1673,8 +1681,8 @@ async fn search_nullable_columns(ctx: &TestContext) {
     assert_eq!(nodes.len(), 1);
     let node = &nodes[0];
     assert_eq!(node["type"], "Note");
-    assert_eq!(node["id"], 3000);
-    assert!(node["id"].is_i64());
+    assert_eq!(node["id"], "3000");
+    assert!(node["id"].is_string());
     assert_eq!(node["note"].as_str().unwrap(), "Normal note");
     assert!(node["note"].is_string());
     if let Some(ts) = node.get("created_at") {
@@ -1702,8 +1710,8 @@ async fn search_wildcard_columns(ctx: &TestContext) {
     assert_eq!(nodes.len(), 1);
     let alice = &nodes[0];
     assert_eq!(alice["type"], "User");
-    assert_eq!(alice["id"], 1);
-    assert!(alice["id"].is_i64());
+    assert_eq!(alice["id"], "1");
+    assert!(alice["id"].is_string());
 
     assert_eq!(alice["username"].as_str().unwrap(), "alice");
     assert_eq!(alice["state"].as_str().unwrap(), "active");
@@ -1746,7 +1754,7 @@ async fn path_finding_all_shortest(ctx: &TestContext) {
     assert!(node_ids(nodes, "Project").contains(&1000));
 
     for node in nodes {
-        assert!(node["id"].is_i64());
+        assert!(node["id"].is_string());
         assert!(node["type"].is_string());
     }
 
@@ -1755,8 +1763,8 @@ async fn path_finding_all_shortest(ctx: &TestContext) {
     for edge in edges {
         assert!(edge["path_id"].is_i64());
         assert!(edge["step"].is_i64());
-        assert!(edge["from_id"].is_i64());
-        assert!(edge["to_id"].is_i64());
+        assert!(edge["from_id"].is_string());
+        assert!(edge["to_id"].is_string());
     }
 }
 
@@ -1786,8 +1794,8 @@ async fn path_finding_any(ctx: &TestContext) {
         for edge in edges {
             assert!(edge["path_id"].is_i64());
             assert!(edge["step"].is_i64());
-            assert!(edge["from_id"].is_i64());
-            assert!(edge["to_id"].is_i64());
+            assert!(edge["from_id"].is_string());
+            assert!(edge["to_id"].is_string());
         }
     }
 }
@@ -1841,14 +1849,14 @@ async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
 
     for edge in edges {
         assert_eq!(edge["from"], "User");
-        assert_eq!(edge["from_id"], 1);
-        assert!(edge["to_id"].is_i64());
+        assert_eq!(edge["from_id"], "1");
+        assert!(edge["to_id"].is_string());
         assert!(edge.get("path_id").is_none());
     }
 
     let nodes = value["nodes"].as_array().unwrap();
     let center = find_node(nodes, "User", 1);
-    assert!(center["id"].is_i64());
+    assert!(center["id"].is_string());
 
     let neighbor_types: HashSet<&str> = nodes
         .iter()
@@ -1880,7 +1888,7 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
 
     let nodes = value["nodes"].as_array().unwrap();
     let center = find_node(nodes, "User", 1);
-    assert!(center["id"].is_i64());
+    assert!(center["id"].is_string());
 
     let groups: Vec<&Value> = nodes.iter().filter(|n| n["type"] == "Group").collect();
     assert!(!groups.is_empty());
@@ -1890,7 +1898,7 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
             group.get("name").is_some(),
             "group should have name with dynamic_columns:*"
         );
-        assert!(group["id"].is_i64());
+        assert!(group["id"].is_string());
     }
 
     let group_ids = node_ids(nodes, "Group");
@@ -1904,7 +1912,7 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
     assert!(edges.iter().all(|e| e["type"] == "MEMBER_OF"));
     for edge in edges {
         assert_eq!(edge["from"], "User");
-        assert_eq!(edge["from_id"], 1);
+        assert_eq!(edge["from_id"], "1");
     }
 }
 
@@ -1976,8 +1984,8 @@ async fn filter_starts_with_operator(ctx: &TestContext) {
     let nodes = value["nodes"].as_array().unwrap();
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes[0]["type"], "User");
-    assert_eq!(nodes[0]["id"], 1);
-    assert!(nodes[0]["id"].is_i64());
+    assert_eq!(nodes[0]["id"], "1");
+    assert!(nodes[0]["id"].is_string());
     assert_eq!(nodes[0]["username"].as_str().unwrap(), "alice");
 }
 
@@ -2002,7 +2010,7 @@ async fn filter_is_null_operator(ctx: &TestContext) {
     assert_eq!(ids, HashSet::from([1, 2, 3, 4, 5]));
 
     for node in nodes {
-        assert!(node["id"].is_i64());
+        assert!(node["id"].is_string());
         assert!(node["username"].is_string());
         if let Some(ts) = node.get("created_at") {
             assert!(ts.is_null(), "created_at should be null for matched rows");
@@ -2033,7 +2041,7 @@ async fn search_node_ids_filtering(ctx: &TestContext) {
 
     let bob = find_node(nodes, "User", 2);
     assert_eq!(bob["username"].as_str().unwrap(), "bob");
-    assert!(bob["id"].is_i64());
+    assert!(bob["id"].is_string());
 
     let diana = find_node(nodes, "User", 4);
     assert_eq!(diana["username"].as_str().unwrap(), "diana");
@@ -2131,8 +2139,8 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
         "multi-hop traversal should produce edges"
     );
     for edge in edges {
-        assert!(edge["from_id"].is_i64());
-        assert!(edge["to_id"].is_i64());
+        assert!(edge["from_id"].is_string());
+        assert!(edge["to_id"].is_string());
     }
 }
 
@@ -2411,7 +2419,10 @@ async fn pagination_with_redaction(ctx: &TestContext) {
 
     let nodes = value["nodes"].as_array().unwrap();
     assert_eq!(nodes.len(), 2);
-    let ids: Vec<i64> = nodes.iter().filter_map(|n| n["id"].as_i64()).collect();
+    let ids: Vec<i64> = nodes
+        .iter()
+        .filter_map(|n| n["id"].as_str().and_then(|s| s.parse().ok()))
+        .collect();
     assert_eq!(ids, vec![1, 3], "first page of authorized users");
 }
 

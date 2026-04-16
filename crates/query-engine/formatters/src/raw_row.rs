@@ -24,7 +24,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
 
     for node in ctx.nodes() {
         if let Some(id) = row.get_public_id(node) {
-            obj.insert(format!("{}_id", node.alias), json!(id));
+            obj.insert(format!("{}_id", node.alias), json!(id.to_string()));
         }
         if let Some(entity_type) = row.get_type(node) {
             obj.insert(format!("{}_type", node.alias), json!(entity_type));
@@ -60,7 +60,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
 
 fn node_ref_to_json(node: &NodeRef) -> Value {
     let mut obj = serde_json::Map::new();
-    obj.insert("id".to_string(), json!(node.id));
+    obj.insert("id".to_string(), json!(node.id.to_string()));
     obj.insert("entity_type".to_string(), json!(node.entity_type));
     for (key, value) in &node.properties {
         obj.insert(key.clone(), column_value_to_json(value));
@@ -107,7 +107,7 @@ mod tests {
         let json = row_to_json(row, &ctx);
         let obj = json.as_object().unwrap();
 
-        assert_eq!(obj.get("p_id").unwrap().as_i64().unwrap(), 101);
+        assert_eq!(obj.get("p_id").unwrap().as_str().unwrap(), "101");
         assert_eq!(obj.get("p_type").unwrap().as_str().unwrap(), "Project");
     }
 
@@ -158,7 +158,7 @@ mod tests {
         assert_eq!(path.len(), 2);
 
         let first = path[0].as_object().unwrap();
-        assert_eq!(first.get("id").unwrap().as_i64().unwrap(), 10);
+        assert_eq!(first.get("id").unwrap().as_str().unwrap(), "10");
         assert_eq!(
             first.get("entity_type").unwrap().as_str().unwrap(),
             "Project"
