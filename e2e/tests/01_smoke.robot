@@ -19,6 +19,25 @@ Orbit Status Is Healthy
     ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
     Should Be Equal    ${resp.json()["status"]}    healthy
 
+Enable Feature Flag
+    [Arguments]    ${flag}
+    ${headers}=    GitLab Auth Headers
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/features/${flag}
+    ...    headers=${headers}    data=value=true    expected_status=201
+
+Feature Flag Is Enabled
+    [Arguments]    ${flag}
+    ${headers}=    GitLab Auth Headers
+    ${resp}=    GET    ${GITLAB_URL}/api/v4/features    headers=${headers}    expected_status=200
+    ${flags}=    Set Variable    ${resp.json()}
+    FOR    ${f}    IN    @{flags}
+        IF    "${f["name"]}" == "${flag}"
+            Should Be Equal As Strings    ${f["state"]}    on    Feature flag ${flag} not enabled
+            RETURN
+        END
+    END
+    Fail    Feature flag ${flag} not found
+
 Users Indexed In Graph
     ${headers}=    GitLab Auth Headers
     ${agg}=    Create Dictionary    function=count    target=n
@@ -34,6 +53,12 @@ Users Indexed In Graph
 GitLab Is Ready
     [Documentation]    Wait for GitLab API to respond before testing Orbit
     Wait Until Keyword Succeeds    60s    3s    GitLab API Is Ready
+
+Feature Flags Are Enabled
+    [Documentation]    Enable knowledge graph feature flags via API and verify
+    Enable Feature Flag    knowledge_graph_infra
+    Enable Feature Flag    knowledge_graph
+    Wait Until Keyword Succeeds    30s    3s    Feature Flag Is Enabled    knowledge_graph_infra
 
 Orbit Is Healthy
     [Documentation]    Wait for all components (GKG, Siphon, NATS, ClickHouse) to report healthy
