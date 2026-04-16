@@ -338,10 +338,12 @@ impl SsaResolver {
         // Witness cache fast path: if both witnesses are still distinct
         // and neither is the phi itself, the phi is non-trivial.
         let w = &self.phis[phi_id.0].witnesses;
-        if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref()) {
-            if w0 != w1 && *w0 != Value::Phi(phi_id) && *w1 != Value::Phi(phi_id) {
-                return Value::Phi(phi_id);
-            }
+        if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref())
+            && w0 != w1
+            && *w0 != Value::Phi(phi_id)
+            && *w1 != Value::Phi(phi_id)
+        {
+            return Value::Phi(phi_id);
         }
 
         let mut same: Option<Value> = None;
@@ -427,10 +429,10 @@ impl SsaResolver {
         }
         for &pid in phi_ids {
             for op in &self.phis[pid.0].operands {
-                if let Value::Phi(p) = op {
-                    if let (Some(&src), Some(&tgt)) = (phi_to_node.get(&pid), phi_to_node.get(p)) {
-                        phi_graph.add_edge(src, tgt, ());
-                    }
+                if let Value::Phi(p) = op
+                    && let (Some(&src), Some(&tgt)) = (phi_to_node.get(&pid), phi_to_node.get(p))
+                {
+                    phi_graph.add_edge(src, tgt, ());
                 }
             }
         }
@@ -474,10 +476,10 @@ impl SsaResolver {
                 let mut users: FxHashMap<PhiId, Vec<usize>> = FxHashMap::default();
                 for (i, phi) in self.phis.iter().enumerate() {
                     for op in &phi.operands {
-                        if let Value::Phi(p) = op {
-                            if scc_set.contains(p) {
-                                users.entry(*p).or_default().push(i);
-                            }
+                        if let Value::Phi(p) = op
+                            && scc_set.contains(p)
+                        {
+                            users.entry(*p).or_default().push(i);
                         }
                     }
                 }
@@ -485,10 +487,10 @@ impl SsaResolver {
                 for &pid in &scc {
                     let variable = self.phis[pid.0].variable;
                     let block = self.phis[pid.0].block;
-                    if let Some(block_defs) = self.current_def.get_mut(&variable) {
-                        if block_defs.get(&block) == Some(&Value::Phi(pid)) {
-                            block_defs.insert(block, replacement.clone());
-                        }
+                    if let Some(block_defs) = self.current_def.get_mut(&variable)
+                        && block_defs.get(&block) == Some(&Value::Phi(pid))
+                    {
+                        block_defs.insert(block, replacement.clone());
                     }
                     if let Some(user_indices) = users.get(&pid) {
                         for &ui in user_indices {
