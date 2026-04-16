@@ -214,9 +214,15 @@ where
                     }
                 };
                 let lang = code_graph_config::detect_language_from_path(path)?;
+                let t_parse = std::time::Instant::now();
                 let ast = lang.parse_ast(source_str);
                 let root = ast.root();
-                let result = fused_walk_file(&rules, &graph, &root, file_node, &rules.settings);
+                let parse_ns = t_parse.elapsed().as_nanos() as u64;
+                let t_walk = std::time::Instant::now();
+                let mut result = fused_walk_file(&rules, &graph, &root, file_node, &rules.settings);
+                let walk_ns = t_walk.elapsed().as_nanos() as u64;
+                result.parse_ns = parse_ns;
+                result.walk_ns = walk_ns;
                 pb2.inc(1);
                 Some(result)
             })
@@ -230,15 +236,25 @@ where
         let mut combined_stats = crate::linker::v2::ResolveStats::default();
         let mut total_edges = 0usize;
         let mut total_refs = 0usize;
+        let mut total_parse_ns = 0u64;
+        let mut total_walk_ns = 0u64;
 
         for result in phase2_results.into_iter().flatten() {
             total_edges += result.edges.len();
             total_refs += result.num_refs;
+            total_parse_ns += result.parse_ns;
+            total_walk_ns += result.walk_ns;
             combined_stats.merge(&result.stats);
             for (src, tgt, edge) in result.edges {
                 graph.graph.add_edge(src, tgt, edge);
             }
         }
+
+        eprintln!(
+            "[v2] Phase 2 breakdown: parse {:.2?}, walk+resolve {:.2?} (sum across threads)",
+            std::time::Duration::from_nanos(total_parse_ns),
+            std::time::Duration::from_nanos(total_walk_ns),
+        );
 
         report_rss("after Phase 2 (graph + edges + source bytes)");
 

@@ -28,6 +28,8 @@ pub struct FusedWalkResult {
     pub edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
     pub stats: ResolveStats,
     pub num_refs: usize,
+    pub parse_ns: u64,
+    pub walk_ns: u64,
 }
 
 /// Run Phase 2 on a single file: fused walk + inline resolve.
@@ -136,6 +138,8 @@ pub fn fused_walk_file(
         edges: walker.edges,
         stats: walker.stats,
         num_refs: walker.num_refs,
+        parse_ns: 0,
+        walk_ns: 0,
     }
 }
 
@@ -497,6 +501,18 @@ impl<'a> FusedFileWalker<'a> {
     // ── Inline reference resolution ─────────────────────────
 
     fn resolve_reference_inline(&mut self, name: &str, expression: Option<&[ExpressionStep]>) {
+        // Early skip for bare refs: if the name was never written to SSA
+        // and doesn't exist as any definition in the graph, no resolution
+        // path can produce a result. Skip the entire pipeline.
+        if expression.is_none()
+            && !self.ssa_names.contains(name)
+            && self.graph.lookup_name(name).is_empty()
+        {
+            self.stats.bare_refs += 1;
+            self.stats.bare_unresolved += 1;
+            return;
+        }
+
         let enclosing_def = self.innermost_def();
         let enclosing_scope_fqn = self.scope_stack.last().and_then(|e| e.enclosing_scope_fqn);
 
