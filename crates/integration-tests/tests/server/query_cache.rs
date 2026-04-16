@@ -113,8 +113,8 @@ async fn cached_executor_miss_then_hit() {
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
-    let mut compiled = compile(SIMPLE_TRAVERSAL, &ontology, &security_ctx)
-        .expect("compilation should succeed");
+    let mut compiled =
+        compile(SIMPLE_TRAVERSAL, &ontology, &security_ctx).expect("compilation should succeed");
     compiled.base.query_config.graph_query_cache_enabled = Some(true);
     compiled.base.query_config.graph_query_cache_ttl = Some(300);
     let compiled = Arc::new(compiled);
@@ -146,7 +146,10 @@ async fn cached_executor_miss_then_hit() {
     // Verify ClickHouse is empty
     let direct_batches = ch_ctx.query_parameterized(&compiled.base).await;
     let direct_rows: usize = direct_batches.iter().map(|b| b.num_rows()).sum();
-    assert_eq!(direct_rows, 0, "ClickHouse should be empty after truncation");
+    assert_eq!(
+        direct_rows, 0,
+        "ClickHouse should be empty after truncation"
+    );
 
     // CALL 2: cache hit -> stale data from KV
     let mut ctx2 = build_context(
@@ -194,10 +197,14 @@ async fn cached_executor_bypass_when_disabled() {
 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
-    let compiled = compile(SIMPLE_TRAVERSAL, &ontology, &security_ctx)
-        .expect("compilation should succeed");
+    let compiled =
+        compile(SIMPLE_TRAVERSAL, &ontology, &security_ctx).expect("compilation should succeed");
     assert!(
-        compiled.base.query_config.graph_query_cache_enabled.is_none()
+        compiled
+            .base
+            .query_config
+            .graph_query_cache_enabled
+            .is_none()
             || compiled.base.query_config.graph_query_cache_enabled == Some(false),
         "cache should be disabled by default"
     );
