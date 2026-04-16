@@ -81,12 +81,16 @@ impl CodeIndexingDeps {
     }
 
     pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
+        let config = CodeIndexingTaskHandlerConfig {
+            debounce_secs: 0,
+            ..Default::default()
+        };
         CodeIndexingTaskHandler::new(
             Arc::clone(&self.pipeline),
             Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
-            CodeIndexingTaskHandlerConfig::default(),
+            config,
         )
     }
 }

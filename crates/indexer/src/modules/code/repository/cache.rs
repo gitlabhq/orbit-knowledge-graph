@@ -99,10 +99,15 @@ impl RepositoryCache for LocalRepositoryCache {
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
         let branch_dir = self.branch_dir(project_id, branch);
         match tokio::fs::remove_dir_all(&branch_dir).await {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
+
+        let project_dir = self.base_dir.join(project_id.to_string());
+        let _ = tokio::fs::remove_dir(&project_dir).await;
+
+        Ok(())
     }
 }
 
@@ -212,7 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn separate_branches_are_independent() {
-        let (_dir, cache) = create_cache();
+        let (dir, cache) = create_cache();
         let archive = build_tar_gz(&[("file.rs", b"content")]);
 
         let path_main = cache
@@ -230,6 +235,19 @@ mod tests {
         cache.invalidate(42, "main").await.unwrap();
         assert!(!path_main.exists());
         assert!(path_dev.exists());
+
+        // Project directory still exists because "develop" branch is present
+        let project_dir = dir.path().join("42");
+        assert!(project_dir.exists());
+
+        cache.invalidate(42, "develop").await.unwrap();
+        assert!(!path_dev.exists());
+
+        // Project directory removed after all branches invalidated
+        assert!(
+            !project_dir.exists(),
+            "project directory should be removed when all branches are invalidated"
+        );
     }
 
     #[tokio::test]

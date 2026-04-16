@@ -473,10 +473,12 @@ mod tests {
         let envelope = TestContext::make_request(10, 123, "main");
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
-        // Handler should have attempted indexing (lock was acquired then released).
-        // The MockRepositoryService returns an empty archive so indexing may
-        // succeed or fail, but the point is it was NOT skipped by debounce.
-        // We verify by checking the lock was touched (acquired + released).
-        let _ = result;
+        // The MockRepositoryService returns an empty stream, so archive
+        // extraction fails. An error proves the handler attempted the work
+        // rather than skipping via debounce (which returns Ok(())).
+        assert!(
+            result.is_err(),
+            "expected error from empty mock archive, got Ok -- task may have been incorrectly skipped by debounce"
+        );
     }
 }
