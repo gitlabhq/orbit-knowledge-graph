@@ -9,9 +9,8 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::linker::v2::fused_walker::fused_walk_file;
-use crate::linker::v2::walker::HasRoot;
-use crate::linker::v2::{CodeGraph, HasRules};
+use crate::linker::v2::walker::fused_walk_file;
+use crate::linker::v2::{CodeGraph, HasRoot, HasRules};
 
 fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
