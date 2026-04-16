@@ -13,20 +13,23 @@ use rustc_hash::{FxHashMap, FxHasher};
 
 // ── Node + Edge types ───────────────────────────────────────────
 
-/// A node in the code graph.
+/// A node in the code graph. Lightweight labels — heavy data lives
+/// in dense vecs on `CodeGraph` (defs, imports) indexed by `DefId`/`ImportId`.
 #[derive(Debug, Clone)]
 pub enum GraphNode {
     Directory(CanonicalDirectory),
     File(CanonicalFile),
-    Definition {
-        file_path: Arc<str>,
-        def: CanonicalDefinition,
-    },
-    Import {
-        file_path: Arc<str>,
-        import: CanonicalImport,
-    },
+    Definition { file_path: Arc<str>, id: DefId },
+    Import { file_path: Arc<str>, id: ImportId },
 }
+
+/// Index into `CodeGraph::defs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DefId(pub u32);
+
+/// Index into `CodeGraph::imports`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ImportId(pub u32);
 
 impl GraphNode {
     pub fn path(&self) -> &str {
@@ -35,23 +38,6 @@ impl GraphNode {
             GraphNode::File(f) => &f.path,
             GraphNode::Definition { file_path, .. } => file_path,
             GraphNode::Import { file_path, .. } => file_path,
-        }
-    }
-
-    pub fn name(&self) -> &str {
-        match self {
-            GraphNode::Directory(d) => &d.name,
-            GraphNode::File(f) => &f.name,
-            GraphNode::Definition { def, .. } => &def.name,
-            GraphNode::Import { import, .. } => import.name.as_deref().unwrap_or("*"),
-        }
-    }
-
-    pub fn range(&self) -> Range {
-        match self {
-            GraphNode::Directory(_) | GraphNode::File(_) => Range::empty(),
-            GraphNode::Definition { def, .. } => def.range,
-            GraphNode::Import { import, .. } => import.range,
         }
     }
 
@@ -69,16 +55,16 @@ impl GraphNode {
         }
     }
 
-    pub fn as_definition(&self) -> Option<(&Arc<str>, &CanonicalDefinition)> {
+    pub fn def_id(&self) -> Option<DefId> {
         match self {
-            GraphNode::Definition { file_path, def } => Some((file_path, def)),
+            GraphNode::Definition { id, .. } => Some(*id),
             _ => None,
         }
     }
 
-    pub fn as_import(&self) -> Option<(&Arc<str>, &CanonicalImport)> {
+    pub fn import_id(&self) -> Option<ImportId> {
         match self {
-            GraphNode::Import { file_path, import } => Some((file_path, import)),
+            GraphNode::Import { id, .. } => Some(*id),
             _ => None,
         }
     }
@@ -112,6 +98,11 @@ impl GraphEdge {
 pub struct CodeGraph {
     pub graph: DiGraph<GraphNode, GraphEdge>,
 
+    /// Dense storage for definitions, indexed by `DefId`.
+    pub defs: Vec<CanonicalDefinition>,
+    /// Dense storage for imports, indexed by `ImportId`.
+    pub imports: Vec<CanonicalImport>,
+
     // Structural indexes
     pub dir_index: FxHashMap<String, NodeIndex>,
     pub file_index: FxHashMap<String, NodeIndex>,
@@ -139,6 +130,8 @@ impl CodeGraph {
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
+            defs: Vec::new(),
+            imports: Vec::new(),
             dir_index: FxHashMap::default(),
             file_index: FxHashMap::default(),
 
@@ -188,9 +181,11 @@ impl CodeGraph {
 
         let mut def_nodes = Vec::with_capacity(result.definitions.len());
         for def in result.definitions.iter() {
+            let id = DefId(self.defs.len() as u32);
+            self.defs.push(def.clone());
             let def_node = self.graph.add_node(GraphNode::Definition {
                 file_path: file_path.clone(),
-                def: def.clone(),
+                id,
             });
             def_nodes.push(def_node);
 
@@ -240,9 +235,11 @@ impl CodeGraph {
 
         let mut import_nodes = Vec::with_capacity(result.imports.len());
         for imp in &result.imports {
+            let id = ImportId(self.imports.len() as u32);
+            self.imports.push(imp.clone());
             let imp_node = self.graph.add_node(GraphNode::Import {
                 file_path: file_path.clone(),
-                import: imp.clone(),
+                id,
             });
             import_nodes.push(imp_node);
             self.graph.add_edge(
@@ -389,9 +386,10 @@ impl CodeGraph {
             .graph
             .neighbors_directed(file_node, petgraph::Direction::Outgoing)
         {
-            let Some((_, imp)) = self.graph[neighbor].as_import() else {
+            let Some(import_id) = self.graph[neighbor].import_id() else {
                 continue;
             };
+            let imp = &self.imports[import_id.0 as usize];
             if imp.wildcard {
                 continue;
             }
@@ -488,14 +486,14 @@ impl CodeGraph {
 
     pub fn def(&self, idx: NodeIndex) -> &CanonicalDefinition {
         match &self.graph[idx] {
-            GraphNode::Definition { def, .. } => def,
+            GraphNode::Definition { id, .. } => &self.defs[id.0 as usize],
             other => panic!("Expected Definition, got {other:?}"),
         }
     }
 
     pub fn import(&self, idx: NodeIndex) -> &CanonicalImport {
         match &self.graph[idx] {
-            GraphNode::Import { import, .. } => import,
+            GraphNode::Import { id, .. } => &self.imports[id.0 as usize],
             other => panic!("Expected Import, got {other:?}"),
         }
     }
@@ -521,15 +519,23 @@ impl CodeGraph {
     pub fn definitions(
         &self,
     ) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &CanonicalDefinition)> {
-        self.graph
-            .node_indices()
-            .filter_map(|idx| self.graph[idx].as_definition().map(|(p, d)| (idx, p, d)))
+        self.graph.node_indices().filter_map(|idx| {
+            if let GraphNode::Definition { file_path, id } = &self.graph[idx] {
+                Some((idx, file_path, &self.defs[id.0 as usize]))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn imports(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &CanonicalImport)> {
-        self.graph
-            .node_indices()
-            .filter_map(|idx| self.graph[idx].as_import().map(|(p, i)| (idx, p, i)))
+        self.graph.node_indices().filter_map(|idx| {
+            if let GraphNode::Import { file_path, id } = &self.graph[idx] {
+                Some((idx, file_path, &self.imports[id.0 as usize]))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn edges(&self) -> impl Iterator<Item = (&GraphNode, &GraphNode, &GraphEdge)> {
@@ -555,8 +561,8 @@ impl CodeGraph {
         let mut edges = Vec::new();
 
         for idx in self.graph.node_indices() {
-            if let GraphNode::Definition { def, .. } = &self.graph[idx]
-                && let Some(meta) = &def.metadata
+            if let GraphNode::Definition { id, .. } = &self.graph[idx]
+                && let Some(meta) = &self.defs[id.0 as usize].metadata
                 && !meta.super_types.is_empty()
             {
                 for super_name in &meta.super_types {
@@ -604,17 +610,21 @@ impl CodeGraph {
             let id = match &self.graph[idx] {
                 GraphNode::Directory(d) => compute_id(&[&pid, branch, "dir", &d.path]),
                 GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
-                GraphNode::Definition { file_path, def } => {
+                GraphNode::Definition { file_path, id } => {
+                    let def = &self.defs[id.0 as usize];
                     compute_id(&[&pid, branch, "def", file_path, &def.fqn.to_string()])
                 }
-                GraphNode::Import { file_path, import } => compute_id(&[
-                    &pid,
-                    branch,
-                    "import",
-                    file_path,
-                    &import.path,
-                    import.name.as_deref().unwrap_or("*"),
-                ]),
+                GraphNode::Import { file_path, id } => {
+                    let import = &self.imports[id.0 as usize];
+                    compute_id(&[
+                        &pid,
+                        branch,
+                        "import",
+                        file_path,
+                        &import.path,
+                        import.name.as_deref().unwrap_or("*"),
+                    ])
+                }
             };
             ids.insert(idx, id);
         }

@@ -111,7 +111,11 @@ fn scope_fqn_walk(
     let defs: Vec<_> = graph
         .graph
         .neighbors_directed(file_node, petgraph::Direction::Outgoing)
-        .filter_map(|idx| graph.graph[idx].as_definition().map(|(_, d)| d))
+        .filter_map(|idx| {
+            graph.graph[idx]
+                .def_id()
+                .map(|id| &graph.defs[id.0 as usize])
+        })
         .collect();
 
     for def in &defs {
@@ -155,7 +159,8 @@ fn wildcard_import(
         .graph
         .neighbors_directed(file_node, petgraph::Direction::Outgoing)
     {
-        if let Some((_, imp)) = graph.graph[neighbor].as_import()
+        if let Some(import_id) = graph.graph[neighbor].import_id()
+            && let imp = &graph.imports[import_id.0 as usize]
             && imp.wildcard
         {
             let candidate = format!("{}{}{}", imp.path, sep, name);
@@ -173,7 +178,8 @@ fn same_package(graph: &CodeGraph, file_node: NodeIndex, name: &str, sep: &str) 
         .graph
         .neighbors_directed(file_node, petgraph::Direction::Outgoing)
     {
-        if let Some((_, def)) = graph.graph[neighbor].as_definition()
+        if let Some(def_id) = graph.graph[neighbor].def_id()
+            && let def = &graph.defs[def_id.0 as usize]
             && def.is_top_level
         {
             let fqn_str = def.fqn.to_string();

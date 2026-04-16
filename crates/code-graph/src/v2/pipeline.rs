@@ -55,6 +55,21 @@ pub trait LanguagePipeline {
     ) -> Result<CodeGraph, Vec<PipelineError>>;
 }
 
+fn report_rss(label: &str) {
+    let pid = std::process::id();
+    if let Ok(output) = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "rss="])
+        .output()
+    {
+        if let Ok(rss) = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u64>()
+        {
+            eprintln!("[mem] {label}: {:.1} MB", rss as f64 / 1024.0);
+        }
+    }
+}
+
 /// Generic pipeline parameterized by parser `P` and rules `R`.
 ///
 /// Two-phase fused architecture:
@@ -82,6 +97,16 @@ where
         let t0 = std::time::Instant::now();
 
         eprintln!("[v2] {file_count} files, {num_threads} threads");
+
+        let total_source_bytes: usize = files.iter().map(|(_, s)| s.len()).sum();
+        let total_path_bytes: usize = files.iter().map(|(p, _)| p.len()).sum();
+        eprintln!(
+            "[mem] source bytes: {:.1} MB, path bytes: {:.1} MB, Vec overhead: {:.1} MB",
+            total_source_bytes as f64 / 1048576.0,
+            total_path_bytes as f64 / 1048576.0,
+            (file_count * (std::mem::size_of::<FileInput>())) as f64 / 1048576.0,
+        );
+        report_rss("before Phase 1");
 
         let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
 
@@ -135,6 +160,8 @@ where
             return Err(errors);
         }
 
+        report_rss("after Phase 1 (graph + source bytes)");
+
         // ── Finalize graph ──────────────────────────────────────
         let t1 = std::time::Instant::now();
         let mut graph = graph.into_inner().unwrap();
@@ -144,6 +171,28 @@ where
             errors.len()
         );
         eprintln!("[v2] graph finalize: {:.2?}", t1.elapsed());
+
+        let node_count = graph.graph.node_count();
+        let edge_count = graph.graph.edge_count();
+        eprintln!(
+            "[mem] graph: {} nodes × {} B + {} edges × {} B = {:.1} MB (estimated vec capacity)",
+            node_count,
+            std::mem::size_of::<petgraph::graph::Node<super::super::linker::v2::graph::GraphNode>>(
+            ),
+            edge_count,
+            std::mem::size_of::<petgraph::graph::Edge<super::super::linker::v2::graph::GraphEdge>>(
+            ),
+            (node_count
+                * std::mem::size_of::<
+                    petgraph::graph::Node<super::super::linker::v2::graph::GraphNode>,
+                >()
+                + edge_count
+                    * std::mem::size_of::<
+                        petgraph::graph::Edge<super::super::linker::v2::graph::GraphEdge>,
+                    >()) as f64
+                / 1048576.0,
+        );
+        report_rss("after finalize (graph + indexes + source bytes)");
 
         // ── Phase 2: re-parse + fused walk+resolve ──────────────
         let t2 = std::time::Instant::now();
@@ -190,6 +239,8 @@ where
                 graph.graph.add_edge(src, tgt, edge);
             }
         }
+
+        report_rss("after Phase 2 (graph + edges + source bytes)");
 
         eprintln!(
             "[v2] resolve: {total_refs} refs → {total_edges} edges in {:.2?}",
@@ -433,11 +484,23 @@ impl Pipeline {
         let mut merged = CodeGraph::new();
 
         for g in graphs {
+            // Offsets for remapping DefId/ImportId from source graph to merged
+            let def_offset = merged.defs.len() as u32;
+            let import_offset = merged.imports.len() as u32;
+            merged.defs.extend(g.defs);
+            merged.imports.extend(g.imports);
+
             // Map old node indices to new ones
             let mut index_map: FxHashMap<NodeIndex, NodeIndex> = FxHashMap::default();
 
             for old_idx in g.graph.node_indices() {
-                let node = g.graph[old_idx].clone();
+                let mut node = g.graph[old_idx].clone();
+                // Remap dense vec IDs
+                match &mut node {
+                    GraphNode::Definition { id, .. } => id.0 += def_offset,
+                    GraphNode::Import { id, .. } => id.0 += import_offset,
+                    _ => {}
+                }
                 let new_idx = merged.graph.add_node(node.clone());
                 index_map.insert(old_idx, new_idx);
 

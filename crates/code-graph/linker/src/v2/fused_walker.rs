@@ -63,14 +63,16 @@ pub fn fused_walk_file(
         .neighbors_directed(file_node, petgraph::Direction::Outgoing)
     {
         match &graph.graph[neighbor] {
-            GraphNode::Definition { def, .. } => {
+            GraphNode::Definition { id, .. } => {
+                let def = &graph.defs[id.0 as usize];
                 ssa.write_variable(&def.name, module_block, Value::Def(neighbor));
                 defs_by_byte.insert(
                     def.range.byte_offset.0,
                     (neighbor, def.kind.is_type_container()),
                 );
             }
-            GraphNode::Import { import, .. } => {
+            GraphNode::Import { id, .. } => {
+                let import = &graph.imports[id.0 as usize];
                 if !import.wildcard {
                     let name = import
                         .alias
@@ -340,12 +342,14 @@ impl<'a> FusedFileWalker<'a> {
             .graph
             .neighbors_directed(self.file_node, petgraph::Direction::Outgoing)
         {
-            if let GraphNode::Definition { def, .. } = &self.graph.graph[neighbor]
-                && def.name == class_name
-                && let Some(meta) = &def.metadata
-                && let Some(st) = meta.super_types.first()
-            {
-                return Some(st.clone());
+            if let GraphNode::Definition { id, .. } = &self.graph.graph[neighbor] {
+                let def = &self.graph.defs[id.0 as usize];
+                if def.name == class_name
+                    && let Some(meta) = &def.metadata
+                    && let Some(st) = meta.super_types.first()
+                {
+                    return Some(st.clone());
+                }
             }
         }
         None
