@@ -2512,3 +2512,47 @@ async fn graph_formatter_e2e() {
     // Mutating subtests need their own forked databases.
     run_subtests!(&ctx, traversal_shared_target_node, search_datetime_columns,);
 }
+
+// Schema-negative tests — no ClickHouse required. These hand-craft JSON values
+// and assert the schema validator rejects responses missing `format_version`
+// or carrying an invalid version string.
+
+#[test]
+fn schema_rejects_response_missing_format_version() {
+    let value = serde_json::json!({
+        "query_type": "search",
+        "nodes": [],
+        "edges": []
+    });
+    let errors: Vec<_> = RESPONSE_SCHEMA.iter_errors(&value).collect();
+    assert!(
+        !errors.is_empty(),
+        "schema must reject responses missing format_version"
+    );
+}
+
+#[test]
+fn schema_rejects_invalid_format_version_string() {
+    let value = serde_json::json!({
+        "format_version": "not-a-version",
+        "query_type": "search",
+        "nodes": [],
+        "edges": []
+    });
+    let errors: Vec<_> = RESPONSE_SCHEMA.iter_errors(&value).collect();
+    assert!(
+        !errors.is_empty(),
+        "schema must reject non-semver format_version"
+    );
+}
+
+#[test]
+fn schema_accepts_valid_format_version() {
+    let value = serde_json::json!({
+        "format_version": "1.0.0",
+        "query_type": "search",
+        "nodes": [],
+        "edges": []
+    });
+    assert_valid(&value);
+}

@@ -67,14 +67,23 @@ This already exists via `GET /api/v4/orbit/schema` / `GetGraphSchema` gRPC (see 
 
 Typed metadata goes in the proto envelope. The JSON payload is always `{ query_type, nodes, edges }` with an optional `columns` array for aggregation queries.
 
-Target proto shape (changes pending in !479; current proto uses `QueryMetadata` with `query_type`, `raw_query_strings`, `row_count` only):
+Proto shape (as shipped):
 
 ```protobuf
 message ExecuteQueryResult {
-  string result_json = 1;               // JSON: { query_type, nodes, edges, columns? }
-  string query_type = 2;               // "search", "traversal", etc.
-  repeated string raw_query_strings = 3; // SQL through pipeline stages
-  int32 row_count = 4;
+  oneof content {
+    string result_json = 1;     // format = RAW: structured JSON
+    string formatted_text = 2;  // format = LLM: compact text
+  }
+  QueryMetadata metadata = 3;
+}
+
+message QueryMetadata {
+  string query_type = 1;
+  repeated string raw_query_strings = 2; // compiled ClickHouse SQL(s), debug only
+  int32 row_count = 3;
+  string format_version = 4;             // semver, e.g. "1.0.0"; empty for stubs
+  FormatName format_name = 5;            // RAW | GOON
 }
 ```
 
@@ -279,6 +288,18 @@ The user can always switch.
 ### Implementation
 
 `GraphFormatter` in Rust replaces `RawRowFormatter` as the default. `GoonFormatter` handles LLM output (GOON/TOON format). `ResultContext` was extended with `EdgeMeta` to carry edge column metadata through the pipeline. A JSON Schema at `crates/gkg-server/schemas/query_response.json` is the shared contract between server and frontend. On the frontend side, `graph_transform.js` goes away entirely, replaced by ~30 lines of `buildGraphData()` that passes nodes and edges straight to Three.js.
+
+### Format versioning
+
+Every response includes a `format_version` field (semver string, e.g. `"1.0.0"`). Major bumps signal breaking shape changes, minor bumps signal new optional fields, patch bumps signal formatting bug fixes. The version is loaded at compile time from `config/RAW_OUTPUT_FORMAT_VERSION` and appears in:
+
+1. The JSON response body as a top-level `format_version` string (key order is alphabetical by default since `serde_json` uses `BTreeMap`).
+2. The proto `QueryMetadata.format_version` string + `format_name` enum (`FormatName::Raw` or `FormatName::Goon`).
+3. The JSON Schema `$id` (`schemas/query_response/v1`), whose `vN` suffix tracks the version's major component. CI asserts the two stay in sync.
+
+The `ResultFormatter` trait exposes `format_name() -> FormatName` and `format_version() -> Option<&Version>` so the gRPC service stamps version metadata without hardcoding. A stub formatter (like `GoonFormatter` today, which delegates to `GraphFormatter`) returns `None` from `format_version()` — the proto field then carries an empty string, making "stub" observable in telemetry. CI enforces that changes to formatter code or the response schema require a strictly greater semver bump (`scripts/check-response-schema-version.sh`).
+
+GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) will be added in a follow-up MR alongside the actual GOON encoding (ADR 009).
 
 ## Consequences
 

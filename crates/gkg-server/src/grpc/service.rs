@@ -15,16 +15,24 @@ use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_stats::GraphStatsService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
-    ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
-    GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
-    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
-    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
+    ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
+    GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
+    GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse, ListToolsRequest,
+    ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
+    SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
-use query_engine::formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
 use super::auth::extract_claims;
+
+fn proto_format_name(name: FormatName) -> ProtoFormatName {
+    match name {
+        FormatName::Raw => ProtoFormatName::Raw,
+        FormatName::Goon => ProtoFormatName::Goon,
+    }
+}
 
 pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
@@ -144,10 +152,12 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
                             use crate::proto::execute_query_result::Content;
 
-                            let formatted = if use_llm_format {
-                                GoonFormatter.format(&output)
+                            // Static dispatch: monomorphize per formatter type
+                            // instead of going through a vtable.
+                            let (formatted, format_version, format_name) = if use_llm_format {
+                                GoonFormatter.format_stamped(&output)
                             } else {
-                                GraphFormatter.format(&output)
+                                GraphFormatter.format_stamped(&output)
                             };
 
                             let content = if use_llm_format {
@@ -160,6 +170,8 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                                 query_type: output.query_type,
                                 raw_query_strings: output.raw_query_strings,
                                 row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                                format_version,
+                                format_name: proto_format_name(format_name).into(),
                             });
 
                             let _ = tx
