@@ -64,7 +64,7 @@ pub struct QueryMetadata {
     /// rows returned after redaction (and cursor slicing if applicable)
     #[prost(int32, tag = "3")]
     pub row_count: i32,
-    /// semver string, e.g. "1.0.0"; empty when FORMAT_NAME_UNSPECIFIED
+    /// semver string, e.g. "1.0.0"; empty for stub formatters
     #[prost(string, tag = "4")]
     pub format_version: ::prost::alloc::string::String,
     #[prost(enumeration = "FormatName", tag = "5")]
@@ -397,15 +397,12 @@ impl ResponseFormat {
 }
 /// Concrete encoding produced by the server. QueryMetadata carries this
 /// alongside format_version so consumers can route/parse without inspecting
-/// the payload body. UNSPECIFIED is reserved for stubs that do not yet
-/// emit a tagged format.
+/// the payload body. Mirrors ResponseFormat but in response context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum FormatName {
-    Unspecified = 0,
-    Raw = 1,
-    Goon = 2,
-    Toon = 3,
+    Raw = 0,
+    Llm = 1,
 }
 impl FormatName {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -414,19 +411,15 @@ impl FormatName {
     /// (if the ProtoBuf definition does not change) and safe for programmatic use.
     pub fn as_str_name(&self) -> &'static str {
         match self {
-            Self::Unspecified => "FORMAT_NAME_UNSPECIFIED",
             Self::Raw => "FORMAT_NAME_RAW",
-            Self::Goon => "FORMAT_NAME_GOON",
-            Self::Toon => "FORMAT_NAME_TOON",
+            Self::Llm => "FORMAT_NAME_LLM",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
-            "FORMAT_NAME_UNSPECIFIED" => Some(Self::Unspecified),
             "FORMAT_NAME_RAW" => Some(Self::Raw),
-            "FORMAT_NAME_GOON" => Some(Self::Goon),
-            "FORMAT_NAME_TOON" => Some(Self::Toon),
+            "FORMAT_NAME_LLM" => Some(Self::Llm),
             _ => None,
         }
     }

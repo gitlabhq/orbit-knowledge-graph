@@ -83,7 +83,7 @@ message QueryMetadata {
   repeated string raw_query_strings = 2; // compiled ClickHouse SQL(s), debug only
   int32 row_count = 3;
   string format_version = 4;             // semver, e.g. "1.0.0"; empty for stubs
-  FormatName format_name = 5;            // RAW | GOON | TOON | UNSPECIFIED
+  FormatName format_name = 5;            // RAW | LLM
 }
 ```
 
@@ -294,7 +294,7 @@ The user can always switch.
 Every response includes a `format_version` field (semver string, e.g. `"1.0.0"`). Major bumps signal breaking shape changes, minor bumps signal new optional fields, patch bumps signal formatting bug fixes. The version is loaded at compile time from `config/RAW_OUTPUT_FORMAT_VERSION` and appears in:
 
 1. The JSON response body as a top-level `format_version` string (key order is alphabetical by default since `serde_json` uses `BTreeMap`).
-2. The proto `QueryMetadata.format_version` string + `format_name` enum (`FormatName::Raw`/`Goon`/`Toon`/`Unspecified`).
+2. The proto `QueryMetadata.format_version` string + `format_name` enum (`FormatName::Raw` or `FormatName::Llm`).
 3. The JSON Schema `$id` (`schemas/query_response/v1`), whose `vN` suffix tracks the version's major component. CI asserts the two stay in sync.
 
 The `ResultFormatter` trait exposes `format_name() -> FormatName` and `format_version() -> Option<&Version>` so the gRPC service stamps version metadata without hardcoding. A stub formatter (like `GoonFormatter` today, which delegates to `GraphFormatter`) returns `None` from `format_version()` — the proto field then carries an empty string, making "stub" observable in telemetry. CI enforces that changes to formatter code or the response schema require a strictly greater semver bump (`scripts/check-response-schema-version.sh`).

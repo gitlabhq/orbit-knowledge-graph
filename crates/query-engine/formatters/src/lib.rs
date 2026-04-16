@@ -27,19 +27,15 @@ pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
 /// enum but lives here so the formatters crate stays proto-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatName {
-    Unspecified,
     Raw,
-    Goon,
-    Toon,
+    Llm,
 }
 
 impl FormatName {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Unspecified => "unspecified",
             Self::Raw => "raw",
-            Self::Goon => "goon",
-            Self::Toon => "toon",
+            Self::Llm => "llm",
         }
     }
 }

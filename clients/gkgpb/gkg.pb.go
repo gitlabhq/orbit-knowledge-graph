@@ -78,30 +78,23 @@ func (ResponseFormat) EnumDescriptor() ([]byte, []int) {
 
 // Concrete encoding produced by the server. QueryMetadata carries this
 // alongside format_version so consumers can route/parse without inspecting
-// the payload body. UNSPECIFIED is reserved for stubs that do not yet
-// emit a tagged format.
+// the payload body. Mirrors ResponseFormat but in response context.
 type FormatName int32
 
 const (
-	FormatName_FORMAT_NAME_UNSPECIFIED FormatName = 0
-	FormatName_FORMAT_NAME_RAW         FormatName = 1
-	FormatName_FORMAT_NAME_GOON        FormatName = 2
-	FormatName_FORMAT_NAME_TOON        FormatName = 3
+	FormatName_FORMAT_NAME_RAW FormatName = 0
+	FormatName_FORMAT_NAME_LLM FormatName = 1
 )
 
 // Enum value maps for FormatName.
 var (
 	FormatName_name = map[int32]string{
-		0: "FORMAT_NAME_UNSPECIFIED",
-		1: "FORMAT_NAME_RAW",
-		2: "FORMAT_NAME_GOON",
-		3: "FORMAT_NAME_TOON",
+		0: "FORMAT_NAME_RAW",
+		1: "FORMAT_NAME_LLM",
 	}
 	FormatName_value = map[string]int32{
-		"FORMAT_NAME_UNSPECIFIED": 0,
-		"FORMAT_NAME_RAW":         1,
-		"FORMAT_NAME_GOON":        2,
-		"FORMAT_NAME_TOON":        3,
+		"FORMAT_NAME_RAW": 0,
+		"FORMAT_NAME_LLM": 1,
 	}
 )
 
@@ -501,7 +494,7 @@ type QueryMetadata struct {
 	QueryType       string                 `protobuf:"bytes,1,opt,name=query_type,json=queryType,proto3" json:"query_type,omitempty"`                     // e.g. "traversal", "aggregation", "search"
 	RawQueryStrings []string               `protobuf:"bytes,2,rep,name=raw_query_strings,json=rawQueryStrings,proto3" json:"raw_query_strings,omitempty"` // compiled ClickHouse SQL(s) for debugging
 	RowCount        int32                  `protobuf:"varint,3,opt,name=row_count,json=rowCount,proto3" json:"row_count,omitempty"`                       // rows returned after redaction (and cursor slicing if applicable)
-	FormatVersion   string                 `protobuf:"bytes,4,opt,name=format_version,json=formatVersion,proto3" json:"format_version,omitempty"`         // semver string, e.g. "1.0.0"; empty when FORMAT_NAME_UNSPECIFIED
+	FormatVersion   string                 `protobuf:"bytes,4,opt,name=format_version,json=formatVersion,proto3" json:"format_version,omitempty"`         // semver string, e.g. "1.0.0"; empty for stub formatters
 	FormatName      FormatName             `protobuf:"varint,5,opt,name=format_name,json=formatName,proto3,enum=gkg.v1.FormatName" json:"format_name,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -569,7 +562,7 @@ func (x *QueryMetadata) GetFormatName() FormatName {
 	if x != nil {
 		return x.FormatName
 	}
-	return FormatName_FORMAT_NAME_UNSPECIFIED
+	return FormatName_FORMAT_NAME_RAW
 }
 
 // Server-sent error when query compilation or execution fails.
@@ -2351,13 +2344,11 @@ const file_gkg_proto_rawDesc = "" +
 	"\x05count\x18\x02 \x01(\x03R\x05count*B\n" +
 	"\x0eResponseFormat\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_RAW\x10\x00\x12\x17\n" +
-	"\x13RESPONSE_FORMAT_LLM\x10\x01*j\n" +
+	"\x13RESPONSE_FORMAT_LLM\x10\x01*6\n" +
 	"\n" +
-	"FormatName\x12\x1b\n" +
-	"\x17FORMAT_NAME_UNSPECIFIED\x10\x00\x12\x13\n" +
-	"\x0fFORMAT_NAME_RAW\x10\x01\x12\x14\n" +
-	"\x10FORMAT_NAME_GOON\x10\x02\x12\x14\n" +
-	"\x10FORMAT_NAME_TOON\x10\x03* \n" +
+	"FormatName\x12\x13\n" +
+	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x13\n" +
+	"\x0fFORMAT_NAME_LLM\x10\x01* \n" +
 	"\tQueryType\x12\x13\n" +
 	"\x0fQUERY_TYPE_JSON\x10\x00*\x86\x01\n" +
 	"\rClusterStatus\x12\x1e\n" +

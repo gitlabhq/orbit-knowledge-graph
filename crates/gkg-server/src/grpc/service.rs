@@ -29,10 +29,8 @@ use super::auth::extract_claims;
 
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
-        FormatName::Unspecified => ProtoFormatName::Unspecified,
         FormatName::Raw => ProtoFormatName::Raw,
-        FormatName::Goon => ProtoFormatName::Goon,
-        FormatName::Toon => ProtoFormatName::Toon,
+        FormatName::Llm => ProtoFormatName::Llm,
     }
 }
 
