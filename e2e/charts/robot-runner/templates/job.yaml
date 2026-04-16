@@ -17,15 +17,21 @@ spec:
           pip install --quiet --disable-pip-version-check --root-user-action=ignore \
             robotframework=={{ .Values.robotframework.version }} \
             robotframework-requests=={{ .Values.robotframework.requestsVersion }} &&
-          robot --outputdir /tmp/results --consolecolors off --exitonfailure /tests/
+          robot --outputdir /tmp/results --xunit /tmp/results/xunit.xml \
+            --consolecolors off --exitonfailure /tests/
+          RC=$?
+          echo "---XUNIT_REPORT_START---"
+          cat /tmp/results/xunit.xml 2>/dev/null
+          echo "---XUNIT_REPORT_END---"
+          exit $RC
         env:
         - name: GITLAB_URL
           value: "http://gitlab-webservice-default.{{ .Values.namespaces.gitlab }}.svc.cluster.local:8181"
-        - name: GITLAB_PAT
+        - name: GITLAB_ROOT_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.credentialsSecret }}
-              key: gitlab-pat
+              name: {{ .Values.rootCredentialsSecret }}
+              key: password
         volumeMounts:
         - name: tests
           mountPath: /tests

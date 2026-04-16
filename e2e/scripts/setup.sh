@@ -13,8 +13,10 @@ E2E_CH_GRAPH_PASS=$(openssl rand -base64 24)
 E2E_CH_GRAPH_READ_PASS=$(openssl rand -base64 24)
 E2E_PG_SIPHON_PASS=$(openssl rand -base64 24)
 E2E_CH_GITLAB_PASS=$(openssl rand -base64 24)
+E2E_GITLAB_ROOT_PASS=$(openssl rand -base64 24)
 export E2E_JWT_KEY E2E_CH_DEFAULT_PASS E2E_CH_SIPHON_PASS E2E_CH_DATALAKE_PASS
 export E2E_CH_GRAPH_PASS E2E_CH_GRAPH_READ_PASS E2E_PG_SIPHON_PASS E2E_CH_GITLAB_PASS
+export E2E_GITLAB_ROOT_PASS
 
 # Root CA for gRPC TLS (pre-existing cluster resource from cert-manager)
 log "Extracting root CA from cert-manager"
@@ -25,9 +27,6 @@ export E2E_ROOT_CA_B64=$($KC get secret root-ca-secret -n cert-manager \
 log "Deploying via helmfile"
 cd "$E2E_DIR"
 helmfile --file helmfile.yaml.gotmpl sync
-
-# Seed GitLab with test data (requires running GitLab instance)
-source "$E2E_DIR/scripts/phases/07-seed-toolbox.sh"
 
 log "Setup complete (SHA: $E2E_SHA)"
 log "Run: E2E_SHA=$E2E_SHA scripts/test.sh"

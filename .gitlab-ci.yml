@@ -973,7 +973,9 @@ e2e:
   after_script:
     - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}" -y
   artifacts:
-    when: on_failure
+    when: always
     paths:
       - e2e/diagnostics/
+    reports:
+      junit: e2e/diagnostics/junit.xml
     expire_in: 3 days

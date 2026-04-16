@@ -5,7 +5,6 @@ Library    String
 
 *** Variables ***
 ${GITLAB_URL}     %{GITLAB_URL}
-${GITLAB_PAT}     %{GITLAB_PAT}
 
 *** Keywords ***
 GitLab Auth Headers
@@ -76,17 +75,18 @@ Namespace Is Indexed After Enablement
     ...    Verify Node Indexed    Group    ${group_id}    ${name}
 
 Project Is Indexed Under Enabled Namespace
-    [Documentation]    Create group + project, enable KG, wait, verify both via Orbit API
+    [Documentation]    Create group, enable KG, then create project under it, verify both via Orbit API
     ${suffix}=    Random Suffix
     ${name}=    Set Variable    e2e-prj-${suffix}
     ${group}=    Create Group    ${name}    ${name}
     ${group_id}=    Set Variable    ${group["id"]}
 
     Enable Knowledge Graph    ${group_id}
+    Wait Until Keyword Succeeds    120s    3s
+    ...    Verify Node Indexed    Group    ${group_id}    ${name}
+
     ${project}=    Create Project    proj-${suffix}    ${group_id}
     ${project_id}=    Set Variable    ${project["id"]}
 
-    Wait Until Keyword Succeeds    120s    3s
-    ...    Verify Node Indexed    Group    ${group_id}    ${name}
-    Wait Until Keyword Succeeds    120s    3s
+    Wait Until Keyword Succeeds    60s    3s
     ...    Verify Node Indexed    Project    ${project_id}    proj-${suffix}
