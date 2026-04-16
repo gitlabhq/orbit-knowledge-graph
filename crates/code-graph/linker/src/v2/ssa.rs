@@ -37,6 +37,9 @@ pub enum Value {
     Alias(Intern<str>),
     /// Dead end — parameter, literal, or otherwise unresolvable.
     Opaque,
+    /// Internal: cycle-detection sentinel for the marker algorithm.
+    /// Distinct from Opaque so genuine dead-end blocks aren't misidentified as cycles.
+    Marker,
     /// Internal: a phi node (will be resolved to concrete values).
     Phi(PhiId),
 }
@@ -250,9 +253,10 @@ impl SsaResolver {
     /// Marker algorithm: mark block, collect values from predecessors,
     /// only create a phi if values differ or a cycle was detected.
     fn read_variable_marker(&mut self, variable: VarName, block: BlockId) -> Value {
-        // Place a marker: write Opaque as sentinel so recursive lookups
-        // that reach this block again will find the marker and stop.
-        self.write_variable_interned(variable, block, Value::Opaque);
+        // Place a marker sentinel so recursive lookups that reach this
+        // block again will detect the cycle. Distinct from Opaque so
+        // genuine dead-end values aren't misidentified as cycles.
+        self.write_variable_interned(variable, block, Value::Marker);
 
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
         let mut same: Option<Value> = None;
@@ -260,8 +264,7 @@ impl SsaResolver {
 
         for &pred in &preds {
             let pred_val = self.read_variable_internal(variable, pred);
-            // Ignore the marker sentinel (indicates a cycle back to this block)
-            if pred_val == Value::Opaque {
+            if pred_val == Value::Marker {
                 need_phi = true;
                 continue;
             }
@@ -465,8 +468,20 @@ impl SsaResolver {
             }
 
             if outer_ops.len() == 1 {
-                // All phis in the SCC produce the same value — collapse
+                // All phis in the SCC produce the same value — collapse.
+                // Build reverse map first to avoid O(|SCC| × |total_phis|).
                 let replacement = outer_ops.into_iter().next().unwrap();
+                let mut users: FxHashMap<PhiId, Vec<usize>> = FxHashMap::default();
+                for (i, phi) in self.phis.iter().enumerate() {
+                    for op in &phi.operands {
+                        if let Value::Phi(p) = op {
+                            if scc_set.contains(p) {
+                                users.entry(*p).or_default().push(i);
+                            }
+                        }
+                    }
+                }
+
                 for &pid in &scc {
                     let variable = self.phis[pid.0].variable;
                     let block = self.phis[pid.0].block;
@@ -475,11 +490,12 @@ impl SsaResolver {
                             block_defs.insert(block, replacement.clone());
                         }
                     }
-                    // Replace in all other phis' operands
-                    for i in 0..self.phis.len() {
-                        for op in &mut self.phis[i].operands {
-                            if *op == Value::Phi(pid) {
-                                *op = replacement.clone();
+                    if let Some(user_indices) = users.get(&pid) {
+                        for &ui in user_indices {
+                            for op in &mut self.phis[ui].operands {
+                                if *op == Value::Phi(pid) {
+                                    *op = replacement.clone();
+                                }
                             }
                         }
                     }
@@ -521,7 +537,7 @@ impl SsaResolver {
                     self.resolve_value_recursive(op, out, visited);
                 }
             }
-            Value::Opaque => {} // don't include opaque in results
+            Value::Opaque | Value::Marker => {} // don't include in results
             other => out.push(other.clone()),
         }
     }
