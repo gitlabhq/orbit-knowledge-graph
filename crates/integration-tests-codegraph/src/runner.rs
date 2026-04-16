@@ -36,10 +36,10 @@ pub async fn run_yaml_suite(yaml: &str) {
     for graph in &result.graphs {
         let graph_datasets =
             to_lance_datasets(graph, &ctx).expect("Failed to convert graph to datasets");
-        // NOTE: extend overwrites duplicate keys. Fine for single-language tests.
-        // Multi-language tests would need RecordBatch concat per table name.
         datasets.extend(graph_datasets);
     }
+    // Custom pipelines emit RecordBatches (arrow 58) — skip for now,
+    // test those via dedicated integration tests.
     let config = make_graph_config().expect("Failed to build graph config");
 
     let failures = run_suite(&suite, &datasets, &config).await;

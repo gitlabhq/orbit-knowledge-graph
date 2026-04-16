@@ -40,18 +40,29 @@ use crate::v2::langs::ruby::{RubyDsl, RubyRules};
 /// Input to a language pipeline: file path (source read on demand).
 pub type FileInput = String;
 
+/// Output from a language pipeline.
+///
+/// - **Graph**: the standard `CodeGraph` output (generic pipelines).
+/// - **Batches**: raw Arrow `RecordBatch`es keyed by table name (custom
+///   pipelines that bypass `CodeGraph` entirely).
+pub enum PipelineOutput {
+    Graph(CodeGraph),
+    Batches(Vec<(String, arrow::record_batch::RecordBatch)>),
+}
+
 /// Trait for language-specific graph production.
 ///
 /// Two strategies:
 /// - **Generic**: `GenericPipeline<P, R>` for languages using the standard
 ///   parse+walk → resolve → graph flow.
 /// - **Custom**: implement directly for languages that need full control
-///   over parsing and linking (e.g. Ruby).
+///   over parsing and linking. Custom pipelines can emit `RecordBatch`es
+///   directly without going through `CodeGraph`.
 pub trait LanguagePipeline {
     fn process_files(
-        files: Vec<FileInput>,
+        files: &[FileInput],
         root_path: &str,
-    ) -> Result<CodeGraph, Vec<PipelineError>>;
+    ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
 fn report_rss(label: &str) {
@@ -84,9 +95,9 @@ where
     R: HasRules + Send + Sync,
 {
     fn process_files(
-        files: Vec<FileInput>,
+        files: &[FileInput],
         root_path: &str,
-    ) -> Result<CodeGraph, Vec<PipelineError>> {
+    ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let parser = P::default();
         let rules = R::rules();
         let file_count = files.len();
@@ -287,7 +298,7 @@ where
         );
         combined_stats.print();
 
-        Ok(graph)
+        Ok(PipelineOutput::Graph(graph))
     }
 }
 
@@ -302,9 +313,9 @@ macro_rules! register_v2_pipelines {
     ($( $variant:ident => $pipeline:ty ),+ $(,)?) => {
         fn dispatch_language(
             language: Language,
-            files: Vec<FileInput>,
+            files: &[FileInput],
             root_path: &str,
-        ) -> Option<Result<CodeGraph, Vec<PipelineError>>> {
+        ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             Some(match language {
                 $(Language::$variant => <$pipeline>::process_files(files, root_path),)+
                 _ => return None,
@@ -365,6 +376,7 @@ impl Default for PipelineConfig {
 
 pub struct PipelineResult {
     pub graphs: Vec<CodeGraph>,
+    pub batches: Vec<(String, arrow::record_batch::RecordBatch)>,
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
 }
@@ -411,17 +423,18 @@ impl Pipeline {
 
         // 2. Process each language through its pipeline
         let mut all_graphs: Vec<CodeGraph> = Vec::new();
+        let mut all_batches: Vec<(String, arrow::record_batch::RecordBatch)> = Vec::new();
         let mut all_errors: Vec<PipelineError> = Vec::new();
         let mut files_parsed = 0usize;
         let mut files_skipped = 0usize;
 
-        for (language, files) in files_by_language {
+        for (language, files) in &files_by_language {
             let file_count = files.len();
             eprintln!("[v2] processing {language}: {file_count} files");
             let t_lang = std::time::Instant::now();
 
-            match dispatch_language(language, files, &root_str) {
-                Some(Ok(graph)) => {
+            match dispatch_language(*language, files, &root_str) {
+                Some(Ok(PipelineOutput::Graph(graph))) => {
                     eprintln!(
                         "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
                         t_lang.elapsed(),
@@ -430,6 +443,17 @@ impl Pipeline {
                     );
                     files_parsed += file_count;
                     all_graphs.push(graph);
+                }
+                Some(Ok(PipelineOutput::Batches(batches))) => {
+                    let row_count: usize = batches.iter().map(|(_, b)| b.num_rows()).sum();
+                    eprintln!(
+                        "[v2] {language}: done in {:.2?} ({} batches, {} total rows)",
+                        t_lang.elapsed(),
+                        batches.len(),
+                        row_count,
+                    );
+                    files_parsed += file_count;
+                    all_batches.extend(batches);
                 }
                 Some(Err(errors)) => {
                     eprintln!("[v2] {language}: failed with {} errors", errors.len());
@@ -450,6 +474,7 @@ impl Pipeline {
 
         PipelineResult {
             graphs: all_graphs,
+            batches: all_batches,
             stats: PipelineStats {
                 files_parsed,
                 files_skipped,

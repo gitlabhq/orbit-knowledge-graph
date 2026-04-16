@@ -2105,6 +2105,7 @@ dependencies = [
 name = "code-graph"
 version = "0.1.0"
 dependencies = [
+ "arrow 58.1.0",
  "code-graph-config",
  "code-graph-linker",
  "code-graph-types",
@@ -2114,6 +2115,7 @@ dependencies = [
  "parser-core",
  "petgraph 0.8.3",
  "rayon",
+ "ruby-prism",
  "rustc-hash",
  "smallvec",
  "tempfile",
@@ -5860,6 +5862,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow 56.2.0",
+ "arrow 58.1.0",
  "code-graph",
  "code-graph-linker",
  "globset",
