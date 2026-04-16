@@ -64,6 +64,11 @@ pub struct QueryMetadata {
     /// rows returned after redaction (and cursor slicing if applicable)
     #[prost(int32, tag = "3")]
     pub row_count: i32,
+    /// semver string, e.g. "1.0.0"; empty for stub formatters
+    #[prost(string, tag = "4")]
+    pub format_version: ::prost::alloc::string::String,
+    #[prost(enumeration = "FormatName", tag = "5")]
+    pub format_name: i32,
 }
 /// Server-sent error when query compilation or execution fails.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -386,6 +391,35 @@ impl ResponseFormat {
         match value {
             "RESPONSE_FORMAT_RAW" => Some(Self::Raw),
             "RESPONSE_FORMAT_LLM" => Some(Self::Llm),
+            _ => None,
+        }
+    }
+}
+/// Concrete encoding produced by the server. QueryMetadata carries this
+/// alongside format_version so consumers can route/parse without inspecting
+/// the payload body. Mirrors ResponseFormat but in response context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum FormatName {
+    Raw = 0,
+    Goon = 1,
+}
+impl FormatName {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Raw => "FORMAT_NAME_RAW",
+            Self::Goon => "FORMAT_NAME_GOON",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "FORMAT_NAME_RAW" => Some(Self::Raw),
+            "FORMAT_NAME_GOON" => Some(Self::Goon),
             _ => None,
         }
     }

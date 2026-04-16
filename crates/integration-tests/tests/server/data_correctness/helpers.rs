@@ -117,8 +117,12 @@ pub(super) async fn run_query_with_security(
 
     let value = GraphFormatter.format(&pipeline_output);
     assert_valid(&value);
-    let response =
+    let response: query_engine::formatters::GraphResponse =
         serde_json::from_value(value).expect("response should deserialize to GraphResponse");
+    assert!(
+        !response.format_version.is_empty(),
+        "every response must carry a non-empty format_version"
+    );
     ResponseView::for_query(&compiled.input, response)
 }
 

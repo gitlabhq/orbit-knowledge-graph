@@ -784,6 +784,7 @@ pub(crate) mod tests {
 
     pub(crate) fn sample_response() -> GraphResponse {
         GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "traversal".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
@@ -803,6 +804,7 @@ pub(crate) mod tests {
 
     pub(crate) fn sample_search_response() -> GraphResponse {
         GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "search".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
@@ -816,6 +818,7 @@ pub(crate) mod tests {
 
     pub(crate) fn sample_aggregation_response() -> GraphResponse {
         GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "aggregation".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
@@ -829,6 +832,7 @@ pub(crate) mod tests {
 
     pub(crate) fn sample_neighbors_response() -> GraphResponse {
         GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "neighbors".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
@@ -979,6 +983,7 @@ pub(crate) mod tests {
     #[test]
     fn path_ids_returns_distinct_ids() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "path_finding".to_string(),
             nodes: vec![
                 make_node("User", 1, &[]),
@@ -1001,6 +1006,7 @@ pub(crate) mod tests {
     #[test]
     fn path_returns_edges_sorted_by_step() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "path_finding".to_string(),
             nodes: vec![
                 make_node("User", 1, &[]),
@@ -1133,6 +1139,7 @@ pub(crate) mod tests {
     #[should_panic(expected = "non-existent target node")]
     fn assert_referential_integrity_panics_for_dangling_edge() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "traversal".to_string(),
             nodes: vec![make_node("User", 1, &[])],
             edges: vec![make_edge("User", 1, "Group", 999, "MEMBER_OF")],
@@ -1243,6 +1250,7 @@ pub(crate) mod tests {
     #[test]
     fn empty_response_returns_zero_counts_and_empty_collections() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "search".to_string(),
             nodes: vec![],
             edges: vec![],
@@ -1267,6 +1275,7 @@ mod edge_coverage_tests {
 
     fn response_with_two_edge_types() -> GraphResponse {
         GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "neighbors".to_string(),
             nodes: vec![
                 make_node("User", 1, &[]),
@@ -1334,6 +1343,7 @@ mod edge_coverage_tests {
     #[test]
     fn assert_all_edge_types_covered_empty_response_passes() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "search".to_string(),
             nodes: vec![],
             edges: vec![],
@@ -1347,6 +1357,7 @@ mod edge_coverage_tests {
     #[test]
     fn assert_all_edge_types_covered_single_type_passes() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "traversal".to_string(),
             nodes: vec![make_node("User", 1, &[]), make_node("Group", 100, &[])],
             edges: vec![make_edge("User", 1, "Group", 100, "MEMBER_OF")],
@@ -1361,6 +1372,7 @@ mod edge_coverage_tests {
     #[test]
     fn assert_all_edge_types_covered_mixed_assertion_methods() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "neighbors".to_string(),
             nodes: vec![
                 make_node("User", 1, &[]),

@@ -14,6 +14,12 @@ materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates prop
 
 ## Schema Version Tracking
 
+This file covers ClickHouse DDL versioning only. The query **response format** is
+versioned separately as a semver in `config/RAW_OUTPUT_FORMAT_VERSION` and
+enforced by `scripts/check-response-schema-version.sh` alongside
+`scripts/check-schema-version.sh`. See [ADR 004](decisions/004_unified_response_schema.md)
+for the response format contract.
+
 ### `config/SCHEMA_VERSION`
 
 A plain text file at `config/SCHEMA_VERSION` holds the current schema version as a `u32` integer.

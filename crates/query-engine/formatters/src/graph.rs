@@ -10,7 +10,9 @@ use serde_json::Value;
 use shared::PipelineOutput;
 use types::{QueryResult, QueryResultRow};
 
-use super::{ResultFormatter, column_value_to_json};
+use semver::Version;
+
+use super::{FormatName, ResultFormatter, column_value_to_json};
 
 /// Keys that collide with `GraphNode`'s fixed struct fields under
 /// `#[serde(flatten)]`. If an ontology property strips to one of
@@ -24,6 +26,7 @@ fn is_reserved_node_key(key: &str) -> bool {
 #[derive(Debug, Serialize)]
 #[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphResponse {
+    pub format_version: String,
     pub query_type: String,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
@@ -86,8 +89,20 @@ type EdgeKey = (String, i64, String, i64, String, Option<i64>);
 pub struct GraphFormatter;
 
 impl ResultFormatter for GraphFormatter {
+    fn format_name(&self) -> FormatName {
+        FormatName::Raw
+    }
+
+    fn format_version(&self) -> Option<&Version> {
+        Some(&super::RAW_OUTPUT_FORMAT_VERSION)
+    }
+
     fn format(&self, output: &PipelineOutput) -> Value {
-        serde_json::to_value(self.build_response(output)).unwrap_or(Value::Null)
+        // GraphResponse holds only strings, primitives, and Values that
+        // already came from `column_value_to_json` (which filters non-finite
+        // floats). Serialization is infallible.
+        serde_json::to_value(self.build_response(output))
+            .expect("GraphResponse serialization is infallible")
     }
 }
 
@@ -157,6 +172,7 @@ impl GraphFormatter {
         });
 
         GraphResponse {
+            format_version: super::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type,
             nodes: node_map.into_values().collect(),
             edges,
@@ -569,6 +585,40 @@ mod tests {
         assert_eq!(response.nodes.len(), 2);
         assert!(response.edges.is_empty());
         assert!(response.columns.is_none(), "search should not have columns");
+    }
+
+    #[test]
+    fn format_name_is_raw() {
+        assert_eq!(GraphFormatter.format_name(), FormatName::Raw);
+    }
+
+    #[test]
+    fn format_version_matches_config_const() {
+        let version = GraphFormatter
+            .format_version()
+            .expect("GraphFormatter must have a version");
+        assert_eq!(version, &*super::super::RAW_OUTPUT_FORMAT_VERSION);
+    }
+
+    #[test]
+    fn build_response_populates_format_version_from_const() {
+        let output = make_search_output();
+        let response = GraphFormatter.build_response(&output);
+        assert_eq!(
+            response.format_version,
+            super::super::RAW_OUTPUT_FORMAT_VERSION.to_string()
+        );
+    }
+
+    #[test]
+    fn serialized_response_contains_format_version_field() {
+        let output = make_search_output();
+        let value = GraphFormatter.format(&output);
+        let version = value
+            .get("format_version")
+            .and_then(|v| v.as_str())
+            .expect("serialized JSON must include a string format_version");
+        semver::Version::parse(version).expect("format_version must be valid semver");
     }
 
     #[test]
