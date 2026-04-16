@@ -1,18 +1,38 @@
-//! Centralized linker state with collision-safe verified lookups.
+//! Centralized linker state with collision-safe verified lookups and
+//! arena-backed string storage.
+//!
+//! ## Verified lookups
 //!
 //! All hash-keyed index maps are wrapped in [`VerifiedMap`] / [`NestedMap`]
 //! which force callers to provide the original string key and a verifier
 //! function. There is no API to get raw unverified results — the collision
 //! bug class is structurally impossible.
 //!
+//! ## Arena allocation
+//!
+//! Two arena scopes eliminate per-string heap allocation and Drop overhead:
+//!
+//! - **[`GraphArena`]** (`'arena`): per-language, lives as long as the graph.
+//!   Holds all definition names, FQN strings, import paths, metadata strings.
+//!   Allocated during Phase 1 under the Mutex, read-only in Phase 2.
+//!
+//! - **[`FileArena`]** (`'file`): per-file, thread-local. Holds all scratch
+//!   strings for walker caches, scope names, constructed FQNs. Created at
+//!   Phase 2 file start, dropped wholesale when `FusedWalkResult` is returned.
+//!   Output (`Vec<(NodeIndex, NodeIndex, GraphEdge)>`) contains no arena refs,
+//!   so `'file` never escapes the walk.
+//!
 //! This module is designed to be adopted incrementally: existing code in
 //! `graph.rs` and `walker.rs` can migrate to these types one map at a time.
 
 use std::hash::{Hash, Hasher};
 
+use bumpalo::Bump;
 use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
+
+use bumpalo::collections::String as BumpString;
 
 // ── Hash key ────────────────────────────────────────────────────
 
@@ -266,6 +286,145 @@ impl Default for GraphIndexes {
     }
 }
 
+// ── Arenas ──────────────────────────────────────────────────────
+
+/// Per-language arena for graph-lifetime strings.
+///
+/// Wraps a [`bumpalo::Bump`] allocator. All strings allocated here live
+/// as long as the `CodeGraph` that references them. Allocated during Phase 1
+/// (under Mutex), read-only during Phase 2.
+///
+/// # What goes here
+///
+/// - `CanonicalDefinition.name` → `&'arena str`
+/// - `CanonicalDefinition.fqn` parts → `&'arena str`
+/// - `CanonicalImport.path`, `.name`, `.alias` → `&'arena str`
+/// - `DefinitionMetadata.super_types`, `.return_type`, `.type_annotation` → `&'arena str`
+/// - Directory/file path strings in `GraphNode` variants
+///
+/// # Lifecycle
+///
+/// ```text
+/// let arena = GraphArena::new();           // pipeline start
+/// let graph = LinkerGraph::new(&arena);    // graph borrows 'arena
+/// // Phase 1: arena.alloc_str() under Mutex
+/// // Phase 2: &arena.0 is Send+Sync, read-only
+/// // pipeline end: drop graph, then drop arena
+/// ```
+pub struct GraphArena(Bump);
+
+impl GraphArena {
+    pub fn new() -> Self {
+        Self(Bump::new())
+    }
+
+    /// Allocate with a capacity hint (bytes). Reduces early reallocations
+    /// for large repos. Rule of thumb: ~50 bytes per file for names/paths.
+    pub fn with_capacity(bytes: usize) -> Self {
+        Self(Bump::with_capacity(bytes))
+    }
+
+    /// Copy a string into the arena, returning a reference that lives as
+    /// long as the arena.
+    #[inline]
+    pub fn alloc_str(&self, s: &str) -> &str {
+        self.0.alloc_str(s)
+    }
+
+    /// Allocate a string by formatting into the arena. Avoids a temporary
+    /// `String` allocation for constructed FQNs like `"{parent}.{name}"`.
+    pub fn alloc_fmt(&self, args: std::fmt::Arguments<'_>) -> &str {
+        use std::fmt::Write;
+        let mut w = BumpString::new_in(&self.0);
+        w.write_fmt(args).expect("fmt into bump");
+        w.into_bump_str()
+    }
+
+    /// Total bytes allocated by this arena (including waste from alignment).
+    pub fn allocated_bytes(&self) -> usize {
+        self.0.allocated_bytes()
+    }
+}
+
+impl Default for GraphArena {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Per-file arena for walker scratch strings.
+///
+/// Wraps a [`bumpalo::Bump`] allocator. Thread-local, created at Phase 2
+/// file start, dropped wholesale when the walk completes. Output from the
+/// walk (`Vec<(NodeIndex, NodeIndex, GraphEdge)>`) contains no arena refs,
+/// so `'file` never escapes.
+///
+/// # What goes here
+///
+/// - `import_name_map` keys and values → `&'file str`
+/// - `import_map` keys → `&'file str`
+/// - `nested_cache` keys → `&'file str`
+/// - `scope_stack[].name` → `&'file str`
+/// - Constructed FQN candidates during resolution → `&'file str`
+/// - `Value::Type` / `Value::Alias` name strings → `&'file str`
+///
+/// # Lifecycle
+///
+/// ```text
+/// // Inside par_iter (one per rayon thread):
+/// let file_arena = FileArena::new();
+/// let walker = FileWalker::new(&graph, &file_arena);
+/// walker.walk(&root);
+/// let result = walker.into_result();  // no &'file refs
+/// drop(file_arena);                   // one free(), all strings gone
+/// ```
+pub struct FileArena(Bump);
+
+impl FileArena {
+    pub fn new() -> Self {
+        Self(Bump::new())
+    }
+
+    /// Allocate with a capacity hint. Rule of thumb: ~4KB per file covers
+    /// scope names, cache keys, and constructed FQNs for typical files.
+    pub fn with_capacity(bytes: usize) -> Self {
+        Self(Bump::with_capacity(bytes))
+    }
+
+    /// Copy a string into the arena.
+    #[inline]
+    pub fn alloc_str(&self, s: &str) -> &str {
+        self.0.alloc_str(s)
+    }
+
+    /// Allocate a string by formatting into the arena.
+    pub fn alloc_fmt(&self, args: std::fmt::Arguments<'_>) -> &str {
+        use std::fmt::Write;
+        let mut w = BumpString::new_in(&self.0);
+        w.write_fmt(args).expect("fmt into bump");
+        w.into_bump_str()
+    }
+
+    /// Total bytes allocated by this arena.
+    pub fn allocated_bytes(&self) -> usize {
+        self.0.allocated_bytes()
+    }
+
+    /// Reset the arena for reuse (e.g. processing another file on the same
+    /// thread without reallocating the backing storage). All references
+    /// previously returned by `alloc_str` / `alloc_fmt` become invalid —
+    /// the caller must ensure nothing borrows them.
+    pub fn reset(&mut self) {
+        self.0.reset();
+    }
+}
+
+impl Default for FileArena {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -437,6 +596,101 @@ mod tests {
 
         let result = map.lookup("Foo", "bar", |idx| idx == n1);
         assert_eq!(result.as_slice(), &[n1]);
+    }
+
+    // ── GraphArena ───────────────────────────────────────────
+
+    #[test]
+    fn graph_arena_alloc_str() {
+        let arena = GraphArena::new();
+        let s1 = arena.alloc_str("UserService");
+        let s2 = arena.alloc_str("get_user");
+        assert_eq!(s1, "UserService");
+        assert_eq!(s2, "get_user");
+        // Different allocations, different pointers
+        assert!(!std::ptr::eq(s1.as_ptr(), s2.as_ptr()));
+    }
+
+    #[test]
+    fn graph_arena_alloc_str_deduplicates_nothing() {
+        // Arena does NOT deduplicate — two allocs of the same string
+        // produce independent copies. This is intentional: dedup would
+        // require a lookup table (IStr's problem). Arena trades memory
+        // for zero-lock, zero-fragmentation allocation.
+        let arena = GraphArena::new();
+        let s1 = arena.alloc_str("Foo");
+        let s2 = arena.alloc_str("Foo");
+        assert_eq!(s1, s2);
+        assert!(!std::ptr::eq(s1.as_ptr(), s2.as_ptr()));
+    }
+
+    #[test]
+    fn graph_arena_alloc_fmt() {
+        let arena = GraphArena::new();
+        let parent = "com.example";
+        let name = "UserService";
+        let fqn = arena.alloc_fmt(format_args!("{}.{}", parent, name));
+        assert_eq!(fqn, "com.example.UserService");
+    }
+
+    #[test]
+    fn graph_arena_allocated_bytes_grows() {
+        let arena = GraphArena::new();
+        let before = arena.allocated_bytes();
+        arena.alloc_str("a]reasonably long string that forces allocation");
+        let after = arena.allocated_bytes();
+        assert!(after > before);
+    }
+
+    #[test]
+    fn graph_arena_with_capacity() {
+        let arena = GraphArena::with_capacity(1024 * 1024); // 1MB
+        // Should not panic, pre-allocates backing storage
+        let s = arena.alloc_str("test");
+        assert_eq!(s, "test");
+    }
+
+    // ── FileArena ───────────────────────────────────────────
+
+    #[test]
+    fn file_arena_basic() {
+        let arena = FileArena::new();
+        let s = arena.alloc_str("scope_name");
+        assert_eq!(s, "scope_name");
+    }
+
+    #[test]
+    fn file_arena_alloc_fmt() {
+        let arena = FileArena::new();
+        let key = arena.alloc_fmt(format_args!("{}::{}", "Foo", "bar"));
+        assert_eq!(key, "Foo::bar");
+    }
+
+    #[test]
+    fn file_arena_reset() {
+        let mut arena = FileArena::new();
+        arena.alloc_str("first file strings");
+        let bytes_before = arena.allocated_bytes();
+        assert!(bytes_before > 0);
+
+        arena.reset();
+        // After reset, backing storage is retained but contents are gone.
+        // New allocations reuse the same memory.
+        let s = arena.alloc_str("second file");
+        assert_eq!(s, "second file");
+    }
+
+    #[test]
+    fn file_arena_many_small_allocs() {
+        let arena = FileArena::new();
+        let mut refs = Vec::new();
+        for i in 0..1000 {
+            let s = arena.alloc_fmt(format_args!("name_{}", i));
+            refs.push(s);
+        }
+        assert_eq!(refs[0], "name_0");
+        assert_eq!(refs[999], "name_999");
+        assert_eq!(refs.len(), 1000);
     }
 
     // ── GraphIndexes ────────────────────────────────────────
