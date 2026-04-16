@@ -36,6 +36,19 @@ fn proto_format_name(name: FormatName) -> ProtoFormatName {
     }
 }
 
+fn format_and_stamp<F: ResultFormatter>(
+    formatter: &F,
+    output: &query_engine::shared::PipelineOutput,
+) -> (serde_json::Value, String, ProtoFormatName) {
+    let formatted = formatter.format(output);
+    let format_version = formatter
+        .format_version()
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let format_name = proto_format_name(formatter.format_name());
+    (formatted, format_version, format_name)
+}
+
 pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
     ontology: Arc<Ontology>,
@@ -154,13 +167,13 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
                             use crate::proto::execute_query_result::Content;
 
-                            let formatter: &dyn ResultFormatter = if use_llm_format {
-                                &GoonFormatter
+                            // Static dispatch: monomorphize per formatter type
+                            // instead of going through a vtable.
+                            let (formatted, format_version, format_name) = if use_llm_format {
+                                format_and_stamp(&GoonFormatter, &output)
                             } else {
-                                &GraphFormatter
+                                format_and_stamp(&GraphFormatter, &output)
                             };
-
-                            let formatted = formatter.format(&output);
 
                             let content = if use_llm_format {
                                 Some(Content::FormattedText(formatted.to_string()))
@@ -172,11 +185,8 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                                 query_type: output.query_type,
                                 raw_query_strings: output.raw_query_strings,
                                 row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
-                                format_version: formatter
-                                    .format_version()
-                                    .map(|v| v.to_string())
-                                    .unwrap_or_default(),
-                                format_name: proto_format_name(formatter.format_name()).into(),
+                                format_version,
+                                format_name: format_name.into(),
                             });
 
                             let _ = tx
