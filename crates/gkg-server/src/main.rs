@@ -180,6 +180,9 @@ async fn run_webserver(
                 .await
                 .map_err(|e| anyhow::anyhow!("NATS connection for query cache failed: {e}"))?,
         );
+        gkg_server::pipeline::ensure_query_cache_bucket(&broker)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to create query cache bucket: {e}"))?;
         grpc_server = grpc_server.with_cache_broker(broker);
     }
 

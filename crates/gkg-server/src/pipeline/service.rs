@@ -17,7 +17,7 @@ use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, Pipel
 
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
+    AuthorizationStage, CachedExecutor, HydrationStage, RedactionStage, SecurityStage,
 };
 
 #[derive(Clone)]
@@ -90,7 +90,7 @@ impl QueryPipelineService {
             .await?
             .then(&CompilationStage)
             .await?
-            .then(&ClickHouseExecutor)
+            .then(&CachedExecutor)
             .await?
             .then(&ExtractionStage)
             .await?
