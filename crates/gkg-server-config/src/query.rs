@@ -39,15 +39,25 @@ pub struct QueryConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_cache_ttl: Option<u32>,
 
-    /// Application-level result cache via NATS KV.
+    /// NATS Object Store cache for filtered repo archives (indexer).
     /// Excluded from ClickHouse SETTINGS (app-level only).
     #[serde(default, skip_serializing)]
-    pub app_cache_enabled: Option<bool>,
+    pub code_cache_enabled: Option<bool>,
 
-    /// Application-level cache TTL in seconds.
+    /// Code cache TTL in seconds.
     /// Excluded from ClickHouse SETTINGS (app-level only).
     #[serde(default, skip_serializing)]
-    pub app_cache_ttl: Option<u32>,
+    pub code_cache_ttl: Option<u32>,
+
+    /// NATS KV cache for graph query results (webserver).
+    /// Excluded from ClickHouse SETTINGS (app-level only).
+    #[serde(default, skip_serializing)]
+    pub graph_query_cache_enabled: Option<bool>,
+
+    /// Graph query cache TTL in seconds.
+    /// Excluded from ClickHouse SETTINGS (app-level only).
+    #[serde(default, skip_serializing)]
+    pub graph_query_cache_ttl: Option<u32>,
 }
 
 impl QueryConfig {
@@ -58,8 +68,14 @@ impl QueryConfig {
             max_execution_time: overrides.max_execution_time.or(self.max_execution_time),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
-            app_cache_enabled: overrides.app_cache_enabled.or(self.app_cache_enabled),
-            app_cache_ttl: overrides.app_cache_ttl.or(self.app_cache_ttl),
+            code_cache_enabled: overrides.code_cache_enabled.or(self.code_cache_enabled),
+            code_cache_ttl: overrides.code_cache_ttl.or(self.code_cache_ttl),
+            graph_query_cache_enabled: overrides
+                .graph_query_cache_enabled
+                .or(self.graph_query_cache_enabled),
+            graph_query_cache_ttl: overrides
+                .graph_query_cache_ttl
+                .or(self.graph_query_cache_ttl),
         }
     }
 

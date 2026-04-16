@@ -102,8 +102,10 @@ query:
     max_execution_time: 30
     use_query_cache: false
     query_cache_ttl: 60
-    app_cache_enabled: false
-    app_cache_ttl: 60
+    code_cache_enabled: false
+    code_cache_ttl: 60
+    graph_query_cache_enabled: false
+    graph_query_cache_ttl: 60
 
 metrics:
   otel:
