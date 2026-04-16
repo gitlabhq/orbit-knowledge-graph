@@ -169,12 +169,26 @@ impl SsaResolver {
     }
 
     /// Record a variable definition: `variable` is defined as `value` in `block`.
+    /// On-the-fly copy propagation (Section 3.1): if the value is an alias
+    /// to another variable, resolve it immediately instead of deferring.
     pub fn write_variable(&mut self, variable: &str, block: BlockId, value: Value) {
         let var = Intern::from(variable);
+        let resolved = if let Value::Alias(ref alias_name) = value {
+            // Copy propagation: look up what the aliased variable holds
+            // right now and store that directly. Avoids indirection during reads.
+            let alias_val = self.read_variable_internal(*alias_name, block);
+            if alias_val != Value::Opaque {
+                alias_val
+            } else {
+                value
+            }
+        } else {
+            value
+        };
         self.current_def
             .entry(var)
             .or_default()
-            .insert(block, value);
+            .insert(block, resolved);
         self.stats.writes += 1;
     }
 
