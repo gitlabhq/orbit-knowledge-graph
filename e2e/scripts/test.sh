@@ -56,6 +56,11 @@ for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_SIPHON" "$NS_GKG"; do
   $KC get events -n "$ns" --sort-by=.lastTimestamp 2>/dev/null > "$DIAG_DIR/${ns_short}-events.txt" || true
 
   for pod in $($KC get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+    # Always dump current logs for siphon and gkg pods
+    if [[ "$ns_short" == "siphon" || "$ns_short" == "gkg" ]]; then
+      $KC logs "$pod" -n "$ns" --tail=200 > "$DIAG_DIR/${ns_short}-${pod}.log" 2>/dev/null || true
+    fi
+
     restarts=$($KC get pod "$pod" -n "$ns" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo 0)
     reason=$($KC get pod "$pod" -n "$ns" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}' 2>/dev/null)
     if [[ "$restarts" -gt 0 || -n "$reason" ]]; then

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: e2e-bootstrap
+description: Namespaces and secrets for GKG e2e tests
+version: 0.1.0
+type: application

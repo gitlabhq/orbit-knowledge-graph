@@ -152,7 +152,7 @@ postgresql:
         cpu: 2
         memory: 2Gi
     # GitLab chart hardcodes initdb.scriptsConfigMap — custom scripts via
-    # initdb.scripts are ignored. Siphon PG setup runs post-migration in 04-pg-siphon.sh.
+    # initdb.scripts are ignored. Siphon PG setup runs via pg-cdc-setup helm chart.
 
 redis:
   install: true

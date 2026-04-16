@@ -15,7 +15,6 @@ if [[ -z "$E2E_SHA" ]]; then
   exit 1
 fi
 
-export NS_SECRETS="e2e-${E2E_SHA}-secrets"
 export NS_NATS="e2e-${E2E_SHA}-nats"
 export NS_CH="e2e-${E2E_SHA}-clickhouse"
 export NS_GITLAB="e2e-${E2E_SHA}-gitlab"
@@ -23,15 +22,3 @@ export NS_SIPHON="e2e-${E2E_SHA}-siphon"
 export NS_GKG="e2e-${E2E_SHA}-gkg"
 
 log() { echo "==> $*"; }
-
-wait_for_pods() {
-  local ns=$1 timeout=${2:-300}
-  log "Waiting for pods in $ns (timeout: ${timeout}s)"
-  $KC wait --for=condition=Ready pods \
-    --field-selector=status.phase!=Succeeded,status.phase!=Failed \
-    --all -n "$ns" --timeout="${timeout}s" 2>/dev/null || {
-    log "Warning: not all pods in $ns became ready within ${timeout}s"
-    $KC get pods -n "$ns" --no-headers 2>/dev/null
-  }
-  $KC get pods -n "$ns" --no-headers 2>/dev/null
-}
