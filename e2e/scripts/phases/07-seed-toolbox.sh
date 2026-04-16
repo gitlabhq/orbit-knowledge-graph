@@ -43,7 +43,4 @@ $KC create secret generic e2e-test-credentials -n "$NS_GKG" \
   --from-literal=gkg-url="http://gkg-webserver.${NS_GKG}.svc.cluster.local:8080" \
   --dry-run=client -o yaml | $KC apply -f -
 
-# 2. Enable feature flags (no stdout capture, let stderr through for debugging)
-log "Running enable_feature_flags.rb"
-$KC exec -n "$NS_GITLAB" "$TOOLBOX_POD" -- \
-  gitlab-rails runner /tmp/e2e-toolbox/enable_feature_flags.rb
+# Feature flags are enabled via GitLab API in the smoke test (01_smoke.robot).

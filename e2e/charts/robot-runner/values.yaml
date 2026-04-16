@@ -13,8 +13,6 @@ resources:
     memory: 512Mi
 
 namespaces:
-  nats: ""
-  clickhouse: ""
   gitlab: ""
   gkg: ""
 

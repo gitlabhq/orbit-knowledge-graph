@@ -1,6 +1,7 @@
 {{ $sha := requiredEnv "E2E_SHA" }}
-{{ $gkgImage := env "E2E_GKG_IMAGE" | default "registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg" }}
-{{ $gkgTag := env "E2E_GKG_TAG" | default "0.26.1" }}
+{{ $v := fromYaml (readFile "../config/versions.yaml") }}
+{{ $gkgImage := env "E2E_GKG_IMAGE" | default $v.gkg.image.repository }}
+{{ $gkgTag := env "E2E_GKG_TAG" | default $v.gkg.image.tag }}
 
 extraResources:
   - apiVersion: cert-manager.io/v1
@@ -33,10 +34,10 @@ webserver:
   resources:
     requests:
       cpu: 250m
-      memory: 1Gi
+      memory: 512Mi
     limits:
       cpu: 1
-      memory: 2Gi
+      memory: 1Gi
   service:
     type: ClusterIP
     httpPort: 8080
@@ -55,7 +56,7 @@ indexer:
       memory: 1Gi
     limits:
       cpu: 2
-      memory: 4Gi
+      memory: 2Gi
 
 dispatcher:
   enabled: true
@@ -81,6 +82,13 @@ healthCheck:
         - gkg-indexer
         - gkg-webserver
         - gkg-dispatcher
+    - namespace: e2e-{{ $sha }}-siphon
+      deployments:
+        - postgres-producer
+        - clickhouse-consumer
+    - namespace: e2e-{{ $sha }}-nats
+      statefulSets:
+        - nats
   resources:
     requests:
       cpu: 50m

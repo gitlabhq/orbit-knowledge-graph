@@ -1,5 +1,6 @@
 {{ $sha := requiredEnv "E2E_SHA" }}
 {{ $kctx := env "KCTX" | default "gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_e2e-harness" }}
+{{ $v := fromYaml (readFile "config/versions.yaml") }}
 
 helmDefaults:
   wait: true
@@ -20,7 +21,7 @@ releases:
     namespace: e2e-{{ $sha }}-nats
     createNamespace: true
     chart: nats/nats
-    version: 2.12.6
+    version: {{ $v.nats.chart }}
     labels:
       phase: infra
       component: nats
@@ -41,7 +42,7 @@ releases:
     namespace: e2e-{{ $sha }}-gitlab
     createNamespace: true
     chart: gitlab-devel/gitlab
-    version: 9.10.3-2450691409
+    version: {{ $v.gitlab.chart }}
     labels:
       phase: infra
       component: gitlab
@@ -54,7 +55,7 @@ releases:
     namespace: e2e-{{ $sha }}-siphon
     createNamespace: true
     chart: siphon/siphon
-    version: 1.10.0
+    version: {{ $v.siphon.chart }}
     labels:
       phase: pipeline
       component: siphon
@@ -69,7 +70,7 @@ releases:
     namespace: e2e-{{ $sha }}-gkg
     createNamespace: true
     chart: oci://registry.gitlab.com/gitlab-org/orbit/gkg-helm-charts/gkg
-    version: 0.18.1
+    version: {{ $v.gkg.chart }}
     labels:
       phase: pipeline
       component: gkg

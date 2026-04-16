@@ -17,16 +17,10 @@ spec:
           pip install --quiet --disable-pip-version-check --root-user-action=ignore \
             robotframework=={{ .Values.robotframework.version }} \
             robotframework-requests=={{ .Values.robotframework.requestsVersion }} &&
-          robot --outputdir /tmp/results --consolecolors off /tests/
+          robot --outputdir /tmp/results --consolecolors off --exitonfailure /tests/
         env:
-        - name: NATS_URL
-          value: "http://nats-0.nats-headless.{{ .Values.namespaces.nats }}.svc.cluster.local:8222"
-        - name: CLICKHOUSE_URL
-          value: "http://clickhouse.{{ .Values.namespaces.clickhouse }}.svc.cluster.local:8123"
         - name: GITLAB_URL
           value: "http://gitlab-webservice-default.{{ .Values.namespaces.gitlab }}.svc.cluster.local:8181"
-        - name: GKG_URL
-          value: "http://gkg-webserver.{{ .Values.namespaces.gkg }}.svc.cluster.local:8080"
         - name: GITLAB_PAT
           valueFrom:
             secretKeyRef:
