@@ -29,7 +29,7 @@ helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
 
 # Stream logs in background (retry until pod ready, follow once)
 (while ! $KC logs -f job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null; do
-  [ -f "${MARKER_DIR}/pass" ] || [ -f "${MARKER_DIR}/fail" ] && break
+  { [ -f "${MARKER_DIR}/pass" ] || [ -f "${MARKER_DIR}/fail" ]; } && break
   sleep 2
 done) &
 LOG_PID=$!
