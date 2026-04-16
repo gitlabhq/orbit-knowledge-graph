@@ -6,7 +6,8 @@
 //! populated `SsaResolver` with all reaching definitions computed.
 
 use code_graph_types::{
-    BindingKind, CanonicalBinding, CanonicalControlFlow, CanonicalResult, ControlFlowKind, IStr,
+    BindingKind, CanonicalBinding, CanonicalControlFlow, CanonicalReference, CanonicalResult,
+    ControlFlowKind, IStr,
 };
 use rustc_hash::FxHashMap;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -32,10 +33,9 @@ impl HasRoot for treesitter_visit::Root<StrDoc<SupportLang>> {
 /// Prevents stack overflow on deeply nested ASTs.
 const MIN_STACK_REMAINING: usize = 128 * 1024;
 
-/// A recorded reference read, linking back to the canonical data.
+/// A recorded reference read, indexing into the file's references vec.
 #[derive(Debug, Clone)]
 pub struct RecordedRead {
-    pub file_idx: usize,
     pub ref_idx: usize,
     pub block: BlockId,
     /// Interned reference name — avoids 2.2M String clones on elasticsearch.
@@ -43,7 +43,7 @@ pub struct RecordedRead {
     /// Pre-computed enclosing definition (for edge source). None = file-level.
     pub enclosing_def: Option<NodeIndex>,
     /// Pre-computed enclosing type scope FQN (for implicit this / This chains).
-    pub enclosing_type_fqn: Option<IStr>,
+    pub enclosing_scope_fqn: Option<IStr>,
 }
 
 /// Per-file walk result: owned SSA state + recorded reads.
@@ -51,6 +51,12 @@ pub struct RecordedRead {
 pub struct FileWalkResult {
     pub ssa: SsaResolver,
     pub reads: Vec<RecordedRead>,
+    pub file_node: NodeIndex,
+    /// Moved from CanonicalResult after walking — owns expression chains.
+    pub references: Vec<CanonicalReference>,
+    /// Pre-resolved import name → definition NodeIndexes.
+    /// Built once before resolve, eliminates repeated neighbor iteration.
+    pub import_map: FxHashMap<String, Vec<NodeIndex>>,
 }
 
 impl FileWalkResult {
@@ -59,6 +65,9 @@ impl FileWalkResult {
         Self {
             ssa: SsaResolver::new(),
             reads: Vec::new(),
+            file_node: NodeIndex::new(0),
+            references: Vec::new(),
+            import_map: FxHashMap::default(),
         }
     }
 }
@@ -70,18 +79,24 @@ impl FileWalkResult {
 /// resolution.
 pub fn walk_file(
     rules: &ResolutionRules,
-    file_idx: usize,
     result: &CanonicalResult,
     root: &Node<StrDoc<SupportLang>>,
     def_nodes: &[NodeIndex],
     import_nodes: &[NodeIndex],
+    file_node: NodeIndex,
 ) -> FileWalkResult {
     let mut ssa = SsaResolver::new();
-    let mut walker = FileWalker::new(rules, &mut ssa, file_idx, result, def_nodes, import_nodes);
+    let mut walker = FileWalker::new(rules, &mut ssa, result, def_nodes, import_nodes);
     walker.walk_node(root);
     let reads = walker.reads;
     ssa.seal_remaining();
-    FileWalkResult { ssa, reads }
+    FileWalkResult {
+        ssa,
+        reads,
+        file_node,
+        references: Vec::new(),           // populated by caller after walk
+        import_map: FxHashMap::default(), // populated before resolve
+    }
 }
 
 // ── AST walker (Braun et al.) ───────────────────────────────────
@@ -92,13 +107,12 @@ struct ScopeEntry {
     is_type_scope: bool,
     name: Option<String>,
     def_node: Option<NodeIndex>,
-    enclosing_type_fqn: Option<IStr>,
+    enclosing_scope_fqn: Option<IStr>,
 }
 
 struct FileWalker<'a> {
     rules: &'a ResolutionRules,
     ssa: &'a mut SsaResolver,
-    file_idx: usize,
     result: &'a CanonicalResult,
     def_nodes: &'a [NodeIndex],
     #[allow(dead_code)]
@@ -118,7 +132,6 @@ impl<'a> FileWalker<'a> {
     fn new(
         rules: &'a ResolutionRules,
         ssa: &'a mut SsaResolver,
-        file_idx: usize,
         result: &'a CanonicalResult,
         def_nodes: &'a [NodeIndex],
         import_nodes: &'a [NodeIndex],
@@ -170,7 +183,6 @@ impl<'a> FileWalker<'a> {
         Self {
             rules,
             ssa,
-            file_idx,
             result,
             def_nodes,
             import_nodes,
@@ -180,7 +192,7 @@ impl<'a> FileWalker<'a> {
                 is_type_scope: false,
                 name: None,
                 def_node: None,
-                enclosing_type_fqn: None,
+                enclosing_scope_fqn: None,
             }],
             ref_by_range_start,
             def_by_byte_start,
@@ -235,17 +247,16 @@ impl<'a> FileWalker<'a> {
         // References (matched by byte offset against parsed CanonicalReference).
         if let Some(ref_indices) = self.ref_by_range_start.remove(&byte_start) {
             let enclosing_def = self.innermost_def();
-            let enclosing_type_fqn = self.scope_stack.last().and_then(|e| e.enclosing_type_fqn);
+            let enclosing_scope_fqn = self.scope_stack.last().and_then(|e| e.enclosing_scope_fqn);
 
             for ref_idx in ref_indices {
                 let reference = &self.result.references[ref_idx];
                 self.reads.push(RecordedRead {
-                    file_idx: self.file_idx,
                     ref_idx,
                     block: self.current_block,
                     name: IStr::from(reference.name.as_str()),
                     enclosing_def,
-                    enclosing_type_fqn,
+                    enclosing_scope_fqn,
                 });
             }
         }
@@ -270,9 +281,9 @@ impl<'a> FileWalker<'a> {
         let byte_start = node.range().start;
         let def_idx = self.def_by_byte_start.get(&byte_start).copied();
 
-        // Compute enclosing_type_fqn for this scope.
+        // Compute enclosing_scope_fqn for this scope.
         // Prefer the canonical definition's FQN (source of truth) over build_fqn.
-        let enclosing_type_fqn = if is_type_scope {
+        let enclosing_scope_fqn = if is_type_scope {
             if let Some(di) = def_idx {
                 Some(self.result.definitions[di].fqn.as_istr())
             } else if scope_name.is_some() {
@@ -281,23 +292,23 @@ impl<'a> FileWalker<'a> {
                     .as_ref()
                     .map(|name| IStr::from(self.build_fqn(name).as_str()))
             } else {
-                self.scope_stack.last().and_then(|e| e.enclosing_type_fqn)
+                self.scope_stack.last().and_then(|e| e.enclosing_scope_fqn)
             }
         } else {
             // Non-type scope — inherit parent's enclosing type.
-            self.scope_stack.last().and_then(|e| e.enclosing_type_fqn)
+            self.scope_stack.last().and_then(|e| e.enclosing_scope_fqn)
         };
 
         if is_type_scope && let Some(ref name) = scope_name {
             // Use canonical FQN for self/super SSA writes (matches MemberIndex keys).
-            let class_fqn = if let Some(di) = def_idx {
+            let scope_fqn = if let Some(di) = def_idx {
                 self.result.definitions[di].fqn.to_string()
             } else {
                 self.build_fqn(name)
             };
             for &self_name in self.rules.self_names {
                 self.ssa
-                    .write_variable(self_name, new_block, Value::type_of(&class_fqn));
+                    .write_variable(self_name, new_block, Value::type_of(&scope_fqn));
             }
             if let Some(super_name) = self.rules.super_name
                 && let Some(super_type) = self.find_super_type(name)
@@ -312,7 +323,7 @@ impl<'a> FileWalker<'a> {
             is_type_scope,
             name: scope_name,
             def_node: def_idx.map(|di| self.def_nodes[di]),
-            enclosing_type_fqn,
+            enclosing_scope_fqn,
         });
         self.current_block = new_block;
     }

@@ -9,6 +9,7 @@ pub enum EdgeKind {
     Defines,
     Imports,
     Calls,
+    Extends,
 }
 
 /// Node kind in the graph — the source or target of an edge.

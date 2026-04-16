@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use code_graph_types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, CanonicalResult,
-    EdgeKind, NodeKind, Range, Relationship, containment_relationship,
+    EdgeKind, IStr, NodeKind, Range, Relationship, containment_relationship,
 };
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
 use petgraph::graph::{DiGraph, NodeIndex};
-use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use petgraph::visit::{Bfs, EdgeFiltered};
+use rustc_hash::{FxHashMap, FxHasher};
 
 // ── Node + Edge types ───────────────────────────────────────────
 
@@ -87,8 +88,6 @@ impl GraphNode {
 #[derive(Debug, Clone)]
 pub struct GraphEdge {
     pub relationship: Relationship,
-    pub source_definition_range: Option<Range>,
-    pub target_definition_range: Option<Range>,
 }
 
 impl GraphEdge {
@@ -102,8 +101,6 @@ impl GraphEdge {
                 source_def_kind: None,
                 target_def_kind: None,
             },
-            source_definition_range: None,
-            target_definition_range: None,
         }
     }
 }
@@ -122,11 +119,11 @@ pub struct CodeGraph {
     // Resolution indexes
     pub def_by_fqn: FxHashMap<String, Vec<NodeIndex>>,
     pub def_by_name: FxHashMap<String, Vec<NodeIndex>>,
-    pub members: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
-    pub supers: FxHashMap<String, Vec<String>>,
-    pub ancestors: FxHashMap<String, Vec<String>>,
-    pub imports_by_file: FxHashMap<String, Vec<NodeIndex>>,
-    pub defs_by_file: FxHashMap<String, Vec<NodeIndex>>,
+    pub nested_defs: FxHashMap<String, FxHashMap<String, Vec<NodeIndex>>>,
+
+    /// Pre-computed ancestor chains from Extends edges.
+    /// Built once during finalize(), used during resolve for hierarchy lookups.
+    pub ancestors: FxHashMap<NodeIndex, Vec<NodeIndex>>,
 
     pub root_path: String,
 }
@@ -147,16 +144,13 @@ impl CodeGraph {
 
             def_by_fqn: FxHashMap::default(),
             def_by_name: FxHashMap::default(),
-            members: FxHashMap::default(),
-            supers: FxHashMap::default(),
+            nested_defs: FxHashMap::default(),
             ancestors: FxHashMap::default(),
-            imports_by_file: FxHashMap::default(),
-            defs_by_file: FxHashMap::default(),
             root_path: String::new(),
         }
     }
 
-    /// Add a single file's nodes to the graph. Returns (def_nodes, import_nodes)
+    /// Add a single file's nodes to the graph. Returns (file_node, def_nodes, import_nodes)
     /// so the walker can write `Value::Def(NodeIndex)` immediately.
     ///
     /// Called under a Mutex during the parallel parse+walk phase.
@@ -165,7 +159,7 @@ impl CodeGraph {
         &mut self,
         result: &CanonicalResult,
         _file_order: usize,
-    ) -> (Vec<NodeIndex>, Vec<NodeIndex>) {
+    ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
         let relative_path = self.relative_path(&result.file_path);
         let file_path: Arc<str> = Arc::from(relative_path.as_str());
 
@@ -183,6 +177,15 @@ impl CodeGraph {
         }));
         self.file_index.insert(relative_path.clone(), file_node);
 
+        // Build directory chain and dir→file edge inline.
+        if let Some(dir_idx) = self.ensure_directory_chain(&relative_path) {
+            self.graph.add_edge(
+                dir_idx,
+                file_node,
+                GraphEdge::structural(EdgeKind::Contains, NodeKind::Directory, NodeKind::File),
+            );
+        }
+
         let mut def_nodes = Vec::with_capacity(result.definitions.len());
         for def in result.definitions.iter() {
             let def_node = self.graph.add_node(GraphNode::Definition {
@@ -192,17 +195,14 @@ impl CodeGraph {
             def_nodes.push(def_node);
 
             let fqn_str = def.fqn.to_string();
-            self.def_by_fqn
-                .entry(fqn_str.clone())
-                .or_default()
-                .push(def_node);
+            self.def_by_fqn.entry(fqn_str).or_default().push(def_node);
             self.def_by_name
                 .entry(def.name.clone())
                 .or_default()
                 .push(def_node);
 
             if let Some(parent_fqn) = def.fqn.parent() {
-                self.members
+                self.nested_defs
                     .entry(parent_fqn.to_string())
                     .or_default()
                     .entry(def.name.clone())
@@ -210,17 +210,32 @@ impl CodeGraph {
                     .push(def_node);
             }
 
-            if let Some(meta) = &def.metadata
-                && !meta.super_types.is_empty()
-            {
-                self.supers.insert(fqn_str, meta.super_types.clone());
-            }
-
             self.graph.add_edge(
                 file_node,
                 def_node,
                 GraphEdge::structural(EdgeKind::Defines, NodeKind::File, NodeKind::Definition),
             );
+        }
+
+        // Containment edges between definitions (class→method, module→class, etc.)
+        for (i, def) in result.definitions.iter().enumerate() {
+            let Some(parent_fqn) = def.fqn.parent() else {
+                continue;
+            };
+            // Find the parent def within this file's def_nodes
+            for (j, parent_def) in result.definitions.iter().enumerate() {
+                if j != i
+                    && parent_def.fqn.as_istr() == parent_fqn.as_istr()
+                    && let Some(rel) = containment_relationship(parent_def.kind, def.kind)
+                {
+                    self.graph.add_edge(
+                        def_nodes[j],
+                        def_nodes[i],
+                        GraphEdge { relationship: rel },
+                    );
+                    break;
+                }
+            }
         }
 
         let mut import_nodes = Vec::with_capacity(result.imports.len());
@@ -236,49 +251,110 @@ impl CodeGraph {
                 GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::ImportedSymbol),
             );
         }
-        self.defs_by_file
-            .insert(relative_path.clone(), def_nodes.clone());
-        self.imports_by_file
-            .insert(relative_path, import_nodes.clone());
+        (file_node, def_nodes, import_nodes)
+    }
 
-        (def_nodes, import_nodes)
+    /// Free indexes only needed during graph construction.
+    /// Call after finalize() and pre_resolve_file_imports().
+    pub fn drop_construction_indexes(&mut self) {
+        self.dir_index = FxHashMap::default();
+        self.file_index = FxHashMap::default();
     }
 
     /// Finalize the graph after all files have been added.
-    /// Adds directory chains, containment edges, and flattens ancestor chains.
-    pub fn finalize(&mut self, results: &[CanonicalResult]) {
-        let mut seen_dir_edges: FxHashSet<(String, String)> = FxHashSet::default();
+    /// Directory chains and containment edges are built during add_file_nodes().
+    /// This just links supertypes via Extends edges (cross-file resolution).
+    ///
+    /// NOTE: currently called per-language before merge_graphs(), so cross-language
+    /// inheritance (e.g. Kotlin extending Java) won't be linked. Fine for now since
+    /// we target single-language workspaces / workspace nested_defs.
+    pub fn finalize(&mut self) {
+        self.link_extends();
+        self.build_ancestor_table();
+    }
 
-        // Collect all file paths for directory chain building
-        let file_paths: Vec<String> = results
-            .iter()
-            .map(|r| self.relative_path(&r.file_path))
-            .collect();
+    /// BFS over Extends edges once per class. Stores the ancestor chain
+    /// so resolve never does BFS — just iterates a flat vec.
+    fn build_ancestor_table(&mut self) {
+        let extends_only = EdgeFiltered(
+            &self.graph,
+            |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
+                e.weight().relationship.edge_kind == EdgeKind::Extends
+            },
+        );
 
-        for path in &file_paths {
-            if let Some(dir_idx) = build_directory_chain(path, self, &mut seen_dir_edges)
-                && let Some(&file_node) = self.file_index.get(path)
-            {
-                self.graph.add_edge(
-                    dir_idx,
-                    file_node,
-                    GraphEdge::structural(EdgeKind::Contains, NodeKind::Directory, NodeKind::File),
-                );
+        for idx in self.graph.node_indices() {
+            // Only definitions that have outgoing Extends edges
+            if !matches!(self.graph[idx], GraphNode::Definition { .. }) {
+                continue;
+            }
+            let has_extends = self
+                .graph
+                .edges_directed(idx, petgraph::Direction::Outgoing)
+                .any(|e| e.weight().relationship.edge_kind == EdgeKind::Extends);
+            if !has_extends {
+                continue;
+            }
+
+            let mut chain = Vec::new();
+            let mut bfs = Bfs::new(&extends_only, idx);
+            bfs.next(&extends_only); // skip self
+            while let Some(ancestor) = bfs.next(&extends_only) {
+                chain.push(ancestor);
+            }
+            if !chain.is_empty() {
+                self.ancestors.insert(idx, chain);
+            }
+        }
+    }
+
+    /// Create directory nodes and dir→dir edges for a file path.
+    /// Returns the immediate parent directory's NodeIndex.
+    /// Only creates edges when a directory is first seen, so no dedup set needed.
+    fn ensure_directory_chain(&mut self, file_path: &str) -> Option<NodeIndex> {
+        let path = Path::new(file_path);
+        let mut parent_dirs: Vec<String> = Vec::new();
+        let mut current = path.parent();
+        while let Some(dir) = current {
+            parent_dirs.push(dir_to_string(dir));
+            current = dir.parent();
+        }
+        parent_dirs.reverse();
+
+        for dir_path in &parent_dirs {
+            if !self.dir_index.contains_key(dir_path) {
+                let name = Path::new(dir_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| dir_path.clone());
+                let idx = self
+                    .graph
+                    .add_node(GraphNode::Directory(CanonicalDirectory {
+                        path: dir_path.clone(),
+                        name,
+                    }));
+                self.dir_index.insert(dir_path.clone(), idx);
+
+                // Parent was created/exists from a previous iteration — add edge.
+                if let Some(parent_dir) = Path::new(dir_path).parent() {
+                    let parent_str = dir_to_string(parent_dir);
+                    if let Some(&parent_idx) = self.dir_index.get(&parent_str) {
+                        self.graph.add_edge(
+                            parent_idx,
+                            idx,
+                            GraphEdge::structural(
+                                EdgeKind::Contains,
+                                NodeKind::Directory,
+                                NodeKind::Directory,
+                            ),
+                        );
+                    }
+                }
             }
         }
 
-        // Containment edges between definitions (per file)
-        for result in results {
-            let file_path = self.relative_path(&result.file_path);
-            let def_indices = self
-                .defs_by_file
-                .get(&file_path)
-                .cloned()
-                .unwrap_or_default();
-            build_containment_edges(&result.definitions, &def_indices, self);
-        }
-
-        self.flatten_supers();
+        let parent_dir = dir_to_string(path.parent()?);
+        self.dir_index.get(&parent_dir).copied()
     }
 
     /// Build the complete graph from parsed results in a single pass.
@@ -290,7 +366,7 @@ impl CodeGraph {
         for (i, result) in results.iter().enumerate() {
             cg.add_file_nodes(result, i);
         }
-        cg.finalize(&results);
+        cg.finalize();
         cg
     }
 
@@ -300,6 +376,45 @@ impl CodeGraph {
             .map(|p| p.strip_prefix('/').unwrap_or(p))
             .unwrap_or(file_path)
             .to_string()
+    }
+
+    /// Pre-resolve all imports for a file into a name → defs map.
+    pub fn pre_resolve_file_imports(
+        &self,
+        file_node: NodeIndex,
+        sep: &str,
+    ) -> rustc_hash::FxHashMap<String, Vec<NodeIndex>> {
+        let mut map = rustc_hash::FxHashMap::default();
+        for neighbor in self
+            .graph
+            .neighbors_directed(file_node, petgraph::Direction::Outgoing)
+        {
+            let Some((_, imp)) = self.graph[neighbor].as_import() else {
+                continue;
+            };
+            if imp.wildcard {
+                continue;
+            }
+            let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+            if name.is_empty() {
+                continue;
+            }
+
+            let full_fqn = if imp.path.is_empty() {
+                name.to_string()
+            } else {
+                format!("{}{}{}", imp.path, sep, name)
+            };
+
+            let mut defs = self.lookup_fqn(&full_fqn).to_vec();
+            if defs.is_empty() && !imp.path.is_empty() {
+                defs = self.lookup_fqn(&imp.path).to_vec();
+            }
+            if !defs.is_empty() {
+                map.entry(name.to_string()).or_insert(defs);
+            }
+        }
+        map
     }
 
     // ── Resolution lookups ──────────────────────────────────
@@ -318,57 +433,47 @@ impl CodeGraph {
             .unwrap_or(&[])
     }
 
-    pub fn lookup_member(&self, class_fqn: &str, member_name: &str) -> &[NodeIndex] {
-        self.members
-            .get(class_fqn)
+    pub fn lookup_nested(&self, scope_fqn: &str, member_name: &str) -> &[NodeIndex] {
+        self.nested_defs
+            .get(scope_fqn)
             .and_then(|ms| ms.get(member_name))
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
-    pub fn lookup_member_with_supers(
+    pub fn lookup_nested_with_hierarchy(
         &self,
-        class_fqn: &str,
+        scope_fqn: &str,
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let direct = self.lookup_member(class_fqn, member_name);
-        if !direct.is_empty() {
-            out.extend_from_slice(direct);
-            return true;
-        }
+        // Resolve scope_fqn to NodeIndex(es): try FQN first, then bare name
+        let start_nodes = self
+            .def_by_fqn
+            .get(scope_fqn)
+            .or_else(|| self.def_by_name.get(scope_fqn));
 
-        if let Some(chain) = self.ancestors.get(class_fqn) {
-            for ancestor_fqn in chain {
-                let found = self.lookup_member(ancestor_fqn, member_name);
-                if !found.is_empty() {
-                    out.extend_from_slice(found);
-                    return true;
-                }
+        let Some(start_nodes) = start_nodes else {
+            return false;
+        };
+
+        for &start in start_nodes {
+            // Check direct nested defs first
+            let fqn = self.def_fqn(start);
+            let found = self.lookup_nested(&fqn, member_name);
+            if !found.is_empty() {
+                out.extend_from_slice(found);
+                return true;
             }
-        }
 
-        // Bare name fallback
-        if !self.ancestors.contains_key(class_fqn)
-            && !self.members.contains_key(class_fqn)
-            && let Some(nodes) = self.def_by_name.get(class_fqn)
-        {
-            for &idx in nodes {
-                if let GraphNode::Definition { def, .. } = &self.graph[idx] {
-                    let fqn = def.fqn.to_string();
-                    let direct = self.lookup_member(&fqn, member_name);
-                    if !direct.is_empty() {
-                        out.extend_from_slice(direct);
+            // Walk pre-computed ancestor chain (no BFS)
+            if let Some(chain) = self.ancestors.get(&start) {
+                for &ancestor in chain {
+                    let ancestor_fqn = self.def_fqn(ancestor);
+                    let found = self.lookup_nested(&ancestor_fqn, member_name);
+                    if !found.is_empty() {
+                        out.extend_from_slice(found);
                         return true;
-                    }
-                    if let Some(chain) = self.ancestors.get(fqn.as_str()) {
-                        for ancestor_fqn in chain {
-                            let found = self.lookup_member(ancestor_fqn, member_name);
-                            if !found.is_empty() {
-                                out.extend_from_slice(found);
-                                return true;
-                            }
-                        }
                     }
                 }
             }
@@ -376,18 +481,9 @@ impl CodeGraph {
         false
     }
 
-    pub fn file_imports(&self, file_path: &str) -> &[NodeIndex] {
-        self.imports_by_file
-            .get(file_path)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
-    pub fn file_defs(&self, file_path: &str) -> &[NodeIndex] {
-        self.defs_by_file
-            .get(file_path)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+    /// Does this definition node belong to the given file?
+    pub fn def_in_file(&self, def_idx: NodeIndex, file_path: &str) -> bool {
+        self.graph[def_idx].path() == file_path
     }
 
     pub fn def(&self, idx: NodeIndex) -> &CanonicalDefinition {
@@ -404,8 +500,8 @@ impl CodeGraph {
         }
     }
 
-    pub fn def_fqn(&self, idx: NodeIndex) -> String {
-        self.def(idx).fqn.to_string()
+    pub fn def_fqn(&self, idx: NodeIndex) -> IStr {
+        self.def(idx).fqn.as_istr()
     }
 
     // ── Iterators ───────────────────────────────────────────
@@ -452,62 +548,52 @@ impl CodeGraph {
 
     // ── Internal ────────────────────────────────────────────
 
-    fn flatten_supers(&mut self) {
-        let type_fqns: Vec<String> = self.supers.keys().cloned().collect();
-        for fqn in type_fqns {
-            if self.ancestors.contains_key(&fqn) {
-                continue;
-            }
-            let chain = self.compute_ancestor_chain(&fqn);
-            self.ancestors.insert(fqn, chain);
-        }
-    }
+    /// Add Extends edges from each class/interface to its supertypes.
+    /// Resolves super_type names (which may be bare names or FQNs)
+    /// to NodeIndexes in the graph.
+    fn link_extends(&mut self) {
+        let mut edges = Vec::new();
 
-    fn compute_ancestor_chain(&self, class_fqn: &str) -> Vec<String> {
-        let mut chain = Vec::new();
-        let mut visited = FxHashSet::default();
-        let mut queue = std::collections::VecDeque::new();
-
-        let root_fqns = self.resolve_type_fqns(class_fqn);
-        for fqn in &root_fqns {
-            visited.insert(fqn.clone());
-            queue.push_back(fqn.clone());
-        }
-
-        while let Some(current) = queue.pop_front() {
-            if let Some(super_names) = self.supers.get(&current) {
-                for super_name in super_names {
-                    for super_fqn in self.resolve_type_fqns(super_name) {
-                        if visited.insert(super_fqn.clone()) {
-                            chain.push(super_fqn.clone());
-                            queue.push_back(super_fqn);
+        for idx in self.graph.node_indices() {
+            if let GraphNode::Definition { def, .. } = &self.graph[idx]
+                && let Some(meta) = &def.metadata
+                && !meta.super_types.is_empty()
+            {
+                for super_name in &meta.super_types {
+                    let targets = self.resolve_type_to_nodes(super_name);
+                    for &target in targets {
+                        if target != idx {
+                            edges.push((idx, target));
                         }
                     }
                 }
             }
         }
-        chain
+
+        for (child, parent) in edges {
+            self.graph.add_edge(
+                child,
+                parent,
+                GraphEdge::structural(
+                    EdgeKind::Extends,
+                    NodeKind::Definition,
+                    NodeKind::Definition,
+                ),
+            );
+        }
     }
 
-    fn resolve_type_fqns(&self, type_name: &str) -> Vec<String> {
-        if self.members.contains_key(type_name) || self.supers.contains_key(type_name) {
-            return vec![type_name.to_string()];
+    /// Resolve a type name (FQN or bare name) to graph NodeIndexes.
+    fn resolve_type_to_nodes(&self, name: &str) -> &[NodeIndex] {
+        if let Some(nodes) = self.def_by_fqn.get(name)
+            && !nodes.is_empty()
+        {
+            return nodes;
         }
         self.def_by_name
-            .get(type_name)
-            .map(|nodes| {
-                nodes
-                    .iter()
-                    .filter_map(|&idx| {
-                        if let GraphNode::Definition { def, .. } = &self.graph[idx] {
-                            Some(def.fqn.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+            .get(name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Assign stable IDs to all nodes for Arrow serialization.
@@ -549,83 +635,6 @@ fn dir_to_string(dir: &Path) -> String {
         ".".to_string()
     } else {
         dir.to_string_lossy().to_string()
-    }
-}
-
-fn build_directory_chain(
-    file_path: &str,
-    cg: &mut CodeGraph,
-    seen_dir_edges: &mut FxHashSet<(String, String)>,
-) -> Option<NodeIndex> {
-    let path = Path::new(file_path);
-    let mut ancestors: Vec<String> = Vec::new();
-    let mut current = path.parent();
-    while let Some(dir) = current {
-        ancestors.push(dir_to_string(dir));
-        current = dir.parent();
-    }
-    ancestors.reverse();
-
-    for dir_path in &ancestors {
-        if !cg.dir_index.contains_key(dir_path) {
-            let name = Path::new(dir_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| dir_path.clone());
-            let idx = cg.graph.add_node(GraphNode::Directory(CanonicalDirectory {
-                path: dir_path.clone(),
-                name,
-            }));
-            cg.dir_index.insert(dir_path.clone(), idx);
-        }
-    }
-
-    for pair in ancestors.windows(2) {
-        if seen_dir_edges.insert((pair[0].clone(), pair[1].clone()))
-            && let (Some(&src), Some(&tgt)) =
-                (cg.dir_index.get(&pair[0]), cg.dir_index.get(&pair[1]))
-        {
-            cg.graph.add_edge(
-                src,
-                tgt,
-                GraphEdge::structural(EdgeKind::Contains, NodeKind::Directory, NodeKind::Directory),
-            );
-        }
-    }
-
-    let parent_dir = dir_to_string(path.parent()?);
-    cg.dir_index.get(&parent_dir).copied()
-}
-
-fn build_containment_edges(
-    definitions: &[CanonicalDefinition],
-    def_indices: &[NodeIndex],
-    cg: &mut CodeGraph,
-) {
-    let fqn_to_idx: FxHashMap<code_graph_types::IStr, usize> = definitions
-        .iter()
-        .enumerate()
-        .map(|(i, d)| (d.fqn.as_istr(), i))
-        .collect();
-
-    for (i, def) in definitions.iter().enumerate() {
-        let Some(parent_fqn) = def.fqn.parent() else {
-            continue;
-        };
-        if let Some(&parent_idx) = fqn_to_idx.get(&parent_fqn.as_istr())
-            && parent_idx != i
-            && let Some(rel) = containment_relationship(definitions[parent_idx].kind, def.kind)
-        {
-            cg.graph.add_edge(
-                def_indices[parent_idx],
-                def_indices[i],
-                GraphEdge {
-                    relationship: rel,
-                    source_definition_range: None,
-                    target_definition_range: None,
-                },
-            );
-        }
     }
 }
 
@@ -948,6 +957,6 @@ mod tests {
         assert_eq!(cg.lookup_fqn("Foo.bar").len(), 1);
         assert_eq!(cg.lookup_name("Foo").len(), 1);
         assert_eq!(cg.lookup_name("bar").len(), 1);
-        assert_eq!(cg.lookup_member("Foo", "bar").len(), 1);
+        assert_eq!(cg.lookup_nested("Foo", "bar").len(), 1);
     }
 }

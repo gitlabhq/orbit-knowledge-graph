@@ -93,7 +93,7 @@ where
                 })?;
 
                 // Add this file's nodes to the graph under the lock.
-                let (def_nodes, import_nodes) = {
+                let (file_node, def_nodes, import_nodes) = {
                     let mut g = graph.lock().unwrap();
                     g.add_file_nodes(&result, file_idx)
                 };
@@ -101,11 +101,11 @@ where
                 let walk = if let Some(root) = ast.as_root() {
                     crate::linker::v2::walker::walk_file(
                         &rules,
-                        file_idx,
                         &result,
                         &root,
                         &def_nodes,
                         &import_nodes,
+                        file_node,
                     )
                 } else {
                     FileWalkResult::empty()
@@ -121,28 +121,30 @@ where
         ));
 
         // ── Collect results ─────────────────────────────────────
-        let mut results = Vec::with_capacity(file_outputs.len());
         let mut walks = Vec::with_capacity(file_outputs.len());
         let mut errors = Vec::new();
+        let mut total_defs = 0usize;
+        let mut total_refs = 0usize;
+        let mut total_imports = 0usize;
 
         for output in file_outputs {
             match output {
-                Ok((result, walk)) => {
-                    results.push(result);
+                Ok((mut result, mut walk)) => {
+                    total_defs += result.definitions.len();
+                    total_refs += result.references.len();
+                    total_imports += result.imports.len();
+                    walk.references = std::mem::take(&mut result.references);
                     walks.push(walk);
                 }
                 Err(err) => errors.push(err),
             }
         }
 
-        if !errors.is_empty() && results.is_empty() {
+        if !errors.is_empty() && walks.is_empty() {
             return Err(errors);
         }
 
         // ── Sequential phase ────────────────────────────────────
-        let total_defs: usize = results.iter().map(|r| r.definitions.len()).sum();
-        let total_refs: usize = results.iter().map(|r| r.references.len()).sum();
-        let total_imports: usize = results.iter().map(|r| r.imports.len()).sum();
         eprintln!(
             "[v2] {total_defs} defs, {total_refs} refs, {total_imports} imports, {} errors",
             errors.len()
@@ -150,11 +152,24 @@ where
 
         let t2 = std::time::Instant::now();
         let mut graph = graph.into_inner().unwrap();
-        graph.finalize(&results);
+        graph.finalize();
+
+        // Pre-resolve imports per file (one-time cost, eliminates repeated neighbor iteration)
+        let sep = rules.fqn_separator;
+        for walk in &mut walks {
+            walk.import_map = graph.pre_resolve_file_imports(walk.file_node, sep);
+        }
+
+        // Free construction-only indexes before resolve
+        graph.drop_construction_indexes();
+
+        // Drop walks with zero reads — no references to resolve
+        walks.retain(|w| !w.reads.is_empty());
+
         eprintln!("[v2] graph finalize: {:.2?}", t2.elapsed());
 
         let t3 = std::time::Instant::now();
-        let result = build_edges(&rules, &graph, &results, &mut walks, &rules.settings);
+        let result = build_edges(&rules, &graph, &mut walks, &rules.settings);
         eprintln!(
             "[v2] resolve: {} edges in {:.2?}",
             result.edges.len(),
@@ -441,50 +456,32 @@ impl Pipeline {
                     .or_default()
                     .extend(remapped);
             }
-            for (fp, nodes) in &g.defs_by_file {
-                let remapped: Vec<_> = nodes
-                    .iter()
-                    .filter_map(|i| index_map.get(i).copied())
-                    .collect();
-                merged
-                    .defs_by_file
-                    .entry(fp.clone())
-                    .or_default()
-                    .extend(remapped);
-            }
-            for (fp, nodes) in &g.imports_by_file {
-                let remapped: Vec<_> = nodes
-                    .iter()
-                    .filter_map(|i| index_map.get(i).copied())
-                    .collect();
-                merged
-                    .imports_by_file
-                    .entry(fp.clone())
-                    .or_default()
-                    .extend(remapped);
-            }
-            for (class_fqn, member_map) in &g.members {
-                for (member_name, nodes) in member_map {
+            for (scope_fqn, nested_map) in &g.nested_defs {
+                for (name, nodes) in nested_map {
                     let remapped: Vec<_> = nodes
                         .iter()
                         .filter_map(|i| index_map.get(i).copied())
                         .collect();
                     merged
-                        .members
-                        .entry(class_fqn.clone())
+                        .nested_defs
+                        .entry(scope_fqn.clone())
                         .or_default()
-                        .entry(member_name.clone())
+                        .entry(name.clone())
                         .or_default()
                         .extend(remapped);
                 }
             }
-            merged
-                .supers
-                .extend(g.supers.iter().map(|(k, v)| (k.clone(), v.clone())));
-            merged
-                .ancestors
-                .extend(g.ancestors.iter().map(|(k, v)| (k.clone(), v.clone())));
-
+            for (node, chain) in &g.ancestors {
+                if let Some(&new_node) = index_map.get(node) {
+                    let remapped: Vec<_> = chain
+                        .iter()
+                        .filter_map(|i| index_map.get(i).copied())
+                        .collect();
+                    if !remapped.is_empty() {
+                        merged.ancestors.insert(new_node, remapped);
+                    }
+                }
+            }
             for old_edge in g.graph.edge_indices() {
                 let (src, tgt) = g.graph.edge_endpoints(old_edge).unwrap();
                 let weight = g.graph[old_edge].clone();
