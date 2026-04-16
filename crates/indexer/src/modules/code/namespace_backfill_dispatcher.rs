@@ -179,6 +179,7 @@ impl NamespaceCodeBackfillDispatcher {
         let migrating = match read_migrating_version(&self.graph).await {
             Ok(v) => v,
             Err(e) => {
+                self.metrics.record_error(self.name(), "migration_status");
                 warn!(error = %e, "failed to check migration status, skipping migration backfill");
                 return Ok(());
             }
