@@ -3,8 +3,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 JOB_NAME="e2e-robot-runner"
 RELEASE_NAME="e2e-robot-runner"
+DIAG_DIR="${E2E_DIR}/diagnostics"
+MARKER_DIR=$(mktemp -d)
+trap 'rm -rf "$MARKER_DIR"' EXIT
 
 log "E2E Tests (SHA: $E2E_SHA)"
+mkdir -p "$DIAG_DIR"
 
 # Cleanup previous run
 helm uninstall "$RELEASE_NAME" -n "$NS_GKG" --kube-context "$KCTX" 2>/dev/null || true
@@ -23,29 +27,39 @@ helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
   --set "namespaces.gitlab=$NS_GITLAB" \
   --set "namespaces.gkg=$NS_GKG"
 
-# Wait for completion or failure
-log "Waiting for tests to complete..."
-while true; do
-  CONDITIONS=$($KC get job "$JOB_NAME" -n "$NS_GKG" \
-    -o jsonpath='{range .status.conditions[*]}{.type}={.status}{"\n"}{end}' 2>/dev/null)
-  if echo "$CONDITIONS" | grep -q "Complete=True"; then
-    log "Tests passed"
-    echo ""
-    $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null
-    exit 0
-  fi
-  if echo "$CONDITIONS" | grep -q "Failed=True"; then
-    break
-  fi
-  sleep 5
-done
+# Stream logs in background (retry until pod ready, follow once)
+(while ! $KC logs -f job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null; do
+  { [ -f "${MARKER_DIR}/pass" ] || [ -f "${MARKER_DIR}/fail" ]; } && break
+  sleep 2
+done) &
+LOG_PID=$!
+
+# Race two kubectl waits — first to fire determines result
+log "Waiting for tests to complete (timeout: 1h)..."
+($KC wait --for=condition=complete job/"$JOB_NAME" -n "$NS_GKG" --timeout=3600s 2>/dev/null \
+  && touch "${MARKER_DIR}/pass") &
+($KC wait --for=condition=failed job/"$JOB_NAME" -n "$NS_GKG" --timeout=3600s 2>/dev/null \
+  && touch "${MARKER_DIR}/fail") &
+
+while [ ! -f "${MARKER_DIR}/pass" ] && [ ! -f "${MARKER_DIR}/fail" ]; do sleep 1; done
+
+kill $LOG_PID 2>/dev/null || true
+jobs -p | xargs kill 2>/dev/null || true
+wait 2>/dev/null || true
+
+# Extract JUnit report from job logs (kubectl cp can't exec into completed pods)
+log "Extracting test report"
+$KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null | \
+  sed -n '/---XUNIT_REPORT_START---/,/---XUNIT_REPORT_END---/p' | \
+  sed '/---XUNIT_REPORT_/d' \
+  > "$DIAG_DIR/junit.xml" || true
+
+if [ -f "${MARKER_DIR}/pass" ]; then
+  log "Tests passed"
+  exit 0
+fi
 
 log "Tests failed"
-echo ""
-$KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null
-
-DIAG_DIR="${E2E_DIR}/diagnostics"
-mkdir -p "$DIAG_DIR"
 
 log "Collecting diagnostics to $DIAG_DIR"
 for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_SIPHON" "$NS_GKG"; do
@@ -56,7 +70,6 @@ for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_SIPHON" "$NS_GKG"; do
   $KC get events -n "$ns" --sort-by=.lastTimestamp 2>/dev/null > "$DIAG_DIR/${ns_short}-events.txt" || true
 
   for pod in $($KC get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-    # Always dump current logs for siphon and gkg pods
     if [[ "$ns_short" == "siphon" || "$ns_short" == "gkg" ]]; then
       $KC logs "$pod" -n "$ns" --tail=200 > "$DIAG_DIR/${ns_short}-${pod}.log" 2>/dev/null || true
     fi

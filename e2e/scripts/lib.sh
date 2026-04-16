@@ -15,6 +15,8 @@ if [[ -z "$E2E_SHA" ]]; then
   exit 1
 fi
 
+export E2E_GKG_TAG="${E2E_GKG_TAG:-dev}"
+
 export NS_NATS="e2e-${E2E_SHA}-nats"
 export NS_CH="e2e-${E2E_SHA}-clickhouse"
 export NS_GITLAB="e2e-${E2E_SHA}-gitlab"

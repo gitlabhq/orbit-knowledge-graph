@@ -1,23 +1,50 @@
 *** Settings ***
 Library    RequestsLibrary
 Library    Collections
+Library    DateTime
+
+Suite Setup    Bootstrap E2E Credentials
 
 *** Variables ***
-${GITLAB_URL}     %{GITLAB_URL}
-${GITLAB_PAT}     %{GITLAB_PAT}
+${GITLAB_URL}            %{GITLAB_URL}
+${GITLAB_ROOT_PASS}      %{GITLAB_ROOT_PASSWORD}
 
 *** Keywords ***
+Get Root OAuth Token
+    ${auth}=    Create Dictionary    grant_type=password    username=root    password=${GITLAB_ROOT_PASS}
+    ${resp}=    POST    ${GITLAB_URL}/oauth/token    data=${auth}    expected_status=200
+    RETURN    ${resp.json()["access_token"]}
+
+Bootstrap E2E Credentials
+    [Documentation]    Create e2e-bot user and PAT via GitLab API using root OAuth credentials
+    ${token}=    Wait Until Keyword Succeeds    120s    5s    Get Root OAuth Token
+    ${headers}=    Create Dictionary    Authorization=Bearer ${token}    Content-Type=application/json
+
+    ${user_data}=    Create Dictionary
+    ...    username=e2e-bot    email=e2e-bot@example.com    name=E2E Bot
+    ...    password=E2eB0tP@ssw0rd!    skip_confirmation=true    admin=true
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/users
+    ...    headers=${headers}    json=${user_data}    expected_status=any
+    IF    ${resp.status_code} == 201
+        ${user_id}=    Set Variable    ${resp.json()["id"]}
+    ELSE IF    ${resp.status_code} == 409
+        ${resp}=    GET    ${GITLAB_URL}/api/v4/users?username=e2e-bot
+        ...    headers=${headers}    expected_status=200
+        ${user_id}=    Set Variable    ${resp.json()[0]["id"]}
+    ELSE
+        Fail    Failed to create e2e-bot: ${resp.status_code} ${resp.text}
+    END
+
+    ${scopes}=    Create List    api    read_api
+    ${expiry}=    Evaluate    (datetime.date.today() + datetime.timedelta(days=30)).isoformat()    modules=datetime
+    ${pat_data}=    Create Dictionary    name=e2e-pat    scopes=${scopes}    expires_at=${expiry}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/users/${user_id}/personal_access_tokens
+    ...    headers=${headers}    json=${pat_data}    expected_status=201
+    Set Global Variable    ${GITLAB_PAT}    ${resp.json()["token"]}
+    Log    E2E credentials bootstrapped (user_id=${user_id})
+
 GitLab Auth Headers
     RETURN    ${{{"PRIVATE-TOKEN": "${GITLAB_PAT}", "Content-Type": "application/json"}}}
-
-GitLab API Is Ready
-    ${headers}=    GitLab Auth Headers
-    ${resp}=    GET    ${GITLAB_URL}/api/v4/user    headers=${headers}    expected_status=200
-
-Orbit Status Is Healthy
-    ${headers}=    GitLab Auth Headers
-    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
-    Should Be Equal    ${resp.json()["status"]}    healthy
 
 Enable Feature Flag
     [Arguments]    ${flag}
@@ -41,6 +68,11 @@ Feature Flag Is Enabled
     END
     Fail    Feature flag ${flag} not found
 
+Orbit Status Is Healthy
+    ${headers}=    GitLab Auth Headers
+    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
+    Should Be Equal    ${resp.json()["status"]}    healthy
+
 Users Indexed In Graph
     ${headers}=    GitLab Auth Headers
     ${agg}=    Create Dictionary    function=count    target=n
@@ -53,10 +85,6 @@ Users Indexed In Graph
     Should Be True    ${count} >= 1    No users indexed in graph (count=${count})
 
 *** Test Cases ***
-GitLab Is Ready
-    [Documentation]    Wait for GitLab API to respond before testing Orbit
-    Wait Until Keyword Succeeds    60s    3s    GitLab API Is Ready
-
 Feature Flags Are Enabled
     [Documentation]    Enable knowledge graph feature flags via API and verify
     Enable Feature Flag    knowledge_graph_infra
