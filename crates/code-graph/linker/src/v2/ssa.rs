@@ -387,6 +387,97 @@ impl SsaResolver {
         replacement
     }
 
+    /// Remove redundant phi SCCs (Algorithm 5, Section 3.2 of Braun et al.).
+    /// Handles irreducible control flow where sets of phis reference only
+    /// each other plus one external value. Call after SSA construction is complete.
+    pub fn remove_redundant_phis(&mut self) {
+        let phi_indices: Vec<PhiId> = (0..self.phis.len()).map(PhiId).collect();
+        self.remove_redundant_phis_inner(&phi_indices);
+    }
+
+    fn remove_redundant_phis_inner(&mut self, phi_ids: &[PhiId]) {
+        if phi_ids.is_empty() {
+            return;
+        }
+
+        // Build a petgraph DiGraph of the phi subgraph for SCC computation.
+        let mut phi_graph = petgraph::graph::DiGraph::<PhiId, ()>::new();
+        let mut phi_to_node: FxHashMap<PhiId, petgraph::graph::NodeIndex> = FxHashMap::default();
+
+        for &pid in phi_ids {
+            let n = phi_graph.add_node(pid);
+            phi_to_node.insert(pid, n);
+        }
+        for &pid in phi_ids {
+            for op in &self.phis[pid.0].operands {
+                if let Value::Phi(p) = op {
+                    if let (Some(&src), Some(&tgt)) = (phi_to_node.get(&pid), phi_to_node.get(p)) {
+                        phi_graph.add_edge(src, tgt, ());
+                    }
+                }
+            }
+        }
+
+        // petgraph's tarjan_scc returns SCCs in reverse topological order
+        let sccs = petgraph::algo::tarjan_scc(&phi_graph);
+
+        // Process in reverse (tarjan_scc returns reverse topo order)
+        for scc_nodes in sccs.iter().rev() {
+            if scc_nodes.len() <= 1 {
+                continue;
+            }
+
+            let scc: Vec<PhiId> = scc_nodes.iter().map(|&n| phi_graph[n]).collect();
+            let scc_set: FxHashSet<PhiId> = scc.iter().copied().collect();
+            let mut outer_ops: FxHashSet<Value> = FxHashSet::default();
+            let mut inner: Vec<PhiId> = Vec::new();
+
+            for &pid in &scc {
+                let mut is_inner = true;
+                for op in &self.phis[pid.0].operands {
+                    if let Value::Phi(p) = op {
+                        if !scc_set.contains(p) {
+                            outer_ops.insert(op.clone());
+                            is_inner = false;
+                        }
+                    } else {
+                        outer_ops.insert(op.clone());
+                        is_inner = false;
+                    }
+                }
+                if is_inner {
+                    inner.push(pid);
+                }
+            }
+
+            if outer_ops.len() == 1 {
+                // All phis in the SCC produce the same value — collapse
+                let replacement = outer_ops.into_iter().next().unwrap();
+                for &pid in &scc {
+                    let variable = self.phis[pid.0].variable;
+                    let block = self.phis[pid.0].block;
+                    if let Some(block_defs) = self.current_def.get_mut(&variable) {
+                        if block_defs.get(&block) == Some(&Value::Phi(pid)) {
+                            block_defs.insert(block, replacement.clone());
+                        }
+                    }
+                    // Replace in all other phis' operands
+                    for i in 0..self.phis.len() {
+                        for op in &mut self.phis[i].operands {
+                            if *op == Value::Phi(pid) {
+                                *op = replacement.clone();
+                            }
+                        }
+                    }
+                    self.stats.phis_trivial += 1;
+                }
+            } else if outer_ops.len() > 1 {
+                // Multiple outer values — recurse on inner phis
+                self.remove_redundant_phis_inner(&inner);
+            }
+        }
+    }
+
     /// Expand a value into its concrete reaching definitions.
     /// Phi nodes are recursively expanded. Cycles are handled via visited set.
     fn resolve_value(&self, value: &Value) -> ReachingDefs {
