@@ -439,6 +439,19 @@ impl<'a> SsaResolver<'a> {
     /// Expand a value into its concrete reaching definitions.
     /// Phi nodes are recursively expanded. Cycles are handled via visited set.
     fn resolve_value(&self, value: &Value<'a>) -> ReachingDefs<'a> {
+        // Fast path: non-Phi values resolve directly without allocating HashSets.
+        match value {
+            Value::Def(_) | Value::Import(_) | Value::Type(_) | Value::Alias(_) => {
+                return ReachingDefs {
+                    values: smallvec::smallvec![value.clone()],
+                };
+            }
+            Value::Opaque | Value::Marker => {
+                return ReachingDefs::default();
+            }
+            Value::Phi(_) => {} // fall through to full resolution
+        }
+
         let mut values = SmallVec::new();
         let mut visited = FxHashSet::default();
         self.resolve_value_recursive(value, &mut values, &mut visited);

@@ -580,11 +580,13 @@ impl CodeGraph {
             .lookup(name, |idx| self.def_name(idx) == name)
     }
 
-    pub fn assign_ids(&self, project_id: i64, branch: &str) -> FxHashMap<NodeIndex, i64> {
+    /// Compute stable IDs for all nodes. Returns a dense Vec indexed by
+    /// `NodeIndex::index()` — O(1) lookup, ~3x smaller than FxHashMap.
+    pub fn assign_ids(&self, project_id: i64, branch: &str) -> Vec<i64> {
         let pid = project_id.to_string();
-        let mut ids = FxHashMap::default();
+        let mut ids = vec![0i64; self.graph.node_count()];
         for idx in self.graph.node_indices() {
-            let id = match &self.graph[idx] {
+            ids[idx.index()] = match &self.graph[idx] {
                 GraphNode::Directory(d) => compute_id(&[&pid, branch, "dir", &d.path]),
                 GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
                 GraphNode::Definition { file_path, id } => {
@@ -603,7 +605,6 @@ impl CodeGraph {
                     ])
                 }
             };
-            ids.insert(idx, id);
         }
         ids
     }

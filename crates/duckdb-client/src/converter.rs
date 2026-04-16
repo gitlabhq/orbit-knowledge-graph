@@ -129,7 +129,10 @@ pub fn convert_v2_graph(
             "Directory" => {
                 let rows: Vec<_> = graph
                     .directories()
-                    .map(|(idx, dir)| DirectoryRow { dir, id: ids[&idx] })
+                    .map(|(idx, dir)| DirectoryRow {
+                        dir,
+                        id: ids[idx.index()],
+                    })
                     .collect();
                 DirectoryRow::to_record_batch(&rows, &specs, &ctx)?
             }
@@ -138,7 +141,7 @@ pub fn convert_v2_graph(
                     .files()
                     .map(|(idx, file)| FileRow {
                         file,
-                        id: ids[&idx],
+                        id: ids[idx.index()],
                     })
                     .collect();
                 FileRow::to_record_batch(&rows, &specs, &ctx)?
@@ -150,7 +153,7 @@ pub fn convert_v2_graph(
                         file_path,
                         def,
                         pool: &graph.strings,
-                        id: ids[&idx],
+                        id: ids[idx.index()],
                     })
                     .collect();
                 DefinitionRow::to_record_batch(&rows, &specs, &ctx)?
@@ -162,7 +165,7 @@ pub fn convert_v2_graph(
                         file_path,
                         import,
                         pool: &graph.strings,
-                        id: ids[&idx],
+                        id: ids[idx.index()],
                     })
                     .collect();
                 ImportRow::to_record_batch(&rows, &specs, &ctx)?
@@ -186,8 +189,8 @@ pub fn convert_v2_graph(
             let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
             let edge = &graph.graph[ei];
             EdgeRow {
-                source_id: ids.get(&src).copied().unwrap_or(0),
-                target_id: ids.get(&tgt).copied().unwrap_or(0),
+                source_id: ids[src.index()],
+                target_id: ids[tgt.index()],
                 edge_kind: edge.relationship.edge_kind.as_ref(),
                 source_node_kind: edge.relationship.source_node.as_ref(),
                 target_node_kind: edge.relationship.target_node.as_ref(),
