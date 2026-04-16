@@ -142,28 +142,10 @@ impl Default for NamespaceHandlerConfig {
     }
 }
 
-fn default_debounce_secs() -> u64 {
-    30
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub struct CodeIndexingTaskHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
-
-    /// Minimum seconds between re-indexing the same project+branch.
-    /// Tasks arriving within this window after a successful indexing are skipped.
-    #[serde(default = "default_debounce_secs")]
-    pub debounce_secs: u64,
-}
-
-impl Default for CodeIndexingTaskHandlerConfig {
-    fn default() -> Self {
-        Self {
-            engine: HandlerConfiguration::default(),
-            debounce_secs: default_debounce_secs(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]

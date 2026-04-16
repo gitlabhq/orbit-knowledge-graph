@@ -1,8 +1,7 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use async_trait::async_trait;
-use chrono::Utc;
 use tracing::{debug, info, warn};
 
 use super::checkpoint_store::CodeCheckpointStore;
@@ -104,19 +103,9 @@ impl CodeIndexingTaskHandler {
 
         let branch = self.resolve_branch(request).await?;
 
-        match self.skip_reason(request, &branch).await {
-            Some("skipped_checkpoint") => {
-                self.metrics.record_outcome("skipped_checkpoint");
-                return Ok(());
-            }
-            Some(reason) => {
-                self.metrics.record_outcome(reason);
-                return Err(HandlerError::Processing(format!(
-                    "task {} for project {} deferred ({reason})",
-                    request.task_id, request.project_id
-                )));
-            }
-            None => {}
+        if self.is_already_indexed(request, &branch).await {
+            self.metrics.record_outcome("skipped_checkpoint");
+            return Ok(());
         }
 
         info!(
@@ -150,12 +139,10 @@ impl CodeIndexingTaskHandler {
                 task_id = request.task_id,
                 project_id,
                 branch = %branch,
-                "lock held by another indexer, deferring"
+                "lock held by another indexer, skipping"
             );
             self.metrics.record_outcome("skipped_lock");
-            return Err(HandlerError::Processing(format!(
-                "lock held for project {project_id} branch {branch}, deferring"
-            )));
+            return Ok(());
         }
 
         let result = self
@@ -185,44 +172,17 @@ impl CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
-    async fn skip_reason(
-        &self,
-        request: &CodeIndexingTaskRequest,
-        branch: &str,
-    ) -> Option<&'static str> {
-        let checkpoint = match self
+    async fn is_already_indexed(&self, request: &CodeIndexingTaskRequest, branch: &str) -> bool {
+        if let Ok(Some(checkpoint)) = self
             .checkpoint_store
             .get_checkpoint(&request.traversal_path, request.project_id, branch)
             .await
+            && checkpoint.last_task_id >= request.task_id
         {
-            Ok(Some(cp)) => cp,
-            _ => return None,
-        };
-
-        if checkpoint.last_task_id >= request.task_id {
             debug!(task_id = request.task_id, "already indexed, skipping");
-            return Some("skipped_checkpoint");
+            return true;
         }
-
-        let debounce = Duration::from_secs(self.config.debounce_secs);
-        if debounce > Duration::ZERO {
-            let elapsed = Utc::now().signed_duration_since(checkpoint.indexed_at);
-            if elapsed
-                .to_std()
-                .is_ok_and(|elapsed_std| elapsed_std < debounce)
-            {
-                debug!(
-                    task_id = request.task_id,
-                    project_id = request.project_id,
-                    branch,
-                    debounce_secs = self.config.debounce_secs,
-                    "within debounce window, skipping"
-                );
-                return Some("skipped_debounce");
-            }
-        }
-
-        None
+        false
     }
 }
 
@@ -357,18 +317,6 @@ mod tests {
             branch: &str,
             last_task_id: i64,
         ) {
-            self.set_checkpoint_at(project_id, traversal_path, branch, last_task_id, Utc::now())
-                .await;
-        }
-
-        async fn set_checkpoint_at(
-            &self,
-            project_id: i64,
-            traversal_path: &str,
-            branch: &str,
-            last_task_id: i64,
-            indexed_at: chrono::DateTime<Utc>,
-        ) {
             self.mock_checkpoints
                 .set_checkpoint(&CodeIndexingCheckpoint {
                     traversal_path: traversal_path.to_string(),
@@ -376,7 +324,7 @@ mod tests {
                     branch: branch.to_string(),
                     last_task_id,
                     last_commit: Some("abc".to_string()),
-                    indexed_at,
+                    indexed_at: Utc::now(),
                 })
                 .await
                 .unwrap();
@@ -407,16 +355,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lock_contention_returns_error_for_nack_retry() {
+    async fn skips_when_lock_already_held() {
         let ctx = TestContext::new();
         ctx.set_lock(123, "main");
 
         let envelope = TestContext::make_request(100, 123, "main");
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
-        // Lock contention returns Err so the engine nacks with retry delay,
-        // preserving the message for redelivery after the lock is released.
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
@@ -459,41 +405,5 @@ mod tests {
         let ctx = TestContext::new();
         let subscription = ctx.handler.subscription();
         assert!(subscription.dead_letter_on_exhaustion);
-    }
-
-    #[tokio::test]
-    async fn debounce_returns_error_for_nack_retry() {
-        let ctx = TestContext::new();
-        // Checkpoint was set just now (within the default 30s debounce window)
-        // with a lower task_id so checkpoint skip does not trigger
-        ctx.set_checkpoint(123, "/org/project-123", "main", 5).await;
-
-        let envelope = TestContext::make_request(10, 123, "main");
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
-
-        // Debounce returns Err so the engine nacks with retry delay,
-        // preserving the message for redelivery after the window expires.
-        assert!(result.is_err());
-        assert!(!ctx.lock_exists(123, "main"));
-    }
-
-    #[tokio::test]
-    async fn processes_task_outside_debounce_window() {
-        let ctx = TestContext::new();
-        // Checkpoint was set 60 seconds ago -- outside the 30s debounce window
-        let old_time = Utc::now() - chrono::Duration::seconds(60);
-        ctx.set_checkpoint_at(123, "/org/project-123", "main", 5, old_time)
-            .await;
-
-        let envelope = TestContext::make_request(10, 123, "main");
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
-
-        // The MockRepositoryService returns an empty stream, so archive
-        // extraction fails. An error proves the handler attempted the work
-        // rather than skipping via debounce (which returns Ok(())).
-        assert!(
-            result.is_err(),
-            "expected error from empty mock archive, got Ok -- task may have been incorrectly skipped by debounce"
-        );
     }
 }
