@@ -1,6 +1,6 @@
 use code_graph_config::Language;
 use code_graph_types::{BindingKind, CanonicalImport, DefKind};
-use parser_core::dsl::extractors::{field, metadata, Extract};
+use parser_core::dsl::extractors::{Extract, field, metadata};
 use parser_core::dsl::predicates::*;
 use parser_core::dsl::types::*;
 
@@ -31,20 +31,24 @@ impl DslLanguage for GoDsl {
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .metadata(metadata().return_type(field("result"))),
+            // Unconditional fallback first — reverse iteration means conditional
+            // rules (Struct, Interface) are checked before the fallback.
+            scope("type_spec", "Type").def_kind(DefKind::Other),
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
                 .when(field_kind("type", &["struct_type"])),
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
                 .when(field_kind("type", &["interface_type"])),
-            scope("type_spec", "Type").def_kind(DefKind::Other),
         ]
     }
 
     fn refs() -> Vec<ReferenceRule> {
-        vec![reference("call_expression")
-            .name_from(field("function"))
-            .receiver("function")]
+        vec![
+            reference("call_expression")
+                .name_from(field("function"))
+                .receiver("function"),
+        ]
     }
 
     fn imports() -> Vec<ImportRule> {

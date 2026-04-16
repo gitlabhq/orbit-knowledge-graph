@@ -8,7 +8,7 @@ type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub enum Cond {
     HasName,
     ParentIs(&'static str),
-    ParentEndsWith(&'static str),
+
     GrandparentIs(&'static str),
     AncestorIs(&'static [&'static str]),
     NearestAncestor {
@@ -43,9 +43,7 @@ impl Cond {
         match self {
             Cond::HasName => node.field("name").is_some(),
             Cond::ParentIs(kind) => node.parent().is_some_and(|p| p.kind() == *kind),
-            Cond::ParentEndsWith(suffix) => node
-                .parent()
-                .is_some_and(|p| p.kind().as_ref().ends_with(suffix)),
+
             Cond::KindEndsWith(suffix) => node.kind().as_ref().ends_with(suffix),
             Cond::KindStartsWith(prefix) => node.kind().as_ref().starts_with(prefix),
             Cond::ParentKindEndsWith(suffix) => node
@@ -168,7 +166,7 @@ macro_rules! cond_constructors {
 cond_constructors! {
     fn has_name() => Cond::HasName;
     fn parent_is(kind: &'static str) => Cond::ParentIs(kind);
-    fn parent_ends_with(suffix: &'static str) => Cond::ParentEndsWith(suffix);
+    fn parent_ends_with(suffix: &'static str) => Cond::ParentKindEndsWith(suffix);
     fn grandparent_is(kind: &'static str) => Cond::GrandparentIs(kind);
     fn ancestor_is(kinds: &'static [&'static str]) => Cond::AncestorIs(kinds);
     fn has_child(kinds: &'static [&'static str]) => Cond::HasChild(kinds);

@@ -1,7 +1,7 @@
 //! Supported programming languages.
 
-use crate::tree_sitter::{LanguageExt, TSLanguage};
 use crate::Language;
+use crate::tree_sitter::{LanguageExt, TSLanguage};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
