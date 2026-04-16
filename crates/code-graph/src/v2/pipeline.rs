@@ -112,6 +112,8 @@ where
 
         // ── Phase 1: parse + extract defs/imports → graph ───────
         let pb = progress_bar(file_count as u64, "Phase 1: defs");
+        // Phase 1: parse + extract defs/imports → graph, drop AST.
+        // Record ref count to skip zero-ref files in Phase 2.
         let phase1_results: Vec<_> = files
             .par_iter()
             .enumerate()
@@ -128,8 +130,12 @@ where
                     file_node
                 };
 
+                let ref_count = result.references.len();
+                let defs = result.definitions.len();
+                let imports = result.imports.len();
+
                 pb.inc(1);
-                Ok((file_node, result.definitions.len(), result.imports.len()))
+                Ok((file_node, defs, imports, ref_count))
             })
             .collect();
         pb.finish_with_message(format!(
@@ -137,27 +143,36 @@ where
             t0.elapsed()
         ));
 
-        let mut file_nodes = Vec::with_capacity(file_count);
+        let mut file_entries: Vec<(petgraph::graph::NodeIndex, usize)> =
+            Vec::with_capacity(file_count);
         let mut errors = Vec::new();
         let mut total_defs = 0usize;
         let mut total_imports = 0usize;
+        let mut skipped_count = 0usize;
 
         for output in phase1_results {
             match output {
-                Ok((file_node, defs, imports)) => {
+                Ok((file_node, defs, imports, ref_count)) => {
                     total_defs += defs;
                     total_imports += imports;
-                    file_nodes.push(file_node);
+                    if ref_count == 0 {
+                        skipped_count += 1;
+                    }
+                    file_entries.push((file_node, ref_count));
                 }
                 Err(err) => {
                     errors.push(err);
-                    file_nodes.push(petgraph::graph::NodeIndex::new(0));
+                    file_entries.push((petgraph::graph::NodeIndex::new(0), 0));
                 }
             }
         }
 
-        if !errors.is_empty() && file_nodes.is_empty() {
+        if !errors.is_empty() && file_entries.is_empty() {
             return Err(errors);
+        }
+
+        if skipped_count > 0 {
+            eprintln!("[v2] {skipped_count} files with 0 refs — skipping Phase 2");
         }
 
         report_rss("after Phase 1 (graph + source bytes)");
@@ -194,15 +209,16 @@ where
         );
         report_rss("after finalize (graph + indexes + source bytes)");
 
-        // ── Phase 2: re-parse + fused walk+resolve ──────────────
+        // ── Phase 2: fused walk+resolve ────────────────────────
+        // Three strategies per file: kept AST (no re-parse), re-parse, or skip.
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "Phase 2: resolve");
 
         let phase2_results: Vec<_> = files
             .par_iter()
-            .zip(file_nodes.par_iter())
-            .map(|((path, source), &file_node)| {
-                if file_node.index() == 0 && errors.iter().any(|e| e.file_path == *path) {
+            .zip(file_entries.par_iter())
+            .map(|((path, source), &(file_node, ref_count))| {
+                if ref_count == 0 {
                     pb2.inc(1);
                     return None;
                 }
