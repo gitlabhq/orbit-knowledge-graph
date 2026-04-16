@@ -260,11 +260,9 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
 3. Downloads the full repository archive via the Rails internal API
-4. Runs the streaming indexing pipeline to produce the graph
+4. Runs the streaming indexing pipeline (parse, convert to Arrow, write to ClickHouse, clean up stale data)
 5. Deletes the downloaded repository from disk
-6. Converts the graph to Arrow record batches and writes them to ClickHouse
-7. Cleans up stale data from the previous indexing run
-8. Updates the checkpoint and releases the lock
+6. Updates the checkpoint and releases the lock
 
 ##### Storage in ClickHouse
 
@@ -310,12 +308,12 @@ The `code_indexing_checkpoint` table records the last successfully indexed point
                            |       |- File discovery (respects .gitignore)
                            |       |- Async file reads
                            |       |- CPU-bound parsing (bounded parallelism)
-                           |       \- Analysis phase -> graph
+                           |       |- Analysis phase -> graph
+                           |       |- Convert graph to Arrow record batches
+                           |       |- Write to ClickHouse (6 tables)
+                           |       \- Clean up stale data
                            |- 7. Delete downloaded repository from disk
-                           |- 8. Convert graph to Arrow record batches
-                           |- 9. Write to ClickHouse (6 tables)
-                           |- 10. Clean up stale data
-                           \- 11. Update checkpoint, release lock
+                           \- 8. Update checkpoint, release lock
 ```
 
 ### Differences from the original local tool

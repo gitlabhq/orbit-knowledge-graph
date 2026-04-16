@@ -62,6 +62,7 @@ engine:
       concurrency_group: code
       max_attempts: 5  # event-driven, must retry to avoid data loss
       retry_interval_secs: 60
+      debounce_secs: 30
     namespace-deletion:
       concurrency_group: code
       max_attempts: 1  # re-dispatched daily, no need to retry

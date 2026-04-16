@@ -84,9 +84,21 @@ impl CodeIndexingPipeline {
             )
             .await;
 
-        self.resolver
+        if let Err(error) = self
+            .resolver
             .cleanup(request.project_id, &request.branch)
-            .await;
+            .await
+        {
+            self.metrics.record_cleanup("failure");
+            warn!(
+                project_id = request.project_id,
+                branch = %request.branch,
+                %error,
+                "failed to clean up downloaded repository from disk"
+            );
+        } else {
+            self.metrics.record_cleanup("success");
+        }
 
         indexing_result?;
 

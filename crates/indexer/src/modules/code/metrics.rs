@@ -12,6 +12,7 @@ pub struct CodeMetrics {
     pub(super) handler_duration: Histogram<f64>,
     pub(super) repository_fetch_duration: Histogram<f64>,
     pub(super) repository_resolution_strategy: Counter<u64>,
+    pub(super) repository_cleanup: Counter<u64>,
     pub(super) indexing_duration: Histogram<f64>,
     pub(super) files_processed: Counter<u64>,
     pub(super) nodes_indexed: Counter<u64>,
@@ -49,6 +50,11 @@ impl CodeMetrics {
             .with_description("Repository resolution strategy used (full_download)")
             .build();
 
+        let repository_cleanup = meter
+            .u64_counter("gkg.indexer.code.repository.cleanup")
+            .with_description("Repository disk cleanup outcomes (success, failure)")
+            .build();
+
         let indexing_duration = meter
             .f64_histogram("gkg.indexer.code.indexing.duration")
             .with_unit("s")
@@ -76,6 +82,7 @@ impl CodeMetrics {
             handler_duration,
             repository_fetch_duration,
             repository_resolution_strategy,
+            repository_cleanup,
             indexing_duration,
             files_processed,
             nodes_indexed,
@@ -88,6 +95,11 @@ impl CodeMetrics {
     pub(super) fn record_resolution_strategy(&self, strategy: &'static str) {
         self.repository_resolution_strategy
             .add(1, &[KeyValue::new("strategy", strategy)]);
+    }
+
+    pub(super) fn record_cleanup(&self, outcome: &'static str) {
+        self.repository_cleanup
+            .add(1, &[KeyValue::new("outcome", outcome)]);
     }
 
     pub(super) fn record_outcome(&self, outcome: &'static str) {

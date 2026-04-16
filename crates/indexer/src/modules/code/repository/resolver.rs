@@ -38,15 +38,12 @@ impl RepositoryResolver {
         self.full_download(project_id, branch, ref_name).await
     }
 
-    pub async fn cleanup(&self, project_id: i64, branch: &str) {
-        if let Err(e) = self.cache.invalidate(project_id, branch).await {
-            tracing::warn!(
-                project_id,
-                branch,
-                error = %e,
-                "failed to clean up downloaded repository from disk"
-            );
-        }
+    pub async fn cleanup(
+        &self,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<(), super::cache::RepositoryCacheError> {
+        self.cache.invalidate(project_id, branch).await
     }
 
     async fn full_download(
@@ -83,19 +80,33 @@ mod tests {
     use async_trait::async_trait;
     use parking_lot::Mutex;
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     struct ScriptedRepositoryService {
         archive: Mutex<Vec<u8>>,
+        fail_downloads: Mutex<bool>,
+        download_count: AtomicUsize,
     }
 
     impl ScriptedRepositoryService {
         fn with_archive(files: &[(&str, &str)], ref_name: &str) -> Arc<Self> {
             Arc::new(Self {
                 archive: Mutex::new(build_test_tar_gz(files, ref_name)),
+                fail_downloads: Mutex::new(false),
+                download_count: AtomicUsize::new(0),
             })
         }
 
         fn set_archive(&self, files: &[(&str, &str)], ref_name: &str) {
             *self.archive.lock() = build_test_tar_gz(files, ref_name);
+        }
+
+        fn set_fail_downloads(&self, fail: bool) {
+            *self.fail_downloads.lock() = fail;
+        }
+
+        fn download_count(&self) -> usize {
+            self.download_count.load(Ordering::SeqCst)
         }
     }
 
@@ -116,6 +127,12 @@ mod tests {
             _project_id: i64,
             _ref_name: &str,
         ) -> Result<super::super::service::ByteStream, RepositoryServiceError> {
+            self.download_count.fetch_add(1, Ordering::SeqCst);
+            if *self.fail_downloads.lock() {
+                return Err(RepositoryServiceError::Archive(
+                    "simulated download failure".to_string(),
+                ));
+            }
             let data = self.archive.lock().clone();
             Ok(Box::pin(futures::stream::once(async {
                 Ok(bytes::Bytes::from(data))
@@ -204,7 +221,92 @@ mod tests {
         let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
         assert!(path.exists());
 
-        resolver.cleanup(1, "main").await;
+        resolver.cleanup(1, "main").await.unwrap();
         assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn resolve_same_commit_downloads_every_time() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+
+        resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+
+        assert_eq!(service.download_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn cleanup_is_idempotent() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        let (_dir, resolver) = create_resolver(service);
+
+        resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+
+        resolver.cleanup(1, "main").await.unwrap();
+        resolver.cleanup(1, "main").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn resolve_works_after_cleanup() {
+        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "v1")], "commit1");
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+
+        let path1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(path1.join("src/main.rs")).unwrap(),
+            "v1"
+        );
+
+        resolver.cleanup(1, "main").await.unwrap();
+
+        service.set_archive(&[("src/main.rs", "v2")], "commit2");
+        let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(path2.join("src/main.rs")).unwrap(),
+            "v2"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_propagates_download_error() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+
+        service.set_fail_downloads(true);
+        let result = resolver.resolve(1, "main", Some("abc123")).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn cleanup_without_prior_download_does_not_error() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        let (_dir, resolver) = create_resolver(service);
+
+        resolver.cleanup(1, "main").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn multiple_projects_are_independent() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+
+        let path1 = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let path2 = resolver.resolve(2, "main", Some("abc123")).await.unwrap();
+
+        assert_ne!(path1, path2);
+        assert!(path1.join("src/main.rs").exists());
+        assert!(path2.join("src/main.rs").exists());
+
+        resolver.cleanup(1, "main").await.unwrap();
+        assert!(!path1.exists());
+        assert!(path2.exists());
     }
 }

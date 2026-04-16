@@ -35,6 +35,7 @@
         "handlers": {
           "code-indexing-task": {
             "concurrency_group": null,
+            "debounce_secs": 30,
             "max_attempts": null,
             "retry_interval_secs": null
           },
@@ -276,6 +277,13 @@
           ],
           "default": null
         },
+        "debounce_secs": {
+          "description": "Minimum seconds between re-indexing the same project+branch.\nTasks arriving within this window after a successful indexing are skipped.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
+        },
         "max_attempts": {
           "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
           "type": [
@@ -318,6 +326,7 @@
           "default": {
             "code-indexing-task": {
               "concurrency_group": null,
+              "debounce_secs": 30,
               "max_attempts": null,
               "retry_interval_secs": null
             },
@@ -493,6 +502,7 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "concurrency_group": null,
+            "debounce_secs": 30,
             "max_attempts": null,
             "retry_interval_secs": null
           }

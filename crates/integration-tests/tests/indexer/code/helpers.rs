@@ -35,7 +35,7 @@ pub struct CodeIndexingDeps {
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
-    _cache_dir: tempfile::TempDir,
+    cache_dir: tempfile::TempDir,
 }
 
 impl CodeIndexingDeps {
@@ -72,8 +72,12 @@ impl CodeIndexingDeps {
             repository_service,
             checkpoint_store,
             metrics,
-            _cache_dir: cache_dir,
+            cache_dir,
         }
+    }
+
+    pub fn cache_dir_path(&self) -> &std::path::Path {
+        self.cache_dir.path()
     }
 
     pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {

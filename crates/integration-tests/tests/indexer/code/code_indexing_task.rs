@@ -129,6 +129,128 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
     );
 }
 
+#[tokio::test]
+async fn disk_is_clean_after_successful_indexing() {
+    let project_id: i64 = 4;
+    let commit_sha = "abc123";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main {
+            public void save() {}
+        }",
+        )],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let cache_dir = deps.cache_dir_path().to_path_buf();
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        commit_sha,
+        1,
+        "/cleanup-test",
+    )
+    .await;
+
+    assert_code_indexed(&clickhouse, project_id).await;
+
+    let remaining: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    assert!(
+        remaining.is_empty(),
+        "cache dir should be empty after indexing, found: {remaining:?}"
+    );
+}
+
+#[tokio::test]
+async fn disk_is_clean_after_multiple_reindexes() {
+    let project_id: i64 = 5;
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main { public void v1() {} }")],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let cache_dir = deps.cache_dir_path().to_path_buf();
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        "/multi-test",
+    )
+    .await;
+
+    mock.replace_archive(
+        project_id,
+        &[("src/Main.java", "public class Main { public void v2() {} }")],
+    );
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        "/multi-test",
+    )
+    .await;
+
+    mock.replace_archive(
+        project_id,
+        &[("src/Main.java", "public class Main { public void v3() {} }")],
+    );
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit3",
+        3,
+        "/multi-test",
+    )
+    .await;
+
+    assert_active_definitions(&clickhouse, project_id, "src/Main.java", &["Main", "v3"]).await;
+
+    let remaining: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    assert!(
+        remaining.is_empty(),
+        "cache dir should be empty after repeated indexing, found: {remaining:?}"
+    );
+}
+
 async fn index_code(
     handler: &indexer::modules::code::CodeIndexingTaskHandler,
     clickhouse: &integration_testkit::TestContext,
