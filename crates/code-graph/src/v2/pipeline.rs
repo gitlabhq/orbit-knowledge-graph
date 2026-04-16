@@ -227,8 +227,16 @@ where
                 let ast = lang.parse_ast(source_str);
                 let root = ast.root();
                 let parse_ns = t_parse.elapsed().as_nanos() as u64;
+                let file_arena = crate::linker::v2::state::FileArena::with_capacity(4096);
                 let t_walk = std::time::Instant::now();
-                let mut result = fused_walk_file(&rules, &graph, &root, file_node, &rules.settings);
+                let mut result = fused_walk_file(
+                    &rules,
+                    &graph,
+                    &root,
+                    file_node,
+                    &rules.settings,
+                    &file_arena,
+                );
                 let walk_ns = t_walk.elapsed().as_nanos() as u64;
                 result.parse_ns = parse_ns;
                 result.walk_ns = walk_ns;

@@ -16,6 +16,7 @@ use super::graph::{CodeGraph, GraphEdge, GraphNode};
 use super::imports::{ResolveSettings, apply_import_strategies, resolve_import};
 use super::rules::ResolutionRules;
 use super::ssa::{BlockId, SsaResolver, Value};
+use super::state::FileArena;
 use super::stats::ResolveStats;
 
 const MIN_STACK_REMAINING: usize = 128 * 1024;
@@ -39,6 +40,7 @@ pub fn fused_walk_file(
     root: &Node<StrDoc<SupportLang>>,
     file_node: NodeIndex,
     settings: &ResolveSettings,
+    file_arena: &FileArena,
 ) -> FusedWalkResult {
     let spec = rules
         .language_spec
@@ -104,6 +106,7 @@ pub fn fused_walk_file(
         ssa: &mut ssa,
         file_node,
         settings,
+        file_arena,
         import_map: &import_map,
         import_name_map: &import_name_map,
         defs_by_byte: &defs_by_byte,
@@ -121,7 +124,6 @@ pub fn fused_walk_file(
         import_cache: FxHashMap::default(),
         nested_cache: FxHashMap::default(),
         ssa_names,
-        buf: String::with_capacity(128),
         sep,
         last_bare_path: ResolvePath::None,
         last_chain_path: ResolvePath::None,
@@ -142,10 +144,10 @@ pub fn fused_walk_file(
 
 // ── Scope stack entry ───────────────────────────────────────────
 
-struct ScopeEntry {
+struct ScopeEntry<'a> {
     block: BlockId,
     is_type_scope: bool,
-    name: Option<String>,
+    name: Option<&'a str>,
     def_node: Option<NodeIndex>,
     enclosing_scope_fqn: Option<IStr>,
 }
@@ -159,22 +161,22 @@ struct FusedFileWalker<'a> {
     ssa: &'a mut SsaResolver,
     file_node: NodeIndex,
     settings: &'a ResolveSettings,
+    file_arena: &'a FileArena,
     import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
     import_name_map: &'a FxHashMap<String, String>,
     defs_by_byte: &'a FxHashMap<usize, (NodeIndex, bool)>,
 
     current_block: BlockId,
-    scope_stack: Vec<ScopeEntry>,
+    scope_stack: Vec<ScopeEntry<'a>>,
     edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
     stats: ResolveStats,
     num_refs: usize,
 
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
-    nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
+    nested_cache: FxHashMap<(&'a str, &'a str), Vec<NodeIndex>>,
     /// Hashed names written to SSA. read_variable for names not in this set
     /// will always return Opaque — skip the predecessor traversal.
     ssa_names: rustc_hash::FxHashSet<u64>,
-    buf: String,
     sep: &'static str,
     last_bare_path: ResolvePath,
     last_chain_path: ResolvePath,
@@ -300,7 +302,8 @@ impl<'a> FusedFileWalker<'a> {
         // Write self/super SSA variables for type scopes
         if is_type_scope {
             let scope_fqn = if let Some((idx, _)) = def_info {
-                self.graph.def(idx).fqn.to_string()
+                self.file_arena
+                    .alloc_str(&self.graph.def(idx).fqn.to_string())
             } else {
                 self.build_fqn(name)
             };
@@ -321,7 +324,7 @@ impl<'a> FusedFileWalker<'a> {
         self.scope_stack.push(ScopeEntry {
             block: new_block,
             is_type_scope,
-            name: Some(name.to_string()),
+            name: Some(self.file_arena.alloc_str(name)),
             def_node,
             enclosing_scope_fqn,
         });
@@ -336,14 +339,11 @@ impl<'a> FusedFileWalker<'a> {
         }
     }
 
-    fn build_fqn(&self, name: &str) -> String {
-        let mut parts: Vec<&str> = self
-            .scope_stack
-            .iter()
-            .filter_map(|e| e.name.as_deref())
-            .collect();
+    fn build_fqn(&self, name: &str) -> &'a str {
+        let mut parts: Vec<&str> = self.scope_stack.iter().filter_map(|e| e.name).collect();
         parts.push(name);
-        parts.join(self.sep)
+        let joined = parts.join(self.sep);
+        self.file_arena.alloc_str(&joined)
     }
 
     fn find_super_type(&self, class_name: &str) -> Option<String> {
@@ -868,11 +868,8 @@ impl<'a> FusedFileWalker<'a> {
         if compound_key.is_empty() {
             return SmallVec::new();
         }
-        self.buf.clear();
-        self.buf.push_str(compound_key);
-        self.buf.push_str(self.sep);
-        self.buf.push_str(member_name);
-        std::mem::swap(compound_key, &mut self.buf);
+        compound_key.push_str(self.sep);
+        compound_key.push_str(member_name);
         let reaching = self
             .ssa
             .read_variable_stateless(compound_key, self.current_block);
@@ -913,8 +910,9 @@ impl<'a> FusedFileWalker<'a> {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let key = (scope_fqn.to_string(), member_name.to_string());
-        if let Some(cached) = self.nested_cache.get(&key) {
+        let sk = self.file_arena.alloc_str(scope_fqn);
+        let mk = self.file_arena.alloc_str(member_name);
+        if let Some(cached) = self.nested_cache.get(&(sk, mk)) {
             if !cached.is_empty() {
                 out.extend_from_slice(cached);
                 return true;
@@ -922,15 +920,13 @@ impl<'a> FusedFileWalker<'a> {
             return false;
         }
         let mut result = Vec::new();
-        // lookup_nested_with_hierarchy verifies both scope_fqn and member_name
-        // against actual strings (hash collision guard).
         self.graph
             .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
         let found = !result.is_empty();
         if found {
             out.extend_from_slice(&result);
         }
-        self.nested_cache.insert(key, result);
+        self.nested_cache.insert((sk, mk), result);
         found
     }
 
