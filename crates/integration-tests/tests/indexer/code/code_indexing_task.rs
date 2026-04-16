@@ -175,7 +175,9 @@ async fn debounce_skips_reindex_within_window() {
     let context = handler_context(&clickhouse);
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, "/debounce-test");
     let result = handler.handle(context, envelope).await;
-    assert!(result.is_ok(), "debounced task should return Ok");
+    // Debounce returns Err so the engine nacks with retry delay.
+    // The task is preserved in NATS for redelivery after the window expires.
+    assert!(result.is_err(), "debounced task should return Err for nack");
 
     // The original definitions should still be active (v1, not v2)
     // because the second indexing was debounced.

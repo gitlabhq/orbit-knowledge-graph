@@ -111,8 +111,10 @@ impl CodeIndexingTaskHandler {
             }
             Some(reason) => {
                 self.metrics.record_outcome(reason);
-                self.republish(context, request).await;
-                return Ok(());
+                return Err(HandlerError::Processing(format!(
+                    "task {} for project {} deferred ({reason})",
+                    request.task_id, request.project_id
+                )));
             }
             None => {}
         }
@@ -148,11 +150,12 @@ impl CodeIndexingTaskHandler {
                 task_id = request.task_id,
                 project_id,
                 branch = %branch,
-                "lock held by another indexer, re-publishing"
+                "lock held by another indexer, deferring"
             );
             self.metrics.record_outcome("skipped_lock");
-            self.republish(context, request).await;
-            return Ok(());
+            return Err(HandlerError::Processing(format!(
+                "lock held for project {project_id} branch {branch}, deferring"
+            )));
         }
 
         let result = self
@@ -224,50 +227,6 @@ impl CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
-    async fn republish(&self, ctx: &HandlerContext, request: &CodeIndexingTaskRequest) {
-        let envelope = match crate::types::Envelope::new(request) {
-            Ok(e) => e,
-            Err(e) => {
-                warn!(
-                    task_id = request.task_id,
-                    project_id = request.project_id,
-                    error = %e,
-                    "failed to serialize debounced task for re-publish"
-                );
-                return;
-            }
-        };
-
-        match ctx
-            .nats
-            .publish(&request.publish_subscription(), &envelope)
-            .await
-        {
-            Ok(()) => {
-                debug!(
-                    task_id = request.task_id,
-                    project_id = request.project_id,
-                    "re-published debounced task"
-                );
-            }
-            Err(crate::nats::NatsError::PublishDuplicate) => {
-                debug!(
-                    task_id = request.task_id,
-                    project_id = request.project_id,
-                    "debounced task already in-flight, skipping re-publish"
-                );
-            }
-            Err(e) => {
-                warn!(
-                    task_id = request.task_id,
-                    project_id = request.project_id,
-                    error = %e,
-                    "failed to re-publish debounced task"
-                );
-            }
-        }
-    }
-
     async fn try_acquire_lock(
         &self,
         ctx: &HandlerContext,
@@ -448,21 +407,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lock_contention_re_publishes_task() {
+    async fn lock_contention_returns_error_for_nack_retry() {
         let ctx = TestContext::new();
         ctx.set_lock(123, "main");
 
         let envelope = TestContext::make_request(100, 123, "main");
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
-        assert!(result.is_ok());
-
-        let published = ctx.mock_nats.get_published();
-        assert_eq!(
-            published.len(),
-            1,
-            "lock-contended task should be re-published"
-        );
+        // Lock contention returns Err so the engine nacks with retry delay,
+        // preserving the message for redelivery after the lock is released.
+        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -508,7 +462,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn debounce_re_publishes_task_to_nats() {
+    async fn debounce_returns_error_for_nack_retry() {
         let ctx = TestContext::new();
         // Checkpoint was set just now (within the default 30s debounce window)
         // with a lower task_id so checkpoint skip does not trigger
@@ -517,15 +471,10 @@ mod tests {
         let envelope = TestContext::make_request(10, 123, "main");
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
-        assert!(result.is_ok());
+        // Debounce returns Err so the engine nacks with retry delay,
+        // preserving the message for redelivery after the window expires.
+        assert!(result.is_err());
         assert!(!ctx.lock_exists(123, "main"));
-
-        let published = ctx.mock_nats.get_published();
-        assert_eq!(published.len(), 1, "debounced task should be re-published");
-        assert!(
-            published[0].0.subject.contains("123"),
-            "re-published subject should contain the project_id"
-        );
     }
 
     #[tokio::test]
