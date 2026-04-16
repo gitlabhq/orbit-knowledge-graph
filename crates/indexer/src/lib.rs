@@ -314,6 +314,7 @@ pub async fn run_dispatcher(
         )),
         Box::new(NamespaceCodeBackfillDispatcher::new(
             services.nats.clone(),
+            config.graph.build_client(),
             config.datalake.build_client(),
             metrics.clone(),
             config.schedule.tasks.namespace_code_backfill.clone(),
