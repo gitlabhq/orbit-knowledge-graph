@@ -390,16 +390,14 @@ pub struct SdlcProgress {
     #[prost(string, tag = "5")]
     pub last_error: ::prost::alloc::string::String,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CodeOverview {
-    #[prost(int32, tag = "1")]
-    pub projects_indexed: i32,
-    #[prost(int32, tag = "2")]
-    pub projects_total: i32,
+    #[prost(int64, tag = "1")]
+    pub projects_indexed: i64,
+    #[prost(int64, tag = "2")]
+    pub projects_total: i64,
     #[prost(string, tag = "3")]
     pub last_indexed_at: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag = "4")]
-    pub projects: ::prost::alloc::vec::Vec<ProjectCodeOverview>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ProjectCodeOverview {
@@ -573,6 +571,7 @@ impl GraphState {
 #[repr(i32)]
 pub enum EntityStatus {
     Pending = 0,
+    /// indexer only produces PENDING/COMPLETED (see ADR 009).
     Completed = 2,
 }
 impl EntityStatus {

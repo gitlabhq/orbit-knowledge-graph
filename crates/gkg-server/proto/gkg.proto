@@ -289,7 +289,8 @@ enum GraphState {
 
 enum EntityStatus {
   ENTITY_STATUS_PENDING = 0;
-  reserved 1;
+  reserved 1; // was ENTITY_STATUS_IN_PROGRESS; dropped 2026-04-16 as the
+              // indexer only produces PENDING/COMPLETED (see ADR 009).
   ENTITY_STATUS_COMPLETED = 2;
 }
 
@@ -328,10 +329,13 @@ message SdlcProgress {
 }
 
 message CodeOverview {
-  int32 projects_indexed = 1;
-  int32 projects_total = 2;
+  int64 projects_indexed = 1;
+  int64 projects_total = 2;
   string last_indexed_at = 3;
-  repeated ProjectCodeOverview projects = 4;
+  // Reserved for a future per-project breakdown populated from `code.{project_id}`
+  // KV keys; not emitted today. See ADR 009 "Project-level code lookups".
+  reserved 4;
+  reserved "projects";
 }
 
 message ProjectCodeOverview {

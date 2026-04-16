@@ -87,6 +87,13 @@
         "username": "default"
       }
     },
+    "graph_status": {
+      "$ref": "#/$defs/GraphStatusConfig",
+      "default": {
+        "debounce_secs": 10,
+        "staleness_threshold_secs": 120
+      }
+    },
     "grpc": {
       "$ref": "#/$defs/GrpcConfig",
       "default": {
@@ -430,6 +437,24 @@
           "minimum": 0
         }
       }
+    },
+    "GraphStatusConfig": {
+      "type": "object",
+      "properties": {
+        "debounce_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 10,
+          "minimum": 0
+        },
+        "staleness_threshold_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 120,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     },
     "GrpcConfig": {
       "type": "object",

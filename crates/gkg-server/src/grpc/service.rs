@@ -15,10 +15,11 @@ use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
-    ExecuteQueryMessage, ExecuteQueryResult, GetClusterHealthRequest, GetClusterHealthResponse,
-    GetGraphSchemaRequest, GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse,
-    ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge,
-    SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
+    ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
+    GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
+    GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, ListToolsRequest,
+    ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
+    SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
@@ -446,9 +447,13 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
         claims.group_traversal_ids.clone()
     };
 
-    let is_authorized = authorized_paths
-        .iter()
-        .any(|allowed| requested_path.starts_with(allowed));
+    // Normalize both sides to end with `/` to prevent prefix collisions like
+    // "1/2/" matching "1/20/" when an allowed path lacks a trailing slash.
+    let requested = ensure_trailing_slash(requested_path);
+    let is_authorized = authorized_paths.iter().any(|allowed| {
+        let allowed = ensure_trailing_slash(allowed);
+        requested.starts_with(&allowed)
+    });
 
     if !is_authorized {
         return Err(Status::permission_denied(
@@ -457,6 +462,14 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
     }
 
     Ok(())
+}
+
+fn ensure_trailing_slash(path: &str) -> String {
+    if path.ends_with('/') {
+        path.to_string()
+    } else {
+        format!("{path}/")
+    }
 }
 
 #[cfg(test)]

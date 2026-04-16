@@ -319,6 +319,12 @@ Position keys encode scope and entity, e.g. `"global.User"` or `"ns.42.Project"`
 
 Rows deleted in the source database have `_siphon_deleted` set to `true`. The extraction query pulls these rows alongside live data, and the `_deleted` flag carries through to the graph table. Downstream queries filter on the flag. Periodic cleanup jobs remove flagged rows from the graph tables.
 
+**Post-ETL progress reporting**
+
+After each SDLC namespace handler completes, `ProgressWriter` runs ClickHouse count queries against the graph tables (using `uniq()` with HLL for RMT-safe deduplication and filtering `_deleted`) for nodes and edges scoped to the namespace's traversal path. Counts are rolled up in-memory to every ancestor traversal-path prefix, then a `CountsSnapshot` is written per prefix alongside a `MetaSnapshot` for the namespace into the NATS KV bucket `indexing_progress`. Progress writes are non-fatal (best-effort): KV failures are logged but do not fail the handler. Count queries are debounced per namespace via an in-memory `HashMap<NamespaceId, Instant>` so frequent dispatch cycles do not re-run counts within the debounce window.
+
+See [ADR 009](../decisions/009_indexing_progress_nats_kv.md) for the full design, key schema, projections, and failure modes.
+
 ##### Zero-downtime schema changes
 
 **Main PostgreSQL to Lake**

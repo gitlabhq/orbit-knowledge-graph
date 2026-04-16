@@ -46,11 +46,13 @@ fn build_single_node_query(target: &NodeCountTarget, traversal_path: &str) -> Qu
             Expr::string(traversal_path),
         ],
     );
+    let not_deleted = Expr::unary(Op::Not, Expr::col(alias, "_deleted"));
+    let where_clause = Expr::and_all([Some(tp_filter), Some(not_deleted)]);
 
     Query {
         select,
         from,
-        where_clause: Some(tp_filter),
+        where_clause,
         group_by: vec![Expr::col(alias, "traversal_path")],
         ..Default::default()
     }
@@ -80,11 +82,13 @@ pub fn build_edge_count_query(traversal_path: &str) -> Node {
             Expr::string(traversal_path),
         ],
     );
+    let not_deleted = Expr::unary(Op::Not, Expr::col(alias, "_deleted"));
+    let where_clause = Expr::and_all([Some(tp_filter), Some(not_deleted)]);
 
     let query = Query {
         select,
         from,
-        where_clause: Some(tp_filter),
+        where_clause,
         group_by: vec![
             Expr::col(alias, "traversal_path"),
             Expr::col(alias, "relationship_kind"),
@@ -129,7 +133,16 @@ pub fn build_cross_namespace_edge_query(
             Expr::col(edge_alias, "relationship_kind"),
             "relationship_kind",
         ),
-        SelectExpr::new(Expr::func("count", vec![]), "cnt"),
+        SelectExpr::new(
+            Expr::func(
+                "uniq",
+                vec![
+                    Expr::col(edge_alias, "source_id"),
+                    Expr::col(edge_alias, "target_id"),
+                ],
+            ),
+            "cnt",
+        ),
     ];
 
     let edge_table = TableRef::scan("gl_edge", edge_alias);
@@ -291,8 +304,8 @@ mod tests {
             result.sql
         );
         assert!(
-            result.sql.contains("count"),
-            "should use count(): {}",
+            result.sql.contains("uniq"),
+            "should use uniq for dedup: {}",
             result.sql
         );
     }
@@ -313,6 +326,39 @@ mod tests {
             result.sql.contains("gl_vulnerability"),
             "should join gl_vulnerability: {}",
             result.sql
+        );
+    }
+
+    #[test]
+    fn node_count_query_filters_soft_deleted() {
+        let targets = test_targets();
+        let ast = build_node_count_query(&targets, "1/2/");
+        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+        assert!(
+            result.sql.contains("_deleted"),
+            "should filter _deleted rows: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn edge_count_query_filters_soft_deleted() {
+        let ast = build_edge_count_query("1/2/");
+        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+        assert!(
+            result.sql.contains("_deleted"),
+            "should filter _deleted rows: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn node_count_targets_excludes_user() {
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let targets = node_count_targets(&ontology);
+        assert!(
+            !targets.iter().any(|t| t.name == "User"),
+            "User has no traversal_path and must be excluded"
         );
     }
 }

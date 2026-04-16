@@ -27,9 +27,9 @@ pub struct SdlcMeta {
     #[serde(default)]
     pub last_started_at: String,
     #[serde(default)]
-    pub last_duration_ms: u64,
+    pub last_duration_ms: i64,
     #[serde(default)]
-    pub cycle_count: u64,
+    pub cycle_count: i64,
     #[serde(default)]
     pub last_error: String,
 }

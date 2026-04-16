@@ -722,7 +722,9 @@ the next ETL cycle, the webserver returns "not found" for progress queries.
 
 Every KV value includes `updated_at`. The webserver can compare this against
 the current time and include a `stale: true` flag in the response if the value
-is older than a configurable threshold (e.g., 2x the ETL interval).
+is older than a configurable threshold. Default is 120s in
+`graph_status.staleness_threshold_secs`, which is 2x the default SDLC cron
+(60s). Tune per deployment.
 
 ### Testability
 
@@ -849,6 +851,9 @@ and `COMPLETED` (count > 0).
 
 The endpoint reads pre-aggregated counts from NATS KV. There is no error
 state; errors are recorded in `sdlc.last_error`.
+
+`code.projects` (the per-project breakdown in `CodeOverview`) is reserved in
+the proto for future implementation; the current webserver never populates it.
 
 ### Access control
 

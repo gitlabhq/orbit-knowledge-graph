@@ -62,6 +62,7 @@ impl Handler for NamespaceHandler {
             })?;
 
         let started_at = Instant::now();
+        let started_at_wall = chrono::Utc::now();
         info!(
             namespace_id = payload.namespace,
             organization_id = payload.organization,
@@ -110,6 +111,7 @@ impl Handler for NamespaceHandler {
                 context.nats.as_ref(),
                 payload.namespace,
                 &traversal_path,
+                started_at_wall,
                 elapsed,
                 error_msg.as_deref(),
             )

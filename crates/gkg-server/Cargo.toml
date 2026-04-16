@@ -55,6 +55,7 @@ tonic-prost-build = { workspace = true }
 prost-build = { workspace = true }
 
 [dev-dependencies]
+bytes = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 jsonschema = { workspace = true }
 tokio = { workspace = true }

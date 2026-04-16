@@ -18,8 +18,7 @@ use crate::handler::HandlerError;
 use crate::nats::{KvPutOptions, NatsServices};
 
 use gkg_server_config::indexing_progress::{
-    CodeMeta, CountsSnapshot, INDEXING_PROGRESS_BUCKET, MetaSnapshot, SdlcMeta, counts_key,
-    meta_key,
+    CountsSnapshot, INDEXING_PROGRESS_BUCKET, MetaSnapshot, SdlcMeta, counts_key, meta_key,
 };
 
 use self::queries::{
@@ -53,6 +52,7 @@ impl ProgressWriter {
         nats: &dyn NatsServices,
         namespace_id: i64,
         traversal_path: &str,
+        started_at: chrono::DateTime<chrono::Utc>,
         elapsed: std::time::Duration,
         error: Option<&str>,
     ) -> Result<(), HandlerError> {
@@ -61,7 +61,7 @@ impl ProgressWriter {
             return Ok(());
         }
 
-        let started_at = Instant::now();
+        let count_started = Instant::now();
 
         let (node_counts, edge_counts) = self
             .run_count_queries(traversal_path)
@@ -70,7 +70,8 @@ impl ProgressWriter {
 
         let rollups = rollup_counts(&node_counts, &edge_counts);
 
-        let now = chrono::Utc::now().to_rfc3339();
+        let completed_at = chrono::Utc::now();
+        let now = completed_at.to_rfc3339();
 
         for (tp, (nodes, edges)) in &rollups {
             let snapshot = CountsSnapshot {
@@ -92,22 +93,28 @@ impl ProgressWriter {
             .map_err(|e| HandlerError::Processing(format!("KV put {key}: {e}")))?;
         }
 
-        let state = "idle";
         let prev_meta = self.read_previous_meta(nats, namespace_id).await;
         let prev_cycle = prev_meta.as_ref().map(|m| m.sdlc.cycle_count).unwrap_or(0);
         let prev_backfill_done = prev_meta.as_ref().is_some_and(|m| m.initial_backfill_done);
+        // Preserve the code side of the meta: the code indexing handler writes
+        // `code` independently, and the SDLC handler must not clobber it.
+        let prev_code = prev_meta
+            .as_ref()
+            .map(|m| m.code.clone())
+            .unwrap_or_default();
+
         let meta = MetaSnapshot {
-            state: state.to_string(),
+            state: "idle".to_string(),
             initial_backfill_done: prev_backfill_done || error.is_none(),
             updated_at: now,
             sdlc: SdlcMeta {
-                last_completed_at: chrono::Utc::now().to_rfc3339(),
-                last_started_at: (chrono::Utc::now() - elapsed).to_rfc3339(),
-                last_duration_ms: elapsed.as_millis() as u64,
+                last_completed_at: completed_at.to_rfc3339(),
+                last_started_at: started_at.to_rfc3339(),
+                last_duration_ms: i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX),
                 cycle_count: prev_cycle + 1,
                 last_error: error.unwrap_or("").to_string(),
             },
-            code: CodeMeta::default(),
+            code: prev_code,
         };
         let meta_value = serde_json::to_vec(&meta)
             .map_err(|e| HandlerError::Processing(format!("serialize meta: {e}")))?;
@@ -123,7 +130,7 @@ impl ProgressWriter {
 
         self.record_update(namespace_id);
 
-        let count_duration = started_at.elapsed();
+        let count_duration = count_started.elapsed();
         info!(
             namespace_id,
             kv_keys = rollups.len(),

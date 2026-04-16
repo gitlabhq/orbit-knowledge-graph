@@ -4,7 +4,7 @@ use std::sync::Arc;
 use indexer::nats::NatsServices;
 use ontology::Ontology;
 use tonic::Status;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use crate::proto::{
     CodeOverview, EntityStatus, GetGraphStatusResponse, GraphState, GraphStatusDomain,
@@ -38,43 +38,59 @@ impl GraphStatusService {
         if traversal_path.is_empty() {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
+        if !is_valid_traversal_path(traversal_path) {
+            return Err(Status::invalid_argument(
+                "traversal_path must contain only digits and '/'",
+            ));
+        }
 
-        let kv_key = counts_key(traversal_path);
-        debug!(key = %kv_key, "reading graph status from KV");
+        let counts_k = counts_key(traversal_path);
+        // meta is keyed by root namespace id (second segment), which is what
+        // the indexer writes in ProgressWriter. counts is keyed by the full
+        // traversal path prefix, supporting subgroup-level lookups.
+        let namespace_id = extract_root_namespace_id(traversal_path);
+        let meta_k = namespace_id.map(meta_key);
 
-        let counts_entry = self
-            .nats
-            .kv_get(INDEXING_PROGRESS_BUCKET, &kv_key)
-            .await
-            .map_err(|e| Status::internal(format!("NATS KV read failed: {e}")))?;
+        debug!(counts = %counts_k, meta = ?meta_k, "reading graph status from KV");
+
+        let counts_fut = self.nats.kv_get(INDEXING_PROGRESS_BUCKET, &counts_k);
+        let (counts_entry, meta_entry) = match meta_k.as_ref() {
+            Some(mk) => {
+                let meta_fut = self.nats.kv_get(INDEXING_PROGRESS_BUCKET, mk);
+                let (c, m) = tokio::join!(counts_fut, meta_fut);
+                (map_kv_err(c, "counts")?, Some(map_kv_err(m, "meta")?))
+            }
+            None => (map_kv_err(counts_fut.await, "counts")?, None),
+        };
 
         let (node_counts, edge_counts, updated_at) = match counts_entry {
-            Some(entry) => {
-                let snapshot: CountsSnapshot = serde_json::from_slice(&entry.value)
-                    .map_err(|e| Status::internal(format!("invalid counts snapshot: {e}")))?;
-                (snapshot.nodes, snapshot.edges, snapshot.updated_at)
-            }
+            Some(entry) => match serde_json::from_slice::<CountsSnapshot>(&entry.value) {
+                Ok(s) => (s.nodes, s.edges, s.updated_at),
+                Err(e) => {
+                    error!(key = %counts_k, error = %e, "invalid counts snapshot");
+                    return Err(Status::internal("invalid counts snapshot"));
+                }
+            },
             None => {
-                debug!(key = %kv_key, "no counts snapshot found, returning empty");
+                debug!(key = %counts_k, "no counts snapshot found, returning empty");
                 (HashMap::new(), HashMap::new(), String::new())
             }
         };
 
-        let namespace_id = extract_namespace_id(traversal_path);
-        let (state, initial_backfill_done, sdlc, code) = match namespace_id {
-            Some(ns_id) => self.read_meta(ns_id).await?,
+        let (state, initial_backfill_done, sdlc, code) = match meta_entry.flatten() {
+            Some(entry) => parse_meta(&entry.value)?,
             None => (GraphState::Pending as i32, false, None, None),
         };
 
         let stale = is_stale(&updated_at, self.staleness_threshold_secs);
         let domains = self.build_domains(&node_counts);
-        let edge_counts_map: HashMap<String, i64> = edge_counts;
 
         info!(
             traversal_path,
             state,
             node_types = domains.iter().map(|d| d.items.len()).sum::<usize>(),
-            edge_types = edge_counts_map.len(),
+            edge_types = edge_counts.len(),
+            stale,
             "graph status response built"
         );
 
@@ -83,54 +99,11 @@ impl GraphStatusService {
             initial_backfill_done,
             updated_at,
             domains,
-            edge_counts: edge_counts_map,
+            edge_counts,
             sdlc,
             code,
             stale,
         })
-    }
-
-    async fn read_meta(
-        &self,
-        namespace_id: i64,
-    ) -> Result<(i32, bool, Option<SdlcProgress>, Option<CodeOverview>), Status> {
-        let key = meta_key(namespace_id);
-        let entry = self
-            .nats
-            .kv_get(INDEXING_PROGRESS_BUCKET, &key)
-            .await
-            .map_err(|e| Status::internal(format!("NATS KV meta read failed: {e}")))?;
-
-        match entry {
-            Some(entry) => {
-                let meta: MetaSnapshot = serde_json::from_slice(&entry.value)
-                    .map_err(|e| Status::internal(format!("invalid meta snapshot: {e}")))?;
-
-                let state = match meta.state.as_str() {
-                    "indexing" => GraphState::Indexing as i32,
-                    "idle" => GraphState::Idle as i32,
-                    _ => GraphState::Pending as i32,
-                };
-
-                let sdlc = Some(SdlcProgress {
-                    last_completed_at: meta.sdlc.last_completed_at,
-                    last_started_at: meta.sdlc.last_started_at,
-                    last_duration_ms: meta.sdlc.last_duration_ms as i64,
-                    cycle_count: meta.sdlc.cycle_count as i64,
-                    last_error: meta.sdlc.last_error,
-                });
-
-                let code = Some(CodeOverview {
-                    projects_indexed: meta.code.projects_indexed as i32,
-                    projects_total: meta.code.projects_total as i32,
-                    last_indexed_at: meta.code.last_indexed_at,
-                    projects: vec![],
-                });
-
-                Ok((state, meta.initial_backfill_done, sdlc, code))
-            }
-            None => Ok((GraphState::Pending as i32, false, None, None)),
-        }
     }
 
     fn build_domains(&self, node_counts: &HashMap<String, i64>) -> Vec<GraphStatusDomain> {
@@ -168,13 +141,67 @@ impl GraphStatusService {
     }
 }
 
-fn extract_namespace_id(traversal_path: &str) -> Option<i64> {
+fn map_kv_err<T>(
+    res: Result<T, indexer::nats::NatsError>,
+    kind: &'static str,
+) -> Result<T, Status> {
+    res.map_err(|e| {
+        error!(kind, error = %e, "NATS KV read failed");
+        Status::internal(format!("KV read failed ({kind})"))
+    })
+}
+
+fn parse_meta(
+    value: &[u8],
+) -> Result<(i32, bool, Option<SdlcProgress>, Option<CodeOverview>), Status> {
+    let meta: MetaSnapshot = serde_json::from_slice(value).map_err(|e| {
+        error!(error = %e, "invalid meta snapshot");
+        Status::internal("invalid meta snapshot")
+    })?;
+
+    let state = match meta.state.as_str() {
+        "indexing" => GraphState::Indexing as i32,
+        "idle" => GraphState::Idle as i32,
+        _ => GraphState::Pending as i32,
+    };
+
+    let sdlc = Some(SdlcProgress {
+        last_completed_at: meta.sdlc.last_completed_at,
+        last_started_at: meta.sdlc.last_started_at,
+        last_duration_ms: meta.sdlc.last_duration_ms,
+        cycle_count: meta.sdlc.cycle_count,
+        last_error: meta.sdlc.last_error,
+    });
+
+    let code = Some(CodeOverview {
+        projects_indexed: meta.code.projects_indexed,
+        projects_total: meta.code.projects_total,
+        last_indexed_at: meta.code.last_indexed_at,
+    });
+
+    Ok((state, meta.initial_backfill_done, sdlc, code))
+}
+
+/// Returns the root namespace id from a traversal path like `"1/9970/55154808/"`.
+///
+/// The root namespace id is the second segment (after the organization id). This
+/// is what the indexer writes `meta` snapshots under, keyed as `meta.<root_ns_id>`.
+/// Counts snapshots use the full path prefix (`counts.1.9970.55154808`), so deep
+/// lookups read per-subtree counts but share the namespace-level meta.
+fn extract_root_namespace_id(traversal_path: &str) -> Option<i64> {
     let parts: Vec<&str> = traversal_path.trim_end_matches('/').split('/').collect();
     if parts.len() >= 2 {
         parts[1].parse().ok()
     } else {
         None
     }
+}
+
+fn is_valid_traversal_path(traversal_path: &str) -> bool {
+    !traversal_path.is_empty()
+        && traversal_path
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '/')
 }
 
 fn is_stale(updated_at: &str, staleness_threshold_secs: u64) -> bool {
@@ -185,12 +212,15 @@ fn is_stale(updated_at: &str, staleness_threshold_secs: u64) -> bool {
         return true;
     };
     let age = chrono::Utc::now() - ts.with_timezone(&chrono::Utc);
-    age.num_seconds() > staleness_threshold_secs as i64
+    let threshold = i64::try_from(staleness_threshold_secs).unwrap_or(i64::MAX);
+    age.num_seconds() > threshold
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+    use gkg_server_config::indexing_progress::{CodeMeta, SdlcMeta};
     use indexer::testkit::mocks::MockNatsServices;
 
     fn test_ontology() -> Arc<Ontology> {
@@ -201,12 +231,42 @@ mod tests {
         GraphStatusService::new(Arc::new(MockNatsServices::new()), test_ontology(), 120)
     }
 
+    fn service_with_nats(nats: Arc<MockNatsServices>) -> GraphStatusService {
+        GraphStatusService::new(nats, test_ontology(), 120)
+    }
+
+    fn seed_counts(mock: &MockNatsServices, tp: &str, snapshot: &CountsSnapshot) {
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &counts_key(tp),
+            Bytes::from(serde_json::to_vec(snapshot).unwrap()),
+        );
+    }
+
+    fn seed_meta(mock: &MockNatsServices, ns: i64, meta: &MetaSnapshot) {
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(ns),
+            Bytes::from(serde_json::to_vec(meta).unwrap()),
+        );
+    }
+
     #[test]
-    fn extract_namespace_id_from_traversal_path() {
-        assert_eq!(extract_namespace_id("1/9970/"), Some(9970));
-        assert_eq!(extract_namespace_id("1/9970/55154808/"), Some(9970));
-        assert_eq!(extract_namespace_id("1/"), None);
-        assert_eq!(extract_namespace_id(""), None);
+    fn extract_root_namespace_id_from_traversal_path() {
+        assert_eq!(extract_root_namespace_id("1/9970/"), Some(9970));
+        assert_eq!(extract_root_namespace_id("1/9970/55154808/"), Some(9970));
+        assert_eq!(extract_root_namespace_id("1/"), None);
+        assert_eq!(extract_root_namespace_id(""), None);
+    }
+
+    #[test]
+    fn is_valid_traversal_path_rejects_non_numeric() {
+        assert!(is_valid_traversal_path("1/9970/"));
+        assert!(is_valid_traversal_path("1/9970/55154808/"));
+        assert!(!is_valid_traversal_path(""));
+        assert!(!is_valid_traversal_path("1/abc/"));
+        assert!(!is_valid_traversal_path("1.9970"));
+        assert!(!is_valid_traversal_path("1/../9970"));
     }
 
     #[test]
@@ -217,6 +277,12 @@ mod tests {
 
         let recent = chrono::Utc::now().to_rfc3339();
         assert!(!is_stale(&recent, 120));
+    }
+
+    #[test]
+    fn is_stale_u64_max_does_not_wrap() {
+        let recent = chrono::Utc::now().to_rfc3339();
+        assert!(!is_stale(&recent, u64::MAX));
     }
 
     #[test]
@@ -288,5 +354,116 @@ mod tests {
             !has_user,
             "User has no traversal_path and should be excluded"
         );
+    }
+
+    #[tokio::test]
+    async fn get_status_rejects_empty_path() {
+        let svc = test_service();
+        let err = svc.get_status("").await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn get_status_rejects_non_numeric_path() {
+        let svc = test_service();
+        let err = svc.get_status("1/abc/").await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn get_status_returns_empty_when_kv_missing() {
+        let svc = test_service();
+        let resp = svc.get_status("1/9970/").await.unwrap();
+        assert_eq!(resp.state, GraphState::Pending as i32);
+        assert!(!resp.initial_backfill_done);
+        assert!(resp.stale);
+        assert_eq!(resp.updated_at, "");
+        assert!(resp.edge_counts.is_empty());
+        for d in &resp.domains {
+            for i in &d.items {
+                assert_eq!(i.count, 0);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn get_status_returns_seeded_counts_and_meta() {
+        let mock = Arc::new(MockNatsServices::new());
+
+        let mut nodes = HashMap::new();
+        nodes.insert("Project".to_string(), 10);
+        let mut edges = HashMap::new();
+        edges.insert("CONTAINS".to_string(), 25);
+
+        seed_counts(
+            &mock,
+            "1/9970/",
+            &CountsSnapshot {
+                updated_at: chrono::Utc::now().to_rfc3339(),
+                nodes,
+                edges,
+            },
+        );
+        seed_meta(
+            &mock,
+            9970,
+            &MetaSnapshot {
+                state: "idle".to_string(),
+                initial_backfill_done: true,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+                sdlc: SdlcMeta {
+                    last_completed_at: "2026-04-16T00:00:00Z".to_string(),
+                    last_started_at: "2026-04-16T00:00:00Z".to_string(),
+                    last_duration_ms: 1234,
+                    cycle_count: 42,
+                    last_error: String::new(),
+                },
+                code: CodeMeta::default(),
+            },
+        );
+
+        let svc = service_with_nats(mock);
+        let resp = svc.get_status("1/9970/").await.unwrap();
+
+        assert_eq!(resp.state, GraphState::Idle as i32);
+        assert!(resp.initial_backfill_done);
+        assert!(!resp.stale);
+        assert_eq!(resp.edge_counts.get("CONTAINS"), Some(&25));
+        assert_eq!(resp.sdlc.as_ref().unwrap().cycle_count, 42);
+    }
+
+    #[tokio::test]
+    async fn get_status_malformed_counts_snapshot_returns_internal() {
+        let mock = Arc::new(MockNatsServices::new());
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &counts_key("1/9970/"),
+            Bytes::from("not json"),
+        );
+        let svc = service_with_nats(mock);
+        let err = svc.get_status("1/9970/").await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert!(
+            !err.message().contains("expected"),
+            "error should not leak serde details: {}",
+            err.message()
+        );
+    }
+
+    #[tokio::test]
+    async fn get_status_stale_when_updated_at_old() {
+        let mock = Arc::new(MockNatsServices::new());
+        seed_counts(
+            &mock,
+            "1/9970/",
+            &CountsSnapshot {
+                updated_at: "2020-01-01T00:00:00Z".to_string(),
+                nodes: HashMap::new(),
+                edges: HashMap::new(),
+            },
+        );
+        let svc = service_with_nats(mock);
+        let resp = svc.get_status("1/9970/").await.unwrap();
+        assert!(resp.stale);
     }
 }
