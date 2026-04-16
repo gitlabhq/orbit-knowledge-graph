@@ -10,6 +10,7 @@ use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::schema::version::read_migrating_version;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 use clickhouse_client::FromArrowColumn;
@@ -30,8 +31,17 @@ WHERE deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
+/// All enabled namespace IDs from the datalake. Used to trigger a full
+/// backfill when a schema migration is in progress.
+const ENABLED_NAMESPACE_IDS_QUERY: &str = r#"
+SELECT DISTINCT root_namespace_id
+FROM siphon_knowledge_graph_enabled_namespaces
+WHERE _siphon_deleted = false
+"#;
+
 pub struct NamespaceCodeBackfillDispatcher {
     nats: Arc<dyn NatsServices>,
+    graph: ArrowClickHouseClient,
     datalake: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     config: NamespaceCodeBackfillDispatcherConfig,
@@ -40,12 +50,14 @@ pub struct NamespaceCodeBackfillDispatcher {
 impl NamespaceCodeBackfillDispatcher {
     pub fn new(
         nats: Arc<dyn NatsServices>,
+        graph: ArrowClickHouseClient,
         datalake: ArrowClickHouseClient,
         metrics: ScheduledTaskMetrics,
         config: NamespaceCodeBackfillDispatcherConfig,
     ) -> Self {
         Self {
             nats,
+            graph,
             datalake,
             metrics,
             config,
@@ -100,6 +112,13 @@ struct PendingProject {
 
 impl NamespaceCodeBackfillDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
+        self.dispatch_cdc_events().await?;
+        self.dispatch_migration_backfill().await?;
+        Ok(())
+    }
+
+    /// Consume CDC events for newly-enabled namespaces and dispatch backfill.
+    async fn dispatch_cdc_events(&self) -> Result<(), TaskError> {
         let subscription = self.siphon_subscription();
         let mut total = DispatchOutcome {
             dispatched: 0,
@@ -150,6 +169,76 @@ impl NamespaceCodeBackfillDispatcher {
         }
 
         Ok(())
+    }
+
+    /// When a schema migration is in progress, dispatch code backfill for
+    /// all enabled namespaces so the new-prefix checkpoint table gets
+    /// populated. Without this, migration completion blocks indefinitely
+    /// because the code checkpoint table stays empty.
+    async fn dispatch_migration_backfill(&self) -> Result<(), TaskError> {
+        let migrating = match read_migrating_version(&self.graph).await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(error = %e, "failed to check migration status, skipping migration backfill");
+                return Ok(());
+            }
+        };
+
+        let Some(version) = migrating else {
+            return Ok(());
+        };
+
+        let namespace_ids = self.fetch_enabled_namespace_ids().await?;
+        if namespace_ids.is_empty() {
+            return Ok(());
+        }
+
+        info!(
+            version,
+            namespace_count = namespace_ids.len(),
+            "schema migration in progress, dispatching code backfill for all enabled namespaces"
+        );
+
+        let mut total = DispatchOutcome {
+            dispatched: 0,
+            skipped: 0,
+        };
+
+        for namespace_id in &namespace_ids {
+            let outcome = self.dispatch_projects_code_indexing(*namespace_id).await?;
+            total.dispatched += outcome.dispatched;
+            total.skipped += outcome.skipped;
+        }
+
+        if total.dispatched > 0 || total.skipped > 0 {
+            self.metrics
+                .record_requests_published(self.name(), total.dispatched);
+            self.metrics
+                .record_requests_skipped(self.name(), total.skipped);
+
+            info!(
+                version,
+                dispatched = total.dispatched,
+                skipped = total.skipped,
+                "dispatched migration code backfill requests"
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn fetch_enabled_namespace_ids(&self) -> Result<Vec<i64>, TaskError> {
+        let batches = self
+            .datalake
+            .query(ENABLED_NAMESPACE_IDS_QUERY)
+            .fetch_arrow()
+            .await
+            .map_err(|error| {
+                self.metrics.record_error(self.name(), "query");
+                TaskError::new(error)
+            })?;
+
+        i64::extract_column(&batches, 0).map_err(TaskError::new)
     }
 
     fn extract_namespace_ids(
@@ -331,15 +420,14 @@ mod tests {
     }
 
     fn create_dispatcher(nats: Arc<MockNatsServices>) -> NamespaceCodeBackfillDispatcher {
-        let datalake = ArrowClickHouseClient::new(
-            "http://localhost:0",
-            "default",
-            "default",
-            None,
-            &std::collections::HashMap::new(),
-        );
+        let empty = &std::collections::HashMap::new();
+        let graph =
+            ArrowClickHouseClient::new("http://localhost:0", "default", "default", None, empty);
+        let datalake =
+            ArrowClickHouseClient::new("http://localhost:0", "default", "default", None, empty);
         NamespaceCodeBackfillDispatcher::new(
             nats,
+            graph,
             datalake,
             test_metrics(),
             NamespaceCodeBackfillDispatcherConfig::default(),
@@ -401,6 +489,11 @@ mod tests {
         let ids = dispatcher.extract_namespace_ids(&messages).unwrap();
 
         assert_eq!(ids, vec![100, 200]);
+    }
+
+    #[test]
+    fn enabled_namespace_query_filters_deleted() {
+        assert!(ENABLED_NAMESPACE_IDS_QUERY.contains("_siphon_deleted = false"));
     }
 
     #[tokio::test]
