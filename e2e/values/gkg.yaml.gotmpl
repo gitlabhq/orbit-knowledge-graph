@@ -149,7 +149,7 @@ schedule:
     namespace-deletion:
       cron: "0 0 3 * * *"
     migration-completion:
-      cron: "0 */1 * * * *"
+      cron: "*/10 * * * * *"
 
 engine:
   max_concurrent_workers: 4

@@ -71,7 +71,7 @@ Namespace Is Indexed After Enablement
 
     Enable Knowledge Graph    ${group_id}
 
-    Wait Until Keyword Succeeds    30s    3s
+    Wait Until Keyword Succeeds    120s    3s
     ...    Verify Node Indexed    Group    ${group_id}    ${name}
 
 Project Is Indexed Under Enabled Namespace
@@ -82,7 +82,7 @@ Project Is Indexed Under Enabled Namespace
     ${group_id}=    Set Variable    ${group["id"]}
 
     Enable Knowledge Graph    ${group_id}
-    Wait Until Keyword Succeeds    30s    3s
+    Wait Until Keyword Succeeds    120s    3s
     ...    Verify Node Indexed    Group    ${group_id}    ${name}
 
     ${project}=    Create Project    proj-${suffix}    ${group_id}
