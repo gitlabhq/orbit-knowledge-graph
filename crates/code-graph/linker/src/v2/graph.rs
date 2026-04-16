@@ -108,7 +108,7 @@ pub struct CodeGraph {
     pub dir_index: FxHashMap<String, NodeIndex>,
     pub file_index: FxHashMap<String, NodeIndex>,
 
-    // Resolution indexes — SmallVec inlines up to 2 entries (common case),
+    // Resolution indexes — SmallVec<[_; 8]> inlines up to 8 entries (32 bytes),
     // eliminating a heap pointer chase on every lookup.
     pub def_by_fqn: FxHashMap<String, SmallVec<[NodeIndex; 8]>>,
     pub def_by_name: FxHashMap<String, SmallVec<[NodeIndex; 8]>>,
