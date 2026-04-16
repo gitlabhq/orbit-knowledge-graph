@@ -18,6 +18,7 @@ code-graph-types = { path = "../types" }
 treesitter-visit = { path = "../treesitter-visit" }
 parser-core = { path = "../parser" }
 gkg-utils = { path = "../../utils" }
+bumpalo = { workspace = true }
 petgraph = { workspace = true }
 arrow = { workspace = true }
 anyhow = { workspace = true }

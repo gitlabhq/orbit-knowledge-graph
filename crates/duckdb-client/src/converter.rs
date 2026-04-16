@@ -129,7 +129,10 @@ pub fn convert_v2_graph(
             "Directory" => {
                 let rows: Vec<_> = graph
                     .directories()
-                    .map(|(idx, dir)| DirectoryRow { dir, id: ids[&idx] })
+                    .map(|(idx, dir)| DirectoryRow {
+                        dir,
+                        id: ids[idx.index()],
+                    })
                     .collect();
                 DirectoryRow::to_record_batch(&rows, &specs, &ctx)?
             }
@@ -138,7 +141,7 @@ pub fn convert_v2_graph(
                     .files()
                     .map(|(idx, file)| FileRow {
                         file,
-                        id: ids[&idx],
+                        id: ids[idx.index()],
                     })
                     .collect();
                 FileRow::to_record_batch(&rows, &specs, &ctx)?
@@ -149,18 +152,20 @@ pub fn convert_v2_graph(
                     .map(|(idx, file_path, def)| DefinitionRow {
                         file_path,
                         def,
-                        id: ids[&idx],
+                        pool: &graph.strings,
+                        id: ids[idx.index()],
                     })
                     .collect();
                 DefinitionRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "ImportedSymbol" => {
                 let rows: Vec<_> = graph
-                    .imports()
+                    .imports_iter()
                     .map(|(idx, file_path, import)| ImportRow {
                         file_path,
                         import,
-                        id: ids[&idx],
+                        pool: &graph.strings,
+                        id: ids[idx.index()],
                     })
                     .collect();
                 ImportRow::to_record_batch(&rows, &specs, &ctx)?
@@ -184,11 +189,11 @@ pub fn convert_v2_graph(
             let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
             let edge = &graph.graph[ei];
             EdgeRow {
-                source_id: ids.get(&src).copied().unwrap_or(0),
-                target_id: ids.get(&tgt).copied().unwrap_or(0),
-                edge_kind: edge.relationship.edge_kind.to_string(),
-                source_node_kind: edge.relationship.source_node.to_string(),
-                target_node_kind: edge.relationship.target_node.to_string(),
+                source_id: ids[src.index()],
+                target_id: ids[tgt.index()],
+                edge_kind: edge.relationship.edge_kind.as_ref(),
+                source_node_kind: edge.relationship.source_node.as_ref(),
+                target_node_kind: edge.relationship.target_node.as_ref(),
             }
         })
         .collect();

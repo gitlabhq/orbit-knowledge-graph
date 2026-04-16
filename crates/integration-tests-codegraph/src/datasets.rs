@@ -5,10 +5,9 @@ use arrow_56::array::{Array, ArrayBuilder, Int64Builder, StringBuilder};
 use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
 use code_graph_linker::v2::graph::*;
-use rustc_hash::FxHashMap;
 
 pub(crate) type LanceDatasets = HashMap<String, RecordBatch>;
-type NodeIds = FxHashMap<petgraph::graph::NodeIndex, i64>;
+type NodeIds = Vec<i64>;
 
 pub(crate) fn to_lance_datasets(
     graph: &CodeGraph,
@@ -52,7 +51,7 @@ fn build_directory_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Rec
     let mut name_b = StringBuilder::with_capacity(n, n * 16);
 
     for (idx, d) in &dirs {
-        id_b.append_value(ids[idx]);
+        id_b.append_value(ids[idx.index()]);
         path_b.append_value(&d.path);
         name_b.append_value(&d.name);
     }
@@ -77,7 +76,7 @@ fn build_file_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBa
     let mut lang_b = StringBuilder::with_capacity(n, n * 8);
 
     for (idx, f) in &files {
-        id_b.append_value(ids[idx]);
+        id_b.append_value(ids[idx.index()]);
         path_b.append_value(&f.path);
         name_b.append_value(&f.name);
         ext_b.append_value(&f.extension);
@@ -116,10 +115,10 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
     let mut eb_b = Int64Builder::with_capacity(n);
 
     for (idx, fp, d) in &defs {
-        id_b.append_value(ids[idx]);
+        id_b.append_value(ids[idx.index()]);
         fp_b.append_value(fp.as_ref());
-        fqn_b.append_value(d.fqn.to_string());
-        name_b.append_value(&d.name);
+        fqn_b.append_value(graph.str(d.fqn));
+        name_b.append_value(graph.str(d.name));
         dt_b.append_value(d.definition_type);
         sl_b.append_value(d.range.start.line as i64);
         el_b.append_value(d.range.end.line as i64);
@@ -154,7 +153,7 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
 }
 
 fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
-    let imports: Vec<_> = graph.imports().collect();
+    let imports: Vec<_> = graph.imports_iter().collect();
     let n = imports.len();
     let mut id_b = Int64Builder::with_capacity(n);
     let mut fp_b = StringBuilder::with_capacity(n, n * 32);
@@ -164,16 +163,16 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
     let mut alias_b = StringBuilder::with_capacity(n, n * 16);
 
     for (idx, fp, imp) in &imports {
-        id_b.append_value(ids[idx]);
+        id_b.append_value(ids[idx.index()]);
         fp_b.append_value(fp.as_ref());
         it_b.append_value(imp.import_type);
-        path_b.append_value(&imp.path);
-        match &imp.name {
-            Some(n) => name_b.append_value(n),
+        path_b.append_value(graph.str(imp.path));
+        match imp.name {
+            Some(id) => name_b.append_value(graph.str(id)),
             None => name_b.append_null(),
         }
-        match &imp.alias {
-            Some(a) => alias_b.append_value(a),
+        match imp.alias {
+            Some(id) => alias_b.append_value(graph.str(id)),
             None => alias_b.append_null(),
         }
     }
@@ -214,8 +213,8 @@ fn build_edge_rows(graph: &CodeGraph, ids: &NodeIds) -> Vec<EdgeRow> {
             let (src, tgt) = graph.graph.edge_endpoints(edge_idx)?;
             let weight = &graph.graph[edge_idx];
             Some(EdgeRow {
-                source_id: *ids.get(&src)?,
-                target_id: *ids.get(&tgt)?,
+                source_id: ids[src.index()],
+                target_id: ids[tgt.index()],
                 edge_kind: format!("{:?}", weight.relationship.edge_kind),
                 source_node_kind: format!("{:?}", weight.relationship.source_node),
                 target_node_kind: format!("{:?}", weight.relationship.target_node),
