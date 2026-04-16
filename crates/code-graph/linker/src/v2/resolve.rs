@@ -43,7 +43,7 @@ impl Default for ResolveSettings {
 
 // ── Import strategies ───────────────────────────────────────────
 
-fn apply_import_strategies(
+pub(crate) fn apply_import_strategies(
     strategies: &[ImportStrategy],
     graph: &CodeGraph,
     file_node: NodeIndex,
@@ -67,7 +67,11 @@ fn apply_import_strategies(
     vec![]
 }
 
-fn resolve_import(graph: &CodeGraph, import_idx: NodeIndex, sep: &str) -> Vec<NodeIndex> {
+pub(crate) fn resolve_import(
+    graph: &CodeGraph,
+    import_idx: NodeIndex,
+    sep: &str,
+) -> Vec<NodeIndex> {
     let import = graph.import(import_idx);
     let symbol_name = import
         .alias

@@ -9,8 +9,9 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::linker::v2::walker::{FileWalkResult, HasRoot};
-use crate::linker::v2::{CodeGraph, HasRules, build_edges};
+use crate::linker::v2::fused_walker::fused_walk_file;
+use crate::linker::v2::walker::HasRoot;
+use crate::linker::v2::{CodeGraph, HasRules};
 
 fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
@@ -56,9 +57,12 @@ pub trait LanguagePipeline {
 
 /// Generic pipeline parameterized by parser `P` and rules `R`.
 ///
-/// Streaming architecture:
-/// 1. **Parallel**: parse + walk each file, drop AST immediately
-/// 2. **Sequential**: build indexes, resolve cross-file references, build graph
+/// Two-phase fused architecture:
+/// 1. **Phase 1** (parallel): parse + extract defs/imports → add to graph
+/// 2. **Phase 2** (parallel): re-parse + fused walk+resolve → emit edges
+///
+/// No CanonicalResult accumulation, no FileWalkResult, no RecordedRead.
+/// Each file's SSA state is created and dropped within Phase 2.
 pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
@@ -79,109 +83,145 @@ where
 
         eprintln!("[v2] {file_count} files, {num_threads} threads");
 
-        // Graph exists before the parallel phase. Each file locks it
-        // briefly to add nodes, gets NodeIndex values, then walks.
         let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
 
-        // ── Parallel phase: parse + add nodes + walk ────────────
-        let pb = progress_bar(file_count as u64, "Parse + walk");
-        let file_outputs: Vec<_> = files
+        // ── Phase 1: parse + extract defs/imports → graph ───────
+        let pb = progress_bar(file_count as u64, "Phase 1: defs");
+        let phase1_results: Vec<_> = files
             .par_iter()
             .enumerate()
             .map(|(file_idx, (path, source))| {
-                let (result, ast) = parser.parse_file(source, path).map_err(|e| PipelineError {
-                    file_path: path.clone(),
-                    error: format!("Parse error: {e}"),
-                })?;
+                let (result, _ast) =
+                    parser.parse_file(source, path).map_err(|e| PipelineError {
+                        file_path: path.clone(),
+                        error: format!("Parse error: {e}"),
+                    })?;
 
-                // Add this file's nodes to the graph under the lock.
-                let (file_node, def_nodes, import_nodes) = {
+                let file_node = {
                     let mut g = graph.lock().unwrap();
-                    g.add_file_nodes(&result, file_idx)
+                    let (file_node, _, _) = g.add_file_nodes(&result, file_idx);
+                    file_node
                 };
 
-                let walk = if let Some(root) = ast.as_root() {
-                    crate::linker::v2::walker::walk_file(
-                        &rules,
-                        &result,
-                        &root,
-                        &def_nodes,
-                        &import_nodes,
-                        file_node,
-                    )
-                } else {
-                    FileWalkResult::empty()
-                };
+                let total_defs = result.definitions.len();
+                let total_imports = result.imports.len();
+                // CanonicalResult + AST dropped here
 
                 pb.inc(1);
-                Ok((result, walk))
+                Ok((file_node, total_defs, total_imports))
             })
             .collect();
         pb.finish_with_message(format!(
-            "Parse + walk: {file_count} files in {:.2?}",
+            "Phase 1: {file_count} files in {:.2?}",
             t0.elapsed()
         ));
 
-        // ── Collect results ─────────────────────────────────────
-        let mut walks = Vec::with_capacity(file_outputs.len());
+        // ── Collect Phase 1 results ─────────────────────────────
+        let mut file_nodes = Vec::with_capacity(file_count);
         let mut errors = Vec::new();
         let mut total_defs = 0usize;
-        let mut total_refs = 0usize;
         let mut total_imports = 0usize;
 
-        for output in file_outputs {
+        for output in phase1_results {
             match output {
-                Ok((mut result, mut walk)) => {
-                    total_defs += result.definitions.len();
-                    total_refs += result.references.len();
-                    total_imports += result.imports.len();
-                    walk.references = std::mem::take(&mut result.references);
-                    walks.push(walk);
+                Ok((file_node, defs, imports)) => {
+                    total_defs += defs;
+                    total_imports += imports;
+                    file_nodes.push(file_node);
                 }
-                Err(err) => errors.push(err),
+                Err(err) => {
+                    errors.push(err);
+                    file_nodes.push(petgraph::graph::NodeIndex::new(0)); // placeholder
+                }
             }
         }
 
-        if !errors.is_empty() && walks.is_empty() {
+        if !errors.is_empty() && file_nodes.is_empty() {
             return Err(errors);
         }
 
-        // ── Sequential phase ────────────────────────────────────
-        eprintln!(
-            "[v2] {total_defs} defs, {total_refs} refs, {total_imports} imports, {} errors",
-            errors.len()
-        );
-
-        let t2 = std::time::Instant::now();
+        // ── Finalize graph ──────────────────────────────────────
+        let t1 = std::time::Instant::now();
         let mut graph = graph.into_inner().unwrap();
         graph.finalize();
-
-        // Pre-resolve imports per file (one-time cost, eliminates repeated neighbor iteration)
-        let sep = rules.fqn_separator;
-        for walk in &mut walks {
-            walk.import_map = graph.pre_resolve_file_imports(walk.file_node, sep);
-        }
-
-        // Free construction-only indexes before resolve
-        graph.drop_construction_indexes();
-
-        // Drop walks with zero reads — no references to resolve
-        walks.retain(|w| !w.reads.is_empty());
-
-        eprintln!("[v2] graph finalize: {:.2?}", t2.elapsed());
-
-        let t3 = std::time::Instant::now();
-        let result = build_edges(&rules, &graph, &mut walks, &rules.settings);
         eprintln!(
-            "[v2] resolve: {} edges in {:.2?}",
-            result.edges.len(),
-            t3.elapsed()
+            "[v2] {total_defs} defs, {total_imports} imports, {} errors",
+            errors.len()
         );
-        result.stats.print();
+        eprintln!("[v2] graph finalize: {:.2?}", t1.elapsed());
 
-        for (src, tgt, edge) in result.edges {
-            graph.graph.add_edge(src, tgt, edge);
+        // ── Phase 2: re-parse + fused walk+resolve ──────────────
+        let t2 = std::time::Instant::now();
+        let pb2 = progress_bar(file_count as u64, "Phase 2: resolve");
+
+        let language = rules
+            .language_spec
+            .as_ref()
+            .map(|_| R::rules()) // need language for re-parse
+            .expect("fused pipeline requires LanguageSpec");
+        let lang = language.language_spec.as_ref().unwrap();
+
+        let phase2_results: Vec<_> = files
+            .par_iter()
+            .zip(file_nodes.par_iter())
+            .map(|((path, source), &file_node)| {
+                // Skip files that failed Phase 1
+                if file_node.index() == 0 && errors.iter().any(|e| e.file_path == *path) {
+                    pb2.inc(1);
+                    return None;
+                }
+
+                let source_str = match std::str::from_utf8(source) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        pb2.inc(1);
+                        return None;
+                    }
+                };
+
+                // Re-parse with tree-sitter (fast, no DSL extraction)
+                let lang_enum = lang.scopes.first().and_then(|_| {
+                    // Detect language from file extension
+                    let ext = path.rsplit('.').next()?;
+                    code_graph_config::detect_language_from_extension(ext)
+                });
+                let Some(lang_enum) = lang_enum else {
+                    pb2.inc(1);
+                    return None;
+                };
+
+                let ast = lang_enum.parse_ast(source_str);
+                let root = ast.root();
+
+                let result = fused_walk_file(&rules, &graph, &root, file_node, &rules.settings);
+                pb2.inc(1);
+                Some(result)
+            })
+            .collect();
+        pb2.finish_with_message(format!(
+            "Phase 2: {file_count} files in {:.2?}",
+            t2.elapsed()
+        ));
+
+        // ── Collect edges + stats ───────────────────────────────
+        let mut combined_stats = crate::linker::v2::ResolveStats::default();
+        let mut total_edges = 0usize;
+        let mut total_refs = 0usize;
+
+        for result in phase2_results.into_iter().flatten() {
+            total_edges += result.edges.len();
+            total_refs += result.num_refs;
+            combined_stats.merge(&result.stats);
+            for (src, tgt, edge) in result.edges {
+                graph.graph.add_edge(src, tgt, edge);
+            }
         }
+
+        eprintln!(
+            "[v2] resolve: {total_refs} refs → {total_edges} edges in {:.2?}",
+            t2.elapsed()
+        );
+        combined_stats.print();
 
         Ok(graph)
     }

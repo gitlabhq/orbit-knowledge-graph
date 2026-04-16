@@ -1,3 +1,4 @@
+pub mod fused_walker;
 pub mod graph;
 pub mod resolve;
 pub mod rules;

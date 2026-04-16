@@ -23,6 +23,14 @@ struct ScopeMatch {
     metadata: Option<Box<DefinitionMetadata>>,
 }
 
+/// Lightweight scope info for the fused walker (Phase 2).
+/// No metadata, no range — just what's needed for scope stack + SSA.
+pub struct ScopeInfo {
+    pub name: String,
+    pub creates_scope: bool,
+    pub is_type_scope: bool,
+}
+
 impl LanguageSpec {
     /// Parse source bytes into a `CanonicalResult` and the retained AST.
     pub fn parse_canonical(
@@ -550,6 +558,37 @@ impl LanguageSpec {
                 });
             }
         }
+    }
+
+    // ── Public API for fused walker (Phase 2) ───────────────
+
+    /// Match a scope rule. Returns lightweight info for scope stack + SSA.
+    pub fn match_scope(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        node_kind: &str,
+        import_map: &rustc_hash::FxHashMap<String, String>,
+        sep: &'static str,
+    ) -> Option<ScopeInfo> {
+        let m = self.evaluate_scope(node, node_kind, import_map, sep)?;
+        Some(ScopeInfo {
+            name: m.name,
+            creates_scope: m.creates_scope,
+            is_type_scope: m.def_kind.is_type_container(),
+        })
+    }
+
+    /// Match a reference rule. Returns name + optional expression chain.
+    pub fn match_reference(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        node_kind: &str,
+        import_map: &rustc_hash::FxHashMap<String, String>,
+        sep: &str,
+    ) -> Option<(String, Option<Vec<ExpressionStep>>)> {
+        let (name, _range, expression) =
+            self.evaluate_reference(node, node_kind, import_map, sep)?;
+        Some((name, expression))
     }
 }
 
