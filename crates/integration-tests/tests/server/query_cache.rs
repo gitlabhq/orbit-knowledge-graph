@@ -79,6 +79,7 @@ fn build_context(
     compiled: Arc<query_engine::compiler::CompiledQueryContext>,
     client: Arc<clickhouse_client::ArrowClickHouseClient>,
     broker: Arc<NatsBroker>,
+    query_json: &str,
 ) -> QueryPipelineContext {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
@@ -86,10 +87,10 @@ fn build_context(
     server_extensions.insert(broker);
 
     QueryPipelineContext {
-        query_json: String::new(),
+        query_json: query_json.to_string(),
         compiled: Some(compiled),
         ontology: Arc::clone(ontology),
-        security_context: None,
+        security_context: Some(test_security_context()),
         server_extensions,
         phases: TypeMap::default(),
     }
@@ -127,6 +128,7 @@ async fn cached_executor_miss_then_hit() {
         Arc::clone(&compiled),
         Arc::clone(&client),
         Arc::clone(&broker),
+        SIMPLE_TRAVERSAL,
     );
     let output1 = CachedExecutor
         .execute(&mut ctx1, &mut NoOpObserver)
@@ -157,6 +159,7 @@ async fn cached_executor_miss_then_hit() {
         Arc::clone(&compiled),
         Arc::clone(&client),
         Arc::clone(&broker),
+        SIMPLE_TRAVERSAL,
     );
     let output2 = CachedExecutor
         .execute(&mut ctx2, &mut NoOpObserver)
@@ -217,6 +220,7 @@ async fn cached_executor_bypass_when_disabled() {
         Arc::clone(&compiled),
         Arc::clone(&client),
         Arc::clone(&broker),
+        SIMPLE_TRAVERSAL,
     );
     let output = CachedExecutor
         .execute(&mut ctx, &mut NoOpObserver)
@@ -237,6 +241,7 @@ async fn cached_executor_bypass_when_disabled() {
         Arc::clone(&compiled),
         Arc::clone(&client),
         Arc::clone(&broker),
+        SIMPLE_TRAVERSAL,
     );
     let output2 = CachedExecutor
         .execute(&mut ctx2, &mut NoOpObserver)
@@ -273,10 +278,10 @@ async fn cached_executor_works_without_nats() {
     server_extensions.insert(gkg_server_config::ProfilingConfig::default());
 
     let mut ctx = QueryPipelineContext {
-        query_json: String::new(),
+        query_json: SIMPLE_TRAVERSAL.to_string(),
         compiled: Some(compiled),
         ontology,
-        security_context: None,
+        security_context: Some(test_security_context()),
         server_extensions,
         phases: TypeMap::default(),
     };
