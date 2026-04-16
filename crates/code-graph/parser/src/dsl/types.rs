@@ -518,6 +518,18 @@ impl<L: DslLanguage> code_graph_types::CanonicalParser for DslParser<L> {
     }
 }
 
+impl<L: DslLanguage> DslParser<L> {
+    /// Parse for defs+imports only (skip refs/bindings/cf). No AST returned.
+    pub fn parse_defs_only(
+        &self,
+        source: &[u8],
+        file_path: &str,
+    ) -> anyhow::Result<code_graph_types::CanonicalResult> {
+        let spec = L::spec();
+        Ok(spec.parse_defs_only(source, file_path, L::language())?)
+    }
+}
+
 // ── Binding rules ───────────────────────────────────────────────
 
 pub struct BindingRule {

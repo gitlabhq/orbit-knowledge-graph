@@ -118,8 +118,9 @@ where
             .par_iter()
             .enumerate()
             .map(|(file_idx, (path, source))| {
-                let (result, _ast) =
-                    parser.parse_file(source, path).map_err(|e| PipelineError {
+                let result = parser
+                    .parse_defs_only(source, path)
+                    .map_err(|e| PipelineError {
                         file_path: path.clone(),
                         error: format!("Parse error: {e}"),
                     })?;
@@ -130,12 +131,11 @@ where
                     file_node
                 };
 
-                let ref_count = result.references.len();
                 let defs = result.definitions.len();
                 let imports = result.imports.len();
 
                 pb.inc(1);
-                Ok((file_node, defs, imports, ref_count))
+                Ok((file_node, defs, imports))
             })
             .collect();
         pb.finish_with_message(format!(
@@ -143,36 +143,27 @@ where
             t0.elapsed()
         ));
 
-        let mut file_entries: Vec<(petgraph::graph::NodeIndex, usize)> =
-            Vec::with_capacity(file_count);
+        let mut file_nodes = Vec::with_capacity(file_count);
         let mut errors = Vec::new();
         let mut total_defs = 0usize;
         let mut total_imports = 0usize;
-        let mut skipped_count = 0usize;
 
         for output in phase1_results {
             match output {
-                Ok((file_node, defs, imports, ref_count)) => {
+                Ok((file_node, defs, imports)) => {
                     total_defs += defs;
                     total_imports += imports;
-                    if ref_count == 0 {
-                        skipped_count += 1;
-                    }
-                    file_entries.push((file_node, ref_count));
+                    file_nodes.push(file_node);
                 }
                 Err(err) => {
                     errors.push(err);
-                    file_entries.push((petgraph::graph::NodeIndex::new(0), 0));
+                    file_nodes.push(petgraph::graph::NodeIndex::new(0));
                 }
             }
         }
 
-        if !errors.is_empty() && file_entries.is_empty() {
+        if !errors.is_empty() && file_nodes.is_empty() {
             return Err(errors);
-        }
-
-        if skipped_count > 0 {
-            eprintln!("[v2] {skipped_count} files with 0 refs — skipping Phase 2");
         }
 
         report_rss("after Phase 1 (graph + source bytes)");
@@ -216,9 +207,9 @@ where
 
         let phase2_results: Vec<_> = files
             .par_iter()
-            .zip(file_entries.par_iter())
-            .map(|((path, source), &(file_node, ref_count))| {
-                if ref_count == 0 {
+            .zip(file_nodes.par_iter())
+            .map(|((path, source), &file_node)| {
+                if file_node.index() == 0 && errors.iter().any(|e| e.file_path == *path) {
                     pb2.inc(1);
                     return None;
                 }

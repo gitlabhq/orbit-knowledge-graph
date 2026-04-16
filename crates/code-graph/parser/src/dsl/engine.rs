@@ -32,6 +32,61 @@ pub struct ScopeInfo {
 }
 
 impl LanguageSpec {
+    /// Parse source for defs+imports only (skip refs, bindings, control flow).
+    /// Used by Phase 1 where only graph construction is needed.
+    pub fn parse_defs_only(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+    ) -> crate::Result<CanonicalResult> {
+        let source_str = std::str::from_utf8(source)
+            .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
+
+        let ast = language.parse_ast(source_str);
+        let root = ast.root();
+        let sep = language.fqn_separator();
+
+        let mut defs = Vec::new();
+        let mut imports = Vec::new();
+        let mut scope_stack: Vec<Arc<str>> = Vec::new();
+        let mut import_map = rustc_hash::FxHashMap::default();
+
+        if self.module_from_path
+            && let Some(module) = file_path_to_module(file_path, sep)
+        {
+            scope_stack.push(Arc::from(module.as_str()));
+        }
+
+        let top_level_depth = scope_stack.len();
+        self.walk_defs_only(
+            &root,
+            &mut scope_stack,
+            top_level_depth,
+            &mut defs,
+            &mut imports,
+            &mut import_map,
+            sep,
+        );
+
+        let extension = file_path
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_string())
+            .unwrap_or_default();
+
+        Ok(CanonicalResult {
+            file_path: file_path.to_string(),
+            extension,
+            file_size: source.len() as u64,
+            language,
+            definitions: defs,
+            imports,
+            references: Vec::new(),
+            bindings: Vec::new(),
+            control_flow: Vec::new(),
+        })
+    }
+
     /// Parse source bytes into a `CanonicalResult` and the retained AST.
     pub fn parse_canonical(
         &self,
@@ -306,6 +361,98 @@ impl LanguageSpec {
                 imports,
                 bindings,
                 control_flow,
+                import_map,
+                sep,
+            );
+        }
+
+        if pushed_scope {
+            scope_stack.pop();
+        }
+    }
+
+    /// Lightweight walk: only scope + import rules. No refs, bindings, or
+    /// control flow. Used by `parse_defs_only` for Phase 1.
+    fn walk_defs_only(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        scope_stack: &mut Vec<Arc<str>>,
+        top_level_depth: usize,
+        defs: &mut Vec<CanonicalDefinition>,
+        imports: &mut Vec<CanonicalImport>,
+        import_map: &mut rustc_hash::FxHashMap<String, String>,
+        sep: &'static str,
+    ) {
+        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
+            return;
+        }
+
+        let node_kind = node.kind();
+        let node_kind_ref = node_kind.as_ref();
+        let mut pushed_scope = false;
+
+        if let Some((pkg_kind, ref pkg_extract)) = self.package_node
+            && node_kind_ref == pkg_kind
+            && let Some(name) = pkg_extract.extract_name(node)
+        {
+            scope_stack.push(Arc::from(name.as_str()));
+        }
+
+        if let Some(m) = self.evaluate_scope(node, node_kind_ref, import_map, sep) {
+            let is_top_level = scope_stack.len() <= top_level_depth;
+
+            if m.creates_scope {
+                scope_stack.push(Arc::from(m.name.as_str()));
+                pushed_scope = true;
+            }
+
+            let fqn = if m.creates_scope {
+                Fqn::from_parts(
+                    &scope_stack.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
+                    sep,
+                )
+            } else {
+                Fqn::from_scope(scope_stack, &m.name, sep)
+            };
+
+            defs.push(CanonicalDefinition {
+                definition_type: m.label,
+                kind: m.def_kind,
+                name: m.name,
+                fqn,
+                range: canonical_range(&m.range),
+                is_top_level,
+                metadata: m.metadata,
+            });
+        }
+
+        let custom_scope_handled = self
+            .custom_scope_fn
+            .is_some_and(|f| f(node, defs, scope_stack, sep));
+
+        if !custom_scope_handled {
+            let import_count_before = imports.len();
+            let handled = self.custom_import_fn.is_some_and(|f| f(node, imports));
+            if !handled {
+                self.evaluate_imports(node, node_kind_ref, imports);
+            }
+            for imp in &imports[import_count_before..] {
+                if !imp.wildcard && !imp.path.is_empty() {
+                    let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+                    if !name.is_empty() {
+                        import_map.insert(name.to_string(), format!("{}{}{}", imp.path, sep, name));
+                    }
+                }
+            }
+        }
+
+        for child in node.children() {
+            self.walk_defs_only(
+                &child,
+                scope_stack,
+                top_level_depth,
+                defs,
+                imports,
                 import_map,
                 sep,
             );

@@ -34,4 +34,10 @@ pub trait CanonicalParser: Send + Sync {
         source: &[u8],
         file_path: &str,
     ) -> anyhow::Result<(CanonicalResult, Self::Ast)>;
+
+    /// Parse for defs+imports only (skip refs/bindings/cf). No AST returned.
+    fn parse_defs_only(&self, source: &[u8], file_path: &str) -> anyhow::Result<CanonicalResult> {
+        let (result, _ast) = self.parse_file(source, file_path)?;
+        Ok(result)
+    }
 }
