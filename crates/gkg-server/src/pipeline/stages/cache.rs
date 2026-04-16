@@ -91,8 +91,11 @@ impl PipelineStage for CachedExecutor {
 
         let output = ClickHouseExecutor.execute(ctx, obs).await?;
 
-        if let Ok(data) = serialize_batches(&output.batches) {
-            if data.len() <= MAX_CACHE_VALUE_BYTES {
+        match serialize_batches(&output.batches) {
+            Err(e) => {
+                warn!(cache_key, error = %e, "failed to serialize query result for cache, skipping store");
+            }
+            Ok(data) if data.len() <= MAX_CACHE_VALUE_BYTES => {
                 let broker = Arc::clone(&broker);
                 let key = cache_key.clone();
                 tokio::spawn(async move {
@@ -106,7 +109,8 @@ impl PipelineStage for CachedExecutor {
                         debug!(key, "stored query result in cache");
                     }
                 });
-            } else {
+            }
+            Ok(data) => {
                 debug!(
                     cache_key,
                     size = data.len(),
@@ -122,8 +126,9 @@ impl PipelineStage for CachedExecutor {
 
 fn compute_cache_key(sql: &str, rendered: &str) -> String {
     let mut hasher = Sha256::new();
+    hasher.update((sql.len() as u64).to_le_bytes());
     hasher.update(sql.as_bytes());
-    hasher.update(b"|");
+    hasher.update((rendered.len() as u64).to_le_bytes());
     hasher.update(rendered.as_bytes());
     format!("{:x}", hasher.finalize())
 }
