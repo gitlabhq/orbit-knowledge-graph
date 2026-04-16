@@ -81,8 +81,19 @@ impl CodeIndexingDeps {
     }
 
     pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
+        self.code_indexing_task_handler_with_debounce(0)
+    }
+
+    pub fn code_indexing_task_handler_with_debounce(
+        &self,
+        debounce_secs: u64,
+    ) -> CodeIndexingTaskHandler {
+        // debounce_secs=0 is required for tests that call index_code multiple
+        // times in quick succession (e.g. soft_deletes_stale_code_data). A
+        // nonzero debounce would cause the second indexing to be skipped
+        // because the checkpoint indexed_at is within the debounce window.
         let config = CodeIndexingTaskHandlerConfig {
-            debounce_secs: 0,
+            debounce_secs,
             ..Default::default()
         };
         CodeIndexingTaskHandler::new(

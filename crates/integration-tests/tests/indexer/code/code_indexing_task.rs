@@ -130,6 +130,59 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 }
 
 #[tokio::test]
+async fn debounce_skips_reindex_within_window() {
+    let project_id: i64 = 6;
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main { public void v1() {} }")],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    // Use a large debounce window so the second task is always within it
+    let handler = deps.code_indexing_task_handler_with_debounce(600);
+
+    // First indexing succeeds and writes a checkpoint to ClickHouse
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        "/debounce-test",
+    )
+    .await;
+
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_active_definitions(&clickhouse, project_id, "src/Main.java", &["Main", "v1"]).await;
+
+    // Replace the archive with new content. If debounce works correctly,
+    // the second indexing task should be skipped (debounced) and the
+    // old definitions should remain active.
+    mock.replace_archive(
+        project_id,
+        &[("src/Main.java", "public class Main { public void v2() {} }")],
+    );
+
+    let context = handler_context(&clickhouse);
+    let envelope = code_indexing_task_envelope(project_id, "commit2", 2, "/debounce-test");
+    let result = handler.handle(context, envelope).await;
+    assert!(result.is_ok(), "debounced task should return Ok");
+
+    // The original definitions should still be active (v1, not v2)
+    // because the second indexing was debounced.
+    assert_active_definitions(&clickhouse, project_id, "src/Main.java", &["Main", "v1"]).await;
+}
+
+#[tokio::test]
 async fn disk_is_clean_after_successful_indexing() {
     let project_id: i64 = 4;
     let commit_sha = "abc123";
