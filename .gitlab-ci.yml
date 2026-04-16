@@ -972,3 +972,8 @@ e2e:
     - bash e2e/scripts/test.sh
   after_script:
     - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}" -y
+  artifacts:
+    when: on_failure
+    paths:
+      - e2e/diagnostics/
+    expire_in: 3 days

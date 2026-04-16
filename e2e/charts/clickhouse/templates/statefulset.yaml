@@ -38,6 +38,12 @@ spec:
               mountPath: /var/lib/clickhouse
             - name: initdb
               mountPath: /docker-entrypoint-initdb.d
+            - name: config
+              mountPath: /etc/clickhouse-server/config.d/low_memory_server.xml
+              subPath: low_memory_server.xml
+            - name: config
+              mountPath: /etc/clickhouse-server/users.d/low_memory_users.xml
+              subPath: low_memory_users.xml
           livenessProbe:
             httpGet:
               path: /ping
@@ -54,6 +60,9 @@ spec:
         - name: initdb
           configMap:
             name: {{ .Release.Name }}-initdb
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-config
   volumeClaimTemplates:
     - metadata:
         name: data

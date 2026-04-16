@@ -1,0 +1,21 @@
+# Central version pinning for e2e components.
+# Chart versions used by helmfile.yaml.gotmpl, image versions by values/*.yaml.gotmpl.
+# CI can override GKG image via E2E_GKG_IMAGE / E2E_GKG_TAG env vars.
+
+siphon:
+  chart: "1.10.0"
+  image:
+    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
+    tag: "0.0.62-beta"
+
+gitlab:
+  chart: "9.10.3-2450691409"
+
+gkg:
+  chart: "0.18.1"
+  image:
+    repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
+    tag: "0.26.1"
+
+nats:
+  chart: "2.12.6"

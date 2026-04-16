@@ -24,14 +24,6 @@ export NS_GKG="e2e-${E2E_SHA}-gkg"
 
 log() { echo "==> $*"; }
 
-cdc_table_names() {
-  python3 -c "
-import re, sys
-text = open(sys.argv[1]).read()
-print('\n'.join(re.findall(r'- name: (\S+)', text)))
-" "$E2E_DIR/config/cdc-tables.yaml"
-}
-
 wait_for_pods() {
   local ns=$1 timeout=${2:-300}
   log "Waiting for pods in $ns (timeout: ${timeout}s)"

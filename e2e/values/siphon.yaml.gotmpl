@@ -1,12 +1,13 @@
 {{ $sha := requiredEnv "E2E_SHA" }}
 {{ $cdc := fromYaml (readFile "../config/cdc-tables.yaml") }}
+{{ $v := fromYaml (readFile "../config/versions.yaml") }}
 
 namespace: e2e-{{ $sha }}-siphon
 
 image:
-  repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
+  repository: {{ $v.siphon.image.repository }}
   pullPolicy: Always
-  tag: 0.0.62-beta
+  tag: {{ $v.siphon.image.tag }}
 
 replicas: 1
 reloader: false
@@ -17,7 +18,7 @@ resources:
     memory: 512Mi
   limits:
     cpu: 2
-    memory: 4Gi
+    memory: 2Gi
 
 appConfigDefaults:
   prometheus:
