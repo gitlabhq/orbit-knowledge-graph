@@ -19,9 +19,6 @@ pub enum RepositoryServiceError {
 
     #[error("archive extraction failed: {0}")]
     Archive(String),
-
-    #[error("force push detected for project {0}")]
-    ForcePush(i64),
 }
 
 #[async_trait]
@@ -33,26 +30,6 @@ pub trait RepositoryService: Send + Sync {
         project_id: i64,
         ref_name: &str,
     ) -> Result<ByteStream, RepositoryServiceError>;
-
-    async fn changed_paths(
-        &self,
-        project_id: i64,
-        from_sha: &str,
-        to_sha: &str,
-    ) -> Result<ByteStream, RepositoryServiceError>;
-
-    async fn list_blobs(
-        &self,
-        project_id: i64,
-        oids: &[String],
-    ) -> Result<ByteStream, RepositoryServiceError>;
-}
-
-fn map_gitlab_error(error: GitlabClientError) -> RepositoryServiceError {
-    match error {
-        GitlabClientError::ForcePush(project_id) => RepositoryServiceError::ForcePush(project_id),
-        other => RepositoryServiceError::GitlabApi(other),
-    }
 }
 
 pub struct RailsRepositoryService {
@@ -81,43 +58,11 @@ impl RepositoryService for RailsRepositoryService {
         let stream = self
             .gitlab_client
             .download_archive(project_id, ref_name)
-            .await
-            .map_err(map_gitlab_error)?;
+            .await?;
 
-        Ok(Box::pin(stream.map(|r| r.map_err(map_gitlab_error))))
-    }
-
-    async fn changed_paths(
-        &self,
-        project_id: i64,
-        from_sha: &str,
-        to_sha: &str,
-    ) -> Result<ByteStream, RepositoryServiceError> {
-        use futures::StreamExt;
-
-        let stream = self
-            .gitlab_client
-            .changed_paths(project_id, from_sha, to_sha)
-            .await
-            .map_err(map_gitlab_error)?;
-
-        Ok(Box::pin(stream.map(|r| r.map_err(map_gitlab_error))))
-    }
-
-    async fn list_blobs(
-        &self,
-        project_id: i64,
-        oids: &[String],
-    ) -> Result<ByteStream, RepositoryServiceError> {
-        use futures::StreamExt;
-
-        let stream = self
-            .gitlab_client
-            .list_blobs(project_id, oids)
-            .await
-            .map_err(map_gitlab_error)?;
-
-        Ok(Box::pin(stream.map(|r| r.map_err(map_gitlab_error))))
+        Ok(Box::pin(
+            stream.map(|r| r.map_err(RepositoryServiceError::GitlabApi)),
+        ))
     }
 }
 
@@ -161,23 +106,6 @@ impl RepositoryService for CachingRepositoryService {
                 Err(error)
             }
         }
-    }
-
-    async fn changed_paths(
-        &self,
-        project_id: i64,
-        from_sha: &str,
-        to_sha: &str,
-    ) -> Result<ByteStream, RepositoryServiceError> {
-        self.inner.changed_paths(project_id, from_sha, to_sha).await
-    }
-
-    async fn list_blobs(
-        &self,
-        project_id: i64,
-        oids: &[String],
-    ) -> Result<ByteStream, RepositoryServiceError> {
-        self.inner.list_blobs(project_id, oids).await
     }
 }
 
@@ -242,23 +170,6 @@ pub mod test_utils {
         ) -> Result<ByteStream, RepositoryServiceError> {
             Ok(Box::pin(futures::stream::empty()))
         }
-
-        async fn changed_paths(
-            &self,
-            _project_id: i64,
-            _from_sha: &str,
-            _to_sha: &str,
-        ) -> Result<ByteStream, RepositoryServiceError> {
-            Ok(Box::pin(futures::stream::empty()))
-        }
-
-        async fn list_blobs(
-            &self,
-            _project_id: i64,
-            _oids: &[String],
-        ) -> Result<ByteStream, RepositoryServiceError> {
-            Ok(Box::pin(futures::stream::empty()))
-        }
     }
 
     pub struct CountingRepositoryService {
@@ -306,23 +217,6 @@ pub mod test_utils {
                 ));
             }
             self.inner.download_archive(project_id, ref_name).await
-        }
-
-        async fn changed_paths(
-            &self,
-            project_id: i64,
-            from_sha: &str,
-            to_sha: &str,
-        ) -> Result<ByteStream, RepositoryServiceError> {
-            self.inner.changed_paths(project_id, from_sha, to_sha).await
-        }
-
-        async fn list_blobs(
-            &self,
-            project_id: i64,
-            oids: &[String],
-        ) -> Result<ByteStream, RepositoryServiceError> {
-            self.inner.list_blobs(project_id, oids).await
         }
     }
 }
