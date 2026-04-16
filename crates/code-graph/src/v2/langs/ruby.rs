@@ -1,7 +1,6 @@
 use code_graph_config::Language;
 use code_graph_types::{BindingKind, CanonicalImport, DefKind};
 use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
-use parser_core::dsl::predicates::parent_is;
 use parser_core::dsl::types::{
     BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LoopRule, ReferenceRule,
     ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
