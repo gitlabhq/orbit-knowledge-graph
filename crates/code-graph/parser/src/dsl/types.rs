@@ -365,12 +365,6 @@ impl ImportRule {
         self
     }
 
-    /// Set the symbol name used for wildcard imports (default: "*").
-    pub fn wildcard_sym(mut self, sym: &'static str) -> Self {
-        self.wildcard_symbol = sym;
-        self
-    }
-
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
         self.classify.map_or(self.label, |f| f(node))
     }

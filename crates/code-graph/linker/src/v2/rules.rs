@@ -202,20 +202,3 @@ impl ResolutionRules {
         result
     }
 }
-
-// ── Builder helpers ─────────────────────────────────────────────
-
-pub fn isolated_scope(node_kind: &'static str, is_type_scope: bool) -> IsolatedScopeRule {
-    IsolatedScopeRule {
-        node_kind,
-        is_type_scope,
-        name_field: "name",
-    }
-}
-
-impl IsolatedScopeRule {
-    pub fn name_from(mut self, field: &'static str) -> Self {
-        self.name_field = field;
-        self
-    }
-}

@@ -121,10 +121,6 @@ pub enum ExpressionStep {
     This,
     /// `super` reference.
     Super,
-    /// Array/index access.
-    Index,
-    /// Method reference (`Foo::bar`).
-    MethodRef(String),
 }
 
 // ── Bindings ────────────────────────────────────────────────────
