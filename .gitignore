@@ -22,6 +22,10 @@ evaluation_results*/
 
 # Local environment (credentials)
 .env
+.env.local
+
+# Robot Framework run artifacts
+e2e/local/results/
 
 # Dev logs, pid files, and runtime artifacts
 .dev/
