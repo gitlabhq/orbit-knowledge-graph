@@ -366,12 +366,14 @@ where
         graph.finalize();
 
         // ── Phase C: parallel resolution ────────────────────────
+        // Take references out of FileInfo so they're dropped after resolution,
+        // not held for the entire phase.
         let t2 = std::time::Instant::now();
-        let pb2 = progress_bar(file_count as u64, "Phase C: resolve");
+        let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
 
         let resolve_results: Vec<_> = file_infos
-            .par_iter()
+            .into_par_iter()
             .map(|info_opt| {
                 let Some(info) = info_opt else {
                     pb2.inc(1);
@@ -387,6 +389,7 @@ where
                     &rules,
                     &rules.settings,
                 );
+                // info (including references) dropped here
 
                 total_edges.fetch_add(result.edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
@@ -395,12 +398,11 @@ where
             .collect();
 
         pb2.finish_with_message(format!(
-            "Phase C: {} edges in {:.2?}",
+            "{} edges in {:.2?}",
             total_edges.load(std::sync::atomic::Ordering::Relaxed),
             t2.elapsed()
         ));
 
-        // Add edges to graph
         for edges in resolve_results {
             for (src, tgt, edge) in edges {
                 graph.graph.add_edge(src, tgt, edge);
