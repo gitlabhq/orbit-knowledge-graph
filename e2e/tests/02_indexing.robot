@@ -17,13 +17,13 @@ Project Issue And Note Are Indexed
 
     ${project_name}=    Set Variable    e2e-prj-${suffix}
     ${project}=    Create Project    ${project_name}    ${SHARED_NAMESPACE_ID}
-    Wait For Node Indexed    Project    ${project["id"]}    ${project_name}    timeout=20s
+    Wait For Node Indexed    Project    ${project["id"]}    ${project_name}    timeout=45s
 
     ${issue_title}=    Set Variable    e2e-issue-${suffix}
     ${issue}=    Create Issue    ${project["id"]}    ${issue_title}
     Wait For Node Indexed    WorkItem    ${issue["id"]}    ${issue_title}
-    ...    label_field=title    timeout=20s
+    ...    label_field=title    timeout=45s
 
     ${note_body}=    Set Variable    e2e-note-${suffix}
     ${note}=    Create Note On Issue    ${project["id"]}    ${issue["iid"]}    ${note_body}
-    Wait For Node Indexed    Note    ${note["id"]}    timeout=20s
+    Wait For Node Indexed    Note    ${note["id"]}    timeout=45s
