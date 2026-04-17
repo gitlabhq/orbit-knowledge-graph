@@ -58,6 +58,7 @@ pub(crate) struct ReachingDefs<'a> {
 }
 
 impl ReachingDefs<'_> {
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }

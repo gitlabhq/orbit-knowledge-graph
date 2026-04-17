@@ -822,7 +822,7 @@ impl LanguageSpec {
         let node_kind = node.kind();
         let nk = node_kind.as_ref();
         let mut pushed_scope = false;
-        let mut is_type_scope = false;
+        let is_type_scope;
 
         // Package node
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
@@ -1223,27 +1223,6 @@ impl<'a> WalkFullState<'a> {
             import_map: rustc_hash::FxHashMap::default(),
             top_level_depth: 0,
         }
-    }
-
-    /// Try to resolve a bare name to an SSA value by checking this file's
-    /// defs and imports. Falls back to Alias (for SSA chasing) or Opaque.
-    fn resolve_name_to_ssa_value(&self, name: &str) -> super::ssa::SsaValue<'a> {
-        // Check local defs
-        for (i, def) in self.defs.iter().enumerate().rev() {
-            if def.name == name {
-                return super::ssa::SsaValue::LocalDef(i as u32);
-            }
-        }
-        // Check imports
-        for (i, imp) in self.imports.iter().enumerate().rev() {
-            let effective = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-            if effective == name {
-                return super::ssa::SsaValue::ImportRef(i as u32);
-            }
-        }
-        // Fall back to alias — SSA copy propagation will chase it
-        let interned = self.arena.alloc_str(name);
-        super::ssa::SsaValue::Alias(interned)
     }
 }
 

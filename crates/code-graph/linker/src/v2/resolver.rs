@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 
 use super::graph::{CodeGraph, GraphEdge};
 use super::imports::{self, ResolveSettings, apply_import_strategies};
-use super::rules::{ImportStrategy, ResolutionRules, ResolveStage};
+use super::rules::{ResolutionRules, ResolveStage};
 use super::state::ScratchBuf;
 
 /// Result of resolving one file's references.
@@ -437,7 +437,7 @@ fn resolve_base_type_fqns(
 /// Pre-resolve imports for a file: build name → [NodeIndex] map.
 fn pre_resolve_imports(
     graph: &CodeGraph,
-    file_node: NodeIndex,
+    _file_node: NodeIndex,
     import_nodes: &[NodeIndex],
 ) -> FxHashMap<String, Vec<NodeIndex>> {
     let mut map: FxHashMap<String, Vec<NodeIndex>> = FxHashMap::default();
