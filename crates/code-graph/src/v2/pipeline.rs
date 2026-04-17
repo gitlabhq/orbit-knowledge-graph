@@ -409,7 +409,15 @@ where
             }
         }
 
-        eprintln!("[v2-sp] total: {:.2?}", t0.elapsed());
+        eprintln!(
+            "[v2-sp] total: {:.2?} ({} nodes, {} edges, defs={}, imports={}, pool={})",
+            t0.elapsed(),
+            graph.graph.node_count(),
+            graph.graph.edge_count(),
+            graph.defs.len(),
+            graph.imports.len(),
+            graph.strings.len(),
+        );
         Ok(PipelineOutput::Graph(Box::new(graph)))
     }
 }
