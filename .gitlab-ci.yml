@@ -430,6 +430,8 @@ integration-test:
 
 .code-indexing-benchmark-rules:
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
         - crates/cli/**/*
