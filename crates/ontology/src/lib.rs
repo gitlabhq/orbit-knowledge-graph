@@ -598,6 +598,26 @@ impl Ontology {
         self.get_redaction_config(entity_name).is_some()
     }
 
+    /// Iterator over names of `admin_only` fields on the given entity.
+    /// Returns an empty iterator if the entity does not exist.
+    pub fn admin_only_properties(&self, entity_name: &str) -> impl Iterator<Item = &str> {
+        self.get_node(entity_name).into_iter().flat_map(|node| {
+            node.fields
+                .iter()
+                .filter(|f| f.admin_only)
+                .map(|f| f.name.as_str())
+        })
+    }
+
+    /// Whether `field_name` on `entity_name` is marked `admin_only`.
+    /// Returns false if either the entity or the field does not exist.
+    #[must_use]
+    pub fn is_admin_only(&self, entity_name: &str, field_name: &str) -> bool {
+        self.get_node(entity_name)
+            .and_then(|node| node.fields.iter().find(|f| f.name == field_name))
+            .is_some_and(|f| f.admin_only)
+    }
+
     /// Iterator over all nodes.
     pub fn nodes(&self) -> impl Iterator<Item = &NodeEntity> {
         self.nodes.values()
@@ -1904,6 +1924,62 @@ properties:
             .with_nodes(["User"])
             .modify_field("Bogus", "field", |_| {});
         assert!(result.is_err());
+    }
+
+    // ── admin_only_properties / is_admin_only ──────────────────────
+
+    fn admin_only_ontology() -> Ontology {
+        Ontology::new()
+            .with_nodes(["User"])
+            .with_fields(
+                "User",
+                [
+                    ("username", DataType::String),
+                    ("is_admin", DataType::Bool),
+                    ("is_auditor", DataType::Bool),
+                ],
+            )
+            .modify_field("User", "is_admin", |f| f.admin_only = true)
+            .unwrap()
+            .modify_field("User", "is_auditor", |f| f.admin_only = true)
+            .unwrap()
+    }
+
+    #[test]
+    fn admin_only_properties_yields_only_admin_only_fields() {
+        let ont = admin_only_ontology();
+        let mut got: Vec<&str> = ont.admin_only_properties("User").collect();
+        got.sort_unstable();
+        assert_eq!(got, vec!["is_admin", "is_auditor"]);
+    }
+
+    #[test]
+    fn admin_only_properties_empty_for_unknown_entity() {
+        let ont = admin_only_ontology();
+        assert_eq!(ont.admin_only_properties("Bogus").count(), 0);
+    }
+
+    #[test]
+    fn admin_only_properties_empty_when_no_admin_only_fields() {
+        let ont = Ontology::new()
+            .with_nodes(["Project"])
+            .with_fields("Project", [("name", DataType::String)]);
+        assert_eq!(ont.admin_only_properties("Project").count(), 0);
+    }
+
+    #[test]
+    fn is_admin_only_matches_flag() {
+        let ont = admin_only_ontology();
+        assert!(ont.is_admin_only("User", "is_admin"));
+        assert!(ont.is_admin_only("User", "is_auditor"));
+        assert!(!ont.is_admin_only("User", "username"));
+    }
+
+    #[test]
+    fn is_admin_only_fails_closed_for_unknowns() {
+        let ont = admin_only_ontology();
+        assert!(!ont.is_admin_only("User", "bogus_field"));
+        assert!(!ont.is_admin_only("Bogus", "is_admin"));
     }
 
     #[test]

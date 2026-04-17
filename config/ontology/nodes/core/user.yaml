@@ -116,12 +116,14 @@ properties:
     type: boolean
     source: admin
     nullable: false
+    admin_only: true
     description: "Whether the user is an instance administrator."
 
   is_auditor:
     type: boolean
     source: auditor
     nullable: false
+    admin_only: true
     description: "Whether the user has auditor role."
 
   is_external:

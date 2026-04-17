@@ -8,6 +8,7 @@ pub mod hydrate;
 pub mod lower;
 pub mod normalize;
 pub mod optimize;
+pub mod restrict;
 pub mod security;
 pub mod settings;
 pub mod validate;
@@ -55,6 +56,21 @@ where
         let input = state.take_input()?;
         state.set_input(normalize::normalize(input, env.ontology())?);
         Ok(())
+    }
+}
+
+pub struct RestrictPass;
+
+impl<E, S> CompilerPass<E, S> for RestrictPass
+where
+    E: PipelineEnv + HasOntology + HasSecurityCtx,
+    S: PipelineState + HasInput,
+{
+    const NAME: &'static str = "restrict";
+
+    fn run(&self, env: &E, state: &mut S) -> Result<()> {
+        let input = state.input_mut()?;
+        restrict::restrict(input, env.ontology(), env.security_ctx())
     }
 }
 
@@ -164,14 +180,14 @@ pub struct HydratePlanPass;
 
 impl<E, S> CompilerPass<E, S> for HydratePlanPass
 where
-    E: PipelineEnv + HasOntology,
+    E: PipelineEnv + HasOntology + HasSecurityCtx,
     S: PipelineState + HasInput + HasHydrationPlan,
 {
     const NAME: &'static str = "hydrate_plan";
 
     fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let input = state.input()?;
-        let plan = hydrate::generate_hydration_plan(input, env.ontology());
+        let plan = hydrate::generate_hydration_plan(input, env.ontology(), env.security_ctx());
         state.set_hydration_plan(plan);
         Ok(())
     }

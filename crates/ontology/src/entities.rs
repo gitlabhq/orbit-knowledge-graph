@@ -341,6 +341,10 @@ pub struct Field {
     /// Whether users can filter on this field. Defaults to true. Set to false
     /// for internal columns (e.g. traversal_path) that are system-controlled.
     pub filterable: bool,
+    /// Whether this field is only visible to instance administrators.
+    /// Defaults to false. When true, non-admin users cannot select or
+    /// filter on this field.
+    pub admin_only: bool,
 }
 
 impl Default for Field {
@@ -354,6 +358,7 @@ impl Default for Field {
             enum_type: EnumType::default(),
             like_allowed: true,
             filterable: true,
+            admin_only: false,
         }
     }
 }

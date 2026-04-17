@@ -79,12 +79,11 @@ impl HydrationStage {
 
         let hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
 
-        let compiled = compile_input(hydration_input, ctx.security_context()?).map_err(|e| {
-            PipelineError::Compile {
+        let compiled = compile_input(hydration_input, &ctx.ontology, ctx.security_context()?)
+            .map_err(|e| PipelineError::Compile {
                 client_safe: e.is_client_safe(),
                 message: e.to_string(),
-            }
-        })?;
+            })?;
 
         let rendered_sql = compiled.base.render();
         let debug = DebugQuery {

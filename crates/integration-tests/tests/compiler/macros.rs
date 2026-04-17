@@ -35,9 +35,13 @@ fn secure_env_new_stores_fields() {
 #[test]
 fn local_env_new_stores_ontology() {
     let ontology = Arc::new(Ontology::new());
-    let env = LocalEnv::new(ontology.clone());
+    let env = LocalEnv::local(ontology.clone());
 
     assert!(Arc::ptr_eq(env.ontology(), &ontology));
+    assert!(
+        env.security_ctx().admin,
+        "local env must run as admin so admin_only fields stay visible in CLI tooling"
+    );
 }
 
 #[test]
