@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use code_graph::v2::pipeline::dispatch_by_tag;
+use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::{Pipeline, PipelineConfig, PipelineOutput};
 use code_graph_linker::v2::graph::RowContext;
 

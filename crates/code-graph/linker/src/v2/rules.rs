@@ -13,6 +13,34 @@ pub trait HasRules {
     fn rules() -> ResolutionRules;
 }
 
+/// No-resolution wrapper. Wraps a DSL spec with empty resolution stages.
+/// Use for languages that have parsing but no cross-reference resolution yet.
+///
+/// ```ignore
+/// // In register_v2_pipelines!:
+/// CSharp => [GenericPipeline<DslParser<CSharpDsl>, NoRules<CSharpDsl>>],
+/// ```
+pub struct NoRules<D>(std::marker::PhantomData<D>);
+
+impl<D: parser_core::dsl::types::DslLanguage> HasRules for NoRules<D> {
+    fn rules() -> ResolutionRules {
+        let spec = D::spec();
+        let scopes = ResolutionRules::derive_scopes(&spec);
+        ResolutionRules::new(
+            "no_rules",
+            scopes,
+            spec,
+            vec![],
+            vec![],
+            ChainMode::ValueFlow,
+            ReceiverMode::None,
+            D::language().fqn_separator(),
+            &[],
+            None,
+        )
+    }
+}
+
 // ── Scope rules ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
