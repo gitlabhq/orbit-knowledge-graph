@@ -38,7 +38,10 @@ GITLAB_REF="$(yq -r '.gitlab.ref' "$VERSIONS")"
 log "siphon image: $SIPHON_IMAGE"
 log "gitlab ref:   $GITLAB_REF"
 
-TMP="$(mktemp -d)"
+# Under GitLab CI with docker-in-docker the dind daemon only sees paths under
+# $CI_PROJECT_DIR — /tmp lives on the runner, not the dind container, so volume
+# mounts from /tmp would be empty inside the siphon container.
+TMP="$(mktemp -d -p "${CI_PROJECT_DIR:-/tmp}")"
 trap 'rm -rf "$TMP"' EXIT
 TABLES_RAW="$TMP/tables-raw"
 TABLES="$TMP/tables"
