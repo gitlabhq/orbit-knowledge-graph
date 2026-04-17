@@ -16,18 +16,15 @@ pub enum InstallError {
 }
 
 /// Product-analytics handle. Cheaply cloneable.
+///
+/// Noop by default. `install` validates config and returns a live handle
+/// once the labkit-events transport lands; today it's a logging stub that
+/// still delegates to Noop.
 #[derive(Clone)]
 pub struct Analytics(Arc<Inner>);
 
 enum Inner {
     Noop,
-    /// Stub: the real tracker (labkit-events) lands in a follow-up MR. For
-    /// now, Live just logs each event at debug level so we can exercise the
-    /// config path and prove wiring end-to-end.
-    Live {
-        app_id: String,
-        collector_url: String,
-    },
     Recording(Arc<Mutex<Vec<Recorded>>>),
 }
 
@@ -44,15 +41,18 @@ impl Analytics {
         Self(Arc::new(Inner::Noop))
     }
 
+    /// Validate config and return a handle. Today the live transport is
+    /// stubbed — a successful install logs a warning and hands back
+    /// [`Analytics::noop`]. Real transport lands in a follow-up.
     pub fn install(cfg: &AnalyticsConfig) -> Result<Self, InstallError> {
         if !cfg.enabled || cfg.collector_url.is_empty() {
             return Err(InstallError::NotConfigured);
         }
-        let app_id = cfg.app_id.clone().unwrap_or_else(|| "gkg".to_owned());
-        Ok(Self(Arc::new(Inner::Live {
-            app_id,
-            collector_url: cfg.collector_url.clone(),
-        })))
+        warn!(
+            collector = %cfg.collector_url,
+            "analytics: live transport not yet wired — emitting as noop"
+        );
+        Ok(Self::noop())
     }
 
     pub fn recording() -> (Self, crate::testkit::RecordingHandle) {
@@ -63,38 +63,23 @@ impl Analytics {
         )
     }
 
-    /// Emit an event. Fire-and-forget — serialization failures are logged.
+    /// Emit an event. Fire-and-forget. Serialization failures are logged.
     pub fn track<E: AnalyticsEvent>(&self, event: E) {
-        let props = match serde_json::to_value(&event) {
-            Ok(v) => v,
-            Err(err) => {
-                warn!(%err, name = E::event_name(), "analytics: serialize failed");
-                return;
-            }
-        };
         match &*self.0 {
-            Inner::Noop => debug!(name = E::event_name(), "analytics: noop"),
-            Inner::Live {
-                app_id,
-                collector_url,
-            } => debug!(
-                name = E::event_name(),
-                schema = E::schema_uri(),
-                %app_id,
-                %collector_url,
-                ?props,
-                "analytics: live stub (no transport yet)"
-            ),
-            Inner::Recording(sink) => sink.lock().push(Recorded {
-                event_name: E::event_name(),
-                schema_uri: E::schema_uri(),
-                props,
-                context: current(),
-            }),
+            Inner::Noop => debug!(name = E::EVENT_NAME, "analytics: noop"),
+            Inner::Recording(sink) => match serde_json::to_value(&event) {
+                Ok(props) => sink.lock().push(Recorded {
+                    event_name: E::EVENT_NAME,
+                    schema_uri: E::SCHEMA_URI,
+                    props,
+                    context: current(),
+                }),
+                Err(err) => warn!(%err, name = E::EVENT_NAME, "analytics: serialize failed"),
+            },
         }
     }
 
-    /// Flush any buffered events. No-op in the current stub.
+    /// Flush buffered events. No-op in the current stub.
     pub async fn shutdown(&self) {}
 }
 
@@ -102,22 +87,14 @@ impl Analytics {
 mod tests {
     use super::*;
     use crate::context::{DeploymentType, SourceType, with_context};
-    use crate::event::sealed::Sealed;
+    use crate::event::declare_event;
     use serde::Serialize;
 
     #[derive(Serialize)]
     struct Demo {
         value: u32,
     }
-    impl Sealed for Demo {}
-    impl AnalyticsEvent for Demo {
-        fn schema_uri() -> &'static str {
-            "iglu:com.gitlab/demo/jsonschema/1-0-0"
-        }
-        fn event_name() -> &'static str {
-            "demo"
-        }
-    }
+    declare_event!(Demo => "demo" @ "iglu:com.gitlab/demo/jsonschema/1-0-0");
 
     #[tokio::test]
     async fn noop_drops_silently() {

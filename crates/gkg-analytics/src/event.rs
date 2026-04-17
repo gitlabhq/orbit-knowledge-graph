@@ -5,16 +5,26 @@ pub(crate) mod sealed {
 }
 
 /// A product analytics event. Sealed — only this crate declares events.
-/// Add a new event by defining a struct in this crate, implementing
-/// `sealed::Sealed` and `AnalyticsEvent` for it.
+/// New events are one line via [`declare_event!`].
 pub trait AnalyticsEvent: sealed::Sealed + Serialize + Send + 'static {
-    /// Iglu schema URI, e.g. `iglu:com.gitlab/gkg_query_executed/jsonschema/1-0-0`.
-    fn schema_uri() -> &'static str
-    where
-        Self: Sized;
-
     /// Snowplow event name, e.g. `gkg_query_executed`.
-    fn event_name() -> &'static str
-    where
-        Self: Sized;
+    const EVENT_NAME: &'static str;
+    /// Iglu schema URI, e.g. `iglu:com.gitlab/gkg_query_executed/jsonschema/1-0-0`.
+    const SCHEMA_URI: &'static str;
 }
+
+/// Declare a sealed [`AnalyticsEvent`] impl in one line.
+///
+/// ```ignore
+/// declare_event!(QueryExecuted => "gkg_query_executed" @ "iglu:com.gitlab/gkg_query_executed/jsonschema/1-0-0");
+/// ```
+macro_rules! declare_event {
+    ($ty:ty => $name:literal @ $schema:literal) => {
+        impl $crate::event::sealed::Sealed for $ty {}
+        impl $crate::event::AnalyticsEvent for $ty {
+            const EVENT_NAME: &'static str = $name;
+            const SCHEMA_URI: &'static str = $schema;
+        }
+    };
+}
+pub(crate) use declare_event;
