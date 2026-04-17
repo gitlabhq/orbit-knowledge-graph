@@ -130,15 +130,6 @@ pub fn resolve_file_references(
             .unwrap_or(file_node);
 
         let targets = resolve_single(&mut ctx, ref_event);
-        if targets.len() > 100 {
-            eprintln!(
-                "[resolve-explosion] ref={:?} chain={} reaching={:?} targets={}",
-                ref_event.name,
-                ref_event.chain.is_some(),
-                ref_event.reaching,
-                targets.len(),
-            );
-        }
 
         let (source_node_kind, source_def_kind) = ref_event
             .enclosing_def

@@ -602,7 +602,6 @@ where
                     return Vec::new();
                 };
 
-                let t_file = std::time::Instant::now();
                 let result = crate::linker::v2::resolver::resolve_file_references(
                     &graph,
                     &info.references,
@@ -612,16 +611,6 @@ where
                     &rules,
                     &rules.settings,
                 );
-                let elapsed = t_file.elapsed();
-                if elapsed.as_millis() > 50 {
-                    eprintln!(
-                        "[resolve-slow] {:?} refs={} edges={} time={:.1?}",
-                        graph.graph[info.file_node].path(),
-                        info.references.len(),
-                        result.edges.len(),
-                        elapsed,
-                    );
-                }
 
                 total_edges.fetch_add(result.edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
