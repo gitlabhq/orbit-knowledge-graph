@@ -772,6 +772,44 @@ impl LanguageSpec {
 
         state.ssa.seal_remaining();
 
+        // Resolve pending refs now that all blocks are sealed
+        for pending in state.pending_refs.drain(..) {
+            let reaching = state
+                .ssa
+                .read_variable_stateless(pending.ssa_key, pending.block);
+            let parse_values = reaching
+                .values
+                .iter()
+                .filter_map(|v| v.to_parse_value())
+                .collect();
+            state
+                .ref_events
+                .push(code_graph_types::ssa::ReferenceEvent {
+                    name: pending.name,
+                    chain: pending.chain,
+                    reaching: parse_values,
+                    enclosing_def: pending.enclosing_def,
+                    range: pending.range,
+                });
+        }
+
+        eprintln!(
+            "[parse_full] {} defs={} imports={} refs={}",
+            file_path,
+            state.defs.len(),
+            state.imports.len(),
+            state.ref_events.len()
+        );
+        for r in &state.ref_events {
+            eprintln!(
+                "[parse_full]   ref: {:?} chain={} reaching={:?} enclosing={:?}",
+                r.name,
+                r.chain.is_some(),
+                r.reaching,
+                r.enclosing_def
+            );
+        }
+
         let extension = file_path
             .rsplit_once('.')
             .map(|(_, ext)| ext.to_string())
@@ -836,6 +874,7 @@ impl LanguageSpec {
 
             is_type_scope = m.def_kind.is_type_container();
 
+            let def_name = m.name.clone();
             state.defs.push(CanonicalDefinition {
                 definition_type: m.label,
                 kind: m.def_kind,
@@ -845,6 +884,18 @@ impl LanguageSpec {
                 is_top_level,
                 metadata: m.metadata,
             });
+
+            eprintln!(
+                "[walk_full] def[{}]={:?} creates_scope={}",
+                def_index, def_name, m.creates_scope
+            );
+            // Write def name to SSA so bare refs like `foo()` find it
+            let ssa_name = state.arena.alloc_str(&def_name);
+            state.ssa.write_variable(
+                ssa_name,
+                state.current_block,
+                super::ssa::SsaValue::LocalDef(def_index),
+            );
 
             // Write self/this/super SSA variables for type scopes
             if is_type_scope {
@@ -877,6 +928,10 @@ impl LanguageSpec {
 
             // Track enclosing def for references
             if m.creates_scope {
+                eprintln!(
+                    "[walk_full] enclosing push {} (stack before={:?})",
+                    def_index, state.enclosing_def_stack
+                );
                 state.enclosing_def_stack.push(def_index);
             }
         }
@@ -959,24 +1014,42 @@ impl LanguageSpec {
             if let Some((name, range, expression)) =
                 self.evaluate_reference(node, nk, &state.import_map, sep)
             {
-                let reaching = state
-                    .ssa
-                    .read_variable_stateless(state.arena.alloc_str(&name), state.current_block);
-                let parse_values = reaching
-                    .values
-                    .iter()
-                    .filter_map(|v| v.to_parse_value())
-                    .collect();
+                // For chains, read SSA for the base identifier (not the terminal).
+                // For bare refs, read SSA for the name itself.
+                let ssa_key = if let Some(chain) = &expression {
+                    match chain.first() {
+                        Some(ExpressionStep::Ident(base)) => state.arena.alloc_str(base),
+                        Some(ExpressionStep::This) => {
+                            // Find the self_name written to SSA
+                            self.ssa_config
+                                .self_names
+                                .first()
+                                .map(|&s| state.arena.alloc_str(s))
+                                .unwrap_or(state.arena.alloc_str(&name))
+                        }
+                        Some(ExpressionStep::Super) => self
+                            .ssa_config
+                            .super_name
+                            .map(|s| state.arena.alloc_str(s))
+                            .unwrap_or(state.arena.alloc_str(&name)),
+                        _ => state.arena.alloc_str(&name),
+                    }
+                } else {
+                    state.arena.alloc_str(&name)
+                };
 
-                state
-                    .ref_events
-                    .push(code_graph_types::ssa::ReferenceEvent {
-                        name,
-                        chain: expression,
-                        reaching: parse_values,
-                        enclosing_def: state.enclosing_def_stack.last().copied(),
-                        range: canonical_range(&range),
-                    });
+                eprintln!(
+                    "[walk_full] pending ref={:?} enclosing_stack={:?}",
+                    name, state.enclosing_def_stack
+                );
+                state.pending_refs.push(PendingRef {
+                    name,
+                    chain: expression,
+                    ssa_key,
+                    block: state.current_block,
+                    enclosing_def: state.enclosing_def_stack.last().copied(),
+                    range: canonical_range(&range),
+                });
             }
         }
 
@@ -1012,25 +1085,38 @@ impl LanguageSpec {
             .catch_all_kind
             .is_some_and(|ck| node.children().any(|c| c.kind().as_ref() == ck));
 
+        // Identify condition byte range to skip (already walked above)
+        let cond_range = rule
+            .condition_field
+            .and_then(|f| node.field(f))
+            .map(|n| (n.range().start, n.range().end));
+
         let mut end_blocks = smallvec::SmallVec::<[super::ssa::BlockId; 4]>::new();
 
         for child in node.children() {
             let ck = child.kind();
-            if !rule.branch_kinds.iter().any(|&k| k == ck.as_ref()) {
-                continue;
+            if rule.branch_kinds.iter().any(|&k| k == ck.as_ref()) {
+                let arm_block = state.ssa.add_block();
+                state.ssa.add_predecessor(arm_block, pre_block);
+                state.ssa.seal_block(arm_block);
+                state.current_block = arm_block;
+
+                // Walk arm contents
+                for arm_child in child.children() {
+                    self.walk_full(&arm_child, state, sep);
+                }
+
+                end_blocks.push(state.current_block);
+            } else {
+                // Non-branch child: walk in pre-block (skip condition, already walked)
+                let cs = child.range().start;
+                let ce = child.range().end;
+                let is_condition = cond_range.is_some_and(|(s, e)| cs >= s && ce <= e);
+                if !is_condition {
+                    state.current_block = pre_block;
+                    self.walk_full(&child, state, sep);
+                }
             }
-
-            let arm_block = state.ssa.add_block();
-            state.ssa.add_predecessor(arm_block, pre_block);
-            state.ssa.seal_block(arm_block);
-            state.current_block = arm_block;
-
-            // Walk arm contents
-            for arm_child in child.children() {
-                self.walk_full(&arm_child, state, sep);
-            }
-
-            end_blocks.push(state.current_block);
         }
 
         // Join block
@@ -1099,6 +1185,17 @@ impl LanguageSpec {
 
 // ── Walk state for parse_full ───────────────────────────────────
 
+/// A reference whose SSA reaching defs haven't been resolved yet.
+/// Stored during the walk, resolved after seal_remaining().
+struct PendingRef<'a> {
+    name: String,
+    chain: Option<Vec<ExpressionStep>>,
+    ssa_key: &'a str,
+    block: super::ssa::BlockId,
+    enclosing_def: Option<u32>,
+    range: code_graph_types::Range,
+}
+
 struct WalkFullState<'a> {
     ssa: super::ssa::SsaEngine<'a>,
     arena: &'a bumpalo::Bump,
@@ -1108,6 +1205,7 @@ struct WalkFullState<'a> {
     defs: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
     ref_events: Vec<code_graph_types::ssa::ReferenceEvent>,
+    pending_refs: Vec<PendingRef<'a>>,
     import_map: rustc_hash::FxHashMap<String, String>,
     top_level_depth: usize,
 }
@@ -1127,6 +1225,7 @@ impl<'a> WalkFullState<'a> {
             defs: Vec::new(),
             imports: Vec::new(),
             ref_events: Vec::new(),
+            pending_refs: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
             top_level_depth: 0,
         }

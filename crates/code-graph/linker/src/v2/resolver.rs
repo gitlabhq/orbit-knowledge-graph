@@ -45,6 +45,13 @@ pub fn resolve_file_references(
         if deadline.is_some_and(|d| std::time::Instant::now() > d) {
             break;
         }
+        eprintln!(
+            "[resolver] ref: name={:?} chain={} reaching={:?} enclosing={:?}",
+            ref_event.name,
+            ref_event.chain.is_some(),
+            ref_event.reaching,
+            ref_event.enclosing_def,
+        );
 
         let source_node = ref_event
             .enclosing_def
@@ -63,22 +70,34 @@ pub fn resolve_file_references(
             &mut scratch,
         );
 
+        let (source_node_kind, source_def_kind) = ref_event
+            .enclosing_def
+            .and_then(|i| def_nodes.get(i as usize))
+            .and_then(|&n| graph.graph[n].def_id())
+            .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
+            .unwrap_or((NodeKind::File, None));
+
+        eprintln!(
+            "[resolver] → targets: {:?}",
+            targets.iter().map(|t| t.index()).collect::<Vec<_>>()
+        );
         for target in targets {
-            if target != source_node {
-                edges.push((
-                    source_node,
-                    target,
-                    GraphEdge {
-                        relationship: Relationship {
-                            edge_kind: EdgeKind::Calls,
-                            source_node: NodeKind::Definition,
-                            target_node: NodeKind::Definition,
-                            source_def_kind: None,
-                            target_def_kind: None,
-                        },
+            let target_def_kind = graph.graph[target]
+                .def_id()
+                .map(|did| graph.defs[did.0 as usize].kind);
+            edges.push((
+                source_node,
+                target,
+                GraphEdge {
+                    relationship: Relationship {
+                        edge_kind: EdgeKind::Calls,
+                        source_node: source_node_kind,
+                        target_node: NodeKind::Definition,
+                        source_def_kind,
+                        target_def_kind,
                     },
-                ));
-            }
+                },
+            ));
         }
     }
 
