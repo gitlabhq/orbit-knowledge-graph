@@ -5,7 +5,6 @@
 
 use code_graph_config::Language;
 use code_graph_linker::v2::NoRules;
-use parser_core::dsl::types::DslParser;
 
 use crate::v2::custom::ruby::RubyPipeline;
 use crate::v2::langs::csharp::CSharpDsl;
@@ -81,11 +80,11 @@ macro_rules! register_v2_pipelines {
 // ── Registration ────────────────────────────────────────────────
 
 register_v2_pipelines! {
-    Python  => [GenericPipeline<DslParser<PythonDsl>, PythonRules>],
-    Java    => [GenericPipeline<DslParser<JavaDsl>, JavaRules>],
-    Kotlin  => [GenericPipeline<DslParser<KotlinDsl>, KotlinRules>],
-    CSharp  => [GenericPipeline<DslParser<CSharpDsl>, NoRules<CSharpDsl>>],
-    Go      => [GenericPipeline<DslParser<GoDsl>, GoRules>],
-    Ruby    => [GenericPipeline<DslParser<RubyDsl>, RubyRules>],
+    Python  => [GenericPipeline<PythonDsl, PythonRules>],
+    Java    => [GenericPipeline<JavaDsl, JavaRules>],
+    Kotlin  => [GenericPipeline<KotlinDsl, KotlinRules>],
+    CSharp  => [GenericPipeline<CSharpDsl, NoRules<CSharpDsl>>],
+    Go      => [GenericPipeline<GoDsl, GoRules>],
+    Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
     Tag("ruby_prism") => [RubyPipeline],
 }

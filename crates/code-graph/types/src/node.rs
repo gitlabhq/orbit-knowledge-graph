@@ -45,15 +45,6 @@ impl DefKind {
     }
 }
 
-/// Resolution status of a reference at a call site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, EnumString, AsRefStr, Display)]
-#[strum(serialize_all = "snake_case")]
-pub enum ReferenceStatus {
-    Resolved,
-    Ambiguous,
-    Unresolved,
-}
-
 /// A parsed definition, language-agnostic.
 ///
 /// All strings are `IStr` (8 bytes, interned). Common names like "get",
@@ -112,23 +103,6 @@ pub struct CanonicalImport {
     pub wildcard: bool,
 }
 
-/// A parsed reference (call site / usage), language-agnostic.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalReference {
-    /// Language-specific reference type (e.g. "Call", "PropertyAccess").
-    pub reference_type: &'static str,
-    pub name: String,
-    pub range: Range,
-    pub scope_fqn: Option<Fqn>,
-    pub status: ReferenceStatus,
-    /// FQN of the resolved target, if any.
-    pub target_fqn: Option<Fqn>,
-    /// Linearized expression chain for member access resolution.
-    /// e.g. `obj.getService().process()` becomes
-    ///   `[Ident("obj"), Field("getService"), Call, Field("process"), Call]`
-    pub expression: Option<Vec<ExpressionStep>>,
-}
-
 /// A single step in a linearized expression chain.
 ///
 /// Chains are read left-to-right. The resolver resolves the base
@@ -147,10 +121,6 @@ pub enum ExpressionStep {
     This,
     /// `super` reference.
     Super,
-    /// Array/index access.
-    Index,
-    /// Method reference (`Foo::bar`).
-    MethodRef(String),
 }
 
 // ── Bindings ────────────────────────────────────────────────────
@@ -163,60 +133,6 @@ pub enum BindingKind {
     Deletion,
     ForTarget,
     WithAlias,
-}
-
-/// A variable binding extracted from the AST.
-///
-/// Represents `x = expr`, `def f(param)`, `del x`, `for x in ...`, etc.
-/// The walker writes these to SSA blocks without touching the AST.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalBinding {
-    pub name: String,
-    pub kind: BindingKind,
-    pub range: Range,
-    /// Type annotation from the AST (e.g. `int x` → "int", `x: str` → "str").
-    pub type_annotation: Option<String>,
-    /// Callee name extracted from the RHS (e.g. `get_builder()` → "get_builder",
-    /// `foo` → "foo"). None for complex/non-name expressions.
-    pub rhs_name: Option<String>,
-    /// Whether this is an instance attribute binding (e.g. `self.db = ...`).
-    pub instance_attr: bool,
-}
-
-// ── Control flow ────────────────────────────────────────────────
-
-/// A branch or loop extracted from the AST.
-///
-/// The walker uses these to build SSA blocks (Braun et al.) without
-/// re-walking the tree-sitter AST.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalControlFlow {
-    pub kind: ControlFlowKind,
-    /// AST node kind (e.g. "if_statement", "for_statement") for
-    /// disambiguation when parent and child share the same byte start.
-    pub node_kind: String,
-    /// Byte range of the entire control-flow node.
-    pub byte_range: (usize, usize),
-    /// Arms/body of the control-flow node.
-    pub children: Vec<ControlFlowChild>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ControlFlowKind {
-    Branch {
-        /// Whether the branch has a catch-all arm (else, default, finally).
-        has_catch_all: bool,
-    },
-    Loop,
-}
-
-/// One arm of a branch or the body of a loop.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ControlFlowChild {
-    pub byte_range: (usize, usize),
-    /// True if this child is the condition expression (walked in the
-    /// pre-branch block, not in a branch arm).
-    pub is_condition: bool,
 }
 
 // ── Structural types ────────────────────────────────────────────
@@ -236,21 +152,4 @@ pub struct CanonicalFile {
     pub extension: String,
     pub language: Language,
     pub size: u64,
-}
-
-/// The complete output of parsing a single file.
-///
-/// Boundary type between parser and linker — nothing language-specific
-/// crosses this boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanonicalResult {
-    pub file_path: String,
-    pub extension: String,
-    pub file_size: u64,
-    pub language: Language,
-    pub definitions: Vec<CanonicalDefinition>,
-    pub imports: Vec<CanonicalImport>,
-    pub references: Vec<CanonicalReference>,
-    pub bindings: Vec<CanonicalBinding>,
-    pub control_flow: Vec<CanonicalControlFlow>,
 }

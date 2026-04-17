@@ -18,7 +18,7 @@ pub trait HasRules {
 ///
 /// ```ignore
 /// // In register_v2_pipelines!:
-/// CSharp => [GenericPipeline<DslParser<CSharpDsl>, NoRules<CSharpDsl>>],
+/// CSharp => [GenericPipeline<CSharpDsl, NoRules<CSharpDsl>>],
 /// ```
 pub struct NoRules<D>(std::marker::PhantomData<D>);
 
@@ -200,22 +200,5 @@ impl ResolutionRules {
             }
         }
         result
-    }
-}
-
-// ── Builder helpers ─────────────────────────────────────────────
-
-pub fn isolated_scope(node_kind: &'static str, is_type_scope: bool) -> IsolatedScopeRule {
-    IsolatedScopeRule {
-        node_kind,
-        is_type_scope,
-        name_field: "name",
-    }
-}
-
-impl IsolatedScopeRule {
-    pub fn name_from(mut self, field: &'static str) -> Self {
-        self.name_field = field;
-        self
     }
 }

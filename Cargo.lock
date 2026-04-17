@@ -2176,10 +2176,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "code-graph-config",
- "internment",
- "intervaltree",
  "serde",
- "smallvec",
  "strum 0.28.0",
 ]
 
@@ -5890,15 +5887,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "intervaltree"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "270bc34e57047cab801a8c871c124d9dc7132f6473c6401f645524f4e6edd111"
-dependencies = [
- "smallvec",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8043,6 +8031,7 @@ name = "parser-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bumpalo",
  "code-graph-config",
  "code-graph-types",
  "internment",
