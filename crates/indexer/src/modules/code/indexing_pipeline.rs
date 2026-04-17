@@ -15,6 +15,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::RepositoryResolver;
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
+use crate::progress::CodeProgressWriter;
 
 pub struct IndexingRequest {
     pub project_id: i64,
@@ -30,6 +31,7 @@ pub struct CodeIndexingPipeline {
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
+    code_progress: Option<Arc<CodeProgressWriter>>,
 }
 
 impl CodeIndexingPipeline {
@@ -39,6 +41,7 @@ impl CodeIndexingPipeline {
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
+        code_progress: Option<Arc<CodeProgressWriter>>,
     ) -> Self {
         Self {
             resolver,
@@ -46,6 +49,7 @@ impl CodeIndexingPipeline {
             stale_data_cleaner,
             metrics,
             table_names,
+            code_progress,
         }
     }
 
@@ -110,7 +114,68 @@ impl CodeIndexingPipeline {
             request.commit_sha.as_deref(),
             indexed_at,
         )
-        .await
+        .await?;
+
+        self.write_progress(context, request, indexed_at).await;
+
+        Ok(())
+    }
+
+    async fn write_progress(
+        &self,
+        context: &HandlerContext,
+        request: &IndexingRequest,
+        indexed_at: DateTime<Utc>,
+    ) {
+        let Some(progress) = self.code_progress.as_ref() else {
+            return;
+        };
+        let commit = request.commit_sha.as_deref().unwrap_or("");
+
+        if let Err(e) = progress
+            .write_project_progress(
+                context.nats.as_ref(),
+                request.project_id,
+                &request.traversal_path,
+                &request.branch,
+                commit,
+                indexed_at,
+            )
+            .await
+        {
+            warn!(
+                project_id = request.project_id,
+                branch = %request.branch,
+                error = %e,
+                "failed to write code project progress to KV (non-fatal)"
+            );
+        }
+
+        let Some(namespace_id) = namespace_id_from_traversal_path(&request.traversal_path) else {
+            debug!(
+                traversal_path = %request.traversal_path,
+                "unable to derive namespace_id from traversal path, skipping namespace meta update"
+            );
+            return;
+        };
+        let namespace_traversal_path = namespace_traversal_prefix(&request.traversal_path)
+            .unwrap_or_else(|| request.traversal_path.clone());
+
+        if let Err(e) = progress
+            .update_namespace_code_meta(
+                context.nats.as_ref(),
+                namespace_id,
+                &namespace_traversal_path,
+                indexed_at,
+            )
+            .await
+        {
+            warn!(
+                namespace_id,
+                error = %e,
+                "failed to update namespace code meta (non-fatal)"
+            );
+        }
     }
 
     async fn set_checkpoint(
@@ -299,5 +364,66 @@ impl CodeIndexingPipeline {
             .await
             .map_err(|e| HandlerError::Processing(format!("write to {table} failed: {e}")))
             .record_error_stage(&self.metrics, "write")
+    }
+}
+
+/// Returns the namespace id from a traversal path of form
+/// `{org}/{namespace_id}/...`.
+fn namespace_id_from_traversal_path(traversal_path: &str) -> Option<i64> {
+    traversal_path
+        .trim_start_matches('/')
+        .split('/')
+        .nth(1)
+        .and_then(|s| s.parse::<i64>().ok())
+}
+
+/// Returns the traversal path truncated to `{org}/{namespace_id}/`.
+fn namespace_traversal_prefix(traversal_path: &str) -> Option<String> {
+    let mut parts = traversal_path.trim_end_matches('/').split('/');
+    let org = parts.next()?;
+    let ns = parts.next()?;
+    if org.is_empty() || ns.is_empty() {
+        return None;
+    }
+    Some(format!("{org}/{ns}/"))
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn namespace_id_from_traversal_path_parses_second_segment() {
+        assert_eq!(namespace_id_from_traversal_path("1/9970/proj/"), Some(9970));
+        assert_eq!(
+            namespace_id_from_traversal_path("1/9970/55154808/95754906/"),
+            Some(9970)
+        );
+    }
+
+    #[test]
+    fn namespace_id_from_traversal_path_returns_none_when_malformed() {
+        assert_eq!(namespace_id_from_traversal_path(""), None);
+        assert_eq!(namespace_id_from_traversal_path("1"), None);
+        assert_eq!(namespace_id_from_traversal_path("1/abc/"), None);
+    }
+
+    #[test]
+    fn namespace_traversal_prefix_takes_first_two_segments() {
+        assert_eq!(
+            namespace_traversal_prefix("1/9970/proj/"),
+            Some("1/9970/".to_string())
+        );
+        assert_eq!(
+            namespace_traversal_prefix("1/9970/55154808/95754906/"),
+            Some("1/9970/".to_string())
+        );
+    }
+
+    #[test]
+    fn namespace_traversal_prefix_returns_none_when_malformed() {
+        assert!(namespace_traversal_prefix("").is_none());
+        assert!(namespace_traversal_prefix("1").is_none());
+        assert!(namespace_traversal_prefix("1/").is_none());
     }
 }

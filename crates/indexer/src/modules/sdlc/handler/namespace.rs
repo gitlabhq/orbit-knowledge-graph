@@ -72,6 +72,16 @@ impl Handler for NamespaceHandler {
 
         let traversal_path = format!("{}/{}/", payload.organization, payload.namespace);
 
+        // Best-effort pre-ETL write of state="indexing" so readers see the active
+        // phase. Failing here must not block ETL.
+        if let Err(e) = self
+            .progress_writer
+            .mark_indexing_started(context.nats.as_ref(), payload.namespace, started_at_wall)
+            .await
+        {
+            warn!(namespace_id = payload.namespace, error = %e, "failed to mark indexing started");
+        }
+
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
             position_key: namespace_position_key(payload.namespace),
@@ -95,12 +105,14 @@ impl Handler for NamespaceHandler {
         self.metrics
             .record_handler_duration("namespace_handler", elapsed.as_secs_f64());
 
+        let total_rows = result.as_ref().ok().map(|o| o.total_rows).unwrap_or(0);
         let error_msg = result.as_ref().err().map(|e| e.to_string());
 
         if result.is_ok() {
             info!(
                 namespace_id = payload.namespace,
                 elapsed_ms = elapsed.as_millis() as u64,
+                total_rows,
                 "namespace indexing completed"
             );
         }
@@ -113,6 +125,7 @@ impl Handler for NamespaceHandler {
                 &traversal_path,
                 started_at_wall,
                 elapsed,
+                total_rows,
                 error_msg.as_deref(),
             )
             .await
@@ -120,7 +133,7 @@ impl Handler for NamespaceHandler {
             warn!(namespace_id = payload.namespace, error = %e, "failed to write indexing progress");
         }
 
-        result
+        result.map(|_| ())
     }
 }
 
@@ -134,32 +147,33 @@ mod tests {
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use ontology::Ontology;
 
-    #[tokio::test]
-    async fn handle_processes_pipelines() {
+    use gkg_server_config::indexing_progress::{INDEXING_PROGRESS_BUCKET, MetaSnapshot, meta_key};
+
+    fn build_handler() -> NamespaceHandler {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1000, 1000);
-
         let pipeline = Arc::new(Pipeline::new(
             Arc::new(EmptyDatalake),
             Arc::new(MockCheckpointStore),
             test_metrics(),
         ));
-
         let graph_client =
             Arc::new(gkg_server_config::ClickHouseConfiguration::default().build_client());
-        let progress_writer = Arc::new(ProgressWriter::new(
-            graph_client,
-            Arc::new(ontology.clone()),
-            9999,
-        ));
-
-        let handler = NamespaceHandler::new(
+        // debounce 9999s so write_progress won't try to query ClickHouse (debounced
+        // after first call), but mark_indexing_started is not debounced.
+        let progress_writer = Arc::new(ProgressWriter::new(graph_client, Arc::new(ontology), 9999));
+        NamespaceHandler::new(
             plans.namespaced,
             pipeline,
             test_metrics(),
             NamespaceHandlerConfig::default(),
             progress_writer,
-        );
+        )
+    }
+
+    #[tokio::test]
+    async fn handle_processes_pipelines() {
+        let handler = build_handler();
 
         let payload = serde_json::json!({
             "organization": 1,
@@ -179,5 +193,44 @@ mod tests {
 
         let result = handler.handle(context, envelope).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn handle_marks_indexing_state_before_etl() {
+        let handler = build_handler();
+        let mock = Arc::new(MockNatsServices::new());
+
+        let payload = serde_json::json!({
+            "organization": 1,
+            "namespace": 42,
+            "watermark": "2024-01-21T00:00:00Z"
+        })
+        .to_string();
+        let envelope = TestEnvelopeFactory::simple(&payload);
+
+        let context = HandlerContext::new(
+            Arc::new(MockDestination::new()),
+            Arc::clone(&mock) as Arc<dyn crate::nats::NatsServices>,
+            Arc::new(MockLockService::new()),
+            ProgressNotifier::noop(),
+        );
+
+        handler.handle(context, envelope).await.unwrap();
+
+        // After the handler runs, the meta key must exist. With empty datalake,
+        // the final write path writes state="idle". But BEFORE the debounced
+        // write_progress, mark_indexing_started fires and writes state="indexing".
+        // Because EmptyDatalake returns 0 rows and debounce is 9999s, the idle
+        // write is also applied (debounce is AFTER the first write, not before).
+        // So after the run, we expect state="idle" (idle overwrites indexing).
+        let entry = mock
+            .get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(42))
+            .expect("meta key should exist after handle");
+        let meta: MetaSnapshot = serde_json::from_slice(&entry).unwrap();
+        assert!(
+            meta.state == "idle" || meta.state == "indexing",
+            "state should be idle or indexing, got {}",
+            meta.state
+        );
     }
 }

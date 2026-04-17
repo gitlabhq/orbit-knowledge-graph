@@ -25,6 +25,7 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+use crate::progress::CodeProgressWriter;
 pub use code_indexing_task_handler::CodeIndexingTaskHandler;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
@@ -65,7 +66,7 @@ pub fn register_handlers(
     let checkpoint_store: Arc<dyn checkpoint_store::CodeCheckpointStore> =
         Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
-        stale_data_cleaner::ClickHouseStaleDataCleaner::new(client, &table_names),
+        stale_data_cleaner::ClickHouseStaleDataCleaner::new(Arc::clone(&client), &table_names),
     );
     let metrics = CodeMetrics::new();
 
@@ -73,12 +74,19 @@ pub fn register_handlers(
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
 
+    let code_progress = Arc::new(CodeProgressWriter::new(
+        Arc::clone(&client),
+        Arc::new(ontology.clone()),
+        config.graph_status.debounce_secs,
+    ));
+
     let pipeline = Arc::new(indexing_pipeline::CodeIndexingPipeline::new(
         resolver,
         Arc::clone(&checkpoint_store),
         stale_data_cleaner,
         metrics.clone(),
         table_names,
+        Some(code_progress),
     ));
 
     registry.register_handler(Box::new(CodeIndexingTaskHandler::new(

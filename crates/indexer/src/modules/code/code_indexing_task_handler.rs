@@ -271,6 +271,7 @@ mod tests {
                 stale_data_cleaner,
                 metrics.clone(),
                 table_names,
+                None,
             ));
 
             let handler = CodeIndexingTaskHandler::new(

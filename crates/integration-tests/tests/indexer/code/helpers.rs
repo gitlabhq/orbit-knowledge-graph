@@ -65,6 +65,7 @@ impl CodeIndexingDeps {
             stale_data_cleaner,
             metrics.clone(),
             table_names,
+            None,
         ));
 
         Self {

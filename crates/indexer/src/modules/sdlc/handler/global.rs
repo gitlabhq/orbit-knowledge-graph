@@ -88,7 +88,7 @@ impl Handler for GlobalHandler {
             );
         }
 
-        result
+        result.map(|_| ())
     }
 }
 

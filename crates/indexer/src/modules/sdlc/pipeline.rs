@@ -27,6 +27,11 @@ pub(in crate::modules::sdlc) struct PipelineContext {
     pub base_conditions: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(in crate::modules::sdlc) struct PipelineOutcome {
+    pub total_rows: u64,
+}
+
 pub(in crate::modules::sdlc) struct Pipeline {
     datalake: Arc<dyn DatalakeQuery>,
     checkpoint_store: Arc<dyn CheckpointStore>,
@@ -52,19 +57,23 @@ impl Pipeline {
         context: &PipelineContext,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<PipelineOutcome, HandlerError> {
         let mut errors = Vec::new();
+        let mut total_rows: u64 = 0;
 
         for plan in plans {
-            if let Err(err) = self.run_plan(plan, context, destination, progress).await {
-                self.metrics
-                    .record_pipeline_error(&plan.name, err.error_kind());
-                errors.push(format!("{}: {err}", plan.name));
+            match self.run_plan(plan, context, destination, progress).await {
+                Ok(rows) => total_rows += rows,
+                Err(err) => {
+                    self.metrics
+                        .record_pipeline_error(&plan.name, err.error_kind());
+                    errors.push(format!("{}: {err}", plan.name));
+                }
             }
         }
 
         if errors.is_empty() {
-            return Ok(());
+            return Ok(PipelineOutcome { total_rows });
         }
 
         Err(HandlerError::Processing(format!(
@@ -79,7 +88,7 @@ impl Pipeline {
         context: &PipelineContext,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<u64, HandlerError> {
         let started_at = Instant::now();
         let mut extract_query = plan.extract_query.clone();
 
@@ -176,7 +185,7 @@ impl Pipeline {
             );
         }
 
-        Ok(())
+        Ok(total_rows)
     }
 
     async fn extract_batch(

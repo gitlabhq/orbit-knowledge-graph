@@ -2,9 +2,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use gkg_server_config::indexing_progress::{
+    INDEXING_PROGRESS_BUCKET, code_key, counts_key, meta_key,
+};
 use tracing::{error, info, warn};
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::nats::NatsServices;
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use gkg_server_config::{HandlerConfiguration, NamespaceDeletionHandlerConfig};
@@ -57,11 +61,7 @@ impl Handler for NamespaceDeletionHandler {
         &self.config.engine
     }
 
-    async fn handle(
-        &self,
-        _context: HandlerContext,
-        message: Envelope,
-    ) -> Result<(), HandlerError> {
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         let payload: NamespaceDeletionRequest =
             message.to_event().map_err(|error| match error {
                 SerializationError::Json(err) => HandlerError::Deserialization(err),
@@ -105,6 +105,41 @@ impl Handler for NamespaceDeletionHandler {
             traversal_path = %payload.traversal_path,
             "starting namespace deletion"
         );
+
+        // Snapshot KV-relevant identifiers BEFORE graph + checkpoint deletion
+        // since those calls clear the source rows. Failure here is non-fatal —
+        // we can still delete graph data, we just won't be able to clean the
+        // corresponding KV keys.
+        let traversal_paths = match self
+            .store
+            .list_traversal_paths(&payload.traversal_path)
+            .await
+        {
+            Ok(tps) => tps,
+            Err(e) => {
+                warn!(
+                    namespace_id = payload.namespace_id,
+                    error = %e,
+                    "failed to enumerate traversal paths for KV cleanup; skipping counts.* keys"
+                );
+                Vec::new()
+            }
+        };
+        let project_ids = match self
+            .store
+            .list_code_project_ids(&payload.traversal_path)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                warn!(
+                    namespace_id = payload.namespace_id,
+                    error = %e,
+                    "failed to enumerate project ids for KV cleanup; skipping code.* keys"
+                );
+                Vec::new()
+            }
+        };
 
         let outcomes = self
             .store
@@ -152,6 +187,14 @@ impl Handler for NamespaceDeletionHandler {
             "deleted namespace checkpoints"
         );
 
+        cleanup_progress_kv(
+            context.nats.as_ref(),
+            payload.namespace_id,
+            &traversal_paths,
+            &project_ids,
+        )
+        .await;
+
         self.store
             .mark_deletion_complete(payload.namespace_id, &payload.traversal_path)
             .await
@@ -168,6 +211,43 @@ impl Handler for NamespaceDeletionHandler {
     }
 }
 
+/// Deletes all NATS KV keys owned by a namespace: meta.<ns>, counts.<tp> for
+/// each traversal path under the namespace, and code.<project_id> for each
+/// code-indexed project. Individual failures are logged and ignored — KV
+/// cleanup is best-effort and should not block graph-data deletion.
+async fn cleanup_progress_kv(
+    nats: &dyn NatsServices,
+    namespace_id: i64,
+    traversal_paths: &[String],
+    project_ids: &[i64],
+) {
+    let mk = meta_key(namespace_id);
+    if let Err(e) = nats.kv_delete(INDEXING_PROGRESS_BUCKET, &mk).await {
+        warn!(key = %mk, error = %e, "failed to delete meta KV key");
+    }
+
+    for tp in traversal_paths {
+        let key = counts_key(tp);
+        if let Err(e) = nats.kv_delete(INDEXING_PROGRESS_BUCKET, &key).await {
+            warn!(key = %key, error = %e, "failed to delete counts KV key");
+        }
+    }
+
+    for project_id in project_ids {
+        let key = code_key(*project_id);
+        if let Err(e) = nats.kv_delete(INDEXING_PROGRESS_BUCKET, &key).await {
+            warn!(key = %key, error = %e, "failed to delete code KV key");
+        }
+    }
+
+    info!(
+        namespace_id,
+        traversal_paths = traversal_paths.len(),
+        code_projects = project_ids.len(),
+        "cleaned up progress KV keys"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -179,6 +259,7 @@ mod tests {
     use crate::nats::{NatsServices, ProgressNotifier};
     use crate::testkit::mocks::{MockDestination, MockLockService, MockNatsServices};
     use crate::types::Envelope;
+    use bytes::Bytes;
 
     use super::super::store::test_utils::{MockNamespaceDeletionStore, failed_outcome, ok_outcome};
 
@@ -186,6 +267,15 @@ mod tests {
         HandlerContext::new(
             Arc::new(MockDestination::new()) as Arc<dyn Destination>,
             Arc::new(MockNatsServices::new()) as Arc<dyn NatsServices>,
+            Arc::new(MockLockService::new()) as Arc<dyn LockService>,
+            ProgressNotifier::noop(),
+        )
+    }
+
+    fn handler_context_with_nats(nats: Arc<MockNatsServices>) -> HandlerContext {
+        HandlerContext::new(
+            Arc::new(MockDestination::new()) as Arc<dyn Destination>,
+            nats as Arc<dyn NatsServices>,
             Arc::new(MockLockService::new()) as Arc<dyn LockService>,
             ProgressNotifier::noop(),
         )
@@ -353,5 +443,140 @@ mod tests {
             vec!["1/100/"],
             "deletion should have succeeded before mark_complete failed"
         );
+    }
+
+    #[tokio::test]
+    async fn deletes_kv_keys_for_meta_counts_and_code() {
+        let store = Arc::new(
+            MockNamespaceDeletionStore::new()
+                .with_traversal_paths(vec![
+                    "1/100/".to_string(),
+                    "1/100/50/".to_string(),
+                    "1/100/50/42/".to_string(),
+                ])
+                .with_project_ids(vec![42, 43]),
+        );
+        let handler = make_handler(store.clone());
+        let nats = Arc::new(MockNatsServices::new());
+
+        // Seed KV entries that should be deleted.
+        nats.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(100),
+            Bytes::from_static(b"{}"),
+        );
+        nats.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &counts_key("1/100/"),
+            Bytes::from_static(b"{}"),
+        );
+        nats.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &counts_key("1/100/50/"),
+            Bytes::from_static(b"{}"),
+        );
+        nats.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &code_key(42),
+            Bytes::from_static(b"{}"),
+        );
+        nats.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &code_key(43),
+            Bytes::from_static(b"{}"),
+        );
+        // Unrelated key — must survive.
+        nats.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(999),
+            Bytes::from_static(b"{}"),
+        );
+
+        handler
+            .handle(
+                handler_context_with_nats(Arc::clone(&nats)),
+                envelope_for(100, "1/100/"),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            nats.get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(100))
+                .is_none(),
+            "meta.100 should be deleted"
+        );
+        assert!(
+            nats.get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/100/"))
+                .is_none(),
+            "counts.1.100 should be deleted"
+        );
+        assert!(
+            nats.get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/100/50/"))
+                .is_none(),
+            "counts.1.100.50 should be deleted"
+        );
+        assert!(
+            nats.get_kv(INDEXING_PROGRESS_BUCKET, &code_key(42))
+                .is_none(),
+            "code.42 should be deleted"
+        );
+        assert!(
+            nats.get_kv(INDEXING_PROGRESS_BUCKET, &code_key(43))
+                .is_none(),
+            "code.43 should be deleted"
+        );
+        assert!(
+            nats.get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(999))
+                .is_some(),
+            "unrelated meta.999 must survive"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshots_ids_before_graph_deletion() {
+        // list_traversal_paths must be called BEFORE delete_namespace_data
+        // (otherwise the source rows are gone). Verify the ordering via
+        // call recording.
+        let store = Arc::new(
+            MockNamespaceDeletionStore::new().with_traversal_paths(vec!["1/100/".to_string()]),
+        );
+        let handler = make_handler(store.clone());
+
+        handler
+            .handle(handler_context(), envelope_for(100, "1/100/"))
+            .await
+            .unwrap();
+
+        assert_eq!(store.list_tp_calls(), vec!["1/100/"]);
+        assert_eq!(store.list_project_calls(), vec!["1/100/"]);
+        assert_eq!(store.delete_calls(), vec!["1/100/"]);
+    }
+
+    #[tokio::test]
+    async fn kv_cleanup_does_not_run_when_namespace_re_enabled() {
+        let store = Arc::new(MockNamespaceDeletionStore::new().namespace_re_enabled());
+        let handler = make_handler(store.clone());
+        let nats = Arc::new(MockNatsServices::new());
+        nats.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(100),
+            Bytes::from_static(b"{}"),
+        );
+
+        handler
+            .handle(
+                handler_context_with_nats(Arc::clone(&nats)),
+                envelope_for(100, "1/100/"),
+            )
+            .await
+            .unwrap();
+
+        // re-enabled path skips cleanup: meta survives.
+        assert!(
+            nats.get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(100))
+                .is_some(),
+            "meta.100 must survive when namespace is re-enabled"
+        );
+        assert!(store.list_tp_calls().is_empty());
     }
 }

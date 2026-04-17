@@ -11,6 +11,28 @@ pub struct CountsSnapshot {
     pub edges: HashMap<String, i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CodeProgressSnapshot {
+    #[serde(default)]
+    pub traversal_path: String,
+    #[serde(default)]
+    pub updated_at: String,
+    #[serde(default)]
+    pub branches: HashMap<String, BranchCodeSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BranchCodeSnapshot {
+    #[serde(default)]
+    pub commit: String,
+    #[serde(default)]
+    pub indexed_at: String,
+    #[serde(default)]
+    pub nodes: HashMap<String, i64>,
+    #[serde(default)]
+    pub edges: HashMap<String, i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetaSnapshot {
     pub state: String,

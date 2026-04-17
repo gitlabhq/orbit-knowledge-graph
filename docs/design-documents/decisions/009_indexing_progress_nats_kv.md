@@ -210,16 +210,7 @@ Tracks pipeline lifecycle and operational state.
     "last_started_at": "2026-04-10T11:50:00Z",
     "last_duration_ms": 300,
     "cycle_count": 47,
-    "last_error": null,
-    "watermarks": {
-      "Project": "2026-04-10T11:55:00Z",
-      "MergeRequest": "2026-04-10T11:50:00Z"
-    },
-    "plans": {
-      "Project": "completed",
-      "MergeRequest": "in_progress",
-      "WorkItem": "pending"
-    }
+    "last_error": ""
   },
   "code": {
     "projects_indexed": 45,
@@ -273,13 +264,19 @@ On the first cycle where all plans complete and `initial_backfill_done` is
 false, the flag is set to true. On every subsequent cycle, the flag remains
 true and the state oscillates between `indexing` and `idle`.
 
-**Plan status derivation** (same logic as current checkpoint state machine):
+**Write points.** The SDLC namespace handler drives the transitions:
 
-| Checkpoint condition | Plan status |
-|---|---|
-| No checkpoint row for `ns.{id}.{plan}` | `pending` |
-| Checkpoint with `cursor_values IS NOT NULL` | `in_progress` |
-| Checkpoint with `cursor_values IS NULL` | `completed` |
+1. Before ETL, `ProgressWriter::mark_indexing_started` writes
+   `state="indexing"`, preserving every other field of the previous meta
+   (`initial_backfill_done`, `sdlc.cycle_count`, `code`). This call is
+   best-effort; a failure is logged and ETL continues.
+2. After ETL, `ProgressWriter::write_progress` overwrites with
+   `state="idle"`, bumps `cycle_count`, refreshes `sdlc.last_*`, and
+   sets `initial_backfill_done` to `true` once the first error-free
+   cycle completes (monotonic thereafter, even on later errors).
+
+`state="pending"` is the implicit default when no `meta.<ns>` key exists
+yet, surfaced by the webserver when it reads a missing key.
 
 **Why not a `completed` state?** An earlier version of this design used
 `completed` as a state after the first full pass, transitioning to `indexing`
@@ -338,12 +335,14 @@ subtree total for all entities at or below that prefix.
    is ~1-2% at high cardinalities, which is acceptable for a progress
    indicator and far better than the 49-300% overcount from `count()`.
 
-   **Why no `NOT _deleted` filter.** Soft-deleted rows (`_deleted = true`) are
-   physically removed during background merges when
-   `allow_experimental_replacing_merge_with_cleanup = 1` is set (which it is
-   on all graph tables). Between merges, the few surviving deleted rows add
-   negligible error to HLL estimates. Omitting the filter avoids reading the
-   `_deleted` column, which reduces I/O.
+   **Soft-delete filtering.** Both node and edge count queries apply
+   `NOT _deleted` to avoid counting tombstoned rows between merge cycles.
+   `ReplacingMergeTree` background merges physically drop soft-deleted
+   rows when `allow_experimental_replacing_merge_with_cleanup = 1` is
+   set (as on all graph tables), but the interval between CDC deletes and
+   merges is non-trivial, and tombstoned rows in that window have the same
+   `id` as live rows so HLL would still count them. The filter is required
+   for correctness.
 
    **Why no `FINAL`.** `FINAL` forces ClickHouse to read all raw rows and
    deduplicate them by primary key at query time. This is correct but
@@ -434,7 +433,8 @@ types using a join with the target entity table:
 
 ```sql
 -- Cross-namespace edges targeting WorkItems in this namespace
-SELECT w.traversal_path, e.relationship_kind, count() AS cnt
+SELECT w.traversal_path, e.relationship_kind,
+       uniq(e.source_id, e.target_id) AS cnt
 FROM gl_edge e
 INNER JOIN gl_work_item w ON e.target_id = w.id
 WHERE startsWith(w.traversal_path, {tp:String})
@@ -447,20 +447,23 @@ GROUP BY w.traversal_path, e.relationship_kind
 
 ```sql
 -- Cross-namespace edges targeting Vulnerabilities in this namespace
-SELECT v.traversal_path, e.relationship_kind, count() AS cnt
+SELECT v.traversal_path, e.relationship_kind,
+       uniq(e.source_id, e.target_id) AS cnt
 FROM gl_edge e
 INNER JOIN gl_vulnerability v ON e.target_id = v.id
 WHERE startsWith(v.traversal_path, {tp:String})
   AND NOT v._deleted
   AND NOT e._deleted
-  AND e.relationship_kind = 'FIXES'
+  AND e.relationship_kind IN ('FIXES')
   AND NOT startsWith(e.traversal_path, {tp:String})
 GROUP BY v.traversal_path, e.relationship_kind
 ```
 
-The `by_target` projection on `gl_edge` (ordered by `target_id`) enables
-efficient joins on `target_id`. These queries only run for the ~3
-cross-namespace edge types and only after non-zero-row ETL runs.
+`uniq(source_id, target_id)` matches the primary node/edge count strategy,
+deduplicating RMT version duplicates via HLL. The `by_target` projection on
+`gl_edge` (ordered by `target_id`) enables efficient joins on `target_id`.
+These queries only run for the ~3 cross-namespace edge types and only after
+non-zero-row ETL runs.
 
 The resulting counts are merged into the `counts.<tp>` values alongside the
 regular edge counts. A single edge may appear in both the source and target
@@ -472,6 +475,37 @@ namespace's counts. This is intentional: each namespace's count reflects
 The `code.<project_id>` key provides O(1) lookup by project ID. The webserver
 receives a project ID, reads the key, checks the embedded `traversal_path`
 against the user's access, and returns the per-branch breakdown.
+
+#### Code progress writes
+
+`CodeProgressWriter` (in `crates/indexer/src/progress/code.rs`) runs after
+each code indexing run for a `(namespace, project, branch)` triple:
+
+1. **`code.<project_id>`.** Counts `Branch`/`Directory`/`File`/`Definition`/
+   `ImportedSymbol` via `uniq(id) ... WHERE traversal_path = ? AND
+   project_id = ? AND (branch = ? OR name = ?) AND NOT _deleted` and code
+   edges via `uniq(source_id, target_id) ... WHERE traversal_path = ? AND
+   source_kind IN (code kinds) AND NOT _deleted GROUP BY relationship_kind`.
+   The resulting `BranchCodeSnapshot` is merged into the pre-existing
+   `CodeProgressSnapshot` for the project so snapshots for other branches
+   are preserved across single-branch re-indexes.
+2. **`meta.<namespace_id>.code`.** `update_namespace_code_meta` refreshes
+   just the `code` block of the namespace meta:
+   - `projects_indexed` from
+     `uniq(project_id) FROM code_indexing_checkpoint WHERE
+     startsWith(traversal_path, <ns_tp>)`
+   - `projects_total` from
+     `count() FROM gl_project FINAL WHERE startsWith(traversal_path, <ns_tp>)
+     AND NOT _deleted`.
+   Every other meta field (`state`, `initial_backfill_done`, `sdlc`, ...)
+   is preserved so SDLC and code writers do not clobber each other.
+
+`CodeProgressWriter` uses an independent in-process debounce map keyed by
+namespace id, also with default `graph_status.debounce_secs = 10`, so the
+namespace meta refresh short-circuits when several projects in the same
+namespace reindex back-to-back. The per-project `code.<project_id>` write
+is not debounced; per-project cadence is governed by the upstream code
+indexing trigger.
 
 ### Edge count projection
 
@@ -568,21 +602,24 @@ would grow to ~50s.
 
 #### Skip counts when ETL processed zero rows
 
-If all plans processed zero rows, skip the count queries entirely. The
-existing KV values are already up-to-date. This requires `Pipeline::run()`
-to return a result struct containing `total_rows: u64`. Today it returns
-`Result<(), HandlerError>` and `total_rows` is only emitted to metrics.
+When `Pipeline::run` reports `total_rows == 0` and a previous
+`meta.<ns>` snapshot exists, `ProgressWriter` skips both the node and edge
+count queries. The existing `counts.*` values are already authoritative in
+that case. The meta snapshot is still refreshed: `updated_at` advances,
+`cycle_count` increments, `sdlc.last_*` gets fresh values, and any staleness
+flag clears. If no previous meta exists, the handler runs the counts normally
+to bootstrap KV.
 
 #### Debounce count queries
 
 Even with the projection, running count queries on every ETL cycle is
-unnecessary when the dispatcher runs frequently (sub-minute intervals).
-The handler maintains an in-process `HashMap<NamespaceId, Instant>` and
-skips count queries if the last update was less than 30 seconds ago. This
-avoids any NATS KV or JSON overhead on the debounce check. The map resets
-on handler restart, which is a safe default (counts run on the first cycle
-after restart). At 500ms dispatch intervals, this eliminates ~98% of count
-query invocations while keeping data fresh enough for UI polling.
+unnecessary when the dispatcher runs frequently. `ProgressWriter` keeps
+an in-process `HashMap<NamespaceId, Instant>` and short-circuits if the
+last recorded update for a namespace is younger than
+`graph_status.debounce_secs`. The default is 10 seconds, which keeps the
+webserver view fresh enough for UI polling while still dropping the bulk
+of count queries under tight dispatch cadences. The map resets on handler
+restart (safe default: counts run on the first cycle after restart).
 
 #### Query timeout
 
@@ -592,6 +629,11 @@ the handler's `ack_wait` (300s) and covers worst-case scenarios under
 ClickHouse load.
 
 #### Staging performance (X-ClickHouse-Summary)
+
+Baseline measurements from 2026-04-10, pre `NOT _deleted` filter on
+node/edge queries and pre `uniq(source_id, target_id)` switch on
+cross-namespace joins. Treat as reference order-of-magnitude, not a
+commitment.
 
 Measured on staging against namespace `1/9970/` (16.4M raw edge rows,
 7.3M node rows across 23 tables, 373 distinct traversal paths):
@@ -609,9 +651,9 @@ reads 7,327,854 rows (180 MB, 500ms). Without `node_edge_counts`: edge
 scan reads 10,162,678 rows (340 MB, 217ms, +49.4% overcount). With
 `FINAL`: 14,413,693 rows (620 MB, 579ms, exact but bypasses projections).
 
-Combined post-ETL cost: **408ms server-side**. With 30s debounce, this
-runs at most twice per minute per namespace. Both projections ensure
-query time stays flat regardless of table size.
+Both projections ensure query time stays flat regardless of table size.
+With the 10s debounce, count queries run at most ~6 times per minute
+per namespace even under tight dispatch cadences.
 
 #### Accuracy detail
 
@@ -643,11 +685,13 @@ Node counts with `uniq(id)` are similarly accurate:
 
 #### Impact analysis
 
-- **Zero-row incremental runs:** no count overhead at all (skip).
+- **Zero-row incremental runs (with prior meta):** no count overhead at
+  all (skip); meta snapshot is still refreshed so staleness clears.
 - **Within debounce window:** no count overhead (skip).
 - **Non-zero runs past debounce:** one node `UNION ALL` + one projection
-  edge query + 2 cross-namespace join queries. ~695ms server-side, well
-  within the 300s handler `ack_wait` timeout.
+  edge query + 2 cross-namespace join queries. Sub-second server-side on
+  staging (see baseline table above), well within the 300s handler
+  `ack_wait` timeout.
 - **Checkpoint advancement:** `save_completed` happens per-plan before
   counts. Count query failures do not affect watermark progression.
 
@@ -689,7 +733,7 @@ checkpoint state, the source of truth is the `checkpoint` table.
 |---|---|---|
 | Node/edge counts | One ETL interval (typically minutes) | Updated after each non-zero-row SDLC handler run |
 | Code project counts | Updated on each code indexing run | Event-driven, near-real-time |
-| Plan statuses | One ETL interval | Derived from checkpoints post-ETL |
+| `state` / `initial_backfill_done` | One ETL interval | Written around each SDLC handler cycle |
 
 **Failure modes:**
 
@@ -776,30 +820,42 @@ message GetGraphStatusRequest {
   string traversal_path = 1;
 }
 
+enum GraphState {
+  GRAPH_STATE_PENDING = 0;
+  GRAPH_STATE_INDEXING = 1;
+  GRAPH_STATE_IDLE = 2;
+}
+
+enum EntityStatus {
+  ENTITY_STATUS_PENDING = 0;
+  reserved 1; // for former ENTITY_STATUS_IN_PROGRESS (removed)
+  ENTITY_STATUS_COMPLETED = 2;
+}
+
 message GetGraphStatusResponse {
   // Operational state: "pending", "indexing", "idle".
   GraphState state = 1;
 
+  // True after all SDLC plans have completed at least one full pass.
+  bool initial_backfill_done = 2;
+
   // When the KV cache was last written.
-  string updated_at = 2;
+  string updated_at = 3;
 
   // Entity counts grouped by ontology domain.
-  repeated GraphStatusDomain domains = 3;
+  repeated GraphStatusDomain domains = 4;
 
   // Edge counts by relationship type.
-  map<string, int64> edge_counts = 4;
+  map<string, int64> edge_counts = 5;
 
   // SDLC pipeline progress.
-  SdlcProgress sdlc = 5;
+  SdlcProgress sdlc = 6;
 
   // Code indexing overview.
-  CodeOverview code = 6;
+  CodeOverview code = 7;
 
   // True when KV data is older than a staleness threshold.
-  bool stale = 7;
-
-  // True after all SDLC plans have completed at least one full pass.
-  bool initial_backfill_done = 8;
+  bool stale = 8;
 }
 
 message GraphStatusDomain {
@@ -819,14 +875,15 @@ message SdlcProgress {
   int64 last_duration_ms = 3;
   int64 cycle_count = 4;
   string last_error = 5;
-  map<string, string> watermarks = 6;
 }
 
 message CodeOverview {
-  int32 projects_indexed = 1;
-  int32 projects_total = 2;
+  int64 projects_indexed = 1;
+  int64 projects_total = 2;
   string last_indexed_at = 3;
-  repeated ProjectCodeOverview projects = 4;
+  // Reserved in proto for future per-project breakdown. Currently unpopulated.
+  reserved 4;
+  reserved "projects";
 }
 
 message ProjectCodeOverview {
@@ -852,8 +909,12 @@ and `COMPLETED` (count > 0).
 The endpoint reads pre-aggregated counts from NATS KV. There is no error
 state; errors are recorded in `sdlc.last_error`.
 
-`code.projects` (the per-project breakdown in `CodeOverview`) is reserved in
-the proto for future implementation; the current webserver never populates it.
+**Graceful degradation.** When the webserver fails to connect to NATS at
+boot, `KnowledgeGraphServiceImpl::graph_status` remains `None` and
+`GetGraphStatus` returns `Status::unavailable("graph status not available
+(NATS not configured)")`. Query execution paths fall back to non-cached
+behavior. This keeps the webserver usable for queries when NATS is
+unreachable, instead of failing to start.
 
 ### Access control
 
@@ -873,14 +934,27 @@ prefix).
 
 ### Namespace deletion
 
-When a namespace is disabled, the `NamespaceDeletionHandler` already cleans up
-graph data after 30 days. It should also delete all progress KV keys:
+When a namespace is disabled, `NamespaceDeletionHandler` cleans up graph
+data after 30 days. As part of the same handler run it also deletes the
+progress KV keys:
 
-- `meta.<ns_id>`
-- All `counts.<tp_dots>` keys matching the namespace's traversal path prefix
-  (constructed from known hierarchy, not by scanning all keys)
-- All `code.<project_id>` keys for projects under the namespace (resolved from
-  `code_indexing_checkpoint`)
+1. **Snapshot identifiers BEFORE graph/checkpoint deletion.** The handler
+   calls `list_traversal_paths` (distinct `traversal_path` across
+   `gl_group` and `gl_project` under the namespace prefix, both filtered
+   by `NOT _deleted`) and `list_code_project_ids` (from
+   `code_indexing_checkpoint`). Snapshotting first is required because the
+   subsequent deletes clear those source rows.
+2. **Delete graph data** via the existing `delete_namespace_data` flow.
+3. **Delete checkpoints** via `delete_namespace_checkpoints`.
+4. **Delete KV keys** using the snapshots: `meta.<ns_id>`,
+   `counts.<tp_dots>` for each collected traversal path, and
+   `code.<project_id>` for each collected project id.
+5. **Mark deletion complete** in `namespace_deletion_schedule`.
+
+KV cleanup is best-effort: individual `kv_delete` failures are logged
+(`warn!`) but do not fail the handler or abort the remaining deletes. If
+snapshotting fails (step 1), the handler proceeds with graph-data
+deletion and logs that KV keys were skipped.
 
 ## Why not the alternatives
 
@@ -991,6 +1065,11 @@ approach adds 2 join queries per ETL cycle, which is acceptable.
 - [Code checkpoint store](../../../crates/indexer/src/modules/code/checkpoint_store.rs)
 - [NATS KV types](../../../crates/indexer/src/nats/kv_types.rs)
 - [NatsServices trait](../../../crates/indexer/src/nats/services.rs)
-- [Graph stats service](../../../crates/gkg-server/src/graph_status/mod.rs)
+- [SDLC ProgressWriter](../../../crates/indexer/src/progress/mod.rs)
+- [CodeProgressWriter](../../../crates/indexer/src/progress/code.rs)
+- [Namespace deletion handler (KV cleanup)](../../../crates/indexer/src/modules/namespace_deletion/handler.rs)
+- [Indexing progress KV types](../../../crates/gkg-server-config/src/indexing_progress.rs)
+- [Graph status config](../../../crates/gkg-server-config/src/graph_status.rs)
+- [Graph status service](../../../crates/gkg-server/src/graph_status/mod.rs)
 - [gl_edge table schema](../../../config/graph.sql)
 - [Snippet #5978783: query optimization research](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5978783)

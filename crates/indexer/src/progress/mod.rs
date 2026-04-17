@@ -1,4 +1,7 @@
+pub mod code;
 pub mod queries;
+
+pub use code::CodeProgressWriter;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,6 +50,42 @@ impl ProgressWriter {
         }
     }
 
+    /// Pre-ETL write of `state="indexing"` so readers observe the active phase.
+    /// Preserves all other fields from the previous meta (sdlc, code, cycle_count,
+    /// initial_backfill_done). If no previous meta exists, writes a minimal
+    /// indexing snapshot with zeros.
+    pub async fn mark_indexing_started(
+        &self,
+        nats: &dyn NatsServices,
+        namespace_id: i64,
+        started_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), HandlerError> {
+        let prev = self.read_previous_meta(nats, namespace_id).await;
+        let mut meta = prev.unwrap_or_else(|| MetaSnapshot {
+            state: String::new(),
+            initial_backfill_done: false,
+            updated_at: String::new(),
+            sdlc: SdlcMeta::default(),
+            code: Default::default(),
+        });
+        meta.state = "indexing".to_string();
+        meta.updated_at = started_at.to_rfc3339();
+        meta.sdlc.last_started_at = started_at.to_rfc3339();
+
+        let value = serde_json::to_vec(&meta)
+            .map_err(|e| HandlerError::Processing(format!("serialize meta: {e}")))?;
+        nats.kv_put(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(namespace_id),
+            Bytes::from(value),
+            KvPutOptions::default(),
+        )
+        .await
+        .map_err(|e| HandlerError::Processing(format!("KV put indexing meta: {e}")))?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn write_progress(
         &self,
         nats: &dyn NatsServices,
@@ -54,6 +93,7 @@ impl ProgressWriter {
         traversal_path: &str,
         started_at: chrono::DateTime<chrono::Utc>,
         elapsed: std::time::Duration,
+        total_rows: u64,
         error: Option<&str>,
     ) -> Result<(), HandlerError> {
         if self.is_debounced(namespace_id) {
@@ -62,38 +102,49 @@ impl ProgressWriter {
         }
 
         let count_started = Instant::now();
+        let prev_meta = self.read_previous_meta(nats, namespace_id).await;
 
-        let (node_counts, edge_counts) = self
-            .run_count_queries(traversal_path)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("count query failed: {e}")))?;
+        // Zero-row skip: if the pipeline processed no rows AND we already have
+        // a prior snapshot, the existing counts are still authoritative. Skip
+        // the expensive count queries but still refresh the meta snapshot so
+        // updated_at / cycle_count / last_* advance and stale flags clear.
+        let skip_counts = total_rows == 0 && prev_meta.is_some();
+        let rollup_count = if skip_counts {
+            0
+        } else {
+            let (node_counts, edge_counts) = self
+                .run_count_queries(traversal_path)
+                .await
+                .map_err(|e| HandlerError::Processing(format!("count query failed: {e}")))?;
 
-        let rollups = rollup_counts(&node_counts, &edge_counts);
+            let rollups = rollup_counts(&node_counts, &edge_counts);
+            let completed_at = chrono::Utc::now();
+            let now = completed_at.to_rfc3339();
+
+            for (tp, (nodes, edges)) in &rollups {
+                let snapshot = CountsSnapshot {
+                    updated_at: now.clone(),
+                    nodes: nodes.clone(),
+                    edges: edges.clone(),
+                };
+                let value = serde_json::to_vec(&snapshot)
+                    .map_err(|e| HandlerError::Processing(format!("serialize counts: {e}")))?;
+
+                let key = counts_key(tp);
+                nats.kv_put(
+                    INDEXING_PROGRESS_BUCKET,
+                    &key,
+                    Bytes::from(value),
+                    KvPutOptions::default(),
+                )
+                .await
+                .map_err(|e| HandlerError::Processing(format!("KV put {key}: {e}")))?;
+            }
+            rollups.len()
+        };
 
         let completed_at = chrono::Utc::now();
         let now = completed_at.to_rfc3339();
-
-        for (tp, (nodes, edges)) in &rollups {
-            let snapshot = CountsSnapshot {
-                updated_at: now.clone(),
-                nodes: nodes.clone(),
-                edges: edges.clone(),
-            };
-            let value = serde_json::to_vec(&snapshot)
-                .map_err(|e| HandlerError::Processing(format!("serialize counts: {e}")))?;
-
-            let key = counts_key(tp);
-            nats.kv_put(
-                INDEXING_PROGRESS_BUCKET,
-                &key,
-                Bytes::from(value),
-                KvPutOptions::default(),
-            )
-            .await
-            .map_err(|e| HandlerError::Processing(format!("KV put {key}: {e}")))?;
-        }
-
-        let prev_meta = self.read_previous_meta(nats, namespace_id).await;
         let prev_cycle = prev_meta.as_ref().map(|m| m.sdlc.cycle_count).unwrap_or(0);
         let prev_backfill_done = prev_meta.as_ref().is_some_and(|m| m.initial_backfill_done);
         // Preserve the code side of the meta: the code indexing handler writes
@@ -133,8 +184,10 @@ impl ProgressWriter {
         let count_duration = count_started.elapsed();
         info!(
             namespace_id,
-            kv_keys = rollups.len(),
+            kv_keys = rollup_count,
             count_ms = count_duration.as_millis() as u64,
+            skip_counts,
+            total_rows,
             "indexing progress written to KV"
         );
 
@@ -365,6 +418,17 @@ fn traversal_path_prefixes(tp: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clickhouse::ClickHouseConfigurationExt;
+    use crate::testkit::mocks::MockNatsServices;
+    use gkg_server_config::indexing_progress::CodeMeta;
+
+    fn test_writer() -> ProgressWriter {
+        let graph_client =
+            Arc::new(gkg_server_config::ClickHouseConfiguration::default().build_client());
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        // Large debounce so any second write in a test is skipped.
+        ProgressWriter::new(graph_client, ontology, 9999)
+    }
 
     #[test]
     fn traversal_path_prefixes_correct() {
@@ -400,5 +464,170 @@ mod tests {
 
         let child = result.get("1/2/3/").unwrap();
         assert_eq!(child.0.get("Project"), Some(&10));
+    }
+
+    #[tokio::test]
+    async fn mark_indexing_started_writes_indexing_state_fresh() {
+        let writer = test_writer();
+        let mock = MockNatsServices::new();
+        let started = chrono::Utc::now();
+
+        writer
+            .mark_indexing_started(&mock, 42, started)
+            .await
+            .unwrap();
+
+        let bytes = mock
+            .get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(42))
+            .expect("meta key written");
+        let meta: MetaSnapshot = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(meta.state, "indexing");
+        assert_eq!(meta.updated_at, started.to_rfc3339());
+        assert_eq!(meta.sdlc.last_started_at, started.to_rfc3339());
+        // Fresh (no prev meta): monotonic flag starts false.
+        assert!(!meta.initial_backfill_done);
+        assert_eq!(meta.sdlc.cycle_count, 0);
+    }
+
+    #[tokio::test]
+    async fn mark_indexing_started_preserves_prev_fields() {
+        let writer = test_writer();
+        let mock = MockNatsServices::new();
+        let prev = MetaSnapshot {
+            state: "idle".to_string(),
+            initial_backfill_done: true,
+            updated_at: "2020-01-01T00:00:00Z".to_string(),
+            sdlc: SdlcMeta {
+                last_completed_at: "2020-01-01T00:00:00Z".to_string(),
+                last_started_at: "2019-12-31T23:59:00Z".to_string(),
+                last_duration_ms: 1000,
+                cycle_count: 7,
+                last_error: String::new(),
+            },
+            code: CodeMeta {
+                projects_indexed: 3,
+                projects_total: 5,
+                last_indexed_at: "2020-01-01T00:00:00Z".to_string(),
+            },
+        };
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(42),
+            Bytes::from(serde_json::to_vec(&prev).unwrap()),
+        );
+
+        let started = chrono::Utc::now();
+        writer
+            .mark_indexing_started(&mock, 42, started)
+            .await
+            .unwrap();
+
+        let bytes = mock
+            .get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(42))
+            .unwrap();
+        let meta: MetaSnapshot = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(meta.state, "indexing");
+        assert!(meta.initial_backfill_done, "monotonic flag preserved");
+        assert_eq!(meta.sdlc.cycle_count, 7, "cycle_count preserved");
+        assert_eq!(
+            meta.code.projects_indexed, 3,
+            "code projects_indexed preserved"
+        );
+        assert_eq!(meta.code.projects_total, 5, "code projects_total preserved");
+    }
+
+    #[tokio::test]
+    async fn write_progress_skips_counts_when_zero_rows_with_prev() {
+        let writer = test_writer();
+        let mock = MockNatsServices::new();
+
+        // Seed a prior meta so the zero-row path is taken.
+        let prev = MetaSnapshot {
+            state: "idle".to_string(),
+            initial_backfill_done: true,
+            updated_at: "2020-01-01T00:00:00Z".to_string(),
+            sdlc: SdlcMeta::default(),
+            code: CodeMeta::default(),
+        };
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(99),
+            Bytes::from(serde_json::to_vec(&prev).unwrap()),
+        );
+
+        let started = chrono::Utc::now();
+        // total_rows=0 + prev_meta=Some => skip counts. No ClickHouse call.
+        writer
+            .write_progress(
+                &mock,
+                99,
+                "1/99/",
+                started,
+                std::time::Duration::from_millis(5),
+                0, // total_rows
+                None,
+            )
+            .await
+            .expect("should succeed without ClickHouse");
+
+        // Meta updated with new cycle_count and state=idle, initial_backfill_done preserved.
+        let bytes = mock
+            .get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(99))
+            .unwrap();
+        let meta: MetaSnapshot = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(meta.state, "idle");
+        assert!(meta.initial_backfill_done);
+        assert_eq!(meta.sdlc.cycle_count, 1);
+        // No counts keys written.
+        assert!(
+            mock.get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/99/"))
+                .is_none(),
+            "counts key should not be written on zero-row skip"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_progress_preserves_monotonic_initial_backfill_done_on_error() {
+        let writer = test_writer();
+        let mock = MockNatsServices::new();
+
+        // Seed prior success.
+        let prev = MetaSnapshot {
+            state: "idle".to_string(),
+            initial_backfill_done: true,
+            updated_at: "2020-01-01T00:00:00Z".to_string(),
+            sdlc: SdlcMeta {
+                cycle_count: 5,
+                ..Default::default()
+            },
+            code: CodeMeta::default(),
+        };
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(7),
+            Bytes::from(serde_json::to_vec(&prev).unwrap()),
+        );
+
+        writer
+            .write_progress(
+                &mock,
+                7,
+                "1/7/",
+                chrono::Utc::now(),
+                std::time::Duration::from_millis(5),
+                0, // zero rows, takes skip path
+                Some("boom"),
+            )
+            .await
+            .unwrap();
+
+        let bytes = mock.get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(7)).unwrap();
+        let meta: MetaSnapshot = serde_json::from_slice(&bytes).unwrap();
+        assert!(
+            meta.initial_backfill_done,
+            "error after first backfill must not regress flag"
+        );
+        assert_eq!(meta.sdlc.last_error, "boom");
+        assert_eq!(meta.sdlc.cycle_count, 6);
     }
 }

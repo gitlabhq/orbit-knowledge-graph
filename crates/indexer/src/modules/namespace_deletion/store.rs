@@ -96,6 +96,43 @@ HAVING argMax(_deleted, _version) = false
     )
 }
 
+/// Returns distinct traversal paths under a namespace root, used to enumerate
+/// `counts.<tp_dots>` KV keys for cleanup. Must be called BEFORE
+/// `delete_namespace_data` since that clears these rows.
+fn list_traversal_paths_sql() -> String {
+    let group_table = prefixed_table_name("gl_group", *SCHEMA_VERSION);
+    let project_table = prefixed_table_name("gl_project", *SCHEMA_VERSION);
+    format!(
+        r#"
+SELECT DISTINCT traversal_path FROM (
+    SELECT traversal_path FROM {group_table}
+    WHERE startsWith(traversal_path, {{traversal_path:String}})
+      AND NOT _deleted
+    UNION DISTINCT
+    SELECT traversal_path FROM {project_table}
+    WHERE startsWith(traversal_path, {{traversal_path:String}})
+      AND NOT _deleted
+)
+"#
+    )
+}
+
+/// Returns distinct project ids under a namespace root, used to enumerate
+/// `code.<project_id>` KV keys for cleanup. Must be called BEFORE
+/// `delete_namespace_checkpoints` clears the checkpoint rows.
+fn list_code_project_ids_sql() -> String {
+    let table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+    format!(
+        r#"
+SELECT project_id
+FROM {table}
+WHERE startsWith(traversal_path, {{traversal_path:String}})
+GROUP BY project_id
+HAVING argMax(_deleted, _version) = false
+"#
+    )
+}
+
 fn due_namespaces_query_sql() -> String {
     let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
     format!(
@@ -169,6 +206,21 @@ pub trait NamespaceDeletionStore: Send + Sync {
     async fn find_due_deletions(
         &self,
     ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError>;
+
+    /// Enumerate distinct traversal paths under a namespace (from graph tables)
+    /// for KV key cleanup. Must be called before `delete_namespace_data`.
+    async fn list_traversal_paths(
+        &self,
+        traversal_path: &str,
+    ) -> Result<Vec<String>, NamespaceDeletionStoreError>;
+
+    /// Enumerate distinct code project ids under a namespace (from the
+    /// code_indexing_checkpoint table) for KV key cleanup. Must be called
+    /// before `delete_namespace_checkpoints`.
+    async fn list_code_project_ids(
+        &self,
+        traversal_path: &str,
+    ) -> Result<Vec<i64>, NamespaceDeletionStoreError>;
 }
 
 pub struct ClickHouseNamespaceDeletionStore {
@@ -312,6 +364,36 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
             })
     }
 
+    async fn list_traversal_paths(
+        &self,
+        traversal_path: &str,
+    ) -> Result<Vec<String>, NamespaceDeletionStoreError> {
+        let batches = self
+            .graph
+            .query(&list_traversal_paths_sql())
+            .param("traversal_path", traversal_path)
+            .fetch_arrow()
+            .await
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+        String::extract_column(&batches, 0)
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
+    }
+
+    async fn list_code_project_ids(
+        &self,
+        traversal_path: &str,
+    ) -> Result<Vec<i64>, NamespaceDeletionStoreError> {
+        let batches = self
+            .graph
+            .query(&list_code_project_ids_sql())
+            .param("traversal_path", traversal_path)
+            .fetch_arrow()
+            .await
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+        i64::extract_column(&batches, 0)
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
+    }
+
     async fn find_due_deletions(
         &self,
     ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError> {
@@ -354,9 +436,13 @@ pub mod test_utils {
         delete_checkpoint_calls: Mutex<Vec<i64>>,
         mark_complete_calls: Mutex<Vec<(i64, String)>>,
         schedule_calls: Mutex<Vec<(i64, String, String)>>,
+        list_tp_calls: Mutex<Vec<String>>,
+        list_project_calls: Mutex<Vec<String>>,
         deletion_outcomes: Vec<TableDeletionOutcome>,
         newly_deleted: Vec<NamespaceScheduleEntry>,
         due_deletions: Vec<NamespaceScheduleEntry>,
+        traversal_paths: Vec<String>,
+        project_ids: Vec<i64>,
         namespace_still_deleted: bool,
         fail_mark_complete: bool,
         fail_schedule: bool,
@@ -385,13 +471,35 @@ pub mod test_utils {
                 delete_checkpoint_calls: Mutex::new(Vec::new()),
                 mark_complete_calls: Mutex::new(Vec::new()),
                 schedule_calls: Mutex::new(Vec::new()),
+                list_tp_calls: Mutex::new(Vec::new()),
+                list_project_calls: Mutex::new(Vec::new()),
                 deletion_outcomes: vec![ok_outcome("gl_project")],
                 newly_deleted: Vec::new(),
                 due_deletions: Vec::new(),
+                traversal_paths: Vec::new(),
+                project_ids: Vec::new(),
                 namespace_still_deleted: true,
                 fail_mark_complete: false,
                 fail_schedule: false,
             }
+        }
+
+        pub fn with_traversal_paths(mut self, tps: Vec<String>) -> Self {
+            self.traversal_paths = tps;
+            self
+        }
+
+        pub fn with_project_ids(mut self, ids: Vec<i64>) -> Self {
+            self.project_ids = ids;
+            self
+        }
+
+        pub fn list_tp_calls(&self) -> Vec<String> {
+            self.list_tp_calls.lock().clone()
+        }
+
+        pub fn list_project_calls(&self) -> Vec<String> {
+            self.list_project_calls.lock().clone()
         }
 
         pub fn with_deletion_outcomes(mut self, outcomes: Vec<TableDeletionOutcome>) -> Self {
@@ -517,6 +625,24 @@ pub mod test_utils {
             &self,
         ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError> {
             Ok(self.due_deletions.clone())
+        }
+
+        async fn list_traversal_paths(
+            &self,
+            traversal_path: &str,
+        ) -> Result<Vec<String>, NamespaceDeletionStoreError> {
+            self.list_tp_calls.lock().push(traversal_path.to_string());
+            Ok(self.traversal_paths.clone())
+        }
+
+        async fn list_code_project_ids(
+            &self,
+            traversal_path: &str,
+        ) -> Result<Vec<i64>, NamespaceDeletionStoreError> {
+            self.list_project_calls
+                .lock()
+                .push(traversal_path.to_string());
+            Ok(self.project_ids.clone())
         }
     }
 }
