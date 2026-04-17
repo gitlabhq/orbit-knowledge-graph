@@ -1,5 +1,6 @@
 {{ $sha := requiredEnv "E2E_SHA" }}
-{{ $cdc := fromYaml (readFile "../config/cdc-tables.yaml") }}
+{{ $producer := fromYaml (readFile "../config/cdc-producer.yaml") }}
+{{ $consumer := fromYaml (readFile "../config/cdc-consumer.yaml") }}
 {{ $v := fromYaml (readFile "../config/versions.yaml") }}
 
 namespace: e2e-{{ $sha }}-siphon
@@ -127,36 +128,11 @@ deployments:
         temp_stream_name: temp_e2e_siphon_event_stream
         snapshot_stream_name: snapshot_e2e_siphon_event_stream
         lsn_store_name: e2e_siphon_lsn_store
-      table_mapping:
-{{- range $cdc.tables }}
-{{- if hasKey . "ignore_columns" }}
-        - column_transformations:
-{{- range .ignore_columns }}
-            - column_name: {{ . }}
-              transformation_type: ignore
-{{- end }}
-          table: {{ .name }}
-{{- else }}
-        - {{ .name }}
-{{- end }}
-{{- end }}
+      table_mapping: {{ toYaml $producer.table_mapping | nindent 8 }}
 
   clickhouse-consumer:
     profile: consumer
     appConfig:
       application_identifier: e2e_siphon_consumer_1
-      streams:
-{{- range $cdc.tables }}
-        - {{ .name }}
-{{- end }}
-      clickhouse:
-        dedup_config:
-{{- range $cdc.tables }}
-{{- if hasKey . "dedup_by" }}
-          - dedup_by: [{{ range $i, $col := .dedup_by }}{{ if $i }}, {{ end }}{{ $col }}{{ end }}]
-{{- if hasKey . "dedup_by_table" }}
-            dedup_by_table: {{ .dedup_by_table }}
-{{- end }}
-            stream_identifier: {{ .name }}
-{{- end }}
-{{- end }}
+      streams: {{ toYaml $consumer.streams | nindent 8 }}
+      clickhouse: {{ toYaml $consumer.clickhouse | nindent 8 }}

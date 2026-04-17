@@ -23,6 +23,11 @@ log "Extracting root CA from cert-manager"
 export E2E_ROOT_CA_B64=$($KC get secret root-ca-secret -n cert-manager \
   -o jsonpath='{.data.ca\.crt}')
 
+# Regenerate siphon CDC config from gitlab-org/gitlab SSOT at the pinned ref.
+# Output (cdc-producer.yaml, cdc-consumer.yaml) is consumed by values/siphon.yaml.gotmpl.
+log "Syncing siphon CDC tables from SSOT"
+"$E2E_DIR/scripts/sync-cdc-tables.sh"
+
 # Deploy all components via helmfile (bootstrap → infra → pipeline)
 log "Deploying via helmfile"
 cd "$E2E_DIR"

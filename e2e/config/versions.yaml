@@ -10,6 +10,12 @@ siphon:
 
 gitlab:
   chart: "9.10.3-2450691409"
+  # Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table definitions
+  # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
+  # Should match the GitLab major.minor version baked into the chart above —
+  # otherwise the generated `cdc-*.yaml` files reference tables/columns that
+  # don't exist in the deployed PG schema.
+  ref: "master"
 
 gkg:
   chart: "0.18.1"
