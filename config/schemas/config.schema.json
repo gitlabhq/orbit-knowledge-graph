@@ -3,6 +3,15 @@
   "title": "AppConfig",
   "type": "object",
   "properties": {
+    "analytics": {
+      "$ref": "#/$defs/AnalyticsConfig",
+      "default": {
+        "deployment": {
+          "environment": "development",
+          "type": "self_managed"
+        }
+      }
+    },
     "bind_address": {
       "type": "string",
       "default": "127.0.0.1:4200"
@@ -22,13 +31,6 @@
         "query_settings": {},
         "url": "http://127.0.0.1:8123",
         "username": "default"
-      }
-    },
-    "deployment": {
-      "$ref": "#/$defs/DeploymentConfig",
-      "default": {
-        "environment": "production",
-        "type": "self_managed"
       }
     },
     "dispatcher_health_bind_address": {
@@ -227,6 +229,19 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "AnalyticsConfig": {
+      "type": "object",
+      "properties": {
+        "deployment": {
+          "$ref": "#/$defs/DeploymentConfig",
+          "default": {
+            "environment": "development",
+            "type": "self_managed"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "ClickHouseConfiguration": {
       "type": "object",
       "properties": {
@@ -310,7 +325,7 @@
       "properties": {
         "environment": {
           "$ref": "#/$defs/DeploymentEnvironment",
-          "default": "production"
+          "default": "development"
         },
         "type": {
           "$ref": "#/$defs/DeploymentKind",
