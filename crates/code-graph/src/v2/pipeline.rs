@@ -344,7 +344,7 @@ macro_rules! register_v2_pipelines {
     (@munch [$($langs:tt)*] [$($tags:tt)*] $variant:ident => $pipeline:tt) => {
         register_v2_pipelines!(@munch [$($langs)* [$variant => $pipeline]] [$($tags)*]);
     };
-    // Emit language dispatch.
+    // Emit language dispatch (private — called by Pipeline::run only).
     (@emit_lang $( [$variant:ident => [$($pipeline:tt)*]] )* ) => {
         fn dispatch_language(
             language: Language,
@@ -357,7 +357,7 @@ macro_rules! register_v2_pipelines {
             })
         }
     };
-    // Emit tag dispatch.
+    // Emit tag dispatch (public — used by YAML test harness for custom pipeline tests).
     (@emit_tag $( [$tag:literal => [$($pipeline:tt)*]] )* ) => {
         pub fn dispatch_by_tag(
             tag: &str,
