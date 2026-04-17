@@ -74,6 +74,7 @@ schedule:
       cron: "0 */1 * * * *"           # every minute
     code-indexing-task:
       cron: "0 */1 * * * *"           # every minute
+      events_stream_name: siphon_stream
     namespace-code-backfill:
       cron: "0 */1 * * * *"           # every minute
     table-cleanup:

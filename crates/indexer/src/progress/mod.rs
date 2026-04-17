@@ -106,10 +106,12 @@ impl ProgressWriter {
 
         // Zero-row skip: if the pipeline processed no rows AND we already have
         // a prior snapshot, the existing counts are still authoritative. Skip
-        // the expensive count queries but still refresh the meta snapshot so
-        // updated_at / cycle_count / last_* advance and stale flags clear.
+        // the expensive count queries but refresh the existing counts key's
+        // updated_at (so readers don't see a stale flag) and refresh the meta
+        // snapshot (so cycle_count / last_* advance).
         let skip_counts = total_rows == 0 && prev_meta.is_some();
         let rollup_count = if skip_counts {
+            self.touch_counts_updated_at(nats, traversal_path).await;
             0
         } else {
             let (node_counts, edge_counts) = self
@@ -357,6 +359,31 @@ impl ProgressWriter {
         serde_json::from_slice(&entry.value).ok()
     }
 
+    /// Refresh `updated_at` on the existing counts key for a namespace without
+    /// re-running ClickHouse count queries. Used on zero-row skip so readers
+    /// don't see a stale flag despite the indexer running.
+    async fn touch_counts_updated_at(&self, nats: &dyn NatsServices, traversal_path: &str) {
+        let key = counts_key(traversal_path);
+        let Ok(Some(entry)) = nats.kv_get(INDEXING_PROGRESS_BUCKET, &key).await else {
+            return;
+        };
+        let Ok(mut snapshot) = serde_json::from_slice::<CountsSnapshot>(&entry.value) else {
+            return;
+        };
+        snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+        let Ok(value) = serde_json::to_vec(&snapshot) else {
+            return;
+        };
+        let _ = nats
+            .kv_put(
+                INDEXING_PROGRESS_BUCKET,
+                &key,
+                Bytes::from(value),
+                KvPutOptions::default(),
+            )
+            .await;
+    }
+
     fn is_debounced(&self, namespace_id: i64) -> bool {
         let map = self.last_update.lock();
         match map.get(&namespace_id) {
@@ -534,6 +561,71 @@ mod tests {
             "code projects_indexed preserved"
         );
         assert_eq!(meta.code.projects_total, 5, "code projects_total preserved");
+    }
+
+    #[tokio::test]
+    async fn zero_row_skip_refreshes_counts_updated_at() {
+        let writer = test_writer();
+        let mock = MockNatsServices::new();
+
+        let stale_ts = "2020-01-01T00:00:00Z".to_string();
+        // Seed an existing counts snapshot with an old updated_at.
+        let mut nodes = HashMap::new();
+        nodes.insert("Project".to_string(), 42);
+        let stale_counts = CountsSnapshot {
+            updated_at: stale_ts.clone(),
+            nodes: nodes.clone(),
+            edges: HashMap::new(),
+        };
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &counts_key("1/99/"),
+            Bytes::from(serde_json::to_vec(&stale_counts).unwrap()),
+        );
+        // Seed prior meta so the zero-row path runs.
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(99),
+            Bytes::from(
+                serde_json::to_vec(&MetaSnapshot {
+                    state: "idle".to_string(),
+                    initial_backfill_done: true,
+                    updated_at: stale_ts.clone(),
+                    sdlc: SdlcMeta::default(),
+                    code: CodeMeta::default(),
+                })
+                .unwrap(),
+            ),
+        );
+
+        writer
+            .write_progress(
+                &mock,
+                99,
+                "1/99/",
+                chrono::Utc::now(),
+                std::time::Duration::from_millis(1),
+                0, // total_rows=0, triggers zero-row skip
+                None,
+            )
+            .await
+            .unwrap();
+
+        // The counts snapshot should have been refreshed with a new updated_at
+        // but identical node/edge counts.
+        let bytes = mock
+            .get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/99/"))
+            .unwrap();
+        let refreshed: CountsSnapshot = serde_json::from_slice(&bytes).unwrap();
+        assert_ne!(
+            refreshed.updated_at, stale_ts,
+            "updated_at must advance on zero-row skip"
+        );
+        assert_eq!(
+            refreshed.nodes.get("Project"),
+            Some(&42),
+            "counts must be preserved"
+        );
     }
 
     #[tokio::test]
