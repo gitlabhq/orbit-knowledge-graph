@@ -2,7 +2,7 @@ use code_graph_config::Language;
 use code_graph_types::{BindingKind, CanonicalImport, DefKind};
 use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
 use parser_core::dsl::types::{
-    BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LoopRule, ReferenceRule,
+    self, BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LoopRule, ReferenceRule,
     ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
 };
 
@@ -117,6 +117,13 @@ impl DslLanguage for RubyDsl {
             field_access: &[("call", "receiver", "method")],
             constructor: &[],
         })
+    }
+
+    fn ssa_config() -> types::SsaConfig {
+        types::SsaConfig {
+            self_names: &["self"],
+            super_name: Some("super"),
+        }
     }
 }
 

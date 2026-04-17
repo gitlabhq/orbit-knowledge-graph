@@ -738,6 +738,420 @@ impl LanguageSpec {
             self.evaluate_reference(node, node_kind, import_map, sep)?;
         Some((name, expression))
     }
+
+    // ── Single-pass parse with SSA ──────────────────────────
+
+    /// Parse source in a single pass: extract defs, imports, and
+    /// SSA-annotated references. No second walk needed.
+    pub fn parse_full(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+    ) -> crate::Result<code_graph_types::ssa::FileResult> {
+        use code_graph_types::ssa::FileResult;
+
+        let source_str = std::str::from_utf8(source)
+            .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
+
+        let ast = language.parse_ast(source_str);
+        let root = ast.root();
+        let sep = language.fqn_separator();
+
+        let arena = bumpalo::Bump::new();
+        let mut state = WalkFullState::new(&arena, &self.ssa_config);
+
+        if self.module_from_path
+            && let Some(module) = file_path_to_module(file_path, sep)
+        {
+            state.scope_stack.push(Arc::from(module.as_str()));
+        }
+        state.top_level_depth = state.scope_stack.len();
+
+        self.walk_full(&root, &mut state, sep);
+
+        state.ssa.seal_remaining();
+
+        let extension = file_path
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_string())
+            .unwrap_or_default();
+
+        Ok(FileResult {
+            file_path: file_path.to_string(),
+            extension,
+            file_size: source.len() as u64,
+            language,
+            definitions: state.defs,
+            imports: state.imports,
+            references: state.ref_events,
+        })
+    }
+
+    fn walk_full<'a>(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        state: &mut WalkFullState<'a>,
+        sep: &'static str,
+    ) {
+        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
+            return;
+        }
+
+        let node_kind = node.kind();
+        let nk = node_kind.as_ref();
+        let mut pushed_scope = false;
+        let mut is_type_scope = false;
+
+        // Package node
+        if let Some((pkg_kind, ref pkg_extract)) = self.package_node
+            && nk == pkg_kind
+            && let Some(name) = pkg_extract.extract_name(node)
+        {
+            state.scope_stack.push(Arc::from(name.as_str()));
+        }
+
+        // Scope matching → push def + optional SSA self/super writes
+        if let Some(m) = self.evaluate_scope(node, nk, &state.import_map, sep) {
+            let is_top_level = state.scope_stack.len() <= state.top_level_depth;
+            let def_index = state.defs.len() as u32;
+
+            if m.creates_scope {
+                state.scope_stack.push(Arc::from(m.name.as_str()));
+                pushed_scope = true;
+            }
+
+            let fqn = if m.creates_scope {
+                Fqn::from_parts(
+                    &state
+                        .scope_stack
+                        .iter()
+                        .map(|s| s.as_ref())
+                        .collect::<Vec<_>>(),
+                    sep,
+                )
+            } else {
+                Fqn::from_scope(&state.scope_stack, &m.name, sep)
+            };
+
+            is_type_scope = m.def_kind.is_type_container();
+
+            state.defs.push(CanonicalDefinition {
+                definition_type: m.label,
+                kind: m.def_kind,
+                name: m.name,
+                fqn,
+                range: canonical_range(&m.range),
+                is_top_level,
+                metadata: m.metadata,
+            });
+
+            // Write self/this/super SSA variables for type scopes
+            if is_type_scope {
+                let scope_fqn = {
+                    let parts: Vec<&str> = state.scope_stack.iter().map(|s| s.as_ref()).collect();
+                    state.arena.alloc_str(&parts.join(sep))
+                };
+                for &self_name in self.ssa_config.self_names {
+                    let name = state.arena.alloc_str(self_name);
+                    state.ssa.write_variable(
+                        name,
+                        state.current_block,
+                        super::ssa::SsaValue::Type(scope_fqn),
+                    );
+                }
+                if let Some(super_name) = self.ssa_config.super_name {
+                    if let Some(meta) = &state.defs[def_index as usize].metadata
+                        && let Some(super_type) = meta.super_types.first()
+                    {
+                        let st = state.arena.alloc_str(super_type);
+                        let name = state.arena.alloc_str(super_name);
+                        state.ssa.write_variable(
+                            name,
+                            state.current_block,
+                            super::ssa::SsaValue::Type(st),
+                        );
+                    }
+                }
+            }
+
+            // Track enclosing def for references
+            if m.creates_scope {
+                state.enclosing_def_stack.push(def_index);
+            }
+        }
+
+        // Custom scope handling (e.g. Ruby attr_accessor)
+        let custom_handled = self
+            .custom_scope_fn
+            .is_some_and(|f| f(node, &mut state.defs, &state.scope_stack, sep));
+
+        if !custom_handled {
+            // Branch matching → SSA fork/join (handles own children)
+            if let Some(&rule_idx) = self.branch_dispatch.get(nk).and_then(|v| v.first()) {
+                self.walk_full_branch(node, rule_idx, state, sep);
+                if pushed_scope {
+                    state.scope_stack.pop();
+                    state.enclosing_def_stack.pop();
+                }
+                return;
+            }
+
+            // Loop matching → SSA header/body/exit (handles own children)
+            if let Some(&rule_idx) = self.loop_dispatch.get(nk).and_then(|v| v.first()) {
+                self.walk_full_loop(node, rule_idx, state, sep);
+                if pushed_scope {
+                    state.scope_stack.pop();
+                    state.enclosing_def_stack.pop();
+                }
+                return;
+            }
+
+            // Import handling → also write to SSA
+            let import_count_before = state.imports.len();
+            let handled = self
+                .custom_import_fn
+                .is_some_and(|f| f(node, &mut state.imports));
+            if !handled {
+                self.evaluate_imports(node, nk, &mut state.imports);
+            }
+            for idx in import_count_before..state.imports.len() {
+                let imp = &state.imports[idx];
+                let import_idx = idx as u32;
+                if !imp.wildcard && !imp.path.is_empty() {
+                    let effective_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+                    if !effective_name.is_empty() {
+                        state.import_map.insert(
+                            effective_name.to_string(),
+                            format!("{}{}{}", imp.path, sep, effective_name),
+                        );
+                        // Write import to SSA so alias chasing finds it
+                        let ssa_name = state.arena.alloc_str(effective_name);
+                        state.ssa.write_variable(
+                            ssa_name,
+                            state.current_block,
+                            super::ssa::SsaValue::ImportRef(import_idx),
+                        );
+                    }
+                }
+            }
+
+            // Binding handling → SSA write
+            if let Some(&rule_idx) = self.binding_dispatch.get(nk).and_then(|v| v.first()) {
+                let rule = &self.bindings[rule_idx];
+                if let Some(name) = rule.extract_name(node) {
+                    let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
+                        // Type annotation → Type(bare_name), matching walker behavior
+                        super::ssa::SsaValue::Type(state.arena.alloc_str(&type_ann))
+                    } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
+                        // RHS callee name → Alias for SSA copy propagation
+                        super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
+                    } else {
+                        super::ssa::SsaValue::Opaque
+                    };
+
+                    let ssa_name = state.arena.alloc_str(&name);
+                    state.ssa.write_variable(ssa_name, state.current_block, val);
+                }
+            }
+
+            // Reference handling → SSA read → ReferenceEvent
+            if let Some((name, range, expression)) =
+                self.evaluate_reference(node, nk, &state.import_map, sep)
+            {
+                let reaching = state
+                    .ssa
+                    .read_variable_stateless(state.arena.alloc_str(&name), state.current_block);
+                let parse_values = reaching
+                    .values
+                    .iter()
+                    .filter_map(|v| v.to_parse_value())
+                    .collect();
+
+                state
+                    .ref_events
+                    .push(code_graph_types::ssa::ReferenceEvent {
+                        name,
+                        chain: expression,
+                        reaching: parse_values,
+                        enclosing_def: state.enclosing_def_stack.last().copied(),
+                        range: canonical_range(&range),
+                    });
+            }
+        }
+
+        // Recurse children
+        for child in node.children() {
+            self.walk_full(&child, state, sep);
+        }
+
+        if pushed_scope {
+            state.scope_stack.pop();
+            state.enclosing_def_stack.pop();
+        }
+    }
+
+    fn walk_full_branch<'a>(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        rule_idx: usize,
+        state: &mut WalkFullState<'a>,
+        sep: &'static str,
+    ) {
+        let rule = &self.branches[rule_idx];
+        let pre_block = state.current_block;
+
+        // Walk condition in pre-branch block
+        if let Some(cond_field) = rule.condition_field
+            && let Some(cond_node) = node.field(cond_field)
+        {
+            self.walk_full(&cond_node, state, sep);
+        }
+
+        let has_catch_all = rule
+            .catch_all_kind
+            .is_some_and(|ck| node.children().any(|c| c.kind().as_ref() == ck));
+
+        let mut end_blocks = smallvec::SmallVec::<[super::ssa::BlockId; 4]>::new();
+
+        for child in node.children() {
+            let ck = child.kind();
+            if !rule.branch_kinds.iter().any(|&k| k == ck.as_ref()) {
+                continue;
+            }
+
+            let arm_block = state.ssa.add_block();
+            state.ssa.add_predecessor(arm_block, pre_block);
+            state.ssa.seal_block(arm_block);
+            state.current_block = arm_block;
+
+            // Walk arm contents
+            for arm_child in child.children() {
+                self.walk_full(&arm_child, state, sep);
+            }
+
+            end_blocks.push(state.current_block);
+        }
+
+        // Join block
+        let join = state.ssa.add_block();
+        for &end in &end_blocks {
+            state.ssa.add_predecessor(join, end);
+        }
+        if !has_catch_all {
+            state.ssa.add_predecessor(join, pre_block);
+        }
+        state.ssa.seal_block(join);
+        state.current_block = join;
+    }
+
+    fn walk_full_loop<'a>(
+        &self,
+        node: &Node<StrDoc<SupportLang>>,
+        rule_idx: usize,
+        state: &mut WalkFullState<'a>,
+        sep: &'static str,
+    ) {
+        let rule = &self.loops[rule_idx];
+        let pre_block = state.current_block;
+
+        // Walk iteration expression in pre-loop block
+        if let Some(iter_field) = rule.iter_field
+            && let Some(iter_node) = node.field(iter_field)
+        {
+            self.walk_full(&iter_node, state, sep);
+        }
+
+        // Header block (NOT sealed yet — back edge comes after body)
+        let header = state.ssa.add_block();
+        state.ssa.add_predecessor(header, pre_block);
+        state.current_block = header;
+
+        // Body block
+        let body = state.ssa.add_block();
+        state.ssa.add_predecessor(body, header);
+        state.ssa.seal_block(body);
+        state.current_block = body;
+
+        // Walk body contents
+        if let Some(body_node) = node.field(rule.body_field) {
+            for child in body_node.children() {
+                self.walk_full(&child, state, sep);
+            }
+        } else {
+            // No explicit body field — walk all children
+            for child in node.children() {
+                self.walk_full(&child, state, sep);
+            }
+        }
+
+        // Back edge + seal header
+        state.ssa.add_predecessor(header, state.current_block);
+        state.ssa.seal_block(header);
+
+        // Exit block
+        let exit = state.ssa.add_block();
+        state.ssa.add_predecessor(exit, header);
+        state.ssa.seal_block(exit);
+        state.current_block = exit;
+    }
+}
+
+// ── Walk state for parse_full ───────────────────────────────────
+
+struct WalkFullState<'a> {
+    ssa: super::ssa::SsaEngine<'a>,
+    arena: &'a bumpalo::Bump,
+    current_block: super::ssa::BlockId,
+    scope_stack: Vec<Arc<str>>,
+    enclosing_def_stack: Vec<u32>,
+    defs: Vec<CanonicalDefinition>,
+    imports: Vec<CanonicalImport>,
+    ref_events: Vec<code_graph_types::ssa::ReferenceEvent>,
+    import_map: rustc_hash::FxHashMap<String, String>,
+    top_level_depth: usize,
+}
+
+impl<'a> WalkFullState<'a> {
+    fn new(arena: &'a bumpalo::Bump, _ssa_config: &super::types::SsaConfig) -> Self {
+        let mut ssa = super::ssa::SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+
+        Self {
+            ssa,
+            arena,
+            current_block: entry,
+            scope_stack: Vec::new(),
+            enclosing_def_stack: Vec::new(),
+            defs: Vec::new(),
+            imports: Vec::new(),
+            ref_events: Vec::new(),
+            import_map: rustc_hash::FxHashMap::default(),
+            top_level_depth: 0,
+        }
+    }
+
+    /// Try to resolve a bare name to an SSA value by checking this file's
+    /// defs and imports. Falls back to Alias (for SSA chasing) or Opaque.
+    fn resolve_name_to_ssa_value(&self, name: &str) -> super::ssa::SsaValue<'a> {
+        // Check local defs
+        for (i, def) in self.defs.iter().enumerate().rev() {
+            if def.name == name {
+                return super::ssa::SsaValue::LocalDef(i as u32);
+            }
+        }
+        // Check imports
+        for (i, imp) in self.imports.iter().enumerate().rev() {
+            let effective = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+            if effective == name {
+                return super::ssa::SsaValue::ImportRef(i as u32);
+            }
+        }
+        // Fall back to alias — SSA copy propagation will chase it
+        let interned = self.arena.alloc_str(name);
+        super::ssa::SsaValue::Alias(interned)
+    }
 }
 
 /// Convert a file path to a module scope string.

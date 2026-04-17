@@ -1,7 +1,7 @@
 use code_graph_config::Language;
 use code_graph_types::{BindingKind, DefKind};
 use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
-use parser_core::dsl::types::*;
+use parser_core::dsl::types::{self, *};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -198,6 +198,13 @@ impl DslLanguage for JavaDsl {
             loop_rule("enhanced_for_statement").iter_over("value"),
             loop_rule("do_statement"),
         ]
+    }
+
+    fn ssa_config() -> types::SsaConfig {
+        types::SsaConfig {
+            self_names: &["this", "self"],
+            super_name: Some("super"),
+        }
     }
 }
 

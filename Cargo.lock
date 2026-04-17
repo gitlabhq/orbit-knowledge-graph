@@ -8043,6 +8043,7 @@ name = "parser-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bumpalo",
  "code-graph-config",
  "code-graph-types",
  "internment",

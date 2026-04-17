@@ -456,6 +456,186 @@ impl Pipeline {
     }
 }
 
+// ── Single-pass pipeline ────────────────────────────────────────
+
+/// Three-phase pipeline that uses `parse_full` — no re-parse.
+///
+/// - **Phase A** (parallel): `parse_full()` per file → `FileResult`
+/// - **Phase B** (sequential): graph.add_file_nodes(defs, imports), finalize
+/// - **Phase C** (parallel): resolve_file_references() → edges
+pub struct SinglePassPipeline<P, R>(PhantomData<(P, R)>);
+
+impl<P, R> LanguagePipeline for SinglePassPipeline<P, R>
+where
+    P: parser_core::dsl::types::DslLanguage + 'static,
+    R: crate::linker::v2::HasRules + Send + Sync,
+{
+    fn process_files(
+        files: &[FileInput],
+        root_path: &str,
+    ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        use code_graph_types::CanonicalResult;
+
+        let spec = P::spec();
+        let rules = R::rules();
+        let language = P::language();
+        let file_count = files.len();
+        let t0 = std::time::Instant::now();
+
+        eprintln!(
+            "[v2-sp] {file_count} files, {} threads",
+            rayon::current_num_threads()
+        );
+
+        // ── Phase A: parallel parse_full ────────────────────────
+        let pb = progress_bar(file_count as u64, "Phase A: parse");
+        let errors = Mutex::new(Vec::new());
+
+        let parse_results: Vec<Option<code_graph_types::ssa::FileResult>> = files
+            .par_iter()
+            .map(|path| {
+                let abs_path = format!("{root_path}/{path}");
+                let source = match std::fs::read(&abs_path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        errors.lock().unwrap().push(PipelineError {
+                            file_path: path.clone(),
+                            error: format!("Read error: {e}"),
+                        });
+                        pb.inc(1);
+                        return None;
+                    }
+                };
+
+                let result = match spec.parse_full(&source, path, language) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        errors.lock().unwrap().push(PipelineError {
+                            file_path: path.clone(),
+                            error: format!("Parse error: {e}"),
+                        });
+                        pb.inc(1);
+                        return None;
+                    }
+                };
+
+                pb.inc(1);
+                Some(result)
+            })
+            .collect();
+
+        pb.finish_with_message(format!(
+            "Phase A: {file_count} files in {:.2?}",
+            t0.elapsed()
+        ));
+
+        let errors = errors.into_inner().unwrap();
+        if !errors.is_empty() && parse_results.iter().all(|r| r.is_none()) {
+            return Err(errors);
+        }
+
+        // ── Phase B: sequential graph build ─────────────────────
+        let t1 = std::time::Instant::now();
+        let sp = spinner("Phase B: graph");
+        let mut graph = CodeGraph::new_with_root(root_path.to_string());
+        let mut total_defs = 0usize;
+        let mut total_imports = 0usize;
+
+        // We need (file_node, def_nodes, import_nodes, references) per file
+        struct FileInfo {
+            file_node: petgraph::graph::NodeIndex,
+            def_nodes: Vec<petgraph::graph::NodeIndex>,
+            import_nodes: Vec<petgraph::graph::NodeIndex>,
+            references: Vec<code_graph_types::ssa::ReferenceEvent>,
+        }
+
+        let mut file_infos: Vec<Option<FileInfo>> = Vec::with_capacity(file_count);
+
+        for (idx, result_opt) in parse_results.into_iter().enumerate() {
+            let Some(result) = result_opt else {
+                file_infos.push(None);
+                continue;
+            };
+
+            total_defs += result.definitions.len();
+            total_imports += result.imports.len();
+            let references = result.references;
+
+            // Build CanonicalResult from FileResult for graph builder
+            let canonical = CanonicalResult {
+                file_path: result.file_path,
+                extension: result.extension,
+                file_size: result.file_size,
+                language: result.language,
+                definitions: result.definitions,
+                imports: result.imports,
+                references: Vec::new(),
+                bindings: Vec::new(),
+                control_flow: Vec::new(),
+            };
+
+            let (file_node, def_nodes, import_nodes) = graph.add_file_nodes(canonical, idx);
+            file_infos.push(Some(FileInfo {
+                file_node,
+                def_nodes,
+                import_nodes,
+                references,
+            }));
+        }
+
+        graph.finalize();
+        sp.finish_with_message(format!(
+            "Phase B: {total_defs} defs, {total_imports} imports in {:.2?}",
+            t1.elapsed()
+        ));
+
+        // ── Phase C: parallel resolution ────────────────────────
+        let t2 = std::time::Instant::now();
+        let pb2 = progress_bar(file_count as u64, "Phase C: resolve");
+        let total_edges = std::sync::atomic::AtomicUsize::new(0);
+
+        let resolve_results: Vec<_> = file_infos
+            .par_iter()
+            .map(|info_opt| {
+                let Some(info) = info_opt else {
+                    pb2.inc(1);
+                    return Vec::new();
+                };
+
+                let result = crate::linker::v2::resolver::resolve_file_references(
+                    &graph,
+                    &info.references,
+                    info.file_node,
+                    &info.def_nodes,
+                    &info.import_nodes,
+                    &rules,
+                    &rules.settings,
+                );
+
+                total_edges.fetch_add(result.edges.len(), std::sync::atomic::Ordering::Relaxed);
+                pb2.inc(1);
+                result.edges
+            })
+            .collect();
+
+        pb2.finish_with_message(format!(
+            "Phase C: {} edges in {:.2?}",
+            total_edges.load(std::sync::atomic::Ordering::Relaxed),
+            t2.elapsed()
+        ));
+
+        // Add edges to graph
+        for edges in resolve_results {
+            for (src, tgt, edge) in edges {
+                graph.graph.add_edge(src, tgt, edge);
+            }
+        }
+
+        eprintln!("[v2-sp] total: {:.2?}", t0.elapsed());
+        Ok(PipelineOutput::Graph(Box::new(graph)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,7 +1,7 @@
 use code_graph_config::Language;
 use code_graph_types::DefKind;
 use parser_core::dsl::extractors::{Extract, ExtractList, metadata};
-use parser_core::dsl::types::*;
+use parser_core::dsl::types::{self, *};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -190,6 +190,13 @@ impl DslLanguage for KotlinDsl {
             loop_rule("while_statement"),
             loop_rule("do_while_statement"),
         ]
+    }
+
+    fn ssa_config() -> types::SsaConfig {
+        types::SsaConfig {
+            self_names: &["this", "self"],
+            super_name: Some("super"),
+        }
     }
 }
 

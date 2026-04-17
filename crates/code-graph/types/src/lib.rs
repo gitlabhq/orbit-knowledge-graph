@@ -3,6 +3,7 @@ mod fqn;
 mod node;
 mod range;
 mod scope;
+pub mod ssa;
 
 pub use edge::{EdgeKind, NodeKind, Relationship, containment_edge_kind, containment_relationship};
 pub use fqn::Fqn;

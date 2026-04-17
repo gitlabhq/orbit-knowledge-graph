@@ -2,7 +2,7 @@ use code_graph_config::Language;
 use code_graph_types::DefKind;
 use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
 use parser_core::dsl::predicates::*;
-use parser_core::dsl::types::*;
+use parser_core::dsl::types::{self, *};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -253,6 +253,13 @@ impl DslLanguage for PythonDsl {
                 iter_field: None,
             },
         ]
+    }
+
+    fn ssa_config() -> types::SsaConfig {
+        types::SsaConfig {
+            self_names: &["self"],
+            super_name: Some("super"),
+        }
     }
 }
 

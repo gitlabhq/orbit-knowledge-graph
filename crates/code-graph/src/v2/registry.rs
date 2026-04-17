@@ -15,7 +15,7 @@ use crate::v2::langs::kotlin::{KotlinDsl, KotlinRules};
 use crate::v2::langs::python::{PythonDsl, PythonRules};
 use crate::v2::langs::ruby::{RubyDsl, RubyRules};
 use crate::v2::pipeline::{
-    FileInput, GenericPipeline, LanguagePipeline, PipelineError, PipelineOutput,
+    FileInput, GenericPipeline, LanguagePipeline, PipelineError, PipelineOutput, SinglePassPipeline,
 };
 
 // ── Macro ───────────────────────────────────────────────────────
@@ -81,11 +81,11 @@ macro_rules! register_v2_pipelines {
 // ── Registration ────────────────────────────────────────────────
 
 register_v2_pipelines! {
-    Python  => [GenericPipeline<DslParser<PythonDsl>, PythonRules>],
-    Java    => [GenericPipeline<DslParser<JavaDsl>, JavaRules>],
-    Kotlin  => [GenericPipeline<DslParser<KotlinDsl>, KotlinRules>],
-    CSharp  => [GenericPipeline<DslParser<CSharpDsl>, NoRules<CSharpDsl>>],
-    Go      => [GenericPipeline<DslParser<GoDsl>, GoRules>],
-    Ruby    => [GenericPipeline<DslParser<RubyDsl>, RubyRules>],
+    Python  => [SinglePassPipeline<PythonDsl, PythonRules>],
+    Java    => [SinglePassPipeline<JavaDsl, JavaRules>],
+    Kotlin  => [SinglePassPipeline<KotlinDsl, KotlinRules>],
+    CSharp  => [SinglePassPipeline<CSharpDsl, NoRules<CSharpDsl>>],
+    Go      => [SinglePassPipeline<GoDsl, GoRules>],
+    Ruby    => [SinglePassPipeline<RubyDsl, RubyRules>],
     Tag("ruby_prism") => [RubyPipeline],
 }

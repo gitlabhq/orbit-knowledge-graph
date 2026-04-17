@@ -471,6 +471,10 @@ pub trait DslLanguage: Send + Sync + Default {
         vec![]
     }
 
+    fn ssa_config() -> SsaConfig {
+        SsaConfig::default()
+    }
+
     fn spec() -> LanguageSpec {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
@@ -478,7 +482,8 @@ pub trait DslLanguage: Send + Sync + Default {
                 .custom_scope(Self::custom_scope)
                 .with_bindings(Self::bindings())
                 .with_branches(Self::branches())
-                .with_loops(Self::loops());
+                .with_loops(Self::loops())
+                .with_ssa_config(Self::ssa_config());
         if let Some(cc) = Self::chain_config() {
             spec = spec.chain(cc);
         }
@@ -695,6 +700,28 @@ impl LoopRule {
     }
 }
 
+// ── SSA config ──────────────────────────────────────────────────
+
+/// Per-language SSA configuration. Tells the SSA engine which variable
+/// names to write when entering a type scope (class/module).
+pub struct SsaConfig {
+    /// Variable names written as `LocalDef(class_def_idx)` when entering a
+    /// type scope. e.g. `&["self"]` for Python, `&["this", "self"]` for Java.
+    pub self_names: &'static [&'static str],
+    /// Variable name for the super-class reference. Written as
+    /// `LocalDef(super_def_idx)` when entering a class with super_types.
+    pub super_name: Option<&'static str>,
+}
+
+impl Default for SsaConfig {
+    fn default() -> Self {
+        Self {
+            self_names: &[],
+            super_name: None,
+        }
+    }
+}
+
 // ── Function types ──────────────────────────────────────────────
 
 /// Function type for custom import handling.
@@ -752,6 +779,7 @@ pub struct LanguageSpec {
     pub(crate) custom_import_fn: Option<CustomImportFn>,
     pub(crate) custom_scope_fn: Option<CustomScopeFn>,
     pub(crate) module_from_path: bool,
+    pub ssa_config: SsaConfig,
 
     // Dispatch tables: node_kind → indices into the corresponding rule Vec.
     // Built once at construction, O(1) lookup per node during walk.
@@ -786,6 +814,7 @@ impl LanguageSpec {
             custom_import_fn: None,
             custom_scope_fn: None,
             module_from_path: false,
+            ssa_config: SsaConfig::default(),
             scope_dispatch,
             ref_dispatch,
             import_dispatch,
@@ -839,6 +868,11 @@ impl LanguageSpec {
     /// the module hierarchy comes from the filesystem, not from an AST node.
     pub fn module_scope_from_path(mut self) -> Self {
         self.module_from_path = true;
+        self
+    }
+
+    pub fn with_ssa_config(mut self, config: SsaConfig) -> Self {
+        self.ssa_config = config;
         self
     }
 }

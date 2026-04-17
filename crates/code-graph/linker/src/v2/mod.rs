@@ -1,5 +1,6 @@
 pub mod graph;
 pub mod imports;
+pub mod resolver;
 pub mod rules;
 pub mod ssa;
 pub mod state;
