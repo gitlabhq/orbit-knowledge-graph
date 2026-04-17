@@ -41,7 +41,7 @@ impl<'a> ResolveCtx<'a> {
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
     ) -> Self {
-        let import_map = pre_resolve_imports(graph, file_node, import_nodes);
+        let import_map = pre_resolve_imports(graph, file_node, import_nodes, rules.fqn_separator);
         Self {
             graph,
             file_node,
@@ -439,6 +439,7 @@ fn pre_resolve_imports(
     graph: &CodeGraph,
     _file_node: NodeIndex,
     import_nodes: &[NodeIndex],
+    sep: &str,
 ) -> FxHashMap<String, Vec<NodeIndex>> {
     let mut map: FxHashMap<String, Vec<NodeIndex>> = FxHashMap::default();
     for &import_node in import_nodes {
@@ -451,7 +452,7 @@ fn pre_resolve_imports(
                 .unwrap_or_default();
             if !effective_name.is_empty() {
                 let fqn = match gimp.name {
-                    Some(n) => format!("{}{}{}", graph.str(gimp.path), ".", graph.str(n),),
+                    Some(n) => format!("{}{}{}", graph.str(gimp.path), sep, graph.str(n)),
                     None => graph.str(gimp.path).to_string(),
                 };
                 let targets = graph.indexes.by_fqn.lookup(&fqn, |idx| {

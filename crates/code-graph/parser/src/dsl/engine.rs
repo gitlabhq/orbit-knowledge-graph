@@ -23,14 +23,6 @@ struct ScopeMatch {
     metadata: Option<Box<DefinitionMetadata>>,
 }
 
-/// Lightweight scope info for the fused walker (Phase 2).
-/// No metadata, no range — just what's needed for scope stack + SSA.
-pub struct ScopeInfo {
-    pub name: String,
-    pub creates_scope: bool,
-    pub is_type_scope: bool,
-}
-
 impl LanguageSpec {
     /// Parse source for defs+imports only (skip refs, bindings, control flow).
     /// Used by Phase 1 where only graph construction is needed.
@@ -708,38 +700,7 @@ impl LanguageSpec {
         }
     }
 
-    // ── Public API for fused walker (Phase 2) ───────────────
-
-    /// Match a scope rule. Returns lightweight info for scope stack + SSA.
-    pub fn match_scope(
-        &self,
-        node: &Node<StrDoc<SupportLang>>,
-        node_kind: &str,
-        import_map: &rustc_hash::FxHashMap<String, String>,
-        sep: &'static str,
-    ) -> Option<ScopeInfo> {
-        let m = self.evaluate_scope(node, node_kind, import_map, sep)?;
-        Some(ScopeInfo {
-            name: m.name,
-            creates_scope: m.creates_scope,
-            is_type_scope: m.def_kind.is_type_container(),
-        })
-    }
-
-    /// Match a reference rule. Returns name + optional expression chain.
-    pub fn match_reference(
-        &self,
-        node: &Node<StrDoc<SupportLang>>,
-        node_kind: &str,
-        import_map: &rustc_hash::FxHashMap<String, String>,
-        sep: &str,
-    ) -> Option<(String, Option<Vec<ExpressionStep>>)> {
-        let (name, _range, expression) =
-            self.evaluate_reference(node, node_kind, import_map, sep)?;
-        Some((name, expression))
-    }
-
-    // ── Single-pass parse with SSA ──────────────────────────
+    // ── parse_full: single walk with SSA ──────────────────────
 
     /// Parse source in a single pass: extract defs, imports, and
     /// SSA-annotated references. No second walk needed.
@@ -759,7 +720,7 @@ impl LanguageSpec {
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, &self.ssa_config);
+        let mut state = WalkFullState::new(&arena);
 
         if self.module_from_path
             && let Some(module) = file_path_to_module(file_path, sep)
@@ -822,7 +783,6 @@ impl LanguageSpec {
         let node_kind = node.kind();
         let nk = node_kind.as_ref();
         let mut pushed_scope = false;
-        let is_type_scope;
 
         // Package node
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
@@ -862,7 +822,7 @@ impl LanguageSpec {
                 Fqn::from_scope(&state.scope_stack, &m.name, sep)
             };
 
-            is_type_scope = m.def_kind.is_type_container();
+            let is_type_scope = m.def_kind.is_type_container();
 
             let def_name = m.name.clone();
             state.defs.push(CanonicalDefinition {
@@ -875,8 +835,7 @@ impl LanguageSpec {
                 metadata: m.metadata,
             });
 
-            // Write def name to SSA in the PARENT block so sibling scopes can see it.
-            // Must happen before creating the scope block (which changes current_block).
+            // Write def name to SSA in the parent block so sibling scopes can see it.
             let parent_block = if pushed_scope {
                 *state.saved_blocks.last().unwrap_or(&state.current_block)
             } else {
@@ -1204,7 +1163,7 @@ struct WalkFullState<'a> {
 }
 
 impl<'a> WalkFullState<'a> {
-    fn new(arena: &'a bumpalo::Bump, _ssa_config: &super::types::SsaConfig) -> Self {
+    fn new(arena: &'a bumpalo::Bump) -> Self {
         let mut ssa = super::ssa::SsaEngine::new();
         let entry = ssa.add_block();
         ssa.seal_block(entry);

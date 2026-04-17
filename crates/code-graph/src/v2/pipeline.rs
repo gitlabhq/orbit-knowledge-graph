@@ -237,14 +237,11 @@ impl Pipeline {
     }
 }
 
-// ── Single-pass pipeline ────────────────────────────────────────
-
 /// Generic pipeline parameterized by language spec `P` and rules `R`.
 ///
-/// Single-pass architecture — each file is parsed once:
-/// - **Phase A** (parallel): `parse_full()` per file → defs, imports, SSA-annotated refs
-/// - **Phase B** (sequential): build graph from defs/imports, finalize indexes
-/// - **Phase C** (parallel): resolve references → emit edges (no re-parse)
+/// - **Phase 1** (parallel): `parse_defs_only()` → add defs/imports to graph under Mutex
+/// - **Finalize**: build ancestor chains, drop construction indexes
+/// - **Phase 2** (parallel): `parse_full()` → SSA + resolve inline → emit edges
 pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
@@ -256,8 +253,6 @@ where
         files: &[FileInput],
         root_path: &str,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
-        use code_graph_types::CanonicalResult;
-
         let spec = P::spec();
         let rules = R::rules();
         let language = P::language();
@@ -269,9 +264,7 @@ where
             rayon::current_num_threads()
         );
 
-        // ── Phase A+B: parallel parse, Mutex graph build ────────
-        // Parse each file, add defs/imports to graph under Mutex (consumed
-        // immediately — no intermediate Vec<FileResult>), keep only refs.
+        // ── Phase 1: parallel parse_defs_only + graph build ─────
         let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
         let pb = progress_bar(file_count as u64, "parse + graph");
         let errors = Mutex::new(Vec::new());
@@ -348,7 +341,7 @@ where
         let mut graph = graph.into_inner().unwrap();
         graph.finalize();
 
-        // ── Phase C: parallel resolution ────────────────────────
+        // ── Phase 2: parallel parse_full + resolve ────────────
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
@@ -388,7 +381,6 @@ where
                     &rules,
                     &rules.settings,
                 );
-                // source + file_result dropped here
 
                 total_edges.fetch_add(result.edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
