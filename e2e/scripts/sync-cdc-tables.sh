@@ -58,22 +58,39 @@ curl -sfL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 120 -o "$ARC
 gzip -t "$ARCHIVE" 2>/dev/null || { echo "downloaded archive is not gzip (bad ref?)"; exit 1; }
 tar -xzf "$ARCHIVE" --strip-components=4 -C "$TABLES_RAW"
 
-# --- 2. Filter to database: main --------------------------------------------
+# --- 2. Filter to database: main, drop heavy partitioned tables -------------
 # Layout below only declares a `main` producer; siphon's helm generator hard-fails
 # on any SSOT table whose `database:` is not in the layout.
-SKIPPED=0
+#
+# TEMPORARY: skip these partitioned tables until we add tests that need them:
+#   - p_knowledge_graph_code_indexing_tasks: ~30 daily partitions; would be needed
+#     for code-indexing tests (none yet). Each partition snapshots in ~7s and they
+#     sort alphabetically before public.* in the publication, so leaving them in
+#     pushes test-relevant tables (notes, work_items, projects) ~3-4 min later
+#     than necessary, blowing the canary budget on a cold cluster.
+#   - merge_request_diff_files_99208b8fac: ~6 hash partitions; only needed for
+#     MR-diff tests (none yet).
+# Re-add by removing the corresponding entries from EXCLUDE_REGEX once the
+# matching test suite lands.
+EXCLUDE_REGEX='^(p_knowledge_graph_code_indexing_tasks|merge_request_diff_files_99208b8fac)$'
+
+SKIPPED_DB=0
+SKIPPED_HEAVY=0
 KEPT=0
 for f in "$TABLES_RAW"/*.yml "$TABLES_RAW"/*.yaml; do
   [[ -f "$f" ]] || continue
   db="$(yq -r '.database // "main"' "$f")"
-  if [[ "$db" == "main" ]]; then
+  table="$(basename "$f" | sed -E 's/\.(yml|yaml)$//')"
+  if [[ "$db" != "main" ]]; then
+    SKIPPED_DB=$((SKIPPED_DB+1))
+  elif [[ "$table" =~ $EXCLUDE_REGEX ]]; then
+    SKIPPED_HEAVY=$((SKIPPED_HEAVY+1))
+  else
     cp "$f" "$TABLES/"
     KEPT=$((KEPT+1))
-  else
-    SKIPPED=$((SKIPPED+1))
   fi
 done
-log "tables kept (main): $KEPT, skipped (other dbs): $SKIPPED"
+log "tables kept: $KEPT, skipped (other dbs): $SKIPPED_DB, skipped (heavy partitioned): $SKIPPED_HEAVY"
 [[ "$KEPT" -gt 0 ]] || { echo "no main-database tables found in SSOT"; exit 1; }
 
 # --- 3. Generate fragments via siphon schema binary --------------------------
