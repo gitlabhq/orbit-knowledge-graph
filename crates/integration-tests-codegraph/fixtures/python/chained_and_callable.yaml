@@ -99,15 +99,12 @@ tests:
       - { row: { caller: "main.mixed_caller", callee: "main.my_function" } }
 
   - name: "D28: callable_caller calls Callable (instantiation)"
-    # BUG: 2 identical rows. Callable() produces one edge, then obj()
-    # resolves obj → Callable via SSA alias, producing a duplicate.
-    # Same dedup issue as higher_order.yaml.
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callable_caller' AND callee.name = 'Callable'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
       - { row: { caller: "main.callable_caller", callee: "main.Callable" } }
 
   - name: "D41: C.method_c calls method_a (from parent A)"
