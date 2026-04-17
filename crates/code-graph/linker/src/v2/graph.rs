@@ -2,9 +2,10 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 
+use code_graph_config::Language;
 use code_graph_types::{
-    CanonicalDirectory, CanonicalFile, CanonicalResult, EdgeKind, NodeKind, Range, Relationship,
-    containment_relationship,
+    CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
+    Range, Relationship, containment_relationship,
 };
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -129,13 +130,17 @@ impl CodeGraph {
         self.strings.get(id)
     }
 
-    /// Add a single file's nodes to the graph.
-    pub fn add_file_nodes(
+    /// Add a single file's parsed defs and imports to the graph.
+    pub fn add_file(
         &mut self,
-        result: CanonicalResult,
-        _file_order: usize,
+        path: &str,
+        extension: &str,
+        language: Language,
+        file_size: u64,
+        definitions: &[CanonicalDefinition],
+        imports: &[CanonicalImport],
     ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
-        let relative_path = self.relative_path(&result.file_path);
+        let relative_path = self.relative_path(path);
         let file_path: Arc<str> = Arc::from(relative_path.as_str());
 
         let file_name = Path::new(&relative_path)
@@ -146,9 +151,9 @@ impl CodeGraph {
         let file_node = self.graph.add_node(GraphNode::File(CanonicalFile {
             path: relative_path.clone(),
             name: file_name,
-            extension: result.extension.clone(),
-            language: result.language,
-            size: result.file_size,
+            extension: extension.to_string(),
+            language,
+            size: file_size,
         }));
         if let Some(fi) = &mut self.indexes.file_index {
             fi.insert(relative_path.clone(), file_node);
@@ -164,10 +169,9 @@ impl CodeGraph {
 
         // Convert canonical defs → pool-backed GraphDefs.
         let def_base = self.defs.len() as u32;
-        let mut def_nodes = Vec::with_capacity(result.definitions.len());
+        let mut def_nodes = Vec::with_capacity(definitions.len());
 
-        let graph_defs: Vec<GraphDef> = result
-            .definitions
+        let graph_defs: Vec<GraphDef> = definitions
             .iter()
             .map(|d| GraphDef::from_canonical(d, &mut self.strings))
             .collect();
@@ -185,7 +189,6 @@ impl CodeGraph {
             self.indexes.by_fqn.insert(fqn_str, def_node);
             self.indexes.by_name.insert(name_str, def_node);
 
-            // Compute parent FQN by string slicing (no allocation needed).
             if let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) {
                 let parent = &fqn_str[..sep_pos];
                 self.indexes.nested.insert(parent, name_str, def_node);
@@ -223,10 +226,9 @@ impl CodeGraph {
         self.defs.extend(graph_defs);
 
         // Convert canonical imports → pool-backed GraphImports.
-        let mut import_nodes = Vec::with_capacity(result.imports.len());
+        let mut import_nodes = Vec::with_capacity(imports.len());
         let import_base = self.imports.len() as u32;
-        let graph_imports: Vec<GraphImport> = result
-            .imports
+        let graph_imports: Vec<GraphImport> = imports
             .iter()
             .map(|imp| GraphImport::from_canonical(imp, &mut self.strings))
             .collect();
@@ -334,15 +336,6 @@ impl CodeGraph {
 
         let parent_dir = dir_to_string(path.parent()?);
         dir_index.get(&parent_dir).copied()
-    }
-
-    pub fn from_results(results: Vec<CanonicalResult>, root_path: String) -> Self {
-        let mut cg = Self::new_with_root(root_path);
-        for (i, result) in results.into_iter().enumerate() {
-            cg.add_file_nodes(result, i);
-        }
-        cg.finalize();
-        cg
     }
 
     pub fn relative_path(&self, file_path: &str) -> String {
@@ -785,18 +778,18 @@ mod tests {
     use code_graph_config::Language;
     use code_graph_types::*;
 
-    fn make_result(file_path: &str, defs: Vec<CanonicalDefinition>) -> CanonicalResult {
-        CanonicalResult {
-            file_path: file_path.to_string(),
-            extension: "py".to_string(),
-            file_size: 100,
-            language: Language::Python,
-            definitions: defs,
-            imports: vec![],
-            references: vec![],
-            bindings: vec![],
-            control_flow: vec![],
+    fn build_graph(file_path: &str, defs: Vec<CanonicalDefinition>) -> CodeGraph {
+        build_graph_multi(vec![(file_path, defs)])
+    }
+
+    fn build_graph_multi(files: Vec<(&str, Vec<CanonicalDefinition>)>) -> CodeGraph {
+        let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        for (path, defs) in &files {
+            let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+            cg.add_file(path, ext, Language::Python, 100, defs, &[]);
         }
+        cg.finalize();
+        cg
     }
 
     fn make_def(name: &str, fqn_parts: &[&str], kind: DefKind) -> CanonicalDefinition {
@@ -813,13 +806,10 @@ mod tests {
 
     #[test]
     fn builds_file_and_directory_nodes() {
-        let cg = CodeGraph::from_results(
-            vec![
-                make_result("/repo/src/main.py", vec![]),
-                make_result("/repo/src/utils/helpers.py", vec![]),
-            ],
-            "/repo".to_string(),
-        );
+        let cg = build_graph_multi(vec![
+            ("/repo/src/main.py", vec![]),
+            ("/repo/src/utils/helpers.py", vec![]),
+        ]);
 
         let files: Vec<_> = cg.files().map(|(_, f)| &f.path).collect();
         assert_eq!(files.len(), 2);
@@ -834,10 +824,7 @@ mod tests {
 
     #[test]
     fn builds_directory_containment_edges() {
-        let cg = CodeGraph::from_results(
-            vec![make_result("/repo/src/utils/helpers.py", vec![])],
-            "/repo".to_string(),
-        );
+        let cg = build_graph("/repo/src/utils/helpers.py", vec![]);
 
         let dir_dir: Vec<_> = cg
             .edges()
@@ -851,10 +838,7 @@ mod tests {
 
     #[test]
     fn builds_dir_to_file_edges() {
-        let cg = CodeGraph::from_results(
-            vec![make_result("/repo/src/main.py", vec![])],
-            "/repo".to_string(),
-        );
+        let cg = build_graph("/repo/src/main.py", vec![]);
 
         let dir_file: Vec<_> = cg
             .edges()
@@ -870,12 +854,9 @@ mod tests {
 
     #[test]
     fn builds_file_to_definition_edges() {
-        let cg = CodeGraph::from_results(
-            vec![make_result(
-                "/repo/main.py",
-                vec![make_def("Foo", &["Foo"], DefKind::Class)],
-            )],
-            "/repo".to_string(),
+        let cg = build_graph(
+            "/repo/main.py",
+            vec![make_def("Foo", &["Foo"], DefKind::Class)],
         );
 
         let file_def: Vec<_> = cg
@@ -890,15 +871,12 @@ mod tests {
 
     #[test]
     fn builds_definition_containment_edges() {
-        let cg = CodeGraph::from_results(
-            vec![make_result(
-                "/repo/main.py",
-                vec![
-                    make_def("Foo", &["Foo"], DefKind::Class),
-                    make_def("bar", &["Foo", "bar"], DefKind::Method),
-                ],
-            )],
-            "/repo".to_string(),
+        let cg = build_graph(
+            "/repo/main.py",
+            vec![
+                make_def("Foo", &["Foo"], DefKind::Class),
+                make_def("bar", &["Foo", "bar"], DefKind::Method),
+            ],
         );
 
         let def_def: Vec<_> = cg
@@ -922,13 +900,7 @@ mod tests {
 
     #[test]
     fn no_duplicate_directories() {
-        let cg = CodeGraph::from_results(
-            vec![
-                make_result("/repo/src/a.py", vec![]),
-                make_result("/repo/src/b.py", vec![]),
-            ],
-            "/repo".to_string(),
-        );
+        let cg = build_graph_multi(vec![("/repo/src/a.py", vec![]), ("/repo/src/b.py", vec![])]);
 
         let src_count = cg.directories().filter(|(_, d)| d.path == "src").count();
         assert_eq!(src_count, 1);
@@ -936,15 +908,12 @@ mod tests {
 
     #[test]
     fn resolution_indexes_populated() {
-        let cg = CodeGraph::from_results(
-            vec![make_result(
-                "/repo/main.py",
-                vec![
-                    make_def("Foo", &["Foo"], DefKind::Class),
-                    make_def("bar", &["Foo", "bar"], DefKind::Method),
-                ],
-            )],
-            "/repo".to_string(),
+        let cg = build_graph(
+            "/repo/main.py",
+            vec![
+                make_def("Foo", &["Foo"], DefKind::Class),
+                make_def("bar", &["Foo", "bar"], DefKind::Method),
+            ],
         );
 
         assert_eq!(

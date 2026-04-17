@@ -1,7 +1,7 @@
 use code_graph_config::Language;
 use code_graph_types::DefKind;
 use parser_core::dsl::extractors::{Extract, ExtractList, metadata};
-use parser_core::dsl::types::*;
+use parser_core::dsl::types::{self, *};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -191,6 +191,13 @@ impl DslLanguage for KotlinDsl {
             loop_rule("do_while_statement"),
         ]
     }
+
+    fn ssa_config() -> types::SsaConfig {
+        types::SsaConfig {
+            self_names: &["this", "self"],
+            super_name: Some("super"),
+        }
+    }
 }
 
 // ── Resolution rules ────────────────────────────────────────────
@@ -236,13 +243,15 @@ impl HasRules for KotlinRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_types::CanonicalParser;
 
-    fn parse(code: &str) -> code_graph_types::CanonicalResult {
-        DslParser::<KotlinDsl>::default()
-            .parse_file(code.as_bytes(), "Test.kt")
+    fn parse(code: &str) -> parser_core::dsl::engine::ParsedDefs {
+        KotlinDsl::spec()
+            .parse_defs_only(
+                code.as_bytes(),
+                "Test.kt",
+                code_graph_config::Language::Kotlin,
+            )
             .unwrap()
-            .0
     }
 
     #[test]

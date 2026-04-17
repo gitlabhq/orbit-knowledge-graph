@@ -365,12 +365,6 @@ impl ImportRule {
         self
     }
 
-    /// Set the symbol name used for wildcard imports (default: "*").
-    pub fn wildcard_sym(mut self, sym: &'static str) -> Self {
-        self.wildcard_symbol = sym;
-        self
-    }
-
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
         self.classify.map_or(self.label, |f| f(node))
     }
@@ -428,25 +422,6 @@ pub trait DslLanguage: Send + Sync + Default {
         vec![]
     }
 
-    /// Custom import extraction for languages with complex import syntax.
-    /// Called for every AST node. Return `true` if the node was handled
-    /// (skips the declarative import rules for this node).
-    fn custom_import(_node: &N<'_>, _imports: &mut Vec<code_graph_types::CanonicalImport>) -> bool {
-        false
-    }
-
-    /// Custom definition extraction for nodes that produce multiple definitions
-    /// from a single AST node (e.g. Ruby's `attr_accessor :name, :email`).
-    /// Called for every AST node. Return `true` if handled.
-    fn custom_scope(
-        _node: &N<'_>,
-        _defs: &mut Vec<code_graph_types::CanonicalDefinition>,
-        _scope_stack: &[std::sync::Arc<str>],
-        _sep: &'static str,
-    ) -> bool {
-        false
-    }
-
     fn chain_config() -> Option<ChainConfig> {
         None
     }
@@ -455,8 +430,8 @@ pub trait DslLanguage: Send + Sync + Default {
         None
     }
 
-    fn module_scope_from_path() -> bool {
-        false
+    fn hooks() -> LanguageHooks {
+        LanguageHooks::default()
     }
 
     fn bindings() -> Vec<BindingRule> {
@@ -471,62 +446,25 @@ pub trait DslLanguage: Send + Sync + Default {
         vec![]
     }
 
+    fn ssa_config() -> SsaConfig {
+        SsaConfig::default()
+    }
+
     fn spec() -> LanguageSpec {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
-                .custom_import(Self::custom_import)
-                .custom_scope(Self::custom_scope)
+                .with_hooks(Self::hooks())
                 .with_bindings(Self::bindings())
                 .with_branches(Self::branches())
-                .with_loops(Self::loops());
+                .with_loops(Self::loops())
+                .with_ssa_config(Self::ssa_config());
         if let Some(cc) = Self::chain_config() {
             spec = spec.chain(cc);
         }
         if let Some((kind, extract)) = Self::package_node() {
             spec = spec.package(kind, extract);
         }
-        if Self::module_scope_from_path() {
-            spec = spec.module_scope_from_path();
-        }
         spec
-    }
-}
-
-/// Generic DSL-based canonical parser.
-///
-/// Wraps a `DslLanguage` impl and provides `CanonicalParser` functionality.
-/// No hand-written AST walking — everything is driven by declarative rules.
-pub struct DslParser<L: DslLanguage>(std::marker::PhantomData<L>);
-
-impl<L: DslLanguage> Default for DslParser<L> {
-    fn default() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-
-impl<L: DslLanguage> code_graph_types::CanonicalParser for DslParser<L> {
-    type Ast = treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>;
-
-    fn parse_file(
-        &self,
-        source: &[u8],
-        file_path: &str,
-    ) -> anyhow::Result<(code_graph_types::CanonicalResult, Self::Ast)> {
-        let spec = L::spec();
-        let (result, ast) = spec.parse_canonical(source, file_path, L::language())?;
-        Ok((result, ast))
-    }
-}
-
-impl<L: DslLanguage> DslParser<L> {
-    /// Parse for defs+imports only (skip refs/bindings/cf). No AST returned.
-    pub fn parse_defs_only(
-        &self,
-        source: &[u8],
-        file_path: &str,
-    ) -> anyhow::Result<code_graph_types::CanonicalResult> {
-        let spec = L::spec();
-        Ok(spec.parse_defs_only(source, file_path, L::language())?)
     }
 }
 
@@ -695,18 +633,41 @@ impl LoopRule {
     }
 }
 
-// ── Function types ──────────────────────────────────────────────
+// ── SSA config ──────────────────────────────────────────────────
 
-/// Function type for custom import handling.
-pub type CustomImportFn = fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool;
+/// Per-language SSA configuration. Tells the SSA engine which variable
+/// names to write when entering a type scope (class/module).
+#[derive(Default)]
+pub struct SsaConfig {
+    /// Variable names written as `LocalDef(class_def_idx)` when entering a
+    /// type scope. e.g. `&["self"]` for Python, `&["this", "self"]` for Java.
+    pub self_names: &'static [&'static str],
+    /// Variable name for the super-class reference. Written as
+    /// `LocalDef(super_def_idx)` when entering a class with super_types.
+    pub super_name: Option<&'static str>,
+}
 
-/// Function type for custom scope/definition handling.
-pub type CustomScopeFn = fn(
+// ── Hooks ───────────────────────────────────────────────────────
+
+/// Function type for injecting extra definitions after scope matching.
+pub type ScopeHookFn = fn(
     &N<'_>,
     &mut Vec<code_graph_types::CanonicalDefinition>,
     &[std::sync::Arc<str>],
     &'static str,
 ) -> bool;
+
+/// Language-specific escape hatches. All fields default to `None`.
+/// The engine calls each hook if set, otherwise uses default behavior.
+#[derive(Default)]
+pub struct LanguageHooks {
+    /// Derive a module scope from a file path before walking.
+    pub module_scope: Option<fn(&str, &str) -> Option<String>>,
+    /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
+    pub on_scope: Option<ScopeHookFn>,
+    /// Override import extraction (e.g. Ruby require/require_relative).
+    pub on_import: Option<fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool>,
+}
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {
     let mut map: FxHashMap<&'static str, Vec<usize>> = FxHashMap::default();
@@ -749,9 +710,8 @@ pub struct LanguageSpec {
     pub loops: Vec<LoopRule>,
     pub chain_config: Option<ChainConfig>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
-    pub(crate) custom_import_fn: Option<CustomImportFn>,
-    pub(crate) custom_scope_fn: Option<CustomScopeFn>,
-    pub(crate) module_from_path: bool,
+    pub(crate) hooks: LanguageHooks,
+    pub ssa_config: SsaConfig,
 
     // Dispatch tables: node_kind → indices into the corresponding rule Vec.
     // Built once at construction, O(1) lookup per node during walk.
@@ -783,9 +743,8 @@ impl LanguageSpec {
             loops: Vec::new(),
             chain_config: None,
             package_node: None,
-            custom_import_fn: None,
-            custom_scope_fn: None,
-            module_from_path: false,
+            hooks: LanguageHooks::default(),
+            ssa_config: SsaConfig::default(),
             scope_dispatch,
             ref_dispatch,
             import_dispatch,
@@ -825,20 +784,13 @@ impl LanguageSpec {
         self
     }
 
-    pub fn custom_import(mut self, f: CustomImportFn) -> Self {
-        self.custom_import_fn = Some(f);
+    pub fn with_hooks(mut self, hooks: LanguageHooks) -> Self {
+        self.hooks = hooks;
         self
     }
 
-    pub fn custom_scope(mut self, f: CustomScopeFn) -> Self {
-        self.custom_scope_fn = Some(f);
-        self
-    }
-
-    /// Derive module scope from file path. For languages like Python where
-    /// the module hierarchy comes from the filesystem, not from an AST node.
-    pub fn module_scope_from_path(mut self) -> Self {
-        self.module_from_path = true;
+    pub fn with_ssa_config(mut self, config: SsaConfig) -> Self {
+        self.ssa_config = config;
         self
     }
 }

@@ -2,7 +2,7 @@ use code_graph_config::Language;
 use code_graph_types::DefKind;
 use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
 use parser_core::dsl::predicates::*;
-use parser_core::dsl::types::*;
+use parser_core::dsl::types::{self, *};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -91,8 +91,11 @@ impl DslLanguage for PythonDsl {
         Language::Python
     }
 
-    fn module_scope_from_path() -> bool {
-        true
+    fn hooks() -> parser_core::dsl::types::LanguageHooks {
+        parser_core::dsl::types::LanguageHooks {
+            module_scope: Some(python_module_from_path),
+            ..parser_core::dsl::types::LanguageHooks::default()
+        }
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -254,6 +257,13 @@ impl DslLanguage for PythonDsl {
             },
         ]
     }
+
+    fn ssa_config() -> types::SsaConfig {
+        types::SsaConfig {
+            self_names: &["self"],
+            super_name: Some("super"),
+        }
+    }
 }
 
 // ── Resolution rules ────────────────────────────────────────────
@@ -289,16 +299,36 @@ impl HasRules for PythonRules {
     }
 }
 
+/// Derive module scope from file path.
+/// `services/user_service.py` → `services.user_service`
+/// `models/__init__.py` → `models`
+/// `main.py` → `main`
+fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
+    let path = std::path::Path::new(file_path);
+    let stem = path.with_extension("");
+    let stem_str = stem.to_str()?;
+    let module = stem_str.replace(['/', '\\'], sep);
+    let module = module
+        .strip_suffix(&format!("{sep}__init__"))
+        .unwrap_or(&module);
+    if module.is_empty() {
+        return None;
+    }
+    Some(module.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_types::CanonicalParser;
 
-    fn parse(code: &str) -> code_graph_types::CanonicalResult {
-        DslParser::<PythonDsl>::default()
-            .parse_file(code.as_bytes(), "test.py")
+    fn parse(code: &str) -> parser_core::dsl::engine::ParsedDefs {
+        PythonDsl::spec()
+            .parse_defs_only(
+                code.as_bytes(),
+                "test.py",
+                code_graph_config::Language::Python,
+            )
             .unwrap()
-            .0
     }
 
     #[test]
@@ -337,9 +367,17 @@ mod tests {
 
     #[test]
     fn call_references() {
-        let result = parse("def foo():\n    bar()\n");
-        assert!(!result.references.is_empty());
-        assert!(result.references.iter().any(|r| r.name == "bar"));
+        let mut ref_names = Vec::new();
+        PythonDsl::spec()
+            .parse_full_and_resolve(
+                b"def foo():\n    bar()\n",
+                "test.py",
+                code_graph_config::Language::Python,
+                |name, _, _, _| ref_names.push(name.to_string()),
+            )
+            .unwrap();
+        assert!(!ref_names.is_empty());
+        assert!(ref_names.iter().any(|n| n == "bar"));
     }
 
     #[test]
