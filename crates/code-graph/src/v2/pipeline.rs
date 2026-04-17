@@ -282,7 +282,6 @@ where
             file_node: petgraph::graph::NodeIndex,
             def_nodes: Vec<petgraph::graph::NodeIndex>,
             import_nodes: Vec<petgraph::graph::NodeIndex>,
-            references: Vec<code_graph_types::ssa::ReferenceEvent>,
         }
 
         let file_infos: Vec<Option<FileInfo>> = files
@@ -302,7 +301,7 @@ where
                     }
                 };
 
-                let result = match spec.parse_full(&source, path, language) {
+                let result = match spec.parse_defs_only(&source, path, language) {
                     Ok(r) => r,
                     Err(e) => {
                         errors.lock().unwrap().push(PipelineError {
@@ -320,32 +319,16 @@ where
                 );
                 total_imports.fetch_add(result.imports.len(), std::sync::atomic::Ordering::Relaxed);
 
-                let references = result.references;
-
-                let canonical = CanonicalResult {
-                    file_path: result.file_path,
-                    extension: result.extension,
-                    file_size: result.file_size,
-                    language: result.language,
-                    definitions: result.definitions,
-                    imports: result.imports,
-                    references: Vec::new(),
-                    bindings: Vec::new(),
-                    control_flow: Vec::new(),
-                };
-
                 let (file_node, def_nodes, import_nodes) = {
                     let mut g = graph.lock().unwrap();
-                    g.add_file_nodes(canonical, idx)
+                    g.add_file_nodes(result, idx)
                 };
-                // source + CanonicalResult dropped here — only refs survive
 
                 pb.inc(1);
                 Some(FileInfo {
                     file_node,
                     def_nodes,
                     import_nodes,
-                    references,
                 })
             })
             .collect();
@@ -372,21 +355,40 @@ where
 
         let resolve_results: Vec<_> = file_infos
             .into_par_iter()
-            .map(|info_opt| {
+            .zip(files.par_iter())
+            .map(|(info_opt, path)| {
                 let Some(info) = info_opt else {
                     pb2.inc(1);
                     return Vec::new();
                 };
 
+                let abs_path = format!("{root_path}/{path}");
+                let source = match std::fs::read(&abs_path) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        pb2.inc(1);
+                        return Vec::new();
+                    }
+                };
+
+                let file_result = match spec.parse_full(&source, path, language) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        pb2.inc(1);
+                        return Vec::new();
+                    }
+                };
+
                 let result = crate::linker::v2::resolver::resolve_file_references(
                     &graph,
-                    &info.references,
+                    &file_result.references,
                     info.file_node,
                     &info.def_nodes,
                     &info.import_nodes,
                     &rules,
                     &rules.settings,
                 );
+                // source + file_result dropped here
 
                 total_edges.fetch_add(result.edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
