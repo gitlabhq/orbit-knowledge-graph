@@ -109,6 +109,10 @@ pub fn resolve_file_references(
     rules: &ResolutionRules,
     settings: &ResolveSettings,
 ) -> ResolveResult {
+    if refs.is_empty() {
+        return ResolveResult { edges: Vec::new() };
+    }
+
     let mut edges = Vec::new();
     let mut ctx = ResolveCtx::new(graph, file_node, def_nodes, import_nodes, rules, settings);
 
@@ -198,6 +202,9 @@ fn resolve_bare(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<Nod
                 )
             }
             ResolveStage::ImplicitMember => {
+                if !ctx.graph.indexes.by_name.contains(&ref_event.name) {
+                    continue;
+                }
                 if let Some(enclosing_idx) = ref_event.enclosing_def
                     && let Some(&enclosing_node) = ctx.def_nodes.get(enclosing_idx as usize)
                 {
