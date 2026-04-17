@@ -1,6 +1,7 @@
 {{ $sha := requiredEnv "E2E_SHA" }}
 {{ $producer := fromYaml (readFile "../config/cdc-producer.yaml") }}
 {{ $consumer := fromYaml (readFile "../config/cdc-consumer.yaml") }}
+{{ $reconciler := fromYaml (readFile "../config/cdc-reconciler.yaml") }}
 {{ $v := fromYaml (readFile "../config/versions.yaml") }}
 
 namespace: e2e-{{ $sha }}-siphon
@@ -107,6 +108,24 @@ deploymentProfiles:
       prometheus: {}
       queueing: {}
 
+  reconciler:
+    enabled: true
+    mode: reconciler
+    command:
+      - /app/siphon
+      - reconciler
+      - --config=/etc/config/config.yaml
+      - --log-level=info
+    env:
+      - name: GOMEMLIMIT
+        value: "1500MiB"
+      - name: GOGC
+        value: "50"
+    appConfig:
+      prometheus: {}
+      queueing: {}
+      clickhouse: {}
+
 deployments:
   postgres-producer:
     profile: producer
@@ -136,3 +155,10 @@ deployments:
       application_identifier: e2e_siphon_consumer_1
       streams: {{ required "cdc-consumer.yaml missing streams" $consumer.streams | toYaml | nindent 8 }}
       clickhouse: {{ required "cdc-consumer.yaml missing clickhouse" $consumer.clickhouse | toYaml | nindent 8 }}
+
+  reconciler:
+    profile: reconciler
+    appConfig:
+      application_identifier: e2e_siphon_reconciler_1
+      concurrency: 10
+      schedules: {{ required "cdc-reconciler.yaml missing schedules" $reconciler.schedules | toYaml | nindent 8 }}
