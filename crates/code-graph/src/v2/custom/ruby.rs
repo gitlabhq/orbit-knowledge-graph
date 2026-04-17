@@ -27,7 +27,7 @@ impl LanguagePipeline for RubyPipeline {
         let mut next_id: i64 = 1;
 
         for file_path in files {
-            let abs_path = if file_path.starts_with(root_path) {
+            let abs_path = if Path::new(file_path.as_str()).starts_with(root_path) {
                 file_path.clone()
             } else {
                 format!("{root_path}/{file_path}")
@@ -78,6 +78,11 @@ impl LanguagePipeline for RubyPipeline {
 
         if !errors.is_empty() && file_entries.is_empty() {
             return Err(errors);
+        }
+        if !errors.is_empty() {
+            for e in &errors {
+                eprintln!("[ruby_prism] skipped {}: {}", e.file_path, e.error);
+            }
         }
 
         let file_batch = build_file_batch(&file_entries)?;
@@ -142,8 +147,8 @@ impl PrismVisitor<'_> {
             format!("{}::{name}", prefix.join("::"))
         };
 
-        let start_line = self.source[..start].lines().count() as i64;
-        let end_line = self.source[..end].lines().count() as i64;
+        let start_line = self.source[..start].lines().count() as i64 + 1;
+        let end_line = self.source[..end].lines().count() as i64 + 1;
 
         self.defs.push(DefEntry {
             id: def_id,

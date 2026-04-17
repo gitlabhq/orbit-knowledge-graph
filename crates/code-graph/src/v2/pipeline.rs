@@ -296,6 +296,12 @@ pub struct PipelineResult {
     pub errors: Vec<PipelineError>,
 }
 
+/// Aggregate stats from the pipeline run.
+///
+/// Note: `definitions_count`, `imports_count`, `references_count`, and
+/// `edges_count` only reflect `PipelineOutput::Graph` outputs. Custom
+/// pipelines returning `PipelineOutput::Batches` contribute to
+/// `files_parsed` but not to the entity counts.
 pub struct PipelineStats {
     pub files_parsed: usize,
     pub files_skipped: usize,
