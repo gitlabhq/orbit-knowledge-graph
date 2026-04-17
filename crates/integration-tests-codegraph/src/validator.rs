@@ -151,8 +151,10 @@ fn apply_filter(batch: &RecordBatch, where_clause: &HashMap<String, String>) -> 
                 }
                 Arc::new(b.finish()) as Arc<dyn Array>
             } else {
-                // Unsupported type — keep all rows (will show up in debugging)
-                col.clone()
+                panic!(
+                    "where filter: unsupported column type {:?}",
+                    col.data_type()
+                );
             }
         })
         .collect();
