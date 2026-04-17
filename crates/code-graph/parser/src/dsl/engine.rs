@@ -562,18 +562,17 @@ impl LanguageSpec {
                         super::ssa::SsaValue::Type(scope_fqn),
                     );
                 }
-                if let Some(super_name) = self.ssa_config.super_name {
-                    if let Some(meta) = &state.defs[def_index as usize].metadata
-                        && let Some(super_type) = meta.super_types.first()
-                    {
-                        let st = state.arena.alloc_str(super_type);
-                        let name = state.arena.alloc_str(super_name);
-                        state.ssa.write_variable(
-                            name,
-                            state.current_block,
-                            super::ssa::SsaValue::Type(st),
-                        );
-                    }
+                if let Some(super_name) = self.ssa_config.super_name
+                    && let Some(meta) = &state.defs[def_index as usize].metadata
+                    && let Some(super_type) = meta.super_types.first()
+                {
+                    let st = state.arena.alloc_str(super_type);
+                    let name = state.arena.alloc_str(super_name);
+                    state.ssa.write_variable(
+                        name,
+                        state.current_block,
+                        super::ssa::SsaValue::Type(st),
+                    );
                 }
             }
 

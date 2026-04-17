@@ -779,25 +779,11 @@ mod tests {
     use code_graph_types::*;
 
     fn build_graph(file_path: &str, defs: Vec<CanonicalDefinition>) -> CodeGraph {
-        let root = file_path
-            .rsplit_once('/')
-            .map(|(r, _)| r)
-            .unwrap_or("")
-            .to_string();
-        let mut cg = CodeGraph::new_with_root(root);
-        let ext = file_path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
-        cg.add_file(file_path, ext, Language::Python, 100, &defs, &[]);
-        cg.finalize();
-        cg
+        build_graph_multi(vec![(file_path, defs)])
     }
 
     fn build_graph_multi(files: Vec<(&str, Vec<CanonicalDefinition>)>) -> CodeGraph {
-        let root = files
-            .first()
-            .and_then(|(p, _)| p.rsplit_once('/').map(|(r, _)| r))
-            .unwrap_or("")
-            .to_string();
-        let mut cg = CodeGraph::new_with_root(root);
+        let mut cg = CodeGraph::new_with_root("/repo".to_string());
         for (path, defs) in &files {
             let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
             cg.add_file(path, ext, Language::Python, 100, defs, &[]);

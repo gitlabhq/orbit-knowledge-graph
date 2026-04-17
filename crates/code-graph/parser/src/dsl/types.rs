@@ -637,6 +637,7 @@ impl LoopRule {
 
 /// Per-language SSA configuration. Tells the SSA engine which variable
 /// names to write when entering a type scope (class/module).
+#[derive(Default)]
 pub struct SsaConfig {
     /// Variable names written as `LocalDef(class_def_idx)` when entering a
     /// type scope. e.g. `&["self"]` for Python, `&["this", "self"]` for Java.
@@ -646,43 +647,26 @@ pub struct SsaConfig {
     pub super_name: Option<&'static str>,
 }
 
-impl Default for SsaConfig {
-    fn default() -> Self {
-        Self {
-            self_names: &[],
-            super_name: None,
-        }
-    }
-}
-
 // ── Hooks ───────────────────────────────────────────────────────
+
+/// Function type for injecting extra definitions after scope matching.
+pub type ScopeHookFn = fn(
+    &N<'_>,
+    &mut Vec<code_graph_types::CanonicalDefinition>,
+    &[std::sync::Arc<str>],
+    &'static str,
+) -> bool;
 
 /// Language-specific escape hatches. All fields default to `None`.
 /// The engine calls each hook if set, otherwise uses default behavior.
+#[derive(Default)]
 pub struct LanguageHooks {
     /// Derive a module scope from a file path before walking.
     pub module_scope: Option<fn(&str, &str) -> Option<String>>,
     /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
-    pub on_scope: Option<
-        fn(
-            &N<'_>,
-            &mut Vec<code_graph_types::CanonicalDefinition>,
-            &[std::sync::Arc<str>],
-            &'static str,
-        ) -> bool,
-    >,
+    pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool>,
-}
-
-impl Default for LanguageHooks {
-    fn default() -> Self {
-        Self {
-            module_scope: None,
-            on_scope: None,
-            on_import: None,
-        }
-    }
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {
