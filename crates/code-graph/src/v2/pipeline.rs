@@ -366,8 +366,6 @@ where
         graph.finalize();
 
         // ── Phase C: parallel resolution ────────────────────────
-        // Take references out of FileInfo so they're dropped after resolution,
-        // not held for the entire phase.
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
@@ -389,7 +387,6 @@ where
                     &rules,
                     &rules.settings,
                 );
-                // info (including references) dropped here
 
                 total_edges.fetch_add(result.edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
