@@ -269,13 +269,26 @@ where
             rayon::current_num_threads()
         );
 
-        // ── Phase A: parallel parse_full ────────────────────────
-        let pb = progress_bar(file_count as u64, "Phase A: parse");
+        // ── Phase A+B: parallel parse, Mutex graph build ────────
+        // Parse each file, add defs/imports to graph under Mutex (consumed
+        // immediately — no intermediate Vec<FileResult>), keep only refs.
+        let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
+        let pb = progress_bar(file_count as u64, "parse + graph");
         let errors = Mutex::new(Vec::new());
+        let total_defs = std::sync::atomic::AtomicUsize::new(0);
+        let total_imports = std::sync::atomic::AtomicUsize::new(0);
 
-        let parse_results: Vec<Option<code_graph_types::ssa::FileResult>> = files
+        struct FileInfo {
+            file_node: petgraph::graph::NodeIndex,
+            def_nodes: Vec<petgraph::graph::NodeIndex>,
+            import_nodes: Vec<petgraph::graph::NodeIndex>,
+            references: Vec<code_graph_types::ssa::ReferenceEvent>,
+        }
+
+        let file_infos: Vec<Option<FileInfo>> = files
             .par_iter()
-            .map(|path| {
+            .enumerate()
+            .map(|(idx, path)| {
                 let abs_path = format!("{root_path}/{path}");
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
@@ -301,75 +314,56 @@ where
                     }
                 };
 
+                total_defs.fetch_add(
+                    result.definitions.len(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                total_imports.fetch_add(result.imports.len(), std::sync::atomic::Ordering::Relaxed);
+
+                let references = result.references;
+
+                let canonical = CanonicalResult {
+                    file_path: result.file_path,
+                    extension: result.extension,
+                    file_size: result.file_size,
+                    language: result.language,
+                    definitions: result.definitions,
+                    imports: result.imports,
+                    references: Vec::new(),
+                    bindings: Vec::new(),
+                    control_flow: Vec::new(),
+                };
+
+                let (file_node, def_nodes, import_nodes) = {
+                    let mut g = graph.lock().unwrap();
+                    g.add_file_nodes(canonical, idx)
+                };
+                // source + CanonicalResult dropped here — only refs survive
+
                 pb.inc(1);
-                Some(result)
+                Some(FileInfo {
+                    file_node,
+                    def_nodes,
+                    import_nodes,
+                    references,
+                })
             })
             .collect();
 
         pb.finish_with_message(format!(
-            "Phase A: {file_count} files in {:.2?}",
+            "{} defs, {} imports in {:.2?}",
+            total_defs.load(std::sync::atomic::Ordering::Relaxed),
+            total_imports.load(std::sync::atomic::Ordering::Relaxed),
             t0.elapsed()
         ));
 
         let errors = errors.into_inner().unwrap();
-        if !errors.is_empty() && parse_results.iter().all(|r| r.is_none()) {
+        if !errors.is_empty() && file_infos.iter().all(|r| r.is_none()) {
             return Err(errors);
         }
 
-        // ── Phase B: sequential graph build ─────────────────────
-        let t1 = std::time::Instant::now();
-        let sp = spinner("Phase B: graph");
-        let mut graph = CodeGraph::new_with_root(root_path.to_string());
-        let mut total_defs = 0usize;
-        let mut total_imports = 0usize;
-
-        // We need (file_node, def_nodes, import_nodes, references) per file
-        struct FileInfo {
-            file_node: petgraph::graph::NodeIndex,
-            def_nodes: Vec<petgraph::graph::NodeIndex>,
-            import_nodes: Vec<petgraph::graph::NodeIndex>,
-            references: Vec<code_graph_types::ssa::ReferenceEvent>,
-        }
-
-        let mut file_infos: Vec<Option<FileInfo>> = Vec::with_capacity(file_count);
-
-        for (idx, result_opt) in parse_results.into_iter().enumerate() {
-            let Some(result) = result_opt else {
-                file_infos.push(None);
-                continue;
-            };
-
-            total_defs += result.definitions.len();
-            total_imports += result.imports.len();
-            let references = result.references;
-
-            // Build CanonicalResult from FileResult for graph builder
-            let canonical = CanonicalResult {
-                file_path: result.file_path,
-                extension: result.extension,
-                file_size: result.file_size,
-                language: result.language,
-                definitions: result.definitions,
-                imports: result.imports,
-                references: Vec::new(),
-                bindings: Vec::new(),
-                control_flow: Vec::new(),
-            };
-
-            let (file_node, def_nodes, import_nodes) = graph.add_file_nodes(canonical, idx);
-            file_infos.push(Some(FileInfo {
-                file_node,
-                def_nodes,
-                import_nodes,
-                references,
-            }));
-        }
-
+        let mut graph = graph.into_inner().unwrap();
         graph.finalize();
-        sp.finish_with_message(format!(
-            "Phase B: {total_defs} defs, {total_imports} imports in {:.2?}",
-            t1.elapsed()
-        ));
 
         // ── Phase C: parallel resolution ────────────────────────
         let t2 = std::time::Instant::now();
