@@ -11,6 +11,23 @@ use tracing::warn;
 use crate::handler::HandlerError;
 use crate::nats::{KvPutOptions, NatsServices};
 
+/// Read-modify-write helper for a JSON snapshot. Loads `key` (or `T::default()`
+/// if absent/corrupt), passes it to `mutate`, then writes it back. Centralizes
+/// the read/mutate/serialize/put dance duplicated across the two writers.
+pub(crate) async fn update_json<T, F>(
+    nats: &dyn NatsServices,
+    key: &str,
+    mutate: F,
+) -> Result<(), HandlerError>
+where
+    T: DeserializeOwned + Serialize + Default,
+    F: FnOnce(&mut T),
+{
+    let mut value = read_json::<T>(nats, key).await.unwrap_or_default();
+    mutate(&mut value);
+    write_json(nats, key, &value).await
+}
+
 /// Reads a JSON snapshot from the progress bucket. Returns `None` on a miss,
 /// a NATS error, or a deserialization failure. Callers that need to
 /// distinguish those cases should use `NatsServices::kv_get` directly.

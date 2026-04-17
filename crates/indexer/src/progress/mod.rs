@@ -63,22 +63,19 @@ impl ProgressWriter {
 
     /// Pre-ETL write of `state="indexing"` so readers observe the active phase.
     /// Preserves all other fields from the previous meta (sdlc, code, cycle_count,
-    /// initial_backfill_done). If no previous meta exists, writes a minimal
-    /// indexing snapshot with zeros.
+    /// initial_backfill_done).
     pub async fn mark_indexing_started(
         &self,
         nats: &dyn NatsServices,
         namespace_id: i64,
         started_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), HandlerError> {
-        let mut meta = kv::read_json::<MetaSnapshot>(nats, &meta_key(namespace_id))
-            .await
-            .unwrap_or_default();
-        meta.state = "indexing".to_string();
-        meta.updated_at = started_at.to_rfc3339();
-        meta.sdlc.last_started_at = started_at.to_rfc3339();
-
-        kv::write_json(nats, &meta_key(namespace_id), &meta).await
+        kv::update_json::<MetaSnapshot, _>(nats, &meta_key(namespace_id), |meta| {
+            meta.state = "indexing".to_string();
+            meta.updated_at = started_at.to_rfc3339();
+            meta.sdlc.last_started_at = started_at.to_rfc3339();
+        })
+        .await
     }
 
     pub async fn write_progress(
@@ -169,56 +166,70 @@ impl ProgressWriter {
 
         let rollups = rollup_counts(&node_counts, &edge_counts);
         let now = chrono::Utc::now().to_rfc3339();
+        let total = rollups.len();
 
-        for (tp, (nodes, edges)) in &rollups {
+        for (tp, (nodes, edges)) in rollups {
             let snapshot = CountsSnapshot {
                 updated_at: now.clone(),
-                nodes: nodes.clone(),
-                edges: edges.clone(),
+                nodes,
+                edges,
             };
-            kv::write_json(nats, &counts_key(tp), &snapshot).await?;
+            kv::write_json(nats, &counts_key(&tp), &snapshot).await?;
         }
-        Ok(rollups.len())
+        Ok(total)
     }
 
     async fn run_count_queries(
         &self,
         traversal_path: &str,
-    ) -> Result<(Vec<NodeCountRow>, Vec<EdgeCountRow>), String> {
+    ) -> Result<(Vec<CountRow>, Vec<CountRow>), String> {
         let targets = node_count_targets(&self.ontology);
         if targets.is_empty() {
             return Ok((vec![], vec![]));
         }
 
-        let node_batches = self
-            .execute(build_node_count_query(&targets, traversal_path), "node")
+        let node_rows = self
+            .fetch_count_rows(
+                build_node_count_query(&targets, traversal_path),
+                "entity",
+                "node",
+            )
             .await?;
-        let mut node_rows = Vec::new();
-        for batch in &node_batches {
-            extract_node_rows(batch, &mut node_rows);
-        }
 
-        let edge_batches = self
-            .execute(build_edge_count_query(traversal_path), "edge")
+        let mut edge_rows = self
+            .fetch_count_rows(
+                build_edge_count_query(traversal_path),
+                "relationship_kind",
+                "edge",
+            )
             .await?;
-        let mut edge_rows = Vec::new();
-        for batch in &edge_batches {
-            extract_edge_rows(batch, &mut edge_rows);
-        }
 
         for target in cross_namespace_edge_targets() {
-            let cross_batches = self
-                .execute(
+            edge_rows.extend(
+                self.fetch_count_rows(
                     build_cross_namespace_edge_query(&target, traversal_path),
+                    "relationship_kind",
                     "cross-namespace",
                 )
-                .await?;
-            for batch in &cross_batches {
-                extract_edge_rows(batch, &mut edge_rows);
-            }
+                .await?,
+            );
         }
 
         Ok((node_rows, edge_rows))
+    }
+
+    async fn fetch_count_rows(
+        &self,
+        ast: query_engine::compiler::Node,
+        key_col: &str,
+        label: &'static str,
+    ) -> Result<Vec<CountRow>, String> {
+        let batches = self.execute(ast, label).await?;
+        let mut rows = Vec::new();
+        for batch in &batches {
+            extract_count_rows(batch, key_col, &mut rows);
+        }
+        Ok(rows)
     }
 
     /// Compile a count-query AST and fetch its Arrow batches. `label` is used
@@ -250,95 +261,73 @@ impl ProgressWriter {
     /// re-running ClickHouse count queries. Used on zero-row skip so readers
     /// don't see a stale flag despite the indexer running.
     async fn touch_counts_updated_at(&self, nats: &dyn NatsServices, traversal_path: &str) {
-        let key = counts_key(traversal_path);
-        let Some(mut snapshot) = kv::read_json::<CountsSnapshot>(nats, &key).await else {
-            return;
-        };
-        snapshot.updated_at = chrono::Utc::now().to_rfc3339();
-        let _ = kv::write_json(nats, &key, &snapshot).await;
+        let _ = kv::update_json::<CountsSnapshot, _>(nats, &counts_key(traversal_path), |s| {
+            s.updated_at = chrono::Utc::now().to_rfc3339();
+        })
+        .await;
     }
 }
 
+/// A count-query row: `key` is the entity name for nodes, or the
+/// `relationship_kind` for edges.
 #[derive(Debug)]
-struct NodeCountRow {
-    entity: String,
-    count: i64,
-    traversal_path: String,
+pub(crate) struct CountRow {
+    pub traversal_path: String,
+    pub key: String,
+    pub count: i64,
 }
 
-#[derive(Debug)]
-struct EdgeCountRow {
-    traversal_path: String,
-    relationship_kind: String,
-    count: i64,
-}
-
+/// Maps each ancestor traversal path to `(nodes_by_entity, edges_by_kind)`.
 type RollupMap = HashMap<String, (HashMap<String, i64>, HashMap<String, i64>)>;
 
-fn rollup_counts(node_rows: &[NodeCountRow], edge_rows: &[EdgeCountRow]) -> RollupMap {
+fn rollup_counts(node_rows: &[CountRow], edge_rows: &[CountRow]) -> RollupMap {
     let mut result: RollupMap = HashMap::new();
-
     for row in node_rows {
-        for prefix in traversal_path_prefixes(&row.traversal_path) {
-            let entry = result.entry(prefix).or_default();
-            *entry.0.entry(row.entity.clone()).or_insert(0) += row.count;
-        }
+        accumulate_into(&mut result, row, true);
     }
-
     for row in edge_rows {
-        for prefix in traversal_path_prefixes(&row.traversal_path) {
-            let entry = result.entry(prefix).or_default();
-            *entry.1.entry(row.relationship_kind.clone()).or_insert(0) += row.count;
-        }
+        accumulate_into(&mut result, row, false);
     }
-
     result
 }
 
+fn accumulate_into(result: &mut RollupMap, row: &CountRow, is_node: bool) {
+    for prefix in traversal_path_prefixes(&row.traversal_path) {
+        let (nodes, edges) = result.entry(prefix).or_default();
+        let bucket = if is_node { nodes } else { edges };
+        *bucket.entry(row.key.clone()).or_insert(0) += row.count;
+    }
+}
+
 fn traversal_path_prefixes(tp: &str) -> Vec<String> {
-    let parts: Vec<&str> = tp.trim_end_matches('/').split('/').collect();
-    let mut prefixes = Vec::with_capacity(parts.len());
-    for i in 1..=parts.len() {
-        prefixes.push(format!("{}/", parts[..i].join("/")));
-    }
-    prefixes
+    let trimmed = tp.trim_end_matches('/');
+    trimmed
+        .match_indices('/')
+        .map(|(i, _)| format!("{}/", &trimmed[..i]))
+        .chain(std::iter::once(format!("{trimmed}/")))
+        .collect()
 }
 
-fn extract_node_rows(batch: &arrow::record_batch::RecordBatch, out: &mut Vec<NodeCountRow>) {
-    let (Some(entities), Some(counts), Some(tps)) = (
-        ArrowUtils::get_column_by_name::<StringArray>(batch, "entity"),
-        ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt"),
+/// Extract `(traversal_path, <key_col>, cnt)` triples from one batch.
+pub(crate) fn extract_count_rows(
+    batch: &arrow::record_batch::RecordBatch,
+    key_col: &str,
+    out: &mut Vec<CountRow>,
+) {
+    let (Some(tps), Some(keys), Some(counts)) = (
         ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path"),
-    ) else {
-        return;
-    };
-    for row in 0..batch.num_rows() {
-        if entities.is_null(row) || counts.is_null(row) || tps.is_null(row) {
-            continue;
-        }
-        out.push(NodeCountRow {
-            entity: entities.value(row).to_string(),
-            count: counts.value(row) as i64,
-            traversal_path: tps.value(row).to_string(),
-        });
-    }
-}
-
-fn extract_edge_rows(batch: &arrow::record_batch::RecordBatch, out: &mut Vec<EdgeCountRow>) {
-    let (Some(tps), Some(rels), Some(counts)) = (
-        ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path"),
-        ArrowUtils::get_column_by_name::<StringArray>(batch, "relationship_kind"),
+        ArrowUtils::get_column_by_name::<StringArray>(batch, key_col),
         ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt"),
     ) else {
         return;
     };
     for row in 0..batch.num_rows() {
-        if tps.is_null(row) || rels.is_null(row) || counts.is_null(row) {
+        if tps.is_null(row) || keys.is_null(row) || counts.is_null(row) {
             continue;
         }
-        out.push(EdgeCountRow {
+        out.push(CountRow {
             traversal_path: tps.value(row).to_string(),
-            relationship_kind: rels.value(row).to_string(),
+            key: keys.value(row).to_string(),
             count: counts.value(row) as i64,
         });
     }
@@ -390,25 +379,18 @@ mod tests {
         assert_eq!(prefixes, vec!["1/", "1/9970/", "1/9970/55154808/"]);
     }
 
+    fn row(tp: &str, key: &str, count: i64) -> CountRow {
+        CountRow {
+            traversal_path: tp.to_string(),
+            key: key.to_string(),
+            count,
+        }
+    }
+
     #[test]
     fn rollup_aggregates_to_ancestors() {
-        let node_rows = vec![
-            NodeCountRow {
-                entity: "Project".to_string(),
-                count: 10,
-                traversal_path: "1/2/3/".to_string(),
-            },
-            NodeCountRow {
-                entity: "Project".to_string(),
-                count: 5,
-                traversal_path: "1/2/4/".to_string(),
-            },
-        ];
-        let edge_rows = vec![EdgeCountRow {
-            traversal_path: "1/2/3/".to_string(),
-            relationship_kind: "IN_PROJECT".to_string(),
-            count: 20,
-        }];
+        let node_rows = vec![row("1/2/3/", "Project", 10), row("1/2/4/", "Project", 5)];
+        let edge_rows = vec![row("1/2/3/", "IN_PROJECT", 20)];
 
         let result = rollup_counts(&node_rows, &edge_rows);
 

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::array::{Array, StringArray, UInt64Array};
+use arrow::array::{Array, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::indexing_progress::{
     BranchCodeSnapshot, CodeMeta, CodeProgressSnapshot, MetaSnapshot, code_key, meta_key,
@@ -25,9 +25,6 @@ use crate::nats::NatsServices;
 use crate::progress::debounce::Debouncer;
 use crate::progress::kv;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
-
-const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
-const GL_PROJECT_TABLE: &str = "gl_project";
 
 /// Source kinds for edges produced by the code indexing pipeline. Mirrors
 /// `stale_data_cleaner::CODE_EDGE_SOURCE_KINDS`; duplicated here to keep
@@ -130,11 +127,21 @@ impl CodeProgressWriter {
         }
 
         let projects_indexed = self
-            .query_projects_indexed(namespace_traversal_path)
+            .scalar_count_by_prefix(
+                &prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION),
+                "uniq(project_id)",
+                namespace_traversal_path,
+                false,
+            )
             .await
             .map_err(|e| HandlerError::Processing(format!("query projects_indexed: {e}")))?;
         let projects_total = self
-            .query_projects_total(namespace_traversal_path)
+            .scalar_count_by_prefix(
+                &prefixed_table_name("gl_project", *SCHEMA_VERSION),
+                "count()",
+                namespace_traversal_path,
+                true,
+            )
             .await
             .map_err(|e| HandlerError::Processing(format!("query projects_total: {e}")))?;
 
@@ -143,11 +150,10 @@ impl CodeProgressWriter {
             projects_total,
             last_indexed_at: now.to_rfc3339(),
         };
-
-        let prev_meta = kv::read_json::<MetaSnapshot>(nats, &meta_key(namespace_id)).await;
-        let merged = merge_meta_code(prev_meta, code, now.to_rfc3339());
-
-        kv::write_json(nats, &meta_key(namespace_id), &merged).await?;
+        kv::update_json::<MetaSnapshot, _>(nats, &meta_key(namespace_id), |meta| {
+            apply_code_block(meta, code, &now.to_rfc3339());
+        })
+        .await?;
         self.debouncer.record(namespace_id);
         Ok(())
     }
@@ -207,12 +213,15 @@ impl CodeProgressWriter {
             .join(", ");
         let sql = format!(
             r#"
-            SELECT relationship_kind, uniq(source_id, target_id) AS cnt
+            SELECT
+                traversal_path,
+                relationship_kind,
+                uniq(source_id, target_id) AS cnt
             FROM {edge_table}
             WHERE traversal_path = {{traversal_path:String}}
               AND source_kind IN ({source_kinds_sql})
               AND NOT _deleted
-            GROUP BY relationship_kind
+            GROUP BY traversal_path, relationship_kind
             "#
         );
         let batches = self
@@ -223,37 +232,13 @@ impl CodeProgressWriter {
             .await
             .map_err(|e| format!("query edges: {e}"))?;
 
-        let mut edges = HashMap::new();
+        let mut rows = Vec::new();
         for batch in &batches {
-            let (Some(rels), Some(counts)) = (
-                ArrowUtils::get_column_by_name::<StringArray>(batch, "relationship_kind"),
-                ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt"),
-            ) else {
-                continue;
-            };
-            for row in 0..batch.num_rows() {
-                if rels.is_null(row) || counts.is_null(row) {
-                    continue;
-                }
-                edges.insert(rels.value(row).to_string(), counts.value(row) as i64);
-            }
+            crate::progress::extract_count_rows(batch, "relationship_kind", &mut rows);
         }
+        let edges = rows.into_iter().map(|r| (r.key, r.count)).collect();
 
         Ok((nodes, edges))
-    }
-
-    async fn query_projects_indexed(&self, namespace_traversal_path: &str) -> Result<i64, String> {
-        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
-        self.scalar_count_by_prefix(&table, "uniq(project_id)", namespace_traversal_path, false)
-            .await
-            .map_err(|e| format!("projects_indexed: {e}"))
-    }
-
-    async fn query_projects_total(&self, namespace_traversal_path: &str) -> Result<i64, String> {
-        let table = prefixed_table_name(GL_PROJECT_TABLE, *SCHEMA_VERSION);
-        self.scalar_count_by_prefix(&table, "count()", namespace_traversal_path, true)
-            .await
-            .map_err(|e| format!("projects_total: {e}"))
     }
 
     /// Runs `SELECT <agg> AS cnt FROM <table> [FINAL] WHERE
@@ -312,6 +297,17 @@ fn scalar_u64(batches: &[arrow::record_batch::RecordBatch], column: &str) -> u64
     0
 }
 
+/// Apply a fresh `code` block to a meta snapshot while preserving every other
+/// field. A fresh snapshot (`state == ""`) is seeded to `"pending"` so readers
+/// see a meaningful state until SDLC writes `"idle"`.
+pub(crate) fn apply_code_block(meta: &mut MetaSnapshot, code: CodeMeta, updated_at: &str) {
+    if meta.state.is_empty() {
+        meta.state = "pending".to_string();
+    }
+    meta.code = code;
+    meta.updated_at = updated_at.to_string();
+}
+
 /// Merge a freshly computed branch snapshot into the previous per-project
 /// snapshot, preserving branches that were not reindexed in this cycle.
 pub(crate) fn merge_snapshot(
@@ -328,30 +324,6 @@ pub(crate) fn merge_snapshot(
         .branches
         .insert(branch.to_string(), branch_snapshot);
     snapshot
-}
-
-/// Merge a fresh `code` block into a pre-existing meta snapshot. Other
-/// top-level meta fields (state, initial_backfill_done, sdlc, ...) are
-/// preserved. If no previous meta exists, a minimal one is created.
-pub(crate) fn merge_meta_code(
-    prev: Option<MetaSnapshot>,
-    code: CodeMeta,
-    updated_at: String,
-) -> MetaSnapshot {
-    match prev {
-        Some(mut meta) => {
-            meta.code = code;
-            meta.updated_at = updated_at;
-            meta
-        }
-        None => MetaSnapshot {
-            state: "pending".to_string(),
-            initial_backfill_done: false,
-            updated_at,
-            sdlc: Default::default(),
-            code,
-        },
-    }
 }
 
 #[cfg(test)]
@@ -469,61 +441,47 @@ mod tests {
         assert_eq!(main.nodes.get("File"), Some(&999));
     }
 
+    fn code_meta(indexed: i64, total: i64) -> CodeMeta {
+        CodeMeta {
+            projects_indexed: indexed,
+            projects_total: total,
+            last_indexed_at: "2026-02-01T00:00:00Z".to_string(),
+        }
+    }
+
     #[test]
-    fn merge_meta_code_preserves_sdlc_and_flags() {
-        let prev = MetaSnapshot {
+    fn apply_code_block_preserves_sdlc_and_flags() {
+        let mut meta = MetaSnapshot {
             state: "idle".to_string(),
             initial_backfill_done: true,
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             sdlc: SdlcMeta {
-                last_completed_at: "2026-01-01T00:00:00Z".to_string(),
-                last_started_at: "2026-01-01T00:00:00Z".to_string(),
-                last_duration_ms: 1234,
                 cycle_count: 42,
                 last_error: "prev error".to_string(),
+                last_duration_ms: 1234,
+                ..Default::default()
             },
-            code: CodeMeta {
-                projects_indexed: 1,
-                projects_total: 2,
-                last_indexed_at: "2026-01-01T00:00:00Z".to_string(),
-            },
+            code: code_meta(1, 2),
         };
 
-        let updated = merge_meta_code(
-            Some(prev),
-            CodeMeta {
-                projects_indexed: 5,
-                projects_total: 10,
-                last_indexed_at: "2026-02-01T00:00:00Z".to_string(),
-            },
-            "2026-02-01T00:00:00Z".to_string(),
-        );
+        apply_code_block(&mut meta, code_meta(5, 10), "2026-02-01T00:00:00Z");
 
-        assert_eq!(updated.state, "idle", "state preserved");
-        assert!(updated.initial_backfill_done);
-        assert_eq!(updated.sdlc.cycle_count, 42);
-        assert_eq!(updated.sdlc.last_duration_ms, 1234);
-        assert_eq!(updated.sdlc.last_error, "prev error");
-        assert_eq!(updated.code.projects_indexed, 5);
-        assert_eq!(updated.code.projects_total, 10);
-        assert_eq!(updated.updated_at, "2026-02-01T00:00:00Z");
+        assert_eq!(meta.state, "idle", "state preserved");
+        assert!(meta.initial_backfill_done);
+        assert_eq!(meta.sdlc.cycle_count, 42);
+        assert_eq!(meta.sdlc.last_error, "prev error");
+        assert_eq!(meta.code.projects_indexed, 5);
+        assert_eq!(meta.updated_at, "2026-02-01T00:00:00Z");
     }
 
     #[test]
-    fn merge_meta_code_without_prev_sets_pending_state() {
-        let updated = merge_meta_code(
-            None,
-            CodeMeta {
-                projects_indexed: 1,
-                projects_total: 3,
-                last_indexed_at: "2026-02-01T00:00:00Z".to_string(),
-            },
-            "2026-02-01T00:00:00Z".to_string(),
-        );
+    fn apply_code_block_on_default_meta_seeds_pending() {
+        let mut meta = MetaSnapshot::default();
+        apply_code_block(&mut meta, code_meta(1, 3), "2026-02-01T00:00:00Z");
 
-        assert_eq!(updated.state, "pending");
-        assert!(!updated.initial_backfill_done);
-        assert_eq!(updated.code.projects_total, 3);
+        assert_eq!(meta.state, "pending");
+        assert!(!meta.initial_backfill_done);
+        assert_eq!(meta.code.projects_total, 3);
     }
 
     #[tokio::test]

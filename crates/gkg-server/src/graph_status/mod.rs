@@ -63,18 +63,16 @@ impl GraphStatusService {
         };
 
         let counts = parse_snapshot::<CountsSnapshot>(counts_entry, "counts")?.unwrap_or_default();
-        let (state, initial_backfill_done, sdlc, code) =
-            match parse_snapshot::<MetaSnapshot>(meta_entry, "meta")? {
-                Some(meta) => into_meta_fields(meta),
-                None => (GraphState::Pending as i32, false, None, None),
-            };
+        let meta = parse_snapshot::<MetaSnapshot>(meta_entry, "meta")?
+            .map(into_meta_fields)
+            .unwrap_or_default();
 
         let stale = is_stale(&counts.updated_at, self.staleness_threshold_secs);
         let domains = self.build_domains(&counts.nodes);
 
         info!(
             traversal_path,
-            state,
+            state = meta.state,
             node_types = domains.iter().map(|d| d.items.len()).sum::<usize>(),
             edge_types = counts.edges.len(),
             stale,
@@ -82,13 +80,13 @@ impl GraphStatusService {
         );
 
         Ok(GetGraphStatusResponse {
-            state,
-            initial_backfill_done,
+            state: meta.state,
+            initial_backfill_done: meta.initial_backfill_done,
             updated_at: counts.updated_at,
             domains,
             edge_counts: counts.edges,
-            sdlc,
-            code,
+            sdlc: meta.sdlc,
+            code: meta.code,
             stale,
         })
     }
@@ -158,28 +156,45 @@ fn parse_snapshot<T: DeserializeOwned>(
         })
 }
 
-fn into_meta_fields(meta: MetaSnapshot) -> (i32, bool, Option<SdlcProgress>, Option<CodeOverview>) {
-    let state = match meta.state.as_str() {
-        "indexing" => GraphState::Indexing as i32,
-        "idle" => GraphState::Idle as i32,
-        _ => GraphState::Pending as i32,
-    };
+struct MetaFields {
+    state: i32,
+    initial_backfill_done: bool,
+    sdlc: Option<SdlcProgress>,
+    code: Option<CodeOverview>,
+}
 
-    let sdlc = Some(SdlcProgress {
-        last_completed_at: meta.sdlc.last_completed_at,
-        last_started_at: meta.sdlc.last_started_at,
-        last_duration_ms: meta.sdlc.last_duration_ms,
-        cycle_count: meta.sdlc.cycle_count,
-        last_error: meta.sdlc.last_error,
-    });
+impl Default for MetaFields {
+    fn default() -> Self {
+        Self {
+            state: GraphState::Pending as i32,
+            initial_backfill_done: false,
+            sdlc: None,
+            code: None,
+        }
+    }
+}
 
-    let code = Some(CodeOverview {
-        projects_indexed: meta.code.projects_indexed,
-        projects_total: meta.code.projects_total,
-        last_indexed_at: meta.code.last_indexed_at,
-    });
-
-    (state, meta.initial_backfill_done, sdlc, code)
+fn into_meta_fields(meta: MetaSnapshot) -> MetaFields {
+    MetaFields {
+        state: match meta.state.as_str() {
+            "indexing" => GraphState::Indexing as i32,
+            "idle" => GraphState::Idle as i32,
+            _ => GraphState::Pending as i32,
+        },
+        initial_backfill_done: meta.initial_backfill_done,
+        sdlc: Some(SdlcProgress {
+            last_completed_at: meta.sdlc.last_completed_at,
+            last_started_at: meta.sdlc.last_started_at,
+            last_duration_ms: meta.sdlc.last_duration_ms,
+            cycle_count: meta.sdlc.cycle_count,
+            last_error: meta.sdlc.last_error,
+        }),
+        code: Some(CodeOverview {
+            projects_indexed: meta.code.projects_indexed,
+            projects_total: meta.code.projects_total,
+            last_indexed_at: meta.code.last_indexed_at,
+        }),
+    }
 }
 
 /// Returns the root namespace id from a traversal path like `"1/9970/55154808/"`.
