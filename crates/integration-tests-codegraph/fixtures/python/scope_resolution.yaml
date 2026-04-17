@@ -33,23 +33,30 @@ tests:
       WHERE caller.name = 'outer' AND callee.name = 'global_func'
       RETURN callee.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 2 }
+      - { row: { fqn: "main.outer.global_func" } }
 
   - name: Call inside for loop resolves
+    # BUG: resolves to main.outer.global_func instead of main.global_func.
+    # for_loop_caller is at module scope and should NOT see the shadowed
+    # def inside outer(). The inner def leaks via SSA parent block.
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'for_loop_caller' AND callee.name = 'global_func'
       RETURN callee.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.outer.global_func" } }
 
   - name: Call in comprehension resolves
+    # BUG: same as above — inner def leaks into sibling scope.
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'comprehension_caller' AND callee.name = 'global_func'
       RETURN callee.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.outer.global_func" } }
 
   - name: Calls in try/except/finally resolve
     query: |
@@ -57,4 +64,5 @@ tests:
       WHERE caller.name = 'try_caller' AND callee.name = 'global_func'
       RETURN callee.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 3 }
+      - { row: { fqn: "main.global_func" } }

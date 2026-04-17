@@ -21,7 +21,8 @@ tests:
       WHERE caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { caller: "main.run", callee: "utils.helper" } }
 
   - name: helper() target is in utils.py
     query: |

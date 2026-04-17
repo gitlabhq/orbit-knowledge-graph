@@ -16,4 +16,5 @@ tests:
       WHERE caller.name = 'factorial' AND callee.name = 'factorial'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { caller: "main.factorial", callee: "main.factorial" } }

@@ -19,4 +19,5 @@ tests:
       WHERE callee.name = 'decorated'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { caller: "main.run", callee: "main.decorated" } }

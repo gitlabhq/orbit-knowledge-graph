@@ -30,7 +30,8 @@ tests:
       WHERE caller.name = 'run' AND callee.name = 'helper'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { caller: "com.example.App.run", callee: "com.example.App.helper" } }
 
   - name: "caller() calls topLevel()"
     query: |
@@ -38,7 +39,8 @@ tests:
       WHERE caller.name = 'caller' AND callee.name = 'topLevel'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { caller: "com.example.caller", callee: "com.example.topLevel" } }
 
   - name: "App methods have correct FQN"
     query: |
@@ -46,5 +48,5 @@ tests:
       WHERE cls.name = 'App' AND cls.definition_type = 'Class'
       RETURN m.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 3 }
       - { match: { field: fqn, pattern: "com.example.App.*" } }

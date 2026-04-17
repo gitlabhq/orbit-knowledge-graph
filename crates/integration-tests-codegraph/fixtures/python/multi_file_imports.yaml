@@ -34,7 +34,8 @@ tests:
       WHERE caller.name = 'create_user' AND callee.name = 'User'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { src: "services.py", tgt: "models.py" } }
 
   - name: main calls UserService across files
     query: |
@@ -42,7 +43,8 @@ tests:
       WHERE caller.name = 'run' AND callee.name = 'UserService'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { src: "main.py", tgt: "services.py" } }
 
   - name: Three files in the graph
     query: |

@@ -16,7 +16,8 @@ tests:
       WHERE callee.name = 'inner'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: false }
+      - { row_count: 2 }
+      - { row: { caller: "main.outer", callee: "main.outer.inner" } }
 
   - name: outer() exists as a definition
     query: |
@@ -24,7 +25,8 @@ tests:
       WHERE d.name = 'outer'
       RETURN d.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.outer" } }
 
   - name: inner has correct FQN nesting
     query: |

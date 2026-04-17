@@ -35,8 +35,8 @@ tests:
       WHERE d.name = 'adder'
       RETURN d.fqn AS fqn
     assert:
-      - { empty: false }
-      - { match: { field: fqn, pattern: "*make_adder.*" } }
+      - { row_count: 1 }
+      - { row: { fqn: "main.make_adder.adder" } }
 
   - name: caller calls make_adder
     query: |
@@ -44,7 +44,8 @@ tests:
       WHERE caller.name = 'caller' AND callee.name = 'make_adder'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: false }
+      - { row_count: 2 }
+      - { row: { caller: "main.caller", callee: "main.make_adder" } }
 
   - name: Callable class has __call__
     query: |
@@ -52,7 +53,8 @@ tests:
       WHERE cls.name = 'Callable' AND m.name = '__call__'
       RETURN m.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.Callable.__call__" } }
 
   - name: Nested function calls as arguments resolve
     query: |
@@ -60,4 +62,5 @@ tests:
       WHERE caller.name = 'nested_args'
       RETURN callee.name AS callee
     assert:
-      - { empty: false }
+      - { row: { callee: "inner1" } }
+      - { row: { callee: "inner2" } }

@@ -20,7 +20,8 @@ tests:
       WHERE d.name = 'async_func'
       RETURN d.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.async_func" } }
 
   - name: Async caller calls async_func
     query: |
@@ -28,7 +29,8 @@ tests:
       WHERE caller.name = 'async_caller' AND callee.name = 'async_func'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: false }
+      - { row_count: 2 }
+      - { row: { caller: "main.async_caller", callee: "main.async_func" } }
 
   - name: Async generator exists
     query: |
@@ -36,4 +38,5 @@ tests:
       WHERE d.name = 'async_generator'
       RETURN d.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.async_generator" } }

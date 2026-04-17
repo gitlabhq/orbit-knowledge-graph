@@ -46,8 +46,8 @@ tests:
       WHERE i.name = 'join'
       RETURN i.path AS path
     assert:
-      - { empty: false }
-      - { match: { field: path, pattern: "os.path" } }
+      - { row_count: 1 }
+      - { row: { path: "os.path" } }
 
   - name: "C6: wildcard import exists"
     query: |
@@ -71,7 +71,7 @@ tests:
       WHERE i.alias = 'np'
       RETURN i.path AS path
     assert:
-      - { empty: false }
+      - { row_count: 1 }
 
   - name: "Total imports at least 15"
     query: |

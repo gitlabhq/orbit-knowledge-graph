@@ -30,7 +30,7 @@ tests:
       WHERE d.name = 'User'
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
-      - { empty: false }
+      - { row_count: 1 }
       - { row: { fqn: "User", type: "Class" } }
 
   - name: User methods extracted

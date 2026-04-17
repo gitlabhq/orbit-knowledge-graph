@@ -14,8 +14,8 @@ tests:
       WHERE d.name = 'square'
       RETURN d.definition_type AS dt
     assert:
-      - { empty: false }
-      - { match: { field: dt, pattern: "Lambda" } }
+      - { row_count: 1 }
+      - { row: { dt: "Lambda" } }
 
   - name: square() call resolves to lambda
     query: |
@@ -23,4 +23,5 @@ tests:
       WHERE callee.name = 'square'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { caller: "main.run", callee: "main.square" } }

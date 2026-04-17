@@ -29,7 +29,8 @@ tests:
       WHERE cls.name = 'Dog' AND m.name = 'fetch'
       RETURN m.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.Dog.fetch" } }
 
   - name: GuideDog has guide method
     query: |
@@ -37,4 +38,5 @@ tests:
       WHERE cls.name = 'GuideDog' AND m.name = 'guide'
       RETURN m.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.GuideDog.guide" } }

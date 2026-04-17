@@ -31,7 +31,8 @@ tests:
       WHERE cls.name = 'MyClass' AND m.name = 'instance_method'
       RETURN m.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.MyClass.instance_method" } }
 
   - name: class_method exists in class
     query: |
@@ -39,7 +40,8 @@ tests:
       WHERE cls.name = 'MyClass' AND m.name = 'class_method'
       RETURN m.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.MyClass.class_method" } }
 
   - name: static_method exists in class
     query: |
@@ -47,4 +49,5 @@ tests:
       WHERE cls.name = 'MyClass' AND m.name = 'static_method'
       RETURN m.fqn AS fqn
     assert:
-      - { empty: false }
+      - { row_count: 1 }
+      - { row: { fqn: "main.MyClass.static_method" } }

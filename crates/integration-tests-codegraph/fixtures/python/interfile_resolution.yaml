@@ -127,4 +127,8 @@ tests:
       RETURN caller.name AS caller, callee.name AS callee,
              caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { empty: false }
+      - { row_count: 6 }
+      - { row: { caller: "run", callee: "UserService" } }
+      - { row: { caller: "run", callee: "ProjectService" } }
+      - { row: { caller: "create", callee: "User" } }
+      - { row: { caller: "create", callee: "Project" } }
