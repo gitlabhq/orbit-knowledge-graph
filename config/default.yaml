@@ -97,6 +97,12 @@ grpc:
   max_connection_age_secs: 300      # 5 min, for L4 ILB rebalancing
   stream_timeout_secs: 60
 
+rate_limit:
+  max_concurrent_queries: 64        # server-wide concurrent query cap (0 = disabled)
+  per_user_max_requests: 100        # max queries per user per window (0 = disabled)
+  per_user_window_secs: 60          # sliding window duration
+  per_user_max_entries: 10000       # max tracked user buckets (bounds memory)
+
 query:
   default:
     max_execution_time: 30

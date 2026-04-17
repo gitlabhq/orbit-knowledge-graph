@@ -166,6 +166,14 @@ async fn run_webserver(
 
     let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
 
+    let rate_limiter = gkg_server::rate_limit::QueryRateLimiter::new(&config.rate_limit);
+    info!(
+        max_concurrent = config.rate_limit.max_concurrent_queries,
+        per_user_max = config.rate_limit.per_user_max_requests,
+        per_user_window_secs = config.rate_limit.per_user_window_secs,
+        "Rate limiter initialized",
+    );
+
     let mut grpc_server = GrpcServer::new(
         config.grpc_bind_address,
         validator,
@@ -175,6 +183,7 @@ async fn run_webserver(
         tls_config,
         config.grpc.clone(),
     )
+    .with_rate_limiter(rate_limiter)
     .with_resolver_registry(Arc::new(resolver_registry));
 
     if config.query.default.graph_query_cache_enabled == Some(true) {

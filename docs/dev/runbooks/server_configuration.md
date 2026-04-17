@@ -290,6 +290,21 @@ These settings are used by the Webserver mode.
 | `grpc.max_connection_age_secs` | `300` (5 min) | Max connection age (for L4 ILB rebalancing) |
 | `grpc.stream_timeout_secs` | `60` | Stream timeout |
 
+### Rate limiting
+
+Two independent controls prevent query abuse and ClickHouse overload:
+
+| Config path | Env var | Default | Description |
+|-------------|---------|---------|-------------|
+| `rate_limit.max_concurrent_queries` | `GKG_RATE_LIMIT__MAX_CONCURRENT_QUERIES` | `64` | Server-wide concurrent query cap. 0 disables. |
+| `rate_limit.per_user_max_requests` | `GKG_RATE_LIMIT__PER_USER_MAX_REQUESTS` | `100` | Max queries per user per window. 0 disables. |
+| `rate_limit.per_user_window_secs` | `GKG_RATE_LIMIT__PER_USER_WINDOW_SECS` | `60` | Sliding window duration in seconds. |
+| `rate_limit.per_user_max_entries` | `GKG_RATE_LIMIT__PER_USER_MAX_ENTRIES` | `10000` | Max tracked user buckets (bounds memory). |
+
+The global concurrency limit uses a `tokio::sync::Semaphore`. When all slots are occupied, new queries are rejected immediately with `RESOURCE_EXHAUSTED`. The per-user limit uses a sliding window keyed by `user_id` from JWT claims. Both emit the `gkg.query.pipeline.threat.rate_limited` OTel counter on rejection.
+
+These are independent of the per-connection `grpc.concurrency_limit` (tonic built-in), which caps HTTP/2 streams per connection.
+
 ### Query settings
 
 Supports default settings and per-query-type overrides (e.g. `aggregation`, `traversal`, `search`):

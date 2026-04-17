@@ -58,6 +58,11 @@ impl GrpcServer {
         self
     }
 
+    pub fn with_rate_limiter(mut self, limiter: crate::rate_limit::QueryRateLimiter) -> Self {
+        self.service = self.service.with_rate_limiter(limiter);
+        self
+    }
+
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }

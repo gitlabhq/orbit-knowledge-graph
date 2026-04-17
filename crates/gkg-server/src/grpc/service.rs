@@ -22,6 +22,7 @@ use crate::proto::{
     SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
+use crate::rate_limit::QueryRateLimiter;
 use crate::tools::{ToolRegistry, ToolService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
@@ -48,6 +49,7 @@ pub struct KnowledgeGraphServiceImpl {
     cluster_health: Arc<ClusterHealthChecker>,
     graph_stats: GraphStatsService,
     stream_timeout_secs: u64,
+    rate_limiter: Option<QueryRateLimiter>,
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -74,6 +76,7 @@ impl KnowledgeGraphServiceImpl {
             cluster_health,
             graph_stats,
             stream_timeout_secs,
+            rate_limiter: None,
         }
     }
 
@@ -84,6 +87,11 @@ impl KnowledgeGraphServiceImpl {
 
     pub fn with_cache_broker(mut self, broker: Arc<indexer::nats::NatsBroker>) -> Self {
         self.pipeline = self.pipeline.with_cache_broker(broker);
+        self
+    }
+
+    pub fn with_rate_limiter(mut self, limiter: QueryRateLimiter) -> Self {
+        self.rate_limiter = Some(limiter);
         self
     }
 }
@@ -134,12 +142,32 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
 
+        // Rate limit check: fail fast before any pipeline work.
+        let permit = if let Some(limiter) = &self.rate_limiter {
+            match limiter.try_acquire(claims.user_id) {
+                Ok(permit) => Some(permit),
+                Err(rejection) => {
+                    tracing::warn!(
+                        user_id = claims.user_id,
+                        reason = %rejection,
+                        "Query rejected by rate limiter",
+                    );
+                    return Err(Status::resource_exhausted(rejection.to_string()));
+                }
+            }
+        } else {
+            None
+        };
+
         let pipeline = self.pipeline.clone();
         let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
         tokio::spawn(
             async move {
+                // Hold the permit for the duration of the query.
+                let _permit = permit;
+
                 let handler = async {
                     let req = match receive_query_request(&mut stream, &tx).await {
                         Some(r) => r,
@@ -200,7 +228,8 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     .await
                     .is_err()
                 {
-                    tracing::warn!("Query stream timed out after 60s");
+                    tracing::warn!(timeout_secs = stream_timeout, "Query stream timed out");
+                    crate::metrics::record_stream_timeout();
                     let _ = tx
                         .send(Err(Status::deadline_exceeded("Query stream timed out")))
                         .await;

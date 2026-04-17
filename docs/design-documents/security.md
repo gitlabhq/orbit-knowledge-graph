@@ -191,15 +191,16 @@ In addition to authorization filtering, the query engine implements further safe
 - **Depth Caps**: Traversals limited to max 3 hops. Enforced in query compiler; queries exceeding this are rejected with error.
 - **Relationship Allow-Lists**: Only pre-defined relationship types are allowed. Unknown relationships trigger validation errors.
 - **Row Limits**: Max 1000 rows per query (configurable). Enforced in SQL generation: `LIMIT 1000`.
-- **Query Timeouts**: All ClickHouse queries have a 30-second timeout via `max_execution_time` setting.
-- **Rate Limiting**: Per-user rate limiting enforced at the GKG web server level (e.g., 100 queries per minute).
+- **Query Timeouts**: ClickHouse queries have a configurable timeout via `max_execution_time` setting (default 30s, overridable per query type in `config/default.yaml`). A stream-level timeout (default 60s) wraps the entire gRPC handler, covering compilation, execution, redaction, and hydration. Both are configurable via the `query:` and `grpc:` config sections.
+- **Rate Limiting**: Two layers, both configurable via the `rate_limit:` config section:
+  - *Global concurrency*: a server-wide semaphore (default 64) limits how many queries execute simultaneously across all connections, preventing ClickHouse overload.
+  - *Per-user rate*: a sliding-window rate limit (default 100 queries per 60s) keyed by `user_id` from JWT claims prevents a single user from monopolizing query capacity.
+  - *Per-connection concurrency*: tonic's `concurrency_limit_per_connection` (default 256) caps concurrent streams per HTTP/2 connection.
 
 **Detection and Monitoring**:
 
-- **Metric**: `qe.threat.depth_exceeded` (counter) -queries rejected for exceeding traversal depth or hop cap.
-- **Metric**: `qe.threat.limit_exceeded` (counter) -queries rejected for exceeding array cardinality caps (node_ids, IN filter values).
-- **Metric**: `qe.threat.timeout` (counter) -queries that timed out.
-- **Metric**: `qe.threat.rate_limited` (counter) -queries rejected due to rate limiting.
+- **Metric**: `gkg.server.rate_limit.rejected` (counter, `reason=per_user|global_concurrency`) -- queries rejected by the rate limiter.
+- **Metric**: `gkg.server.stream_timed_out` (counter) -- query streams that exceeded the configured stream timeout.
 - **Alert**: Trigger warning if timeout rate exceeds 5% of total queries.
 
 ## Layer 3: Final Redaction Layer via Rails Authorization
@@ -252,7 +253,7 @@ The redaction exchange occurs inside a bidirectional gRPC stream between Workhor
 
 **Code Review Requirements**:
 
-- GKG redaction module must be called for all non-aggregation queries before returning results.
+- GKG redaction module must be called for all queries before returning results. For aggregation queries, redaction is scoped to GROUP BY node columns only (individual row values are not returned, so full row-level redaction does not apply).
 - Rails redaction exchange handler must use `Ability.allowed?`, not custom permission checks.
 - Integration tests must verify confidential issues are filtered out.
 - Performance tests must verify batch sizes and latency for large result sets.

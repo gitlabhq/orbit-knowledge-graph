@@ -181,6 +181,15 @@
         "default": {}
       }
     },
+    "rate_limit": {
+      "$ref": "#/$defs/RateLimitConfig",
+      "default": {
+        "max_concurrent_queries": 64,
+        "per_user_max_entries": 10000,
+        "per_user_max_requests": 100,
+        "per_user_window_secs": 60
+      }
+    },
     "schedule": {
       "$ref": "#/$defs/ScheduleConfig",
       "default": {
@@ -1082,6 +1091,40 @@
       "additionalProperties": {
         "$ref": "#/$defs/QueryConfig"
       }
+    },
+    "RateLimitConfig": {
+      "type": "object",
+      "properties": {
+        "max_concurrent_queries": {
+          "description": "Maximum number of queries executing concurrently across all connections.\n0 disables the global concurrency limit.",
+          "type": "integer",
+          "format": "uint",
+          "default": 64,
+          "minimum": 0
+        },
+        "per_user_max_entries": {
+          "description": "Maximum number of distinct user buckets to track. Oldest entries are\nevicted when this limit is reached. Bounds memory usage.",
+          "type": "integer",
+          "format": "uint",
+          "default": 10000,
+          "minimum": 0
+        },
+        "per_user_max_requests": {
+          "description": "Maximum queries a single user can execute per `window_secs` interval.\n0 disables per-user rate limiting.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 100,
+          "minimum": 0
+        },
+        "per_user_window_secs": {
+          "description": "Sliding window duration in seconds for per-user rate limiting.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     },
     "ScheduleConfig": {
       "description": "Top-level schedule configuration.",
