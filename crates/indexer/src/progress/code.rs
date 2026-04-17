@@ -12,19 +12,18 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use arrow::array::{Array, StringArray, UInt64Array};
-use bytes::Bytes;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::indexing_progress::{
-    BranchCodeSnapshot, CodeMeta, CodeProgressSnapshot, INDEXING_PROGRESS_BUCKET, MetaSnapshot,
-    code_key, meta_key,
+    BranchCodeSnapshot, CodeMeta, CodeProgressSnapshot, MetaSnapshot, code_key, meta_key,
 };
 use gkg_utils::arrow::ArrowUtils;
 use ontology::Ontology;
-use parking_lot::Mutex;
 use tracing::{debug, info};
 
 use crate::handler::HandlerError;
-use crate::nats::{KvPutOptions, NatsServices};
+use crate::nats::NatsServices;
+use crate::progress::debounce::Debouncer;
+use crate::progress::kv;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
@@ -51,8 +50,7 @@ const CODE_NODE_KINDS_WITH_BRANCH: &[&str] = &["Directory", "File", "Definition"
 pub struct CodeProgressWriter {
     client: Arc<ArrowClickHouseClient>,
     ontology: Arc<Ontology>,
-    last_update: Mutex<HashMap<i64, Instant>>,
-    debounce_secs: u64,
+    debouncer: Debouncer,
 }
 
 impl CodeProgressWriter {
@@ -64,8 +62,7 @@ impl CodeProgressWriter {
         Self {
             client,
             ontology,
-            last_update: Mutex::new(HashMap::new()),
-            debounce_secs,
+            debouncer: Debouncer::new(debounce_secs),
         }
     }
 
@@ -94,7 +91,7 @@ impl CodeProgressWriter {
             edges,
         };
 
-        let prev = self.read_previous_project(nats, project_id).await;
+        let prev = kv::read_json::<CodeProgressSnapshot>(nats, &code_key(project_id)).await;
         let snapshot = merge_snapshot(
             prev,
             traversal_path,
@@ -103,17 +100,7 @@ impl CodeProgressWriter {
             indexed_at.to_rfc3339(),
         );
 
-        let value = serde_json::to_vec(&snapshot)
-            .map_err(|e| HandlerError::Processing(format!("serialize code snapshot: {e}")))?;
-
-        nats.kv_put(
-            INDEXING_PROGRESS_BUCKET,
-            &code_key(project_id),
-            Bytes::from(value),
-            KvPutOptions::default(),
-        )
-        .await
-        .map_err(|e| HandlerError::Processing(format!("KV put code: {e}")))?;
+        kv::write_json(nats, &code_key(project_id), &snapshot).await?;
 
         info!(
             project_id,
@@ -134,7 +121,7 @@ impl CodeProgressWriter {
         namespace_traversal_path: &str,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), HandlerError> {
-        if self.is_debounced(namespace_id) {
+        if self.debouncer.is_debounced(namespace_id) {
             debug!(
                 namespace_id,
                 "skipping namespace code meta write (debounced)"
@@ -157,21 +144,11 @@ impl CodeProgressWriter {
             last_indexed_at: now.to_rfc3339(),
         };
 
-        let prev_meta = self.read_previous_meta(nats, namespace_id).await;
+        let prev_meta = kv::read_json::<MetaSnapshot>(nats, &meta_key(namespace_id)).await;
         let merged = merge_meta_code(prev_meta, code, now.to_rfc3339());
 
-        let value = serde_json::to_vec(&merged)
-            .map_err(|e| HandlerError::Processing(format!("serialize meta: {e}")))?;
-        nats.kv_put(
-            INDEXING_PROGRESS_BUCKET,
-            &meta_key(namespace_id),
-            Bytes::from(value),
-            KvPutOptions::default(),
-        )
-        .await
-        .map_err(|e| HandlerError::Processing(format!("KV put meta: {e}")))?;
-
-        self.record_update(namespace_id);
+        kv::write_json(nats, &meta_key(namespace_id), &merged).await?;
+        self.debouncer.record(namespace_id);
         Ok(())
     }
 
@@ -183,41 +160,22 @@ impl CodeProgressWriter {
     ) -> Result<(HashMap<String, i64>, HashMap<String, i64>), String> {
         let mut nodes: HashMap<String, i64> = HashMap::new();
 
-        // gl_branch: no branch column; filter by (traversal_path, project_id, name=branch).
-        let branch_table = self.resolve_table("Branch")?;
-        let sql = format!(
-            r#"
-            SELECT uniq(id) AS cnt
-            FROM {branch_table}
-            WHERE traversal_path = {{traversal_path:String}}
-              AND project_id = {{project_id:Int64}}
-              AND name = {{branch:String}}
-              AND NOT _deleted
-            "#
-        );
-        let batches = self
-            .client
-            .query(&sql)
-            .param("traversal_path", traversal_path)
-            .param("project_id", project_id)
-            .param("branch", branch)
-            .fetch_arrow()
-            .await
-            .map_err(|e| format!("query Branch: {e}"))?;
-        let branch_count = scalar_u64(&batches, "cnt");
-        if branch_count > 0 {
-            nodes.insert("Branch".to_string(), branch_count as i64);
-        }
-
-        for kind in CODE_NODE_KINDS_WITH_BRANCH {
+        // gl_branch is keyed by `name`; the other node tables carry a
+        // `branch` column. The query shape only differs in that one filter.
+        for kind in std::iter::once("Branch").chain(CODE_NODE_KINDS_WITH_BRANCH.iter().copied()) {
             let table = self.resolve_table(kind)?;
+            let branch_filter = if kind == "Branch" {
+                "name = {branch:String}"
+            } else {
+                "branch = {branch:String}"
+            };
             let sql = format!(
                 r#"
                 SELECT uniq(id) AS cnt
                 FROM {table}
                 WHERE traversal_path = {{traversal_path:String}}
                   AND project_id = {{project_id:Int64}}
-                  AND branch = {{branch:String}}
+                  AND {branch_filter}
                   AND NOT _deleted
                 "#
             );
@@ -230,18 +188,17 @@ impl CodeProgressWriter {
                 .fetch_arrow()
                 .await
                 .map_err(|e| format!("query {kind}: {e}"))?;
-            let count = scalar_u64(&batches, "cnt");
+            let count = scalar_u64(&batches, "cnt") as i64;
             if count > 0 {
-                nodes.insert((*kind).to_string(), count as i64);
+                nodes.insert(kind.to_string(), count);
             }
         }
 
         // Edges: gl_edge has no project_id or branch column. Scope by
-        // (traversal_path, source_kind IN code kinds). At present the code
-        // pipeline indexes a single branch per project, so this is a correct
-        // per-project, per-branch approximation. Multi-branch indexing (a
-        // future enhancement) will need to attribute edges per branch via
-        // join with the source node tables.
+        // (traversal_path, source_kind IN code kinds). The code pipeline
+        // indexes one branch per project today, so this is a correct
+        // per-project, per-branch approximation. Multi-branch indexing would
+        // need a join with the source node tables to attribute edges.
         let edge_table = prefixed_table_name(self.ontology.edge_table(), *SCHEMA_VERSION);
         let source_kinds_sql = CODE_EDGE_SOURCE_KINDS
             .iter()
@@ -268,12 +225,10 @@ impl CodeProgressWriter {
 
         let mut edges = HashMap::new();
         for batch in &batches {
-            let Some(rels) =
-                ArrowUtils::get_column_by_name::<StringArray>(batch, "relationship_kind")
-            else {
-                continue;
-            };
-            let Some(counts) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
+            let (Some(rels), Some(counts)) = (
+                ArrowUtils::get_column_by_name::<StringArray>(batch, "relationship_kind"),
+                ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt"),
+            ) else {
                 continue;
             };
             for row in 0..batch.num_rows() {
@@ -289,40 +244,49 @@ impl CodeProgressWriter {
 
     async fn query_projects_indexed(&self, namespace_traversal_path: &str) -> Result<i64, String> {
         let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
-        let sql = format!(
-            r#"
-            SELECT uniq(project_id) AS cnt
-            FROM {table}
-            WHERE startsWith(traversal_path, {{traversal_path:String}})
-            "#
-        );
-        let batches = self
-            .client
-            .query(&sql)
-            .param("traversal_path", namespace_traversal_path)
-            .fetch_arrow()
+        self.scalar_count_by_prefix(&table, "uniq(project_id)", namespace_traversal_path, false)
             .await
-            .map_err(|e| format!("projects_indexed: {e}"))?;
-        Ok(scalar_u64(&batches, "cnt") as i64)
+            .map_err(|e| format!("projects_indexed: {e}"))
     }
 
     async fn query_projects_total(&self, namespace_traversal_path: &str) -> Result<i64, String> {
         let table = prefixed_table_name(GL_PROJECT_TABLE, *SCHEMA_VERSION);
+        self.scalar_count_by_prefix(&table, "count()", namespace_traversal_path, true)
+            .await
+            .map_err(|e| format!("projects_total: {e}"))
+    }
+
+    /// Runs `SELECT <agg> AS cnt FROM <table> [FINAL] WHERE
+    /// startsWith(traversal_path, <prefix>) [AND NOT _deleted]` and returns
+    /// the scalar `cnt` value. `filter_deleted` adds the `FINAL` modifier and
+    /// the `NOT _deleted` predicate — needed for soft-deleted tables only.
+    async fn scalar_count_by_prefix(
+        &self,
+        table: &str,
+        agg: &str,
+        prefix: &str,
+        filter_deleted: bool,
+    ) -> Result<i64, String> {
+        let (final_kw, deleted_clause) = if filter_deleted {
+            ("FINAL", "AND NOT _deleted")
+        } else {
+            ("", "")
+        };
         let sql = format!(
             r#"
-            SELECT count() AS cnt
-            FROM {table} FINAL
+            SELECT {agg} AS cnt
+            FROM {table} {final_kw}
             WHERE startsWith(traversal_path, {{traversal_path:String}})
-              AND NOT _deleted
+              {deleted_clause}
             "#
         );
         let batches = self
             .client
             .query(&sql)
-            .param("traversal_path", namespace_traversal_path)
+            .param("traversal_path", prefix)
             .fetch_arrow()
             .await
-            .map_err(|e| format!("projects_total: {e}"))?;
+            .map_err(|e| e.to_string())?;
         Ok(scalar_u64(&batches, "cnt") as i64)
     }
 
@@ -332,44 +296,6 @@ impl CodeProgressWriter {
             .table_name(node_name)
             .map_err(|e| format!("ontology table_name({node_name}): {e}"))?;
         Ok(prefixed_table_name(raw, *SCHEMA_VERSION))
-    }
-
-    async fn read_previous_project(
-        &self,
-        nats: &dyn NatsServices,
-        project_id: i64,
-    ) -> Option<CodeProgressSnapshot> {
-        let entry = nats
-            .kv_get(INDEXING_PROGRESS_BUCKET, &code_key(project_id))
-            .await
-            .ok()
-            .flatten()?;
-        serde_json::from_slice(&entry.value).ok()
-    }
-
-    async fn read_previous_meta(
-        &self,
-        nats: &dyn NatsServices,
-        namespace_id: i64,
-    ) -> Option<MetaSnapshot> {
-        let entry = nats
-            .kv_get(INDEXING_PROGRESS_BUCKET, &meta_key(namespace_id))
-            .await
-            .ok()
-            .flatten()?;
-        serde_json::from_slice(&entry.value).ok()
-    }
-
-    fn is_debounced(&self, namespace_id: i64) -> bool {
-        let map = self.last_update.lock();
-        match map.get(&namespace_id) {
-            Some(last) => last.elapsed().as_secs() < self.debounce_secs,
-            None => false,
-        }
-    }
-
-    fn record_update(&self, namespace_id: i64) {
-        self.last_update.lock().insert(namespace_id, Instant::now());
     }
 }
 
@@ -433,7 +359,7 @@ mod tests {
     use super::*;
     use crate::clickhouse::ClickHouseConfigurationExt;
     use crate::testkit::mocks::MockNatsServices;
-    use gkg_server_config::indexing_progress::SdlcMeta;
+    use gkg_server_config::indexing_progress::{INDEXING_PROGRESS_BUCKET, SdlcMeta};
 
     fn test_writer() -> CodeProgressWriter {
         let graph_client =
@@ -605,16 +531,14 @@ mod tests {
         let writer = test_writer();
         let mock = MockNatsServices::new();
 
-        // Seed a prior meta and a prior debounce timestamp. Since we forbid the
-        // ClickHouse call in this test, mark debounced state by writing first
-        // (which fails ClickHouse) - instead use a direct `record_update`.
-        writer.record_update(77);
-        let result = writer
+        // Pre-record the debouncer so the call short-circuits before touching
+        // ClickHouse (which isn't available in tests).
+        writer.debouncer.record(77);
+        writer
             .update_namespace_code_meta(&mock, 77, "1/77/", chrono::Utc::now())
-            .await;
-        assert!(result.is_ok(), "debounced call must short-circuit");
+            .await
+            .expect("debounced call must short-circuit");
 
-        // No KV write occurred: key must not exist.
         assert!(
             mock.get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(77))
                 .is_none()

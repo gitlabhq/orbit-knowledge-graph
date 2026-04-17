@@ -2,13 +2,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use gkg_server_config::indexing_progress::{
-    INDEXING_PROGRESS_BUCKET, code_key, counts_key, meta_key,
-};
+use gkg_server_config::indexing_progress::{code_key, counts_key, meta_key};
 use tracing::{error, info, warn};
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::nats::NatsServices;
+use crate::progress::kv;
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use gkg_server_config::{HandlerConfiguration, NamespaceDeletionHandlerConfig};
@@ -214,30 +213,19 @@ impl Handler for NamespaceDeletionHandler {
 /// Deletes all NATS KV keys owned by a namespace: meta.<ns>, counts.<tp> for
 /// each traversal path under the namespace, and code.<project_id> for each
 /// code-indexed project. Individual failures are logged and ignored — KV
-/// cleanup is best-effort and should not block graph-data deletion.
+/// cleanup is best-effort and must not block graph-data deletion.
 async fn cleanup_progress_kv(
     nats: &dyn NatsServices,
     namespace_id: i64,
     traversal_paths: &[String],
     project_ids: &[i64],
 ) {
-    let mk = meta_key(namespace_id);
-    if let Err(e) = nats.kv_delete(INDEXING_PROGRESS_BUCKET, &mk).await {
-        warn!(key = %mk, error = %e, "failed to delete meta KV key");
-    }
-
+    kv::delete_best_effort(nats, "meta", &meta_key(namespace_id)).await;
     for tp in traversal_paths {
-        let key = counts_key(tp);
-        if let Err(e) = nats.kv_delete(INDEXING_PROGRESS_BUCKET, &key).await {
-            warn!(key = %key, error = %e, "failed to delete counts KV key");
-        }
+        kv::delete_best_effort(nats, "counts", &counts_key(tp)).await;
     }
-
     for project_id in project_ids {
-        let key = code_key(*project_id);
-        if let Err(e) = nats.kv_delete(INDEXING_PROGRESS_BUCKET, &key).await {
-            warn!(key = %key, error = %e, "failed to delete code KV key");
-        }
+        kv::delete_best_effort(nats, "code", &code_key(*project_id)).await;
     }
 
     info!(
@@ -260,6 +248,7 @@ mod tests {
     use crate::testkit::mocks::{MockDestination, MockLockService, MockNatsServices};
     use crate::types::Envelope;
     use bytes::Bytes;
+    use gkg_server_config::indexing_progress::INDEXING_PROGRESS_BUCKET;
 
     use super::super::store::test_utils::{MockNamespaceDeletionStore, failed_outcome, ok_outcome};
 
@@ -445,6 +434,14 @@ mod tests {
         );
     }
 
+    fn seed_stub(nats: &MockNatsServices, key: &str) {
+        nats.set_kv(INDEXING_PROGRESS_BUCKET, key, Bytes::from_static(b"{}"));
+    }
+
+    fn kv_present(nats: &MockNatsServices, key: &str) -> bool {
+        nats.get_kv(INDEXING_PROGRESS_BUCKET, key).is_some()
+    }
+
     #[tokio::test]
     async fn deletes_kv_keys_for_meta_counts_and_code() {
         let store = Arc::new(
@@ -459,38 +456,18 @@ mod tests {
         let handler = make_handler(store.clone());
         let nats = Arc::new(MockNatsServices::new());
 
-        // Seed KV entries that should be deleted.
-        nats.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &meta_key(100),
-            Bytes::from_static(b"{}"),
-        );
-        nats.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &counts_key("1/100/"),
-            Bytes::from_static(b"{}"),
-        );
-        nats.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &counts_key("1/100/50/"),
-            Bytes::from_static(b"{}"),
-        );
-        nats.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &code_key(42),
-            Bytes::from_static(b"{}"),
-        );
-        nats.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &code_key(43),
-            Bytes::from_static(b"{}"),
-        );
+        let owned_keys = [
+            meta_key(100),
+            counts_key("1/100/"),
+            counts_key("1/100/50/"),
+            code_key(42),
+            code_key(43),
+        ];
+        for k in &owned_keys {
+            seed_stub(&nats, k);
+        }
         // Unrelated key — must survive.
-        nats.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &meta_key(999),
-            Bytes::from_static(b"{}"),
-        );
+        seed_stub(&nats, &meta_key(999));
 
         handler
             .handle(
@@ -500,34 +477,11 @@ mod tests {
             .await
             .unwrap();
 
+        for k in &owned_keys {
+            assert!(!kv_present(&nats, k), "{k} should be deleted");
+        }
         assert!(
-            nats.get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(100))
-                .is_none(),
-            "meta.100 should be deleted"
-        );
-        assert!(
-            nats.get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/100/"))
-                .is_none(),
-            "counts.1.100 should be deleted"
-        );
-        assert!(
-            nats.get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/100/50/"))
-                .is_none(),
-            "counts.1.100.50 should be deleted"
-        );
-        assert!(
-            nats.get_kv(INDEXING_PROGRESS_BUCKET, &code_key(42))
-                .is_none(),
-            "code.42 should be deleted"
-        );
-        assert!(
-            nats.get_kv(INDEXING_PROGRESS_BUCKET, &code_key(43))
-                .is_none(),
-            "code.43 should be deleted"
-        );
-        assert!(
-            nats.get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(999))
-                .is_some(),
+            kv_present(&nats, &meta_key(999)),
             "unrelated meta.999 must survive"
         );
     }
@@ -557,11 +511,7 @@ mod tests {
         let store = Arc::new(MockNamespaceDeletionStore::new().namespace_re_enabled());
         let handler = make_handler(store.clone());
         let nats = Arc::new(MockNatsServices::new());
-        nats.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &meta_key(100),
-            Bytes::from_static(b"{}"),
-        );
+        seed_stub(&nats, &meta_key(100));
 
         handler
             .handle(
@@ -571,10 +521,8 @@ mod tests {
             .await
             .unwrap();
 
-        // re-enabled path skips cleanup: meta survives.
         assert!(
-            nats.get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(100))
-                .is_some(),
+            kv_present(&nats, &meta_key(100)),
             "meta.100 must survive when namespace is re-enabled"
         );
         assert!(store.list_tp_calls().is_empty());

@@ -121,12 +121,14 @@ impl Handler for NamespaceHandler {
             .progress_writer
             .write_progress(
                 context.nats.as_ref(),
-                payload.namespace,
-                &traversal_path,
-                started_at_wall,
-                elapsed,
-                total_rows,
-                error_msg.as_deref(),
+                crate::progress::ProgressRun {
+                    namespace_id: payload.namespace,
+                    traversal_path: &traversal_path,
+                    started_at: started_at_wall,
+                    elapsed,
+                    total_rows,
+                    error: error_msg.as_deref(),
+                },
             )
             .await
         {

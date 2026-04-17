@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use indexer::nats::NatsServices;
+use indexer::nats::{KvEntry, NatsServices};
 use ontology::Ontology;
+use serde::de::DeserializeOwned;
 use tonic::Status;
 use tracing::{debug, error, info};
 
@@ -44,52 +45,38 @@ impl GraphStatusService {
             ));
         }
 
+        // `meta` is keyed by root namespace id (second segment), matching what
+        // `ProgressWriter` writes. `counts` is keyed by the full traversal path
+        // prefix, so subgroup-level queries share the namespace-level meta.
         let counts_k = counts_key(traversal_path);
-        // meta is keyed by root namespace id (second segment), which is what
-        // the indexer writes in ProgressWriter. counts is keyed by the full
-        // traversal path prefix, supporting subgroup-level lookups.
-        let namespace_id = extract_root_namespace_id(traversal_path);
-        let meta_k = namespace_id.map(meta_key);
+        let meta_k = extract_root_namespace_id(traversal_path).map(meta_key);
 
         debug!(counts = %counts_k, meta = ?meta_k, "reading graph status from KV");
 
-        let counts_fut = self.nats.kv_get(INDEXING_PROGRESS_BUCKET, &counts_k);
         let (counts_entry, meta_entry) = match meta_k.as_ref() {
             Some(mk) => {
-                let meta_fut = self.nats.kv_get(INDEXING_PROGRESS_BUCKET, mk);
-                let (c, m) = tokio::join!(counts_fut, meta_fut);
-                (map_kv_err(c, "counts")?, Some(map_kv_err(m, "meta")?))
+                let (c, m) =
+                    tokio::join!(self.read_kv("counts", &counts_k), self.read_kv("meta", mk));
+                (c?, m?)
             }
-            None => (map_kv_err(counts_fut.await, "counts")?, None),
+            None => (self.read_kv("counts", &counts_k).await?, None),
         };
 
-        let (node_counts, edge_counts, updated_at) = match counts_entry {
-            Some(entry) => match serde_json::from_slice::<CountsSnapshot>(&entry.value) {
-                Ok(s) => (s.nodes, s.edges, s.updated_at),
-                Err(e) => {
-                    error!(key = %counts_k, error = %e, "invalid counts snapshot");
-                    return Err(Status::internal("invalid counts snapshot"));
-                }
-            },
-            None => {
-                debug!(key = %counts_k, "no counts snapshot found, returning empty");
-                (HashMap::new(), HashMap::new(), String::new())
-            }
-        };
+        let counts = parse_snapshot::<CountsSnapshot>(counts_entry, "counts")?.unwrap_or_default();
+        let (state, initial_backfill_done, sdlc, code) =
+            match parse_snapshot::<MetaSnapshot>(meta_entry, "meta")? {
+                Some(meta) => into_meta_fields(meta),
+                None => (GraphState::Pending as i32, false, None, None),
+            };
 
-        let (state, initial_backfill_done, sdlc, code) = match meta_entry.flatten() {
-            Some(entry) => parse_meta(&entry.value)?,
-            None => (GraphState::Pending as i32, false, None, None),
-        };
-
-        let stale = is_stale(&updated_at, self.staleness_threshold_secs);
-        let domains = self.build_domains(&node_counts);
+        let stale = is_stale(&counts.updated_at, self.staleness_threshold_secs);
+        let domains = self.build_domains(&counts.nodes);
 
         info!(
             traversal_path,
             state,
             node_types = domains.iter().map(|d| d.items.len()).sum::<usize>(),
-            edge_types = edge_counts.len(),
+            edge_types = counts.edges.len(),
             stale,
             "graph status response built"
         );
@@ -97,68 +84,81 @@ impl GraphStatusService {
         Ok(GetGraphStatusResponse {
             state,
             initial_backfill_done,
-            updated_at,
+            updated_at: counts.updated_at,
             domains,
-            edge_counts,
+            edge_counts: counts.edges,
             sdlc,
             code,
             stale,
         })
     }
 
+    async fn read_kv(&self, kind: &'static str, key: &str) -> Result<Option<KvEntry>, Status> {
+        self.nats
+            .kv_get(INDEXING_PROGRESS_BUCKET, key)
+            .await
+            .map_err(|e| {
+                error!(kind, error = %e, "NATS KV read failed");
+                Status::internal(format!("KV read failed ({kind})"))
+            })
+    }
+
     fn build_domains(&self, node_counts: &HashMap<String, i64>) -> Vec<GraphStatusDomain> {
         self.ontology
             .domains()
-            .map(|domain| {
-                let items = domain
+            .map(|domain| GraphStatusDomain {
+                name: domain.name.clone(),
+                items: domain
                     .node_names
                     .iter()
-                    .filter_map(|node_name| {
-                        let node = self.ontology.get_node(node_name)?;
-                        if !node.has_traversal_path {
-                            return None;
-                        }
-                        let count = node_counts.get(node_name).copied().unwrap_or(0);
-                        let status = if count > 0 {
-                            EntityStatus::Completed as i32
-                        } else {
-                            EntityStatus::Pending as i32
-                        };
-                        Some(GraphStatusItem {
-                            name: node_name.clone(),
-                            status,
-                            count,
-                        })
-                    })
-                    .collect();
-
-                GraphStatusDomain {
-                    name: domain.name.clone(),
-                    items,
-                }
+                    .filter_map(|name| self.build_item(name, node_counts))
+                    .collect(),
             })
             .collect()
     }
+
+    fn build_item(
+        &self,
+        node_name: &str,
+        node_counts: &HashMap<String, i64>,
+    ) -> Option<GraphStatusItem> {
+        let node = self.ontology.get_node(node_name)?;
+        if !node.has_traversal_path {
+            return None;
+        }
+        let count = node_counts.get(node_name).copied().unwrap_or(0);
+        Some(GraphStatusItem {
+            name: node_name.to_string(),
+            status: status_for_count(count),
+            count,
+        })
+    }
 }
 
-fn map_kv_err<T>(
-    res: Result<T, indexer::nats::NatsError>,
+fn status_for_count(count: i64) -> i32 {
+    if count > 0 {
+        EntityStatus::Completed as i32
+    } else {
+        EntityStatus::Pending as i32
+    }
+}
+
+/// Deserialize an optional KV entry's JSON payload. Absent entry → `Ok(None)`;
+/// invalid JSON → `Err(Status::internal)` with `kind` in the log line.
+fn parse_snapshot<T: DeserializeOwned>(
+    entry: Option<KvEntry>,
     kind: &'static str,
-) -> Result<T, Status> {
-    res.map_err(|e| {
-        error!(kind, error = %e, "NATS KV read failed");
-        Status::internal(format!("KV read failed ({kind})"))
-    })
+) -> Result<Option<T>, Status> {
+    let Some(entry) = entry else { return Ok(None) };
+    serde_json::from_slice::<T>(&entry.value)
+        .map(Some)
+        .map_err(|e| {
+            error!(kind, error = %e, "invalid snapshot");
+            Status::internal(format!("invalid {kind} snapshot"))
+        })
 }
 
-fn parse_meta(
-    value: &[u8],
-) -> Result<(i32, bool, Option<SdlcProgress>, Option<CodeOverview>), Status> {
-    let meta: MetaSnapshot = serde_json::from_slice(value).map_err(|e| {
-        error!(error = %e, "invalid meta snapshot");
-        Status::internal("invalid meta snapshot")
-    })?;
-
+fn into_meta_fields(meta: MetaSnapshot) -> (i32, bool, Option<SdlcProgress>, Option<CodeOverview>) {
     let state = match meta.state.as_str() {
         "indexing" => GraphState::Indexing as i32,
         "idle" => GraphState::Idle as i32,
@@ -179,22 +179,22 @@ fn parse_meta(
         last_indexed_at: meta.code.last_indexed_at,
     });
 
-    Ok((state, meta.initial_backfill_done, sdlc, code))
+    (state, meta.initial_backfill_done, sdlc, code)
 }
 
 /// Returns the root namespace id from a traversal path like `"1/9970/55154808/"`.
 ///
-/// The root namespace id is the second segment (after the organization id). This
-/// is what the indexer writes `meta` snapshots under, keyed as `meta.<root_ns_id>`.
-/// Counts snapshots use the full path prefix (`counts.1.9970.55154808`), so deep
-/// lookups read per-subtree counts but share the namespace-level meta.
+/// The root namespace id is the second segment (after the organization id) and
+/// is what the indexer writes `meta` snapshots under. Counts snapshots use the
+/// full path prefix, so deep lookups read per-subtree counts while sharing the
+/// namespace-level meta.
 fn extract_root_namespace_id(traversal_path: &str) -> Option<i64> {
-    let parts: Vec<&str> = traversal_path.trim_end_matches('/').split('/').collect();
-    if parts.len() >= 2 {
-        parts[1].parse().ok()
-    } else {
-        None
-    }
+    traversal_path
+        .trim_end_matches('/')
+        .split('/')
+        .nth(1)?
+        .parse()
+        .ok()
 }
 
 fn is_valid_traversal_path(traversal_path: &str) -> bool {

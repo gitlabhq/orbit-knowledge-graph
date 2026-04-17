@@ -1,4 +1,6 @@
 pub mod code;
+pub(crate) mod debounce;
+pub(crate) mod kv;
 pub mod queries;
 
 pub use code::CodeProgressWriter;
@@ -8,32 +10,42 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use arrow::array::{Array, StringArray, UInt64Array};
-use bytes::Bytes;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
 use ontology::Ontology;
-use parking_lot::Mutex;
 use query_engine::compiler::{ResultContext, codegen};
 use tracing::{debug, info};
 
 use crate::handler::HandlerError;
-use crate::nats::{KvPutOptions, NatsServices};
+use crate::nats::NatsServices;
 
 use gkg_server_config::indexing_progress::{
-    CountsSnapshot, INDEXING_PROGRESS_BUCKET, MetaSnapshot, SdlcMeta, counts_key, meta_key,
+    CountsSnapshot, MetaSnapshot, SdlcMeta, counts_key, meta_key,
 };
 
+use self::debounce::Debouncer;
 use self::queries::{
     build_cross_namespace_edge_query, build_edge_count_query, build_node_count_query,
     cross_namespace_edge_targets, node_count_targets,
 };
 
+/// Inputs for one call to [`ProgressWriter::write_progress`]. Bundled into a
+/// struct so the signature doesn't need to thread seven arguments through
+/// handlers.
+pub struct ProgressRun<'a> {
+    pub namespace_id: i64,
+    pub traversal_path: &'a str,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub elapsed: std::time::Duration,
+    pub total_rows: u64,
+    pub error: Option<&'a str>,
+}
+
 pub struct ProgressWriter {
     client: Arc<ArrowClickHouseClient>,
     ontology: Arc<Ontology>,
-    last_update: Mutex<HashMap<i64, Instant>>,
-    debounce_secs: u64,
+    debouncer: Debouncer,
 }
 
 impl ProgressWriter {
@@ -45,8 +57,7 @@ impl ProgressWriter {
         Self {
             client,
             ontology,
-            last_update: Mutex::new(HashMap::new()),
-            debounce_secs,
+            debouncer: Debouncer::new(debounce_secs),
         }
     }
 
@@ -60,116 +71,64 @@ impl ProgressWriter {
         namespace_id: i64,
         started_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), HandlerError> {
-        let prev = self.read_previous_meta(nats, namespace_id).await;
-        let mut meta = prev.unwrap_or_else(|| MetaSnapshot {
-            state: String::new(),
-            initial_backfill_done: false,
-            updated_at: String::new(),
-            sdlc: SdlcMeta::default(),
-            code: Default::default(),
-        });
+        let mut meta = kv::read_json::<MetaSnapshot>(nats, &meta_key(namespace_id))
+            .await
+            .unwrap_or_default();
         meta.state = "indexing".to_string();
         meta.updated_at = started_at.to_rfc3339();
         meta.sdlc.last_started_at = started_at.to_rfc3339();
 
-        let value = serde_json::to_vec(&meta)
-            .map_err(|e| HandlerError::Processing(format!("serialize meta: {e}")))?;
-        nats.kv_put(
-            INDEXING_PROGRESS_BUCKET,
-            &meta_key(namespace_id),
-            Bytes::from(value),
-            KvPutOptions::default(),
-        )
-        .await
-        .map_err(|e| HandlerError::Processing(format!("KV put indexing meta: {e}")))?;
-        Ok(())
+        kv::write_json(nats, &meta_key(namespace_id), &meta).await
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn write_progress(
         &self,
         nats: &dyn NatsServices,
-        namespace_id: i64,
-        traversal_path: &str,
-        started_at: chrono::DateTime<chrono::Utc>,
-        elapsed: std::time::Duration,
-        total_rows: u64,
-        error: Option<&str>,
+        run: ProgressRun<'_>,
     ) -> Result<(), HandlerError> {
-        if self.is_debounced(namespace_id) {
+        let ProgressRun {
+            namespace_id,
+            traversal_path,
+            started_at,
+            elapsed,
+            total_rows,
+            error,
+        } = run;
+
+        if self.debouncer.is_debounced(namespace_id) {
             debug!(namespace_id, "skipping progress write (debounced)");
             return Ok(());
         }
 
         let count_started = Instant::now();
-        let prev_meta = self.read_previous_meta(nats, namespace_id).await;
+        let prev_meta = kv::read_json::<MetaSnapshot>(nats, &meta_key(namespace_id)).await;
 
         // Zero-row skip: if the pipeline processed no rows AND a prior counts
         // snapshot already exists, the existing counts are still authoritative.
-        // Skip the expensive count queries but refresh the existing counts key's
-        // updated_at (so readers don't see a stale flag) and refresh the meta
-        // snapshot (so cycle_count / last_* advance).
-        //
-        // Note: we check the counts KV directly, not prev_meta. `mark_indexing_started`
-        // writes meta at handler entry, so prev_meta is always Some by the time
-        // write_progress runs. The counts key is the authoritative signal for
-        // "have we written counts for this namespace before?".
-        let prev_counts = nats
-            .kv_get(INDEXING_PROGRESS_BUCKET, &counts_key(traversal_path))
+        // We check the counts KV directly (not prev_meta) because
+        // `mark_indexing_started` always writes meta first.
+        let has_prev_counts = kv::read_json::<CountsSnapshot>(nats, &counts_key(traversal_path))
             .await
-            .ok()
-            .flatten();
-        let skip_counts = total_rows == 0 && prev_counts.is_some();
+            .is_some();
+        let skip_counts = total_rows == 0 && has_prev_counts;
         let rollup_count = if skip_counts {
             self.touch_counts_updated_at(nats, traversal_path).await;
             0
         } else {
-            let (node_counts, edge_counts) = self
-                .run_count_queries(traversal_path)
-                .await
-                .map_err(|e| HandlerError::Processing(format!("count query failed: {e}")))?;
-
-            let rollups = rollup_counts(&node_counts, &edge_counts);
-            let completed_at = chrono::Utc::now();
-            let now = completed_at.to_rfc3339();
-
-            for (tp, (nodes, edges)) in &rollups {
-                let snapshot = CountsSnapshot {
-                    updated_at: now.clone(),
-                    nodes: nodes.clone(),
-                    edges: edges.clone(),
-                };
-                let value = serde_json::to_vec(&snapshot)
-                    .map_err(|e| HandlerError::Processing(format!("serialize counts: {e}")))?;
-
-                let key = counts_key(tp);
-                nats.kv_put(
-                    INDEXING_PROGRESS_BUCKET,
-                    &key,
-                    Bytes::from(value),
-                    KvPutOptions::default(),
-                )
-                .await
-                .map_err(|e| HandlerError::Processing(format!("KV put {key}: {e}")))?;
-            }
-            rollups.len()
+            self.write_count_rollups(nats, traversal_path).await?
         };
 
         let completed_at = chrono::Utc::now();
-        let now = completed_at.to_rfc3339();
         let prev_cycle = prev_meta.as_ref().map(|m| m.sdlc.cycle_count).unwrap_or(0);
         let prev_backfill_done = prev_meta.as_ref().is_some_and(|m| m.initial_backfill_done);
-        // Preserve the code side of the meta: the code indexing handler writes
-        // `code` independently, and the SDLC handler must not clobber it.
-        let prev_code = prev_meta
-            .as_ref()
-            .map(|m| m.code.clone())
-            .unwrap_or_default();
+        // Preserve the code block: the code indexing handler owns `code`, and
+        // the SDLC handler must not clobber it.
+        let prev_code = prev_meta.map(|m| m.code).unwrap_or_default();
 
         let meta = MetaSnapshot {
             state: "idle".to_string(),
             initial_backfill_done: prev_backfill_done || error.is_none(),
-            updated_at: now,
+            updated_at: completed_at.to_rfc3339(),
             sdlc: SdlcMeta {
                 last_completed_at: completed_at.to_rfc3339(),
                 last_started_at: started_at.to_rfc3339(),
@@ -179,31 +138,47 @@ impl ProgressWriter {
             },
             code: prev_code,
         };
-        let meta_value = serde_json::to_vec(&meta)
-            .map_err(|e| HandlerError::Processing(format!("serialize meta: {e}")))?;
-        let mk = meta_key(namespace_id);
-        nats.kv_put(
-            INDEXING_PROGRESS_BUCKET,
-            &mk,
-            Bytes::from(meta_value),
-            KvPutOptions::default(),
-        )
-        .await
-        .map_err(|e| HandlerError::Processing(format!("KV put meta: {e}")))?;
+        kv::write_json(nats, &meta_key(namespace_id), &meta).await?;
 
-        self.record_update(namespace_id);
+        self.debouncer.record(namespace_id);
 
-        let count_duration = count_started.elapsed();
         info!(
             namespace_id,
             kv_keys = rollup_count,
-            count_ms = count_duration.as_millis() as u64,
+            count_ms = count_started.elapsed().as_millis() as u64,
             skip_counts,
             total_rows,
             "indexing progress written to KV"
         );
 
         Ok(())
+    }
+
+    /// Runs node + edge count queries, rolls the results up to every
+    /// ancestor traversal path, and writes one `counts.<tp>` snapshot per
+    /// rollup. Returns the number of KV keys written.
+    async fn write_count_rollups(
+        &self,
+        nats: &dyn NatsServices,
+        traversal_path: &str,
+    ) -> Result<usize, HandlerError> {
+        let (node_counts, edge_counts) = self
+            .run_count_queries(traversal_path)
+            .await
+            .map_err(|e| HandlerError::Processing(format!("count query failed: {e}")))?;
+
+        let rollups = rollup_counts(&node_counts, &edge_counts);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        for (tp, (nodes, edges)) in &rollups {
+            let snapshot = CountsSnapshot {
+                updated_at: now.clone(),
+                nodes: nodes.clone(),
+                edges: edges.clone(),
+            };
+            kv::write_json(nats, &counts_key(tp), &snapshot).await?;
+        }
+        Ok(rollups.len())
     }
 
     async fn run_count_queries(
@@ -215,158 +190,60 @@ impl ProgressWriter {
             return Ok((vec![], vec![]));
         }
 
-        let count_query_config = QueryConfig {
-            max_execution_time: Some(30),
-            ..QueryConfig::default()
-        };
-
-        let node_ast = build_node_count_query(&targets, traversal_path);
-        let node_pq = codegen(&node_ast, ResultContext::new(), count_query_config)
-            .map_err(|e| format!("node codegen: {e}"))?;
-
-        debug!(sql = %node_pq.sql, "executing node count query");
-
-        let mut node_query = self.client.query(&node_pq.sql);
-        for (key, param) in &node_pq.params {
-            node_query =
-                ArrowClickHouseClient::bind_param(node_query, key, &param.value, &param.ch_type);
-        }
-        let node_batches = node_query
-            .fetch_arrow()
-            .await
-            .map_err(|e| format!("node query: {e}"))?;
-
+        let node_batches = self
+            .execute(build_node_count_query(&targets, traversal_path), "node")
+            .await?;
         let mut node_rows = Vec::new();
         for batch in &node_batches {
-            let Some(entities) = ArrowUtils::get_column_by_name::<StringArray>(batch, "entity")
-            else {
-                continue;
-            };
-            let Some(counts) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
-                continue;
-            };
-            let Some(tps) = ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path")
-            else {
-                continue;
-            };
-            for row in 0..batch.num_rows() {
-                if entities.is_null(row) || counts.is_null(row) || tps.is_null(row) {
-                    continue;
-                }
-                node_rows.push(NodeCountRow {
-                    entity: entities.value(row).to_string(),
-                    count: counts.value(row) as i64,
-                    traversal_path: tps.value(row).to_string(),
-                });
-            }
+            extract_node_rows(batch, &mut node_rows);
         }
 
-        let edge_ast = build_edge_count_query(traversal_path);
-        let edge_pq = codegen(&edge_ast, ResultContext::new(), count_query_config)
-            .map_err(|e| format!("edge codegen: {e}"))?;
-
-        debug!(sql = %edge_pq.sql, "executing edge count query");
-
-        let mut edge_query = self.client.query(&edge_pq.sql);
-        for (key, param) in &edge_pq.params {
-            edge_query =
-                ArrowClickHouseClient::bind_param(edge_query, key, &param.value, &param.ch_type);
-        }
-        let edge_batches = edge_query
-            .fetch_arrow()
-            .await
-            .map_err(|e| format!("edge query: {e}"))?;
-
+        let edge_batches = self
+            .execute(build_edge_count_query(traversal_path), "edge")
+            .await?;
         let mut edge_rows = Vec::new();
         for batch in &edge_batches {
-            let Some(tps) = ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path")
-            else {
-                continue;
-            };
-            let Some(rels) =
-                ArrowUtils::get_column_by_name::<StringArray>(batch, "relationship_kind")
-            else {
-                continue;
-            };
-            let Some(counts) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
-                continue;
-            };
-            for row in 0..batch.num_rows() {
-                if tps.is_null(row) || rels.is_null(row) || counts.is_null(row) {
-                    continue;
-                }
-                edge_rows.push(EdgeCountRow {
-                    traversal_path: tps.value(row).to_string(),
-                    relationship_kind: rels.value(row).to_string(),
-                    count: counts.value(row) as i64,
-                });
-            }
+            extract_edge_rows(batch, &mut edge_rows);
         }
 
         for target in cross_namespace_edge_targets() {
-            let cross_ast = build_cross_namespace_edge_query(&target, traversal_path);
-            let cross_pq = codegen(&cross_ast, ResultContext::new(), count_query_config)
-                .map_err(|e| format!("cross-namespace codegen: {e}"))?;
-
-            debug!(sql = %cross_pq.sql, target = target.target_alias, "executing cross-namespace edge query");
-
-            let mut cross_query = self.client.query(&cross_pq.sql);
-            for (key, param) in &cross_pq.params {
-                cross_query = ArrowClickHouseClient::bind_param(
-                    cross_query,
-                    key,
-                    &param.value,
-                    &param.ch_type,
-                );
-            }
-            let cross_batches = cross_query
-                .fetch_arrow()
-                .await
-                .map_err(|e| format!("cross-namespace edge query: {e}"))?;
-
+            let cross_batches = self
+                .execute(
+                    build_cross_namespace_edge_query(&target, traversal_path),
+                    "cross-namespace",
+                )
+                .await?;
             for batch in &cross_batches {
-                let Some(tps) =
-                    ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path")
-                else {
-                    continue;
-                };
-                let Some(rels) =
-                    ArrowUtils::get_column_by_name::<StringArray>(batch, "relationship_kind")
-                else {
-                    continue;
-                };
-                let Some(counts) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt")
-                else {
-                    continue;
-                };
-                for row in 0..batch.num_rows() {
-                    if tps.is_null(row) || rels.is_null(row) || counts.is_null(row) {
-                        continue;
-                    }
-                    edge_rows.push(EdgeCountRow {
-                        traversal_path: tps.value(row).to_string(),
-                        relationship_kind: rels.value(row).to_string(),
-                        count: counts.value(row) as i64,
-                    });
-                }
+                extract_edge_rows(batch, &mut edge_rows);
             }
         }
 
         Ok((node_rows, edge_rows))
     }
 
-    async fn read_previous_meta(
+    /// Compile a count-query AST and fetch its Arrow batches. `label` is used
+    /// only in error messages / trace logs.
+    async fn execute(
         &self,
-        nats: &dyn NatsServices,
-        namespace_id: i64,
-    ) -> Option<MetaSnapshot> {
-        let key = meta_key(namespace_id);
-        let entry = nats
-            .kv_get(INDEXING_PROGRESS_BUCKET, &key)
+        ast: query_engine::compiler::Node,
+        label: &'static str,
+    ) -> Result<Vec<arrow::record_batch::RecordBatch>, String> {
+        let config = QueryConfig {
+            max_execution_time: Some(30),
+            ..QueryConfig::default()
+        };
+        let pq = codegen(&ast, ResultContext::new(), config)
+            .map_err(|e| format!("{label} codegen: {e}"))?;
+
+        debug!(sql = %pq.sql, label, "executing count query");
+
+        let mut q = self.client.query(&pq.sql);
+        for (key, param) in &pq.params {
+            q = ArrowClickHouseClient::bind_param(q, key, &param.value, &param.ch_type);
+        }
+        q.fetch_arrow()
             .await
-            .ok()
-            .flatten()?;
-        serde_json::from_slice(&entry.value).ok()
+            .map_err(|e| format!("{label} query: {e}"))
     }
 
     /// Refresh `updated_at` on the existing counts key for a namespace without
@@ -374,36 +251,11 @@ impl ProgressWriter {
     /// don't see a stale flag despite the indexer running.
     async fn touch_counts_updated_at(&self, nats: &dyn NatsServices, traversal_path: &str) {
         let key = counts_key(traversal_path);
-        let Ok(Some(entry)) = nats.kv_get(INDEXING_PROGRESS_BUCKET, &key).await else {
-            return;
-        };
-        let Ok(mut snapshot) = serde_json::from_slice::<CountsSnapshot>(&entry.value) else {
+        let Some(mut snapshot) = kv::read_json::<CountsSnapshot>(nats, &key).await else {
             return;
         };
         snapshot.updated_at = chrono::Utc::now().to_rfc3339();
-        let Ok(value) = serde_json::to_vec(&snapshot) else {
-            return;
-        };
-        let _ = nats
-            .kv_put(
-                INDEXING_PROGRESS_BUCKET,
-                &key,
-                Bytes::from(value),
-                KvPutOptions::default(),
-            )
-            .await;
-    }
-
-    fn is_debounced(&self, namespace_id: i64) -> bool {
-        let map = self.last_update.lock();
-        match map.get(&namespace_id) {
-            Some(last) => last.elapsed().as_secs() < self.debounce_secs,
-            None => false,
-        }
-    }
-
-    fn record_update(&self, namespace_id: i64) {
-        self.last_update.lock().insert(namespace_id, Instant::now());
+        let _ = kv::write_json(nats, &key, &snapshot).await;
     }
 }
 
@@ -452,12 +304,53 @@ fn traversal_path_prefixes(tp: &str) -> Vec<String> {
     prefixes
 }
 
+fn extract_node_rows(batch: &arrow::record_batch::RecordBatch, out: &mut Vec<NodeCountRow>) {
+    let (Some(entities), Some(counts), Some(tps)) = (
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "entity"),
+        ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt"),
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path"),
+    ) else {
+        return;
+    };
+    for row in 0..batch.num_rows() {
+        if entities.is_null(row) || counts.is_null(row) || tps.is_null(row) {
+            continue;
+        }
+        out.push(NodeCountRow {
+            entity: entities.value(row).to_string(),
+            count: counts.value(row) as i64,
+            traversal_path: tps.value(row).to_string(),
+        });
+    }
+}
+
+fn extract_edge_rows(batch: &arrow::record_batch::RecordBatch, out: &mut Vec<EdgeCountRow>) {
+    let (Some(tps), Some(rels), Some(counts)) = (
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path"),
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "relationship_kind"),
+        ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt"),
+    ) else {
+        return;
+    };
+    for row in 0..batch.num_rows() {
+        if tps.is_null(row) || rels.is_null(row) || counts.is_null(row) {
+            continue;
+        }
+        out.push(EdgeCountRow {
+            traversal_path: tps.value(row).to_string(),
+            relationship_kind: rels.value(row).to_string(),
+            count: counts.value(row) as i64,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::clickhouse::ClickHouseConfigurationExt;
     use crate::testkit::mocks::MockNatsServices;
-    use gkg_server_config::indexing_progress::CodeMeta;
+    use bytes::Bytes;
+    use gkg_server_config::indexing_progress::{CodeMeta, INDEXING_PROGRESS_BUCKET};
 
     fn test_writer() -> ProgressWriter {
         let graph_client =
@@ -465,6 +358,30 @@ mod tests {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         // Large debounce so any second write in a test is skipped.
         ProgressWriter::new(graph_client, ontology, 9999)
+    }
+
+    fn run_for(namespace_id: i64, tp: &str, total_rows: u64) -> ProgressRun<'_> {
+        ProgressRun {
+            namespace_id,
+            traversal_path: tp,
+            started_at: chrono::Utc::now(),
+            elapsed: std::time::Duration::from_millis(1),
+            total_rows,
+            error: None,
+        }
+    }
+
+    fn seed<T: serde::Serialize>(mock: &MockNatsServices, key: &str, value: &T) {
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            key,
+            Bytes::from(serde_json::to_vec(value).unwrap()),
+        );
+    }
+
+    fn read<T: serde::de::DeserializeOwned>(mock: &MockNatsServices, key: &str) -> T {
+        let bytes = mock.get_kv(INDEXING_PROGRESS_BUCKET, key).unwrap();
+        serde_json::from_slice(&bytes).unwrap()
     }
 
     #[test]
@@ -514,10 +431,7 @@ mod tests {
             .await
             .unwrap();
 
-        let bytes = mock
-            .get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(42))
-            .expect("meta key written");
-        let meta: MetaSnapshot = serde_json::from_slice(&bytes).unwrap();
+        let meta: MetaSnapshot = read(&mock, &meta_key(42));
         assert_eq!(meta.state, "indexing");
         assert_eq!(meta.updated_at, started.to_rfc3339());
         assert_eq!(meta.sdlc.last_started_at, started.to_rfc3339());
@@ -547,30 +461,19 @@ mod tests {
                 last_indexed_at: "2020-01-01T00:00:00Z".to_string(),
             },
         };
-        mock.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &meta_key(42),
-            Bytes::from(serde_json::to_vec(&prev).unwrap()),
-        );
+        seed(&mock, &meta_key(42), &prev);
 
-        let started = chrono::Utc::now();
         writer
-            .mark_indexing_started(&mock, 42, started)
+            .mark_indexing_started(&mock, 42, chrono::Utc::now())
             .await
             .unwrap();
 
-        let bytes = mock
-            .get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(42))
-            .unwrap();
-        let meta: MetaSnapshot = serde_json::from_slice(&bytes).unwrap();
+        let meta: MetaSnapshot = read(&mock, &meta_key(42));
         assert_eq!(meta.state, "indexing");
         assert!(meta.initial_backfill_done, "monotonic flag preserved");
         assert_eq!(meta.sdlc.cycle_count, 7, "cycle_count preserved");
-        assert_eq!(
-            meta.code.projects_indexed, 3,
-            "code projects_indexed preserved"
-        );
-        assert_eq!(meta.code.projects_total, 5, "code projects_total preserved");
+        assert_eq!(meta.code.projects_indexed, 3);
+        assert_eq!(meta.code.projects_total, 5);
     }
 
     #[tokio::test]
@@ -579,63 +482,32 @@ mod tests {
         let mock = MockNatsServices::new();
 
         let stale_ts = "2020-01-01T00:00:00Z".to_string();
-        // Seed an existing counts snapshot with an old updated_at.
-        let mut nodes = HashMap::new();
-        nodes.insert("Project".to_string(), 42);
         let stale_counts = CountsSnapshot {
             updated_at: stale_ts.clone(),
-            nodes: nodes.clone(),
+            nodes: HashMap::from([("Project".to_string(), 42)]),
             edges: HashMap::new(),
         };
-        mock.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &counts_key("1/99/"),
-            Bytes::from(serde_json::to_vec(&stale_counts).unwrap()),
-        );
-        // Seed prior meta so the zero-row path runs.
-        mock.set_kv(
-            INDEXING_PROGRESS_BUCKET,
+        seed(&mock, &counts_key("1/99/"), &stale_counts);
+        seed(
+            &mock,
             &meta_key(99),
-            Bytes::from(
-                serde_json::to_vec(&MetaSnapshot {
-                    state: "idle".to_string(),
-                    initial_backfill_done: true,
-                    updated_at: stale_ts.clone(),
-                    sdlc: SdlcMeta::default(),
-                    code: CodeMeta::default(),
-                })
-                .unwrap(),
-            ),
+            &MetaSnapshot {
+                state: "idle".to_string(),
+                initial_backfill_done: true,
+                updated_at: stale_ts.clone(),
+                sdlc: SdlcMeta::default(),
+                code: CodeMeta::default(),
+            },
         );
 
         writer
-            .write_progress(
-                &mock,
-                99,
-                "1/99/",
-                chrono::Utc::now(),
-                std::time::Duration::from_millis(1),
-                0, // total_rows=0, triggers zero-row skip
-                None,
-            )
+            .write_progress(&mock, run_for(99, "1/99/", 0))
             .await
             .unwrap();
 
-        // The counts snapshot should have been refreshed with a new updated_at
-        // but identical node/edge counts.
-        let bytes = mock
-            .get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/99/"))
-            .unwrap();
-        let refreshed: CountsSnapshot = serde_json::from_slice(&bytes).unwrap();
-        assert_ne!(
-            refreshed.updated_at, stale_ts,
-            "updated_at must advance on zero-row skip"
-        );
-        assert_eq!(
-            refreshed.nodes.get("Project"),
-            Some(&42),
-            "counts must be preserved"
-        );
+        let refreshed: CountsSnapshot = read(&mock, &counts_key("1/99/"));
+        assert_ne!(refreshed.updated_at, stale_ts);
+        assert_eq!(refreshed.nodes.get("Project"), Some(&42));
     }
 
     #[tokio::test]
@@ -643,63 +515,27 @@ mod tests {
         let writer = test_writer();
         let mock = MockNatsServices::new();
 
-        // Seed a prior counts key (zero-row skip condition).
-        let prev_counts = CountsSnapshot {
-            updated_at: "2020-01-01T00:00:00Z".to_string(),
-            nodes: HashMap::new(),
-            edges: HashMap::new(),
-        };
-        mock.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &counts_key("1/99/"),
-            Bytes::from(serde_json::to_vec(&prev_counts).unwrap()),
-        );
-        // Seed a prior meta so cycle_count advances correctly.
-        let prev = MetaSnapshot {
-            state: "idle".to_string(),
-            initial_backfill_done: true,
-            updated_at: "2020-01-01T00:00:00Z".to_string(),
-            sdlc: SdlcMeta::default(),
-            code: CodeMeta::default(),
-        };
-        mock.set_kv(
-            INDEXING_PROGRESS_BUCKET,
+        seed(&mock, &counts_key("1/99/"), &CountsSnapshot::default());
+        seed(
+            &mock,
             &meta_key(99),
-            Bytes::from(serde_json::to_vec(&prev).unwrap()),
+            &MetaSnapshot {
+                state: "idle".to_string(),
+                initial_backfill_done: true,
+                ..Default::default()
+            },
         );
 
-        let started = chrono::Utc::now();
         // total_rows=0 + prev_counts=Some => skip counts. No ClickHouse call.
         writer
-            .write_progress(
-                &mock,
-                99,
-                "1/99/",
-                started,
-                std::time::Duration::from_millis(5),
-                0, // total_rows
-                None,
-            )
+            .write_progress(&mock, run_for(99, "1/99/", 0))
             .await
             .expect("should succeed without ClickHouse");
 
-        // Meta updated with new cycle_count and state=idle, initial_backfill_done preserved.
-        let bytes = mock
-            .get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(99))
-            .unwrap();
-        let meta: MetaSnapshot = serde_json::from_slice(&bytes).unwrap();
+        let meta: MetaSnapshot = read(&mock, &meta_key(99));
         assert_eq!(meta.state, "idle");
         assert!(meta.initial_backfill_done);
         assert_eq!(meta.sdlc.cycle_count, 1);
-        // Counts key preserved (same values) with refreshed updated_at.
-        let counts_bytes = mock
-            .get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/99/"))
-            .unwrap();
-        let counts: CountsSnapshot = serde_json::from_slice(&counts_bytes).unwrap();
-        assert_ne!(
-            counts.updated_at, "2020-01-01T00:00:00Z",
-            "updated_at must advance on zero-row skip"
-        );
     }
 
     #[tokio::test]
@@ -707,37 +543,23 @@ mod tests {
         let writer = test_writer();
         let mock = MockNatsServices::new();
 
-        // Seed a prior meta but NO counts key. Because there's no ClickHouse
-        // in the test, the count query will fail — we use that failure as the
-        // signal that the count path was attempted (skip would have succeeded).
-        let prev = MetaSnapshot {
-            state: "idle".to_string(),
-            initial_backfill_done: true,
-            updated_at: "2020-01-01T00:00:00Z".to_string(),
-            sdlc: SdlcMeta::default(),
-            code: CodeMeta::default(),
-        };
-        mock.set_kv(
-            INDEXING_PROGRESS_BUCKET,
+        // Prior meta exists but NO counts key. total_rows=0 + no counts =>
+        // must NOT skip; must attempt count queries, which fail against the
+        // default ClickHouse config in tests.
+        seed(
+            &mock,
             &meta_key(99),
-            Bytes::from(serde_json::to_vec(&prev).unwrap()),
+            &MetaSnapshot {
+                state: "idle".to_string(),
+                initial_backfill_done: true,
+                ..Default::default()
+            },
         );
 
-        // total_rows=0 but no prev_counts => must NOT skip; must attempt count queries.
-        let result = writer
-            .write_progress(
-                &mock,
-                99,
-                "1/99/",
-                chrono::Utc::now(),
-                std::time::Duration::from_millis(5),
-                0,
-                None,
-            )
-            .await;
+        let result = writer.write_progress(&mock, run_for(99, "1/99/", 0)).await;
         assert!(
             result.is_err(),
-            "expected count query to be attempted (and fail against default ClickHouse), but skip fired instead: {result:?}"
+            "expected count query attempt (and fail), got: {result:?}"
         );
     }
 
@@ -746,53 +568,29 @@ mod tests {
         let writer = test_writer();
         let mock = MockNatsServices::new();
 
-        // Seed prior success (meta AND counts, so zero-row skip fires and we
-        // don't need ClickHouse).
-        let prev_counts = CountsSnapshot {
-            updated_at: "2020-01-01T00:00:00Z".to_string(),
-            nodes: HashMap::new(),
-            edges: HashMap::new(),
-        };
-        mock.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &counts_key("1/7/"),
-            Bytes::from(serde_json::to_vec(&prev_counts).unwrap()),
-        );
-        let prev = MetaSnapshot {
-            state: "idle".to_string(),
-            initial_backfill_done: true,
-            updated_at: "2020-01-01T00:00:00Z".to_string(),
-            sdlc: SdlcMeta {
-                cycle_count: 5,
+        seed(&mock, &counts_key("1/7/"), &CountsSnapshot::default());
+        seed(
+            &mock,
+            &meta_key(7),
+            &MetaSnapshot {
+                state: "idle".to_string(),
+                initial_backfill_done: true,
+                sdlc: SdlcMeta {
+                    cycle_count: 5,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
-            code: CodeMeta::default(),
+        );
+
+        let run = ProgressRun {
+            error: Some("boom"),
+            ..run_for(7, "1/7/", 0)
         };
-        mock.set_kv(
-            INDEXING_PROGRESS_BUCKET,
-            &meta_key(7),
-            Bytes::from(serde_json::to_vec(&prev).unwrap()),
-        );
+        writer.write_progress(&mock, run).await.unwrap();
 
-        writer
-            .write_progress(
-                &mock,
-                7,
-                "1/7/",
-                chrono::Utc::now(),
-                std::time::Duration::from_millis(5),
-                0, // zero rows, takes skip path
-                Some("boom"),
-            )
-            .await
-            .unwrap();
-
-        let bytes = mock.get_kv(INDEXING_PROGRESS_BUCKET, &meta_key(7)).unwrap();
-        let meta: MetaSnapshot = serde_json::from_slice(&bytes).unwrap();
-        assert!(
-            meta.initial_backfill_done,
-            "error after first backfill must not regress flag"
-        );
+        let meta: MetaSnapshot = read(&mock, &meta_key(7));
+        assert!(meta.initial_backfill_done, "monotonic flag preserved");
         assert_eq!(meta.sdlc.last_error, "boom");
         assert_eq!(meta.sdlc.cycle_count, 6);
     }

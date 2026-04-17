@@ -4,10 +4,13 @@ use serde::{Deserialize, Serialize};
 
 pub const INDEXING_PROGRESS_BUCKET: &str = "indexing_progress";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CountsSnapshot {
+    #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
     pub nodes: HashMap<String, i64>,
+    #[serde(default)]
     pub edges: HashMap<String, i64>,
 }
 
@@ -33,12 +36,17 @@ pub struct BranchCodeSnapshot {
     pub edges: HashMap<String, i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MetaSnapshot {
+    #[serde(default)]
     pub state: String,
+    #[serde(default)]
     pub initial_backfill_done: bool,
+    #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
     pub sdlc: SdlcMeta,
+    #[serde(default)]
     pub code: CodeMeta,
 }
 
