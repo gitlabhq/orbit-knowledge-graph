@@ -9,6 +9,8 @@ code-graph-types = { path = "types" }
 treesitter-visit = { path = "treesitter-visit" }
 parser-core = { path = "parser" }
 code-graph-linker = { path = "linker" }
+arrow = { workspace = true }
+ruby-prism = "1.7.0"
 ignore = { workspace = true }
 indicatif = { workspace = true }
 log = { workspace = true }

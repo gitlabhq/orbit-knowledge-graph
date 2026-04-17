@@ -12,6 +12,10 @@ code-graph-linker = { path = "../code-graph/linker" }
 lance-graph = { workspace = true }
 arrow_56 = { workspace = true }
 
+# arrow 58 for reading PipelineOutput::Batches via IPC bridge
+arrow = { workspace = true }
+arrow-ipc = { workspace = true }
+
 globset = { workspace = true }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }

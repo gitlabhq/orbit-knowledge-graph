@@ -8,7 +8,7 @@ pub mod walker;
 
 pub use graph::{CodeGraph, GraphEdge, GraphNode};
 pub use imports::ResolveSettings;
-pub use rules::{HasRules, ResolutionRules};
+pub use rules::{HasRules, NoRules, ResolutionRules};
 pub use ssa::SsaResolver;
 pub use state::{
     BlockId, GraphDef, GraphDefMeta, GraphImport, ReachingDefs, StrId, StringPool, Value,

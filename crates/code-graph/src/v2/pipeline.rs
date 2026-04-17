@@ -2,7 +2,6 @@ use code_graph_config::{Language, detect_language_from_extension};
 use code_graph_types::CanonicalParser;
 use ignore::WalkBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
-use parser_core::dsl::types::{DslLanguage, DslParser};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
@@ -30,15 +29,19 @@ fn spinner(msg: &str) -> ProgressBar {
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
     pb
 }
-use crate::v2::langs::csharp::CSharpDsl;
-use crate::v2::langs::go::{GoDsl, GoRules};
-use crate::v2::langs::java::{JavaDsl, JavaRules};
-use crate::v2::langs::kotlin::{KotlinDsl, KotlinRules};
-use crate::v2::langs::python::{PythonDsl, PythonRules};
-use crate::v2::langs::ruby::{RubyDsl, RubyRules};
 
 /// Input to a language pipeline: file path (source read on demand).
 pub type FileInput = String;
+
+/// Output from a language pipeline.
+///
+/// - **Graph**: the standard `CodeGraph` output (generic pipelines).
+/// - **Batches**: raw Arrow `RecordBatch`es keyed by table name (custom
+///   pipelines that bypass `CodeGraph` entirely).
+pub enum PipelineOutput {
+    Graph(Box<CodeGraph>),
+    Batches(Vec<(String, arrow::record_batch::RecordBatch)>),
+}
 
 /// Trait for language-specific graph production.
 ///
@@ -46,25 +49,13 @@ pub type FileInput = String;
 /// - **Generic**: `GenericPipeline<P, R>` for languages using the standard
 ///   parse+walk → resolve → graph flow.
 /// - **Custom**: implement directly for languages that need full control
-///   over parsing and linking (e.g. Ruby).
+///   over parsing and linking. Custom pipelines can emit `RecordBatch`es
+///   directly without going through `CodeGraph`.
 pub trait LanguagePipeline {
     fn process_files(
-        files: Vec<FileInput>,
+        files: &[FileInput],
         root_path: &str,
-    ) -> Result<CodeGraph, Vec<PipelineError>>;
-}
-
-fn report_rss(label: &str) {
-    let pid = std::process::id();
-    if let Ok(output) = std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "rss="])
-        .output()
-        && let Ok(rss) = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse::<u64>()
-    {
-        eprintln!("[mem] {label}: {:.1} MB", rss as f64 / 1024.0);
-    }
+    ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
 /// Generic pipeline parameterized by parser `P` and rules `R`.
@@ -84,9 +75,9 @@ where
     R: HasRules + Send + Sync,
 {
     fn process_files(
-        files: Vec<FileInput>,
+        files: &[FileInput],
         root_path: &str,
-    ) -> Result<CodeGraph, Vec<PipelineError>> {
+    ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let parser = P::default();
         let rules = R::rules();
         let file_count = files.len();
@@ -94,7 +85,6 @@ where
         let t0 = std::time::Instant::now();
 
         eprintln!("[v2] {file_count} files, {num_threads} threads");
-        report_rss("before Phase 1");
 
         // ── Phase 1: parallel parse + add to graph under Mutex ──
         let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
@@ -167,8 +157,6 @@ where
             .map(|opt| opt.unwrap_or(petgraph::graph::NodeIndex::new(0)))
             .collect();
 
-        report_rss("after Phase 1 (graph + source bytes)");
-
         // ── Finalize graph ──────────────────────────────────────
         let t1 = std::time::Instant::now();
         graph.finalize();
@@ -198,8 +186,6 @@ where
                     >()) as f64
                 / 1048576.0,
         );
-        report_rss("after finalize (graph + indexes + source bytes)");
-
         // ── Phase 2: fused walk+resolve ────────────────────────
         // Re-parse from disk per file, or skip on Phase 1 error.
         let t2 = std::time::Instant::now();
@@ -279,74 +265,14 @@ where
             std::time::Duration::from_nanos(total_walk_ns),
         );
 
-        report_rss("after Phase 2 (graph + edges + source bytes)");
-
         eprintln!(
             "[v2] resolve: {total_refs} refs → {total_edges} edges in {:.2?}",
             t2.elapsed()
         );
         combined_stats.print();
 
-        Ok(graph)
+        Ok(PipelineOutput::Graph(Box::new(graph)))
     }
-}
-
-/// Registration macro for v2 pipelines.
-///
-/// Generates `dispatch_language` which routes files to the correct
-/// `LanguagePipeline` implementation per language.
-///
-/// Adding a new language: implement `LanguagePipeline` (or use
-/// `GenericPipeline<YourParser>`), add one line here.
-macro_rules! register_v2_pipelines {
-    ($( $variant:ident => $pipeline:ty ),+ $(,)?) => {
-        fn dispatch_language(
-            language: Language,
-            files: Vec<FileInput>,
-            root_path: &str,
-        ) -> Option<Result<CodeGraph, Vec<PipelineError>>> {
-            Some(match language {
-                $(Language::$variant => <$pipeline>::process_files(files, root_path),)+
-                _ => return None,
-            })
-        }
-    };
-}
-
-/// No-op rules: parse + chain resolution only, no SSA import strategies.
-macro_rules! no_op_rules {
-    ($name:ident, $dsl:ty, $sep:expr) => {
-        pub struct $name;
-        impl HasRules for $name {
-            fn rules() -> crate::linker::v2::ResolutionRules {
-                let spec = <$dsl>::spec();
-                let scopes = crate::linker::v2::ResolutionRules::derive_scopes(&spec);
-                crate::linker::v2::ResolutionRules::new(
-                    stringify!($name),
-                    scopes,
-                    spec,
-                    vec![],
-                    vec![],
-                    crate::linker::v2::rules::ChainMode::ValueFlow,
-                    crate::linker::v2::rules::ReceiverMode::None,
-                    $sep,
-                    &[],
-                    None,
-                )
-            }
-        }
-    };
-}
-
-no_op_rules!(CSharpNoRules, CSharpDsl, ".");
-
-register_v2_pipelines! {
-    Python  => GenericPipeline<DslParser<PythonDsl>, PythonRules>,
-    Java    => GenericPipeline<DslParser<JavaDsl>, JavaRules>,
-    Kotlin  => GenericPipeline<DslParser<KotlinDsl>, KotlinRules>,
-    CSharp  => GenericPipeline<DslParser<CSharpDsl>, CSharpNoRules>,
-    Go      => GenericPipeline<DslParser<GoDsl>, GoRules>,
-    Ruby    => GenericPipeline<DslParser<RubyDsl>, RubyRules>,
 }
 
 pub struct PipelineConfig {
@@ -365,10 +291,17 @@ impl Default for PipelineConfig {
 
 pub struct PipelineResult {
     pub graphs: Vec<CodeGraph>,
+    pub batches: Vec<(String, arrow::record_batch::RecordBatch)>,
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
 }
 
+/// Aggregate stats from the pipeline run.
+///
+/// Note: `definitions_count`, `imports_count`, `references_count`, and
+/// `edges_count` only reflect `PipelineOutput::Graph` outputs. Custom
+/// pipelines returning `PipelineOutput::Batches` contribute to
+/// `files_parsed` but not to the entity counts.
 pub struct PipelineStats {
     pub files_parsed: usize,
     pub files_skipped: usize,
@@ -411,17 +344,18 @@ impl Pipeline {
 
         // 2. Process each language through its pipeline
         let mut all_graphs: Vec<CodeGraph> = Vec::new();
+        let mut all_batches: Vec<(String, arrow::record_batch::RecordBatch)> = Vec::new();
         let mut all_errors: Vec<PipelineError> = Vec::new();
         let mut files_parsed = 0usize;
         let mut files_skipped = 0usize;
 
-        for (language, files) in files_by_language {
+        for (language, files) in &files_by_language {
             let file_count = files.len();
             eprintln!("[v2] processing {language}: {file_count} files");
             let t_lang = std::time::Instant::now();
 
-            match dispatch_language(language, files, &root_str) {
-                Some(Ok(graph)) => {
+            match crate::v2::registry::dispatch_language(*language, files, &root_str) {
+                Some(Ok(PipelineOutput::Graph(graph))) => {
                     eprintln!(
                         "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
                         t_lang.elapsed(),
@@ -429,7 +363,18 @@ impl Pipeline {
                         graph.edge_count()
                     );
                     files_parsed += file_count;
-                    all_graphs.push(graph);
+                    all_graphs.push(*graph);
+                }
+                Some(Ok(PipelineOutput::Batches(batches))) => {
+                    let row_count: usize = batches.iter().map(|(_, b)| b.num_rows()).sum();
+                    eprintln!(
+                        "[v2] {language}: done in {:.2?} ({} batches, {} total rows)",
+                        t_lang.elapsed(),
+                        batches.len(),
+                        row_count,
+                    );
+                    files_parsed += file_count;
+                    all_batches.extend(batches);
                 }
                 Some(Err(errors)) => {
                     eprintln!("[v2] {language}: failed with {} errors", errors.len());
@@ -450,6 +395,7 @@ impl Pipeline {
 
         PipelineResult {
             graphs: all_graphs,
+            batches: all_batches,
             stats: PipelineStats {
                 files_parsed,
                 files_skipped,
@@ -521,9 +467,13 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        dispatch_language(language, vec![path.to_string()], "/")
+        let output = crate::v2::registry::dispatch_language(language, &[path.to_string()], "/")
             .unwrap_or_else(|| panic!("Language {language} not supported"))
-            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"))
+            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
+        match output {
+            PipelineOutput::Graph(g) => *g,
+            PipelineOutput::Batches(_) => panic!("expected Graph output"),
+        }
     }
 
     // ── Python fixture ──────────────────────────────────────────────

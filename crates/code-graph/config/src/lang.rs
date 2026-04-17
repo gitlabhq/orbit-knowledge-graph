@@ -7,7 +7,7 @@ use treesitter_visit::{LanguageExt, SupportLang};
 macro_rules! define_languages {
     ($(
         $variant:ident => {
-            support_lang: $sl:ident,
+            $(support_lang: $sl:ident,)?
             extensions: [$($ext:literal),+ $(,)?],
             exclude: [$($excl:literal),* $(,)?],
             separator: $sep:literal,
@@ -41,18 +41,27 @@ macro_rules! define_languages {
                 match self { $(Self::$variant => &[$($name),+]),+ }
             }
 
-            pub const fn to_support_lang(&self) -> SupportLang {
-                match self { $(Self::$variant => SupportLang::$sl),+ }
+            /// Returns the tree-sitter grammar for this language, if one exists.
+            /// Custom-parser languages (e.g. Vue, Svelte) return `None`.
+            pub const fn to_support_lang(&self) -> Option<SupportLang> {
+                match self {
+                    $(Self::$variant => define_languages!(@support_lang $($sl)?),)+
+                }
             }
 
+            /// Parse source with tree-sitter. Panics if the language has no grammar.
             pub fn parse_ast(
                 &self,
                 code: &str,
             ) -> treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>> {
-                self.to_support_lang().ast_grep(code)
+                self.to_support_lang()
+                    .unwrap_or_else(|| panic!("{self} has no tree-sitter grammar"))
+                    .ast_grep(code)
             }
         }
     };
+    (@support_lang $sl:ident) => { Some(SupportLang::$sl) };
+    (@support_lang) => { None };
 }
 
 define_languages! {

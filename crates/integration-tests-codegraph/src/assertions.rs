@@ -11,6 +11,11 @@ pub(crate) struct FixtureFile {
 #[derive(Debug, Deserialize)]
 pub(crate) struct TestSuite {
     pub name: String,
+    /// Which pipeline to use. Absent or `"generic"` uses the standard
+    /// `Pipeline::run()` dispatch. Named pipelines (e.g. `"ruby_prism"`)
+    /// invoke the corresponding custom pipeline directly.
+    #[serde(default)]
+    pub pipeline: Option<String>,
     #[serde(default)]
     pub fixtures: Vec<FixtureFile>,
     pub tests: Vec<TestCase>,
