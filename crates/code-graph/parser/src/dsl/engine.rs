@@ -1037,20 +1037,21 @@ impl LanguageSpec {
                 // For bare refs, read SSA for the name itself.
                 let ssa_key = if let Some(chain) = &expression {
                     match chain.first() {
-                        Some(ExpressionStep::Ident(base)) => state.arena.alloc_str(base),
-                        Some(ExpressionStep::This) => {
-                            // Find the self_name written to SSA
-                            self.ssa_config
-                                .self_names
-                                .first()
-                                .map(|&s| state.arena.alloc_str(s))
-                                .unwrap_or(state.arena.alloc_str(&name))
+                        Some(ExpressionStep::Ident(base) | ExpressionStep::Call(base)) => {
+                            state.arena.alloc_str(base)
                         }
+                        Some(ExpressionStep::This) => self
+                            .ssa_config
+                            .self_names
+                            .first()
+                            .map(|&s| state.arena.alloc_str(s))
+                            .unwrap_or(state.arena.alloc_str(&name)),
                         Some(ExpressionStep::Super) => self
                             .ssa_config
                             .super_name
                             .map(|s| state.arena.alloc_str(s))
                             .unwrap_or(state.arena.alloc_str(&name)),
+                        Some(ExpressionStep::New(type_name)) => state.arena.alloc_str(type_name),
                         _ => state.arena.alloc_str(&name),
                     }
                 } else {
@@ -1058,8 +1059,8 @@ impl LanguageSpec {
                 };
 
                 eprintln!(
-                    "[walk_full] pending ref={:?} enclosing_stack={:?}",
-                    name, state.enclosing_def_stack
+                    "[walk_full] pending ref={:?} enclosing_stack={:?} block={:?} range={:?}",
+                    name, state.enclosing_def_stack, state.current_block, range
                 );
                 state.pending_refs.push(PendingRef {
                     name,
@@ -1183,9 +1184,7 @@ impl LanguageSpec {
 
         // Walk body contents
         if let Some(body_node) = node.field(rule.body_field) {
-            for child in body_node.children() {
-                self.walk_full(&child, state, sep);
-            }
+            self.walk_full(&body_node, state, sep);
         } else {
             // No explicit body field — walk all children
             for child in node.children() {

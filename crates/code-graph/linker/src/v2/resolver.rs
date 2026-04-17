@@ -78,7 +78,8 @@ pub fn resolve_file_references(
             .unwrap_or((NodeKind::File, None));
 
         eprintln!(
-            "[resolver] → targets: {:?}",
+            "[resolver] → {:?} targets: {:?}",
+            ref_event.name,
             targets.iter().map(|t| t.index()).collect::<Vec<_>>()
         );
         for target in targets {
@@ -291,7 +292,7 @@ fn resolve_chain(
                 let fallback_event = ReferenceEvent {
                     name: last_name.to_string(),
                     chain: None,
-                    reaching: ref_event.reaching.clone(),
+                    reaching: smallvec::smallvec![],
                     enclosing_def: ref_event.enclosing_def,
                     range: ref_event.range,
                 };
