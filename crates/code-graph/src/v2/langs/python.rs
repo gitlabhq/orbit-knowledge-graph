@@ -299,13 +299,15 @@ impl HasRules for PythonRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_types::CanonicalParser;
 
-    fn parse(code: &str) -> code_graph_types::CanonicalResult {
-        DslParser::<PythonDsl>::default()
-            .parse_file(code.as_bytes(), "test.py")
+    fn parse(code: &str) -> parser_core::dsl::engine::ParsedDefs {
+        PythonDsl::spec()
+            .parse_defs_only(
+                code.as_bytes(),
+                "test.py",
+                code_graph_config::Language::Python,
+            )
             .unwrap()
-            .0
     }
 
     #[test]
@@ -344,9 +346,17 @@ mod tests {
 
     #[test]
     fn call_references() {
-        let result = parse("def foo():\n    bar()\n");
-        assert!(!result.references.is_empty());
-        assert!(result.references.iter().any(|r| r.name == "bar"));
+        let mut ref_names = Vec::new();
+        PythonDsl::spec()
+            .parse_full_and_resolve(
+                b"def foo():\n    bar()\n",
+                "test.py",
+                code_graph_config::Language::Python,
+                |name, _, _, _| ref_names.push(name.to_string()),
+            )
+            .unwrap();
+        assert!(!ref_names.is_empty());
+        assert!(ref_names.iter().any(|n| n == "bar"));
     }
 
     #[test]

@@ -61,13 +61,15 @@ impl DslLanguage for CSharpDsl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_types::CanonicalParser;
 
-    fn parse(code: &str) -> code_graph_types::CanonicalResult {
-        DslParser::<CSharpDsl>::default()
-            .parse_file(code.as_bytes(), "Test.cs")
+    fn parse(code: &str) -> parser_core::dsl::engine::ParsedDefs {
+        CSharpDsl::spec()
+            .parse_defs_only(
+                code.as_bytes(),
+                "Test.cs",
+                code_graph_config::Language::CSharp,
+            )
             .unwrap()
-            .0
     }
 
     #[test]
@@ -77,11 +79,5 @@ mod tests {
         );
         assert!(result.definitions.len() >= 2);
         assert!(result.definitions.iter().any(|d| d.name == "Controller"));
-    }
-
-    #[test]
-    fn language() {
-        let result = parse("class X {}");
-        assert_eq!(result.language, Language::CSharp);
     }
 }

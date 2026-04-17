@@ -207,14 +207,4 @@ mod tests {
         assert_eq!("class".parse::<DefKind>().unwrap(), DefKind::Class);
         assert_eq!(DefKind::Method.as_ref(), "method");
     }
-
-    #[test]
-    fn reference_status_strum() {
-        use crate::node::ReferenceStatus;
-        assert_eq!(ReferenceStatus::Resolved.to_string(), "resolved");
-        assert_eq!(
-            "ambiguous".parse::<ReferenceStatus>().unwrap(),
-            ReferenceStatus::Ambiguous
-        );
-    }
 }

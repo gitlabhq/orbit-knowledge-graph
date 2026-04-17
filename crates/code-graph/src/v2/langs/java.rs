@@ -255,13 +255,15 @@ impl HasRules for JavaRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_types::CanonicalParser;
 
-    fn parse(code: &str) -> code_graph_types::CanonicalResult {
-        DslParser::<JavaDsl>::default()
-            .parse_file(code.as_bytes(), "Test.java")
+    fn parse(code: &str) -> parser_core::dsl::engine::ParsedDefs {
+        JavaDsl::spec()
+            .parse_defs_only(
+                code.as_bytes(),
+                "Test.java",
+                code_graph_config::Language::Java,
+            )
             .unwrap()
-            .0
     }
 
     #[test]

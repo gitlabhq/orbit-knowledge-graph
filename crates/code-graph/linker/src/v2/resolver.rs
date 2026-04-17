@@ -1,9 +1,9 @@
-//! Cross-file reference resolution from SSA-annotated `ReferenceEvent`s.
+//! Cross-file reference resolution.
 //!
-//! Takes `ParseValue` indices and maps them to graph `NodeIndex` targets,
-//! producing edges. This is the Phase C of the single-pass pipeline.
+//! `FileResolver` resolves one reference at a time via `resolve()`.
+//! No intermediate collections — the caller drives iteration.
 
-use code_graph_types::ssa::{ParseValue, ReferenceEvent};
+use code_graph_types::ssa::ParseValue;
 use code_graph_types::{EdgeKind, ExpressionStep, NodeKind, Relationship};
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
@@ -13,12 +13,94 @@ use super::imports::{self, ResolveSettings, apply_import_strategies};
 use super::rules::{ResolutionRules, ResolveStage};
 use super::state::ScratchBuf;
 
-/// Result of resolving one file's references.
-pub struct ResolveResult {
-    pub edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
+/// Borrowed reference data for resolution. No allocations.
+pub struct RefData<'a> {
+    pub name: &'a str,
+    pub chain: Option<&'a [ExpressionStep]>,
+    pub reaching: &'a [ParseValue],
+    pub enclosing_def: Option<u32>,
 }
 
-/// Per-file resolution context with caches.
+/// Per-file resolver with caches. Create once per file, call `resolve()` per ref.
+pub struct FileResolver<'a> {
+    ctx: ResolveCtx<'a>,
+    deadline: Option<std::time::Instant>,
+}
+
+impl<'a> FileResolver<'a> {
+    pub fn new(
+        graph: &'a CodeGraph,
+        file_node: NodeIndex,
+        def_nodes: &'a [NodeIndex],
+        import_nodes: &'a [NodeIndex],
+        rules: &'a ResolutionRules,
+        settings: &'a ResolveSettings,
+    ) -> Self {
+        let ctx = ResolveCtx::new(graph, file_node, def_nodes, import_nodes, rules, settings);
+        let deadline = settings
+            .per_file_timeout
+            .map(|d| std::time::Instant::now() + d);
+        Self { ctx, deadline }
+    }
+
+    /// Resolve a single reference, returning (source, target, edge) triples.
+    pub fn resolve(
+        &mut self,
+        name: &str,
+        chain: Option<&[ExpressionStep]>,
+        reaching: &[ParseValue],
+        enclosing_def: Option<u32>,
+        edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
+    ) {
+        if self.deadline.is_some_and(|d| std::time::Instant::now() > d) {
+            return;
+        }
+
+        let ref_data = RefData {
+            name,
+            chain,
+            reaching,
+            enclosing_def,
+        };
+        let targets = resolve_single(&mut self.ctx, &ref_data);
+        if targets.is_empty() {
+            return;
+        }
+
+        let graph = self.ctx.graph;
+        let source_node = enclosing_def
+            .and_then(|i| self.ctx.def_nodes.get(i as usize).copied())
+            .unwrap_or(self.ctx.file_node);
+
+        let (source_node_kind, source_def_kind) = enclosing_def
+            .and_then(|i| self.ctx.def_nodes.get(i as usize))
+            .and_then(|&n| graph.graph[n].def_id())
+            .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
+            .unwrap_or((NodeKind::File, None));
+
+        for target in targets {
+            let target_def_kind = graph.graph[target]
+                .def_id()
+                .map(|did| graph.defs[did.0 as usize].kind);
+            edges.push((
+                source_node,
+                target,
+                GraphEdge {
+                    relationship: Relationship {
+                        edge_kind: EdgeKind::Calls,
+                        source_node: source_node_kind,
+                        target_node: NodeKind::Definition,
+                        source_def_kind,
+                        target_def_kind,
+                    },
+                },
+            ));
+        }
+    }
+}
+
+// ── internals ───────────────────────────────────────────────────
+
 struct ResolveCtx<'a> {
     graph: &'a CodeGraph,
     file_node: NodeIndex,
@@ -41,7 +123,7 @@ impl<'a> ResolveCtx<'a> {
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
     ) -> Self {
-        let import_map = pre_resolve_imports(graph, file_node, import_nodes, rules.fqn_separator);
+        let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
         Self {
             graph,
             file_node,
@@ -96,122 +178,53 @@ impl<'a> ResolveCtx<'a> {
     }
 }
 
-/// Resolve all references for a single file.
-///
-/// Maps `ParseValue` indices to graph nodes and produces edges.
-/// This runs in parallel across files — no shared mutable state.
-pub fn resolve_file_references(
-    graph: &CodeGraph,
-    refs: &[ReferenceEvent],
-    file_node: NodeIndex,
-    def_nodes: &[NodeIndex],
-    import_nodes: &[NodeIndex],
-    rules: &ResolutionRules,
-    settings: &ResolveSettings,
-) -> ResolveResult {
-    if refs.is_empty() {
-        return ResolveResult { edges: Vec::new() };
-    }
-
-    let mut edges = Vec::new();
-    let mut ctx = ResolveCtx::new(graph, file_node, def_nodes, import_nodes, rules, settings);
-
-    let deadline = settings
-        .per_file_timeout
-        .map(|d| std::time::Instant::now() + d);
-
-    for ref_event in refs {
-        if deadline.is_some_and(|d| std::time::Instant::now() > d) {
-            break;
-        }
-        let source_node = ref_event
-            .enclosing_def
-            .and_then(|i| def_nodes.get(i as usize).copied())
-            .unwrap_or(file_node);
-
-        let targets = resolve_single(&mut ctx, ref_event);
-
-        let (source_node_kind, source_def_kind) = ref_event
-            .enclosing_def
-            .and_then(|i| def_nodes.get(i as usize))
-            .and_then(|&n| graph.graph[n].def_id())
-            .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
-            .unwrap_or((NodeKind::File, None));
-
-        for target in targets {
-            let target_def_kind = graph.graph[target]
-                .def_id()
-                .map(|did| graph.defs[did.0 as usize].kind);
-            edges.push((
-                source_node,
-                target,
-                GraphEdge {
-                    relationship: Relationship {
-                        edge_kind: EdgeKind::Calls,
-                        source_node: source_node_kind,
-                        target_node: NodeKind::Definition,
-                        source_def_kind,
-                        target_def_kind,
-                    },
-                },
-            ));
-        }
-    }
-
-    ResolveResult { edges }
-}
-
-/// Resolve a single reference event to target nodes.
-fn resolve_single(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<NodeIndex> {
-    if ref_event.chain.is_some() {
-        resolve_chain(ctx, ref_event)
+fn resolve_single(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
+    if r.chain.is_some() {
+        resolve_chain(ctx, r)
     } else {
-        resolve_bare(ctx, ref_event)
+        resolve_bare(ctx, r)
     }
 }
 
-/// Resolve a bare reference (no chain) using the configured stages.
-fn resolve_bare(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<NodeIndex> {
-    // Early skip: if no SSA reaching defs AND name not in any definition, nothing can resolve.
-    if ref_event.reaching.is_empty() && !ctx.graph.indexes.by_name.contains(&ref_event.name) {
+fn resolve_bare(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
+    if r.reaching.is_empty() && !ctx.graph.indexes.by_name.contains(r.name) {
         return vec![];
     }
 
     for stage in &ctx.rules.bare_stages.clone() {
         let result = match stage {
             ResolveStage::SSA => {
-                if ref_event.reaching.is_empty() {
+                if r.reaching.is_empty() {
                     vec![]
                 } else {
-                    resolve_from_reaching(ctx, &ref_event.reaching, &ref_event.name)
+                    resolve_from_reaching(ctx, r.reaching, r.name)
                 }
             }
             ResolveStage::ImportStrategies => {
-                // Skip if name doesn't exist as any definition
-                if !ctx.graph.indexes.by_name.contains(&ref_event.name) {
+                if !ctx.graph.indexes.by_name.contains(r.name) {
                     continue;
                 }
                 apply_import_strategies(
                     &ctx.rules.import_strategies,
                     ctx.graph,
                     ctx.file_node,
-                    &ref_event.name,
+                    r.name,
                     ctx.rules.fqn_separator,
                     &ctx.import_map,
                     &mut ctx.scratch,
                 )
             }
             ResolveStage::ImplicitMember => {
-                if !ctx.graph.indexes.by_name.contains(&ref_event.name) {
+                if !ctx.graph.indexes.by_name.contains(r.name) {
                     continue;
                 }
-                if let Some(enclosing_idx) = ref_event.enclosing_def
+                if let Some(enclosing_idx) = r.enclosing_def
                     && let Some(&enclosing_node) = ctx.def_nodes.get(enclosing_idx as usize)
                 {
                     resolve_implicit_member(
                         ctx.graph,
                         enclosing_node,
-                        &ref_event.name,
+                        r.name,
                         ctx.rules.fqn_separator,
                     )
                 } else {
@@ -229,7 +242,6 @@ fn resolve_bare(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<Nod
     vec![]
 }
 
-/// Map ParseValue reaching defs to concrete graph nodes.
 fn resolve_from_reaching(
     ctx: &mut ResolveCtx<'_>,
     reaching: &[ParseValue],
@@ -265,15 +277,13 @@ fn resolve_from_reaching(
     result
 }
 
-/// Resolve a chained reference using FQN-based type flow.
-fn resolve_chain(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<NodeIndex> {
-    let chain = ref_event.chain.as_deref().unwrap_or(&[]);
+fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
+    let chain = r.chain.unwrap_or(&[]);
     if chain.is_empty() {
         return vec![];
     }
 
-    let mut current_types: Vec<String> =
-        resolve_base_type_fqns(ctx, &chain[0], &ref_event.reaching);
+    let mut current_types: Vec<String> = resolve_base_type_fqns(ctx, &chain[0], r.reaching);
 
     if current_types.is_empty() {
         if ctx.settings.chain_fallback {
@@ -281,14 +291,13 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<No
                 ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
                 _ => None,
             }) {
-                let fallback_event = ReferenceEvent {
-                    name: last_name.to_string(),
+                let fallback = RefData {
+                    name: last_name,
                     chain: None,
-                    reaching: smallvec::smallvec![],
-                    enclosing_def: ref_event.enclosing_def,
-                    range: ref_event.range,
+                    reaching: &[],
+                    enclosing_def: r.enclosing_def,
                 };
-                return resolve_bare(ctx, &fallback_event);
+                return resolve_bare(ctx, &fallback);
             }
         }
         return vec![];
@@ -337,13 +346,11 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<No
         }
 
         if is_last {
-            // Dedup found nodes
             let mut seen = rustc_hash::FxHashSet::default();
             found_nodes.retain(|n| seen.insert(*n));
             return found_nodes;
         }
 
-        // Dedup next_types to prevent multiplicative explosion from overloads
         {
             let mut seen = rustc_hash::FxHashSet::default();
             next_types.retain(|t| seen.insert(t.clone()));
@@ -354,7 +361,6 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<No
     vec![]
 }
 
-/// Resolve the base of a chain to type FQN strings.
 fn resolve_base_type_fqns(
     ctx: &mut ResolveCtx<'_>,
     base_step: &ExpressionStep,
@@ -434,10 +440,8 @@ fn resolve_base_type_fqns(
     }
 }
 
-/// Pre-resolve imports for a file: build name → [NodeIndex] map.
 fn pre_resolve_imports(
     graph: &CodeGraph,
-    _file_node: NodeIndex,
     import_nodes: &[NodeIndex],
     sep: &str,
 ) -> FxHashMap<String, Vec<NodeIndex>> {
@@ -469,7 +473,6 @@ fn pre_resolve_imports(
     map
 }
 
-/// Look up a name as a member of the enclosing scope (implicit this/self).
 fn resolve_implicit_member(
     graph: &CodeGraph,
     enclosing_node: NodeIndex,
@@ -480,7 +483,6 @@ fn resolve_implicit_member(
     if let Some(did) = graph.graph[enclosing_node].def_id() {
         let gdef = &graph.defs[did.0 as usize];
         let fqn = graph.str(gdef.fqn);
-        // Walk up the FQN chain looking for a container with this member
         let mut scope = fqn;
         loop {
             graph.indexes.nested.lookup_into(

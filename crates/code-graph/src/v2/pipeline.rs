@@ -241,7 +241,7 @@ impl Pipeline {
 ///
 /// - **Phase 1** (parallel): `parse_defs_only()` → add defs/imports to graph under Mutex
 /// - **Finalize**: build ancestor chains, drop construction indexes
-/// - **Phase 2** (parallel): `parse_full()` → SSA + resolve inline → emit edges
+/// - **Phase 2** (parallel): `parse_full_and_resolve()` with callback → edges
 pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
@@ -280,7 +280,7 @@ where
         let file_infos: Vec<Option<FileInfo>> = files
             .par_iter()
             .enumerate()
-            .map(|(idx, path)| {
+            .map(|(_, path)| {
                 let abs_path = format!("{root_path}/{path}");
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
@@ -312,9 +312,19 @@ where
                 );
                 total_imports.fetch_add(result.imports.len(), std::sync::atomic::Ordering::Relaxed);
 
+                let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+                let file_size = source.len() as u64;
+
                 let (file_node, def_nodes, import_nodes) = {
                     let mut g = graph.lock().unwrap();
-                    g.add_file_nodes(result, idx)
+                    g.add_file(
+                        path,
+                        ext,
+                        language,
+                        file_size,
+                        &result.definitions,
+                        &result.imports,
+                    )
                 };
 
                 pb.inc(1);
@@ -341,7 +351,7 @@ where
         let mut graph = graph.into_inner().unwrap();
         graph.finalize();
 
-        // ── Phase 2: parallel parse_full + resolve ────────────
+        // ── Phase 2: parallel parse_full + resolve (callback) ──
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
@@ -364,27 +374,28 @@ where
                     }
                 };
 
-                let file_result = match spec.parse_full(&source, path, language) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        pb2.inc(1);
-                        return Vec::new();
-                    }
-                };
-
-                let result = crate::linker::v2::resolver::resolve_file_references(
+                let mut resolver = crate::linker::v2::FileResolver::new(
                     &graph,
-                    &file_result.references,
                     info.file_node,
                     &info.def_nodes,
                     &info.import_nodes,
                     &rules,
                     &rules.settings,
                 );
+                let mut edges = Vec::new();
 
-                total_edges.fetch_add(result.edges.len(), std::sync::atomic::Ordering::Relaxed);
+                let _ = spec.parse_full_and_resolve(
+                    &source,
+                    path,
+                    language,
+                    |name, chain, reaching, enclosing_def| {
+                        resolver.resolve(name, chain, reaching, enclosing_def, &mut edges);
+                    },
+                );
+
+                total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
-                result.edges
+                edges
             })
             .collect();
 

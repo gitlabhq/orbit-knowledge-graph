@@ -497,44 +497,6 @@ pub trait DslLanguage: Send + Sync + Default {
     }
 }
 
-/// Generic DSL-based canonical parser.
-///
-/// Wraps a `DslLanguage` impl and provides `CanonicalParser` functionality.
-/// No hand-written AST walking — everything is driven by declarative rules.
-pub struct DslParser<L: DslLanguage>(std::marker::PhantomData<L>);
-
-impl<L: DslLanguage> Default for DslParser<L> {
-    fn default() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-
-impl<L: DslLanguage> code_graph_types::CanonicalParser for DslParser<L> {
-    type Ast = treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>;
-
-    fn parse_file(
-        &self,
-        source: &[u8],
-        file_path: &str,
-    ) -> anyhow::Result<(code_graph_types::CanonicalResult, Self::Ast)> {
-        let spec = L::spec();
-        let (result, ast) = spec.parse_canonical(source, file_path, L::language())?;
-        Ok((result, ast))
-    }
-}
-
-impl<L: DslLanguage> DslParser<L> {
-    /// Parse for defs+imports only (skip refs/bindings/cf). No AST returned.
-    pub fn parse_defs_only(
-        &self,
-        source: &[u8],
-        file_path: &str,
-    ) -> anyhow::Result<code_graph_types::CanonicalResult> {
-        let spec = L::spec();
-        Ok(spec.parse_defs_only(source, file_path, L::language())?)
-    }
-}
-
 // ── Binding rules ───────────────────────────────────────────────
 
 pub struct BindingRule {

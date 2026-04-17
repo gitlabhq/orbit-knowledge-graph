@@ -5,14 +5,18 @@ use treesitter_visit::{Node, SupportLang};
 
 use code_graph_config::Language;
 use code_graph_types::{
-    CanonicalBinding, CanonicalControlFlow, CanonicalDefinition, CanonicalImport,
-    CanonicalReference, CanonicalResult, ControlFlowChild, ControlFlowKind, DefKind,
-    DefinitionMetadata, ExpressionStep, Fqn, ReferenceStatus,
+    CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
 };
 
 use crate::utils::node_to_range;
 
 use super::types::{LanguageSpec, Rule};
+
+/// Result of a defs-only parse. Just definitions and imports.
+pub struct ParsedDefs {
+    pub definitions: Vec<CanonicalDefinition>,
+    pub imports: Vec<CanonicalImport>,
+}
 
 struct ScopeMatch {
     name: String,
@@ -24,14 +28,13 @@ struct ScopeMatch {
 }
 
 impl LanguageSpec {
-    /// Parse source for defs+imports only (skip refs, bindings, control flow).
-    /// Used by Phase 1 where only graph construction is needed.
+    /// Parse source for defs+imports only. Used by Phase 1.
     pub fn parse_defs_only(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
-    ) -> crate::Result<CanonicalResult> {
+    ) -> crate::Result<ParsedDefs> {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
@@ -61,306 +64,10 @@ impl LanguageSpec {
             sep,
         );
 
-        let extension = file_path
-            .rsplit_once('.')
-            .map(|(_, ext)| ext.to_string())
-            .unwrap_or_default();
-
-        Ok(CanonicalResult {
-            file_path: file_path.to_string(),
-            extension,
-            file_size: source.len() as u64,
-            language,
+        Ok(ParsedDefs {
             definitions: defs,
             imports,
-            references: Vec::new(),
-            bindings: Vec::new(),
-            control_flow: Vec::new(),
         })
-    }
-
-    /// Parse source bytes into a `CanonicalResult` and the retained AST.
-    pub fn parse_canonical(
-        &self,
-        source: &[u8],
-        file_path: &str,
-        language: Language,
-    ) -> crate::Result<(
-        CanonicalResult,
-        treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>,
-    )> {
-        let source_str = std::str::from_utf8(source)
-            .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
-
-        let ast = language.parse_ast(source_str);
-        let root = ast.root();
-        let sep = language.fqn_separator();
-
-        let mut defs = Vec::new();
-        let mut refs = Vec::new();
-        let mut imports = Vec::new();
-        let mut bindings = Vec::new();
-        let mut control_flow = Vec::new();
-        let mut scope_stack: Vec<Arc<str>> = Vec::new();
-        let mut import_map = rustc_hash::FxHashMap::default();
-
-        // Derive module scope from file path for languages like Python.
-        if self.module_from_path
-            && let Some(module) = file_path_to_module(file_path, sep)
-        {
-            scope_stack.push(Arc::from(module.as_str()));
-        }
-
-        // Scope depth at which definitions are "top level" — accounts for
-        // the module scope pushed by module_from_path.
-        let top_level_depth = scope_stack.len();
-
-        self.walk(
-            &root,
-            &mut scope_stack,
-            top_level_depth,
-            &mut defs,
-            &mut refs,
-            &mut imports,
-            &mut bindings,
-            &mut control_flow,
-            &mut import_map,
-            sep,
-        );
-
-        let extension = file_path
-            .rsplit_once('.')
-            .map(|(_, ext)| ext.to_string())
-            .unwrap_or_default();
-
-        let result = CanonicalResult {
-            file_path: file_path.to_string(),
-            extension,
-            file_size: source.len() as u64,
-            language,
-            definitions: defs,
-            imports,
-            references: refs,
-            bindings,
-            control_flow,
-        };
-
-        Ok((result, ast))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn walk(
-        &self,
-        node: &Node<StrDoc<SupportLang>>,
-        scope_stack: &mut Vec<Arc<str>>,
-        top_level_depth: usize,
-        defs: &mut Vec<CanonicalDefinition>,
-        refs: &mut Vec<CanonicalReference>,
-        imports: &mut Vec<CanonicalImport>,
-        bindings: &mut Vec<CanonicalBinding>,
-        control_flow: &mut Vec<CanonicalControlFlow>,
-        import_map: &mut rustc_hash::FxHashMap<String, String>,
-        sep: &'static str,
-    ) {
-        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::MINIMUM_STACK_REMAINING {
-            return;
-        }
-
-        let node_kind = node.kind();
-        let node_kind_ref = node_kind.as_ref();
-        let mut pushed_scope = false;
-
-        // Check for package/namespace node (pushes scope, no definition)
-        if let Some((pkg_kind, ref pkg_extract)) = self.package_node
-            && node_kind_ref == pkg_kind
-            && let Some(name) = pkg_extract.extract_name(node)
-        {
-            scope_stack.push(Arc::from(name.as_str()));
-        }
-
-        if let Some(m) = self.evaluate_scope(node, node_kind_ref, import_map, sep) {
-            let is_top_level = scope_stack.len() <= top_level_depth;
-
-            if m.creates_scope {
-                scope_stack.push(Arc::from(m.name.as_str()));
-                pushed_scope = true;
-            }
-
-            let fqn = if m.creates_scope {
-                Fqn::from_parts(
-                    &scope_stack.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
-                    sep,
-                )
-            } else {
-                Fqn::from_scope(scope_stack, &m.name, sep)
-            };
-
-            defs.push(CanonicalDefinition {
-                definition_type: m.label,
-                kind: m.def_kind,
-                name: m.name,
-                fqn,
-                range: canonical_range(&m.range),
-                is_top_level,
-                metadata: m.metadata,
-            });
-        }
-
-        let custom_scope_handled = self
-            .custom_scope_fn
-            .is_some_and(|f| f(node, defs, scope_stack, sep));
-
-        if !custom_scope_handled {
-            if let Some((name, range, expression)) =
-                self.evaluate_reference(node, node_kind_ref, import_map, sep)
-            {
-                refs.push(CanonicalReference {
-                    reference_type: "Call",
-                    name,
-                    range: canonical_range(&range),
-                    scope_fqn: Fqn::from_scope_only(scope_stack, sep),
-                    status: ReferenceStatus::Unresolved,
-                    target_fqn: None,
-                    expression,
-                });
-            }
-
-            let import_count_before = imports.len();
-            let handled = self.custom_import_fn.is_some_and(|f| f(node, imports));
-            if !handled {
-                self.evaluate_imports(node, node_kind_ref, imports);
-            }
-            for imp in &imports[import_count_before..] {
-                if !imp.wildcard && !imp.path.is_empty() {
-                    let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-                    if !name.is_empty() {
-                        import_map.insert(name.to_string(), format!("{}{}{}", imp.path, sep, name));
-                    }
-                }
-            }
-        }
-
-        // Extract bindings
-        if let Some(&rule_idx) = self
-            .binding_dispatch
-            .get(node_kind_ref)
-            .and_then(|v| v.first())
-            && let rule = &self.bindings[rule_idx]
-            && let Some(name) = rule.extract_name(node)
-        {
-            let type_annotation = rule.extract_type_annotation(node);
-            let rhs_name = rule.extract_rhs_name(node, self);
-            let instance_attr = rule
-                .instance_attr_prefixes
-                .iter()
-                .any(|prefix| name.starts_with(prefix));
-
-            bindings.push(CanonicalBinding {
-                name,
-                kind: rule.binding_kind,
-                range: canonical_range(&node_to_range(node)),
-                type_annotation,
-                rhs_name,
-                instance_attr,
-            });
-        }
-
-        // Extract branches
-        if let Some(&rule_idx) = self
-            .branch_dispatch
-            .get(node_kind_ref)
-            .and_then(|v| v.first())
-        {
-            let rule = &self.branches[rule_idx];
-            let byte_range = (node.range().start, node.range().end);
-            let mut children = Vec::new();
-
-            // Condition child (walked in pre-branch block)
-            if let Some(cond_field) = rule.condition_field
-                && let Some(cond_node) = node.field(cond_field)
-            {
-                children.push(ControlFlowChild {
-                    byte_range: (cond_node.range().start, cond_node.range().end),
-                    is_condition: true,
-                });
-            }
-
-            // Branch arms
-            let has_catch_all = rule
-                .catch_all_kind
-                .is_some_and(|catch_kind| node.children().any(|c| c.kind().as_ref() == catch_kind));
-            for child in node.children() {
-                let ck = child.kind();
-                if rule.branch_kinds.iter().any(|&k| k == ck.as_ref()) {
-                    children.push(ControlFlowChild {
-                        byte_range: (child.range().start, child.range().end),
-                        is_condition: false,
-                    });
-                }
-            }
-
-            control_flow.push(CanonicalControlFlow {
-                kind: ControlFlowKind::Branch { has_catch_all },
-                node_kind: node_kind_ref.to_string(),
-                byte_range,
-                children,
-            });
-        }
-
-        // Extract loops
-        if let Some(&rule_idx) = self
-            .loop_dispatch
-            .get(node_kind_ref)
-            .and_then(|v| v.first())
-        {
-            let rule = &self.loops[rule_idx];
-            let byte_range = (node.range().start, node.range().end);
-            let mut children = Vec::new();
-
-            // Iteration expression (walked in pre-loop block)
-            if let Some(iter_field) = rule.iter_field
-                && let Some(iter_node) = node.field(iter_field)
-            {
-                children.push(ControlFlowChild {
-                    byte_range: (iter_node.range().start, iter_node.range().end),
-                    is_condition: true,
-                });
-            }
-
-            // Loop body
-            if let Some(body_node) = node.field(rule.body_field) {
-                children.push(ControlFlowChild {
-                    byte_range: (body_node.range().start, body_node.range().end),
-                    is_condition: false,
-                });
-            }
-
-            control_flow.push(CanonicalControlFlow {
-                kind: ControlFlowKind::Loop,
-                node_kind: node_kind_ref.to_string(),
-                byte_range,
-                children,
-            });
-        }
-
-        for child in node.children() {
-            self.walk(
-                &child,
-                scope_stack,
-                top_level_depth,
-                defs,
-                refs,
-                imports,
-                bindings,
-                control_flow,
-                import_map,
-                sep,
-            );
-        }
-
-        if pushed_scope {
-            scope_stack.pop();
-        }
     }
 
     /// Lightweight walk: only scope + import rules. No refs, bindings, or
@@ -700,18 +407,26 @@ impl LanguageSpec {
         }
     }
 
-    // ── parse_full: single walk with SSA ──────────────────────
+    // ── parse_full_and_resolve: single walk with SSA + inline callback ──
 
-    /// Parse source in a single pass: extract defs, imports, and
-    /// SSA-annotated references. No second walk needed.
-    pub fn parse_full(
+    /// Parse source with SSA, then call `on_ref` for each resolved reference.
+    /// No intermediate collections — each ref is dispatched as soon as its
+    /// reaching defs are computed.
+    pub fn parse_full_and_resolve<F>(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
-    ) -> crate::Result<code_graph_types::ssa::FileResult> {
-        use code_graph_types::ssa::FileResult;
-
+        mut on_ref: F,
+    ) -> crate::Result<()>
+    where
+        F: FnMut(
+            &str,                                        // name
+            Option<&[code_graph_types::ExpressionStep]>, // chain
+            &[code_graph_types::ssa::ParseValue],        // reaching defs
+            Option<u32>,                                 // enclosing_def index
+        ),
+    {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
@@ -733,41 +448,25 @@ impl LanguageSpec {
 
         state.ssa.seal_remaining();
 
-        // Resolve pending refs now that all blocks are sealed
+        // Dispatch each pending ref directly — no Vec<ReferenceEvent> materialized
         for pending in state.pending_refs.drain(..) {
             let reaching = state
                 .ssa
                 .read_variable_stateless(pending.ssa_key, pending.block);
-            let parse_values = reaching
+            let parse_values: smallvec::SmallVec<[code_graph_types::ssa::ParseValue; 2]> = reaching
                 .values
                 .iter()
                 .filter_map(|v| v.to_parse_value())
                 .collect();
-            state
-                .ref_events
-                .push(code_graph_types::ssa::ReferenceEvent {
-                    name: pending.name,
-                    chain: pending.chain,
-                    reaching: parse_values,
-                    enclosing_def: pending.enclosing_def,
-                    range: pending.range,
-                });
+            on_ref(
+                &pending.name,
+                pending.chain.as_deref(),
+                &parse_values,
+                pending.enclosing_def,
+            );
         }
 
-        let extension = file_path
-            .rsplit_once('.')
-            .map(|(_, ext)| ext.to_string())
-            .unwrap_or_default();
-
-        Ok(FileResult {
-            file_path: file_path.to_string(),
-            extension,
-            file_size: source.len() as u64,
-            language,
-            definitions: state.defs,
-            imports: state.imports,
-            references: state.ref_events,
-        })
+        Ok(())
     }
 
     fn walk_full<'a>(
@@ -963,8 +662,8 @@ impl LanguageSpec {
                 }
             }
 
-            // Reference handling → SSA read → ReferenceEvent
-            if let Some((name, range, expression)) =
+            // Reference handling → SSA read → PendingRef
+            if let Some((name, _range, expression)) =
                 self.evaluate_reference(node, nk, &state.import_map, sep)
             {
                 // For chains, read SSA for the base identifier (not the terminal).
@@ -998,7 +697,6 @@ impl LanguageSpec {
                     ssa_key,
                     block: state.current_block,
                     enclosing_def: state.enclosing_def_stack.last().copied(),
-                    range: canonical_range(&range),
                 });
             }
         }
@@ -1144,7 +842,6 @@ struct PendingRef<'a> {
     ssa_key: &'a str,
     block: super::ssa::BlockId,
     enclosing_def: Option<u32>,
-    range: code_graph_types::Range,
 }
 
 struct WalkFullState<'a> {
@@ -1155,7 +852,6 @@ struct WalkFullState<'a> {
     enclosing_def_stack: Vec<u32>,
     defs: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
-    ref_events: Vec<code_graph_types::ssa::ReferenceEvent>,
     pending_refs: Vec<PendingRef<'a>>,
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
@@ -1176,7 +872,6 @@ impl<'a> WalkFullState<'a> {
             enclosing_def_stack: Vec::new(),
             defs: Vec::new(),
             imports: Vec::new(),
-            ref_events: Vec::new(),
             pending_refs: Vec::new(),
             saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
@@ -1226,10 +921,9 @@ mod tests {
     use crate::dsl::predicates::*;
     use crate::dsl::types::*;
 
-    fn parse_with(spec: &LanguageSpec, code: &str) -> CanonicalResult {
-        spec.parse_canonical(code.as_bytes(), "test.py", Language::Python)
+    fn parse_with(spec: &LanguageSpec, code: &str) -> ParsedDefs {
+        spec.parse_defs_only(code.as_bytes(), "test.py", Language::Python)
             .unwrap()
-            .0
     }
 
     #[test]
@@ -1265,10 +959,19 @@ mod tests {
             vec![reference("call").name_from(field("function"))],
             vec![],
         );
-        let result = parse_with(&spec, "def foo(): pass\nfoo()");
+        let mut ref_names = Vec::new();
+        spec.parse_full_and_resolve(
+            b"def foo(): pass\nfoo()",
+            "test.py",
+            Language::Python,
+            |name, _chain, _reaching, _enclosing| {
+                ref_names.push(name.to_string());
+            },
+        )
+        .unwrap();
 
-        assert_eq!(result.references.len(), 1);
-        assert_eq!(result.references[0].name, "foo");
+        assert_eq!(ref_names.len(), 1);
+        assert_eq!(ref_names[0], "foo");
     }
 
     #[test]

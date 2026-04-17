@@ -18,7 +18,7 @@ pub trait HasRules {
 ///
 /// ```ignore
 /// // In register_v2_pipelines!:
-/// CSharp => [GenericPipeline<DslParser<CSharpDsl>, NoRules<CSharpDsl>>],
+/// CSharp => [GenericPipeline<CSharpDsl, NoRules<CSharpDsl>>],
 /// ```
 pub struct NoRules<D>(std::marker::PhantomData<D>);
 

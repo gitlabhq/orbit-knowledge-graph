@@ -243,13 +243,15 @@ impl HasRules for KotlinRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_types::CanonicalParser;
 
-    fn parse(code: &str) -> code_graph_types::CanonicalResult {
-        DslParser::<KotlinDsl>::default()
-            .parse_file(code.as_bytes(), "Test.kt")
+    fn parse(code: &str) -> parser_core::dsl::engine::ParsedDefs {
+        KotlinDsl::spec()
+            .parse_defs_only(
+                code.as_bytes(),
+                "Test.kt",
+                code_graph_config::Language::Kotlin,
+            )
             .unwrap()
-            .0
     }
 
     #[test]
