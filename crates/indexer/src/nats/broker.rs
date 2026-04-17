@@ -534,12 +534,19 @@ impl NatsBroker {
     pub async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
         let store = self.get_or_create_kv_store(bucket).await?;
 
+        // Use entry() so we can return the revision and key metadata, then
+        // filter to `Put` operations so delete/purge tombstones are treated
+        // as "key absent". `store.get()` does the filter but drops metadata.
         match store.entry(key).await {
-            Ok(Some(entry)) => Ok(Some(KvEntry {
-                key: entry.key,
-                value: entry.value,
-                revision: entry.revision,
-            })),
+            Ok(Some(entry)) => match entry.operation {
+                async_nats::jetstream::kv::Operation::Put => Ok(Some(KvEntry {
+                    key: entry.key,
+                    value: entry.value,
+                    revision: entry.revision,
+                })),
+                // Delete or Purge tombstones: key is logically absent.
+                _ => Ok(None),
+            },
             Ok(None) => Ok(None),
             Err(e) => Err(NatsError::KvGet {
                 bucket: bucket.to_string(),
