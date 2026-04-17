@@ -1,0 +1,59 @@
+use std::sync::Arc;
+
+use gkg_server_config::BillingConfig;
+use labkit_events::BillingEvent;
+
+use super::constants::APP_ID;
+
+pub trait BillingTracker: Send + Sync {
+    fn track(&self, event: BillingEvent);
+}
+
+pub struct SnowplowBillingTracker {
+    tracker: Arc<labkit_events::Tracker>,
+}
+
+impl SnowplowBillingTracker {
+    pub fn from_config(config: &BillingConfig) -> Result<Self, labkit_events::Error> {
+        let tracker = labkit_events::Tracker::builder(&config.collector_url, APP_ID)
+            .batch_size(1)
+            .build()?;
+        Ok(Self {
+            tracker: Arc::new(tracker),
+        })
+    }
+}
+
+impl BillingTracker for SnowplowBillingTracker {
+    fn track(&self, event: BillingEvent) {
+        if let Err(e) = self.tracker.track_billing_event(event) {
+            tracing::error!(error = %e, "failed to track billing event");
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct InMemoryBillingTracker {
+    count: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+impl InMemoryBillingTracker {
+    pub fn new() -> Self {
+        Self {
+            count: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        self.count.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+impl BillingTracker for InMemoryBillingTracker {
+    fn track(&self, _event: BillingEvent) {
+        self.count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}

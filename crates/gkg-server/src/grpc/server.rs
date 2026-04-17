@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gkg_server_config::ClickHouseConfiguration;
+use gkg_server_config::{ClickHouseConfiguration, GrpcConfig};
 use ontology::Ontology;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tonic::transport::Server as TonicServer;
@@ -10,9 +10,9 @@ use tonic::transport::server::ServerTlsConfig;
 use tracing::info;
 
 use crate::auth::JwtValidator;
+use crate::billing::BillingTracker;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
-use gkg_server_config::GrpcConfig;
 
 use super::service::KnowledgeGraphServiceImpl;
 
@@ -55,6 +55,11 @@ impl GrpcServer {
 
     pub fn with_cache_broker(mut self, broker: Arc<indexer::nats::NatsBroker>) -> Self {
         self.service = self.service.with_cache_broker(broker);
+        self
+    }
+
+    pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
+        self.service = self.service.with_billing(tracker);
         self
     }
 

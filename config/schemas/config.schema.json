@@ -12,6 +12,13 @@
         }
       }
     },
+    "billing": {
+      "$ref": "#/$defs/BillingConfig",
+      "default": {
+        "collector_url": "",
+        "enabled": false
+      }
+    },
     "bind_address": {
       "type": "string",
       "default": "127.0.0.1:4200"
@@ -240,6 +247,20 @@
             "environment": "development",
             "type": "self_managed"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "BillingConfig": {
+      "type": "object",
+      "properties": {
+        "collector_url": {
+          "type": "string",
+          "default": ""
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
