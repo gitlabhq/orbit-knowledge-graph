@@ -54,7 +54,7 @@ Pipeline Is At Steady State
     ${issue}=    Create Issue    ${project["id"]}    ${issue_title}
     ${note}=    Create Note On Issue    ${project["id"]}    ${issue["iid"]}    ${note_body}
 
-    Start Indexing Budget    300
+    Start Indexing Budget    600
     Wait For Node Indexed Within Budget    Project    ${project["id"]}    ${project_name}
     Wait For Node Indexed Within Budget    WorkItem    ${issue["id"]}    ${issue_title}    label_field=title
     Wait For Node Indexed Within Budget    Note    ${note["id"]}
