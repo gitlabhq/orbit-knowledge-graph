@@ -130,5 +130,7 @@ tests:
       - { row_count: 6 }
       - { row: { caller: "run", callee: "UserService" } }
       - { row: { caller: "run", callee: "ProjectService" } }
+      - { row: { caller: "run", callee: "create", src: "main.py", tgt: "services/user_service.py" } }
+      - { row: { caller: "run", callee: "create", src: "main.py", tgt: "services/project_service.py" } }
       - { row: { caller: "create", callee: "User" } }
       - { row: { caller: "create", callee: "Project" } }
