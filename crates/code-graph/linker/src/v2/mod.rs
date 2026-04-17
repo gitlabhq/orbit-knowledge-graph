@@ -3,10 +3,8 @@ pub mod imports;
 pub mod resolver;
 pub mod rules;
 pub mod state;
-pub mod stats;
 
 pub use graph::{CodeGraph, GraphEdge, GraphNode};
 pub use imports::ResolveSettings;
 pub use rules::{HasRules, NoRules, ResolutionRules};
 pub use state::{GraphDef, GraphDefMeta, GraphImport, StrId, StringPool};
-pub use stats::ResolveStats;
