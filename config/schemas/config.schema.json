@@ -3,6 +3,15 @@
   "title": "AppConfig",
   "type": "object",
   "properties": {
+    "analytics": {
+      "$ref": "#/$defs/AnalyticsConfig",
+      "default": {
+        "deployment": {
+          "environment": "development",
+          "type": "self_managed"
+        }
+      }
+    },
     "bind_address": {
       "type": "string",
       "default": "127.0.0.1:4200"
@@ -220,6 +229,19 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "AnalyticsConfig": {
+      "type": "object",
+      "properties": {
+        "deployment": {
+          "$ref": "#/$defs/DeploymentConfig",
+          "default": {
+            "environment": "development",
+            "type": "self_managed"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "ClickHouseConfiguration": {
       "type": "object",
       "properties": {
@@ -297,6 +319,36 @@
           "minimum": 0
         }
       }
+    },
+    "DeploymentConfig": {
+      "type": "object",
+      "properties": {
+        "environment": {
+          "$ref": "#/$defs/DeploymentEnvironment",
+          "default": "development"
+        },
+        "type": {
+          "$ref": "#/$defs/DeploymentKind",
+          "default": "self_managed"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeploymentEnvironment": {
+      "type": "string",
+      "enum": [
+        "development",
+        "staging",
+        "production"
+      ]
+    },
+    "DeploymentKind": {
+      "type": "string",
+      "enum": [
+        "com",
+        "dedicated",
+        "self_managed"
+      ]
     },
     "EngineConfiguration": {
       "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `handlers`: defaults for all handlers",
