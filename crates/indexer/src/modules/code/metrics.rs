@@ -13,6 +13,7 @@ pub struct CodeMetrics {
     pub(super) repository_fetch_duration: Histogram<f64>,
     pub(super) repository_resolution_strategy: Counter<u64>,
     pub(super) repository_cleanup: Counter<u64>,
+    pub(super) repository_empty: Counter<u64>,
     pub(super) indexing_duration: Histogram<f64>,
     pub(super) files_processed: Counter<u64>,
     pub(super) nodes_indexed: Counter<u64>,
@@ -47,12 +48,21 @@ impl CodeMetrics {
 
         let repository_resolution_strategy = meter
             .u64_counter("gkg.indexer.code.repository.resolution")
-            .with_description("Repository resolution strategy used (full_download)")
+            .with_description(
+                "Repository resolution strategy used (full_download, empty_repository)",
+            )
             .build();
 
         let repository_cleanup = meter
             .u64_counter("gkg.indexer.code.repository.cleanup")
             .with_description("Repository disk cleanup outcomes (success, failure)")
+            .build();
+
+        let repository_empty = meter
+            .u64_counter("gkg.indexer.code.repository.empty")
+            .with_description(
+                "Projects short-circuited as terminal-empty at fetch time, labelled by reason (not_found, server_error)",
+            )
             .build();
 
         let indexing_duration = meter
@@ -83,6 +93,7 @@ impl CodeMetrics {
             repository_fetch_duration,
             repository_resolution_strategy,
             repository_cleanup,
+            repository_empty,
             indexing_duration,
             files_processed,
             nodes_indexed,
@@ -105,6 +116,11 @@ impl CodeMetrics {
     pub(super) fn record_outcome(&self, outcome: &'static str) {
         self.events_processed
             .add(1, &[KeyValue::new("outcome", outcome)]);
+    }
+
+    pub(super) fn record_empty_repository(&self, reason: &'static str) {
+        self.repository_empty
+            .add(1, &[KeyValue::new("reason", reason)]);
     }
 
     pub(super) fn record_files_processed(&self, count: u64, outcome: &'static str) {

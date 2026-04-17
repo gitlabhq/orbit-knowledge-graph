@@ -9,6 +9,9 @@ pub enum GitlabClientError {
     #[error("project {0} not found (404)")]
     NotFound(i64),
 
+    #[error("server error for project {project_id}: status {status}")]
+    ServerError { project_id: i64, status: u16 },
+
     #[error("force push detected for project {0}")]
     ForcePush(i64),
 

@@ -6,6 +6,7 @@
 //! `ClickHouseConfiguration::build_client()` or `TlsConfig::load_tls_config()`)
 //! stay in the crates that own the runtime logic.
 
+pub mod analytics;
 pub mod app;
 pub mod clickhouse;
 pub mod engine;
@@ -20,6 +21,7 @@ pub mod schema;
 pub mod secret_file_source;
 pub mod tls;
 
+pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 pub use app::{AppConfig, ConfigError, SECRET_FILE_DIR, SharedAppConfig};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
