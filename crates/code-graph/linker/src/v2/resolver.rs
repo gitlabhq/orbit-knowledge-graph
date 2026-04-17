@@ -45,14 +45,6 @@ pub fn resolve_file_references(
         if deadline.is_some_and(|d| std::time::Instant::now() > d) {
             break;
         }
-        eprintln!(
-            "[resolver] ref: name={:?} chain={} reaching={:?} enclosing={:?}",
-            ref_event.name,
-            ref_event.chain.is_some(),
-            ref_event.reaching,
-            ref_event.enclosing_def,
-        );
-
         let source_node = ref_event
             .enclosing_def
             .and_then(|i| def_nodes.get(i as usize).copied())
@@ -77,11 +69,6 @@ pub fn resolve_file_references(
             .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
             .unwrap_or((NodeKind::File, None));
 
-        eprintln!(
-            "[resolver] → {:?} targets: {:?}",
-            ref_event.name,
-            targets.iter().map(|t| t.index()).collect::<Vec<_>>()
-        );
         for target in targets {
             let target_def_kind = graph.graph[target]
                 .def_id()

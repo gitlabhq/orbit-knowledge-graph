@@ -189,14 +189,6 @@ impl<'a> SsaEngine<'a> {
     ) -> ReachingDefs<'a> {
         self.stats.reads += 1;
         let value = self.read_variable_internal(variable, block);
-        if let SsaValue::Phi(pid) = &value {
-            eprintln!(
-                "[ssa] read {:?} in {:?} → Phi({}) operands={:?}",
-                variable, block, pid.0, self.phis[pid.0].operands
-            );
-        } else {
-            eprintln!("[ssa] read {:?} in {:?} → {:?}", variable, block, value);
-        }
         self.resolve_value(&value)
     }
 
@@ -429,7 +421,6 @@ impl<'a> SsaEngine<'a> {
         let mut seen = FxHashSet::default();
         values.retain(|v| seen.insert(v.clone()));
 
-        eprintln!("[ssa] resolve_value {:?} → {:?}", value, values);
         ReachingDefs { values }
     }
 

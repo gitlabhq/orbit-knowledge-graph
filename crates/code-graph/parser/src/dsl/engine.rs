@@ -793,23 +793,6 @@ impl LanguageSpec {
                 });
         }
 
-        eprintln!(
-            "[parse_full] {} defs={} imports={} refs={}",
-            file_path,
-            state.defs.len(),
-            state.imports.len(),
-            state.ref_events.len()
-        );
-        for r in &state.ref_events {
-            eprintln!(
-                "[parse_full]   ref: {:?} chain={} reaching={:?} enclosing={:?}",
-                r.name,
-                r.chain.is_some(),
-                r.reaching,
-                r.enclosing_def
-            );
-        }
-
         let extension = file_path
             .rsplit_once('.')
             .map(|(_, ext)| ext.to_string())
@@ -892,10 +875,6 @@ impl LanguageSpec {
                 metadata: m.metadata,
             });
 
-            eprintln!(
-                "[walk_full] def[{}]={:?} creates_scope={}",
-                def_index, def_name, m.creates_scope
-            );
             // Write def name to SSA in the PARENT block so sibling scopes can see it.
             // Must happen before creating the scope block (which changes current_block).
             let parent_block = if pushed_scope {
@@ -941,10 +920,6 @@ impl LanguageSpec {
 
             // Track enclosing def for references
             if m.creates_scope {
-                eprintln!(
-                    "[walk_full] enclosing push {} (stack before={:?})",
-                    def_index, state.enclosing_def_stack
-                );
                 state.enclosing_def_stack.push(def_index);
             }
         }
@@ -1058,10 +1033,6 @@ impl LanguageSpec {
                     state.arena.alloc_str(&name)
                 };
 
-                eprintln!(
-                    "[walk_full] pending ref={:?} enclosing_stack={:?} block={:?} range={:?}",
-                    name, state.enclosing_def_stack, state.current_block, range
-                );
                 state.pending_refs.push(PendingRef {
                     name,
                     chain: expression,
