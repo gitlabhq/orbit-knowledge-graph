@@ -1,16 +1,82 @@
-//! SSA-based reaching definitions resolver.
+//! Parser-level SSA engine (Braun et al., CC 2013).
 //!
-//! Implements the Braun et al. algorithm ("Simple and Efficient Construction of
-//! Static Single Assignment Form", CC 2013) adapted for code-graph reference
-//! resolution.
+//! Moved from the linker so that SSA construction happens during parsing,
+//! not during a second AST walk. Values are parser-local indices
+//! (`LocalDef(u32)`, `ImportRef(u32)`) instead of graph `NodeIndex`.
 //!
-//! All string data (variable names, type/alias values) is arena-backed via
-//! `FileArena`. No `Intern<str>`, no global RwLock, no memory leak.
+//! All variable names are `&'a str` backed by `FileArena` (bumpalo).
 
-use super::state::{BlockId, PhiId, ReachingDefs, Value};
-use super::stats::SsaStats;
+use code_graph_types::ssa::ParseValue;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
+
+// ── SSA types (local to the parser) ─────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct BlockId(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct PhiId(pub usize);
+
+/// SSA value — parser-local, no graph dependency.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum SsaValue<'a> {
+    /// Index into this file's definitions list.
+    LocalDef(u32),
+    /// Index into this file's imports list.
+    ImportRef(u32),
+    /// A type FQN for nested member lookup (self/this, type annotations).
+    Type(&'a str),
+    /// Deferred name resolution — chased at write time via copy propagation.
+    Alias(&'a str),
+    /// Dead end — parameter, literal, or otherwise unresolvable.
+    Opaque,
+    /// Internal: cycle-detection sentinel for the marker algorithm.
+    Marker,
+    /// Internal: a phi node (resolved to concrete values).
+    Phi(PhiId),
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SsaStats {
+    pub reads: u64,
+    pub local_hits: u64,
+    pub recursive_lookups: u64,
+    pub unsealed_hits: u64,
+    pub dead_end_hits: u64,
+    pub phis_created: u64,
+    pub phis_trivial: u64,
+    pub markers_elided: u64,
+    pub writes: u64,
+    pub blocks_created: u64,
+}
+
+/// The concrete values a variable resolves to at a given program point.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReachingDefs<'a> {
+    pub values: SmallVec<[SsaValue<'a>; 2]>,
+}
+
+impl ReachingDefs<'_> {
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+}
+
+impl SsaValue<'_> {
+    /// Convert to a ParseValue for output. Returns None for SSA-internal
+    /// values (Marker, Phi) and Alias (should have been resolved).
+    pub fn to_parse_value(&self) -> Option<ParseValue> {
+        match self {
+            SsaValue::LocalDef(i) => Some(ParseValue::LocalDef(*i)),
+            SsaValue::ImportRef(i) => Some(ParseValue::ImportRef(*i)),
+            SsaValue::Type(t) => Some(ParseValue::Type(t.to_string())),
+            SsaValue::Opaque => Some(ParseValue::Opaque),
+            SsaValue::Alias(_) | SsaValue::Marker | SsaValue::Phi(_) => None,
+        }
+    }
+}
 
 // ── Phi node ────────────────────────────────────────────────────
 
@@ -18,11 +84,11 @@ use smallvec::SmallVec;
 struct PhiNode<'a> {
     block: BlockId,
     variable: &'a str,
-    operands: SmallVec<[Value<'a>; 2]>,
+    operands: SmallVec<[SsaValue<'a>; 2]>,
     /// Witness caching (Section 3.1): first two distinct non-self operands.
     /// If both are still valid and distinct, the phi is non-trivial without
     /// scanning all operands.
-    witnesses: [Option<Value<'a>>; 2],
+    witnesses: [Option<SsaValue<'a>>; 2],
 }
 
 // ── Block ───────────────────────────────────────────────────────
@@ -35,22 +101,20 @@ struct Block {
 
 // ── SSA Resolver ────────────────────────────────────────────────
 
-/// SSA-based reaching definitions resolver (Braun et al. algorithm).
+/// Parser-level SSA engine (Braun et al. algorithm).
 ///
-/// All variable names and string values are `&'a str` backed by
-/// [`FileArena`]. No `Intern<str>`, no global RwLock.
-pub struct SsaResolver<'a> {
+/// All variable names are `&'a str` backed by `FileArena`.
+pub(crate) struct SsaEngine<'a> {
     blocks: Vec<Block>,
     phis: Vec<PhiNode<'a>>,
     /// current_def[variable][block] = value
-    current_def: FxHashMap<&'a str, FxHashMap<BlockId, Value<'a>>>,
+    current_def: FxHashMap<&'a str, FxHashMap<BlockId, SsaValue<'a>>>,
     /// Incomplete phis for unsealed blocks: block → variable → phi_id
     incomplete_phis: FxHashMap<BlockId, FxHashMap<&'a str, PhiId>>,
-    /// Counters for SSA operations.
     pub stats: SsaStats,
 }
 
-impl<'a> SsaResolver<'a> {
+impl<'a> SsaEngine<'a> {
     pub fn new() -> Self {
         Self {
             blocks: Vec::with_capacity(32),
@@ -100,13 +164,13 @@ impl<'a> SsaResolver<'a> {
     /// Record a variable definition: `variable` is defined as `value` in `block`.
     /// On-the-fly copy propagation (Section 3.1): if the value is an alias
     /// to another variable, resolve it immediately instead of deferring.
-    pub fn write_variable(&mut self, variable: &'a str, block: BlockId, value: Value<'a>) {
-        let resolved = if let Value::Alias(alias_name) = value {
+    pub fn write_variable(&mut self, variable: &'a str, block: BlockId, value: SsaValue<'a>) {
+        let resolved = if let SsaValue::Alias(alias_name) = value {
             let alias_val = self.read_variable_internal(alias_name, block);
-            if alias_val != Value::Opaque {
+            if alias_val != SsaValue::Opaque {
                 alias_val
             } else {
-                Value::Alias(alias_name)
+                SsaValue::Alias(alias_name)
             }
         } else {
             value
@@ -131,7 +195,7 @@ impl<'a> SsaResolver<'a> {
 
     // ── Internal: Braun et al. algorithm ────────────────────────
 
-    fn read_variable_internal(&mut self, variable: &'a str, block: BlockId) -> Value<'a> {
+    fn read_variable_internal(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
         // Local value numbering: check current block first
         if let Some(block_defs) = self.current_def.get(&variable)
             && let Some(value) = block_defs.get(&block)
@@ -145,7 +209,7 @@ impl<'a> SsaResolver<'a> {
         self.read_variable_recursive(variable, block)
     }
 
-    fn read_variable_recursive(&mut self, variable: &'a str, block: BlockId) -> Value<'a> {
+    fn read_variable_recursive(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
         let val;
         let sealed = self.blocks[block.0].sealed;
         let num_preds = self.blocks[block.0].predecessors.len();
@@ -158,10 +222,10 @@ impl<'a> SsaResolver<'a> {
                 .entry(block)
                 .or_default()
                 .insert(variable, phi_id);
-            val = Value::Phi(phi_id);
+            val = SsaValue::Phi(phi_id);
         } else if num_preds == 0 {
             self.stats.dead_end_hits += 1;
-            val = Value::Opaque;
+            val = SsaValue::Opaque;
         } else if num_preds == 1 {
             let pred = self.blocks[block.0].predecessors[0];
             val = self.read_variable_internal(variable, pred);
@@ -178,19 +242,19 @@ impl<'a> SsaResolver<'a> {
 
     /// Marker algorithm: mark block, collect values from predecessors,
     /// only create a phi if values differ or a cycle was detected.
-    fn read_variable_marker(&mut self, variable: &'a str, block: BlockId) -> Value<'a> {
+    fn read_variable_marker(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
         // Place a marker sentinel so recursive lookups that reach this
         // block again will detect the cycle. Distinct from Opaque so
         // genuine dead-end values aren't misidentified as cycles.
-        self.write_variable_interned(variable, block, Value::Marker);
+        self.write_variable_interned(variable, block, SsaValue::Marker);
 
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
-        let mut same: Option<Value<'a>> = None;
+        let mut same: Option<SsaValue<'a>> = None;
         let mut need_phi = false;
 
         for &pred in &preds {
             let pred_val = self.read_variable_internal(variable, pred);
-            if pred_val == Value::Marker {
+            if pred_val == SsaValue::Marker {
                 need_phi = true;
                 continue;
             }
@@ -209,19 +273,19 @@ impl<'a> SsaResolver<'a> {
             // All predecessors agree (or only one non-cycle predecessor).
             // No phi needed — zero temporary allocations.
             self.stats.markers_elided += 1;
-            return same.unwrap_or(Value::Opaque);
+            return same.unwrap_or(SsaValue::Opaque);
         }
 
         // Different values or cycle detected: fall back to phi creation.
         // Re-collect all operands properly with cycle-breaking phi.
         let phi_id = self.new_phi(block, variable);
-        self.write_variable_interned(variable, block, Value::Phi(phi_id));
+        self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
         self.add_phi_operands(variable, phi_id);
         self.try_remove_trivial_phi(phi_id)
     }
 
     /// Internal write that takes an already-interned name.
-    fn write_variable_interned(&mut self, variable: &'a str, block: BlockId, value: Value<'a>) {
+    fn write_variable_interned(&mut self, variable: &'a str, block: BlockId, value: SsaValue<'a>) {
         self.current_def
             .entry(variable)
             .or_default()
@@ -246,7 +310,7 @@ impl<'a> SsaResolver<'a> {
         for pred in preds {
             let val = self.read_variable_internal(variable, pred);
             // Update witnesses: track first two distinct non-self operands.
-            if val != Value::Phi(phi_id) {
+            if val != SsaValue::Phi(phi_id) {
                 let phi = &mut self.phis[phi_id.0];
                 if phi.witnesses[0].is_none() {
                     phi.witnesses[0] = Some(val.clone());
@@ -260,32 +324,32 @@ impl<'a> SsaResolver<'a> {
 
     /// Remove trivial phi: if it references only one real value (plus itself),
     /// replace it with that value.
-    fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> Value<'a> {
+    fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> SsaValue<'a> {
         // Witness cache fast path: if both witnesses are still distinct
         // and neither is the phi itself, the phi is non-trivial.
         let w = &self.phis[phi_id.0].witnesses;
         if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref())
             && w0 != w1
-            && *w0 != Value::Phi(phi_id)
-            && *w1 != Value::Phi(phi_id)
+            && *w0 != SsaValue::Phi(phi_id)
+            && *w1 != SsaValue::Phi(phi_id)
         {
-            return Value::Phi(phi_id);
+            return SsaValue::Phi(phi_id);
         }
 
-        let mut same: Option<Value<'a>> = None;
+        let mut same: Option<SsaValue<'a>> = None;
 
         for i in 0..self.phis[phi_id.0].operands.len() {
             let op = self.phis[phi_id.0].operands[i].clone();
-            if op == Value::Phi(phi_id) || Some(&op) == same.as_ref() {
+            if op == SsaValue::Phi(phi_id) || Some(&op) == same.as_ref() {
                 continue;
             }
             if same.is_some() {
-                return Value::Phi(phi_id);
+                return SsaValue::Phi(phi_id);
             }
             same = Some(op);
         }
 
-        let replacement = same.unwrap_or(Value::Opaque);
+        let replacement = same.unwrap_or(SsaValue::Opaque);
         self.stats.phis_trivial += 1;
 
         let variable = self.phis[phi_id.0].variable;
@@ -293,7 +357,7 @@ impl<'a> SsaResolver<'a> {
 
         // Update current_def if it points to this phi
         if let Some(block_defs) = self.current_def.get_mut(&variable)
-            && block_defs.get(&block) == Some(&Value::Phi(phi_id))
+            && block_defs.get(&block) == Some(&SsaValue::Phi(phi_id))
         {
             block_defs.insert(block, replacement.clone());
         }
@@ -303,12 +367,12 @@ impl<'a> SsaResolver<'a> {
             .phis
             .iter()
             .enumerate()
-            .filter(|(i, phi)| *i != phi_id.0 && phi.operands.contains(&Value::Phi(phi_id)))
+            .filter(|(i, phi)| *i != phi_id.0 && phi.operands.contains(&SsaValue::Phi(phi_id)))
             .map(|(i, _)| PhiId(i))
             .collect();
 
         // Replace this phi in all users' operands and invalidate witnesses
-        let phi_val = Value::Phi(phi_id);
+        let phi_val = SsaValue::Phi(phi_id);
         for user_id in &phi_users {
             let user = &mut self.phis[user_id.0];
             for op in &mut user.operands {
@@ -332,124 +396,23 @@ impl<'a> SsaResolver<'a> {
         replacement
     }
 
-    /// Remove redundant phi SCCs (Algorithm 5, Section 3.2 of Braun et al.).
-    /// Handles irreducible control flow where sets of phis reference only
-    /// each other plus one external value. Call after SSA construction is complete.
-    pub fn remove_redundant_phis(&mut self) {
-        let phi_indices: Vec<PhiId> = (0..self.phis.len()).map(PhiId).collect();
-        self.remove_redundant_phis_inner(&phi_indices);
-    }
-
-    fn remove_redundant_phis_inner(&mut self, phi_ids: &[PhiId]) {
-        if phi_ids.is_empty() {
-            return;
-        }
-
-        // Build a petgraph DiGraph of the phi subgraph for SCC computation.
-        let mut phi_graph = petgraph::graph::DiGraph::<PhiId, ()>::new();
-        let mut phi_to_node: FxHashMap<PhiId, petgraph::graph::NodeIndex> = FxHashMap::default();
-
-        for &pid in phi_ids {
-            let n = phi_graph.add_node(pid);
-            phi_to_node.insert(pid, n);
-        }
-        for &pid in phi_ids {
-            for op in &self.phis[pid.0].operands {
-                if let Value::Phi(p) = op
-                    && let (Some(&src), Some(&tgt)) = (phi_to_node.get(&pid), phi_to_node.get(p))
-                {
-                    phi_graph.add_edge(src, tgt, ());
-                }
-            }
-        }
-
-        // petgraph's tarjan_scc returns SCCs in reverse topological order
-        let sccs = petgraph::algo::tarjan_scc(&phi_graph);
-
-        // Process in reverse (tarjan_scc returns reverse topo order)
-        for scc_nodes in sccs.iter().rev() {
-            if scc_nodes.len() <= 1 {
-                continue;
-            }
-
-            let scc: Vec<PhiId> = scc_nodes.iter().map(|&n| phi_graph[n]).collect();
-            let scc_set: FxHashSet<PhiId> = scc.iter().copied().collect();
-            let mut outer_ops: FxHashSet<Value<'a>> = FxHashSet::default();
-            let mut inner: Vec<PhiId> = Vec::new();
-
-            for &pid in &scc {
-                let mut is_inner = true;
-                for op in &self.phis[pid.0].operands {
-                    if let Value::Phi(p) = op {
-                        if !scc_set.contains(p) {
-                            outer_ops.insert(op.clone());
-                            is_inner = false;
-                        }
-                    } else {
-                        outer_ops.insert(op.clone());
-                        is_inner = false;
-                    }
-                }
-                if is_inner {
-                    inner.push(pid);
-                }
-            }
-
-            if outer_ops.len() == 1 {
-                // All phis in the SCC produce the same value — collapse.
-                // Build reverse map first to avoid O(|SCC| × |total_phis|).
-                let replacement = outer_ops.into_iter().next().unwrap();
-                let mut users: FxHashMap<PhiId, Vec<usize>> = FxHashMap::default();
-                for (i, phi) in self.phis.iter().enumerate() {
-                    for op in &phi.operands {
-                        if let Value::Phi(p) = op
-                            && scc_set.contains(p)
-                        {
-                            users.entry(*p).or_default().push(i);
-                        }
-                    }
-                }
-
-                for &pid in &scc {
-                    let variable = self.phis[pid.0].variable;
-                    let block = self.phis[pid.0].block;
-                    if let Some(block_defs) = self.current_def.get_mut(&variable)
-                        && block_defs.get(&block) == Some(&Value::Phi(pid))
-                    {
-                        block_defs.insert(block, replacement.clone());
-                    }
-                    if let Some(user_indices) = users.get(&pid) {
-                        for &ui in user_indices {
-                            for op in &mut self.phis[ui].operands {
-                                if *op == Value::Phi(pid) {
-                                    *op = replacement.clone();
-                                }
-                            }
-                        }
-                    }
-                    self.stats.phis_trivial += 1;
-                }
-            } else if outer_ops.len() > 1 {
-                // Multiple outer values — recurse on inner phis
-                self.remove_redundant_phis_inner(&inner);
-            }
-        }
-    }
-
     /// Expand a value into its concrete reaching definitions.
     /// Phi nodes are recursively expanded. Cycles are handled via visited set.
-    fn resolve_value(&self, value: &Value<'a>) -> ReachingDefs<'a> {
+    fn resolve_value(&self, value: &SsaValue<'a>) -> ReachingDefs<'a> {
         // Fast path: non-Phi values resolve directly without allocating HashSets.
         match value {
-            Value::Def(_) | Value::Import(_) | Value::Type(_) | Value::Alias(_) => {
+            SsaValue::LocalDef(_)
+            | SsaValue::ImportRef(_)
+            | SsaValue::Type(_)
+            | SsaValue::Alias(_) => {
                 return ReachingDefs {
                     values: smallvec::smallvec![value.clone()],
                 };
             }
-            Value::Opaque | Value::Marker => {
+            SsaValue::Opaque | SsaValue::Marker => {
                 return ReachingDefs::default();
             }
-            Value::Phi(_) => {} // fall through to full resolution
+            SsaValue::Phi(_) => {} // fall through to full resolution
         }
 
         let mut values = SmallVec::new();
@@ -464,12 +427,12 @@ impl<'a> SsaResolver<'a> {
 
     fn resolve_value_recursive(
         &self,
-        value: &Value<'a>,
-        out: &mut SmallVec<[Value<'a>; 2]>,
+        value: &SsaValue<'a>,
+        out: &mut SmallVec<[SsaValue<'a>; 2]>,
         visited: &mut FxHashSet<PhiId>,
     ) {
         match value {
-            Value::Phi(phi_id) => {
+            SsaValue::Phi(phi_id) => {
                 if !visited.insert(*phi_id) {
                     return; // cycle
                 }
@@ -477,13 +440,13 @@ impl<'a> SsaResolver<'a> {
                     self.resolve_value_recursive(op, out, visited);
                 }
             }
-            Value::Opaque | Value::Marker => {} // don't include in results
+            SsaValue::Opaque | SsaValue::Marker => {} // don't include in results
             other => out.push(other.clone()),
         }
     }
 }
 
-impl Default for SsaResolver<'_> {
+impl Default for SsaEngine<'_> {
     fn default() -> Self {
         Self::new()
     }
@@ -492,39 +455,37 @@ impl Default for SsaResolver<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use petgraph::graph::NodeIndex;
 
     #[test]
     fn single_block_write_read() {
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("x", b, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", b, SsaValue::LocalDef(0));
         let result = ssa.read_variable_stateless("x", b);
 
-        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
+        assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(0)]);
     }
 
     #[test]
     fn read_from_predecessor() {
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let b0 = ssa.add_block();
         let b1 = ssa.add_block();
         ssa.add_predecessor(b1, b0);
         ssa.seal_block(b0);
         ssa.seal_block(b1);
 
-        ssa.write_variable("x", b0, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", b0, SsaValue::LocalDef(0));
         let result = ssa.read_variable_stateless("x", b1);
 
-        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
+        assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(0)]);
     }
 
     #[test]
     fn phi_at_join_point() {
-        // if/else: x = A in then, x = B in else, read x after
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let entry = ssa.add_block();
         let then_b = ssa.add_block();
         let else_b = ssa.add_block();
@@ -540,19 +501,18 @@ mod tests {
         ssa.seal_block(else_b);
         ssa.seal_block(join);
 
-        ssa.write_variable("x", then_b, Value::Def(NodeIndex::new(0)));
-        ssa.write_variable("x", else_b, Value::Def(NodeIndex::new(1)));
+        ssa.write_variable("x", then_b, SsaValue::LocalDef(0));
+        ssa.write_variable("x", else_b, SsaValue::LocalDef(1));
 
         let result = ssa.read_variable_stateless("x", join);
         assert_eq!(result.values.len(), 2);
-        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
-        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
+        assert!(result.values.contains(&SsaValue::LocalDef(0)));
+        assert!(result.values.contains(&SsaValue::LocalDef(1)));
     }
 
     #[test]
     fn trivial_phi_collapsed() {
-        // if/else but only one branch defines x — should collapse to that
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let entry = ssa.add_block();
         let then_b = ssa.add_block();
         let else_b = ssa.add_block();
@@ -568,17 +528,15 @@ mod tests {
         ssa.seal_block(else_b);
         ssa.seal_block(join);
 
-        // x defined in entry, not redefined in either branch
-        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", entry, SsaValue::LocalDef(0));
 
         let result = ssa.read_variable_stateless("x", join);
-        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
+        assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(0)]);
     }
 
     #[test]
     fn loop_phi() {
-        // while loop: x = A before loop, x = B in loop body
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let entry = ssa.add_block();
         let header = ssa.add_block();
         let body = ssa.add_block();
@@ -586,28 +544,26 @@ mod tests {
 
         ssa.add_predecessor(header, entry);
         ssa.add_predecessor(body, header);
-        ssa.add_predecessor(header, body); // back edge
+        ssa.add_predecessor(header, body);
         ssa.add_predecessor(exit, header);
 
         ssa.seal_block(entry);
-        // header can't be sealed until back edge is added — but we already added it
         ssa.seal_block(body);
         ssa.seal_block(header);
         ssa.seal_block(exit);
 
-        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
-        ssa.write_variable("x", body, Value::Def(NodeIndex::new(1)));
+        ssa.write_variable("x", entry, SsaValue::LocalDef(0));
+        ssa.write_variable("x", body, SsaValue::LocalDef(1));
 
         let result = ssa.read_variable_stateless("x", exit);
         assert_eq!(result.values.len(), 2);
-        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
-        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
+        assert!(result.values.contains(&SsaValue::LocalDef(0)));
+        assert!(result.values.contains(&SsaValue::LocalDef(1)));
     }
 
     #[test]
     fn loop_no_redefinition_trivial_phi() {
-        // while loop: x = A before loop, NOT redefined in body
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let entry = ssa.add_block();
         let header = ssa.add_block();
         let body = ssa.add_block();
@@ -623,81 +579,72 @@ mod tests {
         ssa.seal_block(header);
         ssa.seal_block(exit);
 
-        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("x", entry, SsaValue::LocalDef(0));
 
         let result = ssa.read_variable_stateless("x", exit);
-        // Should collapse to single def (trivial phi)
-        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
+        assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(0)]);
     }
 
     #[test]
     fn unsealed_block_deferred_phi() {
-        // Simulate loop construction: header can't be sealed until back edge exists.
-        // Following Braun et al. §2.3: construct body first, then seal header.
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let entry = ssa.add_block();
         let header = ssa.add_block();
         let body = ssa.add_block();
         let exit = ssa.add_block();
 
-        // Forward edges
         ssa.add_predecessor(header, entry);
         ssa.add_predecessor(body, header);
         ssa.add_predecessor(exit, header);
 
         ssa.seal_block(entry);
-        // Header NOT sealed yet — back edge will come later
 
-        // Write defs
-        ssa.write_variable("x", entry, Value::Def(NodeIndex::new(0)));
-        ssa.write_variable("x", body, Value::Def(NodeIndex::new(1)));
+        ssa.write_variable("x", entry, SsaValue::LocalDef(0));
+        ssa.write_variable("x", body, SsaValue::LocalDef(1));
 
-        // Seal body (its only predecessor `header` is already added)
         ssa.seal_block(body);
 
-        // Now add back edge and seal header
         ssa.add_predecessor(header, body);
         ssa.seal_block(header);
         ssa.seal_block(exit);
 
-        // Read after everything is sealed — should see both values via phi
         let result = ssa.read_variable_stateless("x", exit);
-        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
-        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
+        assert!(result.values.contains(&SsaValue::LocalDef(0)));
+        assert!(result.values.contains(&SsaValue::LocalDef(1)));
     }
 
     #[test]
     fn multiple_variables_independent() {
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("x", b, Value::Def(NodeIndex::new(0)));
-        ssa.write_variable("y", b, Value::Def(NodeIndex::new(1)));
+        ssa.write_variable("x", b, SsaValue::LocalDef(0));
+        ssa.write_variable("y", b, SsaValue::LocalDef(1));
 
         let rx = ssa.read_variable_stateless("x", b);
         let ry = ssa.read_variable_stateless("y", b);
 
-        assert_eq!(rx.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
-        assert_eq!(ry.values.as_slice(), &[Value::Def(NodeIndex::new(1))]);
+        assert_eq!(rx.values.as_slice(), &[SsaValue::LocalDef(0)]);
+        assert_eq!(ry.values.as_slice(), &[SsaValue::LocalDef(1)]);
     }
 
     #[test]
     fn overwrite_in_same_block() {
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("x", b, Value::Def(NodeIndex::new(0)));
-        ssa.write_variable("x", b, Value::Def(NodeIndex::new(1))); // overwrite
+        ssa.write_variable("x", b, SsaValue::LocalDef(0));
+        ssa.write_variable("x", b, SsaValue::LocalDef(1));
 
         let result = ssa.read_variable_stateless("x", b);
-        assert_eq!(result.values.as_slice(), &[Value::Def(NodeIndex::new(1))]);
+        assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(1)]);
     }
 
     #[test]
     fn undefined_variable_is_empty() {
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let b = ssa.add_block();
         ssa.seal_block(b);
 
@@ -707,8 +654,7 @@ mod tests {
 
     #[test]
     fn nested_if_else() {
-        // if { if { x=A } else { x=B } } else { x=C }
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let entry = ssa.add_block();
         let outer_then = ssa.add_block();
         let inner_then = ssa.add_block();
@@ -732,30 +678,30 @@ mod tests {
             ssa.seal_block(b);
         }
 
-        ssa.write_variable("x", inner_then, Value::Def(NodeIndex::new(0)));
-        ssa.write_variable("x", inner_else, Value::Def(NodeIndex::new(1)));
-        ssa.write_variable("x", outer_else, Value::Def(NodeIndex::new(2)));
+        ssa.write_variable("x", inner_then, SsaValue::LocalDef(0));
+        ssa.write_variable("x", inner_else, SsaValue::LocalDef(1));
+        ssa.write_variable("x", outer_else, SsaValue::LocalDef(2));
 
         let result = ssa.read_variable_stateless("x", outer_join);
         assert_eq!(result.values.len(), 3);
-        assert!(result.values.contains(&Value::Def(NodeIndex::new(0))));
-        assert!(result.values.contains(&Value::Def(NodeIndex::new(1))));
-        assert!(result.values.contains(&Value::Def(NodeIndex::new(2))));
+        assert!(result.values.contains(&SsaValue::LocalDef(0)));
+        assert!(result.values.contains(&SsaValue::LocalDef(1)));
+        assert!(result.values.contains(&SsaValue::LocalDef(2)));
     }
 
     #[test]
     fn import_and_def_values() {
-        let mut ssa = SsaResolver::new();
+        let mut ssa = SsaEngine::new();
         let b = ssa.add_block();
         ssa.seal_block(b);
 
-        ssa.write_variable("os", b, Value::Import(NodeIndex::new(0)));
-        ssa.write_variable("MyClass", b, Value::Def(NodeIndex::new(0)));
+        ssa.write_variable("os", b, SsaValue::ImportRef(0));
+        ssa.write_variable("MyClass", b, SsaValue::LocalDef(0));
 
         let r1 = ssa.read_variable_stateless("os", b);
         let r2 = ssa.read_variable_stateless("MyClass", b);
 
-        assert_eq!(r1.values.as_slice(), &[Value::Import(NodeIndex::new(0))]);
-        assert_eq!(r2.values.as_slice(), &[Value::Def(NodeIndex::new(0))]);
+        assert_eq!(r1.values.as_slice(), &[SsaValue::ImportRef(0)]);
+        assert_eq!(r2.values.as_slice(), &[SsaValue::LocalDef(0)]);
     }
 }

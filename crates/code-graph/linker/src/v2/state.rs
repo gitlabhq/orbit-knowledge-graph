@@ -447,63 +447,6 @@ impl GraphImport {
     }
 }
 
-// ── SSA types ───────────────────────────────────────────────────
-
-/// Identifier for a basic block in the SSA graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BlockId(pub usize);
-
-impl std::fmt::Display for BlockId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "b{}", self.0)
-    }
-}
-
-/// Identifier for a phi node in the SSA graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PhiId(pub usize);
-
-/// A value in the SSA graph — what a variable resolves to.
-///
-/// All string data (`Type`, `Alias`) is backed by [`FileArena`] — no
-/// `Intern<str>`, no global RwLock, no memory leak.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Value<'a> {
-    /// A definition node in the graph.
-    Def(NodeIndex),
-    /// An import node in the graph.
-    Import(NodeIndex),
-    /// A type name (for type-flow: resolve members on this type).
-    Type(&'a str),
-    /// Deferred name resolution: "I'm whatever this name resolves to."
-    Alias(&'a str),
-    /// Dead end — parameter, literal, or otherwise unresolvable.
-    Opaque,
-    /// Internal: cycle-detection sentinel for the marker algorithm.
-    Marker,
-    /// Internal: a phi node (resolved to concrete values).
-    Phi(PhiId),
-}
-
-impl<'a> Value<'a> {
-    /// Create a Type value from a string slice (arena-backed).
-    pub fn type_of(s: &'a str) -> Self {
-        Self::Type(s)
-    }
-}
-
-/// The concrete values a variable resolves to at a given program point.
-#[derive(Debug, Clone, Default)]
-pub struct ReachingDefs<'a> {
-    pub values: SmallVec<[Value<'a>; 2]>,
-}
-
-impl ReachingDefs<'_> {
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
-}
-
 // ── Arena ───────────────────────────────────────────────────────
 
 /// Per-file arena for walker scratch strings.

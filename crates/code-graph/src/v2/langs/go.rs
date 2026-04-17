@@ -85,8 +85,11 @@ impl DslLanguage for GoDsl {
         vec![loop_rule("for_statement").body("body")]
     }
 
-    fn custom_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
-        go_extract_imports(node, imports)
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
+            on_import: Some(go_extract_imports),
+            ..LanguageHooks::default()
+        }
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
