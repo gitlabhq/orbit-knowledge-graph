@@ -274,6 +274,8 @@ Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
 The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). The code indexing task handler checks it to skip already-indexed commits.
 
+Projects whose Gitaly archive endpoint returns 404 (no refs) or 5xx (no repository storage) are checkpointed with no commit and treated as terminal "indexed empty". This prevents retries and DLQ churn for projects with no content. Once the project is populated, subsequent siphon tasks arrive with a larger `task_id` than the stored checkpoint and are re-processed normally. The `gkg.indexer.code.repository.empty` counter (labelled `reason=not_found|server_error`) tracks how often this short-circuit fires.
+
 #### Flow visual representation
 
 ```plaintext

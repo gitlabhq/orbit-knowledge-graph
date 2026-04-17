@@ -258,11 +258,16 @@ impl GitlabClient {
         response: &reqwest::Response,
         project_id: i64,
     ) -> Result<(), GitlabClientError> {
-        match response.status() {
+        let status = response.status();
+        match status {
             StatusCode::OK => Ok(()),
             StatusCode::UNAUTHORIZED => Err(GitlabClientError::Unauthorized),
             StatusCode::NOT_FOUND => Err(GitlabClientError::NotFound(project_id)),
-            status => Err(GitlabClientError::Unexpected(format!(
+            _ if status.is_server_error() => Err(GitlabClientError::ServerError {
+                project_id,
+                status: status.as_u16(),
+            }),
+            _ => Err(GitlabClientError::Unexpected(format!(
                 "unexpected status {status}"
             ))),
         }
@@ -275,11 +280,16 @@ impl GitlabClient {
         if response.status() == StatusCode::BAD_REQUEST {
             return Err(GitlabClientError::ForcePush(project_id));
         }
-        match response.status() {
+        let status = response.status();
+        match status {
             StatusCode::OK => Ok(()),
             StatusCode::UNAUTHORIZED => Err(GitlabClientError::Unauthorized),
             StatusCode::NOT_FOUND => Err(GitlabClientError::NotFound(project_id)),
-            status => Err(GitlabClientError::Unexpected(format!(
+            _ if status.is_server_error() => Err(GitlabClientError::ServerError {
+                project_id,
+                status: status.as_u16(),
+            }),
+            _ => Err(GitlabClientError::Unexpected(format!(
                 "unexpected status {status} for project {project_id}"
             ))),
         }
