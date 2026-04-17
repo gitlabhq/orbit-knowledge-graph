@@ -38,3 +38,23 @@ Shared Namespace Is Enabled And Indexed
     Set Global Variable    ${SHARED_NAMESPACE_NAME}    ${name}
     Enable Knowledge Graph    ${SHARED_NAMESPACE_ID}
     Wait For Node Indexed    Group    ${SHARED_NAMESPACE_ID}    ${name}
+
+Pipeline Is At Steady State
+    [Documentation]    Create a canary project + issue + note in the shared namespace and wait for
+    ...                each to be indexed within a single shared 5-minute budget. Once this passes,
+    ...                Siphon's initial snapshot has reached the slowest tables we depend on
+    ...                (notes, work_items) and downstream suites can use short per-call timeouts.
+    [Tags]    smoke    setup
+    ${suffix}=    Random Suffix
+    ${project_name}=    Set Variable    canary-prj-${suffix}
+    ${issue_title}=    Set Variable    canary-issue-${suffix}
+    ${note_body}=    Set Variable    canary-note-${suffix}
+
+    ${project}=    Create Project    ${project_name}    ${SHARED_NAMESPACE_ID}
+    ${issue}=    Create Issue    ${project["id"]}    ${issue_title}
+    ${note}=    Create Note On Issue    ${project["id"]}    ${issue["iid"]}    ${note_body}
+
+    Start Indexing Budget    300
+    Wait For Node Indexed Within Budget    Project    ${project["id"]}    ${project_name}
+    Wait For Node Indexed Within Budget    WorkItem    ${issue["id"]}    ${issue_title}    label_field=title
+    Wait For Node Indexed Within Budget    Note    ${note["id"]}

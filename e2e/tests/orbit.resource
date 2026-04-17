@@ -4,6 +4,7 @@ Documentation       Orbit query helpers — health probe and graph node lookups.
 
 Library             RequestsLibrary
 Library             Collections
+Library             DateTime
 Resource            gitlab.resource
 
 
@@ -67,3 +68,24 @@ Entity Count Is At Least
     ${count}=    Orbit Count Nodes    ${entity}
     Should Be True    ${count} >= ${minimum}
     ...    Only ${count} ${entity} nodes indexed (need >= ${minimum})
+
+Start Indexing Budget
+    [Documentation]    Begin a shared time budget consumed by Wait For * Within Budget calls.
+    ...                Use one budget per logical "wait for the pipeline to catch up" sequence.
+    [Arguments]    ${seconds}=300
+    ${now}=    Get Current Date    result_format=epoch
+    Set Global Variable    ${INDEXING_DEADLINE}    ${{${now} + ${seconds}}}
+
+Remaining Budget
+    [Documentation]    Seconds left until INDEXING_DEADLINE; fails fast if exhausted.
+    ${now}=    Get Current Date    result_format=epoch
+    ${remaining}=    Evaluate    int(${INDEXING_DEADLINE} - ${now})
+    Should Be True    ${remaining} > 0    Indexing budget exhausted
+    RETURN    ${remaining}s
+
+Wait For Node Indexed Within Budget
+    [Documentation]    Same as Wait For Node Indexed but pulls timeout from the shared budget.
+    [Arguments]    ${entity}    ${node_id}    ${expected_label}=${None}    ${label_field}=name
+    ${budget}=    Remaining Budget
+    Wait Until Keyword Succeeds    ${budget}    3s
+    ...    Verify Node Indexed    ${entity}    ${node_id}    ${expected_label}    ${label_field}
