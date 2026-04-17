@@ -120,3 +120,8 @@ analytics:
   deployment:
     type: self_managed        # com | dedicated | self_managed
     environment: development  # development | staging | production
+
+billing:
+  enabled: false
+  collector_url: "http://localhost:9090"
+

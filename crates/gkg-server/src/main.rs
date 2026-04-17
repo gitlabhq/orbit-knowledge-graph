@@ -6,6 +6,7 @@ use std::sync::Arc;
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server::auth::JwtValidator;
+use gkg_server::billing::SnowplowBillingTracker;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::content;
@@ -185,6 +186,19 @@ async fn run_webserver(
                 .map_err(|e| anyhow::anyhow!("NATS connection for query cache failed: {e}"))?,
         );
         grpc_server = grpc_server.with_cache_broker(broker);
+    }
+
+    if config.billing.enabled {
+        if config.billing.collector_url.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "billing.enabled=true but billing.collector_url is empty — \
+                 set GKG_BILLING__COLLECTOR_URL"
+            ));
+        }
+        info!(collector_url = %config.billing.collector_url, "initializing billing event tracker");
+        let tracker = SnowplowBillingTracker::from_config(&config.billing)
+            .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
+        grpc_server = grpc_server.with_billing(Arc::new(tracker));
     }
 
     info!(addr = %config.grpc_bind_address, "gRPC server starting");

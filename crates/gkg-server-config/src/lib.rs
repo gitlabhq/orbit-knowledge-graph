@@ -8,6 +8,7 @@
 
 pub mod analytics;
 pub mod app;
+pub mod billing;
 pub mod clickhouse;
 pub mod engine;
 
@@ -23,6 +24,7 @@ pub mod tls;
 
 pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 pub use app::{AppConfig, ConfigError, SECRET_FILE_DIR, SharedAppConfig};
+pub use billing::BillingConfig;
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
     CodeIndexingTaskHandlerConfig, EngineConfiguration, GlobalDispatcherConfig,
