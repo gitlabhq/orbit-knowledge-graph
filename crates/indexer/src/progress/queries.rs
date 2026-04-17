@@ -1,6 +1,8 @@
 use ontology::Ontology;
 use query_engine::compiler::{Expr, JoinType, Node, Op, Query, SelectExpr, TableRef};
 
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+
 pub struct NodeCountTarget {
     pub name: String,
     pub table: String,
@@ -12,7 +14,11 @@ pub fn node_count_targets(ontology: &Ontology) -> Vec<NodeCountTarget> {
         .filter(|node| node.has_traversal_path)
         .map(|node| NodeCountTarget {
             name: node.name.clone(),
-            table: node.destination_table.clone(),
+            // Apply the active schema version prefix so count queries hit the
+            // same tables the indexer writes to. The bare ontology carries
+            // `destination_table` without the version (e.g. `gl_project`);
+            // actual writes go to `v1_gl_project` post-migration.
+            table: prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
         })
         .collect()
 }
@@ -73,7 +79,8 @@ pub fn build_edge_count_query(traversal_path: &str) -> Node {
         ),
     ];
 
-    let from = TableRef::scan("gl_edge", alias);
+    let edge_table = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
+    let from = TableRef::scan(&edge_table, alias);
 
     let tp_filter = Expr::func(
         "startsWith",
@@ -145,8 +152,10 @@ pub fn build_cross_namespace_edge_query(
         ),
     ];
 
-    let edge_table = TableRef::scan("gl_edge", edge_alias);
-    let target_table = TableRef::scan(target.target_table, t);
+    let edge_table_name = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
+    let target_table_name = prefixed_table_name(target.target_table, *SCHEMA_VERSION);
+    let edge_table = TableRef::scan(&edge_table_name, edge_alias);
+    let target_table = TableRef::scan(&target_table_name, t);
 
     let join_on = Expr::eq(Expr::col(edge_alias, "target_id"), Expr::col(t, "id"));
     let from = TableRef::join(JoinType::Inner, edge_table, target_table, join_on);
