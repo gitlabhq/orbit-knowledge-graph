@@ -857,6 +857,13 @@ impl LanguageSpec {
             if m.creates_scope {
                 state.scope_stack.push(Arc::from(m.name.as_str()));
                 pushed_scope = true;
+
+                // Create new SSA block for this scope (isolates bindings)
+                let new_block = state.ssa.add_block();
+                state.ssa.add_predecessor(new_block, state.current_block);
+                state.ssa.seal_block(new_block);
+                state.saved_blocks.push(state.current_block);
+                state.current_block = new_block;
             }
 
             let fqn = if m.creates_scope {
@@ -889,11 +896,17 @@ impl LanguageSpec {
                 "[walk_full] def[{}]={:?} creates_scope={}",
                 def_index, def_name, m.creates_scope
             );
-            // Write def name to SSA so bare refs like `foo()` find it
+            // Write def name to SSA in the PARENT block so sibling scopes can see it.
+            // Must happen before creating the scope block (which changes current_block).
+            let parent_block = if pushed_scope {
+                *state.saved_blocks.last().unwrap_or(&state.current_block)
+            } else {
+                state.current_block
+            };
             let ssa_name = state.arena.alloc_str(&def_name);
             state.ssa.write_variable(
                 ssa_name,
-                state.current_block,
+                parent_block,
                 super::ssa::SsaValue::LocalDef(def_index),
             );
 
@@ -948,6 +961,9 @@ impl LanguageSpec {
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
+                    if let Some(saved) = state.saved_blocks.pop() {
+                        state.current_block = saved;
+                    }
                 }
                 return;
             }
@@ -958,6 +974,9 @@ impl LanguageSpec {
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
+                    if let Some(saved) = state.saved_blocks.pop() {
+                        state.current_block = saved;
+                    }
                 }
                 return;
             }
@@ -1061,6 +1080,9 @@ impl LanguageSpec {
         if pushed_scope {
             state.scope_stack.pop();
             state.enclosing_def_stack.pop();
+            if let Some(saved) = state.saved_blocks.pop() {
+                state.current_block = saved;
+            }
         }
     }
 
@@ -1206,6 +1228,7 @@ struct WalkFullState<'a> {
     imports: Vec<CanonicalImport>,
     ref_events: Vec<code_graph_types::ssa::ReferenceEvent>,
     pending_refs: Vec<PendingRef<'a>>,
+    saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
     top_level_depth: usize,
 }
@@ -1226,6 +1249,7 @@ impl<'a> WalkFullState<'a> {
             imports: Vec::new(),
             ref_events: Vec::new(),
             pending_refs: Vec::new(),
+            saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
             top_level_depth: 0,
         }
