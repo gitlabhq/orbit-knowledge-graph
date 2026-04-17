@@ -12,9 +12,10 @@ use super::arrow_converter::ArrowConverter;
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
-use super::repository::RepositoryResolver;
+use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
+use opentelemetry::KeyValue;
 
 pub struct IndexingRequest {
     pub project_id: i64,
@@ -22,6 +23,19 @@ pub struct IndexingRequest {
     pub traversal_path: String,
     pub task_id: i64,
     pub commit_sha: Option<String>,
+}
+
+/// Terminal outcome of `CodeIndexingPipeline::index_project`.
+///
+/// The handler records a single `events_processed` outcome label based on
+/// this variant — keeping `indexed` and `empty_repository` mutually exclusive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexOutcome {
+    /// Repository downloaded, parsed, written to the graph, and checkpointed.
+    Indexed,
+    /// Archive endpoint signalled no repository content (404 or 5xx); the
+    /// checkpoint was still set so retries and DLQ are avoided.
+    EmptyRepository,
 }
 
 pub struct CodeIndexingPipeline {
@@ -53,9 +67,9 @@ impl CodeIndexingPipeline {
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<IndexOutcome, HandlerError> {
         let fetch_start = Instant::now();
-        let repo_path = self
+        let repo_path = match self
             .resolver
             .resolve(
                 request.project_id,
@@ -63,7 +77,43 @@ impl CodeIndexingPipeline {
                 request.commit_sha.as_deref(),
             )
             .await
-            .record_error_stage(&self.metrics, "repository_fetch")?;
+        {
+            Ok(path) => {
+                self.metrics.record_resolution_strategy("full_download");
+                path
+            }
+            Err(ResolveError::EmptyRepository { reason, detail }) => {
+                warn!(
+                    project_id = request.project_id,
+                    branch = %request.branch,
+                    reason = %reason,
+                    detail,
+                    "project has no repository content; checkpointing as indexed-empty"
+                );
+                self.metrics.record_resolution_strategy("empty_repository");
+                self.metrics
+                    .record_empty_repository(reason.as_metric_label());
+                self.metrics
+                    .repository_fetch_duration
+                    .record(fetch_start.elapsed().as_secs_f64(), &[]);
+                self.set_checkpoint(
+                    &request.traversal_path,
+                    request.project_id,
+                    &request.branch,
+                    request.task_id,
+                    None,
+                    Utc::now(),
+                )
+                .await?;
+                return Ok(IndexOutcome::EmptyRepository);
+            }
+            Err(ResolveError::Other(err)) => {
+                self.metrics
+                    .errors
+                    .add(1, &[KeyValue::new("stage", "repository_fetch")]);
+                return Err(err);
+            }
+        };
         self.metrics
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
@@ -110,7 +160,9 @@ impl CodeIndexingPipeline {
             request.commit_sha.as_deref(),
             indexed_at,
         )
-        .await
+        .await?;
+
+        Ok(IndexOutcome::Indexed)
     }
 
     async fn set_checkpoint(

@@ -4,13 +4,74 @@ use std::sync::Arc;
 use tracing::info;
 
 use super::cache::RepositoryCache;
-use super::service::RepositoryService;
+use super::service::{RepositoryService, RepositoryServiceError};
 use crate::handler::HandlerError;
 use crate::modules::code::metrics::CodeMetrics;
+use gitlab_client::GitlabClientError;
+
+/// Errors produced when resolving a repository snapshot for indexing.
+///
+/// `EmptyRepository` is a recognized terminal outcome: the project record
+/// exists but has no Gitaly content (no refs, or no repository storage at
+/// all). These should be checkpointed as "indexed empty" instead of retried.
+#[derive(Debug, thiserror::Error)]
+pub enum ResolveError {
+    #[error("project has no repository content ({reason}): {detail}")]
+    EmptyRepository {
+        reason: EmptyRepositoryReason,
+        detail: String,
+    },
+
+    #[error(transparent)]
+    Other(#[from] HandlerError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmptyRepositoryReason {
+    NotFound,
+    ServerError,
+}
+
+impl EmptyRepositoryReason {
+    pub fn as_metric_label(self) -> &'static str {
+        match self {
+            EmptyRepositoryReason::NotFound => "not_found",
+            EmptyRepositoryReason::ServerError => "server_error",
+        }
+    }
+}
+
+impl std::fmt::Display for EmptyRepositoryReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_metric_label())
+    }
+}
+
+fn classify_download_error(
+    err: &RepositoryServiceError,
+) -> Option<(EmptyRepositoryReason, String)> {
+    match err {
+        RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(id)) => Some((
+            EmptyRepositoryReason::NotFound,
+            format!("project {id} not found (404)"),
+        )),
+        RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
+            project_id,
+            status,
+        }) => Some((
+            EmptyRepositoryReason::ServerError,
+            format!(
+                "archive endpoint returned {status} for project {project_id} (repository likely missing)"
+            ),
+        )),
+        _ => None,
+    }
+}
 
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
     cache: Arc<dyn RepositoryCache>,
+    #[allow(dead_code)]
     metrics: CodeMetrics,
 }
 
@@ -32,9 +93,8 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: Option<&str>,
-    ) -> Result<PathBuf, HandlerError> {
+    ) -> Result<PathBuf, ResolveError> {
         let ref_name = commit_sha.unwrap_or(branch);
-        self.metrics.record_resolution_strategy("full_download");
         self.full_download(project_id, branch, ref_name).await
     }
 
@@ -51,22 +111,33 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         ref_name: &str,
-    ) -> Result<PathBuf, HandlerError> {
+    ) -> Result<PathBuf, ResolveError> {
         info!(
             project_id,
             branch, ref_name, "downloading repository archive"
         );
 
-        let archive_stream = self
+        let archive_stream = match self
             .repository_service
             .download_archive(project_id, ref_name)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))?;
+        {
+            Ok(stream) => stream,
+            Err(err) => {
+                if let Some((reason, detail)) = classify_download_error(&err) {
+                    return Err(ResolveError::EmptyRepository { reason, detail });
+                }
+                return Err(
+                    HandlerError::Processing(format!("failed to download archive: {err}")).into(),
+                );
+            }
+        };
 
         self.cache
             .extract_archive(project_id, branch, archive_stream)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
+            .map_err(Into::into)
     }
 }
 
@@ -85,6 +156,7 @@ mod tests {
     struct ScriptedRepositoryService {
         archive: Mutex<Vec<u8>>,
         fail_downloads: Mutex<bool>,
+        download_error: Mutex<Option<RepositoryServiceError>>,
         download_count: AtomicUsize,
     }
 
@@ -93,6 +165,16 @@ mod tests {
             Arc::new(Self {
                 archive: Mutex::new(build_test_tar_gz(files, ref_name)),
                 fail_downloads: Mutex::new(false),
+                download_error: Mutex::new(None),
+                download_count: AtomicUsize::new(0),
+            })
+        }
+
+        fn with_download_error(error: RepositoryServiceError) -> Arc<Self> {
+            Arc::new(Self {
+                archive: Mutex::new(Vec::new()),
+                fail_downloads: Mutex::new(false),
+                download_error: Mutex::new(Some(error)),
                 download_count: AtomicUsize::new(0),
             })
         }
@@ -128,6 +210,9 @@ mod tests {
             _ref_name: &str,
         ) -> Result<super::super::service::ByteStream, RepositoryServiceError> {
             self.download_count.fetch_add(1, Ordering::SeqCst);
+            if let Some(err) = self.download_error.lock().take() {
+                return Err(err);
+            }
             if *self.fail_downloads.lock() {
                 return Err(RepositoryServiceError::Archive(
                     "simulated download failure".to_string(),
@@ -280,7 +365,57 @@ mod tests {
         service.set_fail_downloads(true);
         let result = resolver.resolve(1, "main", Some("abc123")).await;
 
-        assert!(result.is_err());
+        assert!(matches!(result, Err(ResolveError::Other(_))));
+    }
+
+    #[tokio::test]
+    async fn resolve_maps_archive_404_to_empty_repository() {
+        let service = ScriptedRepositoryService::with_download_error(
+            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::NotFound(42)),
+        );
+        let (_dir, resolver) = create_resolver(service);
+
+        let err = resolver.resolve(42, "main", None).await.unwrap_err();
+
+        match err {
+            ResolveError::EmptyRepository { reason, detail } => {
+                assert_eq!(reason, EmptyRepositoryReason::NotFound);
+                assert!(detail.contains("not found"), "detail was {detail}");
+            }
+            other => panic!("expected EmptyRepository, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_maps_archive_5xx_to_empty_repository() {
+        let service = ScriptedRepositoryService::with_download_error(
+            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::ServerError {
+                project_id: 42,
+                status: 500,
+            }),
+        );
+        let (_dir, resolver) = create_resolver(service);
+
+        let err = resolver.resolve(42, "main", None).await.unwrap_err();
+
+        match err {
+            ResolveError::EmptyRepository { reason, detail } => {
+                assert_eq!(reason, EmptyRepositoryReason::ServerError);
+                assert!(detail.contains("500"), "detail was {detail}");
+            }
+            other => panic!("expected EmptyRepository, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_non_empty_errors_fall_through_to_other() {
+        let service = ScriptedRepositoryService::with_download_error(
+            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::Unauthorized),
+        );
+        let (_dir, resolver) = create_resolver(service);
+
+        let err = resolver.resolve(42, "main", None).await.unwrap_err();
+        assert!(matches!(err, ResolveError::Other(_)), "got {err:?}");
     }
 
     #[tokio::test]
