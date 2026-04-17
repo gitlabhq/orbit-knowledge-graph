@@ -62,8 +62,8 @@ tests:
       WHERE caller.name = 'reassignment_caller'
       RETURN callee.name AS callee
     assert:
-      - { non_empty: true }
-      - { contains_row: { callee: "option2" } }
+      - { empty: false }
+      - { row: { callee: "option2" } }
 
   - name: "D20: walrus caller calls get_value"
     query: |
@@ -71,7 +71,7 @@ tests:
       WHERE caller.name = 'walrus_caller' AND callee.name = 'get_value'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: "D20: walrus caller calls process"
     query: |
@@ -79,7 +79,7 @@ tests:
       WHERE caller.name = 'walrus_caller' AND callee.name = 'process'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: "D40: f-string calls get_name"
     query: |
@@ -87,7 +87,7 @@ tests:
       WHERE caller.name = 'fstring_caller' AND callee.name = 'get_name'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: "D40: f-string calls get_age"
     query: |
@@ -95,4 +95,4 @@ tests:
       WHERE caller.name = 'fstring_caller' AND callee.name = 'get_age'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }

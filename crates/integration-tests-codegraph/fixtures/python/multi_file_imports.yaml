@@ -34,7 +34,7 @@ tests:
       WHERE caller.name = 'create_user' AND callee.name = 'User'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: main calls UserService across files
     query: |
@@ -42,7 +42,7 @@ tests:
       WHERE caller.name = 'run' AND callee.name = 'UserService'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: Three files in the graph
     query: |
@@ -58,10 +58,10 @@ tests:
           WHERE d.name = 'User'
           RETURN d.file_path AS file
         assert:
-          - { all_match: { field: file, pattern: "models.py" } }
+          - { match: { field: file, pattern: "models.py" } }
       - query: |
           MATCH (d:Definition)
           WHERE d.name = 'Project'
           RETURN d.file_path AS file
         assert:
-          - { all_match: { field: file, pattern: "models.py" } }
+          - { match: { field: file, pattern: "models.py" } }

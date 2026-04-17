@@ -182,7 +182,19 @@ fn check_assertions(
                 None => (batch.clone(), label.to_string()),
             };
             let rows = effective.num_rows();
-            check_one(&scoped_label, severity, &a.check, &effective, rows)
+            let result = check_one(&scoped_label, severity, &a.check, &effective, rows);
+            if a.negate {
+                match result {
+                    Some(_) => None,
+                    None => Some(fail(
+                        &scoped_label,
+                        severity,
+                        format!("Negated assertion passed (expected failure): {:?}", a.check),
+                    )),
+                }
+            } else {
+                result
+            }
         })
         .collect()
 }
@@ -212,17 +224,6 @@ fn check_one(
                 None
             }
         }
-        AssertCheck::NonEmpty { non_empty } => {
-            if *non_empty && total_rows == 0 {
-                Some(fail(
-                    label,
-                    severity,
-                    "Expected non-empty result, got 0 rows".into(),
-                ))
-            } else {
-                None
-            }
-        }
         AssertCheck::RowCount { row_count } => {
             let expected = *row_count as usize;
             if total_rows != expected {
@@ -241,18 +242,18 @@ fn check_one(
         AssertCheck::CountGte { count_gte } => {
             check_int_field(batch, count_gte, |v, e| v < e, ">=", label, severity)
         }
-        AssertCheck::AllMatch { all_match } => {
-            let glob = match globset::Glob::new(&all_match.pattern) {
+        AssertCheck::Match { match_args } => {
+            let glob = match globset::Glob::new(&match_args.pattern) {
                 Ok(g) => g.compile_matcher(),
                 Err(e) => {
                     return Some(fail(
                         label,
                         severity,
-                        format!("Invalid glob pattern '{}': {e}", all_match.pattern),
+                        format!("Invalid glob pattern '{}': {e}", match_args.pattern),
                     ));
                 }
             };
-            if let Some(col) = batch.column_by_name(&all_match.field)
+            if let Some(col) = batch.column_by_name(&match_args.field)
                 && let Some(arr) = col.as_any().downcast_ref::<StringArray>()
             {
                 for i in 0..arr.len() {
@@ -262,9 +263,9 @@ fn check_one(
                             severity,
                             format!(
                                 "Row {i}: {}='{}' does not match '{}'",
-                                all_match.field,
+                                match_args.field,
                                 arr.value(i),
-                                all_match.pattern
+                                match_args.pattern
                             ),
                         ));
                     }
@@ -272,43 +273,7 @@ fn check_one(
             }
             None
         }
-        AssertCheck::NoneMatch { none_match } => {
-            let glob = match globset::Glob::new(&none_match.pattern) {
-                Ok(g) => g.compile_matcher(),
-                Err(e) => {
-                    return Some(fail(
-                        label,
-                        severity,
-                        format!("Invalid glob pattern '{}': {e}", none_match.pattern),
-                    ));
-                }
-            };
-            if let Some(col) = batch.column_by_name(&none_match.field)
-                && let Some(arr) = col.as_any().downcast_ref::<StringArray>()
-            {
-                for i in 0..arr.len() {
-                    if !arr.is_null(i) && glob.is_match(arr.value(i)) {
-                        return Some(fail(
-                            label,
-                            severity,
-                            format!(
-                                "Row {i}: {}='{}' matches forbidden pattern '{}'",
-                                none_match.field,
-                                arr.value(i),
-                                none_match.pattern
-                            ),
-                        ));
-                    }
-                }
-            }
-            None
-        }
-        AssertCheck::ContainsRow { contains_row } => {
-            check_contains_row(batch, contains_row, total_rows, label, severity, false)
-        }
-        AssertCheck::ExcludesRow { excludes_row } => {
-            check_contains_row(batch, excludes_row, total_rows, label, severity, true)
-        }
+        AssertCheck::Row { row } => check_row(batch, row, total_rows, label, severity),
         AssertCheck::NoNulls { no_nulls } => {
             let Some(col) = batch.column_by_name(no_nulls) else {
                 return Some(fail(
@@ -392,13 +357,12 @@ fn check_one(
     }
 }
 
-fn check_contains_row(
+fn check_row(
     batch: &RecordBatch,
     expected: &HashMap<String, String>,
     total_rows: usize,
     label: &str,
     severity: Severity,
-    negate: bool,
 ) -> Option<Failure> {
     let found = (0..total_rows).any(|row| {
         expected.iter().all(|(field, exp)| {
@@ -410,23 +374,18 @@ fn check_contains_row(
         })
     });
 
-    let expected_str: Vec<String> = expected.iter().map(|(k, v)| format!("{k}={v}")).collect();
-    let desc = expected_str.join(", ");
-
-    if negate && found {
-        Some(fail(
-            label,
-            severity,
-            format!("Found forbidden row {{{desc}}} but expected none"),
-        ))
-    } else if !negate && !found {
-        Some(fail(
-            label,
-            severity,
-            format!("No row matching {{{desc}}} in {total_rows} rows"),
-        ))
-    } else {
+    if found {
         None
+    } else {
+        let desc: Vec<String> = expected.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        Some(fail(
+            label,
+            severity,
+            format!(
+                "No row matching {{{}}} in {total_rows} rows",
+                desc.join(", ")
+            ),
+        ))
     }
 }
 

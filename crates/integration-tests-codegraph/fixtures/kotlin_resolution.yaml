@@ -21,7 +21,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
+      - { row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
 
   - name: Package scoping produces correct FQNs
     query: |
@@ -30,7 +30,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { contains_row: { fqn: "com.example.Service" } }
+      - { row: { fqn: "com.example.Service" } }
 
   # ── Broader exhaustive checks ────────────────────────────────
 
@@ -43,10 +43,10 @@ tests:
       - { unique: fqn }
       - { no_nulls: fqn }
       - { no_nulls: type }
-      - { all_match: { field: file, pattern: "com/example/Service.kt" } }
-      - { contains_row: { name: "Service", fqn: "com.example.Service", type: "Class" } }
-      - { contains_row: { name: "process", fqn: "com.example.Service.process", type: "Function" } }
-      - { contains_row: { name: "run", fqn: "com.example.Service.run", type: "Function" } }
+      - { match: { field: file, pattern: "com/example/Service.kt" } }
+      - { row: { name: "Service", fqn: "com.example.Service", type: "Class" } }
+      - { row: { name: "process", fqn: "com.example.Service.process", type: "Function" } }
+      - { row: { name: "run", fqn: "com.example.Service.run", type: "Function" } }
 
   - name: Exactly 2 containment edges
     query: |
@@ -55,8 +55,8 @@ tests:
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 2 }
-      - { contains_row: { parent: "com.example.Service", child: "com.example.Service.process" } }
-      - { contains_row: { parent: "com.example.Service", child: "com.example.Service.run" } }
+      - { row: { parent: "com.example.Service", child: "com.example.Service.process" } }
+      - { row: { parent: "com.example.Service", child: "com.example.Service.run" } }
 
   - name: Single Kotlin file
     query: |
@@ -64,4 +64,4 @@ tests:
       RETURN f.path AS path, f.language AS lang
     assert:
       - { row_count: 1 }
-      - { contains_row: { path: "com/example/Service.kt", lang: "kotlin" } }
+      - { row: { path: "com/example/Service.kt", lang: "kotlin" } }

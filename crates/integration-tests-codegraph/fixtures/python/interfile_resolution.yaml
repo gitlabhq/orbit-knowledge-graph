@@ -66,8 +66,8 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { all_match: { field: src, pattern: "main.py" } }
-      - { all_match: { field: tgt, pattern: "*user_service.py" } }
+      - { match: { field: src, pattern: "main.py" } }
+      - { match: { field: tgt, pattern: "*user_service.py" } }
 
   - name: "Layer 3→2: main.run calls ProjectService"
     query: |
@@ -76,8 +76,8 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { all_match: { field: src, pattern: "main.py" } }
-      - { all_match: { field: tgt, pattern: "*project_service.py" } }
+      - { match: { field: src, pattern: "main.py" } }
+      - { match: { field: tgt, pattern: "*project_service.py" } }
 
   - name: "Layer 2→1: UserService.create calls User"
     description: "from models.user import User; User(name) in create()"
@@ -88,8 +88,8 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { all_match: { field: src, pattern: "*user_service.py" } }
-      - { all_match: { field: tgt, pattern: "*user.py" } }
+      - { match: { field: src, pattern: "*user_service.py" } }
+      - { match: { field: tgt, pattern: "*user.py" } }
 
   - name: "Layer 2→1: ProjectService.create calls Project"
     query: |
@@ -99,8 +99,8 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { all_match: { field: src, pattern: "*project_service.py" } }
-      - { all_match: { field: tgt, pattern: "*project.py" } }
+      - { match: { field: src, pattern: "*project_service.py" } }
+      - { match: { field: tgt, pattern: "*project.py" } }
 
   # ── File structure ────────────────────────
   - name: "Exactly 6 files in the graph"
@@ -117,7 +117,7 @@ tests:
       RETURN d.file_path AS file
     assert:
       - { row_count: 1 }
-      - { all_match: { field: file, pattern: "*user.py" } }
+      - { match: { field: file, pattern: "*user.py" } }
 
   - name: "All cross-file call edges connect different files"
     description: "No same-file edges should be returned by the cross-file filter"
@@ -127,4 +127,4 @@ tests:
       RETURN caller.name AS caller, callee.name AS callee,
              caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { empty: false }

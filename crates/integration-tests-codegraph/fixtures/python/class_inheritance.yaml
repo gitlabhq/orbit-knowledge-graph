@@ -29,7 +29,7 @@ tests:
       WHERE cls.name = 'Dog' AND m.name = 'fetch'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: GuideDog has guide method
     query: |
@@ -37,4 +37,4 @@ tests:
       WHERE cls.name = 'GuideDog' AND m.name = 'guide'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { empty: false }

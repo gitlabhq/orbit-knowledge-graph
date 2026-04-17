@@ -21,7 +21,7 @@ tests:
       WHERE caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: helper() target is in utils.py
     query: |
@@ -29,4 +29,4 @@ tests:
       WHERE callee.name = 'helper'
       RETURN callee.file_path AS file
     assert:
-      - { all_match: { field: file, pattern: "utils.py" } }
+      - { match: { field: file, pattern: "utils.py" } }

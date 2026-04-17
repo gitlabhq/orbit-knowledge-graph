@@ -31,7 +31,7 @@ tests:
       WHERE cls.name = 'MyClass' AND m.name = 'instance_method'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: class_method exists in class
     query: |
@@ -39,7 +39,7 @@ tests:
       WHERE cls.name = 'MyClass' AND m.name = 'class_method'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: static_method exists in class
     query: |
@@ -47,4 +47,4 @@ tests:
       WHERE cls.name = 'MyClass' AND m.name = 'static_method'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { empty: false }

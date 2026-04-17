@@ -26,7 +26,7 @@ tests:
       WHERE caller.name = 'direct_import_caller' AND callee.name = 'sqrt'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: "D5: aliased import ml.sqrt calls exist"
     description: "import mathlib as ml; ml.sqrt() — partial resolution through alias"
@@ -35,4 +35,4 @@ tests:
       WHERE caller.name = 'aliased_caller'
       RETURN callee.name AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }

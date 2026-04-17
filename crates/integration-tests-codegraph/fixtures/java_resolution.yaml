@@ -30,7 +30,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
+      - { row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
 
   - name: Cross-file constructor call resolves
     query: |
@@ -39,7 +39,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { caller: "com.example.App.main", callee: "com.example.Service" } }
+      - { row: { caller: "com.example.App.main", callee: "com.example.Service" } }
 
   - name: Package scoping produces correct FQNs
     query: |
@@ -48,7 +48,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { contains_row: { fqn: "com.example.Service" } }
+      - { row: { fqn: "com.example.Service" } }
 
   # ── Broader exhaustive checks ────────────────────────────────
 
@@ -62,11 +62,11 @@ tests:
       - { no_nulls: fqn }
       - { no_nulls: type }
       - { column_values: { field: name, values: ["Service", "process", "run", "App", "main"] } }
-      - { contains_row: { name: "Service", fqn: "com.example.Service", type: "Class", file: "com/example/Service.java" } }
-      - { contains_row: { name: "process", fqn: "com.example.Service.process", type: "Method", file: "com/example/Service.java" } }
-      - { contains_row: { name: "run", fqn: "com.example.Service.run", type: "Method", file: "com/example/Service.java" } }
-      - { contains_row: { name: "App", fqn: "com.example.App", type: "Class", file: "com/example/App.java" } }
-      - { contains_row: { name: "main", fqn: "com.example.App.main", type: "Method", file: "com/example/App.java" } }
+      - { row: { name: "Service", fqn: "com.example.Service", type: "Class", file: "com/example/Service.java" } }
+      - { row: { name: "process", fqn: "com.example.Service.process", type: "Method", file: "com/example/Service.java" } }
+      - { row: { name: "run", fqn: "com.example.Service.run", type: "Method", file: "com/example/Service.java" } }
+      - { row: { name: "App", fqn: "com.example.App", type: "Class", file: "com/example/App.java" } }
+      - { row: { name: "main", fqn: "com.example.App.main", type: "Method", file: "com/example/App.java" } }
 
   - name: Exactly 3 containment edges
     query: |
@@ -75,9 +75,9 @@ tests:
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 3 }
-      - { contains_row: { parent: "com.example.Service", child: "com.example.Service.process" } }
-      - { contains_row: { parent: "com.example.Service", child: "com.example.Service.run" } }
-      - { contains_row: { parent: "com.example.App", child: "com.example.App.main" } }
+      - { row: { parent: "com.example.Service", child: "com.example.Service.process" } }
+      - { row: { parent: "com.example.Service", child: "com.example.Service.run" } }
+      - { row: { parent: "com.example.App", child: "com.example.App.main" } }
 
   - name: Exactly 2 files, both Java
     query: |
@@ -85,5 +85,5 @@ tests:
       RETURN f.path AS path, f.language AS lang
     assert:
       - { row_count: 2 }
-      - { all_match: { field: lang, pattern: "java" } }
+      - { match: { field: lang, pattern: "java" } }
       - { column_values: { field: path, values: ["com/example/Service.java", "com/example/App.java"] } }

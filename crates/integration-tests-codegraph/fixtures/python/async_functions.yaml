@@ -20,7 +20,7 @@ tests:
       WHERE d.name = 'async_func'
       RETURN d.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: Async caller calls async_func
     query: |
@@ -28,7 +28,7 @@ tests:
       WHERE caller.name = 'async_caller' AND callee.name = 'async_func'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: Async generator exists
     query: |
@@ -36,4 +36,4 @@ tests:
       WHERE d.name = 'async_generator'
       RETURN d.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { empty: false }

@@ -22,7 +22,7 @@ tests:
       WHERE caller.name = 'class_method' AND callee.name = 'static_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: instance_method calls static_method
     query: |
@@ -30,7 +30,7 @@ tests:
       WHERE caller.name = 'instance_method' AND callee.name = 'static_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: instance_method calls class_method
     query: |
@@ -38,4 +38,4 @@ tests:
       WHERE caller.name = 'instance_method' AND callee.name = 'class_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }

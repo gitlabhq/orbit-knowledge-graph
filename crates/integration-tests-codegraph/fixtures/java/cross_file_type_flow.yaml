@@ -38,9 +38,9 @@ tests:
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
         assert:
-          - { contains_row: { callee: "ServiceFactory" } }
-          - { contains_row: { callee: "createService", callee_fqn: "com.example.ServiceFactory.createService" } }
-          - { contains_row: { callee: "findUser", callee_fqn: "com.example.UserService.findUser" } }
+          - { row: { callee: "ServiceFactory" } }
+          - { row: { callee: "createService", callee_fqn: "com.example.ServiceFactory.createService" } }
+          - { row: { callee: "findUser", callee_fqn: "com.example.UserService.findUser" } }
       # no false positive to deleteUser
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)

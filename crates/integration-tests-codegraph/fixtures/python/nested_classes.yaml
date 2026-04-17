@@ -16,7 +16,7 @@ tests:
       WHERE outer.name = 'Outer' AND inner.name = 'Inner'
       RETURN outer.fqn AS parent, inner.fqn AS child
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: method is contained in Inner
     query: |
@@ -24,8 +24,8 @@ tests:
       WHERE cls.name = 'Inner' AND m.name = 'method'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
-      - { all_match: { field: fqn, pattern: "*Outer.Inner.*" } }
+      - { empty: false }
+      - { match: { field: fqn, pattern: "*Outer.Inner.*" } }
 
   - name: outer_method is contained in Outer
     query: |
@@ -33,5 +33,5 @@ tests:
       WHERE cls.name = 'Outer' AND m.name = 'outer_method'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
-      - { all_match: { field: fqn, pattern: "*Outer.*" } }
+      - { empty: false }
+      - { match: { field: fqn, pattern: "*Outer.*" } }

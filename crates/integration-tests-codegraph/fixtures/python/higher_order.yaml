@@ -35,8 +35,8 @@ tests:
       WHERE d.name = 'adder'
       RETURN d.fqn AS fqn
     assert:
-      - { non_empty: true }
-      - { all_match: { field: fqn, pattern: "*make_adder.*" } }
+      - { empty: false }
+      - { match: { field: fqn, pattern: "*make_adder.*" } }
 
   - name: caller calls make_adder
     query: |
@@ -44,7 +44,7 @@ tests:
       WHERE caller.name = 'caller' AND callee.name = 'make_adder'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: Callable class has __call__
     query: |
@@ -52,7 +52,7 @@ tests:
       WHERE cls.name = 'Callable' AND m.name = '__call__'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: Nested function calls as arguments resolve
     query: |
@@ -60,4 +60,4 @@ tests:
       WHERE caller.name = 'nested_args'
       RETURN callee.name AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }

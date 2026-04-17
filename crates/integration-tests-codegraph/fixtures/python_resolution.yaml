@@ -24,7 +24,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { caller: "main.run", callee: "utils.helper" } }
+      - { row: { caller: "main.run", callee: "utils.helper" } }
 
   - name: helper() resolves to utils.helper
     query: |
@@ -33,7 +33,7 @@ tests:
       RETURN callee.file_path AS file, caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { contains_row: { file: "utils.py", caller: "main.run", callee: "utils.helper" } }
+      - { row: { file: "utils.py", caller: "main.run", callee: "utils.helper" } }
 
   # ── Broader exhaustive checks ────────────────────────────────
 
@@ -46,9 +46,9 @@ tests:
       - { unique: fqn }
       - { no_nulls: fqn }
       - { column_values: { field: name, values: ["helper", "unused", "run"] } }
-      - { contains_row: { name: "helper", fqn: "utils.helper", type: "Function", file: "utils.py" } }
-      - { contains_row: { name: "unused", fqn: "utils.unused", type: "Function", file: "utils.py" } }
-      - { contains_row: { name: "run", fqn: "main.run", type: "Function", file: "main.py" } }
+      - { row: { name: "helper", fqn: "utils.helper", type: "Function", file: "utils.py" } }
+      - { row: { name: "unused", fqn: "utils.unused", type: "Function", file: "utils.py" } }
+      - { row: { name: "run", fqn: "main.run", type: "Function", file: "main.py" } }
 
   - name: unused() has no incoming call edges
     query: |
@@ -64,7 +64,7 @@ tests:
       RETURN i.file_path AS file, i.path AS path, i.name AS name
     assert:
       - { row_count: 1 }
-      - { contains_row: { file: "main.py", path: "utils", name: "helper" } }
+      - { row: { file: "main.py", path: "utils", name: "helper" } }
 
   - name: Exactly 2 Python files
     query: |
@@ -72,5 +72,5 @@ tests:
       RETURN f.path AS path, f.language AS lang
     assert:
       - { row_count: 2 }
-      - { all_match: { field: lang, pattern: "python" } }
+      - { match: { field: lang, pattern: "python" } }
       - { column_values: { field: path, values: ["utils.py", "main.py"] } }

@@ -17,7 +17,7 @@ tests:
       MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
       RETURN count(i) AS n
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: os import exists
     query: |
@@ -25,7 +25,7 @@ tests:
       WHERE i.path = 'os'
       RETURN i.path AS path
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: From import exists (Path)
     query: |
@@ -33,7 +33,7 @@ tests:
       WHERE i.name = 'Path'
       RETURN i.path AS path
     assert:
-      - { non_empty: true }
+      - { empty: false }
 
   - name: Aliased import exists (numpy as np)
     query: |
@@ -41,4 +41,4 @@ tests:
       WHERE i.alias = 'np'
       RETURN i.path AS path
     assert:
-      - { non_empty: true }
+      - { empty: false }

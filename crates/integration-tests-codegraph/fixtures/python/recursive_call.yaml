@@ -16,4 +16,4 @@ tests:
       WHERE caller.name = 'factorial' AND callee.name = 'factorial'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }

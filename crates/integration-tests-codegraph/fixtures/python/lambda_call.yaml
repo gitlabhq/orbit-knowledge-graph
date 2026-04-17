@@ -14,8 +14,8 @@ tests:
       WHERE d.name = 'square'
       RETURN d.definition_type AS dt
     assert:
-      - { non_empty: true }
-      - { all_match: { field: dt, pattern: "Lambda" } }
+      - { empty: false }
+      - { match: { field: dt, pattern: "Lambda" } }
 
   - name: square() call resolves to lambda
     query: |
@@ -23,4 +23,4 @@ tests:
       WHERE callee.name = 'square'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { empty: false }
