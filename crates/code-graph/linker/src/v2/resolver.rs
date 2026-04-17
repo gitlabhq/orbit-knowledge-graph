@@ -18,6 +18,84 @@ pub struct ResolveResult {
     pub edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
 }
 
+/// Per-file resolution context with caches.
+struct ResolveCtx<'a> {
+    graph: &'a CodeGraph,
+    file_node: NodeIndex,
+    def_nodes: &'a [NodeIndex],
+    import_nodes: &'a [NodeIndex],
+    import_map: FxHashMap<String, Vec<NodeIndex>>,
+    rules: &'a ResolutionRules,
+    settings: &'a ResolveSettings,
+    scratch: ScratchBuf,
+    import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
+    nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
+}
+
+impl<'a> ResolveCtx<'a> {
+    fn new(
+        graph: &'a CodeGraph,
+        file_node: NodeIndex,
+        def_nodes: &'a [NodeIndex],
+        import_nodes: &'a [NodeIndex],
+        rules: &'a ResolutionRules,
+        settings: &'a ResolveSettings,
+    ) -> Self {
+        let import_map = pre_resolve_imports(graph, file_node, import_nodes);
+        Self {
+            graph,
+            file_node,
+            def_nodes,
+            import_nodes,
+            import_map,
+            rules,
+            settings,
+            scratch: ScratchBuf::new(),
+            import_cache: FxHashMap::default(),
+            nested_cache: FxHashMap::default(),
+        }
+    }
+
+    fn resolve_import_cached(&mut self, import_node: NodeIndex) -> Vec<NodeIndex> {
+        if let Some(cached) = self.import_cache.get(&import_node) {
+            return cached.clone();
+        }
+        let result = imports::resolve_import(
+            self.graph,
+            import_node,
+            self.rules.fqn_separator,
+            &mut self.scratch,
+        );
+        self.import_cache.insert(import_node, result.clone());
+        result
+    }
+
+    fn lookup_nested_cached(
+        &mut self,
+        scope_fqn: &str,
+        member_name: &str,
+        out: &mut Vec<NodeIndex>,
+    ) -> bool {
+        let key = (scope_fqn.to_string(), member_name.to_string());
+        if let Some(cached) = self.nested_cache.get(&key) {
+            if !cached.is_empty() {
+                out.extend_from_slice(cached);
+                return true;
+            }
+            return false;
+        }
+        let mut result = Vec::new();
+        self.graph
+            .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
+        let found = !result.is_empty();
+        if found {
+            out.extend_from_slice(&result);
+        }
+        self.nested_cache.insert(key, result);
+        found
+    }
+}
+
 /// Resolve all references for a single file.
 ///
 /// Maps `ParseValue` indices to graph nodes and produces edges.
@@ -32,10 +110,7 @@ pub fn resolve_file_references(
     settings: &ResolveSettings,
 ) -> ResolveResult {
     let mut edges = Vec::new();
-    let mut scratch = ScratchBuf::new();
-
-    // Pre-resolve imports for this file (same as the old walker)
-    let import_map = pre_resolve_imports(graph, file_node, import_nodes);
+    let mut ctx = ResolveCtx::new(graph, file_node, def_nodes, import_nodes, rules, settings);
 
     let deadline = settings
         .per_file_timeout
@@ -50,17 +125,7 @@ pub fn resolve_file_references(
             .and_then(|i| def_nodes.get(i as usize).copied())
             .unwrap_or(file_node);
 
-        let targets = resolve_single(
-            graph,
-            ref_event,
-            file_node,
-            def_nodes,
-            import_nodes,
-            &import_map,
-            rules,
-            settings,
-            &mut scratch,
-        );
+        let targets = resolve_single(&mut ctx, ref_event);
 
         let (source_node_kind, source_def_kind) = ref_event
             .enclosing_def
@@ -93,84 +158,37 @@ pub fn resolve_file_references(
 }
 
 /// Resolve a single reference event to target nodes.
-fn resolve_single(
-    graph: &CodeGraph,
-    ref_event: &ReferenceEvent,
-    file_node: NodeIndex,
-    def_nodes: &[NodeIndex],
-    import_nodes: &[NodeIndex],
-    import_map: &FxHashMap<String, Vec<NodeIndex>>,
-    rules: &ResolutionRules,
-    settings: &ResolveSettings,
-    scratch: &mut ScratchBuf,
-) -> Vec<NodeIndex> {
+fn resolve_single(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<NodeIndex> {
     if ref_event.chain.is_some() {
-        resolve_chain(
-            graph,
-            ref_event,
-            file_node,
-            def_nodes,
-            import_nodes,
-            import_map,
-            rules,
-            settings,
-            scratch,
-        )
+        resolve_chain(ctx, ref_event)
     } else {
-        resolve_bare(
-            graph,
-            ref_event,
-            file_node,
-            def_nodes,
-            import_nodes,
-            import_map,
-            rules,
-            scratch,
-        )
+        resolve_bare(ctx, ref_event)
     }
 }
 
 /// Resolve a bare reference (no chain) using the configured stages.
-fn resolve_bare(
-    graph: &CodeGraph,
-    ref_event: &ReferenceEvent,
-    file_node: NodeIndex,
-    def_nodes: &[NodeIndex],
-    import_nodes: &[NodeIndex],
-    import_map: &FxHashMap<String, Vec<NodeIndex>>,
-    rules: &ResolutionRules,
-    scratch: &mut ScratchBuf,
-) -> Vec<NodeIndex> {
-    for stage in &rules.bare_stages {
+fn resolve_bare(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<NodeIndex> {
+    for stage in &ctx.rules.bare_stages.clone() {
         let result = match stage {
-            ResolveStage::SSA => resolve_from_reaching(
-                graph,
-                &ref_event.reaching,
-                &ref_event.name,
-                def_nodes,
-                import_nodes,
-                import_map,
-                rules,
-                scratch,
-            ),
+            ResolveStage::SSA => resolve_from_reaching(ctx, &ref_event.reaching, &ref_event.name),
             ResolveStage::ImportStrategies => apply_import_strategies(
-                &rules.import_strategies,
-                graph,
-                file_node,
+                &ctx.rules.import_strategies,
+                ctx.graph,
+                ctx.file_node,
                 &ref_event.name,
-                rules.fqn_separator,
-                import_map,
-                scratch,
+                ctx.rules.fqn_separator,
+                &ctx.import_map,
+                &mut ctx.scratch,
             ),
             ResolveStage::ImplicitMember => {
                 if let Some(enclosing_idx) = ref_event.enclosing_def
-                    && let Some(&enclosing_node) = def_nodes.get(enclosing_idx as usize)
+                    && let Some(&enclosing_node) = ctx.def_nodes.get(enclosing_idx as usize)
                 {
                     resolve_implicit_member(
-                        graph,
+                        ctx.graph,
                         enclosing_node,
                         &ref_event.name,
-                        rules.fqn_separator,
+                        ctx.rules.fqn_separator,
                     )
                 } else {
                     vec![]
@@ -186,34 +204,20 @@ fn resolve_bare(
 
 /// Map ParseValue reaching defs to concrete graph nodes.
 fn resolve_from_reaching(
-    graph: &CodeGraph,
+    ctx: &mut ResolveCtx<'_>,
     reaching: &[ParseValue],
     ref_name: &str,
-    def_nodes: &[NodeIndex],
-    import_nodes: &[NodeIndex],
-    import_map: &FxHashMap<String, Vec<NodeIndex>>,
-    rules: &ResolutionRules,
-    scratch: &mut ScratchBuf,
 ) -> Vec<NodeIndex> {
     let mut result = Vec::new();
     for value in reaching {
         match value {
             ParseValue::LocalDef(i) => {
-                if let Some(&node) = def_nodes.get(*i as usize) {
-                    if let Some(did) = graph.graph[node].def_id() {
-                        let gdef = &graph.defs[did.0 as usize];
+                if let Some(&node) = ctx.def_nodes.get(*i as usize) {
+                    if let Some(did) = ctx.graph.graph[node].def_id() {
+                        let gdef = &ctx.graph.defs[did.0 as usize];
                         if gdef.kind.is_type_container() {
-                            let fqn = graph.str(gdef.fqn);
-                            graph.indexes.nested.lookup_into(
-                                fqn,
-                                ref_name,
-                                |idx| {
-                                    graph.graph[idx].def_id().is_some_and(|d| {
-                                        graph.str(graph.defs[d.0 as usize].name) == ref_name
-                                    })
-                                },
-                                &mut result,
-                            );
+                            let fqn = ctx.graph.str(gdef.fqn);
+                            ctx.lookup_nested_cached(fqn, ref_name, &mut result);
                         } else {
                             result.push(node);
                         }
@@ -221,18 +225,12 @@ fn resolve_from_reaching(
                 }
             }
             ParseValue::ImportRef(i) => {
-                if let Some(&import_node) = import_nodes.get(*i as usize) {
-                    result.extend(imports::resolve_import(
-                        graph,
-                        import_node,
-                        rules.fqn_separator,
-                        scratch,
-                    ));
+                if let Some(&import_node) = ctx.import_nodes.get(*i as usize) {
+                    result.extend(ctx.resolve_import_cached(import_node));
                 }
             }
             ParseValue::Type(type_fqn) => {
-                // Nested member lookup: find ref_name as a member of type_fqn
-                graph.lookup_nested_with_hierarchy(type_fqn, ref_name, &mut result);
+                ctx.lookup_nested_cached(type_fqn, ref_name, &mut result);
             }
             ParseValue::Opaque => {}
         }
@@ -241,37 +239,17 @@ fn resolve_from_reaching(
 }
 
 /// Resolve a chained reference using FQN-based type flow.
-/// Mirrors the walker's resolve_base → walk_step pattern.
-fn resolve_chain(
-    graph: &CodeGraph,
-    ref_event: &ReferenceEvent,
-    file_node: NodeIndex,
-    def_nodes: &[NodeIndex],
-    import_nodes: &[NodeIndex],
-    import_map: &FxHashMap<String, Vec<NodeIndex>>,
-    rules: &ResolutionRules,
-    settings: &ResolveSettings,
-    scratch: &mut ScratchBuf,
-) -> Vec<NodeIndex> {
+fn resolve_chain(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<NodeIndex> {
     let chain = ref_event.chain.as_deref().unwrap_or(&[]);
     if chain.is_empty() {
         return vec![];
     }
 
-    // Resolve base to type FQNs (not NodeIndex)
-    let mut current_types: Vec<String> = resolve_base_type_fqns(
-        graph,
-        &chain[0],
-        &ref_event.reaching,
-        def_nodes,
-        import_nodes,
-        rules,
-        scratch,
-    );
+    let mut current_types: Vec<String> =
+        resolve_base_type_fqns(ctx, &chain[0], &ref_event.reaching);
 
     if current_types.is_empty() {
-        // Chain fallback: resolve the last step as a bare reference
-        if settings.chain_fallback {
+        if ctx.settings.chain_fallback {
             if let Some(last_name) = chain.last().and_then(|s| match s {
                 ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
                 _ => None,
@@ -283,24 +261,14 @@ fn resolve_chain(
                     enclosing_def: ref_event.enclosing_def,
                     range: ref_event.range,
                 };
-                return resolve_bare(
-                    graph,
-                    &fallback_event,
-                    file_node,
-                    def_nodes,
-                    import_nodes,
-                    import_map,
-                    rules,
-                    scratch,
-                );
+                return resolve_bare(ctx, &fallback_event);
             }
         }
         return vec![];
     }
 
-    // Walk chain steps using FQN-based nested lookup
     for (depth, step) in chain[1..].iter().enumerate() {
-        if depth >= settings.max_chain_depth || current_types.is_empty() {
+        if depth >= ctx.settings.max_chain_depth || current_types.is_empty() {
             break;
         }
         let member_name = match step {
@@ -315,27 +283,26 @@ fn resolve_chain(
 
         for type_fqn in &current_types {
             let before = found_nodes.len();
-            graph.lookup_nested_with_hierarchy(type_fqn, member_name, &mut found_nodes);
+            ctx.lookup_nested_cached(type_fqn, member_name, &mut found_nodes);
 
-            // Derive next types from found defs
             for &def_idx in &found_nodes[before..] {
-                if let Some(did) = graph.graph[def_idx].def_id() {
-                    let gdef = &graph.defs[did.0 as usize];
+                if let Some(did) = ctx.graph.graph[def_idx].def_id() {
+                    let gdef = &ctx.graph.defs[did.0 as usize];
                     if matches!(step, ExpressionStep::Call(_)) {
                         if let Some(meta) = &gdef.metadata
                             && let Some(rt) = meta.return_type
                         {
-                            next_types.push(graph.str(rt).to_string());
+                            next_types.push(ctx.graph.str(rt).to_string());
                         }
                         if gdef.kind.is_type_container() {
-                            next_types.push(graph.str(gdef.fqn).to_string());
+                            next_types.push(ctx.graph.str(gdef.fqn).to_string());
                         }
                     }
                     if matches!(step, ExpressionStep::Field(_)) {
                         if let Some(meta) = &gdef.metadata
                             && let Some(ta) = meta.type_annotation
                         {
-                            next_types.push(graph.str(ta).to_string());
+                            next_types.push(ctx.graph.str(ta).to_string());
                         }
                     }
                 }
@@ -353,15 +320,10 @@ fn resolve_chain(
 }
 
 /// Resolve the base of a chain to type FQN strings.
-/// Mirrors the walker's `resolve_base` → `value_types` pattern.
 fn resolve_base_type_fqns(
-    graph: &CodeGraph,
+    ctx: &mut ResolveCtx<'_>,
     base_step: &ExpressionStep,
     reaching: &[ParseValue],
-    def_nodes: &[NodeIndex],
-    import_nodes: &[NodeIndex],
-    rules: &ResolutionRules,
-    scratch: &mut ScratchBuf,
 ) -> Vec<String> {
     match base_step {
         ExpressionStep::Ident(_) | ExpressionStep::Call(_) | ExpressionStep::This => {
@@ -372,32 +334,27 @@ fn resolve_base_type_fqns(
                         types.push(fqn.clone());
                     }
                     ParseValue::LocalDef(i) => {
-                        if let Some(&node) = def_nodes.get(*i as usize)
-                            && let Some(did) = graph.graph[node].def_id()
+                        if let Some(&node) = ctx.def_nodes.get(*i as usize)
+                            && let Some(did) = ctx.graph.graph[node].def_id()
                         {
-                            let gdef = &graph.defs[did.0 as usize];
+                            let gdef = &ctx.graph.defs[did.0 as usize];
                             if gdef.kind.is_type_container() {
-                                types.push(graph.str(gdef.fqn).to_string());
+                                types.push(ctx.graph.str(gdef.fqn).to_string());
                             } else if let Some(meta) = &gdef.metadata
                                 && let Some(rt) = meta.return_type
                             {
-                                types.push(graph.str(rt).to_string());
+                                types.push(ctx.graph.str(rt).to_string());
                             }
                         }
                     }
                     ParseValue::ImportRef(i) => {
-                        if let Some(&import_node) = import_nodes.get(*i as usize) {
-                            let resolved = imports::resolve_import(
-                                graph,
-                                import_node,
-                                rules.fqn_separator,
-                                scratch,
-                            );
+                        if let Some(&import_node) = ctx.import_nodes.get(*i as usize) {
+                            let resolved = ctx.resolve_import_cached(import_node);
                             for def_idx in resolved {
-                                if let Some(did) = graph.graph[def_idx].def_id() {
-                                    let gdef = &graph.defs[did.0 as usize];
+                                if let Some(did) = ctx.graph.graph[def_idx].def_id() {
+                                    let gdef = &ctx.graph.defs[did.0 as usize];
                                     if gdef.kind.is_type_container() {
-                                        types.push(graph.str(gdef.fqn).to_string());
+                                        types.push(ctx.graph.str(gdef.fqn).to_string());
                                     }
                                 }
                             }
@@ -408,37 +365,33 @@ fn resolve_base_type_fqns(
             }
             types
         }
-        ExpressionStep::Super => {
-            // Super types come from reaching defs (written as Type(super_fqn))
-            reaching
-                .iter()
-                .filter_map(|v| match v {
-                    ParseValue::Type(fqn) => Some(fqn.clone()),
-                    _ => None,
-                })
-                .collect()
-        }
+        ExpressionStep::Super => reaching
+            .iter()
+            .filter_map(|v| match v {
+                ParseValue::Type(fqn) => Some(fqn.clone()),
+                _ => None,
+            })
+            .collect(),
         ExpressionStep::New(type_name) => {
-            // Constructor: find type by FQN or name
-            let fqn_matches = graph.indexes.by_fqn.lookup(type_name, |idx| {
-                graph.graph[idx]
+            let fqn_matches = ctx.graph.indexes.by_fqn.lookup(type_name, |idx| {
+                ctx.graph.graph[idx]
                     .def_id()
-                    .is_some_and(|d| graph.str(graph.defs[d.0 as usize].fqn) == *type_name)
+                    .is_some_and(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn) == *type_name)
             });
             if !fqn_matches.is_empty() {
                 return vec![type_name.clone()];
             }
-            let name_matches = graph.indexes.by_name.lookup(type_name, |idx| {
-                graph.graph[idx]
+            let name_matches = ctx.graph.indexes.by_name.lookup(type_name, |idx| {
+                ctx.graph.graph[idx]
                     .def_id()
-                    .is_some_and(|d| graph.str(graph.defs[d.0 as usize].name) == *type_name)
+                    .is_some_and(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].name) == *type_name)
             });
             name_matches
                 .iter()
                 .filter_map(|&idx| {
-                    graph.graph[idx]
+                    ctx.graph.graph[idx]
                         .def_id()
-                        .map(|d| graph.str(graph.defs[d.0 as usize].fqn).to_string())
+                        .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
                 })
                 .collect()
         }
