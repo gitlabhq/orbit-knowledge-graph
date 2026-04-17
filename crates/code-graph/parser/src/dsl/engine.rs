@@ -47,8 +47,8 @@ impl LanguageSpec {
         let mut scope_stack: Vec<Arc<str>> = Vec::new();
         let mut import_map = rustc_hash::FxHashMap::default();
 
-        if self.module_from_path
-            && let Some(module) = file_path_to_module(file_path, sep)
+        if let Some(f) = self.module_scope_fn
+            && let Some(module) = f(file_path, sep)
         {
             scope_stack.push(Arc::from(module.as_str()));
         }
@@ -437,8 +437,8 @@ impl LanguageSpec {
         let arena = bumpalo::Bump::new();
         let mut state = WalkFullState::new(&arena);
 
-        if self.module_from_path
-            && let Some(module) = file_path_to_module(file_path, sep)
+        if let Some(f) = self.module_scope_fn
+            && let Some(module) = f(file_path, sep)
         {
             state.scope_stack.push(Arc::from(module.as_str()));
         }
@@ -878,32 +878,6 @@ impl<'a> WalkFullState<'a> {
             top_level_depth: 0,
         }
     }
-}
-
-/// Convert a file path to a module scope string.
-/// `services/user_service.py` → `services.user_service`
-/// `models/__init__.py` → `models`
-/// `main.py` → `main`
-fn file_path_to_module(file_path: &str, sep: &str) -> Option<String> {
-    let path = std::path::Path::new(file_path);
-
-    // Strip extension
-    let stem = path.with_extension("");
-    let stem_str = stem.to_str()?;
-
-    // Convert path separators to module separator
-    let module = stem_str.replace(['/', '\\'], sep);
-
-    // Strip trailing __init__ (package init files)
-    let module = module
-        .strip_suffix(&format!("{sep}__init__"))
-        .unwrap_or(&module);
-
-    if module.is_empty() {
-        return None;
-    }
-
-    Some(module.to_string())
 }
 
 fn canonical_range(r: &crate::utils::Range) -> code_graph_types::Range {

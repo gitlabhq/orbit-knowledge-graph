@@ -449,8 +449,8 @@ pub trait DslLanguage: Send + Sync + Default {
         None
     }
 
-    fn module_scope_from_path() -> bool {
-        false
+    fn module_scope() -> Option<ModuleScopeFn> {
+        None
     }
 
     fn bindings() -> Vec<BindingRule> {
@@ -484,8 +484,8 @@ pub trait DslLanguage: Send + Sync + Default {
         if let Some((kind, extract)) = Self::package_node() {
             spec = spec.package(kind, extract);
         }
-        if Self::module_scope_from_path() {
-            spec = spec.module_scope_from_path();
+        if let Some(f) = Self::module_scope() {
+            spec = spec.module_scope(f);
         }
         spec
     }
@@ -691,6 +691,10 @@ pub type CustomScopeFn = fn(
     &'static str,
 ) -> bool;
 
+/// Function type for deriving a module scope from a file path.
+/// e.g. `services/user_service.py` → `Some("services.user_service")`
+pub type ModuleScopeFn = fn(&str, &str) -> Option<String>;
+
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {
     let mut map: FxHashMap<&'static str, Vec<usize>> = FxHashMap::default();
     for (i, rule) in rules.iter().enumerate() {
@@ -734,7 +738,7 @@ pub struct LanguageSpec {
     pub(crate) package_node: Option<(&'static str, Extract)>,
     pub(crate) custom_import_fn: Option<CustomImportFn>,
     pub(crate) custom_scope_fn: Option<CustomScopeFn>,
-    pub(crate) module_from_path: bool,
+    pub(crate) module_scope_fn: Option<ModuleScopeFn>,
     pub ssa_config: SsaConfig,
 
     // Dispatch tables: node_kind → indices into the corresponding rule Vec.
@@ -769,7 +773,7 @@ impl LanguageSpec {
             package_node: None,
             custom_import_fn: None,
             custom_scope_fn: None,
-            module_from_path: false,
+            module_scope_fn: None,
             ssa_config: SsaConfig::default(),
             scope_dispatch,
             ref_dispatch,
@@ -820,10 +824,10 @@ impl LanguageSpec {
         self
     }
 
-    /// Derive module scope from file path. For languages like Python where
-    /// the module hierarchy comes from the filesystem, not from an AST node.
-    pub fn module_scope_from_path(mut self) -> Self {
-        self.module_from_path = true;
+    /// Set a function that derives a module scope from a file path.
+    /// The engine calls this before walking to push an initial scope.
+    pub fn module_scope(mut self, f: ModuleScopeFn) -> Self {
+        self.module_scope_fn = Some(f);
         self
     }
 

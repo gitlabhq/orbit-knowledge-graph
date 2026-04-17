@@ -91,8 +91,8 @@ impl DslLanguage for PythonDsl {
         Language::Python
     }
 
-    fn module_scope_from_path() -> bool {
-        true
+    fn module_scope() -> Option<parser_core::dsl::types::ModuleScopeFn> {
+        Some(python_module_from_path)
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -294,6 +294,24 @@ impl HasRules for PythonRules {
             Some("super"),
         )
     }
+}
+
+/// Derive module scope from file path.
+/// `services/user_service.py` → `services.user_service`
+/// `models/__init__.py` → `models`
+/// `main.py` → `main`
+fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
+    let path = std::path::Path::new(file_path);
+    let stem = path.with_extension("");
+    let stem_str = stem.to_str()?;
+    let module = stem_str.replace(['/', '\\'], sep);
+    let module = module
+        .strip_suffix(&format!("{sep}__init__"))
+        .unwrap_or(&module);
+    if module.is_empty() {
+        return None;
+    }
+    Some(module.to_string())
 }
 
 #[cfg(test)]
