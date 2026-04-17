@@ -168,18 +168,35 @@ fn resolve_single(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<N
 
 /// Resolve a bare reference (no chain) using the configured stages.
 fn resolve_bare(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<NodeIndex> {
+    // Early skip: if no SSA reaching defs AND name not in any definition, nothing can resolve.
+    if ref_event.reaching.is_empty() && !ctx.graph.indexes.by_name.contains(&ref_event.name) {
+        return vec![];
+    }
+
     for stage in &ctx.rules.bare_stages.clone() {
         let result = match stage {
-            ResolveStage::SSA => resolve_from_reaching(ctx, &ref_event.reaching, &ref_event.name),
-            ResolveStage::ImportStrategies => apply_import_strategies(
-                &ctx.rules.import_strategies,
-                ctx.graph,
-                ctx.file_node,
-                &ref_event.name,
-                ctx.rules.fqn_separator,
-                &ctx.import_map,
-                &mut ctx.scratch,
-            ),
+            ResolveStage::SSA => {
+                if ref_event.reaching.is_empty() {
+                    vec![]
+                } else {
+                    resolve_from_reaching(ctx, &ref_event.reaching, &ref_event.name)
+                }
+            }
+            ResolveStage::ImportStrategies => {
+                // Skip if name doesn't exist as any definition
+                if !ctx.graph.indexes.by_name.contains(&ref_event.name) {
+                    continue;
+                }
+                apply_import_strategies(
+                    &ctx.rules.import_strategies,
+                    ctx.graph,
+                    ctx.file_node,
+                    &ref_event.name,
+                    ctx.rules.fqn_separator,
+                    &ctx.import_map,
+                    &mut ctx.scratch,
+                )
+            }
             ResolveStage::ImplicitMember => {
                 if let Some(enclosing_idx) = ref_event.enclosing_def
                     && let Some(&enclosing_node) = ctx.def_nodes.get(enclosing_idx as usize)
