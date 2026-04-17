@@ -91,8 +91,11 @@ impl DslLanguage for PythonDsl {
         Language::Python
     }
 
-    fn module_scope() -> Option<parser_core::dsl::types::ModuleScopeFn> {
-        Some(python_module_from_path)
+    fn hooks() -> parser_core::dsl::types::LanguageHooks {
+        parser_core::dsl::types::LanguageHooks {
+            module_scope: Some(python_module_from_path),
+            ..parser_core::dsl::types::LanguageHooks::default()
+        }
     }
 
     fn scopes() -> Vec<ScopeRule> {

@@ -2,8 +2,8 @@ use code_graph_config::Language;
 use code_graph_types::{BindingKind, CanonicalImport, DefKind};
 use parser_core::dsl::extractors::{Extract, ExtractList, field, metadata};
 use parser_core::dsl::types::{
-    self, BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LoopRule, ReferenceRule,
-    ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
+    self, BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LanguageHooks, LoopRule,
+    ReferenceRule, ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
 };
 
 use crate::linker::v2::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
@@ -58,17 +58,12 @@ impl DslLanguage for RubyDsl {
         vec![]
     }
 
-    fn custom_scope(
-        node: &N<'_>,
-        defs: &mut Vec<code_graph_types::CanonicalDefinition>,
-        scope_stack: &[std::sync::Arc<str>],
-        sep: &'static str,
-    ) -> bool {
-        ruby_extract_attr_methods(node, defs, scope_stack, sep)
-    }
-
-    fn custom_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
-        ruby_extract_imports(node, imports)
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
+            on_scope: Some(ruby_extract_attr_methods),
+            on_import: Some(ruby_extract_imports),
+            ..LanguageHooks::default()
+        }
     }
 
     fn bindings() -> Vec<BindingRule> {

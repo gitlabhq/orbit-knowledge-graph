@@ -422,25 +422,6 @@ pub trait DslLanguage: Send + Sync + Default {
         vec![]
     }
 
-    /// Custom import extraction for languages with complex import syntax.
-    /// Called for every AST node. Return `true` if the node was handled
-    /// (skips the declarative import rules for this node).
-    fn custom_import(_node: &N<'_>, _imports: &mut Vec<code_graph_types::CanonicalImport>) -> bool {
-        false
-    }
-
-    /// Custom definition extraction for nodes that produce multiple definitions
-    /// from a single AST node (e.g. Ruby's `attr_accessor :name, :email`).
-    /// Called for every AST node. Return `true` if handled.
-    fn custom_scope(
-        _node: &N<'_>,
-        _defs: &mut Vec<code_graph_types::CanonicalDefinition>,
-        _scope_stack: &[std::sync::Arc<str>],
-        _sep: &'static str,
-    ) -> bool {
-        false
-    }
-
     fn chain_config() -> Option<ChainConfig> {
         None
     }
@@ -449,8 +430,8 @@ pub trait DslLanguage: Send + Sync + Default {
         None
     }
 
-    fn module_scope() -> Option<ModuleScopeFn> {
-        None
+    fn hooks() -> LanguageHooks {
+        LanguageHooks::default()
     }
 
     fn bindings() -> Vec<BindingRule> {
@@ -472,8 +453,7 @@ pub trait DslLanguage: Send + Sync + Default {
     fn spec() -> LanguageSpec {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
-                .custom_import(Self::custom_import)
-                .custom_scope(Self::custom_scope)
+                .with_hooks(Self::hooks())
                 .with_bindings(Self::bindings())
                 .with_branches(Self::branches())
                 .with_loops(Self::loops())
@@ -483,9 +463,6 @@ pub trait DslLanguage: Send + Sync + Default {
         }
         if let Some((kind, extract)) = Self::package_node() {
             spec = spec.package(kind, extract);
-        }
-        if let Some(f) = Self::module_scope() {
-            spec = spec.module_scope(f);
         }
         spec
     }
@@ -678,22 +655,35 @@ impl Default for SsaConfig {
     }
 }
 
-// ── Function types ──────────────────────────────────────────────
+// ── Hooks ───────────────────────────────────────────────────────
 
-/// Function type for custom import handling.
-pub type CustomImportFn = fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool;
+/// Language-specific escape hatches. All fields default to `None`.
+/// The engine calls each hook if set, otherwise uses default behavior.
+pub struct LanguageHooks {
+    /// Derive a module scope from a file path before walking.
+    pub module_scope: Option<fn(&str, &str) -> Option<String>>,
+    /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
+    pub on_scope: Option<
+        fn(
+            &N<'_>,
+            &mut Vec<code_graph_types::CanonicalDefinition>,
+            &[std::sync::Arc<str>],
+            &'static str,
+        ) -> bool,
+    >,
+    /// Override import extraction (e.g. Ruby require/require_relative).
+    pub on_import: Option<fn(&N<'_>, &mut Vec<code_graph_types::CanonicalImport>) -> bool>,
+}
 
-/// Function type for custom scope/definition handling.
-pub type CustomScopeFn = fn(
-    &N<'_>,
-    &mut Vec<code_graph_types::CanonicalDefinition>,
-    &[std::sync::Arc<str>],
-    &'static str,
-) -> bool;
-
-/// Function type for deriving a module scope from a file path.
-/// e.g. `services/user_service.py` → `Some("services.user_service")`
-pub type ModuleScopeFn = fn(&str, &str) -> Option<String>;
+impl Default for LanguageHooks {
+    fn default() -> Self {
+        Self {
+            module_scope: None,
+            on_scope: None,
+            on_import: None,
+        }
+    }
+}
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {
     let mut map: FxHashMap<&'static str, Vec<usize>> = FxHashMap::default();
@@ -736,9 +726,7 @@ pub struct LanguageSpec {
     pub loops: Vec<LoopRule>,
     pub chain_config: Option<ChainConfig>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
-    pub(crate) custom_import_fn: Option<CustomImportFn>,
-    pub(crate) custom_scope_fn: Option<CustomScopeFn>,
-    pub(crate) module_scope_fn: Option<ModuleScopeFn>,
+    pub(crate) hooks: LanguageHooks,
     pub ssa_config: SsaConfig,
 
     // Dispatch tables: node_kind → indices into the corresponding rule Vec.
@@ -771,9 +759,7 @@ impl LanguageSpec {
             loops: Vec::new(),
             chain_config: None,
             package_node: None,
-            custom_import_fn: None,
-            custom_scope_fn: None,
-            module_scope_fn: None,
+            hooks: LanguageHooks::default(),
             ssa_config: SsaConfig::default(),
             scope_dispatch,
             ref_dispatch,
@@ -814,20 +800,8 @@ impl LanguageSpec {
         self
     }
 
-    pub fn custom_import(mut self, f: CustomImportFn) -> Self {
-        self.custom_import_fn = Some(f);
-        self
-    }
-
-    pub fn custom_scope(mut self, f: CustomScopeFn) -> Self {
-        self.custom_scope_fn = Some(f);
-        self
-    }
-
-    /// Set a function that derives a module scope from a file path.
-    /// The engine calls this before walking to push an initial scope.
-    pub fn module_scope(mut self, f: ModuleScopeFn) -> Self {
-        self.module_scope_fn = Some(f);
+    pub fn with_hooks(mut self, hooks: LanguageHooks) -> Self {
+        self.hooks = hooks;
         self
     }
 

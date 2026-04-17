@@ -47,7 +47,7 @@ impl LanguageSpec {
         let mut scope_stack: Vec<Arc<str>> = Vec::new();
         let mut import_map = rustc_hash::FxHashMap::default();
 
-        if let Some(f) = self.module_scope_fn
+        if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
         {
             scope_stack.push(Arc::from(module.as_str()));
@@ -127,12 +127,13 @@ impl LanguageSpec {
         }
 
         let custom_scope_handled = self
-            .custom_scope_fn
+            .hooks
+            .on_scope
             .is_some_and(|f| f(node, defs, scope_stack, sep));
 
         if !custom_scope_handled {
             let import_count_before = imports.len();
-            let handled = self.custom_import_fn.is_some_and(|f| f(node, imports));
+            let handled = self.hooks.on_import.is_some_and(|f| f(node, imports));
             if !handled {
                 self.evaluate_imports(node, node_kind_ref, imports);
             }
@@ -437,7 +438,7 @@ impl LanguageSpec {
         let arena = bumpalo::Bump::new();
         let mut state = WalkFullState::new(&arena);
 
-        if let Some(f) = self.module_scope_fn
+        if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
         {
             state.scope_stack.push(Arc::from(module.as_str()));
@@ -584,7 +585,8 @@ impl LanguageSpec {
 
         // Custom scope handling (e.g. Ruby attr_accessor)
         let custom_handled = self
-            .custom_scope_fn
+            .hooks
+            .on_scope
             .is_some_and(|f| f(node, &mut state.defs, &state.scope_stack, sep));
 
         if !custom_handled {
@@ -617,7 +619,8 @@ impl LanguageSpec {
             // Import handling → also write to SSA
             let import_count_before = state.imports.len();
             let handled = self
-                .custom_import_fn
+                .hooks
+                .on_import
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
                 self.evaluate_imports(node, nk, &mut state.imports);
