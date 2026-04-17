@@ -135,8 +135,8 @@ rm -f "$OUT_PRODUCER.tmp" "$OUT_CONSUMER.tmp" "$OUT_RECONCILER.tmp"
 # before the first fire — combined with refresh propagation that's >5 min in the
 # worst case. Siphon's gocron uses `withSeconds=true`, so a 6-field expression
 # is required for sub-minute cadence.
-yq -i '(.schedules[] | select(.identifier | test("_without_traversal_path$"))).schedule = "*/15 * * * * *"' "$OUT_RECONCILER"
-log "overrode _without_traversal_path schedules to */15 * * * * *"
+yq -i '(.schedules[] | select(.identifier | test("_without_traversal_path$"))).schedule = "*/10 * * * * *"' "$OUT_RECONCILER"
+log "overrode _without_traversal_path schedules to */10 * * * * *"
 
 log "wrote $OUT_PRODUCER"
 log "wrote $OUT_CONSUMER"
