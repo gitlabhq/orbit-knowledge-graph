@@ -64,6 +64,7 @@ impl KnowledgeGraphServiceImpl {
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
+            gkg_analytics::Analytics::noop(),
         );
         let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
         Self {

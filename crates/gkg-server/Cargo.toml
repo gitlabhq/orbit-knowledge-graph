@@ -14,6 +14,7 @@ regenerate-protos = []
 testkit = ["clickhouse-client/testkit"]
 
 [dependencies]
+gkg-analytics = { path = "../gkg-analytics" }
 mimalloc = { workspace = true, features = ["secure"] }
 anyhow = { workspace = true }
 arrow = { workspace = true }

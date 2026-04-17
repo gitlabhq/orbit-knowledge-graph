@@ -37,10 +37,12 @@ members = [
   "crates/integration-tests",
   "crates/duckdb-client",
   "crates/fuzz",
+  "crates/gkg-analytics",
 ]
 
 [workspace.dependencies]
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "594f02c" }
+bon = "3"
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 enum-as-inner = "0.7.0"

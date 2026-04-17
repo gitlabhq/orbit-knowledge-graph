@@ -4948,6 +4948,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gkg-analytics"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "gkg-fuzz"
 version = "0.1.0"
 dependencies = [
@@ -4972,6 +4986,7 @@ dependencies = [
  "clickhouse-client",
  "futures",
  "gitlab-client",
+ "gkg-analytics",
  "gkg-server-config",
  "gkg-utils",
  "health-check",

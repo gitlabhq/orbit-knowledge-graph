@@ -1,8 +1,10 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::auth::Claims;
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
+use gkg_analytics::{Analytics, events::QueryExecuted};
 use gkg_server_config::ProfilingConfig;
 use indexer::nats::NatsBroker;
 use ontology::Ontology;
@@ -25,6 +27,7 @@ pub struct QueryPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
     profiling: ProfilingConfig,
+    analytics: Analytics,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     cache_broker: Option<Arc<NatsBroker>>,
 }
@@ -34,11 +37,13 @@ impl QueryPipelineService {
         ontology: Arc<Ontology>,
         client: Arc<ArrowClickHouseClient>,
         profiling: ProfilingConfig,
+        analytics: Analytics,
     ) -> Self {
         Self {
             ontology,
             client,
             profiling,
+            analytics,
             resolver_registry: None,
             cache_broker: None,
         }
@@ -61,6 +66,7 @@ impl QueryPipelineService {
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
     ) -> Result<PipelineOutput, PipelineError> {
+        let start = Instant::now();
         let mut obs = OTelPipelineObserver::start();
 
         let mut server_extensions = TypeMap::default();
@@ -106,6 +112,12 @@ impl QueryPipelineService {
             .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))?;
 
         obs.finish(output.row_count, output.redacted_count);
+        self.analytics.track(
+            QueryExecuted::builder()
+                .query_type(output.query_type.clone())
+                .duration_ms(start.elapsed().as_millis() as u64)
+                .build(),
+        );
         Ok(output)
     }
 }
