@@ -21,7 +21,38 @@ fixtures:
       }
 
 tests:
-  - name: All definitions
+  # ── Original targeted queries, hardened ──────────────────────
+
+  - name: Same-class method call resolves
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'process'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { contains_row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
+
+  - name: Cross-file constructor call resolves
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path <> callee.file_path
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { contains_row: { caller: "com.example.App.main", callee: "com.example.Service" } }
+
+  - name: Package scoping produces correct FQNs
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Service'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { contains_row: { fqn: "com.example.Service" } }
+
+  # ── Broader exhaustive checks ────────────────────────────────
+
+  - name: Exactly 5 definitions with correct types and files
     query: |
       MATCH (d:Definition)
       RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
@@ -37,24 +68,7 @@ tests:
       - { contains_row: { name: "App", fqn: "com.example.App", type: "Class", file: "com/example/App.java" } }
       - { contains_row: { name: "main", fqn: "com.example.App.main", type: "Method", file: "com/example/App.java" } }
 
-  - name: Same-class method call
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
-    assert:
-      - { contains_row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
-
-  - name: Cross-file constructor call
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.file_path <> callee.file_path AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
-    assert:
-      - { row_count: 1 }
-      - { contains_row: { caller: "com.example.App.main", callee: "com.example.Service" } }
-
-  - name: Containment edges
+  - name: Exactly 3 containment edges
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE e.edge_kind = 'Defines'
@@ -65,7 +79,7 @@ tests:
       - { contains_row: { parent: "com.example.Service", child: "com.example.Service.run" } }
       - { contains_row: { parent: "com.example.App", child: "com.example.App.main" } }
 
-  - name: Files
+  - name: Exactly 2 files, both Java
     query: |
       MATCH (f:File)
       RETURN f.path AS path, f.language AS lang

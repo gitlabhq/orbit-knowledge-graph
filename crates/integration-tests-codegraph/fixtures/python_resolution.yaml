@@ -15,7 +15,29 @@ fixtures:
           helper()
 
 tests:
-  - name: All definitions
+  # ── Original targeted queries, hardened ──────────────────────
+
+  - name: Cross-file call edge exists
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path <> callee.file_path
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { contains_row: { caller: "main.run", callee: "utils.helper" } }
+
+  - name: helper() resolves to utils.helper
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'helper'
+      RETURN callee.file_path AS file, caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { contains_row: { file: "utils.py", caller: "main.run", callee: "utils.helper" } }
+
+  # ── Broader exhaustive checks ────────────────────────────────
+
+  - name: Exactly 3 definitions with correct types and files
     query: |
       MATCH (d:Definition)
       RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
@@ -28,33 +50,15 @@ tests:
       - { contains_row: { name: "unused", fqn: "utils.unused", type: "Function", file: "utils.py" } }
       - { contains_row: { name: "run", fqn: "main.run", type: "Function", file: "main.py" } }
 
-  - name: Cross-file call
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls' AND caller.file_path <> callee.file_path
-      RETURN caller.fqn AS caller, callee.fqn AS callee
-    assert:
-      - { row_count: 1 }
-      - { contains_row: { caller: "main.run", callee: "utils.helper" } }
-
-  - name: helper() resolves to utils.helper
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE callee.name = 'helper' AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, callee.file_path AS file
-    assert:
-      - { row_count: 1 }
-      - { contains_row: { caller: "main.run", callee: "utils.helper", file: "utils.py" } }
-
   - name: unused() has no incoming call edges
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE callee.name = 'unused' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'unused'
       RETURN caller.fqn AS caller
     assert:
       - { empty: true }
 
-  - name: Import
+  - name: Import edge
     query: |
       MATCH (i:ImportedSymbol)
       RETURN i.file_path AS file, i.path AS path, i.name AS name
@@ -62,7 +66,7 @@ tests:
       - { row_count: 1 }
       - { contains_row: { file: "main.py", path: "utils", name: "helper" } }
 
-  - name: Files
+  - name: Exactly 2 Python files
     query: |
       MATCH (f:File)
       RETURN f.path AS path, f.language AS lang

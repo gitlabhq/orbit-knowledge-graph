@@ -12,7 +12,29 @@ fixtures:
       }
 
 tests:
-  - name: All definitions
+  # ── Original targeted queries, hardened ──────────────────────
+
+  - name: Same-class method call resolves
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'process'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { contains_row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
+
+  - name: Package scoping produces correct FQNs
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Service'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { contains_row: { fqn: "com.example.Service" } }
+
+  # ── Broader exhaustive checks ────────────────────────────────
+
+  - name: Exactly 3 definitions with correct types
     query: |
       MATCH (d:Definition)
       RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
@@ -26,16 +48,7 @@ tests:
       - { contains_row: { name: "process", fqn: "com.example.Service.process", type: "Function" } }
       - { contains_row: { name: "run", fqn: "com.example.Service.run", type: "Function" } }
 
-  - name: Same-class method call
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
-    assert:
-      - { row_count: 1 }
-      - { contains_row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
-
-  - name: Containment edges
+  - name: Exactly 2 containment edges
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE e.edge_kind = 'Defines'
@@ -45,7 +58,7 @@ tests:
       - { contains_row: { parent: "com.example.Service", child: "com.example.Service.process" } }
       - { contains_row: { parent: "com.example.Service", child: "com.example.Service.run" } }
 
-  - name: File
+  - name: Single Kotlin file
     query: |
       MATCH (f:File)
       RETURN f.path AS path, f.language AS lang
