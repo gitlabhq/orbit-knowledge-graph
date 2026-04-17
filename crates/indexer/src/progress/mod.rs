@@ -104,12 +104,22 @@ impl ProgressWriter {
         let count_started = Instant::now();
         let prev_meta = self.read_previous_meta(nats, namespace_id).await;
 
-        // Zero-row skip: if the pipeline processed no rows AND we already have
-        // a prior snapshot, the existing counts are still authoritative. Skip
-        // the expensive count queries but refresh the existing counts key's
+        // Zero-row skip: if the pipeline processed no rows AND a prior counts
+        // snapshot already exists, the existing counts are still authoritative.
+        // Skip the expensive count queries but refresh the existing counts key's
         // updated_at (so readers don't see a stale flag) and refresh the meta
         // snapshot (so cycle_count / last_* advance).
-        let skip_counts = total_rows == 0 && prev_meta.is_some();
+        //
+        // Note: we check the counts KV directly, not prev_meta. `mark_indexing_started`
+        // writes meta at handler entry, so prev_meta is always Some by the time
+        // write_progress runs. The counts key is the authoritative signal for
+        // "have we written counts for this namespace before?".
+        let prev_counts = nats
+            .kv_get(INDEXING_PROGRESS_BUCKET, &counts_key(traversal_path))
+            .await
+            .ok()
+            .flatten();
+        let skip_counts = total_rows == 0 && prev_counts.is_some();
         let rollup_count = if skip_counts {
             self.touch_counts_updated_at(nats, traversal_path).await;
             0
@@ -633,7 +643,18 @@ mod tests {
         let writer = test_writer();
         let mock = MockNatsServices::new();
 
-        // Seed a prior meta so the zero-row path is taken.
+        // Seed a prior counts key (zero-row skip condition).
+        let prev_counts = CountsSnapshot {
+            updated_at: "2020-01-01T00:00:00Z".to_string(),
+            nodes: HashMap::new(),
+            edges: HashMap::new(),
+        };
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &counts_key("1/99/"),
+            Bytes::from(serde_json::to_vec(&prev_counts).unwrap()),
+        );
+        // Seed a prior meta so cycle_count advances correctly.
         let prev = MetaSnapshot {
             state: "idle".to_string(),
             initial_backfill_done: true,
@@ -648,7 +669,7 @@ mod tests {
         );
 
         let started = chrono::Utc::now();
-        // total_rows=0 + prev_meta=Some => skip counts. No ClickHouse call.
+        // total_rows=0 + prev_counts=Some => skip counts. No ClickHouse call.
         writer
             .write_progress(
                 &mock,
@@ -670,11 +691,53 @@ mod tests {
         assert_eq!(meta.state, "idle");
         assert!(meta.initial_backfill_done);
         assert_eq!(meta.sdlc.cycle_count, 1);
-        // No counts keys written.
+        // Counts key preserved (same values) with refreshed updated_at.
+        let counts_bytes = mock
+            .get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/99/"))
+            .unwrap();
+        let counts: CountsSnapshot = serde_json::from_slice(&counts_bytes).unwrap();
+        assert_ne!(
+            counts.updated_at, "2020-01-01T00:00:00Z",
+            "updated_at must advance on zero-row skip"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_progress_runs_counts_when_counts_key_missing() {
+        let writer = test_writer();
+        let mock = MockNatsServices::new();
+
+        // Seed a prior meta but NO counts key. Because there's no ClickHouse
+        // in the test, the count query will fail — we use that failure as the
+        // signal that the count path was attempted (skip would have succeeded).
+        let prev = MetaSnapshot {
+            state: "idle".to_string(),
+            initial_backfill_done: true,
+            updated_at: "2020-01-01T00:00:00Z".to_string(),
+            sdlc: SdlcMeta::default(),
+            code: CodeMeta::default(),
+        };
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &meta_key(99),
+            Bytes::from(serde_json::to_vec(&prev).unwrap()),
+        );
+
+        // total_rows=0 but no prev_counts => must NOT skip; must attempt count queries.
+        let result = writer
+            .write_progress(
+                &mock,
+                99,
+                "1/99/",
+                chrono::Utc::now(),
+                std::time::Duration::from_millis(5),
+                0,
+                None,
+            )
+            .await;
         assert!(
-            mock.get_kv(INDEXING_PROGRESS_BUCKET, &counts_key("1/99/"))
-                .is_none(),
-            "counts key should not be written on zero-row skip"
+            result.is_err(),
+            "expected count query to be attempted (and fail against default ClickHouse), but skip fired instead: {result:?}"
         );
     }
 
@@ -683,7 +746,18 @@ mod tests {
         let writer = test_writer();
         let mock = MockNatsServices::new();
 
-        // Seed prior success.
+        // Seed prior success (meta AND counts, so zero-row skip fires and we
+        // don't need ClickHouse).
+        let prev_counts = CountsSnapshot {
+            updated_at: "2020-01-01T00:00:00Z".to_string(),
+            nodes: HashMap::new(),
+            edges: HashMap::new(),
+        };
+        mock.set_kv(
+            INDEXING_PROGRESS_BUCKET,
+            &counts_key("1/7/"),
+            Bytes::from(serde_json::to_vec(&prev_counts).unwrap()),
+        );
         let prev = MetaSnapshot {
             state: "idle".to_string(),
             initial_backfill_done: true,
