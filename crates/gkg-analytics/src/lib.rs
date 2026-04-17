@@ -1,9 +1,12 @@
 //! Typed product analytics for GKG. Base crate — see epic &21189.
 //!
 //! - [`Analytics`] is the handle (noop by default, clone-cheap).
-//! - [`AnalyticsEvent`] is sealed — only this crate declares events.
-//! - [`OrbitContext`] is built with a typestate builder ([`bon`]); required
-//!   fields are checked at compile time.
+//! - [`AnalyticsEvent`] is sealed — events are declared in one place.
+//! - [`AnalyticsContext`] is sealed. Each context mirrors an iglu schema
+//!   and is propagated via its own `task_local!` scope.
+//! - Every event attaches [`OrbitCommon`] plus exactly one path-specific
+//!   context (`E::PathContext`). The split matches the iglu design in
+//!   gitlab-org&21189#note_3259533173.
 
 mod analytics;
 mod config;
@@ -15,6 +18,7 @@ pub mod testkit;
 pub use analytics::{Analytics, InstallError, Recorded};
 pub use config::AnalyticsConfig;
 pub use context::{
-    DeploymentType, OrbitContext, SourceType, Tier, ToolName, UserType, current, with_context,
+    AnalyticsContext, DeploymentType, OrbitCommon, QueryContext, SourceType, Tier, ToolName,
+    UserType,
 };
 pub use event::AnalyticsEvent;
