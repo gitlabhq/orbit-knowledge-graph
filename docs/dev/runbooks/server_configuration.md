@@ -316,6 +316,23 @@ query:
 |-------------|---------|-------------|
 | `schema.max_retained_versions` | `2` | Number of schema version table-sets to retain (min 2) |
 
+## Deployment
+
+Identifies the GitLab deployment hosting this GKG instance. Used to tag Snowplow product analytics and OTel telemetry so downstream dashboards can segment by instance type and environment without inferring it from the hostname.
+
+| Config path | Env var | Default | Description |
+|-------------|---------|---------|-------------|
+| `deployment.type` | `GKG_DEPLOYMENT__TYPE` | `self_managed` | `com`, `dedicated`, or `self_managed` |
+| `deployment.environment` | `GKG_DEPLOYMENT__ENVIRONMENT` | `production` | `development`, `staging`, or `production` |
+
+Example for the .com staging cluster:
+
+```yaml
+deployment:
+  type: com
+  environment: staging
+```
+
 ## Health check
 
 | Config path | Default | Description |

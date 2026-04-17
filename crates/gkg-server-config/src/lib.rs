@@ -8,6 +8,7 @@
 
 pub mod app;
 pub mod clickhouse;
+pub mod deployment;
 pub mod engine;
 
 pub mod gitlab;
@@ -22,6 +23,7 @@ pub mod tls;
 
 pub use app::{AppConfig, ConfigError, SECRET_FILE_DIR, SharedAppConfig};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
+pub use deployment::{DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 pub use engine::{
     CodeIndexingTaskHandlerConfig, EngineConfiguration, GlobalDispatcherConfig,
     GlobalHandlerConfig, HandlerConfiguration, HandlersConfiguration, MigrationCompletionConfig,

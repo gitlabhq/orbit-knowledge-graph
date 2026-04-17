@@ -24,6 +24,13 @@
         "username": "default"
       }
     },
+    "deployment": {
+      "$ref": "#/$defs/DeploymentConfig",
+      "default": {
+        "environment": "production",
+        "type": "self_managed"
+      }
+    },
     "dispatcher_health_bind_address": {
       "type": "string",
       "default": "0.0.0.0:4203"
@@ -297,6 +304,36 @@
           "minimum": 0
         }
       }
+    },
+    "DeploymentConfig": {
+      "type": "object",
+      "properties": {
+        "environment": {
+          "$ref": "#/$defs/DeploymentEnvironment",
+          "default": "production"
+        },
+        "type": {
+          "$ref": "#/$defs/DeploymentKind",
+          "default": "self_managed"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeploymentEnvironment": {
+      "type": "string",
+      "enum": [
+        "development",
+        "staging",
+        "production"
+      ]
+    },
+    "DeploymentKind": {
+      "type": "string",
+      "enum": [
+        "com",
+        "dedicated",
+        "self_managed"
+      ]
     },
     "EngineConfiguration": {
       "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `handlers`: defaults for all handlers",

@@ -115,3 +115,7 @@ metrics:
 
 schema:
   max_retained_versions: 2
+
+deployment:
+  type: self_managed        # com | dedicated | self_managed
+  environment: production   # development | staging | production

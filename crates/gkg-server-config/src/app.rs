@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::clickhouse::ClickHouseConfiguration;
+use crate::deployment::DeploymentConfig;
 use crate::engine::{EngineConfiguration, ScheduleConfig};
 use crate::gitlab::{GitlabClientConfiguration, GitlabConfig};
 use crate::grpc::GrpcConfig;
@@ -79,6 +80,8 @@ pub struct AppConfig {
     pub grpc: GrpcConfig,
     #[serde(default)]
     pub schema: SchemaConfig,
+    #[serde(default)]
+    pub deployment: DeploymentConfig,
 }
 
 impl AppConfig {
