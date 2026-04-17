@@ -1,3 +1,35 @@
+## [0.28.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.27.0...v0.28.0) (2026-04-17)
+
+### Features
+
+* **code-graph:** custom pipeline support with PipelineOutput enum ([11de4ec](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/11de4ecd48e354715c195ce95dcd3073c90d7223)) by Michael Usachenko
+* **code-graph:** go and ruby DSL language specs ([4a7f0cc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a7f0cce9ec8abd7e0b70e2bd73fdb791e5cc0b5)) by Michael Usachenko
+* **config:** add deployment environment configuration ([36b366a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/36b366a5d79b8da160cd535b50ea04433e5a4d45)) by Michael Angelo Rivera
+* **formatters:** add semver-based output format versioning ([4ad78f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4ad78f942991ed7be0ecea508a9ee2020df208ab)) by Michael Angelo Rivera
+* **observability:** add content resolution metrics for Gitaly calls ([28e8e5d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/28e8e5da23fd3f55cc5f805117df2c0038956ed4)) by Michael Usachenko
+* **server:** parse session_id from JWT and add to tracing spans ([be80251](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/be80251e4442cd5745f0067f269e9bc7790038cc)) by Ankit Panchal
+
+### Fixes
+
+* **indexer:** backfill code indexing during schema migration ([0970e23](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0970e23a304f201b25a5e2ec29eb30f5c3810d50)) by Bohdan Parkhomchuk
+* **indexer:** checkpoint empty repositories as terminal ([55c949e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/55c949e44aa1b279ac82a95bb35bb02be51f6204)) by Michael Angelo Rivera
+* **query-engine:** serialize graph IDs as strings ([5b6f389](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5b6f389636fc35189e434ae4a2f0932369516d64)) by Michael Angelo Rivera
+* **server:** exit if no active schema version found ([61dbf48](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/61dbf4853ba149ff4053153f66e054b5440e384e)) by Bohdan Parkhomchuk
+
+### Performance
+
+* **code-graph:** centralized linker state, and DuckDB conversion fixes ([0ca3ff4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0ca3ff43c7bfb66de4cd07cb397d11ce7656ebe6)) by Michael Usachenko
+* **code-graph:** complete ssa implementation with witness caching, SCC removal, copy propagation ([0d810b4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0d810b4ca59ae9c92bf245ced5555c6610463952)) by Michael Usachenko
+* **code-graph:** fused pipeline, invariant-based skips, streaming reads ([a9dd528](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a9dd52830a93104d0362cf7ce035bbbeabf98f39)) by Michael Usachenko
+
+### Other
+
+* **benchmark:** skip benchmark jobs in forks ([05d5f9f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/05d5f9fcd879cba3786ad25faabd3f6409b8a2ec)) by Bohdan Parkhomchuk
+* **e2e:** declarative test runner with live logs ([7f03636](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7f03636a343bb82e7536b559b497b33315876a74)) by Bohdan Parkhomchuk
+* **e2e:** move kubectl resources to helm charts ([60f3648](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/60f36487645da17e7e2b81fef680c005240fdfaa)) by Bohdan Parkhomchuk
+* **indexer:** remove code indexer disk cache ([a45ce75](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a45ce7540e254c8a04db1fb9f5c554de22780fbc)) by Michael Angelo Rivera
+* **server:** builder pattern for GrpcServer, cache config, conditional NATS wiring ([546f979](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/546f9799e9441257657b271dba0e04755c3d9e80)) by Michael Usachenko
+
 ## [0.27.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.26.1...v0.27.0) (2026-04-16)
 
 ### Features
