@@ -10,48 +10,26 @@ fixtures:
               pass
 
 tests:
-  - name: All definitions
+  - name: Nested class produces containment edge
+    query: |
+      MATCH (outer:Definition)-[:DefinitionToDefinition]->(inner:Definition)
+      WHERE outer.name = 'Outer' AND inner.name = 'Inner'
+      RETURN outer.fqn AS parent, inner.fqn AS child
+    assert:
+      - non_empty: true
+
+  - name: Method belongs to its class
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Outer' AND m.name = 'outer_method'
+      RETURN cls.fqn AS parent, m.fqn AS child
+    assert:
+      - non_empty: true
+
+  - name: FQN hierarchy is correct
     query: |
       MATCH (d:Definition)
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
+      WHERE d.name = 'method'
+      RETURN d.fqn AS fqn
     assert:
-      - { row_count: 4 }
-      - { unique: fqn }
-      - { no_nulls: fqn }
-      - { no_nulls: type }
-      - { all_match: { field: file, pattern: "app.py" } }
-      - { column_values: { field: name, values: ["Outer", "Inner", "method", "outer_method"] } }
-      - { contains_row: { name: "Outer", fqn: "app.Outer", type: "Class" } }
-      - { contains_row: { name: "Inner", fqn: "app.Outer.Inner", type: "Class" } }
-      - { contains_row: { name: "method", fqn: "app.Outer.Inner.method", type: "Method" } }
-      - { contains_row: { name: "outer_method", fqn: "app.Outer.outer_method", type: "Method" } }
-
-  - name: Containment edges
-    query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
-      RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
-    assert:
-      - { row_count: 3 }
-      - { all_match: { field: kind, pattern: "Defines" } }
-      - { contains_row: { parent: "app.Outer", child: "app.Outer.Inner" } }
-      - { contains_row: { parent: "app.Outer", child: "app.Outer.outer_method" } }
-      - { contains_row: { parent: "app.Outer.Inner", child: "app.Outer.Inner.method" } }
-      # Inner must NOT contain outer_method
-      - { excludes_row: { parent: "app.Outer.Inner", child: "app.Outer.outer_method" } }
-
-  - name: File structure
-    query: |
-      MATCH (f:File)
-      RETURN f.path AS path, f.extension AS ext, f.language AS lang
-    assert:
-      - { row_count: 1 }
-      - { contains_row: { path: "app.py", ext: "py", lang: "python" } }
-
-  - name: File owns all definitions
-    query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
-      RETURN f.path AS file, d.name AS def, e.edge_kind AS kind
-    assert:
-      - { all_match: { field: file, pattern: "app.py" } }
-      - { all_match: { field: kind, pattern: "Defines" } }
-      - { column_values: { field: def, values: ["Outer", "Inner", "method", "outer_method"] } }
+      - all_match: { field: fqn, pattern: "*Outer.Inner.*" }

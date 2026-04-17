@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use serde::de;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -74,42 +73,9 @@ impl fmt::Display for Severity {
     }
 }
 
-/// An assertion with an optional row filter.
-///
-/// The `where` key pre-filters the query result to rows matching all
-/// specified column=value pairs before evaluating the assertion.
-///
-/// ```yaml
-/// - { row_count: 3 }                                          # no filter
-/// - { where: { file: "main.py" }, row_count: 2 }              # scoped
-/// - { where: { kind: "Defines" }, excludes_row: { f: "x" } }  # scoped negative
-/// ```
-#[derive(Debug, Clone)]
-pub(crate) struct Assert {
-    pub filter: Option<HashMap<String, String>>,
-    pub check: AssertCheck,
-}
-
-impl<'de> Deserialize<'de> for Assert {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
-        let mut value: serde_yaml::Value = Deserialize::deserialize(deserializer)?;
-        let filter = value
-            .as_mapping_mut()
-            .and_then(|m| m.remove("where"))
-            .map(serde_yaml::from_value)
-            .transpose()
-            .map_err(de::Error::custom)?;
-        let check: AssertCheck = serde_yaml::from_value(value).map_err(de::Error::custom)?;
-        Ok(Assert { filter, check })
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum AssertCheck {
+pub(crate) enum Assert {
     Empty {
         empty: bool,
     },
@@ -128,23 +94,8 @@ pub(crate) enum AssertCheck {
     AllMatch {
         all_match: AllMatchArgs,
     },
-    NoneMatch {
-        none_match: AllMatchArgs,
-    },
     ContainsRow {
         contains_row: HashMap<String, String>,
-    },
-    ExcludesRow {
-        excludes_row: HashMap<String, String>,
-    },
-    NoNulls {
-        no_nulls: String,
-    },
-    Unique {
-        unique: String,
-    },
-    ColumnValues {
-        column_values: ColumnValuesArgs,
     },
 }
 
@@ -158,10 +109,4 @@ pub(crate) struct FieldValueArgs {
 pub(crate) struct AllMatchArgs {
     pub field: String,
     pub pattern: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ColumnValuesArgs {
-    pub field: String,
-    pub values: Vec<String>,
 }

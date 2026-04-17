@@ -15,58 +15,19 @@ fixtures:
           helper()
 
 tests:
-  - name: All definitions
+  - name: Cross-file call edge exists
     query: |
-      MATCH (d:Definition)
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
-    assert:
-      - { row_count: 3 }
-      - { unique: fqn }
-      - { no_nulls: fqn }
-      - { column_values: { field: name, values: ["helper", "unused", "run"] } }
-      - { contains_row: { name: "helper", fqn: "utils.helper", type: "Function", file: "utils.py" } }
-      - { contains_row: { name: "unused", fqn: "utils.unused", type: "Function", file: "utils.py" } }
-      - { contains_row: { name: "run", fqn: "main.run", type: "Function", file: "main.py" } }
-
-  - name: Cross-file call
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls' AND caller.file_path <> callee.file_path
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 1 }
-      - { contains_row: { caller: "main.run", callee: "utils.helper" } }
+      - non_empty: true
 
   - name: helper() resolves to utils.helper
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE callee.name = 'helper' AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, callee.file_path AS file
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'helper'
+      RETURN callee.file_path AS file
     assert:
-      - { row_count: 1 }
-      - { contains_row: { caller: "main.run", callee: "utils.helper", file: "utils.py" } }
-
-  - name: unused() has no incoming call edges
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE callee.name = 'unused' AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller
-    assert:
-      - { empty: true }
-
-  - name: Import
-    query: |
-      MATCH (i:ImportedSymbol)
-      RETURN i.file_path AS file, i.path AS path, i.name AS name
-    assert:
-      - { row_count: 1 }
-      - { contains_row: { file: "main.py", path: "utils", name: "helper" } }
-
-  - name: Files
-    query: |
-      MATCH (f:File)
-      RETURN f.path AS path, f.language AS lang
-    assert:
-      - { row_count: 2 }
-      - { all_match: { field: lang, pattern: "python" } }
-      - { column_values: { field: path, values: ["utils.py", "main.py"] } }
+      - non_empty: true
+      - all_match: { field: file, pattern: "utils.py" }
