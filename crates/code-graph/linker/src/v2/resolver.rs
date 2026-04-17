@@ -251,15 +251,15 @@ fn resolve_from_reaching(
     for value in reaching {
         match value {
             ParseValue::LocalDef(i) => {
-                if let Some(&node) = ctx.def_nodes.get(*i as usize) {
-                    if let Some(did) = ctx.graph.graph[node].def_id() {
-                        let gdef = &ctx.graph.defs[did.0 as usize];
-                        if gdef.kind.is_type_container() {
-                            let fqn = ctx.graph.str(gdef.fqn);
-                            ctx.lookup_nested_cached(fqn, ref_name, &mut result);
-                        } else {
-                            result.push(node);
-                        }
+                if let Some(&node) = ctx.def_nodes.get(*i as usize)
+                    && let Some(did) = ctx.graph.graph[node].def_id()
+                {
+                    let gdef = &ctx.graph.defs[did.0 as usize];
+                    if gdef.kind.is_type_container() {
+                        let fqn = ctx.graph.str(gdef.fqn);
+                        ctx.lookup_nested_cached(fqn, ref_name, &mut result);
+                    } else {
+                        result.push(node);
                     }
                 }
             }
@@ -286,19 +286,19 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
     let mut current_types: Vec<String> = resolve_base_type_fqns(ctx, &chain[0], r.reaching);
 
     if current_types.is_empty() {
-        if ctx.settings.chain_fallback {
-            if let Some(last_name) = chain.last().and_then(|s| match s {
+        if ctx.settings.chain_fallback
+            && let Some(last_name) = chain.last().and_then(|s| match s {
                 ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
                 _ => None,
-            }) {
-                let fallback = RefData {
-                    name: last_name,
-                    chain: None,
-                    reaching: &[],
-                    enclosing_def: r.enclosing_def,
-                };
-                return resolve_bare(ctx, &fallback);
-            }
+            })
+        {
+            let fallback = RefData {
+                name: last_name,
+                chain: None,
+                reaching: &[],
+                enclosing_def: r.enclosing_def,
+            };
+            return resolve_bare(ctx, &fallback);
         }
         return vec![];
     }
@@ -334,12 +334,11 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                             next_types.push(ctx.graph.str(gdef.fqn).to_string());
                         }
                     }
-                    if matches!(step, ExpressionStep::Field(_)) {
-                        if let Some(meta) = &gdef.metadata
-                            && let Some(ta) = meta.type_annotation
-                        {
-                            next_types.push(ctx.graph.str(ta).to_string());
-                        }
+                    if matches!(step, ExpressionStep::Field(_))
+                        && let Some(meta) = &gdef.metadata
+                        && let Some(ta) = meta.type_annotation
+                    {
+                        next_types.push(ctx.graph.str(ta).to_string());
                     }
                 }
             }
