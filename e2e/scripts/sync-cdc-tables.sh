@@ -30,7 +30,7 @@ command -v yq >/dev/null || { echo "yq (mikefarah v4+) required"; exit 1; }
 SIPHON_IMAGE="$(yq -r '.siphon.image.repository + ":" + .siphon.image.tag' "$VERSIONS")"
 GITLAB_REF="$(yq -r '.gitlab.ref' "$VERSIONS")"
 
-[[ "$SIPHON_IMAGE" == *":null"* || "$SIPHON_IMAGE" == "null:null" ]] \
+[[ "$SIPHON_IMAGE" == *":null"* || "$SIPHON_IMAGE" == "null:"* ]] \
   && { echo "siphon.image.{repository,tag} missing in $VERSIONS"; exit 1; }
 [[ -z "$GITLAB_REF" || "$GITLAB_REF" == "null" ]] \
   && { echo "gitlab.ref missing in $VERSIONS"; exit 1; }
@@ -53,7 +53,7 @@ mkdir -p "$TABLES_RAW" "$TABLES"
 ARCHIVE="$TMP/tables.tar.gz"
 URL="https://gitlab.com/api/v4/projects/278964/repository/archive.tar.gz?sha=${GITLAB_REF}&path=db/siphon/tables"
 log "fetching $URL"
-curl -sfL --retry 3 --retry-delay 2 -o "$ARCHIVE" "$URL"
+curl -sfL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 120 -o "$ARCHIVE" "$URL"
 gzip -t "$ARCHIVE" 2>/dev/null || { echo "downloaded archive is not gzip (bad ref?)"; exit 1; }
 tar -xzf "$ARCHIVE" --strip-components=4 -C "$TABLES_RAW"
 

@@ -128,11 +128,11 @@ deployments:
         temp_stream_name: temp_e2e_siphon_event_stream
         snapshot_stream_name: snapshot_e2e_siphon_event_stream
         lsn_store_name: e2e_siphon_lsn_store
-      table_mapping: {{ toYaml $producer.table_mapping | nindent 8 }}
+      table_mapping: {{ required "cdc-producer.yaml missing table_mapping (sync-cdc-tables.sh produced empty output?)" $producer.table_mapping | toYaml | nindent 8 }}
 
   clickhouse-consumer:
     profile: consumer
     appConfig:
       application_identifier: e2e_siphon_consumer_1
-      streams: {{ toYaml $consumer.streams | nindent 8 }}
-      clickhouse: {{ toYaml $consumer.clickhouse | nindent 8 }}
+      streams: {{ required "cdc-consumer.yaml missing streams" $consumer.streams | toYaml | nindent 8 }}
+      clickhouse: {{ required "cdc-consumer.yaml missing clickhouse" $consumer.clickhouse | toYaml | nindent 8 }}
