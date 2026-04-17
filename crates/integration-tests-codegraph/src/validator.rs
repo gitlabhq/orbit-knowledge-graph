@@ -1,9 +1,14 @@
-use arrow_56::array::{Array, Int64Array, StringArray};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use arrow_56::array::{Array, Int64Array, Int64Builder, StringArray, StringBuilder};
 use arrow_56::record_batch::RecordBatch;
 use lance_graph::{CypherQuery, GraphConfig};
 use tabled::{Table, builder::Builder};
 
-use super::assertions::{Assert, FieldValueArgs, QueryBlock, Severity, TestCase, TestSuite};
+use super::assertions::{
+    Assert, AssertCheck, FieldValueArgs, QueryBlock, Severity, TestCase, TestSuite,
+};
 use super::datasets::LanceDatasets;
 
 #[derive(Debug)]
@@ -107,28 +112,88 @@ fn format_cell(array: &dyn Array, row: usize) -> String {
     "<?>".into()
 }
 
+// -- where filter -----------------------------------------------------------
+
+fn apply_filter(batch: &RecordBatch, where_clause: &HashMap<String, String>) -> RecordBatch {
+    let matching: Vec<usize> = (0..batch.num_rows())
+        .filter(|&row| {
+            where_clause.iter().all(|(field, expected)| {
+                batch
+                    .column_by_name(field)
+                    .map(|col| format_cell(col.as_ref(), row) == *expected)
+                    .unwrap_or(false)
+            })
+        })
+        .collect();
+
+    let schema = batch.schema();
+    let columns: Vec<Arc<dyn Array>> = (0..batch.num_columns())
+        .map(|col_idx| {
+            let col = batch.column(col_idx);
+            if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
+                let mut b = StringBuilder::new();
+                for &row in &matching {
+                    if arr.is_null(row) {
+                        b.append_null();
+                    } else {
+                        b.append_value(arr.value(row));
+                    }
+                }
+                Arc::new(b.finish()) as Arc<dyn Array>
+            } else if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
+                let mut b = Int64Builder::new();
+                for &row in &matching {
+                    if arr.is_null(row) {
+                        b.append_null();
+                    } else {
+                        b.append_value(arr.value(row));
+                    }
+                }
+                Arc::new(b.finish()) as Arc<dyn Array>
+            } else {
+                // Unsupported type — keep all rows (will show up in debugging)
+                col.clone()
+            }
+        })
+        .collect();
+
+    RecordBatch::try_new(schema, columns).unwrap_or_else(|e| panic!("where filter failed: {e}"))
+}
+
+// -- assertion evaluation ----------------------------------------------------
+
 fn check_assertions(
     label: &str,
     severity: Severity,
     assertions: &[Assert],
     batch: &RecordBatch,
 ) -> Vec<Failure> {
-    let rows = batch.num_rows();
     assertions
         .iter()
-        .filter_map(|a| check_one(label, severity, a, batch, rows))
+        .filter_map(|a| {
+            let (effective, scoped_label) = match &a.filter {
+                Some(f) => {
+                    let filtered = apply_filter(batch, f);
+                    let desc: Vec<String> = f.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                    (filtered, format!("{label} [where {}]", desc.join(", ")))
+                }
+                None => (batch.clone(), label.to_string()),
+            };
+            let rows = effective.num_rows();
+            check_one(&scoped_label, severity, &a.check, &effective, rows)
+        })
         .collect()
 }
 
 fn check_one(
     label: &str,
     severity: Severity,
-    assertion: &Assert,
+    assertion: &AssertCheck,
     batch: &RecordBatch,
     total_rows: usize,
 ) -> Option<Failure> {
     match assertion {
-        Assert::Empty { empty } => {
+        AssertCheck::Empty { empty } => {
             if *empty && total_rows > 0 {
                 Some(fail(
                     label,
@@ -145,7 +210,7 @@ fn check_one(
                 None
             }
         }
-        Assert::NonEmpty { non_empty } => {
+        AssertCheck::NonEmpty { non_empty } => {
             if *non_empty && total_rows == 0 {
                 Some(fail(
                     label,
@@ -156,7 +221,7 @@ fn check_one(
                 None
             }
         }
-        Assert::RowCount { row_count } => {
+        AssertCheck::RowCount { row_count } => {
             let expected = *row_count as usize;
             if total_rows != expected {
                 Some(fail(
@@ -168,13 +233,13 @@ fn check_one(
                 None
             }
         }
-        Assert::CountEquals { count_equals } => {
+        AssertCheck::CountEquals { count_equals } => {
             check_int_field(batch, count_equals, |v, e| v != e, "=", label, severity)
         }
-        Assert::CountGte { count_gte } => {
+        AssertCheck::CountGte { count_gte } => {
             check_int_field(batch, count_gte, |v, e| v < e, ">=", label, severity)
         }
-        Assert::AllMatch { all_match } => {
+        AssertCheck::AllMatch { all_match } => {
             let glob = match globset::Glob::new(&all_match.pattern) {
                 Ok(g) => g.compile_matcher(),
                 Err(e) => {
@@ -205,32 +270,161 @@ fn check_one(
             }
             None
         }
-        Assert::ContainsRow { contains_row } => {
-            for row in 0..total_rows {
-                let all_match = contains_row.iter().all(|(field, expected)| {
-                    batch
-                        .column_by_name(field)
-                        .map(|col| format_cell(col.as_ref(), row))
-                        .as_deref()
-                        == Some(expected.as_str())
-                });
-                if all_match {
-                    return None;
+        AssertCheck::NoneMatch { none_match } => {
+            let glob = match globset::Glob::new(&none_match.pattern) {
+                Ok(g) => g.compile_matcher(),
+                Err(e) => {
+                    return Some(fail(
+                        label,
+                        severity,
+                        format!("Invalid glob pattern '{}': {e}", none_match.pattern),
+                    ));
+                }
+            };
+            if let Some(col) = batch.column_by_name(&none_match.field)
+                && let Some(arr) = col.as_any().downcast_ref::<StringArray>()
+            {
+                for i in 0..arr.len() {
+                    if !arr.is_null(i) && glob.is_match(arr.value(i)) {
+                        return Some(fail(
+                            label,
+                            severity,
+                            format!(
+                                "Row {i}: {}='{}' matches forbidden pattern '{}'",
+                                none_match.field,
+                                arr.value(i),
+                                none_match.pattern
+                            ),
+                        ));
+                    }
                 }
             }
-            let expected_str: Vec<String> = contains_row
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect();
-            Some(fail(
-                label,
-                severity,
-                format!(
-                    "No row matching {{{}}} in {total_rows} rows",
-                    expected_str.join(", ")
-                ),
-            ))
+            None
         }
+        AssertCheck::ContainsRow { contains_row } => {
+            check_contains_row(batch, contains_row, total_rows, label, severity, false)
+        }
+        AssertCheck::ExcludesRow { excludes_row } => {
+            check_contains_row(batch, excludes_row, total_rows, label, severity, true)
+        }
+        AssertCheck::NoNulls { no_nulls } => {
+            let Some(col) = batch.column_by_name(no_nulls) else {
+                return Some(fail(
+                    label,
+                    severity,
+                    format!("Column '{no_nulls}' not found"),
+                ));
+            };
+            let nulls = col.null_count();
+            if nulls > 0 {
+                Some(fail(
+                    label,
+                    severity,
+                    format!("Column '{no_nulls}' has {nulls} NULL values"),
+                ))
+            } else {
+                None
+            }
+        }
+        AssertCheck::Unique { unique } => {
+            let Some(col) = batch.column_by_name(unique) else {
+                return Some(fail(
+                    label,
+                    severity,
+                    format!("Column '{unique}' not found"),
+                ));
+            };
+            let mut seen = HashSet::new();
+            for i in 0..total_rows {
+                if !col.is_null(i) {
+                    let val = format_cell(col.as_ref(), i);
+                    if !seen.insert(val.clone()) {
+                        return Some(fail(
+                            label,
+                            severity,
+                            format!("Duplicate value in column '{unique}': '{val}'"),
+                        ));
+                    }
+                }
+            }
+            None
+        }
+        AssertCheck::ColumnValues { column_values } => {
+            let Some(col) = batch.column_by_name(&column_values.field) else {
+                return Some(fail(
+                    label,
+                    severity,
+                    format!("Column '{}' not found", column_values.field),
+                ));
+            };
+            let expected: HashSet<String> = column_values.values.iter().cloned().collect();
+            let mut actual = HashSet::new();
+            for i in 0..total_rows {
+                if !col.is_null(i) {
+                    actual.insert(format_cell(col.as_ref(), i));
+                }
+            }
+            if actual == expected {
+                None
+            } else {
+                let missing: Vec<_> = expected.difference(&actual).collect();
+                let extra: Vec<_> = actual.difference(&expected).collect();
+                let mut parts = Vec::new();
+                if !missing.is_empty() {
+                    parts.push(format!("missing: {missing:?}"));
+                }
+                if !extra.is_empty() {
+                    parts.push(format!("unexpected: {extra:?}"));
+                }
+                Some(fail(
+                    label,
+                    severity,
+                    format!(
+                        "Column '{}' value set mismatch: {}",
+                        column_values.field,
+                        parts.join(", ")
+                    ),
+                ))
+            }
+        }
+    }
+}
+
+fn check_contains_row(
+    batch: &RecordBatch,
+    expected: &HashMap<String, String>,
+    total_rows: usize,
+    label: &str,
+    severity: Severity,
+    negate: bool,
+) -> Option<Failure> {
+    let found = (0..total_rows).any(|row| {
+        expected.iter().all(|(field, exp)| {
+            batch
+                .column_by_name(field)
+                .map(|col| format_cell(col.as_ref(), row))
+                .as_deref()
+                == Some(exp.as_str())
+        })
+    });
+
+    let expected_str: Vec<String> = expected.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    let desc = expected_str.join(", ");
+
+    if negate && found {
+        Some(fail(
+            label,
+            severity,
+            format!("Found forbidden row {{{desc}}} but expected none"),
+        ))
+    } else if !negate && !found {
+        Some(fail(
+            label,
+            severity,
+            format!("No row matching {{{desc}}} in {total_rows} rows"),
+        ))
+    } else {
+        None
     }
 }
 
