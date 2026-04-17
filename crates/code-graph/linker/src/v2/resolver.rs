@@ -229,6 +229,9 @@ fn resolve_bare(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<Nod
             }
         };
         if !result.is_empty() {
+            let mut seen = rustc_hash::FxHashSet::default();
+            let mut result = result;
+            result.retain(|n| seen.insert(*n));
             return result;
         }
     }
@@ -343,9 +346,17 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, ref_event: &ReferenceEvent) -> Vec<No
         }
 
         if is_last {
+            // Dedup found nodes
+            let mut seen = rustc_hash::FxHashSet::default();
+            found_nodes.retain(|n| seen.insert(*n));
             return found_nodes;
         }
 
+        // Dedup next_types to prevent multiplicative explosion from overloads
+        {
+            let mut seen = rustc_hash::FxHashSet::default();
+            next_types.retain(|t| seen.insert(t.clone()));
+        }
         current_types = next_types;
     }
 
