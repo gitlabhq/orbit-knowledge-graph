@@ -252,7 +252,7 @@ mod tests {
         let sql = compiled.base.render();
 
         assert!(
-            !sql.contains("COUNT(mr.id)") && !sql.contains("count(mr.id)"),
+            !sql.contains("mr.id"),
             "must not reference bare `mr.id` when mr table is not joined, got:\n{sql}"
         );
         assert!(
