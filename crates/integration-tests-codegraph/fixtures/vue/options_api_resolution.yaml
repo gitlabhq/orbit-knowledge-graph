@@ -1,0 +1,147 @@
+name: "Vue Options API resolution"
+pipeline: js
+fixtures:
+  - path: config/webpack.config.js
+    content: |
+      const path = require('path');
+
+      module.exports = {
+        resolve: {
+          alias: {
+            '~': path.join(__dirname, '../app/assets/javascripts'),
+          },
+        },
+      };
+
+  - path: app/assets/javascripts/lib/logger.js
+    content: |
+      export function logError(message) {
+        return message;
+      }
+
+  - path: app/assets/javascripts/tracking/index.js
+    content: |
+      export function trackEvent(name) {
+        return name;
+      }
+
+  - path: app/assets/javascripts/graphql/get_items.query.graphql
+    content: |
+      query getItems {
+        project(fullPath: "gitlab-org/gitlab") {
+          id
+        }
+      }
+
+  - path: app/assets/javascripts/components/child_badge.vue
+    content: |
+      <script>
+      export default {
+        name: 'ChildBadge',
+        methods: {
+          open() {
+            return 'opened';
+          },
+        },
+      };
+      </script>
+
+  - path: app/assets/javascripts/components/parent_panel.vue
+    content: |
+      <script>
+      import { logError } from '~/lib/logger';
+      import * as Tracking from '~/tracking';
+      import getItemsQuery from '../graphql/get_items.query.graphql';
+      import ChildBadge from './child_badge.vue';
+
+      export default {
+        name: 'ParentPanel',
+        components: { ChildBadge },
+        apollo: {
+          items: {
+            query: getItemsQuery,
+          },
+        },
+        mounted() {
+          return this.load();
+        },
+        methods: {
+          load() {
+            return this.normalize();
+          },
+          normalize() {
+            return logError('normalize');
+          },
+          emitTrack() {
+            return Tracking.trackEvent('panel_loaded');
+          },
+        },
+      };
+      </script>
+
+tests:
+  - name: Vue child component default import targets primary export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND i.path = './child_badge.vue'
+      RETURN i.import_type AS import_type, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "DefaultImport", target: "__js_module__::app/assets/javascripts/components/child_badge.vue::default" } }
+
+  - name: Vue GraphQL default import targets primary export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND i.path = '../graphql/get_items.query.graphql'
+      RETURN i.import_type AS import_type, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "DefaultImport", target: "__js_module__::app/assets/javascripts/graphql/get_items.query.graphql::default" } }
+
+  - name: Vue mounted hook resolves this-method call to local method
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND callee.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND caller.name = 'mounted'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "mounted", callee: "load" } }
+
+  - name: Vue local this-method chain resolves load to normalize
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND callee.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND caller.name = 'load'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "load", callee: "normalize" } }
+
+  - name: Vue imported helper call resolves from method to helper definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND callee.file_path = 'app/assets/javascripts/lib/logger.js'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "normalize", callee: "logError" } }
+
+  - name: Vue namespace import member call resolves to concrete definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND callee.file_path = 'app/assets/javascripts/tracking/index.js'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "emitTrack", callee: "trackEvent" } }

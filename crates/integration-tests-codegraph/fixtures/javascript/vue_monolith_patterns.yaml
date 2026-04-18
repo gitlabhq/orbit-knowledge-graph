@@ -1,0 +1,369 @@
+name: "Vue monolith patterns"
+pipeline: js
+fixtures:
+  - path: webpack.config.js
+    content: |
+      const path = require('path');
+
+      module.exports = {
+        resolve: {
+          alias: {
+            '~': path.resolve(__dirname, 'app/assets/javascripts'),
+            ee: path.resolve(__dirname, 'ee/app/assets/javascripts'),
+            jh_else_ce: path.resolve(__dirname, 'app/assets/javascripts'),
+          },
+        },
+      };
+  - path: app/assets/javascripts/tracking.js
+    content: |
+      export function track(action, label) {
+        return `${action}:${label}`;
+      }
+
+      const Tracking = {
+        mixin() {
+          return {};
+        },
+      };
+
+      export default Tracking;
+  - path: app/assets/javascripts/sentry.js
+    content: |
+      export function captureException(error) {
+        return error;
+      }
+  - path: app/assets/javascripts/lib/utils/common_utils.js
+    content: |
+      export function parseBoolean(value) {
+        return value === 'true';
+      }
+  - path: app/assets/javascripts/gitlab_version_check/constants.js
+    content: |
+      export const TRACKING_ACTIONS = {
+        RENDER: 'render',
+        CLICK_BUTTON: 'click_button',
+      };
+
+      export const TRACKING_LABELS = {
+        MODAL: 'modal',
+        REMIND_ME_BTN: 'remind_me_btn',
+      };
+
+      export const STATUS_TYPES = {
+        SUCCESS: 'success',
+        WARNING: 'warning',
+      };
+  - path: app/assets/javascripts/gitlab_version_check/utils.js
+    content: |
+      export const buildKey = (currentVersion) => `${currentVersion}-dismissed`;
+
+      export const getHideAlertModalCookie = (currentVersion) => {
+        return buildKey(currentVersion);
+      };
+
+      export const setHideAlertModalCookie = (currentVersion) => {
+        return buildKey(currentVersion);
+      };
+  - path: app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue
+    content: |
+      <script>
+      import { track } from '~/tracking';
+      import { getHideAlertModalCookie, setHideAlertModalCookie } from '../utils';
+      import { TRACKING_ACTIONS, TRACKING_LABELS } from '../constants';
+
+      export default {
+        name: 'SecurityPatchUpgradeAlertModal',
+        created() {
+          if (getHideAlertModalCookie(this.currentVersion)) {
+            this.visible = false;
+            return;
+          }
+
+          this.dispatchTrackingEvent(TRACKING_ACTIONS.RENDER, TRACKING_LABELS.MODAL);
+        },
+        methods: {
+          dispatchTrackingEvent(action, label) {
+            return track(action, label);
+          },
+          trackRemindMeLaterClick() {
+            setHideAlertModalCookie(this.currentVersion);
+            return this.dispatchTrackingEvent(
+              TRACKING_ACTIONS.CLICK_BUTTON,
+              TRACKING_LABELS.REMIND_ME_BTN,
+            );
+          },
+        },
+      };
+      </script>
+
+      <template>
+        <div />
+      </template>
+  - path: app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue
+    content: |
+      <script>
+      import * as versionUtils from '../utils';
+      import { STATUS_TYPES } from '../constants';
+
+      export default {
+        name: 'GitlabVersionCheckBadge',
+        methods: {
+          badgeTitle() {
+            if (this.status === STATUS_TYPES.SUCCESS) {
+              return versionUtils.buildKey(this.version);
+            }
+
+            return this.fallbackTitle();
+          },
+          fallbackTitle() {
+            return 'unknown';
+          },
+          badConstantCall() {
+            return STATUS_TYPES();
+          },
+        },
+      };
+      </script>
+
+      <template>
+        <div />
+      </template>
+  - path: app/assets/javascripts/gitlab_version_check/components/index.js
+    content: |
+      export { default as GitlabVersionCheckBadge } from './gitlab_version_check_badge.vue';
+      export { default as SecurityPatchUpgradeAlertModal } from './security_patch_upgrade_alert_modal.vue';
+  - path: app/assets/javascripts/gitlab_version_check/index.js
+    content: |
+      import { parseBoolean } from '~/lib/utils/common_utils';
+      import GitlabVersionCheckBadge from 'jh_else_ce/gitlab_version_check/components/gitlab_version_check_badge.vue';
+      import { SecurityPatchUpgradeAlertModal } from '~/gitlab_version_check/components';
+
+      parseBoolean('true');
+
+      export default function mountVersionCheck(el) {
+        parseBoolean(el.dataset.actionable);
+        return [GitlabVersionCheckBadge, SecurityPatchUpgradeAlertModal];
+      }
+  - path: app/assets/javascripts/gitlab_version_check/actions.js
+    content: |
+      import { track } from '~/tracking';
+      import { getHideAlertModalCookie, setHideAlertModalCookie } from './utils';
+
+      export function dismissAlert(currentVersion) {
+        if (getHideAlertModalCookie(currentVersion)) {
+          return null;
+        }
+
+        setHideAlertModalCookie(currentVersion);
+        return track('click_button', currentVersion);
+      }
+  - path: ee/app/assets/javascripts/oncall_schedules/utils.js
+    content: |
+      export function buildSchedulePath(value) {
+        return `schedule:${value}`;
+      }
+  - path: app/assets/javascripts/oncall_schedules/index.js
+    content: |
+      import * as Sentry from '~/sentry';
+      import { buildSchedulePath } from 'ee/oncall_schedules/utils';
+
+      export function resolveSchedule(error) {
+        Sentry.captureException(error);
+        return buildSchedulePath(error);
+      }
+  - path: ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue
+    content: |
+      <script lang="ts">
+      import * as Sentry from '~/sentry';
+      import { buildSchedulePath } from 'ee/oncall_schedules/utils';
+
+      export default {
+        name: 'OncallSchedulesWrapper',
+        methods: {
+          handleError(error: string) {
+            Sentry.captureException(error);
+            return buildSchedulePath(error);
+          },
+        },
+      };
+      </script>
+
+      <template>
+        <div />
+      </template>
+
+tests:
+  - name: Synthesizes module definitions for Vue SFC files
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn STARTS WITH '__js_module__::'
+        AND d.fqn ENDS WITH '.vue'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "__js_module__::app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue" } }
+      - { row: { fqn: "__js_module__::app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue" } }
+      - { row: { fqn: "__js_module__::ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue" } }
+
+  - name: jh_else_ce Vue default import targets the primary export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
+        AND i.path = 'jh_else_ce/gitlab_version_check/components/gitlab_version_check_badge.vue'
+      RETURN i.import_type AS import_type, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "DefaultImport", name: "default", target: "__js_module__::app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue::default" } }
+
+  - name: Barrel named import for Vue component targets the barrel proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
+        AND i.path = '~/gitlab_version_check/components'
+        AND i.name = 'SecurityPatchUpgradeAlertModal'
+      RETURN i.import_type AS import_type, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamedImport", name: "SecurityPatchUpgradeAlertModal", target: "__js_module__::app/assets/javascripts/gitlab_version_check/components/index.js::SecurityPatchUpgradeAlertModal" } }
+
+  - name: Vue SFC imports preserve local monolith alias and relative targets
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue'
+      RETURN i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+    assert:
+      - { row_count: 5 }
+      - { row: { path: "~/tracking", name: "track", alias: null, target: "__js_module__::app/assets/javascripts/tracking.js::track" } }
+      - { row: { path: "../utils", name: "getHideAlertModalCookie", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/utils.js::getHideAlertModalCookie" } }
+      - { row: { path: "../utils", name: "setHideAlertModalCookie", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/utils.js::setHideAlertModalCookie" } }
+      - { row: { path: "../constants", name: "TRACKING_ACTIONS", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/constants.js::TRACKING_ACTIONS" } }
+      - { row: { path: "../constants", name: "TRACKING_LABELS", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/constants.js::TRACKING_LABELS" } }
+
+  - name: Vue SFC definitions are extracted for lifecycle and methods
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue'
+        AND d.fqn IN [
+          'SecurityPatchUpgradeAlertModal',
+          'SecurityPatchUpgradeAlertModal::created',
+          'SecurityPatchUpgradeAlertModal::dispatchTrackingEvent',
+          'SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick'
+        ]
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 4 }
+      - { row: { name: "SecurityPatchUpgradeAlertModal", fqn: "SecurityPatchUpgradeAlertModal", type: "Class" } }
+      - { row: { name: "created", fqn: "SecurityPatchUpgradeAlertModal::created", type: "LifecycleHook" } }
+      - { row: { name: "dispatchTrackingEvent", fqn: "SecurityPatchUpgradeAlertModal::dispatchTrackingEvent", type: "Method" } }
+      - { row: { name: "trackRemindMeLaterClick", fqn: "SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick", type: "Method" } }
+
+  - name: Namespace imports in Vue SFC target synthesized modules
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { import_type: "NamespaceImport", path: "../utils", name: null, alias: "versionUtils", target: "__js_module__::app/assets/javascripts/gitlab_version_check/utils.js" } }
+      - { row: { import_type: "NamedImport", path: "../constants", name: "STATUS_TYPES", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/constants.js::STATUS_TYPES" } }
+
+  - name: Vue badge definitions are extracted for component methods
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue'
+        AND d.fqn IN [
+          'GitlabVersionCheckBadge',
+          'GitlabVersionCheckBadge::badgeTitle',
+          'GitlabVersionCheckBadge::fallbackTitle',
+          'GitlabVersionCheckBadge::badConstantCall'
+        ]
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 4 }
+      - { row: { name: "GitlabVersionCheckBadge", fqn: "GitlabVersionCheckBadge", type: "Class" } }
+      - { row: { name: "badgeTitle", fqn: "GitlabVersionCheckBadge::badgeTitle", type: "Method" } }
+      - { row: { name: "fallbackTitle", fqn: "GitlabVersionCheckBadge::fallbackTitle", type: "Method" } }
+      - { row: { name: "badConstantCall", fqn: "GitlabVersionCheckBadge::badConstantCall", type: "Method" } }
+
+  - name: Imported constants in Vue components do not fabricate call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'GitlabVersionCheckBadge::badConstantCall'
+        AND callee.file_path = 'app/assets/javascripts/gitlab_version_check/constants.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: Script lang ts Vue imports preserve namespace and ee alias targets
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { import_type: "NamespaceImport", path: "~/sentry", name: null, alias: "Sentry", target: "__js_module__::app/assets/javascripts/sentry.js" } }
+      - { row: { import_type: "NamedImport", path: "ee/oncall_schedules/utils", name: "buildSchedulePath", alias: null, target: "__js_module__::ee/app/assets/javascripts/oncall_schedules/utils.js::buildSchedulePath" } }
+
+  - name: Script lang ts Vue definitions are extracted for wrapper methods
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue'
+        AND d.fqn IN [
+          'OncallSchedulesWrapper',
+          'OncallSchedulesWrapper::handleError'
+        ]
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "OncallSchedulesWrapper", fqn: "OncallSchedulesWrapper", type: "Class" } }
+      - { row: { name: "handleError", fqn: "OncallSchedulesWrapper::handleError", type: "Method" } }
+
+  - name: Plain GitLab entrypoints still resolve cross-file calls with monolith aliases
+    queries:
+      - query: |
+          MATCH (file:File)-[e:FileToDefinition]->(callee:Definition)
+          WHERE e.edge_kind = 'Calls'
+            AND file.path = 'app/assets/javascripts/gitlab_version_check/index.js'
+            AND callee.fqn = 'parseBoolean'
+          RETURN file.path AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+          - { row: { caller: "app/assets/javascripts/gitlab_version_check/index.js", callee: "parseBoolean" } }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE e.edge_kind = 'Calls'
+            AND caller.fqn = 'mountVersionCheck'
+            AND callee.fqn = 'parseBoolean'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+          - { row: { caller: "mountVersionCheck", callee: "parseBoolean" } }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE e.edge_kind = 'Calls'
+            AND caller.fqn = 'dismissAlert'
+            AND callee.file_path = 'app/assets/javascripts/gitlab_version_check/utils.js'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: "dismissAlert", callee: "getHideAlertModalCookie" } }
+          - { row: { caller: "dismissAlert", callee: "setHideAlertModalCookie" } }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE e.edge_kind = 'Calls'
+            AND caller.fqn = 'dismissAlert'
+            AND callee.fqn = 'track'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+          - { row: { caller: "dismissAlert", callee: "track" } }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE e.edge_kind = 'Calls'
+            AND caller.fqn = 'resolveSchedule'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: "resolveSchedule", callee: "captureException" } }
+          - { row: { caller: "resolveSchedule", callee: "buildSchedulePath" } }

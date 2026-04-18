@@ -144,7 +144,7 @@ pub(crate) enum AssertCheck {
         match_args: MatchArgs,
     },
     Row {
-        row: HashMap<String, String>,
+        row: HashMap<String, serde_yaml::Value>,
     },
     NoNulls {
         no_nulls: String,

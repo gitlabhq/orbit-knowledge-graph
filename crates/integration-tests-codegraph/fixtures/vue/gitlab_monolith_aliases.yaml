@@ -1,0 +1,182 @@
+name: "Vue GitLab monolith alias patterns"
+pipeline: js
+fixtures:
+  - path: config/webpack.config.js
+    content: |
+      const path = require('path');
+
+      module.exports = {
+        resolve: {
+          alias: {
+            '~': path.join(__dirname, '../app/assets/javascripts'),
+            ee: path.join(__dirname, '../ee/app/assets/javascripts'),
+            ee_else_ce: path.join(__dirname, '../ee/app/assets/javascripts'),
+            '@gitlab/svgs/dist/icons.svg': path.join(
+              __dirname,
+              '../app/assets/javascripts/lib/utils/icons_path.js',
+            ),
+          },
+        },
+      };
+
+  - path: app/assets/javascripts/alert.js
+    content: |
+      export function createAlert(payload) {
+        return payload;
+      }
+
+  - path: app/assets/javascripts/repository/constants.js
+    content: |
+      export const DEFAULT_BLOB_INFO = {
+        pathLocks: { nodes: [] },
+        userPermissions: {},
+      };
+
+  - path: app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue
+    content: |
+      <script>
+      import { createAlert } from '~/alert';
+
+      export default {
+        name: 'CeBlobOverflowMenu',
+        methods: {
+          notify() {
+            return createAlert('ce');
+          },
+        },
+      };
+      </script>
+
+  - path: app/assets/javascripts/lib/utils/icons_path.js
+    content: |
+      export default gon && gon.sprite_icons;
+
+  - path: ee/app/assets/javascripts/sidebar/constants.js
+    content: |
+      export function dropdowni18nText(value) {
+        return value;
+      }
+
+      export const SIDEBAR_ESCALATION_POLICY_TITLE = 'Escalation policy';
+
+  - path: ee/app/assets/javascripts/sidebar/queries/constants.js
+    content: |
+      export const issuableAttributesQueries = {
+        current: 'query',
+      };
+
+  - path: ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue
+    content: |
+      <script>
+      import { createAlert } from '~/alert';
+      import {
+        dropdowni18nText,
+        SIDEBAR_ESCALATION_POLICY_TITLE,
+      } from 'ee_else_ce/sidebar/constants';
+      import { issuableAttributesQueries } from '../queries/constants';
+
+      export default {
+        computed: {
+          title() {
+            return dropdowni18nText(SIDEBAR_ESCALATION_POLICY_TITLE);
+          },
+        },
+        methods: {
+          emitAlert() {
+            return createAlert(issuableAttributesQueries.current);
+          },
+        },
+      };
+      </script>
+
+  - path: ee/app/assets/javascripts/repository/queries/project_info.query.graphql
+    content: |
+      query projectInfo {
+        project(fullPath: "gitlab-org/gitlab") {
+          id
+        }
+      }
+
+  - path: ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue
+    content: |
+      <script>
+      import CeBlobOverflowMenu from '~/repository/components/header_area/blob_overflow_menu.vue';
+      import projectInfoQuery from 'ee_else_ce/repository/queries/project_info.query.graphql';
+      import { DEFAULT_BLOB_INFO } from '~/repository/constants';
+      import iconsPath from '@gitlab/svgs/dist/icons.svg';
+      import { createAlert } from '~/alert';
+
+      export default {
+        name: 'EEBlobOverflowMenu',
+        components: { CeBlobOverflowMenu },
+        methods: {
+          notify() {
+            return createAlert(projectInfoQuery || DEFAULT_BLOB_INFO || iconsPath);
+          },
+        },
+      };
+      </script>
+
+tests:
+  - name: ee_else_ce alias named import targets EE export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
+        AND i.path = 'ee_else_ce/sidebar/constants'
+        AND i.name = 'dropdowni18nText'
+      RETURN i.import_type AS import_type, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamedImport", target: "__js_module__::ee/app/assets/javascripts/sidebar/constants.js::dropdowni18nText" } }
+
+  - name: Vue computed property resolves ee_else_ce helper call
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
+        AND callee.file_path = 'ee/app/assets/javascripts/sidebar/constants.js'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "title", callee: "dropdowni18nText" } }
+
+  - name: Vue default import of CE component targets primary export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
+        AND i.path = '~/repository/components/header_area/blob_overflow_menu.vue'
+      RETURN i.import_type AS import_type, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "DefaultImport", target: "__js_module__::app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue::default" } }
+
+  - name: GraphQL import through ee_else_ce targets primary export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
+        AND i.path = 'ee_else_ce/repository/queries/project_info.query.graphql'
+      RETURN i.import_type AS import_type, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "DefaultImport", target: "__js_module__::ee/app/assets/javascripts/repository/queries/project_info.query.graphql::default" } }
+
+  - name: Asset alias import targets JS helper module
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
+        AND i.path = '@gitlab/svgs/dist/icons.svg'
+      RETURN i.import_type AS import_type, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "DefaultImport", target: "__js_module__::app/assets/javascripts/lib/utils/icons_path.js::default" } }
+
+  - name: Vue monolith helper import from tilde alias resolves to concrete definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
+        AND callee.file_path = 'app/assets/javascripts/alert.js'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "notify", callee: "createAlert" } }

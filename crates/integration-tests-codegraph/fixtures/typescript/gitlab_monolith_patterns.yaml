@@ -1,0 +1,324 @@
+name: "GitLab monolith JS TS patterns"
+pipeline: js
+fixtures:
+  - path: webpack.config.js
+    content: |
+      const path = require('path');
+
+      module.exports = {
+        resolve: {
+          alias: {
+            '~': path.resolve(__dirname, 'app/assets/javascripts'),
+            ee: path.resolve(__dirname, 'ee/app/assets/javascripts'),
+            jh_else_ce: path.resolve(__dirname, 'app/assets/javascripts'),
+          },
+        },
+      };
+  - path: app/assets/javascripts/lib/utils/common_utils.js
+    content: |
+      export function parseBoolean(value) {
+        return value === 'true';
+      }
+  - path: app/assets/javascripts/gitlab_version_check/index.js
+    content: |
+      import { parseBoolean } from '~/lib/utils/common_utils';
+
+      export default function mountVersionCheck() {
+        return parseBoolean('true');
+      }
+  - path: app/assets/javascripts/feature_flags/store/modules/feature_flag.ts
+    content: |
+      export const DEFAULT_SCOPE = 'project';
+
+      export function buildFlagName(name: string): string {
+        return name.trim();
+      }
+  - path: app/assets/javascripts/feature_flags/store/modules/index.ts
+    content: |
+      export * from './feature_flag';
+  - path: app/assets/javascripts/feature_flags/store/actions.ts
+    content: |
+      import { buildFlagName as normalizeFlag, DEFAULT_SCOPE } from '~/feature_flags/store/modules';
+
+      export function fetchFlags(scope: string): string {
+        return normalizeFlag(scope || DEFAULT_SCOPE);
+      }
+
+      export function badScopeCall(): string {
+        return DEFAULT_SCOPE();
+      }
+  - path: app/assets/javascripts/feature_flags/store/legacy_adapter.js
+    content: |
+      function legacyAdapter(name) {
+        return name.trim();
+      }
+
+      module.exports = legacyAdapter;
+  - path: app/assets/javascripts/feature_flags/store/index.ts
+    content: |
+      export { fetchFlags } from './actions';
+      export * as featureFlagModule from './modules';
+      export { default as legacyAdapter } from './legacy_adapter';
+  - path: app/assets/javascripts/projects/your_work/components/app.ts
+    content: |
+      export default function renderProjects(name: string): string {
+        return name.trim();
+      }
+  - path: app/assets/javascripts/projects/your_work/components/tabs.ts
+    content: |
+      export function buildTab(name: string): string {
+        return name.toUpperCase();
+      }
+  - path: app/assets/javascripts/projects/your_work/components/filters.ts
+    content: |
+      export const DEFAULT_TAB = 'all';
+
+      export function normalizeSearch(term: string): string {
+        return term.trim();
+      }
+  - path: app/assets/javascripts/projects/your_work/components/index.ts
+    content: |
+      export { default as ProjectsApp } from './app';
+      export { buildTab } from './tabs';
+      export * from './filters';
+  - path: app/assets/javascripts/projects/your_work/consumer.ts
+    content: |
+      import { ProjectsApp, buildTab, normalizeSearch, DEFAULT_TAB } from '~/projects/your_work/components';
+      import * as ProjectComponents from '~/projects/your_work/components';
+
+      export function runProjects(term: string): string[] {
+        return [ProjectsApp(term), buildTab(term), normalizeSearch(term), ProjectComponents.normalizeSearch(term)];
+      }
+
+      export function badProjectsCall(): string {
+        return DEFAULT_TAB();
+      }
+  - path: app/assets/javascripts/root_entry.js
+    content: |
+      import mountVersionCheck from 'jh_else_ce/gitlab_version_check/index.js';
+
+      export function bootVersionCheck() {
+        return mountVersionCheck();
+      }
+  - path: app/assets/javascripts/legacy_entry.js
+    content: |
+      const legacyAdapter = require('~/feature_flags/store/legacy_adapter');
+
+      export function bootLegacy(name) {
+        return legacyAdapter(name);
+      }
+  - path: ee/app/assets/javascripts/security_inventory/utils.js
+    content: |
+      export function buildSeverityPath(name) {
+        return `severity:${name}`;
+      }
+  - path: app/assets/javascripts/security_inventory/index.ts
+    content: |
+      import { buildSeverityPath } from 'ee/security_inventory/utils';
+
+      export function openInventory(name: string): string {
+        return buildSeverityPath(name);
+      }
+  - path: app/assets/javascripts/vue_shared/components/timezone_dropdown/utils.ts
+    content: |
+      export function formatTimezone(value: string): string {
+        return value.toUpperCase();
+      }
+  - path: ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue
+    content: |
+      <template>
+        <div />
+      </template>
+      <script lang="ts">
+      import { defineComponent } from 'vue';
+      import { GlFormGroup } from '@gitlab/ui';
+      import { formatTimezone } from '~/vue_shared/components/timezone_dropdown/utils';
+
+      export default defineComponent({
+        name: 'AddEditScheduleForm',
+        methods: {
+          normalizeTimezone(value: string) {
+            return formatTimezone(value);
+          },
+        },
+      });
+      </script>
+  - path: ee/app/assets/javascripts/oncall_schedules/index.ts
+    content: |
+      export { default as AddEditScheduleForm } from './components/add_edit_schedule_form.vue';
+  - path: ee/spec/frontend/oncall_schedule/direct_form_spec.ts
+    content: |
+      import AddEditScheduleForm from 'ee/oncall_schedules/components/add_edit_schedule_form.vue';
+
+      export function loadDirectForm() {
+        return AddEditScheduleForm;
+      }
+  - path: ee/spec/frontend/oncall_schedule/index_spec.ts
+    content: |
+      import { AddEditScheduleForm } from 'ee/oncall_schedules/index';
+
+      export function loadFormFromBarrel() {
+        return AddEditScheduleForm;
+      }
+
+tests:
+  - name: jh_else_ce default import targets the CE default export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/root_entry.js'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "DefaultImport", path: "jh_else_ce/gitlab_version_check/index.js", name: "default", target: "__js_module__::app/assets/javascripts/gitlab_version_check/index.js::default" } }
+
+  - name: default imported CE entry preserves aliased helper target
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
+      RETURN i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "~/lib/utils/common_utils", name: "parseBoolean", target: "__js_module__::app/assets/javascripts/lib/utils/common_utils.js::parseBoolean" } }
+
+  - name: aliased import from star barrel preserves identity
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/feature_flags/store/actions.ts'
+      RETURN i.name AS name, i.alias AS alias, d.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "buildFlagName", alias: "normalizeFlag", target: "__js_module__::app/assets/javascripts/feature_flags/store/modules/feature_flag.ts::buildFlagName" } }
+      - { row: { name: "DEFAULT_SCOPE", alias: null, target: "__js_module__::app/assets/javascripts/feature_flags/store/modules/feature_flag.ts::DEFAULT_SCOPE" } }
+
+  - name: feature flag barrel import preserves underlying module targets
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'app/assets/javascripts/feature_flags/store/index.ts'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/index.ts" } }
+      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/index.ts::fetchFlags" } }
+      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/index.ts::featureFlagModule" } }
+      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/index.ts::legacyAdapter" } }
+
+  - name: imported constants from alias barrels do not create false call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'badScopeCall'
+        AND callee.file_path = 'app/assets/javascripts/feature_flags/store/modules/feature_flag.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: CommonJS require through alias targets the primary export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/legacy_entry.js'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "CjsRequire", path: "~/feature_flags/store/legacy_adapter", name: "default", target: "__js_module__::app/assets/javascripts/feature_flags/store/legacy_adapter.js::default" } }
+
+  - name: CommonJS alias modules synthesize module and primary export definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'app/assets/javascripts/feature_flags/store/legacy_adapter.js'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { row: { fqn: "legacyAdapter" } }
+      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/legacy_adapter.js" } }
+      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/legacy_adapter.js::default" } }
+
+  - name: explicit default reexports target the barrel proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
+        AND i.name = 'ProjectsApp'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "__js_module__::app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
+
+  - name: project barrel imports preserve explicit, star, and constant targets
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
+        AND i.import_type = 'NamedImport'
+      RETURN i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 4 }
+      - { row: { name: "ProjectsApp", target: "__js_module__::app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
+      - { row: { name: "buildTab", target: "__js_module__::app/assets/javascripts/projects/your_work/components/index.ts::buildTab" } }
+      - { row: { name: "normalizeSearch", target: "__js_module__::app/assets/javascripts/projects/your_work/components/filters.ts::normalizeSearch" } }
+      - { row: { name: "DEFAULT_TAB", target: "__js_module__::app/assets/javascripts/projects/your_work/components/filters.ts::DEFAULT_TAB" } }
+
+  - name: namespace imports over alias barrels target the synthesized barrel module
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
+        AND i.import_type = 'NamespaceImport'
+      RETURN i.path AS path, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "~/projects/your_work/components", target: "__js_module__::app/assets/javascripts/projects/your_work/components/index.ts" } }
+
+  - name: imported constants from monolith barrels stay inert
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'badProjectsCall'
+        AND callee.file_path = 'app/assets/javascripts/projects/your_work/components/filters.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: ee alias helper imports target enterprise utility definitions
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'app/assets/javascripts/security_inventory/index.ts'
+      RETURN i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "ee/security_inventory/utils", name: "buildSeverityPath", target: "__js_module__::ee/app/assets/javascripts/security_inventory/utils.js::buildSeverityPath" } }
+
+  - name: direct ee Vue imports target synthesized default export proxies
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/direct_form_spec.ts'
+      RETURN i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "ee/oncall_schedules/components/add_edit_schedule_form.vue", name: "default", target: "__js_module__::ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue::default" } }
+
+  - name: Vue SFC extraction emits component and method definitions for monolith files
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { row: { fqn: "AddEditScheduleForm" } }
+      - { row: { fqn: "AddEditScheduleForm::normalizeTimezone" } }
+      - { row: { fqn: "__js_module__::ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue" } }
+      - { row: { fqn: "__js_module__::ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue::default" } }
+
+  - name: external Vue package imports remain unresolved inside monolith SFCs
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue'
+        AND i.path = '@gitlab/ui'
+      RETURN d.fqn AS target
+    assert:
+      - { empty: true }
+
+  - name: ee Vue barrels preserve explicit default reexports
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/index_spec.ts'
+      RETURN i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "AddEditScheduleForm", target: "__js_module__::ee/app/assets/javascripts/oncall_schedules/index.ts::AddEditScheduleForm" } }

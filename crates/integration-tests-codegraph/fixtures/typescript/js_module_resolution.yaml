@@ -1,0 +1,427 @@
+name: "TypeScript JS module resolution"
+pipeline: js
+fixtures:
+  - path: named/util.ts
+    content: |
+      export function helper() {}
+  - path: named/main.ts
+    content: |
+      import { helper } from './util';
+
+      function run() {
+        helper();
+      }
+
+  - path: default/util.ts
+    content: |
+      export default function helper() {}
+  - path: default/main.ts
+    content: |
+      import helper from './util';
+
+      function run() {
+        helper();
+      }
+
+  - path: namespace/util.ts
+    content: |
+      export function helper() {}
+  - path: namespace/main.ts
+    content: |
+      import * as util from './util';
+
+      function run() {
+        util.helper();
+      }
+
+  - path: explicit/util.ts
+    content: |
+      export function helper() {}
+  - path: explicit/index.ts
+    content: |
+      export { helper } from './util';
+  - path: explicit/main.ts
+    content: |
+      import { helper } from './index';
+
+      function run() {
+        helper();
+      }
+
+  - path: star/util.ts
+    content: |
+      export function helper() {}
+  - path: star/index.ts
+    content: |
+      export * from './util';
+  - path: star/main.ts
+    content: |
+      import { helper } from './index';
+
+      function run() {
+        helper();
+      }
+
+  - path: alias/constants.ts
+    content: |
+      export function formatPrecision() {
+        return 2;
+      }
+  - path: alias/main.ts
+    content: |
+      import { formatPrecision as fmt } from './constants';
+
+      function run() {
+        return fmt();
+      }
+
+  - path: identity/constants.ts
+    content: |
+      export const dateFormats = {
+        iso: "iso",
+      };
+
+      export const FLOW_METRICS = ["lead_time"];
+
+      export function formatPrecision() {
+        return 2;
+      }
+  - path: identity/consumer.ts
+    content: |
+      import {
+        dateFormats,
+        FLOW_METRICS as metrics,
+        formatPrecision,
+      } from "./constants";
+
+      export function run() {
+        return [dateFormats.iso, metrics.length, formatPrecision()];
+      }
+
+  - path: no_false_call/constants.ts
+    content: |
+      export const HTTP_STATUS_OK = 200;
+
+      export function formatter(value: string): string {
+        return value.trim();
+      }
+  - path: no_false_call/main.ts
+    content: |
+      import { HTTP_STATUS_OK, formatter } from './constants';
+
+      registerStatus(HTTP_STATUS_OK);
+
+      export function run(value: string): string {
+        return formatter(value);
+      }
+
+      export function attempt() {
+        return HTTP_STATUS_OK();
+      }
+
+      function registerStatus(status: number): number {
+        return status;
+      }
+
+  - path: advanced/consumer.ts
+    content: |
+      class Parser {
+        parse(input: string): string[] {
+          return input.split(",");
+        }
+
+        static fromConfig(config: string): Parser {
+          return new Parser();
+        }
+      }
+
+      export function process(input: string): string[] {
+        const p = new Parser();
+        return p.parse(input);
+      }
+
+      export function createParser(): Parser {
+        return Parser.fromConfig("default");
+      }
+
+      export function runWithService(svc: Parser): string[] {
+        return svc.parse("a,b,c");
+      }
+
+      function transform(input: string): string {
+        return input.toUpperCase();
+      }
+
+      export function mapItems(items: string[]): string[] {
+        return items.map(transform);
+      }
+
+  - path: namespace_chain/barrel.ts
+    content: |
+      export { default as Suggestions } from "./suggestions";
+  - path: namespace_chain/suggestions.ts
+    content: |
+      export default class Suggestions {
+        static configure() {
+          return "configured";
+        }
+      }
+  - path: namespace_chain/consumer.ts
+    content: |
+      import * as extensions from "./barrel";
+
+      export function run() {
+        return extensions.Suggestions.configure();
+      }
+
+  - path: combo/barrel.ts
+    content: |
+      export { default as formatValue } from './direct';
+      export * as toolkit from './toolkit';
+  - path: combo/direct.ts
+    content: |
+      export default function defaultFormat(value: string): string {
+        return value.trim();
+      }
+  - path: combo/toolkit.ts
+    content: |
+      export function normalize(value: string): string {
+        return value.toLowerCase();
+      }
+  - path: combo/consumer.ts
+    content: |
+      import { formatValue, toolkit } from './barrel';
+
+      const reboundFormat = formatValue;
+
+      export function runFormat(value: string): string {
+        return reboundFormat(value);
+      }
+
+      export function runToolkit(value: string): string {
+        return toolkit.normalize(value);
+      }
+
+tests:
+  - name: Synthesizes per-file module definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn STARTS WITH '__js_module__::'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "__js_module__::named/util.ts" } }
+      - { row: { fqn: "__js_module__::default/util.ts" } }
+      - { row: { fqn: "__js_module__::namespace/util.ts" } }
+      - { row: { fqn: "__js_module__::explicit/index.ts" } }
+      - { row: { fqn: "__js_module__::star/index.ts" } }
+
+  - name: Named import targets export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'named/main.ts'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamedImport", path: "./util", name: "helper", target: "__js_module__::named/util.ts::helper" } }
+
+  - name: Named import call resolves to concrete definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'named/main.ts'
+        AND callee.file_path = 'named/util.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: Default import targets primary export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'default/main.ts'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "DefaultImport", path: "./util", name: "default", target: "__js_module__::default/util.ts::default" } }
+
+  - name: Default import call resolves to concrete definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'default/main.ts'
+        AND callee.file_path = 'default/util.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: Namespace import targets synthesized module
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'namespace/main.ts'
+      RETURN i.import_type AS import_type, i.path AS path, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamespaceImport", path: "./util", target: "__js_module__::namespace/util.ts" } }
+
+  - name: Namespace import call resolves to concrete definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'namespace/main.ts'
+        AND callee.file_path = 'namespace/util.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: Explicit reexport targets barrel proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'explicit/main.ts'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "__js_module__::explicit/index.ts::helper" } }
+
+  - name: Explicit reexport call resolves to source definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'explicit/main.ts'
+        AND callee.file_path = 'explicit/util.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: Star reexport resolves back to source export
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'star/main.ts'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "__js_module__::star/util.ts::helper" } }
+
+  - name: Star reexport call resolves to source definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'star/main.ts'
+        AND callee.file_path = 'star/util.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: Aliased named imports keep source identity
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'alias/main.ts'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamedImport", path: "./constants", name: "formatPrecision", alias: "fmt", target: "__js_module__::alias/constants.ts::formatPrecision" } }
+
+  - name: Aliased named import call resolves to local definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'alias/main.ts'
+        AND callee.file_path = 'alias/constants.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "formatPrecision" } }
+
+  - name: Multiple imports from one statement keep distinct symbol identities
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'identity/consumer.ts'
+      RETURN i.name AS name, i.alias AS alias, d.fqn AS target
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "dateFormats", alias: null, target: "__js_module__::identity/constants.ts::dateFormats" } }
+      - { row: { name: "FLOW_METRICS", alias: "metrics", target: "__js_module__::identity/constants.ts::FLOW_METRICS" } }
+      - { row: { name: "formatPrecision", alias: null, target: "__js_module__::identity/constants.ts::formatPrecision" } }
+
+  - name: Imported function from mixed import statement still calls concrete definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'identity/consumer.ts'
+        AND callee.file_path = 'identity/constants.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "formatPrecision" } }
+
+  - name: Imported constants do not create false call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'no_false_call/main.ts'
+        AND callee.file_path = 'no_false_call/constants.ts'
+        AND callee.name = 'HTTP_STATUS_OK'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: Imported functions still call through while constants stay inert
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'no_false_call/main.ts'
+        AND callee.file_path = 'no_false_call/constants.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "formatter" } }
+
+  - name: Constructor, inferred member, and static method calls resolve
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'advanced/consumer.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 5 }
+      - { row: { caller: "process", callee: "Parser" } }
+      - { row: { caller: "process", callee: "Parser::parse" } }
+      - { row: { caller: "createParser", callee: "Parser::fromConfig" } }
+      - { row: { caller: "runWithService", callee: "Parser::parse" } }
+      - { row: { caller: "Parser::fromConfig", callee: "Parser" } }
+
+  - name: Callback passing does not fabricate direct execution edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'advanced/consumer.ts'
+        AND caller.fqn = 'mapItems'
+        AND callee.fqn = 'transform'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: Namespace reexport member chains resolve to underlying static method
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'namespace_chain/consumer.ts'
+        AND callee.file_path = 'namespace_chain/suggestions.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "Suggestions::configure" } }
+
+  - name: Default and namespace barrel exports both resolve through the barrel
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'combo/consumer.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "runFormat", callee: "defaultFormat" } }
+      - { row: { caller: "runToolkit", callee: "normalize" } }

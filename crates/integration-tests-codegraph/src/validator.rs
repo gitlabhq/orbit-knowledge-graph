@@ -157,6 +157,35 @@ fn format_cell(array: &dyn Array, row: usize) -> String {
     "<?>".into()
 }
 
+fn expected_value_matches(array: &dyn Array, row: usize, expected: &serde_yaml::Value) -> bool {
+    match expected {
+        serde_yaml::Value::Null => array.is_null(row),
+        serde_yaml::Value::Bool(value) => {
+            !array.is_null(row) && format_cell(array, row) == value.to_string()
+        }
+        serde_yaml::Value::Number(value) => {
+            !array.is_null(row) && format_cell(array, row) == value.to_string()
+        }
+        serde_yaml::Value::String(value) => {
+            !array.is_null(row) && format_cell(array, row) == *value
+        }
+        _ => false,
+    }
+}
+
+fn expected_value_display(expected: &serde_yaml::Value) -> String {
+    match expected {
+        serde_yaml::Value::Null => "null".to_string(),
+        serde_yaml::Value::Bool(value) => value.to_string(),
+        serde_yaml::Value::Number(value) => value.to_string(),
+        serde_yaml::Value::String(value) => value.clone(),
+        _ => match serde_yaml::to_string(expected) {
+            Ok(value) => value.trim().to_string(),
+            Err(_) => "<unsupported>".to_string(),
+        },
+    }
+}
+
 // -- where filter -----------------------------------------------------------
 
 fn apply_filter(batch: &RecordBatch, where_clause: &HashMap<String, String>) -> RecordBatch {
@@ -404,7 +433,7 @@ fn check_one(
 
 fn check_row(
     batch: &RecordBatch,
-    expected: &HashMap<String, String>,
+    expected: &HashMap<String, serde_yaml::Value>,
     total_rows: usize,
     label: &str,
     severity: Severity,
@@ -413,16 +442,18 @@ fn check_row(
         expected.iter().all(|(field, exp)| {
             batch
                 .column_by_name(field)
-                .map(|col| format_cell(col.as_ref(), row))
-                .as_deref()
-                == Some(exp.as_str())
+                .map(|col| expected_value_matches(col.as_ref(), row, exp))
+                .unwrap_or(false)
         })
     });
 
     if found {
         None
     } else {
-        let desc: Vec<String> = expected.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        let desc: Vec<String> = expected
+            .iter()
+            .map(|(k, v)| format!("{k}={}", expected_value_display(v)))
+            .collect();
         Some(fail(
             label,
             severity,

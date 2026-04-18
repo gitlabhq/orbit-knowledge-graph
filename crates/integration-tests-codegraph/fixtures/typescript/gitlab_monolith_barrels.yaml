@@ -1,0 +1,117 @@
+name: "TypeScript GitLab monolith barrels"
+pipeline: js
+fixtures:
+  - path: config/webpack.config.js
+    content: |
+      const path = require('path');
+
+      module.exports = {
+        resolve: {
+          alias: {
+            '~': path.join(__dirname, '../app/assets/javascripts'),
+            ee: path.join(__dirname, '../ee/app/assets/javascripts'),
+          },
+        },
+      };
+
+  - path: app/assets/javascripts/commit/constants.ts
+    content: |
+      export const VERIFIED_CONFIG = {
+        label: 'verified',
+      };
+
+      export const verificationStatuses = {
+        VERIFIED: 'VERIFIED',
+        UNVERIFIED: 'UNVERIFIED',
+      };
+
+      export const statusConfig = {
+        VERIFIED: VERIFIED_CONFIG,
+      };
+
+      export function describeStatus(): string {
+        return verificationStatuses.VERIFIED;
+      }
+
+  - path: ee/app/assets/javascripts/commit/constants.ts
+    content: |
+      import {
+        verificationStatuses as verificationStatusesCE,
+        statusConfig as statusConfigCE,
+        VERIFIED_CONFIG,
+        describeStatus,
+      } from '~/commit/constants';
+
+      export * from '~/commit/constants';
+
+      export const verificationStatuses = {
+        ...verificationStatusesCE,
+        VERIFIED_CA: 'VERIFIED_CA',
+      };
+
+      export const statusConfig = {
+        ...statusConfigCE,
+        [verificationStatuses.VERIFIED_CA]: VERIFIED_CONFIG,
+      };
+
+      export function describeCombined(): string {
+        return describeStatus();
+      }
+
+  - path: ee/app/assets/javascripts/commit/consumer.ts
+    content: |
+      import { VERIFIED_CONFIG, verificationStatuses } from 'ee/commit/constants';
+      import * as commitConstants from 'ee/commit/constants';
+
+      export function useNamed(): string {
+        return verificationStatuses.VERIFIED_CA || VERIFIED_CONFIG.label;
+      }
+
+      export function useNamespace(): string {
+        return commitConstants.describeCombined();
+      }
+
+tests:
+  - name: EE barrel named import resolves local EE export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
+        AND i.path = 'ee/commit/constants'
+        AND i.name = 'verificationStatuses'
+      RETURN i.import_type AS import_type, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamedImport", target: "__js_module__::ee/app/assets/javascripts/commit/constants.ts::verificationStatuses" } }
+
+  - name: EE barrel star reexport import resolves to CE export proxy
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
+        AND i.path = 'ee/commit/constants'
+        AND i.name = 'VERIFIED_CONFIG'
+      RETURN i.import_type AS import_type, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { import_type: "NamedImport", target: "__js_module__::app/assets/javascripts/commit/constants.ts::VERIFIED_CONFIG" } }
+
+  - name: Namespace import over EE barrel resolves to local EE function
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
+        AND callee.file_path = 'ee/app/assets/javascripts/commit/constants.ts'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "useNamespace", callee: "describeCombined" } }
+
+  - name: EE barrel local call resolves through to CE definition
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'ee/app/assets/javascripts/commit/constants.ts'
+        AND callee.file_path = 'app/assets/javascripts/commit/constants.ts'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "describeCombined", callee: "describeStatus" } }
