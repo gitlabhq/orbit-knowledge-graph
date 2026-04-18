@@ -39,7 +39,7 @@ fn resolve_type_name(
 
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
-    ImportBindingKind, ImportResolutionMode,
+    ImportBindingKind, ImportMode,
 };
 
 use crate::utils::node_to_range;
@@ -537,7 +537,7 @@ impl LanguageSpec {
                             import_type: label,
                             path: base_path.clone(),
                             binding_kind,
-                            resolution_mode: ImportResolutionMode::Import,
+                            mode: ImportMode::Declarative,
                             name: Some(name),
                             alias,
                             scope_fqn: None,
@@ -560,7 +560,7 @@ impl LanguageSpec {
                     imports.push(CanonicalImport {
                         import_type: label,
                         binding_kind,
-                        resolution_mode: ImportResolutionMode::Import,
+                        mode: ImportMode::Declarative,
                         path,
                         name,
                         alias: None,
@@ -573,7 +573,7 @@ impl LanguageSpec {
                     imports.push(CanonicalImport {
                         import_type: label,
                         binding_kind: ImportBindingKind::Named,
-                        resolution_mode: ImportResolutionMode::Import,
+                        mode: ImportMode::Declarative,
                         path: base_path.clone(),
                         name: Some(rule.wildcard_symbol.to_string()),
                         alias: None,
@@ -602,7 +602,7 @@ impl LanguageSpec {
                 imports.push(CanonicalImport {
                     import_type: label,
                     binding_kind: ImportBindingKind::Named,
-                    resolution_mode: ImportResolutionMode::Import,
+                    mode: ImportMode::Declarative,
                     path: full_path,
                     name: None,
                     alias: None,
@@ -624,7 +624,7 @@ impl LanguageSpec {
                 imports.push(CanonicalImport {
                     import_type: label,
                     binding_kind,
-                    resolution_mode: ImportResolutionMode::Import,
+                    mode: ImportMode::Declarative,
                     path,
                     name,
                     alias,

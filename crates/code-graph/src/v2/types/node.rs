@@ -93,17 +93,17 @@ pub struct DefinitionMetadata {
 pub enum ImportBindingKind {
     #[default]
     Named,
-    Default,
+    Primary,
     Namespace,
     SideEffect,
 }
 
-/// Whether an import is resolved through language module syntax or runtime require-like loading.
+/// Whether a binding enters scope through a declarative import form or a runtime load primitive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum ImportResolutionMode {
+pub enum ImportMode {
     #[default]
-    Import,
-    Require,
+    Declarative,
+    Runtime,
 }
 
 /// A parsed import, language-agnostic.
@@ -112,7 +112,7 @@ pub struct CanonicalImport {
     /// Language-specific import type (e.g. "RequireRelative", "FromImport").
     pub import_type: &'static str,
     pub binding_kind: ImportBindingKind,
-    pub resolution_mode: ImportResolutionMode,
+    pub mode: ImportMode,
     pub path: String,
     pub name: Option<String>,
     pub alias: Option<String>,
