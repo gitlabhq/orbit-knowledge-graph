@@ -7,8 +7,10 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use code_graph::linker::indexer::{IndexingConfig, RepositoryIndexer, RepositoryIndexingResult};
-use code_graph::linker::loading::DirectoryFileSource;
+use code_graph::legacy::linker::indexer::{
+    IndexingConfig, RepositoryIndexer, RepositoryIndexingResult,
+};
+use code_graph::legacy::linker::loading::DirectoryFileSource;
 use ontology::Ontology;
 use query_engine::compiler::SecurityContext;
 use query_engine::formatters::{self, ResultFormatter};

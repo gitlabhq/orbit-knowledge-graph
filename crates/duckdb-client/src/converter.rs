@@ -1,5 +1,5 @@
 use arrow::record_batch::RecordBatch;
-use code_graph::linker::analysis::types::{
+use code_graph::legacy::linker::analysis::types::{
     DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode, ResolvedEdge,
     RowContext,
 };
@@ -99,13 +99,13 @@ pub fn convert_graph_data(
 
 /// Convert a v2 `CodeGraph` into `LocalGraphData` ready for DuckDB insert.
 pub fn convert_v2_graph(
-    graph: &code_graph::linker::v2::CodeGraph,
+    graph: &code_graph::v2::linker::CodeGraph,
     project_id: i64,
     branch: &str,
     commit_sha: &str,
     ontology: &Ontology,
 ) -> Result<LocalGraphData> {
-    use code_graph::linker::v2::graph::{
+    use code_graph::v2::linker::graph::{
         DefinitionRow, DirectoryRow, EdgeRow, FileRow, ImportRow, RowContext as V2RowContext,
     };
 

@@ -331,8 +331,8 @@ tool. Here are the main architectural differences in the current service:
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
 | Authorization | None (local tool) | Rails gRPC delegation |
-| Parser crate | External `parser-core` dependency | In-tree `code-graph/parser` (forked and evolved) |
-| Graph builder | External `indexer` crate | In-tree `code-graph/linker` |
+| Parser crate | External `parser-core` dependency | In-tree `code-graph` crate, `src/legacy/parser/` (forked and evolved) |
+| Graph builder | External `indexer` crate | In-tree `code-graph/src/legacy/linker/` |
 | Concurrency | Streaming model (Rayon + semaphore) | Same streaming model (preserved) |
 
 ### Indexing the active branches

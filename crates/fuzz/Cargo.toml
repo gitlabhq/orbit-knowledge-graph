@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 compiler = { path = "../query-engine/compiler" }
-parser-core = { path = "../code-graph/parser" }
+code-graph = { path = "../code-graph" }
 indexer = { path = "../indexer" }
 bolero = "0.13.4"
 serde_json.workspace = true

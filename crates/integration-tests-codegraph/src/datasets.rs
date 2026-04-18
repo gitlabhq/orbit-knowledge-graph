@@ -4,7 +4,7 @@ use std::sync::Arc;
 use arrow_56::array::{Array, ArrayBuilder, Int64Builder, StringBuilder};
 use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
-use code_graph_linker::v2::graph::*;
+use code_graph::v2::linker::graph::*;
 
 pub(crate) type LanceDatasets = HashMap<String, RecordBatch>;
 type NodeIds = Vec<i64>;

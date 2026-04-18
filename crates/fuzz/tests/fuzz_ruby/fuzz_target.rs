@@ -1,5 +1,5 @@
 use bolero::check;
-use parser_core::ruby::analyzer::RubyAnalyzer;
+use code_graph::legacy::parser::ruby::analyzer::RubyAnalyzer;
 use std::str::from_utf8;
 
 fn main() {

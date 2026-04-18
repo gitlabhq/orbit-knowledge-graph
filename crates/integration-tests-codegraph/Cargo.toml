@@ -6,7 +6,6 @@ publish = false
 
 [dependencies]
 code-graph = { path = "../code-graph" }
-code-graph-linker = { path = "../code-graph/linker" }
 
 # lance-graph uses arrow 56 — we need matching types for its API
 lance-graph = { workspace = true }
