@@ -81,6 +81,10 @@ yaml_test!(
 );
 yaml_test!(python_call_resolution, "python_resolution.yaml");
 yaml_test!(python_type_flow, "python/type_flow.yaml");
+yaml_test!(
+    python_decorator_references,
+    "python/decorator_references.yaml"
+);
 
 // Java
 yaml_test!(java_call_resolution, "java_resolution.yaml");

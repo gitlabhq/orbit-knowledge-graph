@@ -1,0 +1,51 @@
+name: "Python: decorator references"
+fixtures:
+  - path: decorators.py
+    content: |
+      class my_decorator:
+          def __init__(self, func):
+              self.func = func
+
+      class other_decorator:
+          def __init__(self, func):
+              self.func = func
+
+      @my_decorator
+      def decorated_func():
+          pass
+
+      @other_decorator
+      def another_func():
+          pass
+
+      def plain_func():
+          pass
+
+tests:
+  # Decorator references currently land as File→Definition edges because
+  # the decorator node is processed before the function scope is entered.
+  - name: Decorators produce file-level reference edges
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE e.edge_kind = 'Calls'
+      RETURN d.name AS callee
+    assert:
+      - { row: { callee: "my_decorator" } }
+      - { row: { callee: "other_decorator" } }
+      - { not: true, row: { callee: "plain_func" } }
+
+  - name: Plain function has no decorator in metadata
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'plain_func'
+      RETURN d.definition_type AS type
+    assert:
+      - { row: { type: "Function" } }
+
+  - name: Decorated functions have correct definition type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['decorated_func', 'another_func']
+      RETURN d.definition_type AS type
+    assert:
+      - { match: { field: "type", pattern: "Decorated*" } }
