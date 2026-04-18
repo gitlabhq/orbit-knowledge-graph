@@ -1,0 +1,73 @@
+name: "Java: generic type parameter stripping"
+fixtures:
+  - path: com/example/UserService.java
+    content: |
+      package com.example;
+
+      public class UserService {
+          public void query() {}
+          public void save() {}
+      }
+
+  - path: com/example/OrderService.java
+    content: |
+      package com.example;
+
+      public class OrderService {
+          public void process() {}
+      }
+
+  - path: com/example/ServiceFactory.java
+    content: |
+      package com.example;
+
+      import java.util.List;
+
+      public class ServiceFactory {
+          public List<UserService> getUsers() { return null; }
+          public List<OrderService> getOrders() { return null; }
+      }
+
+  - path: com/example/App.java
+    content: |
+      package com.example;
+
+      import java.util.List;
+
+      public class App {
+          public void useGenericReturn(ServiceFactory factory) {
+              List<UserService> services = factory.getUsers();
+              services.query();
+          }
+
+          public void useGenericLocal(ServiceFactory factory) {
+              List<OrderService> orders = factory.getOrders();
+              orders.process();
+          }
+      }
+
+tests:
+  - name: All call edges from useGenericReturn
+    description: "getUsers() returns List<UserService> — inner() extracts UserService from type_arguments"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'useGenericReturn' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "com.example.App.useGenericReturn", callee: "com.example.ServiceFactory.getUsers" } }
+      - { row: { caller: "com.example.App.useGenericReturn", callee: "com.example.UserService.query" } }
+      - { not: true, row: { callee: "com.example.UserService.save" } }
+      - { not: true, row: { callee: "com.example.OrderService.process" } }
+
+  - name: All call edges from useGenericLocal
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'useGenericLocal' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "com.example.App.useGenericLocal", callee: "com.example.ServiceFactory.getOrders" } }
+      - { row: { caller: "com.example.App.useGenericLocal", callee: "com.example.OrderService.process" } }
+      - { not: true, row: { callee: "com.example.UserService.query" } }
+      - { not: true, row: { callee: "com.example.UserService.save" } }

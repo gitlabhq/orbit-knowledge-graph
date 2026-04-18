@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use treesitter_visit::Axis;
+use treesitter_visit::Match;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -230,7 +232,7 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         chain: &mut Vec<ExpressionStep>,
-        cc: &crate::v2::dsl::types::ChainConfig,
+        cc: &super::types::ChainConfig,
         import_map: &rustc_hash::FxHashMap<String, String>,
         sep: &str,
     ) {
@@ -260,8 +262,7 @@ impl LanguageSpec {
             if kind_ref == ctor_kind {
                 if let Some(type_node) = node.field(type_field) {
                     let bare = type_node.text().to_string();
-                    let resolved =
-                        crate::v2::dsl::extractors::resolve_type_via_map(&bare, import_map, sep);
+                    let resolved = super::extractors::resolve_type_via_map(&bare, import_map, sep);
                     chain.push(ExpressionStep::New(resolved));
                 }
                 return;
@@ -377,7 +378,7 @@ impl LanguageSpec {
             // Check for wildcard child (e.g. `asterisk` in `import com.example.*`).
             let has_wildcard_child = rule
                 .wildcard_child_kind
-                .is_some_and(|wk| node.children().any(|c| c.kind().as_ref() == wk));
+                .is_some_and(|wk| node.has(Axis::Child, Match::Kind(wk)));
 
             if has_wildcard_child {
                 // Wildcard import: path is the full extracted name, no split needed.
@@ -421,13 +422,14 @@ impl LanguageSpec {
         file_path: &str,
         language: Language,
         mut on_ref: F,
-    ) -> crate::legacy::parser::Result<()>
+    ) -> crate::legacy::parser::Result<Vec<(u32, String)>>
     where
         F: FnMut(
             &str,                                        // name
             Option<&[crate::v2::types::ExpressionStep]>, // chain
             &[crate::v2::types::ssa::ParseValue],        // reaching defs
             Option<u32>,                                 // enclosing_def index
+            &[(u32, String)],                            // inferred return types
         ),
     {
         let source_str = std::str::from_utf8(source)
@@ -451,25 +453,146 @@ impl LanguageSpec {
 
         state.ssa.seal_remaining();
 
-        // Dispatch each pending ref directly — no Vec<ReferenceEvent> materialized
-        for pending in state.pending_refs.drain(..) {
+        let pending_refs: Vec<_> = state.pending_refs.drain(..).collect();
+
+        // Pass 1: infer return types from bare-call / bare-identifier return refs.
+        // Chain refs (e.g. `return foo.bar()`) are skipped — the ssa_key points
+        // at the chain base, not the terminal call's return type.
+        for pending in &pending_refs {
+            if !pending.is_return || pending.chain.is_some() {
+                continue;
+            }
+            let Some(enclosing_idx) = pending.enclosing_def else {
+                continue;
+            };
+            if state.defs[enclosing_idx as usize]
+                .metadata
+                .as_ref()
+                .and_then(|m| m.return_type.as_ref())
+                .is_some()
+            {
+                continue;
+            }
             let reaching = state
                 .ssa
                 .read_variable_stateless(pending.ssa_key, pending.block);
-            let parse_values: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]> = reaching
-                .values
-                .iter()
-                .filter_map(|v| v.to_parse_value())
-                .collect();
+            let inferred = reaching.values.iter().find_map(|v| {
+                let pv = v.to_parse_value()?;
+                match pv {
+                    crate::v2::types::ssa::ParseValue::Type(fqn) => Some(fqn),
+                    crate::v2::types::ssa::ParseValue::LocalDef(i) => state
+                        .defs
+                        .get(i as usize)
+                        .map(|d| d.fqn.as_str().to_string()),
+                    crate::v2::types::ssa::ParseValue::ImportRef(i) => {
+                        state.imports.get(i as usize).and_then(|imp| {
+                            let name = imp.name.as_deref()?;
+                            // Use import_map to resolve to FQN (e.g. "UserService" → "models.UserService")
+                            state
+                                .import_map
+                                .get(name)
+                                .cloned()
+                                .or_else(|| Some(name.to_string()))
+                        })
+                    }
+                    crate::v2::types::ssa::ParseValue::Opaque => None,
+                }
+            });
+            if let Some(rt) = inferred {
+                state.defs[enclosing_idx as usize]
+                    .metadata
+                    .get_or_insert_with(Box::default)
+                    .return_type = Some(rt);
+            }
+        }
+
+        // Collect all inferred return types (from both call returns and
+        // any future sources) into the sidecar for the resolver
+        let inferred_returns: Vec<(u32, String)> = state
+            .defs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, def)| {
+                def.metadata
+                    .as_ref()?
+                    .return_type
+                    .as_ref()
+                    .map(|rt| (i as u32, rt.clone()))
+            })
+            .collect();
+
+        // Pass 2: dispatch refs to resolver
+        for pending in &pending_refs {
+            let reaching = state
+                .ssa
+                .read_variable_stateless(pending.ssa_key, pending.block);
+            let mut parse_values: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]> =
+                reaching
+                    .values
+                    .iter()
+                    .filter_map(|v| v.to_parse_value())
+                    .collect();
+
+            // Instance attr rewrite
+            let mut chain_slice: Option<&[ExpressionStep]> = pending.chain.as_deref();
+            if let Some(chain) = chain_slice
+                && chain.len() >= 3
+                && parse_values
+                    .iter()
+                    .any(|v| matches!(v, crate::v2::types::ssa::ParseValue::Type(_)))
+            {
+                let field_steps: Vec<usize> = chain[1..]
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, s)| {
+                        if matches!(s, ExpressionStep::Field(_)) {
+                            Some(i + 1)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                for &field_idx in field_steps.iter().rev() {
+                    let mut compound = pending.ssa_key.to_string();
+                    for step in &chain[1..=field_idx] {
+                        if let ExpressionStep::Field(name) = step {
+                            compound.push('.');
+                            compound.push_str(name);
+                        }
+                    }
+                    let key = state.arena.alloc_str(&compound);
+                    let r = state.ssa.read_variable_stateless(key, pending.block);
+                    let compound_values: smallvec::SmallVec<
+                        [crate::v2::types::ssa::ParseValue; 2],
+                    > = r.values.iter().filter_map(|v| v.to_parse_value()).collect();
+                    if !compound_values.is_empty()
+                        && !compound_values
+                            .iter()
+                            .all(|v| matches!(v, crate::v2::types::ssa::ParseValue::Opaque))
+                    {
+                        parse_values = compound_values;
+                        let remaining = &chain[field_idx + 1..];
+                        chain_slice = if remaining.len() <= 1 {
+                            None
+                        } else {
+                            Some(remaining)
+                        };
+                        break;
+                    }
+                }
+            }
+
             on_ref(
                 &pending.name,
-                pending.chain.as_deref(),
+                chain_slice,
                 &parse_values,
                 pending.enclosing_def,
+                &inferred_returns,
             );
         }
 
-        Ok(())
+        Ok(inferred_returns)
     }
 
     fn walk_full<'a>(
@@ -664,7 +787,62 @@ impl LanguageSpec {
                     };
 
                     let ssa_name = state.arena.alloc_str(&name);
-                    state.ssa.write_variable(ssa_name, state.current_block, val);
+                    let is_instance_attr = rule
+                        .instance_attr_prefixes
+                        .iter()
+                        .any(|p| name.starts_with(p));
+                    let target_block = if is_instance_attr {
+                        // Write to parent class block so sibling methods can read it
+                        *state.saved_blocks.last().unwrap_or(&state.current_block)
+                    } else {
+                        state.current_block
+                    };
+                    state.ssa.write_variable(ssa_name, target_block, val);
+                }
+            }
+
+            // Track return statement context + infer return type from bare identifiers
+            if !self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk) {
+                state.in_return = true;
+
+                // For `return x` where x is a bare identifier, read its SSA
+                // value. Only fires when the return expression's first named
+                // child is itself an identifier kind — chains like `return
+                // foo.bar()` are left to the resolver via PendingRef.is_return.
+                if let Some(enclosing_idx) = state.enclosing_def_stack.last().copied()
+                    && state.defs[enclosing_idx as usize]
+                        .metadata
+                        .as_ref()
+                        .and_then(|m| m.return_type.as_ref())
+                        .is_none()
+                    && let Some(cc) = &self.chain_config
+                    && node
+                        .children()
+                        .find(|c| c.is_named())
+                        .is_some_and(|c| cc.ident_kinds.contains(&c.kind().as_ref()))
+                    && let Some(ident) = find_first_ident(node, cc.ident_kinds)
+                {
+                    let ssa_key = state.arena.alloc_str(&ident);
+                    let reaching = state
+                        .ssa
+                        .read_variable_stateless(ssa_key, state.current_block);
+                    let inferred = reaching.values.iter().find_map(|v| {
+                        let pv = v.to_parse_value()?;
+                        match pv {
+                            crate::v2::types::ssa::ParseValue::Type(fqn) => Some(fqn),
+                            crate::v2::types::ssa::ParseValue::LocalDef(i) => state
+                                .defs
+                                .get(i as usize)
+                                .map(|d| d.fqn.as_str().to_string()),
+                            _ => None,
+                        }
+                    });
+                    if let Some(rt) = inferred {
+                        state.defs[enclosing_idx as usize]
+                            .metadata
+                            .get_or_insert_with(Box::default)
+                            .return_type = Some(rt);
+                    }
                 }
             }
 
@@ -703,6 +881,7 @@ impl LanguageSpec {
                     ssa_key,
                     block: state.current_block,
                     enclosing_def: state.enclosing_def_stack.last().copied(),
+                    is_return: state.in_return,
                 });
             }
         }
@@ -710,6 +889,11 @@ impl LanguageSpec {
         // Recurse children
         for child in node.children() {
             self.walk_full(&child, state, sep);
+        }
+
+        // Clear return context after children
+        if !self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk) {
+            state.in_return = false;
         }
 
         if pushed_scope {
@@ -740,7 +924,7 @@ impl LanguageSpec {
 
         let has_catch_all = rule
             .catch_all_kind
-            .is_some_and(|ck| node.children().any(|c| c.kind().as_ref() == ck));
+            .is_some_and(|ck| node.has(Axis::Child, Match::Kind(ck)));
 
         // Identify condition byte range to skip (already walked above)
         let cond_range = rule
@@ -848,6 +1032,8 @@ struct PendingRef<'a> {
     ssa_key: &'a str,
     block: super::ssa::BlockId,
     enclosing_def: Option<u32>,
+    /// True if this ref is inside a return statement.
+    is_return: bool,
 }
 
 struct WalkFullState<'a> {
@@ -862,6 +1048,7 @@ struct WalkFullState<'a> {
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
     top_level_depth: usize,
+    in_return: bool,
 }
 
 impl<'a> WalkFullState<'a> {
@@ -882,6 +1069,7 @@ impl<'a> WalkFullState<'a> {
             saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
             top_level_depth: 0,
+            in_return: false,
         }
     }
 }
@@ -892,6 +1080,14 @@ fn canonical_range(r: &crate::utils::Range) -> crate::v2::types::Range {
         crate::v2::types::Position::new(r.end.line, r.end.column),
         r.byte_offset,
     )
+}
+
+/// Find the first identifier node in an expression tree (DFS).
+/// Uses the language's `ident_kinds` from chain config to detect identifiers
+/// generically across languages.
+fn find_first_ident(node: &Node<StrDoc<SupportLang>>, ident_kinds: &[&str]) -> Option<String> {
+    node.find_descendant(|n| n.is_named() && ident_kinds.contains(&n.kind().as_ref()))
+        .map(|n| n.text().to_string())
 }
 
 #[cfg(test)]
@@ -944,7 +1140,7 @@ mod tests {
             b"def foo(): pass\nfoo()",
             "test.py",
             Language::Python,
-            |name, _chain, _reaching, _enclosing| {
+            |name, _chain, _reaching, _enclosing, _inferred| {
                 ref_names.push(name.to_string());
             },
         )

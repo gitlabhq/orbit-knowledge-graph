@@ -1,11 +1,13 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, field, metadata};
+use crate::v2::dsl::extractors::{Extract, child_of_kind, field, metadata};
 use crate::v2::dsl::predicates::*;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
 
 use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -93,7 +95,7 @@ impl DslLanguage for GoDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("package_clause", Extract::ChildOfKind("package_identifier")))
+        Some(("package_clause", child_of_kind("package_identifier")))
     }
 
     fn chain_config() -> Option<ChainConfig> {
@@ -130,9 +132,7 @@ fn go_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool 
 }
 
 fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
-    let path_node = node
-        .children()
-        .find(|n| n.kind().as_ref() == "interpreted_string_literal");
+    let path_node = node.find(Child, Kind("interpreted_string_literal"));
 
     let Some(path_node) = path_node else {
         return;
@@ -141,13 +141,9 @@ fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
     let raw_path = path_node.text().to_string();
     let import_path = raw_path.trim_matches('"').to_string();
 
-    let alias_node = node.children().find(|n| {
-        let k = n.kind();
-        (k.as_ref() == "package_identifier"
-            || k.as_ref() == "blank_identifier"
-            || k.as_ref() == "dot")
-            && n.range().start < path_node.range().start
-    });
+    let alias_node = node
+        .children_matching(AnyKind(&["package_identifier", "blank_identifier", "dot"]))
+        .find(|n| n.range().start < path_node.range().start);
 
     let alias = alias_node.map(|n| n.text().to_string());
     let pkg_name = alias

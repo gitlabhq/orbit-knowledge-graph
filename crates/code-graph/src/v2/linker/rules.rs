@@ -103,6 +103,16 @@ pub enum ResolveStage {
     ImplicitMember,
 }
 
+// ── Resolver hooks ──────────────────────────────────────────────
+
+/// Language-specific resolver behavior. All fields default to `None`.
+#[derive(Default)]
+pub struct ResolverHooks {
+    /// When a bare call resolves to a class instance, redirect to this
+    /// member method. e.g. `"__call__"` for Python, `"invoke"` for Kotlin.
+    pub call_method: Option<&'static str>,
+}
+
 // ── Top-level config ────────────────────────────────────────────
 
 pub struct ResolutionRules {
@@ -132,6 +142,9 @@ pub struct ResolutionRules {
     /// rules with receiver fields, and scope rules for deriving walker scopes.
     pub language_spec: Option<crate::v2::dsl::types::LanguageSpec>,
 
+    /// Resolver hooks for language-specific resolution behavior.
+    pub hooks: ResolverHooks,
+
     /// Operational tuning: timeouts, thresholds, limits.
     pub settings: super::ResolveSettings,
 }
@@ -160,9 +173,15 @@ impl ResolutionRules {
             fqn_separator,
             self_names,
             super_name,
+            hooks: ResolverHooks::default(),
             language_spec: Some(language_spec),
             settings: super::ResolveSettings::default(),
         }
+    }
+
+    pub fn with_hooks(mut self, hooks: ResolverHooks) -> Self {
+        self.hooks = hooks;
+        self
     }
 
     /// Override the default resolve settings.

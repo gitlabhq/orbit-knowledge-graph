@@ -1,0 +1,48 @@
+name: "Python: wildcard import resolution"
+fixtures:
+  - path: models.py
+    content: |
+      class User:
+          def greet(self):
+              pass
+
+      class Project:
+          def describe(self):
+              pass
+
+  - path: main.py
+    content: |
+      from models import *
+
+      def use_user():
+          User()
+
+      def use_project():
+          Project()
+
+tests:
+  - name: Wildcard import resolves User
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_user' AND callee.name = 'User'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.use_user", callee: "models.User" } }
+
+  - name: Wildcard import resolves Project
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_project' AND callee.name = 'Project'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.use_project", callee: "models.Project" } }
+
+  - name: No false cross-resolution
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_user' AND callee.name = 'Project'
+      RETURN caller.fqn AS caller
+    assert:
+      - { empty: true }

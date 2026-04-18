@@ -27,6 +27,8 @@ pub(crate) struct TestCase {
     #[serde(default)]
     pub skip: bool,
     #[serde(default)]
+    pub debug: bool,
+    #[serde(default)]
     pub query: Option<String>,
     #[serde(default)]
     pub assert: Vec<Assert>,

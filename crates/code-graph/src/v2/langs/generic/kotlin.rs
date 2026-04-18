@@ -1,7 +1,11 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, ExtractList, metadata};
+use crate::v2::dsl::extractors::{
+    Extract, ExtractList, child_of_kind, default_extract, field, metadata, no_extract,
+};
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -9,7 +13,7 @@ use crate::v2::types::BindingKind;
 
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
-    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage,
+    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
 };
 
 // ── DSL parser spec ─────────────────────────────────────────────
@@ -44,18 +48,18 @@ fn kotlin_super_types(node: &N<'_>) -> Vec<String> {
 }
 
 fn classify_kotlin_class(node: &N<'_>) -> &'static str {
-    if node.children().any(|c| c.kind() == "enum_class_body") {
+    if node.has(Child, Kind("enum_class_body")) {
         return "Enum";
     }
-    if let Some(type_id) = node.children().find(|c| c.kind() == "type_identifier") {
+    if let Some(type_id) = node.find(Child, Kind("type_identifier")) {
         let prefix_len = type_id.range().start.saturating_sub(node.range().start);
         let prefix = &node.text()[..prefix_len];
         if prefix.contains("interface") {
             return "Interface";
         }
     }
-    if let Some(modifiers) = node.children().find(|c| c.kind() == "modifiers")
-        && let Some(class_mod) = modifiers.children().find(|c| c.kind() == "class_modifier")
+    if let Some(modifiers) = node.find(Child, Kind("modifiers"))
+        && let Some(class_mod) = modifiers.find(Child, Kind("class_modifier"))
     {
         match class_mod.text().as_ref() {
             "data" => return "DataClass",
@@ -80,15 +84,15 @@ impl DslLanguage for KotlinDsl {
         vec![
             scope_fn("class_declaration", classify_kotlin_class)
                 .def_kind(DefKind::Class)
-                .name_from(Extract::ChildOfKind("type_identifier"))
+                .name_from(child_of_kind("type_identifier"))
                 .metadata(metadata().super_types(ExtractList::Fn(kotlin_super_types))),
             scopes(&["object_declaration", "companion_object"], "Object")
                 .def_kind(DefKind::Class)
-                .name_from(Extract::ChildOfKind("type_identifier")),
+                .name_from(child_of_kind("type_identifier")),
             scope("function_declaration", "Function").def_kind(DefKind::Function),
             scope("secondary_constructor", "Constructor")
                 .def_kind(DefKind::Constructor)
-                .name_from(Extract::None),
+                .name_from(no_extract()),
             scope("property_declaration", "Property")
                 .def_kind(DefKind::Property)
                 .no_scope(),
@@ -98,7 +102,7 @@ impl DslLanguage for KotlinDsl {
             scopes(&["lambda_literal", "anonymous_function"], "Lambda")
                 .def_kind(DefKind::Lambda)
                 .no_scope()
-                .name_from(Extract::None),
+                .name_from(no_extract()),
         ]
     }
 
@@ -124,7 +128,7 @@ impl DslLanguage for KotlinDsl {
             {
                 return "WildcardImport";
             }
-            if node.children().any(|c| c.kind() == "import_alias") {
+            if node.has(Child, Kind("import_alias")) {
                 return "AliasedImport";
             }
             "Import"
@@ -138,17 +142,21 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("package_header", Extract::Default))
+        Some(("package_header", default_extract()))
     }
 
     fn bindings() -> Vec<BindingRule> {
+        let skip = &[
+            "Int", "Long", "Short", "Byte", "Float", "Double", "Boolean", "Char", "Unit",
+            "Nothing", "String",
+        ];
         let kotlin_type = |rule: BindingRule| {
             rule.typed(
-                &["user_type", "type"],
-                &[
-                    "Int", "Long", "Short", "Byte", "Float", "Double", "Boolean", "Char", "Unit",
-                    "Nothing", "String",
+                vec![
+                    field("user_type").inner("type_arguments", "type_identifier"),
+                    field("type"),
                 ],
+                skip,
             )
         };
         vec![
@@ -237,6 +245,9 @@ impl HasRules for KotlinRules {
             &["this", "self"],
             Some("super"),
         )
+        .with_hooks(ResolverHooks {
+            call_method: Some("invoke"),
+        })
     }
 }
 
