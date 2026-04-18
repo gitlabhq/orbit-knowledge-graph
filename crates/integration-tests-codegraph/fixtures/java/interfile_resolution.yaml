@@ -53,7 +53,8 @@ tests:
       WHERE caller.name = 'createUser' AND callee.name = 'User'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { src: "com/example/service/UserService.java", tgt: "com/example/model/User.java" } }
 
   - name: "App.run → new UserService (explicit import)"
     query: |
@@ -61,7 +62,8 @@ tests:
       WHERE caller.name = 'run' AND callee.name = 'UserService'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { src: "com/example/App.java", tgt: "com/example/service/UserService.java" } }
 
   - name: "App.run → new User (wildcard import)"
     query: |
@@ -69,7 +71,8 @@ tests:
       WHERE caller.name = 'run' AND callee.name = 'User'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { src: "com/example/App.java", tgt: "com/example/model/User.java" } }
 
   - name: "App.run → new Project (wildcard import)"
     query: |
@@ -77,7 +80,8 @@ tests:
       WHERE caller.name = 'run' AND callee.name = 'Project'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { src: "com/example/App.java", tgt: "com/example/model/Project.java" } }
 
   - name: "User FQN is correct"
     query: |
@@ -85,7 +89,7 @@ tests:
       WHERE d.name = 'User' AND d.definition_type = 'Class'
       RETURN d.fqn AS fqn
     assert:
-      - { contains_row: { fqn: "com.example.model.User" } }
+      - { row: { fqn: "com.example.model.User" } }
 
   - name: "4 files in the graph"
     query: |

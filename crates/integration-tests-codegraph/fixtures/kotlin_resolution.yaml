@@ -12,13 +12,16 @@ fixtures:
       }
 
 tests:
+  # ── Original targeted queries, hardened ──────────────────────
+
   - name: Same-class method call resolves
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'process'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - non_empty: true
+      - { row_count: 1 }
+      - { row: { caller: "com.example.Service.run", callee: "com.example.Service.process" } }
 
   - name: Package scoping produces correct FQNs
     query: |
@@ -26,5 +29,39 @@ tests:
       WHERE d.name = 'Service'
       RETURN d.fqn AS fqn
     assert:
-      - non_empty: true
-      - all_match: { field: fqn, pattern: "com.example.*" }
+      - { row_count: 1 }
+      - { row: { fqn: "com.example.Service" } }
+
+  # ── Broader exhaustive checks ────────────────────────────────
+
+  - name: Exactly 3 definitions with correct types
+    query: |
+      MATCH (d:Definition)
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+      - { no_nulls: type }
+      - { match: { field: file, pattern: "com/example/Service.kt" } }
+      - { row: { name: "Service", fqn: "com.example.Service", type: "Class" } }
+      - { row: { name: "process", fqn: "com.example.Service.process", type: "Function" } }
+      - { row: { name: "run", fqn: "com.example.Service.run", type: "Function" } }
+
+  - name: Exactly 2 containment edges
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE e.edge_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
+    assert:
+      - { row_count: 2 }
+      - { row: { parent: "com.example.Service", child: "com.example.Service.process" } }
+      - { row: { parent: "com.example.Service", child: "com.example.Service.run" } }
+
+  - name: Single Kotlin file
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.language AS lang
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "com/example/Service.kt", lang: "kotlin" } }

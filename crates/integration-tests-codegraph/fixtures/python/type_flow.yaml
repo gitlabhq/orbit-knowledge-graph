@@ -107,7 +107,7 @@ tests:
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'service.App'
           RETURN callee.name AS callee
         assert:
-          - { contains_row: { callee: "query" } }
+          - { row: { callee: "query" } }
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'service.App'
@@ -124,8 +124,8 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { contains_row: { callee: "get_builder" } }
-          - { contains_row: { callee: "step_one" } }
+          - { row: { callee: "get_builder" } }
+          - { row: { callee: "step_one" } }
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'caller' AND callee.name = 'step_two'
@@ -141,7 +141,7 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { contains_row: { callee: "query" } }
+          - { row: { callee: "query" } }
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'execute' AND callee.name = 'close'
@@ -157,8 +157,8 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { contains_row: { callee: "get_connection" } }
-          - { contains_row: { callee: "execute" } }
+          - { row: { callee: "get_connection" } }
+          - { row: { callee: "execute" } }
       # no false positive to rollback()
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
@@ -175,9 +175,9 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { contains_row: { callee: "session" } }
-          - { contains_row: { callee: "cursor" } }
-          - { contains_row: { callee: "fetch_all" } }
+          - { row: { callee: "session" } }
+          - { row: { callee: "cursor" } }
+          - { row: { callee: "fetch_all" } }
       # no edges to wrong types
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
@@ -195,8 +195,8 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { contains_row: { callee: "make_logger" } }
-          - { contains_row: { callee: "info" } }
+          - { row: { callee: "make_logger" } }
+          - { row: { callee: "info" } }
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'use_logger' AND callee.name = 'debug'

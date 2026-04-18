@@ -39,7 +39,8 @@ tests:
       WHERE caller.name = 'main' AND callee.name = 'helper_func'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { src: "src/main.py", tgt: "src/utils.py" } }
 
   - name: "G2: absolute import of package module resolves"
     query: |
@@ -47,7 +48,8 @@ tests:
       WHERE caller.name = 'run_app' AND callee.name = 'PackageClass'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { src: "src/app.py", tgt: "src/package/module.py" } }
 
   - name: "G7: non-existent import produces no edge"
     description: "There is no import for 'nonexistent' so no call edge should exist"
@@ -71,7 +73,7 @@ tests:
       WHERE d.name = 'helper_func'
       RETURN d.file_path AS file
     assert:
-      - { all_match: { field: file, pattern: "*utils.py" } }
+      - { match: { field: file, pattern: "*utils.py" } }
 
   - name: "PackageClass is in src/package/module.py"
     query: |
@@ -79,7 +81,7 @@ tests:
       WHERE d.name = 'PackageClass'
       RETURN d.file_path AS file
     assert:
-      - { all_match: { field: file, pattern: "*module.py" } }
+      - { match: { field: file, pattern: "*module.py" } }
 
   - name: "unused_func has no incoming call edges"
     query: |

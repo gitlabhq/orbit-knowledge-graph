@@ -10,13 +10,16 @@ fixtures:
               pass
 
 tests:
+  # ── Original targeted queries, hardened ──────────────────────
+
   - name: Nested class produces containment edge
     query: |
       MATCH (outer:Definition)-[:DefinitionToDefinition]->(inner:Definition)
       WHERE outer.name = 'Outer' AND inner.name = 'Inner'
       RETURN outer.fqn AS parent, inner.fqn AS child
     assert:
-      - non_empty: true
+      - { row_count: 1 }
+      - { row: { parent: "app.Outer", child: "app.Outer.Inner" } }
 
   - name: Method belongs to its class
     query: |
@@ -24,7 +27,8 @@ tests:
       WHERE cls.name = 'Outer' AND m.name = 'outer_method'
       RETURN cls.fqn AS parent, m.fqn AS child
     assert:
-      - non_empty: true
+      - { row_count: 1 }
+      - { row: { parent: "app.Outer", child: "app.Outer.outer_method" } }
 
   - name: FQN hierarchy is correct
     query: |
@@ -32,4 +36,52 @@ tests:
       WHERE d.name = 'method'
       RETURN d.fqn AS fqn
     assert:
-      - all_match: { field: fqn, pattern: "*Outer.Inner.*" }
+      - { row_count: 1 }
+      - { row: { fqn: "app.Outer.Inner.method" } }
+
+  # ── Broader exhaustive checks ────────────────────────────────
+
+  - name: Exactly 4 definitions with correct types
+    query: |
+      MATCH (d:Definition)
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+      - { no_nulls: type }
+      - { match: { field: file, pattern: "app.py" } }
+      - { column_values: { field: name, values: ["Outer", "Inner", "method", "outer_method"] } }
+      - { row: { name: "Outer", fqn: "app.Outer", type: "Class" } }
+      - { row: { name: "Inner", fqn: "app.Outer.Inner", type: "Class" } }
+      - { row: { name: "method", fqn: "app.Outer.Inner.method", type: "Method" } }
+      - { row: { name: "outer_method", fqn: "app.Outer.outer_method", type: "Method" } }
+
+  - name: Exactly 3 containment edges, all Defines
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
+    assert:
+      - { row_count: 3 }
+      - { match: { field: kind, pattern: "Defines" } }
+      - { row: { parent: "app.Outer", child: "app.Outer.Inner" } }
+      - { row: { parent: "app.Outer", child: "app.Outer.outer_method" } }
+      - { row: { parent: "app.Outer.Inner", child: "app.Outer.Inner.method" } }
+      - { not: true, row: { parent: "app.Outer.Inner", child: "app.Outer.outer_method" } }
+
+  - name: Single file with correct metadata
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.extension AS ext, f.language AS lang
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "app.py", ext: "py", lang: "python" } }
+
+  - name: File owns all 4 definitions via Defines edges
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      RETURN f.path AS file, d.name AS def, e.edge_kind AS kind
+    assert:
+      - { match: { field: file, pattern: "app.py" } }
+      - { match: { field: kind, pattern: "Defines" } }
+      - { column_values: { field: def, values: ["Outer", "Inner", "method", "outer_method"] } }

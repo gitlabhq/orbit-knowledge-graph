@@ -37,7 +37,8 @@ tests:
       WHERE caller.name = 'test_instantiation' AND callee.name = 'MyClass'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "main.test_instantiation", callee: "main.MyClass" } }
 
   - name: Class A and B exist
     queries:
@@ -46,13 +47,15 @@ tests:
           WHERE d.name = 'A'
           RETURN d.fqn AS fqn
         assert:
-          - { non_empty: true }
+          - { row_count: 1 }
+          - { row: { fqn: "main.A" } }
       - query: |
           MATCH (d:Definition)
           WHERE d.name = 'B'
           RETURN d.fqn AS fqn
         assert:
-          - { non_empty: true }
+          - { row_count: 1 }
+          - { row: { fqn: "main.B" } }
 
   - name: Child class contains child_method
     query: |
@@ -60,7 +63,8 @@ tests:
       WHERE cls.name = 'Child' AND m.name = 'child_method'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { fqn: "main.Child.child_method" } }
 
   - name: Child inherits from Parent
     description: "Child(Parent) should produce metadata with super_types"
@@ -69,4 +73,5 @@ tests:
       WHERE d.name = 'Child'
       RETURN d.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { fqn: "main.Child" } }
