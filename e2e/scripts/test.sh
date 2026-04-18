@@ -25,8 +25,7 @@ helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
   --namespace "$NS_GKG" \
   --kube-context "$KCTX" \
   --set "namespaces.gitlab=$NS_GITLAB" \
-  --set "namespaces.gkg=$NS_GKG" \
-  --set "namespaces.clickhouse=$NS_CH"
+  --set "namespaces.gkg=$NS_GKG"
 
 # Stream logs in background (retry until pod ready, follow once)
 (while ! $KC logs -f job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null; do

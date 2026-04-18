@@ -33,5 +33,10 @@ log "Deploying via helmfile"
 cd "$E2E_DIR"
 helmfile --file helmfile.yaml.gotmpl sync
 
+# Shrink CACHE-layout LIFETIME on traversal-path dictionaries so the routes-
+# vs-namespaces race window for new namespaces is sub-second instead of the
+# upstream 60-300s. Must run after GitLab CH migrations created the dicts.
+"$E2E_DIR/scripts/patch-ch-dicts.sh"
+
 log "Setup complete (SHA: $E2E_SHA)"
 log "Run: E2E_SHA=$E2E_SHA scripts/test.sh"

@@ -15,9 +15,7 @@ resources:
 namespaces:
   gitlab: ""
   gkg: ""
-  clickhouse: ""
 
 configMap: e2e-robot-tests
 rootCredentialsSecret: gitlab-root-credentials
-clickhouseCredentialsSecret: clickhouse-default-credentials
 ttlSecondsAfterFinished: 600

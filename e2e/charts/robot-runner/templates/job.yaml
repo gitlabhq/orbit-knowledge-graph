@@ -32,15 +32,6 @@ spec:
             secretKeyRef:
               name: {{ .Values.rootCredentialsSecret }}
               key: password
-        - name: CLICKHOUSE_URL
-          value: "http://clickhouse.{{ .Values.namespaces.clickhouse }}.svc.cluster.local:8123"
-        - name: CLICKHOUSE_USER
-          value: "default"
-        - name: CLICKHOUSE_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.clickhouseCredentialsSecret }}
-              key: password
         volumeMounts:
         - name: tests
           mountPath: /tests
