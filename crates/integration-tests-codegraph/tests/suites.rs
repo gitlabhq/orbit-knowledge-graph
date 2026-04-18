@@ -96,6 +96,10 @@ yaml_test!(
     "java/generic_type_stripping.yaml"
 );
 yaml_test!(java_cross_file_type_flow, "java/cross_file_type_flow.yaml");
+yaml_test!(
+    java_annotation_references,
+    "java/annotation_references.yaml"
+);
 
 // Kotlin
 yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");
