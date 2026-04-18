@@ -78,6 +78,8 @@ async fn data_correctness() {
         aggregation::aggregation_nested_path_includes_child_projects,
         aggregation::aggregation_non_nested_path_only,
         aggregation::aggregation_empty_security_context_rejects_at_compile,
+        aggregation::aggregation_no_group_by_with_filtered_other_node,
+        aggregation::aggregation_no_group_by_preserves_relationship_kind,
         // path finding
         path_finding::path_finding_returns_valid_complete_paths,
         path_finding::path_finding_multiple_destinations_returns_distinct_paths,

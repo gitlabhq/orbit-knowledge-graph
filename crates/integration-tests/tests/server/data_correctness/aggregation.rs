@@ -400,6 +400,57 @@ pub(super) async fn aggregation_nested_path_includes_child_projects(ctx: &TestCo
     resp.assert_node_absent("Group", 102);
 }
 
+// Aggregation with a relationship but no `group_by` makes every participating
+// node edge-only. The optimizer must not emit `node.id IN (...)` for cascade
+// CTEs on edge-only nodes: their tables are absent from FROM and the bare
+// identifier would be parsed as a database name by ClickHouse.
+pub(super) async fn aggregation_no_group_by_with_filtered_other_node(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "u", "entity": "User", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_aggregation_value_i64("total_mrs", 2);
+}
+
+// When both nodes of the relationship are edge-only, `build_joins` starts
+// from the edge scan directly. The `relationship_kind` filter must still
+// reach the WHERE clause or the count leaks rows from every relationship
+// type between the two endpoint kinds. Seed has 4 AUTHORED User to
+// MergeRequest edges and 3 APPROVED edges on the same endpoint kinds.
+pub(super) async fn aggregation_no_group_by_preserves_relationship_kind(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "total_authored"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_aggregation_value_i64("total_authored", 4);
+}
+
 pub(super) async fn aggregation_non_nested_path_only(ctx: &TestContext) {
     // Only 1/102/ — flat group with one project and two MEMBER_OF edges.
     let security_ctx = SecurityContext::new(1, vec!["1/102/".into()]).unwrap();

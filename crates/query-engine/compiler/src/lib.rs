@@ -228,4 +228,36 @@ mod tests {
             "unprefixed search should use gl_group, got: {sql}"
         );
     }
+
+    /// Aggregation with a relationship and a property-less `count(target)`
+    /// must never emit a bare `target.id` reference: ClickHouse reads that
+    /// as `database.column` and fails with `Database target does not exist`.
+    /// The relationship_kind filter must also survive to the main scan.
+    #[test]
+    fn aggregation_with_relationship_emits_no_bare_node_ref() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project", "node_ids": [278964]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("COUNT(mr.id)") && !sql.contains("count(mr.id)"),
+            "must not reference bare `mr.id` when mr table is not joined, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("IN_PROJECT") || sql.contains("relationship_kind"),
+            "relationship_kind filter must survive, got:\n{sql}"
+        );
+    }
 }

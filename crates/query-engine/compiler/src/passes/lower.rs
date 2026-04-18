@@ -481,14 +481,14 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     }
 
     // Build the FROM tree.
-    let (from, edge_aliases) = if input.relationships.is_empty() {
+    let (from, edge_aliases, extra_edge_cond) = if input.relationships.is_empty() {
         // Single-node aggregation — no edges, just a node scan.
         let node = input
             .nodes
             .first()
             .ok_or_else(|| QueryError::Lowering("aggregation requires at least one node".into()))?;
         let table = resolve_table(node)?;
-        (TableRef::scan(&table, &node.id), HashMap::new())
+        (TableRef::scan(&table, &node.id), HashMap::new(), None)
     } else {
         let rel_tables: Vec<Vec<String>> = input
             .relationships
@@ -515,6 +515,7 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     let mut node_edge_col: HashMap<String, (String, String)> = HashMap::new();
     let mut ctes = Vec::new();
     let mut where_parts: Vec<Expr> = where_clause.into_iter().collect();
+    where_parts.extend(extra_edge_cond);
 
     // Build _nf_* CTEs for non-group-by nodes with conditions. Edge-only
     // targets also get their node_edge_col mapping populated here.
@@ -1499,7 +1500,7 @@ fn build_joins(
     rels: &[InputRelationship],
     skip_nodes: &HashSet<String>,
     rel_tables: &[Vec<String>],
-) -> Result<(TableRef, HashMap<usize, String>)> {
+) -> Result<(TableRef, HashMap<usize, String>, Option<Expr>)> {
     // Find the first non-skipped node to start the FROM tree.
     let first_rel = rels
         .first()
@@ -1510,12 +1511,14 @@ fn build_joins(
     } else if !skip_nodes.contains(&first_rel.to) {
         &first_rel.to
     } else {
-        // Both nodes skipped — start from edge.
+        // Both nodes skipped: start from edge. There's no JOIN ON to
+        // attach the type filter to, so surface it for the caller's WHERE.
         let alias = "e0".to_string();
-        let (edge, _) = multi_edge_scan(&rel_tables[0], &alias, &type_filter(&first_rel.types));
+        let (edge, type_cond) =
+            multi_edge_scan(&rel_tables[0], &alias, &type_filter(&first_rel.types));
         let mut edge_aliases = HashMap::new();
         edge_aliases.insert(0, alias);
-        return Ok((edge, edge_aliases));
+        return Ok((edge, edge_aliases, type_cond));
     };
 
     let start = find_node(nodes, start_node_id)?;
@@ -1671,7 +1674,7 @@ fn build_joins(
         }
     }
 
-    Ok((result, edge_aliases))
+    Ok((result, edge_aliases, None))
 }
 
 /// Build a WHERE clause from node conditions and edge filters.
