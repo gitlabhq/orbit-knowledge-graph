@@ -1093,9 +1093,9 @@ fn find_first_ident(node: &Node<StrDoc<SupportLang>>, ident_kinds: &[&str]) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsl::extractors::field;
-    use crate::dsl::predicates::*;
-    use crate::dsl::types::*;
+    use crate::v2::dsl::extractors::field;
+    use crate::v2::dsl::predicates::*;
+    use crate::v2::dsl::types::*;
 
     fn parse_with(spec: &LanguageSpec, code: &str) -> ParsedDefs {
         spec.parse_defs_only(code.as_bytes(), "test.py", Language::Python)
