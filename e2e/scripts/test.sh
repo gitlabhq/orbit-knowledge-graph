@@ -25,7 +25,8 @@ helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
   --namespace "$NS_GKG" \
   --kube-context "$KCTX" \
   --set "namespaces.gitlab=$NS_GITLAB" \
-  --set "namespaces.gkg=$NS_GKG"
+  --set "namespaces.gkg=$NS_GKG" \
+  --set "namespaces.clickhouse=$NS_CH"
 
 # Stream logs in background (retry until pod ready, follow once)
 (while ! $KC logs -f job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null; do
@@ -116,7 +117,7 @@ if [[ -n "$CH_POD" ]]; then
   # keep dumps manageable on chatty tables.
   CH_DUMP_TABLES=$(ch_query "SELECT database || '.' || name FROM system.tables
                              WHERE database IN ('datalake','gkg')
-                               AND engine NOT IN ('View','Null')
+                               AND engine NOT IN ('View','Null','Dictionary')
                              ORDER BY database, name FORMAT TSV" 2>/dev/null || true)
   for tbl in $CH_DUMP_TABLES; do
     safe=$(echo "$tbl" | tr '.' '-')

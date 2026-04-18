@@ -6,6 +6,7 @@ Library             RequestsLibrary
 Library             Collections
 Library             String
 Library             DateTime
+Resource            clickhouse.resource
 
 
 *** Variables ***
@@ -33,6 +34,7 @@ Bootstrap E2E Credentials
     ...    Authorization=Bearer ${token}    Content-Type=application/json
 
     ${user_id}=    Ensure E2E Bot User    ${root_headers}
+    Reload Traversal Path Dictionaries
     ${pat}=    Issue PAT For User    ${root_headers}    ${user_id}
     Set Global Variable    ${GITLAB_PAT}    ${pat}
     Log    E2E credentials bootstrapped (user_id=${user_id})
@@ -101,6 +103,7 @@ Create Group
     ${body}=    Create Dictionary    name=${name}    path=${path}    visibility=public
     ${resp}=    POST    ${GITLAB_URL}/api/v4/groups
     ...    headers=${headers}    json=${body}    expected_status=201
+    Reload Traversal Path Dictionaries
     RETURN    ${resp.json()}
 
 Enable Knowledge Graph
@@ -123,6 +126,7 @@ Create Project
     ${body}=    Create Dictionary    name=${name}    namespace_id=${namespace_id}    visibility=public
     ${resp}=    POST    ${GITLAB_URL}/api/v4/projects
     ...    headers=${headers}    json=${body}    expected_status=201
+    Reload Traversal Path Dictionaries
     RETURN    ${resp.json()}
 
 Create Issue
