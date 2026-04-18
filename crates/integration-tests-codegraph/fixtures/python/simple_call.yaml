@@ -14,7 +14,8 @@ tests:
       WHERE d.name = 'foo'
       RETURN d.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { fqn: "main.foo" } }
 
   - name: File has edge to foo (structural + call)
     query: |
@@ -22,4 +23,5 @@ tests:
       WHERE d.name = 'foo'
       RETURN f.path AS file, d.fqn AS target
     assert:
-      - { non_empty: true }
+      - { row_count: 2 }
+      - { row: { file: "main.py", target: "main.foo" } }

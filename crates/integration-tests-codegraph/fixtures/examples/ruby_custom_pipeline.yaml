@@ -30,8 +30,8 @@ tests:
       WHERE d.name = 'User'
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
-      - { non_empty: true }
-      - { contains_row: { fqn: "User", type: "Class" } }
+      - { row_count: 1 }
+      - { row: { fqn: "User", type: "Class" } }
 
   - name: User methods extracted
     query: |
@@ -40,8 +40,8 @@ tests:
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 2 }
-      - { contains_row: { name: "initialize", type: "Method" } }
-      - { contains_row: { name: "greet", type: "Method" } }
+      - { row: { name: "initialize", type: "Method" } }
+      - { row: { name: "greet", type: "Method" } }
 
   - name: Nested module FQN
     query: |
@@ -49,7 +49,7 @@ tests:
       WHERE d.name = 'AuthService'
       RETURN d.fqn AS fqn
     assert:
-      - { contains_row: { fqn: "Services::AuthService" } }
+      - { row: { fqn: "Services::AuthService" } }
 
   - name: Deeply nested method FQN
     query: |
@@ -57,7 +57,7 @@ tests:
       WHERE d.name = 'authenticate'
       RETURN d.fqn AS fqn
     assert:
-      - { contains_row: { fqn: "Services::AuthService::authenticate" } }
+      - { row: { fqn: "Services::AuthService::authenticate" } }
 
   - name: All definitions count
     query: |

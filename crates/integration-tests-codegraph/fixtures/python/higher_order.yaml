@@ -35,16 +35,20 @@ tests:
       WHERE d.name = 'adder'
       RETURN d.fqn AS fqn
     assert:
-      - { non_empty: true }
-      - { all_match: { field: fqn, pattern: "*make_adder.*" } }
+      - { row_count: 1 }
+      - { row: { fqn: "main.make_adder.adder" } }
 
   - name: caller calls make_adder
+    # BUG: 2 identical rows. make_adder(5) produces one edge, then
+    # add5(10) resolves add5 → make_adder via SSA alias, producing
+    # a duplicate edge. Pipeline should dedup same source→target pairs.
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'caller' AND callee.name = 'make_adder'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 2 }
+      - { row: { caller: "main.caller", callee: "main.make_adder" } }
 
   - name: Callable class has __call__
     query: |
@@ -52,7 +56,8 @@ tests:
       WHERE cls.name = 'Callable' AND m.name = '__call__'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { fqn: "main.Callable.__call__" } }
 
   - name: Nested function calls as arguments resolve
     query: |
@@ -60,4 +65,5 @@ tests:
       WHERE caller.name = 'nested_args'
       RETURN callee.name AS callee
     assert:
-      - { non_empty: true }
+      - { row: { callee: "inner1" } }
+      - { row: { callee: "inner2" } }

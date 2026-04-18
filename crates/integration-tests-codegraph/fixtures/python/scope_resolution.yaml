@@ -33,7 +33,8 @@ tests:
       WHERE caller.name = 'outer' AND callee.name = 'global_func'
       RETURN callee.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 2 }
+      - { row: { fqn: "main.outer.global_func" } }
 
   - name: Call inside for loop resolves
     query: |
@@ -41,7 +42,8 @@ tests:
       WHERE caller.name = 'for_loop_caller' AND callee.name = 'global_func'
       RETURN callee.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { fqn: "main.global_func" } }
 
   - name: Call in comprehension resolves
     query: |
@@ -49,7 +51,8 @@ tests:
       WHERE caller.name = 'comprehension_caller' AND callee.name = 'global_func'
       RETURN callee.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { fqn: "main.global_func" } }
 
   - name: Calls in try/except/finally resolve
     query: |
@@ -57,4 +60,5 @@ tests:
       WHERE caller.name = 'try_caller' AND callee.name = 'global_func'
       RETURN callee.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 3 }
+      - { row: { fqn: "main.global_func" } }

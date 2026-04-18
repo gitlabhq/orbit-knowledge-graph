@@ -46,43 +46,45 @@ tests:
       MATCH (d:Definition)
       RETURN count(d) AS n
     assert:
-      - { non_empty: true }
+      - { count_gte: { field: n, value: 10 } }
 
   - name: simple_function exists
     query: |
       MATCH (d:Definition) WHERE d.name = 'simple_function'
       RETURN d.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { fqn: "main.simple_function" } }
 
   - name: module_lambda exists
     query: |
       MATCH (d:Definition) WHERE d.name = 'module_lambda'
       RETURN d.definition_type AS dt
     assert:
-      - { non_empty: true }
-      - { all_match: { field: dt, pattern: "Lambda" } }
+      - { row_count: 1 }
+      - { row: { dt: "Lambda" } }
 
   - name: async_function exists
     query: |
       MATCH (d:Definition) WHERE d.name = 'async_function'
       RETURN d.fqn AS fqn
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { fqn: "main.async_function" } }
 
   - name: Nested inner_function has correct FQN
     query: |
       MATCH (d:Definition) WHERE d.name = 'inner_function'
       RETURN d.fqn AS fqn
     assert:
-      - { all_match: { field: fqn, pattern: "*outer_function.*" } }
+      - { match: { field: fqn, pattern: "*outer_function.*" } }
 
   - name: InnerClass has correct FQN
     query: |
       MATCH (d:Definition) WHERE d.name = 'InnerClass'
       RETURN d.fqn AS fqn
     assert:
-      - { all_match: { field: fqn, pattern: "*OuterClass.*" } }
+      - { match: { field: fqn, pattern: "*OuterClass.*" } }
 
   - name: ClassWithMethods has multiple methods
     query: |
@@ -90,4 +92,4 @@ tests:
       WHERE cls.name = 'ClassWithMethods'
       RETURN count(m) AS n
     assert:
-      - { non_empty: true }
+      - { count_gte: { field: n, value: 5 } }

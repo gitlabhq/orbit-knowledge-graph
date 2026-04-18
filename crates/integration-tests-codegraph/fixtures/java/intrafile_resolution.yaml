@@ -33,8 +33,8 @@ tests:
       WHERE caller.name = 'run' AND callee.name = 'helper'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
-      - { contains_row: { caller: "com.example.App.run", callee: "com.example.App.helper" } }
+      - { row_count: 1 }
+      - { row: { caller: "com.example.App.run", callee: "com.example.App.helper" } }
 
   - name: "callStatic() calls staticMethod()"
     query: |
@@ -42,7 +42,8 @@ tests:
       WHERE caller.name = 'callStatic' AND callee.name = 'staticMethod'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "com.example.App.callStatic", callee: "com.example.App.staticMethod" } }
 
   - name: "All methods have com.example.App FQN prefix"
     query: |
@@ -50,5 +51,5 @@ tests:
       WHERE cls.name = 'App'
       RETURN m.fqn AS fqn
     assert:
-      - { non_empty: true }
-      - { all_match: { field: fqn, pattern: "com.example.App.*" } }
+      - { row_count: 5 }
+      - { match: { field: fqn, pattern: "com.example.App.*" } }

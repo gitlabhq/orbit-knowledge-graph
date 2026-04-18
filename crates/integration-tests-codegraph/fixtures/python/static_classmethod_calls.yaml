@@ -22,7 +22,8 @@ tests:
       WHERE caller.name = 'class_method' AND callee.name = 'static_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "main.Service.class_method", callee: "main.Service.static_method" } }
 
   - name: instance_method calls static_method
     query: |
@@ -30,7 +31,8 @@ tests:
       WHERE caller.name = 'instance_method' AND callee.name = 'static_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "main.Service.instance_method", callee: "main.Service.static_method" } }
 
   - name: instance_method calls class_method
     query: |
@@ -38,4 +40,5 @@ tests:
       WHERE caller.name = 'instance_method' AND callee.name = 'class_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "main.Service.instance_method", callee: "main.Service.class_method" } }

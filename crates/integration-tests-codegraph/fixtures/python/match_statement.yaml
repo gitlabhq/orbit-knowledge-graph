@@ -30,7 +30,8 @@ tests:
       WHERE caller.name = 'dispatcher' AND callee.name = 'get_value'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "main.dispatcher", callee: "main.get_value" } }
 
   - name: handle_one() called from dispatcher
     query: |
@@ -38,7 +39,8 @@ tests:
       WHERE caller.name = 'dispatcher' AND callee.name = 'handle_one'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "main.dispatcher", callee: "main.handle_one" } }
 
   - name: handle_default() called from dispatcher
     query: |
@@ -46,4 +48,5 @@ tests:
       WHERE caller.name = 'dispatcher' AND callee.name = 'handle_default'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "main.dispatcher", callee: "main.handle_default" } }

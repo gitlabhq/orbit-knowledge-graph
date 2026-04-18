@@ -16,7 +16,8 @@ tests:
       WHERE caller.name = 'method1' AND callee.name = 'method2'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { non_empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "main.MyClass.method1", callee: "main.MyClass.method2" } }
 
   - name: Both methods in same file
     query: |
@@ -24,5 +25,5 @@ tests:
       WHERE caller.name = 'method1' AND callee.name = 'method2'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { all_match: { field: src, pattern: "main.py" } }
-      - { all_match: { field: tgt, pattern: "main.py" } }
+      - { match: { field: src, pattern: "main.py" } }
+      - { match: { field: tgt, pattern: "main.py" } }
