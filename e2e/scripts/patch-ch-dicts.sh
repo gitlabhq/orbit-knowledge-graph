@@ -61,9 +61,14 @@ done
 # `SHOW CREATE DICTIONARY` round-trip preserves SOURCE / LAYOUT / column
 # types so we don't have to duplicate the full DDL here — only the LIFETIME
 # clause is rewritten.
+#
+# FORMAT TSVRaw is critical: the default TabSeparated output escapes
+# newlines inside string literals (e.g. the embedded SOURCE QUERY) as
+# literal `\n`, which makes the round-tripped DDL un-parseable. TSVRaw
+# emits strings verbatim so the multi-line SOURCE QUERY survives intact.
 for dict in "${DICTS[@]}"; do
   log "Patching $dict"
-  ddl=$(ch_query "SHOW CREATE DICTIONARY $dict" 2>/dev/null || true)
+  ddl=$(ch_query "SHOW CREATE DICTIONARY $dict FORMAT TSVRaw" 2>/dev/null || true)
   if [[ -z "$ddl" ]]; then
     log "  $dict not found, skipping"
     continue
