@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 
@@ -45,6 +45,12 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
     // subsequent entries must share the same root or extraction fails.
     let mut archive_root: Option<OsString> = None;
 
+    // Symlinks are deferred until all regular files and directories are
+    // extracted. This guarantees no symlink exists on disk during the main
+    // extraction loop, so create_dir_all and dest.exists() can never follow
+    // a symlink that resolves outside the target directory.
+    let mut deferred_symlinks: Vec<(PathBuf, PathBuf)> = Vec::new();
+
     for entry in archive
         .entries()
         .map_err(|e| ArchiveError::Archive(e.to_string()))?
@@ -83,17 +89,22 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
 
         let dest = target_canonical.join(&relative_path);
 
+        if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
+            let link_target = entry
+                .link_name()
+                .map_err(|e| ArchiveError::Archive(e.to_string()))?
+                .map(|cow| cow.into_owned())
+                .unwrap_or_default();
+            deferred_symlinks.push((dest, link_target));
+            continue;
+        }
+
         let dest_canonical = if dest.exists() {
             dest.canonicalize()
                 .map_err(|e| ArchiveError::Io(e.to_string()))?
-        } else if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| ArchiveError::Io(e.to_string()))?;
-            parent
-                .canonicalize()
-                .map_err(|e| ArchiveError::Io(e.to_string()))?
-                .join(dest.file_name().unwrap_or_default())
         } else {
-            dest.clone()
+            gkg_utils::fs::safe_create_dir_all(&dest, &target_canonical)
+                .map_err(|e| ArchiveError::Archive(e.to_string()))?
         };
 
         if !dest_canonical.starts_with(&target_canonical) {
@@ -103,32 +114,24 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
             )));
         }
 
-        let entry_type = entry.header().entry_type();
-        let is_link = entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link;
-        if let (true, Ok(Some(link_name))) = (is_link, entry.link_name()) {
-            let link_target = if link_name.is_absolute() {
-                link_name.to_path_buf()
-            } else {
-                dest_canonical
-                    .parent()
-                    .unwrap_or(&target_canonical)
-                    .join(&link_name)
-            };
-
-            let normalized = normalize_path(&link_target);
-            if !normalized.starts_with(&target_canonical) {
-                return Err(ArchiveError::Archive(format!(
-                    "symlink target escapes target directory: {} -> {}",
-                    relative_path.display(),
-                    link_name.display()
-                )));
-            }
-        }
-
         entry
             .unpack(&dest_canonical)
             .map_err(|e| ArchiveError::Archive(e.to_string()))?;
     }
+
+    // Create symlinks now that all regular files and directories are in place.
+    // Earlier symlinks in the list can redirect later create_dir_all calls,
+    // so each iteration validates the path via safe_create_dir_all.
+    for (link_path, target) in deferred_symlinks {
+        gkg_utils::fs::safe_create_dir_all(&link_path, &target_canonical)
+            .map_err(|e| ArchiveError::Archive(e.to_string()))?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link_path)
+            .map_err(|e| ArchiveError::Io(e.to_string()))?;
+    }
+
+    gkg_utils::fs::validate_symlinks(&target_canonical)
+        .map_err(|e| ArchiveError::Archive(e.to_string()))?;
 
     Ok(())
 }
@@ -167,19 +170,6 @@ fn strip_archive_root(
     Ok(components.as_path().to_path_buf())
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
-    path.components().fold(PathBuf::new(), |mut acc, c| {
-        match c {
-            Component::ParentDir => {
-                acc.pop();
-            }
-            Component::CurDir => {}
-            _ => acc.push(c),
-        }
-        acc
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,43 +177,32 @@ mod tests {
     use flate2::write::GzEncoder;
     use std::io::Write;
 
-    fn build_tar_gz(entries: Vec<(&str, &[u8])>) -> Vec<u8> {
-        let mut tar_builder = tar::Builder::new(Vec::new());
-        for (path, content) in entries {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(content.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            tar_builder.append_data(&mut header, path, content).unwrap();
-        }
-        let tar_bytes = tar_builder.into_inner().unwrap();
-
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
-        encoder.write_all(&tar_bytes).unwrap();
-        encoder.finish().unwrap()
+    enum Entry<'a> {
+        File(&'a str, &'a [u8]),
+        Symlink(&'a str, &'a str),
     }
 
-    fn build_tar_gz_with_symlink(file_path: &str, link_path: &str, link_target: &str) -> Vec<u8> {
+    fn build_archive(entries: &[Entry]) -> Vec<u8> {
         let mut tar_builder = tar::Builder::new(Vec::new());
-
-        let content = b"hello";
-        let mut header = tar::Header::new_gnu();
-        header.set_size(content.len() as u64);
-        header.set_mode(0o644);
-        header.set_cksum();
-        tar_builder
-            .append_data(&mut header, file_path, &content[..])
-            .unwrap();
-
-        let mut link_header = tar::Header::new_gnu();
-        link_header.set_entry_type(tar::EntryType::Symlink);
-        link_header.set_size(0);
-        link_header.set_mode(0o777);
-        link_header.set_cksum();
-        tar_builder
-            .append_link(&mut link_header, link_path, link_target)
-            .unwrap();
-
+        for entry in entries {
+            match entry {
+                Entry::File(path, content) => {
+                    let mut h = tar::Header::new_gnu();
+                    h.set_size(content.len() as u64);
+                    h.set_mode(0o644);
+                    h.set_cksum();
+                    tar_builder.append_data(&mut h, path, *content).unwrap();
+                }
+                Entry::Symlink(path, target) => {
+                    let mut h = tar::Header::new_gnu();
+                    h.set_entry_type(tar::EntryType::Symlink);
+                    h.set_size(0);
+                    h.set_mode(0o777);
+                    h.set_cksum();
+                    tar_builder.append_link(&mut h, *path, *target).unwrap();
+                }
+            }
+        }
         let tar_bytes = tar_builder.into_inner().unwrap();
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
         encoder.write_all(&tar_bytes).unwrap();
@@ -233,19 +212,21 @@ mod tests {
     #[test]
     fn extracts_and_strips_archive_root() {
         let dir = tempfile::tempdir().unwrap();
-        // Gitaly archives wrap under <slug>-<ref>/
-        let data = build_tar_gz(vec![
-            ("project-main/src/main.rs", b"fn main() {}"),
-            ("project-main/src/lib.rs", b"pub mod lib;"),
+        let data = build_archive(&[
+            Entry::File("project-main/src/main.rs", b"fn main() {}"),
+            Entry::File("project-main/src/lib.rs", b"pub mod lib;"),
         ]);
 
         extract_tar_gz(&data, dir.path()).unwrap();
 
-        // Root directory stripped -- paths are repo-relative
-        let content = std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap();
-        assert_eq!(content, "fn main() {}");
-        let content = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
-        assert_eq!(content, "pub mod lib;");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap(),
+            "fn main() {}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap(),
+            "pub mod lib;"
+        );
         assert!(!dir.path().join("project-main").exists());
     }
 
@@ -328,15 +309,18 @@ mod tests {
     #[test]
     fn rejects_inconsistent_archive_root() {
         let dir = tempfile::tempdir().unwrap();
-        // Two entries under different roots -- invalid archive
-        let data = build_tar_gz(vec![("root-a/file1.rs", b"a"), ("root-b/file2.rs", b"b")]);
+        let data = build_archive(&[
+            Entry::File("root-a/file1.rs", b"a"),
+            Entry::File("root-b/file2.rs", b"b"),
+        ]);
 
         let result = extract_tar_gz(&data, dir.path());
         assert!(result.is_err());
-        let error = result.unwrap_err().to_string();
         assert!(
-            error.contains("not under the expected root"),
-            "got: {error}"
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not under the expected root"),
         );
     }
 
@@ -399,13 +383,98 @@ mod tests {
     #[test]
     fn rejects_symlink_escaping_target_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let data =
-            build_tar_gz_with_symlink("root/legit.txt", "root/escape", "../../../etc/passwd");
+        let outside = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("root/legit.txt", b"hello"),
+            Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
+        ]);
 
         let result = extract_tar_gz(&data, dir.path());
-
         assert!(result.is_err());
-        let error = result.unwrap_err().to_string();
-        assert!(error.contains("symlink target escapes"), "got: {error}");
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("symlink target escapes")
+        );
+    }
+
+    #[test]
+    fn rejects_chained_symlink_attack() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("root/legit.txt", b"legit"),
+            Entry::Symlink("root/a", "."),
+            Entry::Symlink("root/b", "a/.."),
+        ]);
+
+        let result = extract_tar_gz(&data, dir.path());
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("symlink target escapes")
+        );
+    }
+
+    #[test]
+    fn prevents_create_dir_all_through_escaping_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
+            Entry::File("root/escape/sub/pwned.txt", b"pwned"),
+        ]);
+
+        let result = extract_tar_gz(&data, dir.path());
+        assert!(result.is_err());
+        assert!(!outside.path().join("sub").exists());
+    }
+
+    #[test]
+    fn prevents_deferred_symlink_redirect_of_create_dir_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("root/legit.txt", b"legit"),
+            Entry::Symlink("root/a", outside.path().to_str().unwrap()),
+            Entry::Symlink("root/a/b/link", "foo"),
+        ]);
+
+        let result = extract_tar_gz(&data, dir.path());
+        assert!(result.is_err());
+        assert!(
+            !outside.path().join("b").exists(),
+            "create_dir_all must not follow symlink outside target"
+        );
+    }
+
+    #[test]
+    fn allows_valid_internal_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("root/src/lib.rs", b"real content"),
+            Entry::Symlink("root/bin/run", "../src/lib.rs"),
+        ]);
+
+        extract_tar_gz(&data, dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("bin/run")).unwrap(),
+            "real content"
+        );
+    }
+
+    #[test]
+    fn rejects_dangling_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("root/legit.txt", b"hello"),
+            Entry::Symlink("root/dangling", "nonexistent/file.rs"),
+        ]);
+
+        let result = extract_tar_gz(&data, dir.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("dangling symlink"));
     }
 }
