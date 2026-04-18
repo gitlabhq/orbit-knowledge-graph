@@ -143,6 +143,8 @@ impl DslLanguage for PythonDsl {
             reference("call").name_from(field("function")),
             // Bare type references in annotations: x: MyClass, def foo() -> MyClass
             reference("type").name_from(text()),
+            // Decorator references: @dataclass, @staticmethod
+            reference("decorator"),
         ]
     }
 

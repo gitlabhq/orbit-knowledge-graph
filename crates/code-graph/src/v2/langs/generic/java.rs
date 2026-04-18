@@ -106,6 +106,8 @@ impl DslLanguage for JavaDsl {
             reference("type_identifier")
                 .name_from(text())
                 .when(!parent_is("object_creation_expression")),
+            // Annotation references: @Override, @Deprecated
+            references(&["marker_annotation", "annotation"]).name_from(field("name")),
         ]
     }
 
