@@ -114,6 +114,11 @@
               "type": "boolean",
               "description": "Whether users can filter on this field. Defaults to true. Set to false for internal columns (e.g. traversal_path) that should only be system-controlled.",
               "default": true
+            },
+            "admin_only": {
+              "type": "boolean",
+              "description": "Whether this field is only visible to instance administrators. Defaults to false. When true, non-admin users cannot select or filter on this field.",
+              "default": false
             }
           },
           "required": ["type", "source"],

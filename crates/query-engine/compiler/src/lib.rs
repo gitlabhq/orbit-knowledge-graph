@@ -125,8 +125,16 @@ pub fn compile(
 /// For hydration queries (`QueryType::Hydration`), skips security, check, and
 /// hydrate plan passes but applies dedup (argMax) — codegen defaults to
 /// `HydrationPlan::None`. For all other query types, runs the full secure pipeline.
-pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQueryContext> {
-    let env = SecureEnv::new(Arc::new(Ontology::new()), ctx.clone());
+///
+/// The real ontology must be passed so `RestrictPass` can enforce
+/// `admin_only` on pre-built hydration inputs as defense-in-depth against
+/// bugs in upstream plan-building.
+pub fn compile_input(
+    input: Input,
+    ontology: &Arc<Ontology>,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let env = SecureEnv::new(Arc::clone(ontology), ctx.clone());
     let is_hydration = input.query_type == QueryType::Hydration;
     let state = QueryState::from_input(input);
 
@@ -154,7 +162,7 @@ pub fn compile_input(input: Input, ctx: &SecurityContext) -> Result<CompiledQuer
 /// ```
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let env = LocalEnv::new(Arc::new(ontology.clone()));
+    let env = LocalEnv::local(Arc::new(ontology.clone()));
     let state = DuckDbState::from_json(json_input);
     let pipeline = pipelines::duckdb().seal();
     pipeline.execute(state, &env)?.into_output().count_err()
@@ -168,7 +176,7 @@ pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQu
 /// metadata for table resolution and column aliasing.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local_input(input: Input, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let env = LocalEnv::new(Arc::new(ontology.clone()));
+    let env = LocalEnv::local(Arc::new(ontology.clone()));
     let state = DuckDbState::from_input(input);
     let pipeline = pipelines::duckdb_hydration().seal();
     pipeline.execute(state, &env)?.into_output().count_err()

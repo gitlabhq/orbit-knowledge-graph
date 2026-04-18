@@ -227,6 +227,7 @@ fn observer_records_all_pass_completions() {
         vec![
             "validate",
             "normalize",
+            "restrict",
             "lower",
             "optimize",
             "enforce",
@@ -441,6 +442,7 @@ fn hydration_preset_skips_security_and_check() {
     assert_eq!(
         pass_names,
         vec![
+            "restrict",
             "lower",
             "optimize",
             "enforce",

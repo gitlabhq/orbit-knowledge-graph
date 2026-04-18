@@ -52,6 +52,21 @@ pub struct SecureEnv {
 #[derive(PipelineEnv)]
 pub struct LocalEnv {
     ontology: Arc<Ontology>,
+    /// Local/CLI execution has no multi-tenant security boundary; running
+    /// as admin lets `HydratePlanPass` emit unrestricted column specs.
+    security_ctx: SecurityContext,
+}
+
+impl LocalEnv {
+    /// Convenience constructor that fixes `security_ctx` to an admin context,
+    /// so `admin_only` ontology fields remain accessible in local tooling.
+    #[must_use]
+    pub fn local(ontology: Arc<Ontology>) -> Self {
+        let security_ctx = SecurityContext::new(0, vec![])
+            .expect("empty traversal paths are always valid")
+            .with_role(true, None);
+        Self::new(ontology, security_ctx)
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -101,7 +116,7 @@ impl DuckDbState {
 /// Standard ClickHouse compilation pipeline.
 ///
 /// ```text
-/// JSON → Validate → Normalize → Lower → Optimize → Enforce → Deduplicate → Security → Check → HydratePlan → Settings → Codegen
+/// JSON → Validate → Normalize → Restrict → Lower → Optimize → Enforce → Deduplicate → Security → Check → HydratePlan → Settings → Codegen
 /// ```
 ///
 /// Deduplicate runs before Security so that Security's subquery recursion
@@ -112,6 +127,7 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
         .pass(ValidatePass)
         .seal(SealJson)
         .pass(NormalizePass)
+        .pass(RestrictPass)
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
@@ -129,10 +145,11 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
 /// Used by tests and the `compile_input()` public API for non-hydration queries.
 ///
 /// ```text
-/// Input → Lower → Optimize → Enforce → Deduplicate → Security → Check → HydratePlan → Settings → Codegen
+/// Input → Restrict → Lower → Optimize → Enforce → Deduplicate → Security → Check → HydratePlan → Settings → Codegen
 /// ```
 pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
+        .pass(RestrictPass)
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
@@ -152,10 +169,11 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
 /// to each UNION ALL arm so hydration reads the latest non-deleted version.
 ///
 /// ```text
-/// Input → Lower → Optimize → Enforce → Deduplicate → Settings → Codegen
+/// Input → Restrict → Lower → Optimize → Enforce → Deduplicate → Settings → Codegen
 /// ```
 pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
+        .pass(RestrictPass)
         .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)

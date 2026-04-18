@@ -113,6 +113,8 @@ struct PropertyYaml {
     like_allowed: bool,
     #[serde(default = "PropertyYaml::default_filterable")]
     filterable: bool,
+    #[serde(default)]
+    admin_only: bool,
 }
 
 impl PropertyYaml {
@@ -238,6 +240,7 @@ impl NodeYaml {
                     enum_type: prop_def.enum_type,
                     like_allowed: prop_def.like_allowed,
                     filterable: prop_def.filterable,
+                    admin_only: prop_def.admin_only,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

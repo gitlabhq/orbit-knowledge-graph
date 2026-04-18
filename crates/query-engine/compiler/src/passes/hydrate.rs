@@ -1,9 +1,12 @@
 //! Hydration plan: decides how the server fetches entity properties after
 //! the base query returns IDs.
 
+use std::collections::HashSet;
+
 use ontology::{FieldSource, Ontology, VirtualSource};
 
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
+use crate::types::SecurityContext;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -74,11 +77,20 @@ pub struct VirtualColumnRequest {
 ///   columns come from `node.virtual_columns` (populated by normalize).
 ///   Search/Aggregation only get a plan when VCRs are present.
 /// - PathFinding/Neighbors: dynamic plan over all ontology entity types.
-pub fn generate_hydration_plan(input: &Input, ontology: &Ontology) -> HydrationPlan {
+///
+/// The security context is threaded through so dynamic plans can strip
+/// `admin_only` fields before they reach the hydration query — static
+/// plans rely on `RestrictPass` having already pruned them from
+/// `node.columns`.
+pub fn generate_hydration_plan(
+    input: &Input,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) -> HydrationPlan {
     match input.query_type {
         QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => {
-            HydrationPlan::Dynamic(build_dynamic_specs(input, ontology))
+            HydrationPlan::Dynamic(build_dynamic_specs(input, ontology, security_ctx))
         }
         QueryType::Search | QueryType::Aggregation | QueryType::Traversal => {
             let mut templates = build_static_templates(input, ontology);
@@ -136,11 +148,27 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
 /// Pre-resolve column specs for every ontology entity type based on the
 /// query's `dynamic_columns` mode. The server matches discovered entity
 /// types against this list at runtime.
-fn build_dynamic_specs(input: &Input, ontology: &Ontology) -> Vec<DynamicEntityColumns> {
+///
+/// Non-admin callers have `admin_only` fields stripped from both the
+/// wildcard (`*`) and default column sets. Without this filter a
+/// non-admin using `dynamic_columns: "*"` on Neighbors/PathFinding would
+/// see admin-only fields since hydration is built from the ontology
+/// rather than from `node.columns` that `RestrictPass` pruned.
+fn build_dynamic_specs(
+    input: &Input,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) -> Vec<DynamicEntityColumns> {
     ontology
         .node_names()
         .filter_map(|name| {
             let node = ontology.get_node(name)?;
+
+            let admin_only: HashSet<&str> = if security_ctx.admin {
+                HashSet::new()
+            } else {
+                ontology.admin_only_properties(name).collect()
+            };
 
             let requested: Vec<String> = match input.options.dynamic_columns {
                 // Virtual columns are excluded from dynamic modes: they
@@ -150,9 +178,15 @@ fn build_dynamic_specs(input: &Input, ontology: &Ontology) -> Vec<DynamicEntityC
                     .fields
                     .iter()
                     .filter(|f| !f.is_virtual() && f.name != "_version" && f.name != "_deleted")
+                    .filter(|f| !admin_only.contains(f.name.as_str()))
                     .map(|f| f.name.clone())
                     .collect(),
-                DynamicColumnMode::Default => node.default_columns.clone(),
+                DynamicColumnMode::Default => node
+                    .default_columns
+                    .iter()
+                    .filter(|c| !admin_only.contains(c.as_str()))
+                    .cloned()
+                    .collect(),
             };
 
             if requested.is_empty() {
@@ -257,6 +291,7 @@ mod tests {
             enum_type: Default::default(),
             like_allowed: false,
             filterable: true,
+            admin_only: false,
         }
     }
 
@@ -275,6 +310,7 @@ mod tests {
             enum_type: Default::default(),
             like_allowed: false,
             filterable: false,
+            admin_only: false,
         }
     }
 
@@ -423,6 +459,7 @@ mod tests {
                 enum_type: Default::default(),
                 like_allowed: false,
                 filterable: false,
+                admin_only: false,
             },
         ]);
         let requested = vec!["content".to_string()];
@@ -431,5 +468,149 @@ mod tests {
 
         assert!(cols.is_empty());
         assert!(vcs.is_empty());
+    }
+
+    // ── build_dynamic_specs: admin_only filtering ────────────────────────
+    //
+    // Regression guard: before the fix, `dynamic_columns: "*"` on
+    // Neighbors/PathFinding leaked `is_admin`/`is_auditor` because the
+    // wildcard expansion pulled straight from the ontology without
+    // consulting the security context (RestrictPass only runs on
+    // `node.columns`).
+
+    use crate::input::{DynamicColumnMode, Input, InputNode, QueryOptions, QueryType};
+    use crate::types::SecurityContext;
+    use ontology::{DataType, Ontology};
+
+    fn user_ontology() -> Ontology {
+        Ontology::new()
+            .with_nodes(["User"])
+            .with_fields(
+                "User",
+                [
+                    ("username", DataType::String),
+                    ("state", DataType::String),
+                    ("is_admin", DataType::Bool),
+                    ("is_auditor", DataType::Bool),
+                ],
+            )
+            .modify_field("User", "is_admin", |f| f.admin_only = true)
+            .unwrap()
+            .modify_field("User", "is_auditor", |f| f.admin_only = true)
+            .unwrap()
+    }
+
+    fn non_admin_ctx() -> SecurityContext {
+        SecurityContext::new(1, vec!["1/".into()]).unwrap()
+    }
+
+    fn admin_ctx() -> SecurityContext {
+        SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_role(true, None)
+    }
+
+    fn neighbors_input(mode: DynamicColumnMode) -> Input {
+        Input {
+            query_type: QueryType::Neighbors,
+            nodes: vec![InputNode {
+                id: "g".into(),
+                entity: Some("User".into()),
+                ..Default::default()
+            }],
+            options: QueryOptions {
+                dynamic_columns: mode,
+            },
+            ..Input::default()
+        }
+    }
+
+    #[test]
+    fn dynamic_wildcard_strips_admin_only_for_non_admin() {
+        let ont = user_ontology();
+        let ctx = non_admin_ctx();
+        let input = neighbors_input(DynamicColumnMode::All);
+
+        let specs = build_dynamic_specs(&input, &ont, &ctx);
+        let user = specs
+            .iter()
+            .find(|s| s.entity_type == "User")
+            .expect("User spec present");
+
+        assert!(
+            !user.columns.iter().any(|c| c == "is_admin"),
+            "non-admin wildcard must not include is_admin, got {:?}",
+            user.columns
+        );
+        assert!(
+            !user.columns.iter().any(|c| c == "is_auditor"),
+            "non-admin wildcard must not include is_auditor, got {:?}",
+            user.columns
+        );
+        assert!(user.columns.iter().any(|c| c == "username"));
+        assert!(user.columns.iter().any(|c| c == "state"));
+    }
+
+    #[test]
+    fn dynamic_wildcard_preserves_admin_only_for_admin() {
+        let ont = user_ontology();
+        let ctx = admin_ctx();
+        let input = neighbors_input(DynamicColumnMode::All);
+
+        let specs = build_dynamic_specs(&input, &ont, &ctx);
+        let user = specs
+            .iter()
+            .find(|s| s.entity_type == "User")
+            .expect("User spec present");
+
+        assert!(
+            user.columns.iter().any(|c| c == "is_admin"),
+            "admin wildcard must include is_admin, got {:?}",
+            user.columns
+        );
+        assert!(
+            user.columns.iter().any(|c| c == "is_auditor"),
+            "admin wildcard must include is_auditor, got {:?}",
+            user.columns
+        );
+    }
+
+    #[test]
+    fn dynamic_default_strips_admin_only_for_non_admin() {
+        // Defense-in-depth: even if a developer misconfigures
+        // `default_columns` to include an admin_only field, the runtime
+        // filter must still strip it for non-admins.
+        let ont = user_ontology().with_default_columns("User", ["username", "is_admin"]);
+        let ctx = non_admin_ctx();
+        let input = neighbors_input(DynamicColumnMode::Default);
+
+        let specs = build_dynamic_specs(&input, &ont, &ctx);
+        let user = specs
+            .iter()
+            .find(|s| s.entity_type == "User")
+            .expect("User spec present");
+
+        assert_eq!(user.columns, vec!["username".to_string()]);
+    }
+
+    #[test]
+    fn generate_hydration_plan_neighbors_applies_non_admin_filter() {
+        let ont = user_ontology();
+        let ctx = non_admin_ctx();
+        let input = neighbors_input(DynamicColumnMode::All);
+
+        let plan = generate_hydration_plan(&input, &ont, &ctx);
+
+        match plan {
+            HydrationPlan::Dynamic(specs) => {
+                let user = specs
+                    .iter()
+                    .find(|s| s.entity_type == "User")
+                    .expect("User spec present");
+                assert!(!user.columns.iter().any(|c| c == "is_admin"));
+                assert!(!user.columns.iter().any(|c| c == "is_auditor"));
+            }
+            other => panic!("expected Dynamic, got {other:?}"),
+        }
     }
 }

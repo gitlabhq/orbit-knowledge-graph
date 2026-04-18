@@ -147,6 +147,22 @@ async fn data_correctness() {
         security::path_finding_scoped_excludes_paths_through_other_namespaces,
         security::path_finding_multi_path_scope_finds_both,
         security::path_finding_narrow_scope_excludes_all_targets,
+        // security: admin_only field restriction (RestrictPass)
+        security::admin_only_non_admin_filter_rejects_at_compile,
+        security::admin_only_non_admin_order_by_rejects_at_compile,
+        security::admin_only_non_admin_max_aggregation_rejects_at_compile,
+        security::admin_only_non_admin_count_aggregation_on_auditor_rejects_at_compile,
+        security::admin_only_non_admin_wildcard_columns_excludes_admin_fields,
+        security::admin_only_non_admin_explicit_columns_silently_stripped,
+        security::admin_only_admin_filter_compiles,
+        security::admin_only_admin_order_by_compiles,
+        security::admin_only_admin_aggregation_compiles,
+        security::admin_only_admin_wildcard_columns_includes_admin_fields,
+        // security: admin_only on dynamic hydration (Neighbors / PathFinding)
+        security::admin_only_non_admin_neighbors_dynamic_wildcard_strips_admin_fields,
+        security::admin_only_non_admin_neighbors_dynamic_center_node_strips_admin_fields,
+        security::admin_only_non_admin_path_finding_dynamic_wildcard_strips_admin_fields,
+        security::admin_only_admin_neighbors_dynamic_wildcard_includes_admin_fields,
         // cursor pagination
         pagination::cursor_first_page,
         pagination::cursor_second_page,

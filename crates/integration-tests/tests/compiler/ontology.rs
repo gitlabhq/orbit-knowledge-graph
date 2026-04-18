@@ -1,5 +1,7 @@
 //! Compiler tests using the embedded (production) ontology.
 
+use std::sync::Arc;
+
 use super::setup::{embedded_ontology, test_ctx};
 use super::utils::ParsedSql;
 use compiler::{
@@ -774,7 +776,7 @@ fn hydration_query_type_generates_union_all() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx()).unwrap();
+    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
     // Hydration SQL uses ClickHouse array literals (`IN [1,2,3]`) which
     // sqlparser doesn't support yet, so we check the raw SQL string.
     let raw = &result.base.render();
@@ -802,7 +804,7 @@ fn hydration_single_entity_no_union_all() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx()).unwrap();
+    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(!sql.has_union_all());
@@ -830,7 +832,7 @@ fn hydration_uses_parameterized_ids() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx()).unwrap();
+    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
     // Hydration SQL uses ClickHouse array literals — check raw strings.
     let parameterized = &result.base.sql;
 
@@ -866,7 +868,7 @@ fn hydration_skips_security_context() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx()).unwrap();
+    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
     assert!(
@@ -895,7 +897,7 @@ fn hydration_empty_columns_produces_empty_json() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx()).unwrap();
+    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         !rendered.contains("map("),
@@ -923,7 +925,7 @@ fn hydration_id_column_excluded_from_map() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &test_ctx()).unwrap();
+    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("'username'") && rendered.contains("'state'"));
