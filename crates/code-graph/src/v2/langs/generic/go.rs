@@ -2,7 +2,9 @@ use crate::v2::config::Language;
 use crate::v2::dsl::extractors::{Extract, field, metadata};
 use crate::v2::dsl::predicates::*;
 use crate::v2::dsl::types::*;
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
+use crate::v2::types::{
+    BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportResolutionMode,
+};
 
 use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
@@ -157,14 +159,22 @@ fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
 
     let is_blank = alias.as_deref() == Some("_");
     let is_dot = alias.as_deref() == Some(".");
+    let binding_kind = if is_blank {
+        ImportBindingKind::SideEffect
+    } else {
+        ImportBindingKind::Named
+    };
 
     imports.push(CanonicalImport {
         import_type: "Import",
+        binding_kind,
+        resolution_mode: ImportResolutionMode::Import,
         path: import_path,
         name: pkg_name,
         alias: alias.filter(|_| !is_blank && !is_dot),
         scope_fqn: None,
         range: crate::v2::types::Range::empty(),
+        is_type_only: false,
         wildcard: is_dot,
     });
 }

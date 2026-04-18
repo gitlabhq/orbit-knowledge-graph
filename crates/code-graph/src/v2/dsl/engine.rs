@@ -6,6 +6,7 @@ use treesitter_visit::{Node, SupportLang};
 use crate::v2::config::Language;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
+    ImportBindingKind, ImportResolutionMode,
 };
 
 use crate::utils::node_to_range;
@@ -25,6 +26,20 @@ struct ScopeMatch {
     range: crate::utils::Range,
     creates_scope: bool,
     metadata: Option<Box<DefinitionMetadata>>,
+}
+
+fn infer_import_binding_kind(
+    name: Option<&str>,
+    alias: Option<&str>,
+    wildcard: bool,
+) -> ImportBindingKind {
+    if wildcard {
+        ImportBindingKind::Named
+    } else if name.is_none() && alias.is_none() {
+        ImportBindingKind::SideEffect
+    } else {
+        ImportBindingKind::Named
+    }
 }
 
 impl LanguageSpec {
@@ -332,13 +347,19 @@ impl LanguageSpec {
                 if alias_kind.is_some_and(|ak| ak == ck.as_ref()) {
                     if let Some(name_node) = child.field("name") {
                         let alias = child.field("alias").map(|a| a.text().to_string());
+                        let name = name_node.text().to_string();
+                        let binding_kind =
+                            infer_import_binding_kind(Some(name.as_str()), alias.as_deref(), false);
                         imports.push(CanonicalImport {
                             import_type: label,
                             path: base_path.clone(),
-                            name: Some(name_node.text().to_string()),
+                            binding_kind,
+                            resolution_mode: ImportResolutionMode::Import,
+                            name: Some(name),
                             alias,
                             scope_fqn: None,
                             range,
+                            is_type_only: false,
                             wildcard: false,
                         });
                     }
@@ -352,23 +373,30 @@ impl LanguageSpec {
                     } else {
                         (base_path.clone(), Some(child_text))
                     };
+                    let binding_kind = infer_import_binding_kind(name.as_deref(), None, false);
                     imports.push(CanonicalImport {
                         import_type: label,
+                        binding_kind,
+                        resolution_mode: ImportResolutionMode::Import,
                         path,
                         name,
                         alias: None,
                         scope_fqn: None,
                         range,
+                        is_type_only: false,
                         wildcard: false,
                     });
                 } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
                     imports.push(CanonicalImport {
                         import_type: label,
+                        binding_kind: ImportBindingKind::Named,
+                        resolution_mode: ImportResolutionMode::Import,
                         path: base_path.clone(),
                         name: Some(rule.wildcard_symbol.to_string()),
                         alias: None,
                         scope_fqn: None,
                         range,
+                        is_type_only: false,
                         wildcard: true,
                     });
                 }
@@ -383,11 +411,14 @@ impl LanguageSpec {
                 // Wildcard import: path is the full extracted name, no split needed.
                 imports.push(CanonicalImport {
                     import_type: label,
+                    binding_kind: ImportBindingKind::Named,
+                    resolution_mode: ImportResolutionMode::Import,
                     path: full_path,
                     name: None,
                     alias: None,
                     scope_fqn: None,
                     range,
+                    is_type_only: false,
                     wildcard: true,
                 });
             } else {
@@ -396,14 +427,20 @@ impl LanguageSpec {
                 } else {
                     (full_path, rule.extract_symbol(node))
                 };
+                let alias = rule.extract_alias(node);
                 let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
+                let binding_kind =
+                    infer_import_binding_kind(name.as_deref(), alias.as_deref(), is_wildcard);
                 imports.push(CanonicalImport {
                     import_type: label,
+                    binding_kind,
+                    resolution_mode: ImportResolutionMode::Import,
                     path,
                     name,
-                    alias: rule.extract_alias(node),
+                    alias,
                     scope_fqn: None,
                     range,
+                    is_type_only: false,
                     wildcard: is_wildcard,
                 });
             }

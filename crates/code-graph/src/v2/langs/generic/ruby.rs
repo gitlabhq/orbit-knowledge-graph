@@ -4,7 +4,9 @@ use crate::v2::dsl::types::{
     self, BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LanguageHooks, LoopRule,
     ReferenceRule, ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
 };
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
+use crate::v2::types::{
+    BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportResolutionMode,
+};
 
 use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
@@ -234,11 +236,14 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
 
     imports.push(CanonicalImport {
         import_type,
+        binding_kind: ImportBindingKind::Named,
+        resolution_mode: ImportResolutionMode::Require,
         path,
         name,
         alias: None,
         scope_fqn: None,
         range: crate::v2::types::Range::empty(),
+        is_type_only: false,
         wildcard: false,
     });
 
