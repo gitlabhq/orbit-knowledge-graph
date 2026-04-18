@@ -30,7 +30,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use crate::v2::types::{DefKind, ImportBindingKind, ImportResolutionMode, Range};
+use crate::v2::types::{DefKind, ImportBindingKind, ImportMode, Range};
 use bumpalo::Bump;
 use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHasher};
@@ -397,7 +397,7 @@ pub struct GraphDefMeta {
 pub struct GraphImport {
     pub import_type: &'static str,
     pub binding_kind: ImportBindingKind,
-    pub resolution_mode: ImportResolutionMode,
+    pub mode: ImportMode,
     pub path: StrId,
     pub name: Option<StrId>,
     pub alias: Option<StrId>,
@@ -444,7 +444,7 @@ impl GraphImport {
         Self {
             import_type: imp.import_type,
             binding_kind: imp.binding_kind,
-            resolution_mode: imp.resolution_mode,
+            mode: imp.mode,
             path: pool.alloc(&imp.path),
             name: imp.name.as_deref().map(|s| pool.alloc(s)),
             alias: imp.alias.as_deref().map(|s| pool.alloc(s)),
@@ -918,7 +918,7 @@ mod tests {
         let cimp = CanonicalImport {
             import_type: "FromImport",
             binding_kind: ImportBindingKind::Named,
-            resolution_mode: ImportResolutionMode::Import,
+            mode: ImportMode::Declarative,
             path: "app.services".to_string(),
             name: Some("AuthService".to_string()),
             alias: Some("Auth".to_string()),
@@ -933,7 +933,7 @@ mod tests {
         assert_eq!(pool.get(gimp.name.unwrap()), "AuthService");
         assert_eq!(pool.get(gimp.alias.unwrap()), "Auth");
         assert_eq!(gimp.binding_kind, ImportBindingKind::Named);
-        assert_eq!(gimp.resolution_mode, ImportResolutionMode::Import);
+        assert_eq!(gimp.mode, ImportMode::Declarative);
         assert!(gimp.is_type_only);
         assert!(!gimp.wildcard);
     }

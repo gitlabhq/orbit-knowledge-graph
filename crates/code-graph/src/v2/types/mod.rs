@@ -8,6 +8,6 @@ pub use edge::{EdgeKind, NodeKind, Relationship, containment_edge_kind, containm
 pub use fqn::Fqn;
 pub use node::{
     BindingKind, CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, DefKind,
-    DefinitionMetadata, ExpressionStep, ImportBindingKind, ImportResolutionMode,
+    DefinitionMetadata, ExpressionStep, ImportBindingKind, ImportMode,
 };
 pub use range::{Position, Range};
