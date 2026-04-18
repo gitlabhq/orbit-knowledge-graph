@@ -3,8 +3,6 @@ use crate::legacy::parser::python::types::{
     PythonFqn, PythonImportType, PythonImportedSymbolInfo, PythonNodeFqnMap,
 };
 use crate::utils::node_to_range;
-use treesitter_visit::Axis::*;
-use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, Root, SupportLang};
 
@@ -111,7 +109,7 @@ fn extract_import_from_statement(
     };
 
     // Check for wildcard import first
-    let has_wildcard = node.has(Child, Kind("wildcard_import"));
+    let has_wildcard = node.children().any(|c| c.kind() == "wildcard_import");
     if has_wildcard {
         let import_type = if is_relative {
             PythonImportType::RelativeWildcardImport
@@ -247,8 +245,8 @@ fn get_scope_for_node(
 #[cfg(test)]
 mod import_tests {
     use super::*;
-    use crate::parser::{GenericParser, LanguageParser, SupportedLanguage};
-    use crate::python::fqn::build_fqn_index;
+    use crate::legacy::parser::parser::{GenericParser, LanguageParser, SupportedLanguage};
+    use crate::legacy::parser::python::fqn::build_fqn_index;
 
     fn test_import_extraction(
         code: &str,
