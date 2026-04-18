@@ -57,15 +57,21 @@ for _ in $(seq 1 60); do
   sleep 5
 done
 
+# Pull the default-user password from the pod env so we can rewrite the
+# SOURCE block of each dict. The original SOURCE uses USER 'gitlab' and
+# SHOW CREATE redacts its password as literal `[HIDDEN]`; sending that DDL
+# back creates a dict that looks LOADED but fails every lookup with
+# AUTHENTICATION_FAILED. We swap the source user to `default` (which
+# already has full perms) and inject its real password.
+DEFAULT_PASS=$($KC exec -n "$NS_CH" "$CH_POD" -- printenv CLICKHOUSE_PASSWORD)
+[[ -n "$DEFAULT_PASS" ]] || { log "could not read CLICKHOUSE_PASSWORD from pod"; exit 1; }
+
 # Re-create each dict with the existing definition but a shorter LIFETIME.
 # `SHOW CREATE DICTIONARY` round-trip preserves SOURCE / LAYOUT / column
-# types so we don't have to duplicate the full DDL here — only the LIFETIME
-# clause is rewritten.
-#
-# FORMAT TSVRaw is critical: the default TabSeparated output escapes
-# newlines inside string literals (e.g. the embedded SOURCE QUERY) as
-# literal `\n`, which makes the round-tripped DDL un-parseable. TSVRaw
-# emits strings verbatim so the multi-line SOURCE QUERY survives intact.
+# types so we don't have to duplicate the full DDL here. FORMAT TSVRaw is
+# critical: the default TabSeparated output escapes newlines inside string
+# literals (e.g. the embedded SOURCE QUERY) as literal `\n`, which makes
+# the round-tripped DDL un-parseable. TSVRaw emits strings verbatim.
 for dict in "${DICTS[@]}"; do
   log "Patching $dict"
   ddl=$(ch_query "SHOW CREATE DICTIONARY $dict FORMAT TSVRaw" 2>/dev/null || true)
@@ -73,9 +79,10 @@ for dict in "${DICTS[@]}"; do
     log "  $dict not found, skipping"
     continue
   fi
-  patched=$(echo "$ddl" \
+  patched=$(printf '%s' "$ddl" \
     | sed -E 's/^CREATE DICTIONARY/CREATE OR REPLACE DICTIONARY/' \
-    | sed -E "s/LIFETIME\\([^)]*\\)/$NEW_LIFETIME/")
+    | sed -E "s|LIFETIME\\([^)]*\\)|$NEW_LIFETIME|" \
+    | sed -E "s|USER '[^']+' PASSWORD '\\[HIDDEN\\]'|USER 'default' PASSWORD '$DEFAULT_PASS'|")
   ch_query "$patched" >/dev/null
 done
 
