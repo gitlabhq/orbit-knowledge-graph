@@ -1,6 +1,6 @@
-use code_graph_config::v2::Language;
-use code_graph_linker::v2::CodeGraph;
-use code_graph_types::{
+use crate::v2::config::Language;
+use crate::v2::linker::CodeGraph;
+use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportMode, Range,
 };
 use petgraph::graph::NodeIndex;
@@ -294,7 +294,7 @@ fn synthesize_export_definition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_types::{Position, Range};
+    use crate::v2::types::{Position, Range};
 
     fn local_def(name: &str, kind: DefKind) -> CanonicalDefinition {
         CanonicalDefinition {
