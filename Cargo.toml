@@ -108,6 +108,11 @@ syn = { version = "2.0.117", features = ["full"] }
 quote = "1.0.45"
 proc-macro2 = "1.0.106"
 
+# JS/TS ecosystem (v2 custom pipeline)
+oxc = { git = "https://github.com/oxc-project/oxc", rev = "38aea54", features = ["semantic", "ast_visit"] }
+oxc_linter = { git = "https://github.com/oxc-project/oxc", rev = "38aea54" }
+oxc_resolver = "11.19.1"
+
 # Simulator dependencies
 rand = "0.10"
 sqlformat = "0.5"

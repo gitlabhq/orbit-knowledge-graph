@@ -1,3 +1,13 @@
+mod analysis;
+mod cross_file;
+pub mod frameworks;
+mod phase1;
+mod pipeline;
+mod resolver;
+pub mod sfc;
+mod types;
+mod workspace;
+
 use crate::v2::config::Language;
 use crate::v2::linker::CodeGraph;
 use crate::v2::types::{
@@ -5,6 +15,20 @@ use crate::v2::types::{
 };
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
+
+pub use analysis::JsAnalyzer;
+pub use cross_file::JsCrossFileResolver;
+pub use pipeline::JsPipeline;
+pub use sfc::extract_scripts;
+pub use types::JsFileAnalysis;
+pub use workspace::{WorkspacePackage, detect_workspaces, is_bun_project};
+
+pub use types::{
+    CjsExport, ExportedBinding, ImportedName, JsCallConfidence, JsCallEdge, JsCallSite,
+    JsCallTarget, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsImport, JsImportKind,
+    JsImportedBinding, JsImportedCall, JsImportedMemberBinding, JsInvocationKind,
+    JsInvocationSupport, JsMemberKind, JsModuleInfo, JsResolutionMode, OwnedImportEntry,
+};
 
 const MODULE_FQN_PREFIX: &str = "__js_module__";
 const MODULE_EXPORT_TYPE: &str = "ModuleExport";

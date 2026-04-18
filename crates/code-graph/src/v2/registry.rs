@@ -6,6 +6,7 @@
 use crate::v2::config::Language;
 use crate::v2::linker::NoRules;
 
+use crate::v2::langs::custom::js::JsPipeline;
 use crate::v2::langs::custom::ruby::RubyPipeline;
 use crate::v2::langs::generic::csharp::CSharpDsl;
 use crate::v2::langs::generic::go::{GoDsl, GoRules};
@@ -57,6 +58,7 @@ macro_rules! register_v2_pipelines {
             root_path: &str,
             tracer: &crate::v2::trace::Tracer,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
+            #[allow(unreachable_patterns)]
             Some(match language {
                 $(Language::$variant => <$($pipeline)*>::process_files(files, root_path, tracer),)*
                 _ => return None,
@@ -82,11 +84,34 @@ macro_rules! register_v2_pipelines {
 // ── Registration ────────────────────────────────────────────────
 
 register_v2_pipelines! {
+    JavaScript => [JsPipeline],
+    TypeScript => [JsPipeline],
     Python  => [GenericPipeline<PythonDsl, PythonRules>],
     Java    => [GenericPipeline<JavaDsl, JavaRules>],
     Kotlin  => [GenericPipeline<KotlinDsl, KotlinRules>],
     CSharp  => [GenericPipeline<CSharpDsl, NoRules<CSharpDsl>>],
     Go      => [GenericPipeline<GoDsl, GoRules>],
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
+    Tag("js") => [JsPipeline],
     Tag("ruby_prism") => [RubyPipeline],
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn javascript_pipeline_is_registered() {
+        assert!(dispatch_language(Language::JavaScript, &[], "/").is_some());
+    }
+
+    #[test]
+    fn typescript_pipeline_is_registered() {
+        assert!(dispatch_language(Language::TypeScript, &[], "/").is_some());
+    }
+
+    #[test]
+    fn js_pipeline_tag_is_registered() {
+        assert!(dispatch_by_tag("js", &[], "/").is_some());
+    }
 }
