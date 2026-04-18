@@ -107,6 +107,10 @@ yaml_test!(
     kotlin_intrafile_resolution,
     "kotlin/intrafile_resolution.yaml"
 );
+yaml_test!(
+    kotlin_annotation_references,
+    "kotlin/annotation_references.yaml"
+);
 
 // Examples (custom pipelines)
 yaml_test!(ruby_custom_pipeline, "examples/ruby_custom_pipeline.yaml");
