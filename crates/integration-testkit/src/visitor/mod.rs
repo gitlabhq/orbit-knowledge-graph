@@ -396,6 +396,33 @@ impl ResponseView {
         );
     }
 
+    /// Assert the integer value of a column on an ungrouped aggregation response.
+    ///
+    /// Ungrouped aggregations expose their value via `response.columns[*].value`
+    /// rather than on graph nodes. Satisfies [`Requirement::Aggregation`].
+    pub fn assert_aggregation_value_i64(&self, alias: &str, expected: i64) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let cols = self.response.columns.as_ref().unwrap_or_else(|| {
+            panic!("ungrouped aggregation response has no columns (looking for '{alias}')")
+        });
+        let col = cols
+            .iter()
+            .find(|c| c.name == alias)
+            .unwrap_or_else(|| panic!("column '{alias}' not found in {cols:?}"));
+        let actual = col
+            .value
+            .as_ref()
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+            })
+            .unwrap_or_else(|| panic!("column '{alias}' has no integer value: {:?}", col.value));
+        assert_eq!(
+            actual, expected,
+            "column '{alias}': expected {expected}, got {actual}"
+        );
+    }
+
     /// Satisfies [`Requirement::Relationship`] for the given edge type, and [`Requirement::Neighbors`].
     pub fn assert_edge_exists(
         &self,
