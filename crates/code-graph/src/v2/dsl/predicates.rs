@@ -1,3 +1,5 @@
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -42,8 +44,22 @@ impl Cond {
     fn test(&self, node: &N<'_>) -> bool {
         match self {
             Cond::HasName => node.field("name").is_some(),
-            Cond::ParentIs(kind) => node.parent().is_some_and(|p| p.kind() == *kind),
-
+            Cond::ParentIs(kind) => node.has(Parent, Kind(kind)),
+            Cond::GrandparentIs(kind) => node.parent().is_some_and(|p| p.has(Parent, Kind(kind))),
+            Cond::AncestorIs(kinds) => node.has(Ancestor, AnyKind(kinds)),
+            Cond::NearestAncestor { candidates, target } => node
+                .find(Ancestor, AnyKind(candidates))
+                .is_some_and(|a| AnyKind(target).test(&a)),
+            Cond::HasChild(kinds) => node.has(Child, AnyKind(kinds)),
+            Cond::FieldKind { field, kinds } => node.has(Field(field), AnyKind(kinds)),
+            Cond::FieldDescends {
+                field,
+                wrappers,
+                targets,
+                reject,
+            } => node
+                .field(field)
+                .is_some_and(|f| descends(&f, wrappers, targets, reject)),
             Cond::KindEndsWith(suffix) => node.kind().as_ref().ends_with(suffix),
             Cond::KindStartsWith(prefix) => node.kind().as_ref().starts_with(prefix),
             Cond::ParentKindEndsWith(suffix) => node
@@ -53,48 +69,6 @@ impl Cond {
             Cond::ParentKindMatches(re) => node
                 .parent()
                 .is_some_and(|p| re.is_match(p.kind().as_ref())),
-            Cond::GrandparentIs(kind) => node
-                .parent()
-                .and_then(|p| p.parent())
-                .is_some_and(|gp| gp.kind() == *kind),
-            Cond::AncestorIs(kinds) => {
-                let mut cur = node.parent();
-                while let Some(a) = cur {
-                    let k = a.kind();
-                    if kinds.iter().any(|t| *t == k) {
-                        return true;
-                    }
-                    cur = a.parent();
-                }
-                false
-            }
-            Cond::NearestAncestor { candidates, target } => {
-                let mut cur = node.parent();
-                while let Some(a) = cur {
-                    let k = a.kind();
-                    if candidates.iter().any(|c| *c == k) {
-                        return target.iter().any(|t| *t == k);
-                    }
-                    cur = a.parent();
-                }
-                false
-            }
-            Cond::HasChild(kinds) => node.children().any(|child| {
-                let k = child.kind();
-                kinds.iter().any(|t| *t == k)
-            }),
-            Cond::FieldKind { field, kinds } => node.field(field).is_some_and(|f| {
-                let k = f.kind();
-                kinds.iter().any(|t| *t == k)
-            }),
-            Cond::FieldDescends {
-                field,
-                wrappers,
-                targets,
-                reject,
-            } => node
-                .field(field)
-                .is_some_and(|f| descends(&f, wrappers, targets, reject)),
         }
     }
 }

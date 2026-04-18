@@ -1,5 +1,5 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, field};
+use crate::v2::dsl::extractors::{Extract, default_extract, field};
 use crate::v2::dsl::types::*;
 use crate::v2::types::DefKind;
 
@@ -54,7 +54,7 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("namespace_declaration", Extract::Default))
+        Some(("namespace_declaration", default_extract()))
     }
 }
 

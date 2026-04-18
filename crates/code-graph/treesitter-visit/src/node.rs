@@ -257,4 +257,129 @@ impl<'r, D: Doc> Node<'r, D> {
             root: self.root,
         })
     }
+
+    /// Navigate a chain of named fields, returning `None` if any is missing.
+    ///
+    /// `node.field_chain(&["function", "object"])` is equivalent to
+    /// `node.field("function")?.field("object")`.
+    #[must_use]
+    pub fn field_chain(&self, fields: &[&str]) -> Option<Self> {
+        let mut current = self.clone();
+        for &f in fields {
+            current = current.field(f)?;
+        }
+        Some(current)
+    }
+
+    /// Find the first descendant (DFS, left-to-right) matching a predicate.
+    /// Does not test `self`, only its descendants.
+    #[must_use]
+    pub fn find_descendant(&self, predicate: impl Fn(&Self) -> bool) -> Option<Self> {
+        self.find_descendant_inner(&predicate)
+    }
+
+    fn find_descendant_inner(&self, predicate: &dyn Fn(&Self) -> bool) -> Option<Self> {
+        for child in self.children() {
+            if predicate(&child) {
+                return Some(child);
+            }
+            if let Some(found) = child.find_descendant_inner(predicate) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Find the first node along `axis` whose kind satisfies `criterion`.
+    ///
+    /// ```ignore
+    /// use treesitter_visit::{Axis::*, Match::*};
+    /// node.find(Child, Kind("identifier"))
+    /// node.find(Ancestor, AnyKind(&["class_definition", "module"]))
+    /// node.find(Descendant, Kind("type_identifier"))
+    /// node.find(Field("name"), Kind("identifier"))
+    /// ```
+    #[must_use]
+    pub fn find(&self, axis: Axis<'_>, criterion: Match<'_>) -> Option<Self> {
+        match axis {
+            Axis::Child => self.children().find(|c| criterion.test(c)),
+            Axis::Parent => self.parent().filter(|p| criterion.test(p)),
+            Axis::Ancestor => self.parent_chain().find(|a| criterion.test(a)),
+            Axis::Descendant => self.find_descendant(|n| criterion.test(n)),
+            Axis::Field(f) => self.field(f).filter(|n| criterion.test(n)),
+        }
+    }
+
+    /// Check if any node along `axis` satisfies `criterion`.
+    pub fn has(&self, axis: Axis<'_>, criterion: Match<'_>) -> bool {
+        self.find(axis, criterion).is_some()
+    }
+
+    /// All direct children whose kind satisfies `criterion`.
+    pub fn children_matching<'a>(
+        &'a self,
+        criterion: Match<'a>,
+    ) -> impl Iterator<Item = Self> + 'a {
+        self.children().filter(move |c| criterion.test(c))
+    }
+
+    /// Find the first direct child whose kind equals `kind`.
+    #[must_use]
+    pub fn child_of_kind(&self, kind: &str) -> Option<Self> {
+        self.find(Axis::Child, Match::Kind(kind))
+    }
+
+    /// Check whether any direct child has the given kind.
+    pub fn has_child_of_kind(&self, kind: &str) -> bool {
+        self.has(Axis::Child, Match::Kind(kind))
+    }
+
+    /// Lazy iterator from the immediate parent up to the root.
+    pub fn parent_chain(&self) -> impl Iterator<Item = Node<'r, D>> {
+        let mut current = self.parent();
+        std::iter::from_fn(move || {
+            let node = current.take()?;
+            current = node.parent();
+            Some(node)
+        })
+    }
+}
+
+// ── Composable traversal primitives ─────────────────────────────
+
+/// Which direction to traverse from a node.
+#[derive(Clone, Copy)]
+pub enum Axis<'a> {
+    /// Direct children only.
+    Child,
+    /// Immediate parent.
+    Parent,
+    /// Walk up from parent to root.
+    Ancestor,
+    /// DFS through all descendants.
+    Descendant,
+    /// Named field on the node.
+    Field(&'a str),
+}
+
+/// What to match on a node during traversal.
+#[derive(Clone, Copy)]
+pub enum Match<'a> {
+    /// Exact node kind.
+    Kind(&'a str),
+    /// Any of these node kinds.
+    AnyKind(&'a [&'a str]),
+}
+
+impl Match<'_> {
+    /// Test whether a node satisfies this criterion.
+    pub fn test<D: Doc>(&self, node: &Node<'_, D>) -> bool {
+        match self {
+            Match::Kind(k) => node.kind().as_ref() == *k,
+            Match::AnyKind(ks) => {
+                let kind = node.kind();
+                ks.iter().any(|k| *k == kind.as_ref())
+            }
+        }
+    }
 }

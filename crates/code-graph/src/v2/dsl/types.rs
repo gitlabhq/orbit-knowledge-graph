@@ -4,7 +4,7 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::types::{DefKind, DefinitionMetadata};
 
-use super::extractors::{Extract, MetadataRule};
+use super::extractors::{Extract, MetadataRule, default_extract};
 use super::predicates::Pred;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
@@ -115,7 +115,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         label: Label::Static(label),
         def_kind: DefKind::Other,
         condition: None,
-        name: Extract::Default,
+        name: default_extract(),
         creates_scope: true,
         metadata_rule: None,
     }
@@ -128,7 +128,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         label: Label::Static(label),
         def_kind: DefKind::Other,
         condition: None,
-        name: Extract::Default,
+        name: default_extract(),
         creates_scope: true,
         metadata_rule: None,
     }
@@ -146,7 +146,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         label: Label::Fn(label_fn),
         def_kind: DefKind::Other,
         condition: None,
-        name: Extract::Default,
+        name: default_extract(),
         creates_scope: true,
         metadata_rule: None,
     }
@@ -169,13 +169,7 @@ impl ReceiverExtract {
     {
         match self {
             Self::Field(f) => node.field(f),
-            Self::FieldChain(fields) => {
-                let mut current = Some(node.clone());
-                for &f in fields.iter() {
-                    current = current.and_then(|n| n.field(f));
-                }
-                current
-            }
+            Self::FieldChain(fields) => node.field_chain(fields),
         }
     }
 }
@@ -248,7 +242,7 @@ pub fn reference(kind: &'static str) -> ReferenceRule {
     ReferenceRule {
         kinds: vec![kind],
         condition: None,
-        name: Extract::Default,
+        name: default_extract(),
         receiver_extract: None,
     }
 }
@@ -258,7 +252,7 @@ pub fn references(kinds: &[&'static str]) -> ReferenceRule {
     ReferenceRule {
         kinds: kinds.to_vec(),
         condition: None,
-        name: Extract::Default,
+        name: default_extract(),
         receiver_extract: None,
     }
 }
@@ -395,7 +389,7 @@ pub fn import(kind: &'static str) -> ImportRule {
     ImportRule {
         kinds: vec![kind],
         condition: None,
-        path: Extract::Default,
+        path: default_extract(),
         symbol: None,
         alias: None,
         label: "Import",
@@ -476,9 +470,12 @@ pub struct BindingRule {
     pub name_fields: &'static [&'static str],
     pub value_field: Option<&'static str>,
     pub instance_attr_prefixes: &'static [&'static str],
-    /// Type annotation fields to check (TypeFlow). First match wins.
-    pub type_fields: &'static [&'static str],
-    /// Type names to skip (primitives, builtins).
+    /// Type extraction config (TypeFlow). Uses Extract for CST navigation.
+    pub type_extract: Option<TypeExtract>,
+}
+
+pub struct TypeExtract {
+    pub extracts: Vec<super::extractors::Extract>,
     pub skip_types: &'static [&'static str],
 }
 
@@ -489,8 +486,7 @@ pub fn binding(kind: &'static str, binding_kind: crate::v2::types::BindingKind) 
         name_fields: &["left"],
         value_field: Some("right"),
         instance_attr_prefixes: &[],
-        type_fields: &[],
-        skip_types: &[],
+        type_extract: None,
     }
 }
 
@@ -515,31 +511,32 @@ impl BindingRule {
         self
     }
 
-    pub fn typed(mut self, fields: &'static [&'static str], skip: &'static [&'static str]) -> Self {
-        self.type_fields = fields;
-        self.skip_types = skip;
+    pub fn typed(
+        mut self,
+        extracts: Vec<super::extractors::Extract>,
+        skip: &'static [&'static str],
+    ) -> Self {
+        self.type_extract = Some(TypeExtract {
+            extracts,
+            skip_types: skip,
+        });
         self
     }
 
     /// Extract the binding name from an AST node by walking the field chain.
     pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
-        let mut current = node.clone();
-        for &field in self.name_fields {
-            current = current.field(field)?;
-        }
+        let current = node.field_chain(self.name_fields)?;
         Some(current.text().to_string())
     }
 
-    /// Extract a type annotation from the AST node, if configured.
-    /// Returns the bare type name as written in source (e.g. `"Builder"`).
-    /// Resolution to FQN is the resolver's job.
+    /// Extract a type annotation from the AST node using the configured Extract.
     pub fn extract_type_annotation(&self, node: &N<'_>) -> Option<String> {
-        for &field_name in self.type_fields {
-            if let Some(type_node) = node.field(field_name) {
-                let text = type_node.text().to_string();
-                if !self.skip_types.iter().any(|&s| s == text) {
-                    return Some(text);
-                }
+        let te = self.type_extract.as_ref()?;
+        for extract in &te.extracts {
+            if let Some(text) = extract.extract_name(node)
+                && !te.skip_types.iter().any(|&s| s == text)
+            {
+                return Some(text);
             }
         }
         None
@@ -667,6 +664,10 @@ pub struct LanguageHooks {
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
+    /// Node kinds that are return statements. When encountered, the engine
+    /// captures the SSA value of the returned expression and writes it as
+    /// the enclosing function's inferred return type.
+    pub return_kinds: &'static [&'static str],
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {

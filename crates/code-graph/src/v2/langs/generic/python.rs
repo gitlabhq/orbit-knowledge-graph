@@ -1,8 +1,12 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, ExtractList, field, metadata};
+use crate::v2::dsl::extractors::{
+    ExtractList, child_of_kind, field, field_chain, metadata, no_extract,
+};
 use crate::v2::dsl::predicates::*;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -10,7 +14,7 @@ use crate::v2::types::BindingKind;
 
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
-    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage,
+    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
 };
 
 // ── DSL parser spec ─────────────────────────────────────────────
@@ -44,12 +48,9 @@ fn python_super_types(node: &N<'_>) -> Vec<String> {
 }
 
 fn python_decorators(node: &N<'_>) -> Vec<String> {
-    if let Some(parent) = node.parent()
-        && parent.kind() == "decorated_definition"
-    {
+    if let Some(parent) = node.find(Parent, Kind("decorated_definition")) {
         parent
-            .children()
-            .filter(|c| c.kind() == "decorator")
+            .children_matching(Kind("decorator"))
             .map(|c| c.text().trim_start_matches('@').trim().to_string())
             .collect()
     } else {
@@ -58,16 +59,11 @@ fn python_decorators(node: &N<'_>) -> Vec<String> {
 }
 
 fn classify_python_function(node: &N<'_>) -> &'static str {
-    let is_async = node.children().any(|c| c.kind() == "async");
-    let has_decorator = node
-        .parent()
-        .is_some_and(|p| p.kind() == "decorated_definition");
+    let is_async = node.has(Child, Kind("async"));
+    let has_decorator = node.has(Parent, Kind("decorated_definition"));
     let is_method = node.parent().and_then(|p| p.parent()).is_some_and(|gp| {
         gp.kind() == "class_definition"
-            || gp.kind() == "block"
-                && gp
-                    .parent()
-                    .is_some_and(|ggp| ggp.kind() == "class_definition")
+            || gp.kind() == "block" && gp.has(Parent, Kind("class_definition"))
     });
 
     match (is_method, is_async, has_decorator) {
@@ -94,6 +90,7 @@ impl DslLanguage for PythonDsl {
     fn hooks() -> crate::v2::dsl::types::LanguageHooks {
         crate::v2::dsl::types::LanguageHooks {
             module_scope: Some(python_module_from_path),
+            return_kinds: &["return_statement"],
             ..crate::v2::dsl::types::LanguageHooks::default()
         }
     }
@@ -141,7 +138,7 @@ impl DslLanguage for PythonDsl {
         vec![
             reference("call")
                 .when(field_kind("function", &["attribute"]))
-                .name_from(Extract::FieldChain(&["function", "attribute"]))
+                .name_from(field_chain(&["function", "attribute"]))
                 .receiver_chain(&["function", "object"]),
             reference("call").name_from(field("function")),
         ]
@@ -159,18 +156,17 @@ impl DslLanguage for PythonDsl {
 
     fn imports() -> Vec<ImportRule> {
         fn python_import_classify(node: &N<'_>) -> &'static str {
-            let _text = node.text().to_string();
-            if node.children().any(|c| c.kind() == "wildcard_import") {
+            if node.has(Child, Kind("wildcard_import")) {
                 return "WildcardImport";
             }
-            if node.children().any(|c| c.kind() == "aliased_import") {
+            if node.has(Child, Kind("aliased_import")) {
                 return "AliasedImport";
             }
             "Import"
         }
 
         fn python_from_classify(node: &N<'_>) -> &'static str {
-            if node.children().any(|c| c.kind() == "wildcard_import") {
+            if node.has(Child, Kind("wildcard_import")) {
                 return "WildcardImport";
             }
             "FromImport"
@@ -179,7 +175,7 @@ impl DslLanguage for PythonDsl {
         vec![
             import("import_statement")
                 .classify(python_import_classify)
-                .path_from(Extract::None)
+                .path_from(no_extract())
                 .multi(&["dotted_name"])
                 .alias_child("aliased_import")
                 .wildcard_child("wildcard_import"),
@@ -191,7 +187,7 @@ impl DslLanguage for PythonDsl {
                 .wildcard_child("wildcard_import"),
             import("future_import_statement")
                 .label("FutureImport")
-                .path_from(Extract::ChildOfKind("__future__"))
+                .path_from(child_of_kind("__future__"))
                 .multi(&["dotted_name", "identifier"])
                 .alias_child("aliased_import")
                 .wildcard_child("wildcard_import"),
@@ -283,6 +279,7 @@ impl HasRules for PythonRules {
             vec![
                 ImportStrategy::ScopeFqnWalk,
                 ImportStrategy::ExplicitImport,
+                ImportStrategy::WildcardImport,
                 ImportStrategy::FilePath,
                 ImportStrategy::SameFile,
             ],
@@ -296,6 +293,9 @@ impl HasRules for PythonRules {
             &["self"],
             Some("super"),
         )
+        .with_hooks(ResolverHooks {
+            call_method: Some("__call__"),
+        })
     }
 }
 
@@ -373,7 +373,7 @@ mod tests {
                 b"def foo():\n    bar()\n",
                 "test.py",
                 crate::v2::config::Language::Python,
-                |name, _, _, _| ref_names.push(name.to_string()),
+                |name, _, _, _, _| ref_names.push(name.to_string()),
             )
             .unwrap();
         assert!(!ref_names.is_empty());

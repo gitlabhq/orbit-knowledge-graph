@@ -43,6 +43,17 @@ impl<'a> FileResolver<'a> {
         Self { ctx, deadline }
     }
 
+    /// Register inferred return types from the current file's Phase 2 pass.
+    /// Maps def index → return type name. The resolver checks these when
+    /// the graph's metadata has no explicit return type.
+    pub fn set_inferred_returns(&mut self, returns: &[(u32, String)]) {
+        for (def_idx, rt) in returns {
+            if let Some(&node) = self.ctx.def_nodes.get(*def_idx as usize) {
+                self.ctx.inferred_returns.insert(node, rt.clone());
+            }
+        }
+    }
+
     /// Resolve a single reference, returning (source, target, edge) triples.
     pub fn resolve(
         &mut self,
@@ -112,6 +123,7 @@ struct ResolveCtx<'a> {
     scratch: ScratchBuf,
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
+    inferred_returns: FxHashMap<NodeIndex, String>,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -135,6 +147,7 @@ impl<'a> ResolveCtx<'a> {
             scratch: ScratchBuf::new(),
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
+            inferred_returns: FxHashMap::default(),
         }
     }
 
@@ -256,8 +269,17 @@ fn resolve_from_reaching(
                 {
                     let gdef = &ctx.graph.defs[did.0 as usize];
                     if gdef.kind.is_type_container() {
+                        let name = ctx.graph.str(gdef.name);
                         let fqn = ctx.graph.str(gdef.fqn);
-                        ctx.lookup_nested_cached(fqn, ref_name, &mut result);
+                        if ref_name == name {
+                            // Constructor call: ref matches class name
+                            result.push(node);
+                        } else if !ctx.lookup_nested_cached(fqn, ref_name, &mut result) {
+                            // Instance call: try call_method fallback
+                            if let Some(call_method) = ctx.rules.hooks.call_method {
+                                ctx.lookup_nested_cached(fqn, call_method, &mut result);
+                            }
+                        }
                     } else {
                         result.push(node);
                     }
@@ -269,7 +291,11 @@ fn resolve_from_reaching(
                 }
             }
             ParseValue::Type(type_fqn) => {
-                ctx.lookup_nested_cached(type_fqn, ref_name, &mut result);
+                if !ctx.lookup_nested_cached(type_fqn, ref_name, &mut result)
+                    && let Some(call_method) = ctx.rules.hooks.call_method
+                {
+                    ctx.lookup_nested_cached(type_fqn, call_method, &mut result);
+                }
             }
             ParseValue::Opaque => {}
         }
@@ -325,12 +351,18 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                 if let Some(did) = ctx.graph.graph[def_idx].def_id() {
                     let gdef = &ctx.graph.defs[did.0 as usize];
                     if matches!(step, ExpressionStep::Call(_)) {
+                        let mut has_return_type = false;
                         if let Some(meta) = &gdef.metadata
                             && let Some(rt) = meta.return_type
                         {
                             next_types.push(ctx.graph.str(rt).to_string());
+                            has_return_type = true;
                         }
-                        if gdef.kind.is_type_container() {
+                        if !has_return_type && let Some(rt) = ctx.inferred_returns.get(&def_idx) {
+                            next_types.push(rt.clone());
+                            has_return_type = true;
+                        }
+                        if !has_return_type && gdef.kind.is_type_container() {
                             next_types.push(ctx.graph.str(gdef.fqn).to_string());
                         }
                     }
@@ -384,6 +416,8 @@ fn resolve_base_type_fqns(
                                 && let Some(rt) = meta.return_type
                             {
                                 types.push(ctx.graph.str(rt).to_string());
+                            } else if let Some(rt) = ctx.inferred_returns.get(&node) {
+                                types.push(rt.clone());
                             }
                         }
                     }
@@ -395,6 +429,12 @@ fn resolve_base_type_fqns(
                                     let gdef = &ctx.graph.defs[did.0 as usize];
                                     if gdef.kind.is_type_container() {
                                         types.push(ctx.graph.str(gdef.fqn).to_string());
+                                    } else if let Some(meta) = &gdef.metadata
+                                        && let Some(rt) = meta.return_type
+                                    {
+                                        types.push(ctx.graph.str(rt).to_string());
+                                    } else if let Some(rt) = ctx.inferred_returns.get(&def_idx) {
+                                        types.push(rt.clone());
                                     }
                                 }
                             }

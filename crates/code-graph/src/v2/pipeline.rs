@@ -9,6 +9,18 @@ use std::sync::Mutex;
 
 use crate::v2::linker::CodeGraph;
 
+/// A chain reference that failed resolution in Phase 2,
+/// stored for re-resolution in Phase 3 after return types are merged.
+type FailedChain = (
+    String,
+    Vec<crate::v2::types::ExpressionStep>,
+    smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
+    Option<u32>,
+);
+
+/// Per-file inferred return types keyed by the graph node indices of definitions.
+type InferredReturns = (Vec<petgraph::graph::NodeIndex>, Vec<(u32, String)>);
+
 fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
     pb.set_style(
@@ -356,13 +368,29 @@ where
         let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
 
-        let resolve_results: Vec<_> = file_infos
+        type Phase2Result = (
+            Vec<(
+                petgraph::graph::NodeIndex,
+                petgraph::graph::NodeIndex,
+                crate::v2::linker::GraphEdge,
+            )>,
+            Vec<(u32, String)>,
+            Option<FileInfo>,
+            Vec<(
+                String,
+                Vec<crate::v2::types::ExpressionStep>,
+                smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
+                Option<u32>,
+            )>,
+        );
+
+        let resolve_results: Vec<Phase2Result> = file_infos
             .into_par_iter()
             .zip(files.par_iter())
-            .map(|(info_opt, path)| {
+            .map(|(info_opt, path)| -> Phase2Result {
                 let Some(info) = info_opt else {
                     pb2.inc(1);
-                    return Vec::new();
+                    return Default::default();
                 };
 
                 let abs_path = format!("{root_path}/{path}");
@@ -370,7 +398,7 @@ where
                     Ok(s) => s,
                     Err(_) => {
                         pb2.inc(1);
-                        return Vec::new();
+                        return Default::default();
                     }
                 };
 
@@ -383,19 +411,37 @@ where
                     &rules.settings,
                 );
                 let mut edges = Vec::new();
+                let mut failed_chains: Vec<FailedChain> = Vec::new();
+                let mut inferred_set = false;
 
-                let _ = spec.parse_full_and_resolve(
+                let inferred_result = spec.parse_full_and_resolve(
                     &source,
                     path,
                     language,
-                    |name, chain, reaching, enclosing_def| {
+                    |name, chain, reaching, enclosing_def, inferred| {
+                        if !inferred_set {
+                            resolver.set_inferred_returns(inferred);
+                            inferred_set = true;
+                        }
+                        let before = edges.len();
                         resolver.resolve(name, chain, reaching, enclosing_def, &mut edges);
+                        // Store failed chain refs for Phase 3 re-resolution
+                        if edges.len() == before && chain.is_some_and(|c| c.len() >= 2) {
+                            failed_chains.push((
+                                name.to_string(),
+                                chain.unwrap().to_vec(),
+                                reaching.into(),
+                                enclosing_def,
+                            ));
+                        }
                     },
                 );
 
+                let inferred = inferred_result.unwrap_or_default();
+
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
-                edges
+                (edges, inferred, Some(info), failed_chains)
             })
             .collect();
 
@@ -405,9 +451,76 @@ where
             t2.elapsed()
         ));
 
-        for edges in resolve_results {
+        // Insert Phase 2 edges and collect inferred returns + failed chains
+        let mut all_inferred: Vec<InferredReturns> = Vec::new();
+        let mut all_failed: Vec<(FileInfo, Vec<FailedChain>)> = Vec::new();
+
+        for (edges, inferred, info_opt, failed_chains) in resolve_results {
             for (src, tgt, edge) in edges {
                 graph.graph.add_edge(src, tgt, edge);
+            }
+            if let Some(info) = info_opt {
+                if !inferred.is_empty() {
+                    all_inferred.push((info.def_nodes.clone(), inferred));
+                }
+                if !failed_chains.is_empty() {
+                    all_failed.push((info, failed_chains));
+                }
+            }
+        }
+
+        // ── Phase 3: write inferred return types to graph, re-resolve failed chains
+        if !all_inferred.is_empty() {
+            for (def_nodes, inferred) in &all_inferred {
+                for (def_idx, rt) in inferred {
+                    if let Some(&node) = def_nodes.get(*def_idx as usize)
+                        && let Some(did) = graph.graph[node].def_id()
+                    {
+                        let rt_id = graph.strings.alloc(rt);
+                        graph.defs[did.0 as usize]
+                            .metadata
+                            .get_or_insert_with(Default::default)
+                            .return_type = Some(rt_id);
+                    }
+                }
+            }
+
+            if !all_failed.is_empty() {
+                let phase3_results: Vec<_> = all_failed
+                    .par_iter()
+                    .map(|(info, failed_chains)| {
+                        let mut resolver = crate::v2::linker::FileResolver::new(
+                            &graph,
+                            info.file_node,
+                            &info.def_nodes,
+                            &info.import_nodes,
+                            &rules,
+                            &rules.settings,
+                        );
+                        let mut edges = Vec::new();
+                        for (name, chain, reaching, enclosing_def) in failed_chains {
+                            resolver.resolve(
+                                name,
+                                Some(chain),
+                                reaching,
+                                *enclosing_def,
+                                &mut edges,
+                            );
+                        }
+                        edges
+                    })
+                    .collect();
+
+                let mut phase3_edges = 0usize;
+                for edges in phase3_results {
+                    phase3_edges += edges.len();
+                    for (src, tgt, edge) in edges {
+                        graph.graph.add_edge(src, tgt, edge);
+                    }
+                }
+                if phase3_edges > 0 {
+                    eprintln!("[v2-sp] phase 3: {phase3_edges} cross-file edges resolved");
+                }
             }
         }
 
@@ -431,7 +544,7 @@ mod tests {
 
     fn fixture_path(relative: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
-        format!("{manifest}/src/legacy/parser/{relative}")
+        format!("{manifest}/parser/src/{relative}")
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
