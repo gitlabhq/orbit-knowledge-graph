@@ -92,6 +92,7 @@ impl DslLanguage for PythonDsl {
             module_scope: Some(python_module_from_path),
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["decorator"],
+            resolve_import_path: Some(resolve_python_relative_import),
             ..crate::v2::dsl::types::LanguageHooks::default()
         }
     }
@@ -306,6 +307,35 @@ impl HasRules for PythonRules {
 /// `services/user_service.py` → `services.user_service`
 /// `models/__init__.py` → `models`
 /// `main.py` → `main`
+/// Resolve Python relative import paths against the current module scope.
+/// `from .models import User` in module `pkg.sub.mod` → `pkg.sub.models`
+/// `from ..services import Auth` in `pkg.sub.mod` → `pkg.services`
+fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
+    if !raw_path.starts_with('.') {
+        return None; // absolute import, no resolution needed
+    }
+    let dots = raw_path.chars().take_while(|&c| c == '.').count();
+    let suffix = &raw_path[dots..];
+
+    // Module scope is the file's module (e.g. "pkg.sub.module").
+    // 1 dot = same package (drop last component), 2 dots = parent, etc.
+    let parts: Vec<&str> = module_scope.split(sep).collect();
+    if dots > parts.len() {
+        return None; // too many dots, can't resolve
+    }
+    let base = &parts[..parts.len() - dots];
+    if suffix.is_empty() {
+        Some(base.join(sep))
+    } else {
+        let suffix_clean = suffix.trim_start_matches('.');
+        if base.is_empty() {
+            Some(suffix_clean.to_string())
+        } else {
+            Some(format!("{}{sep}{suffix_clean}", base.join(sep)))
+        }
+    }
+}
+
 fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
     let path = std::path::Path::new(file_path);
     let stem = path.with_extension("");

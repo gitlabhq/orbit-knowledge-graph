@@ -139,7 +139,8 @@ impl LanguageSpec {
             let import_count_before = imports.len();
             let handled = self.hooks.on_import.is_some_and(|f| f(node, imports));
             if !handled {
-                self.evaluate_imports(node, node_kind_ref, imports);
+                let ms = scope_stack.first().map(|s| s.as_ref());
+                self.evaluate_imports(node, node_kind_ref, imports, ms, sep);
             }
             for imp in &imports[import_count_before..] {
                 if !imp.wildcard && !imp.path.is_empty() {
@@ -308,6 +309,8 @@ impl LanguageSpec {
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
         imports: &mut Vec<CanonicalImport>,
+        module_scope: Option<&str>,
+        sep: &str,
     ) {
         let Some(indices) = self.import_dispatch.get(node_kind) else {
             return;
@@ -324,7 +327,14 @@ impl LanguageSpec {
         let label = rule.resolve_label(node);
 
         if let Some(child_kinds) = rule.multi_child_kinds {
-            let base_path = rule.extract_name(node).unwrap_or_default();
+            let raw_path = rule.extract_name(node).unwrap_or_default();
+            let base_path = if let Some(resolve) = self.hooks.resolve_import_path
+                && let Some(ms) = module_scope
+            {
+                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
+            } else {
+                raw_path
+            };
             let alias_kind = rule.alias_child_kind;
 
             for child in node.children() {
@@ -374,7 +384,14 @@ impl LanguageSpec {
                     });
                 }
             }
-        } else if let Some(full_path) = rule.extract_name(node) {
+        } else if let Some(raw_path) = rule.extract_name(node) {
+            let full_path = if let Some(resolve) = self.hooks.resolve_import_path
+                && let Some(ms) = module_scope
+            {
+                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
+            } else {
+                raw_path
+            };
             // Check for wildcard child (e.g. `asterisk` in `import com.example.*`).
             let has_wildcard_child = rule
                 .wildcard_child_kind
@@ -773,7 +790,8 @@ impl LanguageSpec {
                 .on_import
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
-                self.evaluate_imports(node, nk, &mut state.imports);
+                let ms = state.scope_stack.first().map(|s| s.as_ref());
+                self.evaluate_imports(node, nk, &mut state.imports, ms, sep);
             }
             for idx in import_count_before..state.imports.len() {
                 let imp = &state.imports[idx];

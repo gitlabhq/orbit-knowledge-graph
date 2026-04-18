@@ -673,6 +673,11 @@ pub struct LanguageHooks {
     /// to the new def. Handles decorators/annotations that are CST siblings
     /// of the decorated function/class definition.
     pub adopt_sibling_refs: &'static [&'static str],
+    /// Resolve an import path relative to the current module scope.
+    /// Called with (raw_path, module_scope, separator). Returns the
+    /// resolved absolute path, or None to keep the raw path.
+    /// Handles Python's `from .models import User` → `package.models`.
+    pub resolve_import_path: Option<fn(&str, &str, &str) -> Option<String>>,
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {

@@ -85,6 +85,7 @@ yaml_test!(
     python_decorator_references,
     "python/decorator_references.yaml"
 );
+yaml_test!(python_relative_imports, "python/relative_imports.yaml");
 
 // Java
 yaml_test!(java_call_resolution, "java_resolution.yaml");
