@@ -1,5 +1,6 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, ExtractList, default_extract, field, metadata};
+use crate::v2::dsl::extractors::{Extract, ExtractList, default_extract, field, metadata, text};
+use crate::v2::dsl::predicates::*;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
@@ -100,6 +101,11 @@ impl DslLanguage for JavaDsl {
                 .name_from(field("name"))
                 .receiver("object"),
             reference("object_creation_expression").name_from(field("type")),
+            // Bare type references: declarations, casts, instanceof, annotations.
+            // Skip inside object_creation_expression (already tracked above).
+            reference("type_identifier")
+                .name_from(text())
+                .when(!parent_is("object_creation_expression")),
         ]
     }
 

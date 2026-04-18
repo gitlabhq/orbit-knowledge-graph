@@ -1,6 +1,6 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::{
-    Extract, ExtractList, child_of_kind, default_extract, field, metadata, no_extract,
+    Extract, ExtractList, child_of_kind, default_extract, field, metadata, no_extract, text,
 };
 use crate::v2::dsl::predicates::*;
 use crate::v2::dsl::types::{self, *};
@@ -113,7 +113,11 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn refs() -> Vec<ReferenceRule> {
-        vec![reference("call_expression").receiver("navigation_expression")]
+        vec![
+            reference("call_expression").receiver("navigation_expression"),
+            // Bare type references: declarations, type casts, is checks
+            reference("type_identifier").name_from(text()),
+        ]
     }
 
     fn chain_config() -> Option<ChainConfig> {

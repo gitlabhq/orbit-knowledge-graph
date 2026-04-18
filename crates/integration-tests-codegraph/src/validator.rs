@@ -51,6 +51,11 @@ async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfi
         failures.extend(run_query_block(&label, test.severity, block, datasets, config).await);
     }
 
+    // Auto-dump on failure so debugging doesn't require re-running with debug: true
+    if !failures.is_empty() && !test.debug {
+        dump_datasets(datasets, config).await;
+    }
+
     failures
 }
 

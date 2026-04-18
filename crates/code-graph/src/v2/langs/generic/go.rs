@@ -1,5 +1,5 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, child_of_kind, field, metadata};
+use crate::v2::dsl::extractors::{Extract, child_of_kind, field, metadata, text};
 use crate::v2::dsl::predicates::*;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
@@ -57,6 +57,11 @@ impl DslLanguage for GoDsl {
             reference("call_expression")
                 .name_from(field("function"))
                 .receiver("function"),
+            // Bare type references: declarations, type assertions.
+            // Skip inside composite_literal (already tracked via chain_config.constructor).
+            reference("type_identifier")
+                .name_from(text())
+                .when(!parent_is("composite_literal")),
         ]
     }
 

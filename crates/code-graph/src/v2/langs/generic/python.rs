@@ -1,6 +1,6 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::{
-    ExtractList, child_of_kind, field, field_chain, metadata, no_extract,
+    ExtractList, child_of_kind, field, field_chain, metadata, no_extract, text,
 };
 use crate::v2::dsl::predicates::*;
 use crate::v2::dsl::types::{self, *};
@@ -141,6 +141,8 @@ impl DslLanguage for PythonDsl {
                 .name_from(field_chain(&["function", "attribute"]))
                 .receiver_chain(&["function", "object"]),
             reference("call").name_from(field("function")),
+            // Bare type references in annotations: x: MyClass, def foo() -> MyClass
+            reference("type").name_from(text()),
         ]
     }
 
