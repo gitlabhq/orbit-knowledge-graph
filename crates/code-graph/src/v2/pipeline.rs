@@ -544,7 +544,7 @@ mod tests {
 
     fn fixture_path(relative: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
-        format!("{manifest}/parser/src/{relative}")
+        format!("{manifest}/src/legacy/parser/{relative}")
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
