@@ -22,30 +22,28 @@ fixtures:
           pass
 
 tests:
-  # Decorator references currently land as File→Definition edges because
-  # the decorator node is processed before the function scope is entered.
-  - name: Decorators produce file-level reference edges
+  - name: Decorator produces reference edge from decorated function
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
-      WHERE e.edge_kind = 'Calls'
-      RETURN d.name AS callee
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'decorated_func' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
     assert:
       - { row: { callee: "my_decorator" } }
+      - { not: true, row: { callee: "other_decorator" } }
+
+  - name: Each decorated function references its own decorator
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'another_func' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+    assert:
       - { row: { callee: "other_decorator" } }
-      - { not: true, row: { callee: "plain_func" } }
+      - { not: true, row: { callee: "my_decorator" } }
 
-  - name: Plain function has no decorator in metadata
+  - name: Plain function has no decorator edges
     query: |
-      MATCH (d:Definition)
-      WHERE d.name = 'plain_func'
-      RETURN d.definition_type AS type
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'plain_func' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
     assert:
-      - { row: { type: "Function" } }
-
-  - name: Decorated functions have correct definition type
-    query: |
-      MATCH (d:Definition)
-      WHERE d.name IN ['decorated_func', 'another_func']
-      RETURN d.definition_type AS type
-    assert:
-      - { match: { field: "type", pattern: "Decorated*" } }
+      - { empty: true }

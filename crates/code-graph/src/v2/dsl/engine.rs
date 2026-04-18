@@ -706,6 +706,30 @@ impl LanguageSpec {
             // Track enclosing def for references
             if m.creates_scope {
                 state.enclosing_def_stack.push(def_index);
+
+                // Adopt sibling references: when decorators/annotations are
+                // CST siblings of the scope node, emit refs attributed to
+                // this def rather than the parent scope.
+                if !self.hooks.adopt_sibling_refs.is_empty() {
+                    if let Some(parent) = node.parent() {
+                        for sibling in parent.children() {
+                            let sk = sibling.kind();
+                            if self.hooks.adopt_sibling_refs.contains(&sk.as_ref()) {
+                                if let Some(name) = super::extractors::default_name(&sibling) {
+                                    let ssa_key = state.arena.alloc_str(&name);
+                                    state.pending_refs.push(PendingRef {
+                                        name,
+                                        chain: None,
+                                        ssa_key,
+                                        block: state.current_block,
+                                        enclosing_def: Some(def_index),
+                                        is_return: false,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

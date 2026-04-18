@@ -91,6 +91,7 @@ impl DslLanguage for PythonDsl {
         crate::v2::dsl::types::LanguageHooks {
             module_scope: Some(python_module_from_path),
             return_kinds: &["return_statement"],
+            adopt_sibling_refs: &["decorator"],
             ..crate::v2::dsl::types::LanguageHooks::default()
         }
     }
@@ -143,8 +144,6 @@ impl DslLanguage for PythonDsl {
             reference("call").name_from(field("function")),
             // Bare type references in annotations: x: MyClass, def foo() -> MyClass
             reference("type").name_from(text()),
-            // Decorator references: @dataclass, @staticmethod
-            reference("decorator"),
         ]
     }
 

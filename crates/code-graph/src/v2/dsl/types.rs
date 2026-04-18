@@ -668,6 +668,11 @@ pub struct LanguageHooks {
     /// captures the SSA value of the returned expression and writes it as
     /// the enclosing function's inferred return type.
     pub return_kinds: &'static [&'static str],
+    /// When a scope def is created, scan the parent node's children for
+    /// siblings of these kinds and emit reference PendingRefs attributed
+    /// to the new def. Handles decorators/annotations that are CST siblings
+    /// of the decorated function/class definition.
+    pub adopt_sibling_refs: &'static [&'static str],
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {

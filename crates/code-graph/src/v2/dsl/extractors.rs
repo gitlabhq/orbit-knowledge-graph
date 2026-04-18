@@ -145,7 +145,7 @@ pub fn default_extract() -> Extract {
 
 // ── Helpers ─────────────────────────────────────────────────────
 
-fn default_name(node: &N<'_>) -> Option<String> {
+pub fn default_name(node: &N<'_>) -> Option<String> {
     if let Some(name_node) = node.field("name") {
         return Some(name_node.text().to_string());
     }
