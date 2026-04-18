@@ -58,6 +58,10 @@ mod tests {
         assert_eq!(detect_language_from_extension("cs"), Some(Language::CSharp));
         assert_eq!(detect_language_from_extension("rs"), Some(Language::Rust));
         assert_eq!(
+            detect_language_from_extension("js"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
             detect_language_from_extension("ts"),
             Some(Language::TypeScript)
         );
@@ -69,6 +73,11 @@ mod tests {
         assert_eq!(detect_language_from_name("python"), Some(Language::Python));
         assert_eq!(
             detect_language_from_name("javascript"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(detect_language_from_name("js"), Some(Language::JavaScript));
+        assert_eq!(
+            detect_language_from_name("typescript"),
             Some(Language::TypeScript)
         );
         assert_eq!(detect_language_from_name("unknown"), None);
@@ -76,6 +85,14 @@ mod tests {
 
     #[test]
     fn detect_by_path() {
+        assert_eq!(
+            detect_language_from_path("src/index.js"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_path("src/index.ts"),
+            Some(Language::TypeScript)
+        );
         assert_eq!(
             detect_language_from_path("src/main.java"),
             Some(Language::Java)
