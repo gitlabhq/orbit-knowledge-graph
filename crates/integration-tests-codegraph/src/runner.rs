@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use code_graph::v2::dispatch_by_tag;
+use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::{Pipeline, PipelineConfig, PipelineOutput};
-use code_graph_linker::v2::graph::RowContext;
 
 use super::assertions::{Severity, TestSuite};
 use super::config::make_graph_config;

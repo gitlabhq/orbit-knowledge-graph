@@ -90,12 +90,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/formatters` | Result formatters (graph, raw row, goon) |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema_version.rs`), migration orchestrator (`schema_migration.rs`), migration completion detection and table cleanup (`migration_completion.rs`) |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
-| `code-graph` | Parent crate for code parsing and graph construction; re-exports `treesitter-visit`, `parser-core`, `code-graph-linker`, `code-graph-config`, `code-graph-types` |
-| `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper |
-| `code-graph/parser` | Multi-language parser (8 langs: Ruby, TypeScript, JavaScript, Python, Kotlin, Java, C#, Rust), tree-sitter + Prism (Ruby) + swc (TS/JS), extracts definitions/imports/references |
-| `code-graph/linker` | Builds in-memory property graphs from parsed code, `AsRecordBatch<RowContext>` impls for all node types, `ResolvedEdge` for edge serialization |
-| `code-graph/config` | Language detection and configuration (language enum, extension-to-language mapping) |
-| `code-graph/types` | Core type definitions for code-graph nodes and edges (definitions, imports, references, bindings, FQN, `CanonicalParser` trait) |
+| `code-graph` | Single crate split into `src/v2/` (current pipeline: `pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`) and `src/legacy/` (old `parser` + `linker` paths kept for the existing indexer path). Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |
+| `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper (kept as a separate sub-crate for compile-time isolation) |
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`), Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |

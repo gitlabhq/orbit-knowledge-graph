@@ -1,4 +1,4 @@
-use code_graph_config::{Language, detect_language_from_extension};
+use crate::v2::config::{Language, detect_language_from_extension};
 use ignore::WalkBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::linker::v2::CodeGraph;
+use crate::v2::linker::CodeGraph;
 
 fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
@@ -246,8 +246,8 @@ pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
 where
-    P: parser_core::dsl::types::DslLanguage + 'static,
-    R: crate::linker::v2::HasRules + Send + Sync,
+    P: crate::v2::dsl::types::DslLanguage + 'static,
+    R: crate::v2::linker::HasRules + Send + Sync,
 {
     fn process_files(
         files: &[FileInput],
@@ -374,7 +374,7 @@ where
                     }
                 };
 
-                let mut resolver = crate::linker::v2::FileResolver::new(
+                let mut resolver = crate::v2::linker::FileResolver::new(
                     &graph,
                     info.file_node,
                     &info.def_nodes,
@@ -427,11 +427,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_graph_types::{DefKind, NodeKind};
+    use crate::v2::types::{DefKind, NodeKind};
 
     fn fixture_path(relative: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
-        format!("{manifest}/parser/src/{relative}")
+        format!("{manifest}/src/legacy/parser/{relative}")
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {

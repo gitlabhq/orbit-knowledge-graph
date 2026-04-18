@@ -1,6 +1,6 @@
 use bolero::check;
-use parser_core::typescript::analyzer::TypeScriptAnalyzer;
-use parser_core::typescript::parser::TypeScriptParser;
+use code_graph::legacy::parser::typescript::analyzer::TypeScriptAnalyzer;
+use code_graph::legacy::parser::typescript::parser::TypeScriptParser;
 use std::str::from_utf8;
 
 fn main() {

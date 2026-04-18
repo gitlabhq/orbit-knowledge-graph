@@ -1,7 +1,7 @@
 use bolero::check;
-use parser_core::LanguageParser;
-use parser_core::parser::{GenericParser, SupportedLanguage};
-use parser_core::rust::analyzer::RustAnalyzer;
+use code_graph::legacy::parser::LanguageParser;
+use code_graph::legacy::parser::parser::{GenericParser, SupportedLanguage};
+use code_graph::legacy::parser::rust::analyzer::RustAnalyzer;
 use std::str::from_utf8;
 
 fn main() {
