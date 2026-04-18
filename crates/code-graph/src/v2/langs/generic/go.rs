@@ -32,7 +32,14 @@ impl DslLanguage for GoDsl {
                 .metadata(metadata().return_type(field("result"))),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
-                .metadata(metadata().return_type(field("result"))),
+                .metadata(
+                    metadata().return_type(field("result")).receiver_type(
+                        field("receiver").then(
+                            child_of_kind("parameter_declaration")
+                                .then(field("type").inner("pointer_type", "type_identifier")),
+                        ),
+                    ),
+                ),
             // Unconditional fallback first — reverse iteration means conditional
             // rules (Struct, Interface) are checked before the fallback.
             scope("type_spec", "Type").def_kind(DefKind::Other),
@@ -64,7 +71,8 @@ impl DslLanguage for GoDsl {
                 .value_from("right"),
             binding("var_spec", BindingKind::Assignment)
                 .name_from(&["name"])
-                .value_from("value"),
+                .value_from("value")
+                .typed(vec![field("type")], &[]),
             binding("assignment_statement", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right"),
@@ -184,7 +192,30 @@ impl HasRules for GoRules {
                 ImportStrategy::ExplicitImport,
                 ImportStrategy::SameFile,
             ],
-            ChainMode::ValueFlow,
+            ChainMode::TypeFlow {
+                type_fields: &["type"],
+                skip_types: &[
+                    "int",
+                    "int8",
+                    "int16",
+                    "int32",
+                    "int64",
+                    "uint",
+                    "uint8",
+                    "uint16",
+                    "uint32",
+                    "uint64",
+                    "float32",
+                    "float64",
+                    "complex64",
+                    "complex128",
+                    "string",
+                    "bool",
+                    "byte",
+                    "rune",
+                    "error",
+                ],
+            },
             ReceiverMode::None,
             ".",
             &[],

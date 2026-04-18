@@ -12,6 +12,8 @@ pub struct Extract {
     /// `container_kind`, find the first child of `target_kind` inside it
     /// and use that instead. Falls back to the node's text if not found.
     inner: Option<(&'static str, &'static str)>,
+    /// Optional chained extract applied to the node found by this extract.
+    then: Option<Box<Extract>>,
 }
 
 enum ExtractStrategy {
@@ -24,7 +26,23 @@ enum ExtractStrategy {
 }
 
 impl Extract {
+    /// Navigate to a node, then delegate to a chained extract.
+    fn navigate_to_node<'a>(&self, node: &N<'a>) -> Option<N<'a>> {
+        match &self.strategy {
+            ExtractStrategy::Default | ExtractStrategy::None | ExtractStrategy::Text => {
+                Some(node.clone())
+            }
+            ExtractStrategy::Field(name) => node.field(name),
+            ExtractStrategy::ChildOfKind(kind) => node.find(Child, Kind(kind)),
+            ExtractStrategy::FieldChain(fields) => node.field_chain(fields),
+        }
+    }
+
     pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        if let Some(next) = &self.then {
+            let navigated = self.navigate_to_node(node)?;
+            return next.extract_name(&navigated);
+        }
         match &self.strategy {
             ExtractStrategy::Default => default_name(node),
             ExtractStrategy::None => None,
@@ -63,6 +81,16 @@ impl Extract {
         self.inner = Some((container_kind, target_kind));
         self
     }
+
+    /// Chain another extract step on the result of this one.
+    ///
+    /// ```ignore
+    /// field("receiver").then(child_of_kind("parameter_declaration").then(field("type")))
+    /// ```
+    pub fn then(mut self, next: Extract) -> Self {
+        self.then = Some(Box::new(next));
+        self
+    }
 }
 
 // ── Constructors ────────────────────────────────────────────────
@@ -71,6 +99,7 @@ pub fn field(name: &'static str) -> Extract {
     Extract {
         strategy: ExtractStrategy::Field(name),
         inner: None,
+        then: None,
     }
 }
 
@@ -78,6 +107,7 @@ pub fn field_chain(fields: &'static [&'static str]) -> Extract {
     Extract {
         strategy: ExtractStrategy::FieldChain(fields),
         inner: None,
+        then: None,
     }
 }
 
@@ -85,6 +115,7 @@ pub fn child_of_kind(kind: &'static str) -> Extract {
     Extract {
         strategy: ExtractStrategy::ChildOfKind(kind),
         inner: None,
+        then: None,
     }
 }
 
@@ -92,6 +123,7 @@ pub fn text() -> Extract {
     Extract {
         strategy: ExtractStrategy::Text,
         inner: None,
+        then: None,
     }
 }
 
@@ -99,6 +131,7 @@ pub fn no_extract() -> Extract {
     Extract {
         strategy: ExtractStrategy::None,
         inner: None,
+        then: None,
     }
 }
 
@@ -106,6 +139,7 @@ pub fn default_extract() -> Extract {
     Extract {
         strategy: ExtractStrategy::Default,
         inner: None,
+        then: None,
     }
 }
 

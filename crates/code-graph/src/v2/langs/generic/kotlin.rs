@@ -2,6 +2,7 @@ use crate::v2::config::Language;
 use crate::v2::dsl::extractors::{
     Extract, ExtractList, child_of_kind, default_extract, field, metadata, no_extract,
 };
+use crate::v2::dsl::predicates::*;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
@@ -89,6 +90,11 @@ impl DslLanguage for KotlinDsl {
             scopes(&["object_declaration", "companion_object"], "Object")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier")),
+            // Extension function: has receiver type before the dot
+            scope("function_declaration", "ExtensionFunction")
+                .def_kind(DefKind::Function)
+                .when(has_child(&["."]))
+                .metadata(metadata().receiver_type(child_of_kind("user_type"))),
             scope("function_declaration", "Function").def_kind(DefKind::Function),
             scope("secondary_constructor", "Constructor")
                 .def_kind(DefKind::Constructor)

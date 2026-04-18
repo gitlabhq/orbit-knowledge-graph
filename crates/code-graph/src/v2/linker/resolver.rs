@@ -182,6 +182,15 @@ impl<'a> ResolveCtx<'a> {
         let mut result = Vec::new();
         self.graph
             .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
+
+        // Fallback: find methods whose receiver_type matches scope_fqn.
+        // This handles Go methods (`func (s *Service) Run()`) and
+        // Kotlin extension functions (`fun String.toTitleCase()`).
+        if result.is_empty() {
+            self.graph
+                .lookup_by_receiver_type(scope_fqn, member_name, &mut result);
+        }
+
         let found = !result.is_empty();
         if found {
             out.extend_from_slice(&result);
