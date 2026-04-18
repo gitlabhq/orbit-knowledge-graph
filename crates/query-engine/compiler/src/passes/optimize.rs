@@ -343,8 +343,14 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
             continue;
         }
 
+        // Skip cascade for edge-only nodes: their table is absent from FROM,
+        // so the cascade would be built but never referenced.
+        let to_edge_only = input.compiler.node_edge_col.contains_key(&rel.to);
+        let from_edge_only = input.compiler.node_edge_col.contains_key(&rel.from);
+
         if from_cte.is_some()
             && to_cte.is_none()
+            && !to_edge_only
             && let Some(cte) = build_cascade_for_node(
                 input,
                 &rel.to,
@@ -360,6 +366,7 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         }
         if to_cte.is_some()
             && from_cte.is_none()
+            && !from_edge_only
             && let Some(cte) = build_cascade_for_node(
                 input,
                 &rel.from,
@@ -378,8 +385,13 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
     // Inject cascade CTE filters into node table scans. Each non-root node
     // with a cascade CTE gets `node.id IN (SELECT id FROM cascade_cte)`,
     // allowing ClickHouse to prewhere-filter large node tables (e.g. gl_job).
+    // Edge-only nodes have no table in FROM, so referencing `node.id` would
+    // emit a bare identifier ClickHouse interprets as a database name.
     for (alias, cte_name) in &node_ctes {
         if *cte_name == sip_cte_name {
+            continue;
+        }
+        if input.compiler.node_edge_col.contains_key(alias) {
             continue;
         }
         let node_filter = Expr::InSubquery {
