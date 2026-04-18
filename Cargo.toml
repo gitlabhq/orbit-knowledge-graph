@@ -5,11 +5,7 @@ version = "0.1.0"
 resolver = "2"
 members = [
   "crates/code-graph",
-  "crates/code-graph/config",
-  "crates/code-graph/types",
   "crates/code-graph/treesitter-visit",
-  "crates/code-graph/parser",
-  "crates/code-graph/linker",
   "crates/clickhouse-client",
   "crates/indexer",
   "crates/query-engine",
@@ -89,8 +85,6 @@ walkdir = "2.5.0"
 criterion = { version = "0.8.1", features = ["html_reports"] }
 tracing-test = "0.2.5"
 
-# Parser-core
-parser-core = { path = "crates/code-graph/parser" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 duckdb = { version = "1.10501.0", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.8.0" }

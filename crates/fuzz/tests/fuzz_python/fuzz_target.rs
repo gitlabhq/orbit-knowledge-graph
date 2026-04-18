@@ -1,7 +1,7 @@
 use bolero::check;
-use parser_core::LanguageParser;
-use parser_core::parser::{GenericParser, SupportedLanguage};
-use parser_core::python::analyzer::PythonAnalyzer;
+use code_graph::legacy::parser::LanguageParser;
+use code_graph::legacy::parser::parser::{GenericParser, SupportedLanguage};
+use code_graph::legacy::parser::python::analyzer::PythonAnalyzer;
 use std::str::from_utf8;
 
 fn main() {

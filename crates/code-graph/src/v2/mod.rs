@@ -1,7 +1,10 @@
-pub mod custom;
+pub mod config;
+pub mod dsl;
 pub mod langs;
+pub mod linker;
 pub mod pipeline;
 pub mod registry;
+pub mod types;
 
 pub use pipeline::{
     GenericPipeline, LanguagePipeline, Pipeline, PipelineConfig, PipelineOutput, PipelineResult,

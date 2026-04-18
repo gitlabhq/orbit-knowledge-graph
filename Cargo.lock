@@ -2105,43 +2105,10 @@ dependencies = [
 name = "code-graph"
 version = "0.1.0"
 dependencies = [
- "arrow 58.1.0",
- "code-graph-config",
- "code-graph-linker",
- "code-graph-types",
- "ignore",
- "indicatif",
- "log",
- "parser-core",
- "petgraph 0.8.3",
- "rayon",
- "ruby-prism",
- "rustc-hash",
- "smallvec",
- "tempfile",
- "treesitter-visit",
-]
-
-[[package]]
-name = "code-graph-config"
-version = "0.1.0"
-dependencies = [
- "rustc-hash",
- "serde",
- "strum 0.28.0",
- "treesitter-visit",
-]
-
-[[package]]
-name = "code-graph-linker"
-version = "0.1.0"
-dependencies = [
  "anyhow",
  "arrow 58.1.0",
  "bumpalo",
  "chrono",
- "code-graph-config",
- "code-graph-types",
  "criterion",
  "futures",
  "gitalisk-core",
@@ -2151,33 +2118,34 @@ dependencies = [
  "internment",
  "log",
  "num_cpus",
- "parser-core",
+ "once_cell",
+ "pastey",
  "petgraph 0.8.3",
  "rayon",
+ "regex",
+ "ruby-prism",
+ "rust-lapper",
  "rustc-hash",
  "serde",
  "serde_json",
  "smallvec",
  "stacker",
  "strum 0.28.0",
+ "swc_atoms",
+ "swc_common",
+ "swc_ecma_ast",
+ "swc_ecma_parser",
+ "swc_ecma_visit",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rayon",
  "tokio-stream",
+ "toml",
  "tracing",
  "tracing-test",
  "treesitter-visit",
  "walkdir",
-]
-
-[[package]]
-name = "code-graph-types"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "code-graph-config",
- "serde",
- "strum 0.28.0",
 ]
 
 [[package]]
@@ -4951,9 +4919,9 @@ name = "gkg-fuzz"
 version = "0.1.0"
 dependencies = [
  "bolero",
+ "code-graph",
  "compiler",
  "indexer",
- "parser-core",
  "serde_json",
 ]
 
@@ -5710,7 +5678,6 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "parking_lot",
- "parser-core",
  "prost 0.14.3",
  "query-engine",
  "rustc-hash",
@@ -5863,7 +5830,6 @@ dependencies = [
  "arrow 58.1.0",
  "arrow-ipc 58.1.0",
  "code-graph",
- "code-graph-linker",
  "globset",
  "lance-graph",
  "petgraph 0.8.3",
@@ -8025,36 +7991,6 @@ dependencies = [
  "regex-syntax",
  "structmeta",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "parser-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bumpalo",
- "code-graph-config",
- "code-graph-types",
- "internment",
- "once_cell",
- "pastey",
- "regex",
- "ruby-prism",
- "rust-lapper",
- "rustc-hash",
- "serde",
- "smallvec",
- "stacker",
- "swc_atoms",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_parser",
- "swc_ecma_visit",
- "tempfile",
- "thiserror 2.0.18",
- "toml",
- "tracing",
- "treesitter-visit",
 ]
 
 [[package]]
