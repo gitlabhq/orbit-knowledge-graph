@@ -54,7 +54,7 @@ tests:
       WHERE caller.name = 'useGenericReturn' AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 2 }
+      - { row_count: 4 }
       - { row: { caller: "com.example.App.useGenericReturn", callee: "com.example.ServiceFactory.getUsers" } }
       - { row: { caller: "com.example.App.useGenericReturn", callee: "com.example.UserService.query" } }
       - { not: true, row: { callee: "com.example.UserService.save" } }
@@ -66,7 +66,7 @@ tests:
       WHERE caller.name = 'useGenericLocal' AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 2 }
+      - { row_count: 4 }
       - { row: { caller: "com.example.App.useGenericLocal", callee: "com.example.ServiceFactory.getOrders" } }
       - { row: { caller: "com.example.App.useGenericLocal", callee: "com.example.OrderService.process" } }
       - { not: true, row: { callee: "com.example.UserService.query" } }
