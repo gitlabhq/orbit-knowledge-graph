@@ -108,23 +108,19 @@ if [[ -n "$CH_POD" ]]; then
             ORDER BY database, name FORMAT Vertical" \
     > "$DIAG_DIR/clickhouse-schema.txt" || true
 
-  # Full contents of small high-value tables. e2e datasets are tiny so
-  # selecting * with FINAL is cheap and gives us actual row state for
-  # post-mortem analysis.
-  for tbl in \
-    datalake.namespace_traversal_paths \
-    datalake.project_namespace_traversal_paths \
-    datalake.work_items \
-    datalake.siphon_namespaces \
-    datalake.siphon_knowledge_graph_enabled_namespaces \
-    gkg.gl_work_item \
-    gkg.gl_group \
-    gkg.gl_project \
-    gkg.gl_user \
-    gkg.gl_note
-  do
+  # Full contents of every base table in datalake and gkg, discovered
+  # dynamically. The graph DB tables are prefixed at runtime by the indexer
+  # (e.g. v1_gl_project per config/SCHEMA_VERSION) so we can't hardcode names.
+  # Filtering on engine != 'View' skips materialized-view definitions
+  # themselves; their target tables are still captured. Capped per-table to
+  # keep dumps manageable on chatty tables.
+  CH_DUMP_TABLES=$(ch_query "SELECT database || '.' || name FROM system.tables
+                             WHERE database IN ('datalake','gkg')
+                               AND engine NOT IN ('View','Null')
+                             ORDER BY database, name FORMAT TSV" 2>/dev/null || true)
+  for tbl in $CH_DUMP_TABLES; do
     safe=$(echo "$tbl" | tr '.' '-')
-    ch_query "SELECT * FROM $tbl FINAL FORMAT Vertical" \
+    ch_query "SELECT * FROM $tbl FINAL ORDER BY ALL LIMIT 1000 FORMAT Vertical" \
       > "$DIAG_DIR/clickhouse-${safe}.txt" || true
   done
 else
