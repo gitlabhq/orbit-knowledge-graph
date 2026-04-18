@@ -35,6 +35,10 @@ pub(crate) async fn run_suite(
 }
 
 async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfig) -> Vec<Failure> {
+    if test.debug {
+        dump_datasets(datasets, config).await;
+    }
+
     let blocks = test.all_queries();
     let mut failures = Vec::new();
 
@@ -48,6 +52,42 @@ async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfi
     }
 
     failures
+}
+
+async fn dump_datasets(datasets: &LanceDatasets, config: &GraphConfig) {
+    let debug_queries = [
+        (
+            "Definitions",
+            "MATCH (d:Definition) RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file",
+        ),
+        (
+            "Files",
+            "MATCH (f:File) RETURN f.path AS path, f.language AS lang",
+        ),
+        (
+            "Imports",
+            "MATCH (i:ImportedSymbol) RETURN i.file_path AS file, i.path AS path, i.name AS name, i.alias AS alias",
+        ),
+        (
+            "DefinitionToDefinition",
+            "MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition) RETURN s.fqn AS source, t.fqn AS target, e.edge_kind AS kind",
+        ),
+        (
+            "FileToDefinition",
+            "MATCH (f:File)-[e:FileToDefinition]->(d:Definition) RETURN f.path AS file, d.fqn AS def, e.edge_kind AS kind",
+        ),
+    ];
+
+    eprintln!("\n  ╔══ DEBUG DUMP ══════════════════════════════════════");
+    for (label, cypher) in debug_queries {
+        if let Ok(q) = CypherQuery::new(cypher) {
+            let q = q.with_config(config.clone());
+            if let Ok(batch) = q.execute(datasets.clone(), None).await {
+                print_result(&format!("  {label}"), cypher, &batch);
+            }
+        }
+    }
+    eprintln!("  ╚══════════════════════════════════════════════════\n");
 }
 
 async fn run_query_block(

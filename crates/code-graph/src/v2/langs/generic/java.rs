@@ -1,12 +1,14 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, ExtractList, field, metadata};
+use crate::v2::dsl::extractors::{Extract, ExtractList, default_extract, field, metadata};
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::linker::rules::{
-    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage,
+    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
 };
 use crate::v2::linker::{HasRules, ResolveSettings};
 
@@ -81,7 +83,10 @@ impl DslLanguage for JavaDsl {
             scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
-                .metadata(metadata().return_type(field("type"))),
+                .metadata(
+                    metadata()
+                        .return_type(field("type").inner("type_arguments", "type_identifier")),
+                ),
             scope("lambda_expression", "Lambda")
                 .def_kind(DefKind::Lambda)
                 .no_scope()
@@ -102,7 +107,7 @@ impl DslLanguage for JavaDsl {
         fn java_import_classify(node: &N<'_>) -> &'static str {
             let text = node.text().to_string();
             let is_static = text.trim_start().starts_with("import static");
-            let is_wildcard = node.children().any(|c| c.kind() == "asterisk");
+            let is_wildcard = node.has(Child, Kind("asterisk"));
             match (is_static, is_wildcard) {
                 (true, _) => "StaticImport",
                 (false, true) => "WildcardImport",
@@ -129,17 +134,17 @@ impl DslLanguage for JavaDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("package_declaration", Extract::Default))
+        Some(("package_declaration", default_extract()))
     }
 
     fn bindings() -> Vec<BindingRule> {
+        let skip = &[
+            "int", "long", "short", "byte", "float", "double", "boolean", "char", "void", "String",
+        ];
         let java_type = |rule: BindingRule| {
             rule.typed(
-                &["type"],
-                &[
-                    "int", "long", "short", "byte", "float", "double", "boolean", "char", "void",
-                    "String",
-                ],
+                vec![field("type").inner("type_arguments", "type_identifier")],
+                skip,
             )
         };
         vec![
@@ -245,6 +250,7 @@ impl HasRules for JavaRules {
             &["this", "self"],
             Some("super"),
         )
+        .with_hooks(ResolverHooks::default())
         .with_settings(ResolveSettings {
             per_file_timeout: Some(std::time::Duration::from_millis(10000)),
             ..ResolveSettings::default()

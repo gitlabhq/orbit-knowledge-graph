@@ -1,0 +1,57 @@
+name: "Python: instance attribute resolution across methods"
+fixtures:
+  - path: main.py
+    content: |
+      class Database:
+          def execute(self):
+              pass
+          def close(self):
+              pass
+
+      class Repo:
+          def __init__(self):
+              self.db = Database()
+
+          def query(self):
+              self.db.execute()
+
+          def cleanup(self):
+              self.db.close()
+
+      class Decoy:
+          def execute(self):
+              pass
+
+tests:
+  - name: self.db.execute() resolves to Database.execute not Decoy.execute
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'query' AND callee.name = 'execute' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.Repo.query", callee: "main.Database.execute" } }
+
+  - name: self.db.close() resolves to Database.close
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'cleanup' AND callee.name = 'close' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.Repo.cleanup", callee: "main.Database.close" } }
+
+  - name: No cross-method leakage
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'query' AND callee.name = 'close' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { empty: true }
+
+  # LIMITATION: cross-class instance attrs (self.db.cursor.execute() where
+  # cursor is set in Database.__init__) don't resolve correctly with a decoy.
+  # The compound SSA key "self.db" resolves to Database, but "cursor" is an
+  # instance attr on Database, not a graph definition. The resolver falls back
+  # to bare name lookup which picks the wrong class if a decoy exists.
+  # Fix requires storing instance attr types as graph metadata on the class.

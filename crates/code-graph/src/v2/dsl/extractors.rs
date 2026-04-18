@@ -1,48 +1,115 @@
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 /// How to extract a name from a tree-sitter node.
-pub enum Extract {
-    /// Look for a `name` field, then fall back to first identifier child.
+pub struct Extract {
+    strategy: ExtractStrategy,
+    /// Optional inner descent: if the extracted node has a child of
+    /// `container_kind`, find the first child of `target_kind` inside it
+    /// and use that instead. Falls back to the node's text if not found.
+    inner: Option<(&'static str, &'static str)>,
+}
+
+enum ExtractStrategy {
     Default,
-    /// Always returns None. Used when the parent node has no path/name to extract.
     None,
-    /// Extract the node's own text directly (for leaf nodes like identifiers).
     Text,
-    /// Extract text from a named field (e.g. `node.field("name")`).
     Field(&'static str),
-    /// Extract text from the first child of this node kind.
     ChildOfKind(&'static str),
-    /// Follow a chain of fields and extract the final node's text.
     FieldChain(&'static [&'static str]),
-    /// C-style: follow `declarator` -> `declarator` chain to find the name.
-    Declarator,
 }
 
 impl Extract {
     pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
-        match self {
-            Extract::Default => default_name(node),
-            Extract::None => None,
-            Extract::Text => Some(node.text().to_string()),
-            Extract::Field(name) => node.field(name).map(|n| n.text().to_string()),
-            Extract::ChildOfKind(kind) => node
-                .children()
-                .find(|c| c.kind().as_ref() == *kind)
-                .map(|n| n.text().to_string()),
-            Extract::FieldChain(fields) => {
-                let mut current = node.clone();
-                for f in *fields {
-                    current = current.field(f)?;
-                }
-                Some(current.text().to_string())
+        match &self.strategy {
+            ExtractStrategy::Default => default_name(node),
+            ExtractStrategy::None => None,
+            ExtractStrategy::Text => Some(node.text().to_string()),
+            ExtractStrategy::Field(name) => {
+                node.field(name).map(|n| self.extract_inner_or_text(&n))
             }
-            Extract::Declarator => declarator_name(node),
+            ExtractStrategy::ChildOfKind(kind) => node
+                .find(Child, Kind(kind))
+                .map(|n| self.extract_inner_or_text(&n)),
+            ExtractStrategy::FieldChain(fields) => {
+                let current = node.field_chain(fields)?;
+                Some(self.extract_inner_or_text(&current))
+            }
         }
     }
+
+    fn extract_inner_or_text(&self, node: &N<'_>) -> String {
+        if let Some((container_kind, target_kind)) = self.inner
+            && let Some(container) = node.find(Child, Kind(container_kind))
+            && let Some(inner) = container.find(Descendant, Kind(target_kind))
+        {
+            return inner.text().to_string();
+        }
+        node.text().to_string()
+    }
+
+    /// Add an inner descent: if the result node has a child of
+    /// `container_kind`, take the first `target_kind` inside it.
+    ///
+    /// ```ignore
+    /// field("type").inner("type_arguments", "type_identifier")
+    /// // List<UserService> → navigate type_arguments → UserService
+    /// ```
+    pub fn inner(mut self, container_kind: &'static str, target_kind: &'static str) -> Self {
+        self.inner = Some((container_kind, target_kind));
+        self
+    }
 }
+
+// ── Constructors ────────────────────────────────────────────────
+
+pub fn field(name: &'static str) -> Extract {
+    Extract {
+        strategy: ExtractStrategy::Field(name),
+        inner: None,
+    }
+}
+
+pub fn field_chain(fields: &'static [&'static str]) -> Extract {
+    Extract {
+        strategy: ExtractStrategy::FieldChain(fields),
+        inner: None,
+    }
+}
+
+pub fn child_of_kind(kind: &'static str) -> Extract {
+    Extract {
+        strategy: ExtractStrategy::ChildOfKind(kind),
+        inner: None,
+    }
+}
+
+pub fn text() -> Extract {
+    Extract {
+        strategy: ExtractStrategy::Text,
+        inner: None,
+    }
+}
+
+pub fn no_extract() -> Extract {
+    Extract {
+        strategy: ExtractStrategy::None,
+        inner: None,
+    }
+}
+
+pub fn default_extract() -> Extract {
+    Extract {
+        strategy: ExtractStrategy::Default,
+        inner: None,
+    }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────
 
 fn default_name(node: &N<'_>) -> Option<String> {
     if let Some(name_node) = node.field("name") {
@@ -67,36 +134,6 @@ fn is_identifier_kind(kind: &str) -> bool {
             | "field_identifier"
             | "property_identifier"
     )
-}
-
-fn declarator_name(node: &N<'_>) -> Option<String> {
-    let declarator = node.field("declarator")?;
-    if let Some(inner) = declarator.field("declarator") {
-        return Some(inner.text().to_string());
-    }
-    if is_identifier_kind(&declarator.kind()) {
-        return Some(declarator.text().to_string());
-    }
-    if let Some(name) = declarator.field("name") {
-        return Some(name.text().to_string());
-    }
-    None
-}
-
-pub fn field(name: &'static str) -> Extract {
-    Extract::Field(name)
-}
-
-pub fn field_chain(fields: &'static [&'static str]) -> Extract {
-    Extract::FieldChain(fields)
-}
-
-pub fn child_of_kind(kind: &'static str) -> Extract {
-    Extract::ChildOfKind(kind)
-}
-
-pub fn declarator() -> Extract {
-    Extract::Declarator
 }
 
 // ── Metadata extraction ─────────────────────────────────────────
@@ -126,20 +163,12 @@ impl ExtractList {
                     return vec![];
                 };
                 field_node
-                    .children()
-                    .filter(|c| {
-                        let k = c.kind();
-                        kinds.iter().any(|&target| target == k.as_ref())
-                    })
+                    .children_matching(AnyKind(kinds))
                     .map(|c| c.text().to_string())
                     .collect()
             }
             ExtractList::ChildrenOfKind(kinds) => node
-                .children()
-                .filter(|c| {
-                    let k = c.kind();
-                    kinds.iter().any(|&target| target == k.as_ref())
-                })
+                .children_matching(AnyKind(kinds))
                 .map(|c| c.text().to_string())
                 .collect(),
             ExtractList::FieldSplit(field_name, sep) => {
@@ -154,12 +183,9 @@ impl ExtractList {
                     .collect()
             }
             ExtractList::Decorators(decorator_kind) => {
-                if let Some(parent) = node.parent()
-                    && parent.kind() == "decorated_definition"
-                {
+                if let Some(parent) = node.find(Parent, Kind("decorated_definition")) {
                     parent
-                        .children()
-                        .filter(|c| c.kind().as_ref() == *decorator_kind)
+                        .children_matching(Kind(decorator_kind))
                         .map(|c| c.text().trim_start_matches('@').trim().to_string())
                         .collect()
                 } else {
@@ -330,7 +356,7 @@ mod tests {
         let root = SupportLang::Python.ast_grep("def foo(): pass");
         let func = root.root().children().next().unwrap();
         assert_eq!(
-            Extract::Default.extract_name(&func),
+            default_extract().extract_name(&func),
             Some("foo".to_string())
         );
     }

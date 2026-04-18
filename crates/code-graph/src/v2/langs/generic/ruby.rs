@@ -1,10 +1,12 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, ExtractList, field, metadata};
+use crate::v2::dsl::extractors::{ExtractList, field, metadata, no_extract, text};
 use crate::v2::dsl::types::{
     self, BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LanguageHooks, LoopRule,
     ReferenceRule, ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
 };
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
 
 use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
@@ -36,7 +38,7 @@ impl DslLanguage for RubyDsl {
             scopes(&["lambda", "do_block", "block"], "Lambda")
                 .def_kind(DefKind::Lambda)
                 .no_scope()
-                .name_from(Extract::None),
+                .name_from(no_extract()),
         ]
     }
 
@@ -50,7 +52,7 @@ impl DslLanguage for RubyDsl {
             // e.g. `validate_name` inside a method body. No parent filter —
             // identifiers appear in body_statement, then, else, begin, rescue, etc.
             // The early exit filter (lookup_name) rejects names not in the graph.
-            reference("identifier").name_from(Extract::Text),
+            reference("identifier").name_from(text()),
         ]
     }
 
@@ -216,8 +218,8 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
 
     let arg = node
         .field("arguments")
-        .and_then(|args| args.children().find(|c| c.kind().as_ref() == "string"))
-        .and_then(|s| s.children().find(|c| c.kind().as_ref() == "string_content"))
+        .and_then(|args| args.find(Child, Kind("string")))
+        .and_then(|s| s.find(Child, Kind("string_content")))
         .map(|c| c.text().to_string());
 
     let Some(path) = arg else {
