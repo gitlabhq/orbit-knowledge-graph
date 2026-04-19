@@ -1,3 +1,4 @@
+use super::sysroot::EmbeddedSysroot;
 use super::workspace::{discover_manifest_paths_for_root, normalize_existing_path};
 use super::*;
 
@@ -17,12 +18,6 @@ pub(super) struct ParsedCargoManifest {
 struct SyntheticCargoWorkspace {
     workspace_manifest_path: PathBuf,
     metadata: Metadata,
-}
-
-pub(super) struct BundledLangCrates {
-    _tempdir: TempDir,
-    core_manifest_path: PathBuf,
-    std_manifest_path: PathBuf,
 }
 
 #[derive(Clone)]
@@ -246,9 +241,9 @@ pub(super) fn build_project_workspace(
     _root_path: &str,
     manifest_path: &Path,
     manifest_cache: &mut ManifestCache,
-    bundled_lang_crates: &BundledLangCrates,
+    embedded_sysroot: &EmbeddedSysroot,
 ) -> Result<ProjectWorkspace> {
-    let synthetic = build_synthetic_workspace(manifest_path, manifest_cache, bundled_lang_crates)?;
+    let synthetic = build_synthetic_workspace(manifest_path, manifest_cache)?;
     let utf8_manifest_path = Utf8PathBuf::from_path_buf(synthetic.workspace_manifest_path.clone())
         .map_err(|path| {
             anyhow!(
@@ -267,7 +262,7 @@ pub(super) fn build_project_workspace(
             build_scripts: WorkspaceBuildScripts::default(),
             rustc: Err(None),
         },
-        sysroot: Sysroot::empty(),
+        sysroot: embedded_sysroot.project_workspace_sysroot()?,
         rustc_cfg: server_rustc_cfg(),
         toolchain: None,
         target: Ok(server_target_data()),
@@ -280,7 +275,6 @@ pub(super) fn build_project_workspace(
 fn build_synthetic_workspace(
     manifest_path: &Path,
     manifest_cache: &mut ManifestCache,
-    bundled_lang_crates: &BundledLangCrates,
 ) -> Result<SyntheticCargoWorkspace> {
     let descriptor = build_workspace_descriptor(manifest_path, manifest_cache)?;
     let mut packages = HashMap::new();
@@ -325,8 +319,7 @@ fn build_synthetic_workspace(
         }
     }
 
-    let mut package_values = packages.into_values().collect::<Vec<_>>();
-    inject_bundled_lang_crates(&mut package_values, bundled_lang_crates);
+    let package_values = packages.into_values().collect::<Vec<_>>();
     let metadata = synthetic_metadata_from_packages(&descriptor, package_values)?;
     Ok(SyntheticCargoWorkspace {
         workspace_manifest_path: descriptor.workspace_manifest_path,
@@ -883,117 +876,6 @@ fn parse_target_platform(target: &str) -> Option<String> {
         .map(|platform| platform.to_string())
 }
 
-impl BundledLangCrates {
-    pub(super) fn create() -> Result<Self> {
-        let tempdir = tempfile::tempdir().context("failed to create bundled lang-crate dir")?;
-        let root = tempdir.path();
-        let core_manifest_path =
-            write_lang_crate(root, "core", BUNDLED_CORE_CARGO_TOML, BUNDLED_CORE_LIB_RS)?;
-        let std_manifest_path =
-            write_lang_crate(root, "std", BUNDLED_STD_CARGO_TOML, BUNDLED_STD_LIB_RS)?;
-
-        Ok(Self {
-            _tempdir: tempdir,
-            core_manifest_path,
-            std_manifest_path,
-        })
-    }
-}
-
-fn write_lang_crate(root: &Path, name: &str, manifest: &str, source: &str) -> Result<PathBuf> {
-    let crate_root = root.join(name);
-    let src_dir = crate_root.join("src");
-    std::fs::create_dir_all(&src_dir)
-        .with_context(|| format!("failed to create bundled crate dir {}", src_dir.display()))?;
-    let manifest_path = crate_root.join("Cargo.toml");
-    std::fs::write(&manifest_path, manifest)
-        .with_context(|| format!("failed to write {}", manifest_path.display()))?;
-    let lib_path = src_dir.join("lib.rs");
-    std::fs::write(&lib_path, source)
-        .with_context(|| format!("failed to write {}", lib_path.display()))?;
-    Ok(manifest_path)
-}
-
-fn inject_bundled_lang_crates(
-    packages: &mut Vec<LocalWorkspacePackage>,
-    bundled_lang_crates: &BundledLangCrates,
-) {
-    let package_names = packages
-        .iter()
-        .map(|package| package.package_name.as_str())
-        .collect::<HashSet<_>>();
-    if package_names.contains("core") || package_names.contains("std") {
-        return;
-    }
-
-    let core_package = bundled_lang_package("core", &bundled_lang_crates.core_manifest_path, &[]);
-    let std_dependency = bundled_lang_dependency("core", &bundled_lang_crates.core_manifest_path);
-    let std_package = bundled_lang_package(
-        "std",
-        &bundled_lang_crates.std_manifest_path,
-        std::slice::from_ref(&std_dependency),
-    );
-    let core_dependency = bundled_lang_dependency("core", &bundled_lang_crates.core_manifest_path);
-    let std_dep = bundled_lang_dependency("std", &bundled_lang_crates.std_manifest_path);
-
-    for package in packages
-        .iter_mut()
-        .filter(|package| !matches!(package.package_name.as_str(), "core" | "std"))
-    {
-        package.dependencies.push(core_dependency.clone());
-        package.dependencies.push(std_dep.clone());
-    }
-
-    packages.push(core_package);
-    packages.push(std_package);
-}
-
-fn bundled_lang_package(
-    name: &str,
-    manifest_path: &Path,
-    dependencies: &[ResolvedDependencyCandidate],
-) -> LocalWorkspacePackage {
-    let version = "0.0.0".to_string();
-    LocalWorkspacePackage {
-        package_id: package_id_for(manifest_path, name, &version),
-        package_name: name.to_string(),
-        manifest_path: manifest_path.to_path_buf(),
-        version,
-        edition: "2021".to_string(),
-        features: BTreeMap::new(),
-        targets: vec![LocalTargetSpec {
-            name: name.to_string(),
-            kind: vec!["lib"],
-            crate_types: vec!["lib"],
-            required_features: Vec::new(),
-            src_path: manifest_path
-                .parent()
-                .expect("bundled manifest has parent")
-                .join("src/lib.rs"),
-            edition: "2021".to_string(),
-            doctest: false,
-            test: false,
-            doc: true,
-        }],
-        dependencies: dependencies.to_vec(),
-        is_member: false,
-    }
-}
-
-fn bundled_lang_dependency(name: &str, target_manifest_path: &Path) -> ResolvedDependencyCandidate {
-    ResolvedDependencyCandidate {
-        manifest_name: name.to_string(),
-        code_name: name.to_string(),
-        target_package_name: name.to_string(),
-        target_manifest_path: target_manifest_path.to_path_buf(),
-        kind: "normal",
-        target: None,
-        optional: false,
-        uses_default_features: true,
-        features: Vec::new(),
-    }
-}
-
 fn cfg_flag(name: &str) -> CfgAtom {
     CfgAtom::Flag(Symbol::intern(name))
 }
@@ -1026,268 +908,6 @@ fn server_target_data() -> TargetData {
         arch: Arch::Other,
     }
 }
-
-const BUNDLED_CORE_CARGO_TOML: &str = r#"[package]
-name = "core"
-version = "0.0.0"
-edition = "2021"
-"#;
-
-const BUNDLED_STD_CARGO_TOML: &str = r#"[package]
-name = "std"
-version = "0.0.0"
-edition = "2021"
-"#;
-
-const BUNDLED_CORE_LIB_RS: &str = r#"#![allow(unused)]
-#![feature(lang_items, no_core)]
-#![no_core]
-
-pub mod option {
-    pub enum Option<T> {
-        Some(T),
-        None,
-    }
-}
-
-pub mod result {
-    pub enum Result<T, E> {
-        Ok(T),
-        Err(E),
-    }
-}
-
-pub mod convert {
-    pub trait From<T> {
-        fn from(value: T) -> Self;
-    }
-
-    impl<T> From<T> for T {
-        fn from(value: T) -> Self {
-            value
-        }
-    }
-}
-
-pub mod pin {
-    pub struct Pin<P>(pub P);
-}
-
-pub mod task {
-    pub enum Poll<T> {
-        #[lang = "Ready"]
-        Ready(T),
-        #[lang = "Pending"]
-        Pending,
-    }
-
-    pub struct Context<'a> {
-        _marker: &'a (),
-    }
-}
-
-pub mod ops {
-    pub enum Infallible {}
-
-    pub enum ControlFlow<B, C = ()> {
-        #[lang = "Continue"]
-        Continue(C),
-        #[lang = "Break"]
-        Break(B),
-    }
-
-    #[lang = "deref"]
-    pub trait Deref {
-        #[lang = "deref_target"]
-        type Target: ?Sized;
-        fn deref(&self) -> &Self::Target;
-    }
-
-    #[lang = "deref_mut"]
-    pub trait DerefMut: Deref {
-        fn deref_mut(&mut self) -> &mut Self::Target;
-    }
-
-    #[lang = "index"]
-    pub trait Index<Idx: ?Sized> {
-        type Output: ?Sized;
-        fn index(&self, index: Idx) -> &Self::Output;
-    }
-
-    #[lang = "index_mut"]
-    pub trait IndexMut<Idx: ?Sized>: Index<Idx> {
-        fn index_mut(&mut self, index: Idx) -> &mut Self::Output;
-    }
-
-    #[lang = "add"]
-    pub trait Add<Rhs = Self> {
-        type Output;
-        fn add(self, rhs: Rhs) -> Self::Output;
-    }
-
-    #[lang = "not"]
-    pub trait Not {
-        type Output;
-        fn not(self) -> Self::Output;
-    }
-
-    #[lang = "neg"]
-    pub trait Neg {
-        type Output;
-        fn neg(self) -> Self::Output;
-    }
-
-    pub trait FromResidual<R = <Self as Try>::Residual> {
-        #[lang = "from_residual"]
-        fn from_residual(residual: R) -> Self;
-    }
-
-    pub trait Residual<O>: Sized {
-        type TryType: Try<Output = O, Residual = Self>;
-    }
-
-    #[lang = "Try"]
-    pub trait Try: FromResidual<Self::Residual> {
-        type Output;
-        type Residual;
-
-        #[lang = "from_output"]
-        fn from_output(output: Self::Output) -> Self;
-
-        #[lang = "branch"]
-        fn branch(self) -> ControlFlow<Self::Residual, Self::Output>;
-    }
-}
-
-pub mod future {
-    use crate::pin::Pin;
-    use crate::task::{Context, Poll};
-
-    #[lang = "future_trait"]
-    pub trait Future {
-        #[lang = "future_output"]
-        type Output;
-
-        #[lang = "poll"]
-        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
-    }
-
-    pub trait IntoFuture {
-        type Output;
-        type IntoFuture: Future<Output = Self::Output>;
-
-        #[lang = "into_future"]
-        fn into_future(self) -> Self::IntoFuture;
-    }
-
-    impl<F: Future> IntoFuture for F {
-        type Output = F::Output;
-        type IntoFuture = F;
-
-        fn into_future(self) -> Self::IntoFuture {
-            self
-        }
-    }
-}
-
-use crate::convert::From;
-use crate::ops::{ControlFlow, FromResidual, Infallible, Residual, Try};
-use crate::option::Option;
-use crate::option::Option::{None, Some};
-use crate::result::Result;
-use crate::result::Result::{Err, Ok};
-
-impl<T> Try for Option<T> {
-    type Output = T;
-    type Residual = Option<Infallible>;
-
-    fn from_output(output: Self::Output) -> Self {
-        Some(output)
-    }
-
-    fn branch(self) -> ControlFlow<Self::Residual, Self::Output> {
-        match self {
-            Some(value) => ControlFlow::Continue(value),
-            None => ControlFlow::Break(None),
-        }
-    }
-}
-
-impl<T> FromResidual<Option<Infallible>> for Option<T> {
-    fn from_residual(residual: Option<Infallible>) -> Self {
-        match residual {
-            None => None,
-            Some(_) => loop {},
-        }
-    }
-}
-
-impl<T> Residual<T> for Option<Infallible> {
-    type TryType = Option<T>;
-}
-
-impl<T, E> Try for Result<T, E> {
-    type Output = T;
-    type Residual = Result<Infallible, E>;
-
-    fn from_output(output: Self::Output) -> Self {
-        Ok(output)
-    }
-
-    fn branch(self) -> ControlFlow<Self::Residual, Self::Output> {
-        match self {
-            Ok(value) => ControlFlow::Continue(value),
-            Err(error) => ControlFlow::Break(Err(error)),
-        }
-    }
-}
-
-impl<T, E, F: From<E>> FromResidual<Result<Infallible, E>> for Result<T, F> {
-    fn from_residual(residual: Result<Infallible, E>) -> Self {
-        match residual {
-            Err(error) => Err(F::from(error)),
-            Ok(_) => loop {},
-        }
-    }
-}
-
-impl<T, E> Residual<T> for Result<Infallible, E> {
-    type TryType = Result<T, E>;
-}
-"#;
-
-const BUNDLED_STD_LIB_RS: &str = r#"#![allow(unused)]
-
-extern crate core;
-
-pub mod convert {
-    pub use core::convert::*;
-}
-
-pub mod future {
-    pub use core::future::*;
-}
-
-pub mod ops {
-    pub use core::ops::*;
-}
-
-pub mod option {
-    pub use core::option::*;
-}
-
-pub mod pin {
-    pub use core::pin::*;
-}
-
-pub mod result {
-    pub use core::result::*;
-}
-
-pub mod task {
-    pub use core::task::*;
-}
-"#;
 
 fn collect_target_specs(
     manifest: &cargo_manifest::TomlManifest,

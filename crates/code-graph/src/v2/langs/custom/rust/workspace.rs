@@ -1,4 +1,5 @@
-use super::manifest::{BundledLangCrates, ManifestCache, build_project_workspace};
+use super::manifest::{ManifestCache, build_project_workspace};
+use super::sysroot::EmbeddedSysroot;
 use super::*;
 
 #[derive(Clone)]
@@ -11,6 +12,7 @@ pub(super) struct WorkspaceIndex {
 }
 
 pub(super) struct WorkspaceCatalog {
+    _embedded_sysroot: Arc<EmbeddedSysroot>,
     workspaces: Vec<WorkspaceIndex>,
     workspace_ids_by_relative_path: HashMap<String, usize>,
 }
@@ -21,14 +23,10 @@ impl WorkspaceIndex {
         manifest_path: &Path,
         manifest_cache: &mut ManifestCache,
         worker_threads: usize,
+        embedded_sysroot: &EmbeddedSysroot,
     ) -> Result<Self> {
-        let bundled_lang_crates = BundledLangCrates::create()?;
-        let workspace = build_project_workspace(
-            root_path,
-            manifest_path,
-            manifest_cache,
-            &bundled_lang_crates,
-        )?;
+        let workspace =
+            build_project_workspace(root_path, manifest_path, manifest_cache, embedded_sysroot)?;
         let worker_threads = if worker_threads == 0 {
             num_cpus::get()
         } else {
@@ -122,6 +120,7 @@ impl WorkspaceCatalog {
     pub(super) fn load(root_path: &str, worker_threads: usize) -> Result<Self> {
         let mut manifest_cache = ManifestCache::new(root_path)?;
         let manifest_paths = manifest_cache.manifest_paths.clone();
+        let embedded_sysroot = Arc::new(EmbeddedSysroot::materialize()?);
         let mut workspaces = Vec::new();
         let mut workspace_ids_by_relative_path = HashMap::new();
         let mut crate_names = HashSet::new();
@@ -140,6 +139,7 @@ impl WorkspaceCatalog {
                 &workspace_manifest_path,
                 &mut manifest_cache,
                 worker_threads,
+                embedded_sysroot.as_ref(),
             ) {
                 Ok(workspace) => {
                     let workspace_id = workspaces.len();
@@ -167,6 +167,7 @@ impl WorkspaceCatalog {
         }
 
         Ok(Self {
+            _embedded_sysroot: embedded_sysroot,
             workspaces,
             workspace_ids_by_relative_path,
         })

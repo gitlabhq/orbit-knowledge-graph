@@ -23,8 +23,8 @@ use ra_ap_intern::Symbol;
 use ra_ap_load_cargo::{LoadCargoConfig, ProcMacroServerChoice, load_workspace};
 use ra_ap_paths::{AbsPathBuf, Utf8PathBuf};
 use ra_ap_project_model::{
-    CargoWorkspace, CfgOverrides, ManifestPath, ProjectWorkspace, ProjectWorkspaceKind, Sysroot,
-    WorkspaceBuildScripts,
+    CargoWorkspace, CfgOverrides, ManifestPath, ProjectJson, ProjectJsonData, ProjectWorkspace,
+    ProjectWorkspaceKind, RustSourceWorkspaceConfig, Sysroot, WorkspaceBuildScripts,
 };
 use ra_ap_syntax::{
     AstNode, Edition, SyntaxKind, SyntaxNode, SyntaxNodePtr, TextRange,
@@ -34,7 +34,6 @@ use ra_ap_syntax::{
     },
 };
 use rayon::prelude::*;
-use tempfile::TempDir;
 use triomphe::Arc;
 
 use crate::v2::config::Language;
@@ -49,6 +48,7 @@ mod local_flow;
 mod manifest;
 #[path = "ast.rs"]
 mod rust_ast;
+mod sysroot;
 mod workspace;
 
 use self::local_flow::build_local_flow_index;
@@ -887,6 +887,7 @@ fn definition_site_for_range(
 #[cfg(test)]
 mod tests {
     use super::manifest::repo_local_existing_file;
+    use super::sysroot::{EMBEDDED_RUST_SYSROOT_VERSION, EmbeddedSysroot};
     use super::workspace::relative_path_if_under_root;
     use std::fs;
     use tempfile::tempdir;
@@ -926,5 +927,17 @@ mod tests {
         let inside = repo_local_existing_file(inside_file, &repo_root).unwrap();
         assert!(inside.ends_with("repo/src/lib.rs"));
         assert_eq!(repo_local_existing_file(outside_file, &repo_root), None);
+    }
+
+    #[test]
+    fn embedded_sysroot_is_pinned_and_loads_core_crates() {
+        let embedded = EmbeddedSysroot::materialize().unwrap();
+
+        assert_eq!(EMBEDDED_RUST_SYSROOT_VERSION, "1.95.0");
+        assert!(std::fs::metadata(embedded.root_path().join("core/src/lib.rs")).is_ok());
+        assert!(std::fs::metadata(embedded.root_path().join("alloc/src/lib.rs")).is_ok());
+        assert!(std::fs::metadata(embedded.root_path().join("std/src/lib.rs")).is_ok());
+        assert!(std::fs::metadata(embedded.root_path().join("proc_macro/src/lib.rs")).is_ok());
+        assert!(embedded.project_workspace_sysroot().unwrap().num_packages() >= 4);
     }
 }

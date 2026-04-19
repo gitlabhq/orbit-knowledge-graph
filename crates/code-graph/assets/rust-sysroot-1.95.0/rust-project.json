@@ -1,0 +1,40 @@
+{
+  "crates": [
+    {
+      "display_name": "core",
+      "root_module": "core/src/lib.rs",
+      "edition": "2021",
+      "deps": [],
+      "is_workspace_member": false
+    },
+    {
+      "display_name": "alloc",
+      "root_module": "alloc/src/lib.rs",
+      "edition": "2021",
+      "deps": [
+        { "crate": 0, "name": "core" }
+      ],
+      "is_workspace_member": false
+    },
+    {
+      "display_name": "proc_macro",
+      "root_module": "proc_macro/src/lib.rs",
+      "edition": "2021",
+      "deps": [
+        { "crate": 0, "name": "core" }
+      ],
+      "is_workspace_member": false
+    },
+    {
+      "display_name": "std",
+      "root_module": "std/src/lib.rs",
+      "edition": "2021",
+      "deps": [
+        { "crate": 0, "name": "core" },
+        { "crate": 1, "name": "alloc" },
+        { "crate": 2, "name": "proc_macro" }
+      ],
+      "is_workspace_member": false
+    }
+  ]
+}

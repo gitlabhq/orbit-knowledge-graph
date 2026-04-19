@@ -2218,6 +2218,7 @@ dependencies = [
  "rayon",
  "regex",
  "ruby-prism",
+ "rust-embed",
  "rust-lapper",
  "rustc-hash 2.1.2",
  "serde",

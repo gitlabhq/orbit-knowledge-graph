@@ -33,6 +33,7 @@ petgraph = { workspace = true }
 rayon = { workspace = true }
 regex = { workspace = true }
 rust-lapper = { workspace = true }
+rust-embed = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
