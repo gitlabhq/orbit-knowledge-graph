@@ -1,0 +1,152 @@
+name: "Python v1 parity — interfile import resolution"
+
+# Mirrors the virtual file tree from legacy interfile.rs tests:
+# src/main.py, src/utils.py, src/package/__init__.py, src/package/module.py,
+# src/package/subpackage/__init__.py, src/package/subpackage/helpers.py
+fixtures:
+  - path: src/utils.py
+    content: |
+      def helper():
+          pass
+      class UtilClass:
+          pass
+
+  - path: src/package/__init__.py
+    content: |
+      pass
+
+  - path: src/package/module.py
+    content: |
+      def module_func():
+          pass
+      class ModuleClass:
+          pass
+
+  - path: src/package/subpackage/__init__.py
+    content: |
+      pass
+
+  - path: src/package/subpackage/helpers.py
+    content: |
+      def helper_func():
+          pass
+
+  # ── Test 1: Absolute import of sibling module ──
+  - path: src/test_absolute_simple.py
+    content: |
+      from utils import helper
+      def use_helper():
+          helper()
+
+  # ── Test 2: Absolute import of dotted package.module ──
+  - path: src/test_absolute_dotted.py
+    content: |
+      from package.module import module_func
+      def use_module():
+          module_func()
+
+  # ── Test 3: Relative import same directory ──
+  - path: src/test_relative_same_dir.py
+    content: |
+      from .utils import helper
+      def use_relative_helper():
+          helper()
+
+  # ── Test 4: Relative import parent directory ──
+  - path: src/package/subpackage/test_relative_parent.py
+    content: |
+      from ..module import module_func
+      def use_parent_module():
+          module_func()
+
+  # ── Test 5: Relative import from __init__.py ──
+  - path: src/package/test_from_init.py
+    content: |
+      from .module import module_func
+      def use_from_init():
+          module_func()
+
+  # ── Test 7/8: Nonexistent imports (should produce no edges) ──
+  - path: src/test_nonexistent.py
+    content: |
+      from nonexistent.module import something
+      from .nonexistent import other
+      def use_nonexistent():
+          pass
+
+tests:
+  # ── T1: test_absolute_import_simple_module ──
+  - name: "Absolute import resolves (from utils import helper)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.test_absolute_simple.use_helper'
+        AND callee.fqn = 'src.utils.helper'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── T2: test_absolute_import_package_module ──
+  - name: "Dotted absolute import resolves (from package.module import module_func)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.test_absolute_dotted.use_module'
+        AND callee.fqn = 'src.package.module.module_func'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── T3: test_relative_import_same_directory ──
+  - name: "Relative import same dir resolves (from .utils import helper)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.test_relative_same_dir.use_relative_helper'
+        AND callee.fqn = 'src.utils.helper'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── T4: test_relative_import_parent_directory ──
+  - name: "Double-dot relative import resolves (from ..module import module_func)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.package.subpackage.test_relative_parent.use_parent_module'
+        AND callee.fqn = 'src.package.module.module_func'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── T5: test_relative_import_from_init_py ──
+  - name: "Relative import from sibling resolves (from .module import module_func)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.package.test_from_init.use_from_init'
+        AND callee.fqn = 'src.package.module.module_func'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── T7/T8: test_import_nonexistent_module / test_relative_import_nonexistent ──
+  - name: "Nonexistent absolute import produces no call edges"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.test_nonexistent.use_nonexistent'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  # ── Definitions exist in correct files ──
+  - name: "All source definitions exist with correct FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper' OR d.name = 'module_func' OR d.name = 'helper_func'
+      RETURN d.name AS name, d.fqn AS fqn, d.file_path AS file
+    assert:
+      - { row: { name: "helper", fqn: "src.utils.helper", file: "src/utils.py" } }
+      - { row: { name: "module_func", fqn: "src.package.module.module_func", file: "src/package/module.py" } }
+      - { row: { name: "helper_func", fqn: "src.package.subpackage.helpers.helper_func", file: "src/package/subpackage/helpers.py" } }

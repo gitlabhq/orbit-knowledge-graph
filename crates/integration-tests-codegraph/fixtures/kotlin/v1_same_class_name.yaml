@@ -1,0 +1,15 @@
+name: "Kotlin v1 parity — same class name disambiguation"
+fixture_dir: "fixtures/code/kotlin/main/kotlin"
+
+tests:
+  # ── K9: test_kotlin_reference_resolution_inheritance_of_class_of_same_name ──
+
+  - name: "ServerFilter.filter -> Filter.filter (disambiguated)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.edgecases.filter.ServerFilter.filter'
+        AND callee.fqn = 'com.example.edgecases.filter.Filter.filter'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

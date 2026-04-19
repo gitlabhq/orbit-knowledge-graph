@@ -16,6 +16,11 @@ pub(crate) struct TestSuite {
     pub pipeline: Option<String>,
     #[serde(default)]
     pub fixtures: Vec<FixtureFile>,
+    /// Load all source files from this directory (relative to workspace root).
+    /// Files are discovered recursively and written to the temp dir preserving
+    /// relative paths. Combines with `fixtures` (inline files take precedence).
+    #[serde(default)]
+    pub fixture_dir: Option<String>,
     pub tests: Vec<TestCase>,
 }
 
