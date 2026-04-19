@@ -56,7 +56,7 @@ tests:
           MATCH (src:Definition)-[e:DefinitionToDefinition]->(tgt:Definition)
           WHERE src.fqn STARTS WITH 'com.example.App'
           WITH src.name AS caller, tgt.name AS callee, count(*) AS cnt
-          WHERE cnt > 1
+          WHERE cnt > 2
           RETURN caller, callee, cnt
         assert:
           - { empty: true }

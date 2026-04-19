@@ -9,6 +9,7 @@ authors = ["GitLab Inc."]
 [dependencies]
 log = { workspace = true }
 serde = { workspace = true }
+smallvec = { workspace = true }
 thiserror = { workspace = true }
 
 # Tree-sitter

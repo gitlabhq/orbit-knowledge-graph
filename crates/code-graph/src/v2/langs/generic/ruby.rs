@@ -1,5 +1,5 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{ExtractList, field, metadata, no_extract, text};
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{
     self, BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LanguageHooks, LoopRule,
     ReferenceRule, ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
@@ -7,6 +7,7 @@ use crate::v2::dsl::types::{
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::extract::{field, no_extract, text};
 
 use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
@@ -31,7 +32,7 @@ impl DslLanguage for RubyDsl {
         vec![
             scope("class", "Class")
                 .def_kind(DefKind::Class)
-                .metadata(metadata().super_types(ExtractList::Fn(ruby_super_types))),
+                .metadata(metadata().super_types(ruby_super_types)),
             scope("module", "Module").def_kind(DefKind::Class),
             scope("method", "Method").def_kind(DefKind::Method),
             scope("singleton_method", "SingletonMethod").def_kind(DefKind::Method),
@@ -113,6 +114,7 @@ impl DslLanguage for RubyDsl {
             super_kinds: &["super"],
             field_access: &[("call", "receiver", "method")],
             constructor: &[],
+            qualified_type_kinds: &[],
         })
     }
 

@@ -1,11 +1,16 @@
 use rustc_hash::FxHashMap;
+use treesitter_visit::extract::{Extract, default_name};
+use treesitter_visit::predicate::Pred;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::types::{DefKind, DefinitionMetadata};
 
-use super::extractors::{Extract, MetadataRule, default_extract};
-use super::predicates::Pred;
+use super::extractors::MetadataRule;
+
+/// Signature for import path resolution hooks.
+/// Called with (raw_path, module_scope, separator). Returns resolved path or None.
+pub type ImportPathResolver = fn(&str, &str, &str) -> Option<String>;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
@@ -22,7 +27,7 @@ pub trait Rule {
     }
 
     fn extract_name(&self, node: &N<'_>) -> Option<String> {
-        self.extract().extract_name(node)
+        self.extract().apply(node)
     }
 }
 
@@ -93,12 +98,9 @@ impl ScopeRule {
     pub(crate) fn extract_metadata(
         &self,
         node: &N<'_>,
-        import_map: &rustc_hash::FxHashMap<String, String>,
-        sep: &'static str,
+        resolve: impl Fn(String, &N<'_>) -> String,
     ) -> Option<Box<DefinitionMetadata>> {
-        self.metadata_rule
-            .as_ref()?
-            .extract_metadata(node, import_map, sep)
+        self.metadata_rule.as_ref()?.extract_metadata(node, resolve)
     }
 
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
@@ -115,7 +117,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         label: Label::Static(label),
         def_kind: DefKind::Other,
         condition: None,
-        name: default_extract(),
+        name: default_name(),
         creates_scope: true,
         metadata_rule: None,
     }
@@ -128,7 +130,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         label: Label::Static(label),
         def_kind: DefKind::Other,
         condition: None,
-        name: default_extract(),
+        name: default_name(),
         creates_scope: true,
         metadata_rule: None,
     }
@@ -146,31 +148,9 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         label: Label::Fn(label_fn),
         def_kind: DefKind::Other,
         condition: None,
-        name: default_extract(),
+        name: default_name(),
         creates_scope: true,
         metadata_rule: None,
-    }
-}
-
-/// How to locate the receiver node for expression chain building.
-pub enum ReceiverExtract {
-    /// Single field name (e.g. `"object"` for Java's method_invocation).
-    Field(&'static str),
-    /// Chain of field names (e.g. `["function", "object"]` for Python's call.function.object).
-    FieldChain(&'static [&'static str]),
-}
-
-impl ReceiverExtract {
-    /// Navigate to the receiver node from the given parent.
-    pub fn resolve<'a>(
-        &self,
-        node: &Node<'a, treesitter_visit::tree_sitter::StrDoc<treesitter_visit::SupportLang>>,
-    ) -> Option<Node<'a, treesitter_visit::tree_sitter::StrDoc<treesitter_visit::SupportLang>>>
-    {
-        match self {
-            Self::Field(f) => node.field(f),
-            Self::FieldChain(fields) => node.field_chain(fields),
-        }
     }
 }
 
@@ -178,8 +158,8 @@ pub struct ReferenceRule {
     pub(crate) kinds: Vec<&'static str>,
     condition: Option<Pred>,
     name: Extract,
-    /// How to extract the receiver expression node for chain building.
-    pub(crate) receiver_extract: Option<ReceiverExtract>,
+    /// Extract pipeline to navigate to the receiver node for chain building.
+    pub(crate) receiver_extract: Option<Extract>,
 }
 
 /// Per-language configuration for expression chain extraction.
@@ -196,6 +176,12 @@ pub struct ChainConfig {
     pub field_access: &'static [(&'static str, &'static str, &'static str)],
     /// Constructor node kinds + type_field.
     pub constructor: &'static [(&'static str, &'static str)],
+    /// Type node kinds inside constructors that are qualified (e.g.
+    /// `scoped_type_identifier` for Java's `new Outer.Inner()`).
+    /// When the constructor's type field has this kind, decompose it
+    /// into chain steps (Ident for the base, Field for nested parts,
+    /// New for the final segment) instead of treating it as a single name.
+    pub qualified_type_kinds: &'static [&'static str],
 }
 
 impl Rule for ReferenceRule {
@@ -225,15 +211,22 @@ impl ReferenceRule {
     }
 
     /// Declare which tree-sitter field holds the receiver expression.
+    /// Set the receiver extraction pipeline. The engine calls
+    /// `extract.navigate(node)` to find the receiver node for chain building.
     pub fn receiver(mut self, field: &'static str) -> Self {
-        self.receiver_extract = Some(ReceiverExtract::Field(field));
+        self.receiver_extract = Some(treesitter_visit::extract::field(field));
         self
     }
 
     /// Declare a field chain to reach the receiver expression.
-    /// e.g. `["function", "object"]` for Python's `call.function.object`.
     pub fn receiver_chain(mut self, fields: &'static [&'static str]) -> Self {
-        self.receiver_extract = Some(ReceiverExtract::FieldChain(fields));
+        self.receiver_extract = Some(treesitter_visit::extract::field_chain(fields));
+        self
+    }
+
+    /// Locate receiver via an arbitrary Extract pipeline.
+    pub fn receiver_via(mut self, extract: Extract) -> Self {
+        self.receiver_extract = Some(extract);
         self
     }
 }
@@ -242,7 +235,7 @@ pub fn reference(kind: &'static str) -> ReferenceRule {
     ReferenceRule {
         kinds: vec![kind],
         condition: None,
-        name: default_extract(),
+        name: default_name(),
         receiver_extract: None,
     }
 }
@@ -252,7 +245,7 @@ pub fn references(kinds: &[&'static str]) -> ReferenceRule {
     ReferenceRule {
         kinds: kinds.to_vec(),
         condition: None,
-        name: default_extract(),
+        name: default_name(),
         receiver_extract: None,
     }
 }
@@ -364,11 +357,11 @@ impl ImportRule {
     }
 
     pub(crate) fn extract_symbol(&self, node: &N<'_>) -> Option<String> {
-        self.symbol.as_ref()?.extract_name(node)
+        self.symbol.as_ref()?.apply(node)
     }
 
     pub(crate) fn extract_alias(&self, node: &N<'_>) -> Option<String> {
-        self.alias.as_ref()?.extract_name(node)
+        self.alias.as_ref()?.apply(node)
     }
 
     pub(crate) fn should_split(&self) -> bool {
@@ -389,7 +382,7 @@ pub fn import(kind: &'static str) -> ImportRule {
     ImportRule {
         kinds: vec![kind],
         condition: None,
-        path: default_extract(),
+        path: default_name(),
         symbol: None,
         alias: None,
         label: "Import",
@@ -475,7 +468,7 @@ pub struct BindingRule {
 }
 
 pub struct TypeExtract {
-    pub extracts: Vec<super::extractors::Extract>,
+    pub extracts: Vec<Extract>,
     pub skip_types: &'static [&'static str],
 }
 
@@ -511,11 +504,7 @@ impl BindingRule {
         self
     }
 
-    pub fn typed(
-        mut self,
-        extracts: Vec<super::extractors::Extract>,
-        skip: &'static [&'static str],
-    ) -> Self {
+    pub fn typed(mut self, extracts: Vec<Extract>, skip: &'static [&'static str]) -> Self {
         self.type_extract = Some(TypeExtract {
             extracts,
             skip_types: skip,
@@ -533,7 +522,7 @@ impl BindingRule {
     pub fn extract_type_annotation(&self, node: &N<'_>) -> Option<String> {
         let te = self.type_extract.as_ref()?;
         for extract in &te.extracts {
-            if let Some(text) = extract.extract_name(node)
+            if let Some(text) = extract.apply(node)
                 && !te.skip_types.iter().any(|&s| s == text)
             {
                 return Some(text);
@@ -553,7 +542,7 @@ impl BindingRule {
         // Use matches() not just kind() to respect conditions (e.g.
         // Python has two `call` rules — one for method calls, one for plain calls).
         if let Some(ref_rule) = spec.refs.iter().find(|r| r.matches(&value_node, vk_ref)) {
-            return ref_rule.extract_name(&value_node);
+            return ref_rule.extract().apply(&value_node);
         }
 
         // Bare identifier
@@ -668,6 +657,16 @@ pub struct LanguageHooks {
     /// captures the SSA value of the returned expression and writes it as
     /// the enclosing function's inferred return type.
     pub return_kinds: &'static [&'static str],
+    /// When a scope def is created, scan the parent node's children for
+    /// siblings of these kinds and emit reference PendingRefs attributed
+    /// to the new def. Handles decorators/annotations that are CST siblings
+    /// of the decorated function/class definition.
+    pub adopt_sibling_refs: &'static [&'static str],
+    /// Resolve an import path relative to the current module scope.
+    /// Called with (raw_path, module_scope, separator). Returns the
+    /// resolved absolute path, or None to keep the raw path.
+    /// Handles Python's `from .models import User` → `package.models`.
+    pub resolve_import_path: Option<ImportPathResolver>,
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {

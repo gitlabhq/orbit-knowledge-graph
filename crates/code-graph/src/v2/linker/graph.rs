@@ -447,6 +447,42 @@ impl CodeGraph {
         false
     }
 
+    /// Find methods whose `receiver_type` metadata matches `type_name` and
+    /// whose name matches `member_name`. Used for Go methods and Kotlin
+    /// extension functions where the method is not nested inside the type.
+    ///
+    /// Receiver types in source are often bare names (`Service`) while the
+    /// lookup FQN is fully qualified (`main.Service`). We match if the
+    /// receiver_type equals the FQN or its last segment after `sep`.
+    pub fn lookup_by_receiver_type(
+        &self,
+        type_name: &str,
+        member_name: &str,
+        sep: &str,
+        out: &mut Vec<NodeIndex>,
+    ) {
+        let candidates = self.indexes.by_name.lookup(member_name, |idx| {
+            self.graph[idx]
+                .def_id()
+                .is_some_and(|d| self.str(self.defs[d.0 as usize].name) == member_name)
+        });
+        let bare_type = type_name.rsplit_once(sep).map_or(type_name, |(_, t)| t);
+
+        for idx in candidates {
+            if let Some(did) = self.graph[idx].def_id() {
+                let gdef = &self.defs[did.0 as usize];
+                if let Some(meta) = &gdef.metadata
+                    && let Some(rt) = meta.receiver_type
+                {
+                    let rt_str = self.str(rt);
+                    if rt_str == type_name || rt_str == bare_type {
+                        out.push(idx);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn def_in_file(&self, def_idx: NodeIndex, file_path: &str) -> bool {
         self.graph[def_idx].path() == file_path
     }

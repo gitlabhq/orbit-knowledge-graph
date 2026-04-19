@@ -48,5 +48,5 @@ tests:
       WHERE cls.name = 'App' AND cls.definition_type = 'Class'
       RETURN m.fqn AS fqn
     assert:
-      - { row_count: 3 }
-      - { match: { field: fqn, pattern: "com.example.App.*" } }
+      - { row_count: 4 }
+      - { match: { field: fqn, pattern: "com.example.App*" } }

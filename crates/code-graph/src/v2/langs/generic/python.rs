@@ -1,12 +1,11 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{
-    ExtractList, child_of_kind, field, field_chain, metadata, no_extract,
-};
-use crate::v2::dsl::predicates::*;
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::extract::{child_of_kind, field, field_chain, no_extract, text};
+use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -91,16 +90,18 @@ impl DslLanguage for PythonDsl {
         crate::v2::dsl::types::LanguageHooks {
             module_scope: Some(python_module_from_path),
             return_kinds: &["return_statement"],
+            adopt_sibling_refs: &["decorator"],
+            resolve_import_path: Some(resolve_python_relative_import),
             ..crate::v2::dsl::types::LanguageHooks::default()
         }
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || metadata().super_types(ExtractList::Fn(python_super_types));
+        let class_meta = || metadata().super_types(python_super_types);
         let func_meta = || {
             metadata()
                 .return_type(field("return_type"))
-                .decorators(ExtractList::Fn(python_decorators))
+                .decorators(python_decorators)
         };
 
         let mut rules = vec![
@@ -141,6 +142,8 @@ impl DslLanguage for PythonDsl {
                 .name_from(field_chain(&["function", "attribute"]))
                 .receiver_chain(&["function", "object"]),
             reference("call").name_from(field("function")),
+            // Bare type references in annotations: x: MyClass, def foo() -> MyClass
+            reference("type").name_from(text()),
         ]
     }
 
@@ -151,6 +154,7 @@ impl DslLanguage for PythonDsl {
             super_kinds: &[],
             field_access: &[("attribute", "object", "attribute")],
             constructor: &[],
+            qualified_type_kinds: &[],
         })
     }
 
@@ -303,6 +307,40 @@ impl HasRules for PythonRules {
 /// `services/user_service.py` → `services.user_service`
 /// `models/__init__.py` → `models`
 /// `main.py` → `main`
+/// Resolve Python relative import paths against the current module scope.
+/// `from .models import User` in module `pkg.sub.mod` → `pkg.sub.models`
+/// `from ..services import Auth` in `pkg.sub.mod` → `pkg.services`
+fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
+    if !raw_path.starts_with('.') {
+        return None; // absolute import, no resolution needed
+    }
+    let dots = raw_path.chars().take_while(|&c| c == '.').count();
+    let suffix = &raw_path[dots..];
+
+    // Module scope is the file's module (e.g. "pkg.sub.module").
+    // 1 dot = same package (drop last component), 2 dots = parent, etc.
+    let parts: Vec<&str> = module_scope.split(sep).collect();
+    if dots > parts.len() {
+        return None; // too many dots, can't resolve
+    }
+    let base = &parts[..parts.len() - dots];
+    if suffix.is_empty() {
+        let joined = base.join(sep);
+        if joined.is_empty() {
+            None
+        } else {
+            Some(joined)
+        }
+    } else {
+        let suffix_clean = suffix.trim_start_matches('.');
+        if base.is_empty() {
+            Some(suffix_clean.to_string())
+        } else {
+            Some(format!("{}{sep}{suffix_clean}", base.join(sep)))
+        }
+    }
+}
+
 fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
     let path = std::path::Path::new(file_path);
     let stem = path.with_extension("");
@@ -362,7 +400,8 @@ mod tests {
             .find(|d| d.name == "greet")
             .unwrap();
         let meta = greet.metadata.as_ref().expect("should have metadata");
-        assert_eq!(meta.return_type.as_deref(), Some("str"));
+        // "str" is FQN-qualified with the module prefix from "test.py"
+        assert_eq!(meta.return_type.as_deref(), Some("test.str"));
     }
 
     #[test]

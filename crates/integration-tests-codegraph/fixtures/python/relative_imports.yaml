@@ -1,0 +1,34 @@
+name: "Python: relative import resolution"
+fixtures:
+  - path: mypackage/__init__.py
+    content: ""
+  - path: mypackage/models.py
+    content: |
+      class User:
+          def save(self):
+              pass
+  - path: mypackage/services.py
+    content: |
+      from .models import User
+
+      def create_user():
+          u = User()
+          u.save()
+
+tests:
+  - name: Relative import resolves to correct module
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'mypackage/services.py'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row: { path: "mypackage.models", name: "User" } }
+
+  - name: Call through relative import resolves
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'create_user' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "mypackage.models.User" } }
+      - { row: { callee: "mypackage.models.User.save" } }

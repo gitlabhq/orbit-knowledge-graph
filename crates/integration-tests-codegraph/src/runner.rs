@@ -78,6 +78,16 @@ fn copy_dir_recursive(src_dir: &std::path::Path, dst_dir: &std::path::Path) {
 pub async fn run_yaml_suite(yaml: &str) {
     let suite: TestSuite = serde_yaml::from_str(yaml).expect("Failed to parse YAML suite");
 
+    // Skip pipeline entirely if all tests are skipped
+    if suite.tests.iter().all(|t| t.skip) {
+        eprintln!(
+            "[PASS] Suite: {} ({} tests, all skipped)",
+            suite.name,
+            suite.tests.len()
+        );
+        return;
+    }
+
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
 
     // Copy fixture_dir contents first (if set)

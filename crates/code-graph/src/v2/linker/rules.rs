@@ -142,6 +142,11 @@ pub struct ResolutionRules {
     /// rules with receiver fields, and scope rules for deriving walker scopes.
     pub language_spec: Option<crate::v2::dsl::types::LanguageSpec>,
 
+    /// Implicit sub-scopes to search when member lookup fails.
+    /// e.g. Kotlin's `&["Companion"]`: when `Foo.bar()` fails, try
+    /// `Foo.Companion.bar()`.
+    pub implicit_sub_scopes: &'static [&'static str],
+
     /// Resolver hooks for language-specific resolution behavior.
     pub hooks: ResolverHooks,
 
@@ -173,10 +178,16 @@ impl ResolutionRules {
             fqn_separator,
             self_names,
             super_name,
+            implicit_sub_scopes: &[],
             hooks: ResolverHooks::default(),
             language_spec: Some(language_spec),
             settings: super::ResolveSettings::default(),
         }
+    }
+
+    pub fn with_implicit_sub_scopes(mut self, scopes: &'static [&'static str]) -> Self {
+        self.implicit_sub_scopes = scopes;
+        self
     }
 
     pub fn with_hooks(mut self, hooks: ResolverHooks) -> Self {

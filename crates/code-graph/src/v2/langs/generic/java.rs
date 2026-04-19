@@ -1,9 +1,11 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, ExtractList, default_extract, field, metadata};
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::extract::{Extract, default_name, field, text};
+use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -59,7 +61,7 @@ impl DslLanguage for JavaDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || metadata().super_types(ExtractList::Fn(java_super_types));
+        let class_meta = || metadata().super_types(java_super_types);
 
         vec![
             scopes(
@@ -100,6 +102,13 @@ impl DslLanguage for JavaDsl {
                 .name_from(field("name"))
                 .receiver("object"),
             reference("object_creation_expression").name_from(field("type")),
+            // Bare type references: declarations, casts, instanceof, annotations.
+            // Skip inside object_creation_expression (already tracked above).
+            reference("type_identifier")
+                .name_from(text())
+                .when(!parent_is("object_creation_expression")),
+            // Annotation references: @Override, @Deprecated
+            references(&["marker_annotation", "annotation"]).name_from(field("name")),
         ]
     }
 
@@ -130,11 +139,12 @@ impl DslLanguage for JavaDsl {
             super_kinds: &["super"],
             field_access: &[("field_access", "object", "field")],
             constructor: &[("object_creation_expression", "type")],
+            qualified_type_kinds: &["scoped_type_identifier"],
         })
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("package_declaration", default_extract()))
+        Some(("package_declaration", default_name()))
     }
 
     fn bindings() -> Vec<BindingRule> {
