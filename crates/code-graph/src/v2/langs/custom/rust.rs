@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
+use bumpalo::Bump;
 use cargo_metadata::Metadata;
 use cargo_platform::Platform;
 use cargo_util_schemas::manifest as cargo_manifest;
@@ -21,46 +22,31 @@ use ra_ap_project_model::{
 };
 use ra_ap_syntax::{
     AstNode, Edition, SourceFile, TextRange,
-    ast::{self, HasModuleItem, HasName, HasVisibility, StructKind},
+    ast::{
+        self, BinaryOp, ElseBranch, HasArgList, HasLoopBody, HasModuleItem, HasName, HasVisibility,
+        StructKind, VisibilityKind,
+    },
 };
 use rayon::prelude::*;
 use triomphe::Arc;
 
 use crate::v2::config::Language;
-use crate::v2::linker::{CodeGraph, GraphEdge};
-use crate::v2::pipeline::{FileInput, LanguagePipeline, PipelineError, PipelineOutput};
-use crate::v2::types::{
-    CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, NodeKind, Position, Range,
-    Relationship,
+use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
+use crate::v2::linker::CodeGraph;
+use crate::v2::pipeline::{
+    FileInput, LanguagePipeline, PipelineConfig, PipelineError, PipelineOutput,
 };
+use crate::v2::types::{CanonicalDefinition, CanonicalImport, DefKind, Fqn, Position, Range};
 
 pub struct RustPipeline;
 
 #[derive(Clone)]
 struct ParsedRustFile {
-    abs_path: String,
     relative_path: String,
     file_size: u64,
-    workspace_id: Option<usize>,
     definitions: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
-}
-
-#[derive(Clone, Copy)]
-struct DefinitionLocator {
-    node: petgraph::graph::NodeIndex,
-    start: u32,
-    end: u32,
-}
-
-struct GraphLookup {
-    file_nodes: HashMap<String, petgraph::graph::NodeIndex>,
-    locators: HashMap<String, Vec<DefinitionLocator>>,
-}
-
-struct GraphState {
-    graph: CodeGraph,
-    lookup: GraphLookup,
+    edge_candidates: Vec<ResolvedEdgeCandidate>,
 }
 
 struct WorkspaceIndex {
@@ -154,40 +140,64 @@ enum ImportVisibility {
     Public,
 }
 
-#[derive(Clone, Copy)]
-struct EdgeEndpoints {
-    source: petgraph::graph::NodeIndex,
-    target: petgraph::graph::NodeIndex,
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct DefinitionSite {
+    relative_path: String,
+    start: u32,
+    end: u32,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedEdgeCandidate {
+    source_relative_path: String,
+    source_start: u32,
+    source_end: u32,
+    target: DefinitionSite,
+}
+
+struct LocalFlowIndex {
+    targets_by_call_range: HashMap<(u32, u32), Vec<DefinitionSite>>,
 }
 
 impl LanguagePipeline for RustPipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
+        config: &PipelineConfig,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let canonical_root = canonical_root_path(root_path);
         let root_path = canonical_root.as_str();
-        let workspaces = WorkspaceCatalog::load(root_path).ok();
+        let workspaces = WorkspaceCatalog::load(root_path, config.worker_threads).ok();
         let parsed = parse_rust_files(files, root_path, workspaces.as_ref())?;
-        let mut graph_state = build_graph(root_path, &parsed);
+        let mut graph = build_graph(root_path, &parsed);
 
-        let edge_lists = if let Some(workspaces) = workspaces.as_ref() {
-            resolve_file_edges_with_workspaces(workspaces, &parsed, &graph_state.lookup)
-        } else {
-            parsed
-                .iter()
-                .map(|file| resolve_file_edges_standalone(file, &graph_state.lookup))
-                .collect::<Vec<_>>()
-        };
-
-        for edges in edge_lists {
-            for edge in edges {
-                add_call_edge(&mut graph_state.graph, edge.source, edge.target);
+        for file in &parsed {
+            for edge in &file.edge_candidates {
+                let Some(source_node) = graph
+                    .enclosing_definition_for_range(
+                        &edge.source_relative_path,
+                        edge.source_start,
+                        edge.source_end,
+                    )
+                    .or_else(|| graph.file_node_for_path(&edge.source_relative_path))
+                else {
+                    continue;
+                };
+                let Some(target_node) = graph.definition_for_range(
+                    &edge.target.relative_path,
+                    edge.target.start,
+                    edge.target.end,
+                ) else {
+                    continue;
+                };
+                if source_node != target_node {
+                    graph.add_call_edge(source_node, target_node);
+                }
             }
         }
 
-        graph_state.graph.finalize();
-        Ok(PipelineOutput::Graph(Box::new(graph_state.graph)))
+        graph.finalize();
+        Ok(PipelineOutput::Graph(Box::new(graph)))
     }
 }
 
@@ -232,7 +242,7 @@ fn parse_rust_files_with_workspaces(
         let sema = Semantics::new(&workspace.db);
         attach_db(&workspace.db, || {
             for file in workspace_files {
-                match parse_workspace_file(file, root_path, workspace_id, workspace, &sema) {
+                match parse_workspace_file(file, root_path, workspace, &sema) {
                     Ok(file) => parsed.push(file),
                     Err(err) => errors.push(err),
                 }
@@ -288,7 +298,6 @@ fn parse_rust_files_standalone(
 fn parse_workspace_file(
     file_path: &str,
     root_path: &str,
-    workspace_id: usize,
     workspace: &WorkspaceIndex,
     sema: &Semantics<'_, RootDatabase>,
 ) -> Result<ParsedRustFile, PipelineError> {
@@ -304,14 +313,20 @@ fn parse_workspace_file(
     let file_module_parts = file_module_parts_from_workspace(sema, workspace, file_id)
         .unwrap_or_else(|| fallback_file_module_parts(&relative_path));
     let crate_root_parts = workspace.crate_root_parts_for_file(file_id);
+    let edge_candidates = collect_resolved_edge_candidates(
+        &source_file,
+        sema,
+        &workspace.db,
+        &workspace.paths_by_file_id,
+        &relative_path,
+    );
 
     Ok(build_parsed_rust_file(
-        abs_path,
         relative_path,
         source,
-        Some(workspace_id),
         file_module_parts,
         crate_root_parts,
+        edge_candidates,
         source_file,
         Some(sema),
         Some(workspace),
@@ -328,17 +343,35 @@ fn parse_rust_file_standalone(
         file_path: file_path.to_string(),
         error: format!("Read error: {err}"),
     })?;
-    let parse = SourceFile::parse(&source, Edition::CURRENT);
-    let source_file = parse.tree();
     let file_module_parts = fallback_file_module_parts(&relative_path);
+    let workspace = standalone_workspace(&relative_path, source.clone());
+    let (source_file, edge_candidates) =
+        if let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) {
+            let sema = Semantics::new(&workspace.db);
+            let source_file = sema.parse_guess_edition(file_id);
+            let edge_candidates = attach_db(&workspace.db, || {
+                collect_resolved_edge_candidates(
+                    &source_file,
+                    &sema,
+                    &workspace.db,
+                    &workspace.paths_by_file_id,
+                    &relative_path,
+                )
+            });
+            (source_file, edge_candidates)
+        } else {
+            (
+                SourceFile::parse(&source, Edition::CURRENT).tree(),
+                Vec::new(),
+            )
+        };
 
     Ok(build_parsed_rust_file(
-        abs_path,
         relative_path,
         source,
-        None,
         file_module_parts,
         Vec::new(),
+        edge_candidates,
         source_file,
         None,
         None,
@@ -350,12 +383,11 @@ fn parse_rust_file_standalone(
     reason = "keeps parser call sites flat and allocation-free"
 )]
 fn build_parsed_rust_file(
-    abs_path: String,
     relative_path: String,
     source: String,
-    workspace_id: Option<usize>,
     file_module_parts: Vec<String>,
     crate_root_parts: Vec<String>,
+    edge_candidates: Vec<ResolvedEdgeCandidate>,
     source_file: ast::SourceFile,
     sema: Option<&Semantics<'_, RootDatabase>>,
     workspace: Option<&WorkspaceIndex>,
@@ -365,11 +397,10 @@ fn build_parsed_rust_file(
 
     ParsedRustFile {
         file_size: source.len() as u64,
-        abs_path,
         relative_path,
-        workspace_id,
         definitions,
         imports,
+        edge_candidates,
     }
 }
 
@@ -889,7 +920,10 @@ impl RustStructureExtractor {
         let Some(use_tree) = use_item.use_tree() else {
             return;
         };
-        let visibility = if use_item.visibility().is_some() {
+        let visibility = if matches!(
+            use_item.visibility().map(|visibility| visibility.kind()),
+            Some(VisibilityKind::Pub)
+        ) {
             ImportVisibility::Public
         } else {
             ImportVisibility::Private
@@ -1190,10 +1224,8 @@ fn scope_fqn(parts: &[String]) -> Option<Fqn> {
     (!parts.is_empty()).then(|| canonical_fqn_parts(parts))
 }
 
-fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> GraphState {
+fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> CodeGraph {
     let mut graph = CodeGraph::new_with_root(root_path.to_string());
-    let mut file_nodes = HashMap::with_capacity(parsed.len());
-    let mut locators = HashMap::with_capacity(parsed.len());
 
     for file in parsed {
         let extension = Path::new(&file.relative_path)
@@ -1201,7 +1233,7 @@ fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> GraphState {
             .and_then(|ext| ext.to_str())
             .unwrap_or("rs");
 
-        let (file_node, def_nodes, _) = graph.add_file(
+        let _ = graph.add_file(
             &file.relative_path,
             extension,
             Language::Rust,
@@ -1209,53 +1241,9 @@ fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> GraphState {
             &file.definitions,
             &file.imports,
         );
-        file_nodes.insert(file.relative_path.clone(), file_node);
-
-        let file_locators = file
-            .definitions
-            .iter()
-            .zip(def_nodes)
-            .map(|(definition, node)| DefinitionLocator {
-                node,
-                start: definition.range.byte_offset.0 as u32,
-                end: definition.range.byte_offset.1 as u32,
-            })
-            .collect();
-        locators.insert(file.relative_path.clone(), file_locators);
     }
 
-    GraphState {
-        graph,
-        lookup: GraphLookup {
-            file_nodes,
-            locators,
-        },
-    }
-}
-
-fn resolve_file_edges_standalone(
-    file: &ParsedRustFile,
-    lookup: &GraphLookup,
-) -> Vec<EdgeEndpoints> {
-    let Ok(source) = std::fs::read_to_string(&file.abs_path) else {
-        return Vec::new();
-    };
-    let workspace = standalone_workspace(&file.relative_path, source);
-    let Some(&file_id) = workspace.file_ids_by_relative_path.get(&file.relative_path) else {
-        return Vec::new();
-    };
-
-    let sema = Semantics::new(&workspace.db);
-    attach_db(&workspace.db, || {
-        collect_resolved_edges(
-            &sema,
-            &workspace.db,
-            &workspace.paths_by_file_id,
-            lookup,
-            file_id,
-            &file.relative_path,
-        )
-    })
+    graph
 }
 
 fn standalone_workspace(relative_path: &str, source: String) -> WorkspaceIndex {
@@ -1309,121 +1297,522 @@ fn standalone_workspace(relative_path: &str, source: String) -> WorkspaceIndex {
     }
 }
 
-fn collect_resolved_edges(
-    sema: &Semantics<'_, RootDatabase>,
-    db: &RootDatabase,
-    paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
-    file_id: FileId,
-    relative_path: &str,
-) -> Vec<EdgeEndpoints> {
-    attach_db(db, || {
-        let source_file = sema.parse_guess_edition(file_id);
-        let mut edges = Vec::new();
+impl LocalFlowIndex {
+    fn new() -> Self {
+        Self {
+            targets_by_call_range: HashMap::new(),
+        }
+    }
 
-        for node in source_file.syntax().descendants() {
-            if let Some(method_call) = ast::MethodCallExpr::cast(node.clone()) {
-                let target_node = sema
-                    .resolve_method_call(&method_call)
-                    .and_then(|function| {
-                        hir_def_to_definition(db, paths_by_file_id, lookup, function)
-                    })
-                    .or_else(|| {
-                        method_call_to_definition_fallback(
-                            sema,
-                            db,
-                            paths_by_file_id,
-                            lookup,
-                            &method_call,
-                        )
-                    });
-                push_resolved_edge(
-                    &mut edges,
-                    lookup,
-                    relative_path,
-                    method_call.syntax().text_range(),
-                    target_node,
-                );
+    fn record_target(&mut self, range: TextRange, target: DefinitionSite) {
+        self.targets_by_call_range
+            .entry((u32::from(range.start()), u32::from(range.end())))
+            .or_default()
+            .push(target);
+    }
+
+    fn dedup(&mut self) {
+        for targets in self.targets_by_call_range.values_mut() {
+            let mut seen = HashSet::new();
+            targets.retain(|target| seen.insert(target.clone()));
+        }
+    }
+
+    fn targets_for_call(&self, range: TextRange) -> Option<&[DefinitionSite]> {
+        self.targets_by_call_range
+            .get(&(u32::from(range.start()), u32::from(range.end())))
+            .map(Vec::as_slice)
+    }
+}
+
+struct LocalFlowState<'arena, 'db> {
+    sema: &'arena Semantics<'db, RootDatabase>,
+    db: &'db RootDatabase,
+    paths_by_file_id: &'arena HashMap<FileId, String>,
+    arena: &'arena Bump,
+    ssa: SsaEngine<'arena>,
+    current_block: BlockId,
+    local_keys: HashMap<u32, &'arena str>,
+    temp_counter: usize,
+}
+
+impl<'arena, 'db> LocalFlowState<'arena, 'db> {
+    fn new(
+        sema: &'arena Semantics<'db, RootDatabase>,
+        db: &'db RootDatabase,
+        paths_by_file_id: &'arena HashMap<FileId, String>,
+        arena: &'arena Bump,
+    ) -> Self {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        Self {
+            sema,
+            db,
+            paths_by_file_id,
+            arena,
+            ssa,
+            current_block: entry,
+            local_keys: HashMap::new(),
+            temp_counter: 0,
+        }
+    }
+
+    fn local_key(&mut self, local: ra_ap_hir::Local) -> &'arena str {
+        self.local_keys
+            .entry(local.as_id())
+            .or_insert_with(|| self.arena.alloc_str(&format!("local#{}", local.as_id())))
+    }
+
+    fn temp_key(&mut self, prefix: &str) -> &'arena str {
+        let key = self
+            .arena
+            .alloc_str(&format!("{prefix}#{}", self.temp_counter));
+        self.temp_counter += 1;
+        key
+    }
+
+    fn to_ssa_site(&self, site: DefinitionSite) -> SsaValue<'arena> {
+        SsaValue::ResolvedSite(ResolvedSite {
+            path: self.arena.alloc_str(&site.relative_path),
+            start: site.start,
+            end: site.end,
+        })
+    }
+
+    fn write_pattern_bindings(&mut self, pat: Option<ast::Pat>, value: SsaValue<'arena>) {
+        let Some(pat) = pat else {
+            return;
+        };
+
+        for ident_pat in pat.syntax().descendants().filter_map(ast::IdentPat::cast) {
+            let Some(local) = self.sema.to_def(&ident_pat) else {
                 continue;
-            }
+            };
+            let key = self.local_key(local);
+            self.ssa
+                .write_variable(key, self.current_block, value.clone());
+        }
+    }
 
-            if let Some(call_expr) = ast::CallExpr::cast(node.clone()) {
-                let Some(expr) = call_expr.expr() else {
-                    continue;
-                };
-                let target_node = sema
-                    .resolve_expr_as_callable(&expr)
-                    .and_then(|callable| {
-                        callable_to_definition(db, paths_by_file_id, lookup, callable.kind())
-                    })
-                    .or_else(|| path_expr_to_definition(sema, db, paths_by_file_id, lookup, &expr));
-                push_resolved_edge(
-                    &mut edges,
-                    lookup,
-                    relative_path,
-                    call_expr.syntax().text_range(),
-                    target_node,
-                );
-                continue;
-            }
+    fn write_assignment_target(&mut self, lhs: &ast::Expr, value: SsaValue<'arena>) {
+        let ast::Expr::PathExpr(path_expr) = lhs else {
+            return;
+        };
+        let Some(path) = path_expr.path() else {
+            return;
+        };
+        let Some(PathResolution::Local(local)) = self.sema.resolve_path(&path) else {
+            return;
+        };
+        let key = self.local_key(local);
+        self.ssa.write_variable(key, self.current_block, value);
+    }
 
-            if let Some(macro_call) = ast::MacroCall::cast(node) {
-                let target_node = sema.resolve_macro_call(&macro_call).and_then(|macro_def| {
-                    hir_def_to_definition(db, paths_by_file_id, lookup, macro_def)
-                });
-                push_resolved_edge(
-                    &mut edges,
-                    lookup,
-                    relative_path,
-                    macro_call.syntax().text_range(),
-                    target_node,
+    fn record_local_call_targets(
+        &mut self,
+        range: TextRange,
+        local: ra_ap_hir::Local,
+        index: &mut LocalFlowIndex,
+    ) {
+        let key = self.local_key(local);
+        let reaching = self.ssa.read_variable_stateless(key, self.current_block);
+        for value in reaching.values {
+            if let SsaValue::ResolvedSite(site) = value {
+                index.record_target(
+                    range,
+                    DefinitionSite {
+                        relative_path: site.path.to_string(),
+                        start: site.start,
+                        end: site.end,
+                    },
                 );
             }
         }
+    }
 
-        edges
-    })
+    fn walk_block_value(
+        &mut self,
+        block: &ast::BlockExpr,
+        index: &mut LocalFlowIndex,
+    ) -> SsaValue<'arena> {
+        for stmt in block.statements() {
+            self.walk_stmt(&stmt, index);
+        }
+        block
+            .tail_expr()
+            .map(|expr| self.walk_expr_value(&expr, index))
+            .unwrap_or(SsaValue::Opaque)
+    }
+
+    fn walk_stmt(&mut self, stmt: &ast::Stmt, index: &mut LocalFlowIndex) {
+        match stmt {
+            ast::Stmt::LetStmt(let_stmt) => {
+                let value = let_stmt
+                    .initializer()
+                    .map(|expr| self.walk_expr_value(&expr, index))
+                    .unwrap_or(SsaValue::Opaque);
+                self.write_pattern_bindings(let_stmt.pat(), value);
+            }
+            ast::Stmt::ExprStmt(expr_stmt) => {
+                if let Some(expr) = expr_stmt.expr() {
+                    let _ = self.walk_expr_value(&expr, index);
+                }
+            }
+            ast::Stmt::Item(_) => {}
+        }
+    }
+
+    fn walk_if_expr_value(
+        &mut self,
+        if_expr: &ast::IfExpr,
+        index: &mut LocalFlowIndex,
+    ) -> SsaValue<'arena> {
+        if let Some(condition) = if_expr.condition() {
+            let _ = self.walk_expr_value(&condition, index);
+        }
+
+        let pre_block = self.current_block;
+        let then_block = self.ssa.add_block();
+        self.ssa.add_predecessor(then_block, pre_block);
+        self.ssa.seal_block(then_block);
+        self.current_block = then_block;
+        let then_value = if_expr
+            .then_branch()
+            .map(|block| self.walk_block_value(&block, index))
+            .unwrap_or(SsaValue::Opaque);
+        let then_end = self.current_block;
+
+        let Some(else_branch) = if_expr.else_branch() else {
+            let join = self.ssa.add_block();
+            self.ssa.add_predecessor(join, pre_block);
+            self.ssa.add_predecessor(join, then_end);
+            self.ssa.seal_block(join);
+            self.current_block = join;
+            return SsaValue::Opaque;
+        };
+
+        let temp = self.temp_key("if");
+        self.ssa.write_variable(temp, then_end, then_value);
+
+        let else_block = self.ssa.add_block();
+        self.ssa.add_predecessor(else_block, pre_block);
+        self.ssa.seal_block(else_block);
+        self.current_block = else_block;
+        let else_value = match else_branch {
+            ElseBranch::Block(block) => self.walk_block_value(&block, index),
+            ElseBranch::IfExpr(elif) => self.walk_if_expr_value(&elif, index),
+        };
+        let else_end = self.current_block;
+        self.ssa.write_variable(temp, else_end, else_value);
+
+        let join = self.ssa.add_block();
+        self.ssa.add_predecessor(join, then_end);
+        self.ssa.add_predecessor(join, else_end);
+        self.ssa.seal_block(join);
+        self.current_block = join;
+        SsaValue::Alias(temp)
+    }
+
+    fn walk_loop_body(
+        &mut self,
+        index: &mut LocalFlowIndex,
+        iterable_or_condition: Option<&ast::Expr>,
+        binding_pat: Option<ast::Pat>,
+        body: Option<ast::BlockExpr>,
+    ) {
+        if let Some(expr) = iterable_or_condition {
+            let _ = self.walk_expr_value(expr, index);
+        }
+
+        let pre_block = self.current_block;
+        let header = self.ssa.add_block();
+        self.ssa.add_predecessor(header, pre_block);
+        self.current_block = header;
+
+        let body_block = self.ssa.add_block();
+        self.ssa.add_predecessor(body_block, header);
+        self.ssa.seal_block(body_block);
+        self.current_block = body_block;
+
+        if let Some(pat) = binding_pat {
+            self.write_pattern_bindings(Some(pat), SsaValue::Opaque);
+        }
+        if let Some(body) = body {
+            let _ = self.walk_block_value(&body, index);
+        }
+
+        self.ssa.add_predecessor(header, self.current_block);
+        self.ssa.seal_block(header);
+
+        let exit = self.ssa.add_block();
+        self.ssa.add_predecessor(exit, header);
+        self.ssa.seal_block(exit);
+        self.current_block = exit;
+    }
+
+    fn walk_expr_value(
+        &mut self,
+        expr: &ast::Expr,
+        index: &mut LocalFlowIndex,
+    ) -> SsaValue<'arena> {
+        match expr {
+            ast::Expr::PathExpr(path_expr) => {
+                if let Some(path) = path_expr.path()
+                    && let Some(PathResolution::Local(local)) = self.sema.resolve_path(&path)
+                {
+                    return SsaValue::Alias(self.local_key(local));
+                }
+                resolved_site_for_expr(self.sema, self.db, self.paths_by_file_id, expr)
+                    .map(|site| self.to_ssa_site(site))
+                    .unwrap_or(SsaValue::Opaque)
+            }
+            ast::Expr::CallExpr(call_expr) => {
+                if let Some(callee) = call_expr.expr() {
+                    if let ast::Expr::PathExpr(path_expr) = &callee
+                        && let Some(path) = path_expr.path()
+                        && let Some(PathResolution::Local(local)) = self.sema.resolve_path(&path)
+                    {
+                        self.record_local_call_targets(
+                            call_expr.syntax().text_range(),
+                            local,
+                            index,
+                        );
+                    }
+
+                    let _ = self.walk_expr_value(&callee, index);
+                }
+                if let Some(arg_list) = call_expr.arg_list() {
+                    for arg in arg_list.args() {
+                        let _ = self.walk_expr_value(&arg, index);
+                    }
+                }
+                SsaValue::Opaque
+            }
+            ast::Expr::MethodCallExpr(method_call) => {
+                if let Some(receiver) = method_call.receiver() {
+                    let _ = self.walk_expr_value(&receiver, index);
+                }
+                if let Some(arg_list) = method_call.arg_list() {
+                    for arg in arg_list.args() {
+                        let _ = self.walk_expr_value(&arg, index);
+                    }
+                }
+                SsaValue::Opaque
+            }
+            ast::Expr::IfExpr(if_expr) => self.walk_if_expr_value(if_expr, index),
+            ast::Expr::MatchExpr(match_expr) => self.walk_match_expr_value(match_expr, index),
+            ast::Expr::BlockExpr(block_expr) => self.walk_block_value(block_expr, index),
+            ast::Expr::WhileExpr(while_expr) => {
+                self.walk_loop_body(
+                    index,
+                    while_expr.condition().as_ref(),
+                    None,
+                    while_expr.loop_body(),
+                );
+                SsaValue::Opaque
+            }
+            ast::Expr::LoopExpr(loop_expr) => {
+                self.walk_loop_body(index, None, None, loop_expr.loop_body());
+                SsaValue::Opaque
+            }
+            ast::Expr::ForExpr(for_expr) => {
+                self.walk_loop_body(
+                    index,
+                    for_expr.iterable().as_ref(),
+                    for_expr.pat(),
+                    for_expr.loop_body(),
+                );
+                SsaValue::Opaque
+            }
+            ast::Expr::BinExpr(bin_expr)
+                if matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { .. })) =>
+            {
+                let rhs_value = bin_expr
+                    .rhs()
+                    .map(|rhs| self.walk_expr_value(&rhs, index))
+                    .unwrap_or(SsaValue::Opaque);
+                if let Some(lhs) = bin_expr.lhs() {
+                    self.write_assignment_target(&lhs, rhs_value.clone());
+                }
+                SsaValue::Opaque
+            }
+            _ => {
+                for child in expr.syntax().children().filter_map(ast::Expr::cast) {
+                    let _ = self.walk_expr_value(&child, index);
+                }
+                resolved_site_for_expr(self.sema, self.db, self.paths_by_file_id, expr)
+                    .map(|site| self.to_ssa_site(site))
+                    .unwrap_or(SsaValue::Opaque)
+            }
+        }
+    }
+
+    fn walk_match_expr_value(
+        &mut self,
+        match_expr: &ast::MatchExpr,
+        index: &mut LocalFlowIndex,
+    ) -> SsaValue<'arena> {
+        if let Some(scrutinee) = match_expr.expr() {
+            let _ = self.walk_expr_value(&scrutinee, index);
+        }
+
+        let Some(arm_list) = match_expr.match_arm_list() else {
+            return SsaValue::Opaque;
+        };
+
+        let pre_block = self.current_block;
+        let temp = self.temp_key("match");
+        let join = self.ssa.add_block();
+        let mut saw_arm = false;
+
+        for arm in arm_list.arms() {
+            let arm_block = self.ssa.add_block();
+            self.ssa.add_predecessor(arm_block, pre_block);
+            self.ssa.seal_block(arm_block);
+            self.current_block = arm_block;
+            self.write_pattern_bindings(arm.pat(), SsaValue::Opaque);
+
+            let arm_value = arm
+                .expr()
+                .map(|expr| self.walk_expr_value(&expr, index))
+                .unwrap_or(SsaValue::Opaque);
+            let arm_end = self.current_block;
+            self.ssa.write_variable(temp, arm_end, arm_value);
+            self.ssa.add_predecessor(join, arm_end);
+            saw_arm = true;
+        }
+
+        if !saw_arm {
+            return SsaValue::Opaque;
+        }
+
+        self.ssa.seal_block(join);
+        self.current_block = join;
+        SsaValue::Alias(temp)
+    }
 }
 
-fn enclosing_definition_node(
-    lookup: &GraphLookup,
+fn build_local_flow_index(
+    source_file: &ast::SourceFile,
+    sema: &Semantics<'_, RootDatabase>,
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+) -> LocalFlowIndex {
+    let mut index = LocalFlowIndex::new();
+
+    for function in source_file.syntax().descendants().filter_map(ast::Fn::cast) {
+        let Some(body) = function.body() else {
+            continue;
+        };
+        let arena = Bump::new();
+        let mut state = LocalFlowState::new(sema, db, paths_by_file_id, &arena);
+        let _ = state.walk_block_value(&body, &mut index);
+    }
+
+    index.dedup();
+    index
+}
+
+fn collect_resolved_edge_candidates(
+    source_file: &ast::SourceFile,
+    sema: &Semantics<'_, RootDatabase>,
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
     relative_path: &str,
-    start: u32,
-    end: u32,
-) -> Option<petgraph::graph::NodeIndex> {
-    let locators = lookup.locators.get(relative_path)?;
-    locators
-        .iter()
-        .filter(|locator| locator.start <= start && end <= locator.end)
-        .min_by_key(|locator| locator.end.saturating_sub(locator.start))
-        .map(|locator| locator.node)
+) -> Vec<ResolvedEdgeCandidate> {
+    let local_flow = build_local_flow_index(source_file, sema, db, paths_by_file_id);
+    let mut edges = Vec::new();
+
+    for node in source_file.syntax().descendants() {
+        if let Some(method_call) = ast::MethodCallExpr::cast(node.clone()) {
+            let target = sema
+                .resolve_method_call(&method_call)
+                .and_then(|function| hir_def_to_definition_site(db, paths_by_file_id, function))
+                .or_else(|| {
+                    method_call_to_definition_fallback(sema, db, paths_by_file_id, &method_call)
+                });
+            push_resolved_edge(
+                &mut edges,
+                relative_path,
+                method_call.syntax().text_range(),
+                target,
+            );
+            continue;
+        }
+
+        if let Some(call_expr) = ast::CallExpr::cast(node.clone()) {
+            let Some(expr) = call_expr.expr() else {
+                continue;
+            };
+
+            let mut targets = Vec::new();
+            let local_flow_targets = match &expr {
+                ast::Expr::PathExpr(path_expr) => path_expr
+                    .path()
+                    .and_then(|path| sema.resolve_path(&path))
+                    .and_then(|resolution| match resolution {
+                        PathResolution::Local(_) => {
+                            local_flow.targets_for_call(call_expr.syntax().text_range())
+                        }
+                        _ => None,
+                    }),
+                _ => None,
+            };
+
+            if let Some(flow_targets) = local_flow_targets {
+                targets.extend(flow_targets.iter().cloned());
+            } else if let Some(target) = sema
+                .resolve_expr_as_callable(&expr)
+                .and_then(|callable| {
+                    callable_to_definition_site(db, paths_by_file_id, callable.kind())
+                })
+                .or_else(|| path_expr_to_definition_site(sema, db, paths_by_file_id, &expr))
+            {
+                targets.push(target);
+            }
+
+            for target in targets {
+                push_resolved_edge(
+                    &mut edges,
+                    relative_path,
+                    call_expr.syntax().text_range(),
+                    Some(target),
+                );
+            }
+            continue;
+        }
+
+        if let Some(macro_call) = ast::MacroCall::cast(node) {
+            let target = sema
+                .resolve_macro_call(&macro_call)
+                .and_then(|macro_def| hir_def_to_definition_site(db, paths_by_file_id, macro_def));
+            push_resolved_edge(
+                &mut edges,
+                relative_path,
+                macro_call.syntax().text_range(),
+                target,
+            );
+        }
+    }
+
+    edges
 }
 
 fn push_resolved_edge(
-    edges: &mut Vec<EdgeEndpoints>,
-    lookup: &GraphLookup,
+    edges: &mut Vec<ResolvedEdgeCandidate>,
     relative_path: &str,
     call_range: TextRange,
-    target_node: Option<petgraph::graph::NodeIndex>,
+    target: Option<DefinitionSite>,
 ) {
-    let Some(source_node) = enclosing_definition_node(
-        lookup,
-        relative_path,
-        u32::from(call_range.start()),
-        u32::from(call_range.end()),
-    )
-    .or_else(|| lookup.file_nodes.get(relative_path).copied()) else {
+    let Some(target) = target else {
         return;
     };
-    let Some(target_node) = target_node else {
-        return;
-    };
-    if source_node == target_node {
-        return;
-    }
-    edges.push(EdgeEndpoints {
-        source: source_node,
-        target: target_node,
+    edges.push(ResolvedEdgeCandidate {
+        source_relative_path: relative_path.to_string(),
+        source_start: u32::from(call_range.start()),
+        source_end: u32::from(call_range.end()),
+        target,
     });
 }
 
@@ -1431,12 +1820,11 @@ fn method_call_to_definition_fallback(
     sema: &Semantics<'_, RootDatabase>,
     db: &RootDatabase,
     paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
     method_call: &ast::MethodCallExpr,
-) -> Option<petgraph::graph::NodeIndex> {
+) -> Option<DefinitionSite> {
     if let Some(target) = sema
         .resolve_method_call_as_callable(method_call)
-        .and_then(|callable| callable_to_definition(db, paths_by_file_id, lookup, callable.kind()))
+        .and_then(|callable| callable_to_definition_site(db, paths_by_file_id, callable.kind()))
     {
         return Some(target);
     }
@@ -1452,7 +1840,7 @@ fn method_call_to_definition_fallback(
     if let Some(target) = receiver_ty.autoderef(db).find_map(|candidate_ty| {
         candidate_ty.iterate_method_candidates(db, &scope, None, |function| {
             (function.name(db).as_str() == method_name)
-                .then(|| hir_def_to_definition(db, paths_by_file_id, lookup, function))
+                .then(|| hir_def_to_definition_site(db, paths_by_file_id, function))
                 .flatten()
         })
     }) {
@@ -1462,7 +1850,6 @@ fn method_call_to_definition_fallback(
     if let Some(target) = trait_method_to_definition_fallback(
         db,
         paths_by_file_id,
-        lookup,
         &visible_traits,
         &receiver_ty,
         &method_name,
@@ -1472,17 +1859,16 @@ fn method_call_to_definition_fallback(
 
     sema.resolve_method_call_fallback(method_call)
         .and_then(|(definition, _)| definition.left())
-        .and_then(|function| hir_def_to_definition(db, paths_by_file_id, lookup, function))
+        .and_then(|function| hir_def_to_definition_site(db, paths_by_file_id, function))
 }
 
 fn trait_method_to_definition_fallback(
     db: &RootDatabase,
     paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
     visible_traits: &ra_ap_hir::VisibleTraits,
     receiver_ty: &ra_ap_hir::Type<'_>,
     method_name: &str,
-) -> Option<petgraph::graph::NodeIndex> {
+) -> Option<DefinitionSite> {
     receiver_ty.autoderef(db).find_map(|_| {
         visible_traits.0.iter().find_map(|trait_id| {
             let trait_def = ra_ap_hir::Trait::from(*trait_id);
@@ -1497,93 +1883,55 @@ fn trait_method_to_definition_fallback(
                     }
                     _ => None,
                 })
-                .and_then(|function| hir_def_to_definition(db, paths_by_file_id, lookup, function))
+                .and_then(|function| hir_def_to_definition_site(db, paths_by_file_id, function))
         })
     })
 }
 
-fn callable_to_definition(
+fn callable_to_definition_site(
     db: &RootDatabase,
     paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
     callable: CallableKind<'_>,
-) -> Option<petgraph::graph::NodeIndex> {
+) -> Option<DefinitionSite> {
     match callable {
         CallableKind::Function(function) => {
-            hir_def_to_definition(db, paths_by_file_id, lookup, function)
+            hir_def_to_definition_site(db, paths_by_file_id, function)
         }
         CallableKind::TupleStruct(strukt) => {
-            hir_def_to_definition(db, paths_by_file_id, lookup, strukt)
+            hir_def_to_definition_site(db, paths_by_file_id, strukt)
         }
         CallableKind::TupleEnumVariant(variant) => {
-            hir_def_to_definition(db, paths_by_file_id, lookup, variant)
+            hir_def_to_definition_site(db, paths_by_file_id, variant)
         }
         CallableKind::Closure(_) | CallableKind::FnPtr | CallableKind::FnImpl(_) => None,
     }
 }
 
-fn path_expr_to_definition(
+fn resolved_site_for_expr(
     sema: &Semantics<'_, RootDatabase>,
     db: &RootDatabase,
     paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
     expr: &ast::Expr,
-) -> Option<petgraph::graph::NodeIndex> {
+) -> Option<DefinitionSite> {
+    sema.resolve_expr_as_callable(expr)
+        .and_then(|callable| callable_to_definition_site(db, paths_by_file_id, callable.kind()))
+        .or_else(|| path_expr_to_definition_site(sema, db, paths_by_file_id, expr))
+}
+
+fn path_expr_to_definition_site(
+    sema: &Semantics<'_, RootDatabase>,
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    expr: &ast::Expr,
+) -> Option<DefinitionSite> {
     let ast::Expr::PathExpr(path_expr) = expr else {
         return None;
     };
     let path = path_expr.path()?;
     let resolution = sema.resolve_path(&path)?;
-    let mut visited = HashSet::new();
-    path_resolution_to_definition(sema, db, paths_by_file_id, lookup, resolution, &mut visited)
-}
-
-fn expr_to_definition(
-    sema: &Semantics<'_, RootDatabase>,
-    db: &RootDatabase,
-    paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
-    expr: &ast::Expr,
-    visited_locals: &mut HashSet<u32>,
-) -> Option<petgraph::graph::NodeIndex> {
-    sema.resolve_expr_as_callable(expr)
-        .and_then(|callable| callable_to_definition(db, paths_by_file_id, lookup, callable.kind()))
-        .or_else(|| match expr {
-            ast::Expr::PathExpr(path_expr) => {
-                let path = path_expr.path()?;
-                let resolution = sema.resolve_path(&path)?;
-                path_resolution_to_definition(
-                    sema,
-                    db,
-                    paths_by_file_id,
-                    lookup,
-                    resolution,
-                    visited_locals,
-                )
-            }
-            _ => None,
-        })
-}
-
-fn path_resolution_to_definition(
-    sema: &Semantics<'_, RootDatabase>,
-    db: &RootDatabase,
-    paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
-    resolution: PathResolution,
-    visited_locals: &mut HashSet<u32>,
-) -> Option<petgraph::graph::NodeIndex> {
     match resolution {
-        PathResolution::Def(def) => module_def_to_definition(db, paths_by_file_id, lookup, def),
-        PathResolution::Local(local) => {
-            if let Some(target) = local.ty(db).as_callable(db).and_then(|callable| {
-                callable_to_definition(db, paths_by_file_id, lookup, callable.kind())
-            }) {
-                return Some(target);
-            }
-
-            local_binding_to_definition(sema, db, paths_by_file_id, lookup, local, visited_locals)
-        }
+        PathResolution::Def(def) => module_def_to_definition_site(db, paths_by_file_id, def),
+        PathResolution::Local(_) => None,
         PathResolution::TypeParam(_)
         | PathResolution::ConstParam(_)
         | PathResolution::SelfType(_)
@@ -1593,205 +1941,76 @@ fn path_resolution_to_definition(
     }
 }
 
-fn local_binding_to_definition(
-    sema: &Semantics<'_, RootDatabase>,
+fn module_def_to_definition_site(
     db: &RootDatabase,
     paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
-    local: ra_ap_hir::Local,
-    visited_locals: &mut HashSet<u32>,
-) -> Option<petgraph::graph::NodeIndex> {
-    if !visited_locals.insert(local.as_id()) {
-        return None;
-    }
-
-    let result = local
-        .primary_source(db)
-        .into_ident_pat()
-        .and_then(|ident_pat| {
-            ident_pat
-                .syntax()
-                .ancestors()
-                .find_map(ast::LetStmt::cast)
-                .and_then(|let_stmt| let_stmt.initializer())
-        })
-        .and_then(|expr| {
-            expr_to_definition(sema, db, paths_by_file_id, lookup, &expr, visited_locals)
-        });
-
-    visited_locals.remove(&local.as_id());
-    result
-}
-
-fn module_def_to_definition(
-    db: &RootDatabase,
-    paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
     def: ModuleDef,
-) -> Option<petgraph::graph::NodeIndex> {
+) -> Option<DefinitionSite> {
     match def {
         ModuleDef::Module(_) => None,
-        ModuleDef::Function(function) => {
-            hir_def_to_definition(db, paths_by_file_id, lookup, function)
-        }
+        ModuleDef::Function(function) => hir_def_to_definition_site(db, paths_by_file_id, function),
         ModuleDef::Adt(adt) => match adt {
             ra_ap_hir::Adt::Struct(strukt) => {
-                hir_def_to_definition(db, paths_by_file_id, lookup, strukt)
+                hir_def_to_definition_site(db, paths_by_file_id, strukt)
             }
             ra_ap_hir::Adt::Enum(enum_def) => {
-                hir_def_to_definition(db, paths_by_file_id, lookup, enum_def)
+                hir_def_to_definition_site(db, paths_by_file_id, enum_def)
             }
             ra_ap_hir::Adt::Union(union_def) => {
-                hir_def_to_definition(db, paths_by_file_id, lookup, union_def)
+                hir_def_to_definition_site(db, paths_by_file_id, union_def)
             }
         },
         ModuleDef::EnumVariant(variant) => {
-            hir_def_to_definition(db, paths_by_file_id, lookup, variant)
+            hir_def_to_definition_site(db, paths_by_file_id, variant)
         }
-        ModuleDef::Const(constant) => hir_def_to_definition(db, paths_by_file_id, lookup, constant),
+        ModuleDef::Const(constant) => hir_def_to_definition_site(db, paths_by_file_id, constant),
         ModuleDef::Static(static_item) => {
-            hir_def_to_definition(db, paths_by_file_id, lookup, static_item)
+            hir_def_to_definition_site(db, paths_by_file_id, static_item)
         }
-        ModuleDef::Trait(trait_def) => {
-            hir_def_to_definition(db, paths_by_file_id, lookup, trait_def)
-        }
+        ModuleDef::Trait(trait_def) => hir_def_to_definition_site(db, paths_by_file_id, trait_def),
         ModuleDef::TypeAlias(type_alias) => {
-            hir_def_to_definition(db, paths_by_file_id, lookup, type_alias)
+            hir_def_to_definition_site(db, paths_by_file_id, type_alias)
         }
         ModuleDef::BuiltinType(_) => None,
-        ModuleDef::Macro(macro_def) => {
-            hir_def_to_definition(db, paths_by_file_id, lookup, macro_def)
-        }
+        ModuleDef::Macro(macro_def) => hir_def_to_definition_site(db, paths_by_file_id, macro_def),
     }
 }
 
-fn hir_def_to_definition<D, N>(
+fn hir_def_to_definition_site<D, N>(
     db: &RootDatabase,
     paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
     def: D,
-) -> Option<petgraph::graph::NodeIndex>
+) -> Option<DefinitionSite>
 where
     D: HasSource<Ast = N>,
     N: AstNode,
 {
     let source = def.source(db)?;
-    source_to_definition(db, paths_by_file_id, lookup, source)
+    source_to_definition_site(db, paths_by_file_id, source)
 }
 
-fn source_to_definition<N: AstNode>(
+fn source_to_definition_site<N: AstNode>(
     db: &RootDatabase,
     paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
     source: InFile<N>,
-) -> Option<petgraph::graph::NodeIndex> {
+) -> Option<DefinitionSite> {
     let file_range = source
         .syntax()
         .original_file_range_rooted(db)
         .into_file_id(db);
-    definition_node_for_range(
-        paths_by_file_id,
-        lookup,
-        file_range.file_id,
-        file_range.range,
-    )
+    definition_site_for_range(paths_by_file_id, file_range.file_id, file_range.range)
 }
 
-fn definition_node_for_range(
+fn definition_site_for_range(
     paths_by_file_id: &HashMap<FileId, String>,
-    lookup: &GraphLookup,
     file_id: FileId,
     range: TextRange,
-) -> Option<petgraph::graph::NodeIndex> {
-    let relative_path = paths_by_file_id.get(&file_id)?;
-    let locators = lookup.locators.get(relative_path)?;
-    let start = u32::from(range.start());
-    let end = u32::from(range.end());
-
-    locators
-        .iter()
-        .filter(|locator| locator.start <= start && end <= locator.end)
-        .min_by_key(|locator| locator.end.saturating_sub(locator.start))
-        .or_else(|| {
-            locators
-                .iter()
-                .filter(|locator| ranges_overlap(locator.start, locator.end, start, end))
-                .min_by_key(|locator| locator.end.saturating_sub(locator.start))
-        })
-        .map(|locator| locator.node)
-}
-
-fn resolve_file_edges_with_workspaces(
-    workspaces: &WorkspaceCatalog,
-    parsed: &[ParsedRustFile],
-    lookup: &GraphLookup,
-) -> Vec<Vec<EdgeEndpoints>> {
-    let mut files_by_workspace = vec![Vec::new(); workspaces.workspaces.len()];
-    let mut edge_lists = Vec::new();
-
-    for file in parsed {
-        if let Some(workspace_id) = file.workspace_id {
-            files_by_workspace[workspace_id].push(file);
-        } else {
-            edge_lists.push(resolve_file_edges_standalone(file, lookup));
-        }
-    }
-
-    for (workspace_id, files) in files_by_workspace.iter().enumerate() {
-        if files.is_empty() {
-            continue;
-        }
-
-        let workspace = &workspaces.workspaces[workspace_id];
-        let sema = Semantics::new(&workspace.db);
-        attach_db(&workspace.db, || {
-            for file in files {
-                if let Some(&file_id) = workspace.file_ids_by_relative_path.get(&file.relative_path)
-                {
-                    edge_lists.push(collect_resolved_edges(
-                        &sema,
-                        &workspace.db,
-                        &workspace.paths_by_file_id,
-                        lookup,
-                        file_id,
-                        &file.relative_path,
-                    ));
-                } else {
-                    edge_lists.push(resolve_file_edges_standalone(file, lookup));
-                }
-            }
-        });
-    }
-
-    edge_lists
-}
-
-fn add_call_edge(
-    graph: &mut CodeGraph,
-    source_node: petgraph::graph::NodeIndex,
-    target_node: petgraph::graph::NodeIndex,
-) {
-    let (source_node_kind, source_def_kind) = graph.graph[source_node]
-        .def_id()
-        .map(|id| (NodeKind::Definition, Some(graph.defs[id.0 as usize].kind)))
-        .unwrap_or((NodeKind::File, None));
-    let target_def_kind = graph.graph[target_node]
-        .def_id()
-        .map(|id| graph.defs[id.0 as usize].kind);
-
-    graph.graph.add_edge(
-        source_node,
-        target_node,
-        GraphEdge {
-            relationship: Relationship {
-                edge_kind: EdgeKind::Calls,
-                source_node: source_node_kind,
-                target_node: NodeKind::Definition,
-                source_def_kind,
-                target_def_kind,
-            },
-        },
-    );
+) -> Option<DefinitionSite> {
+    Some(DefinitionSite {
+        relative_path: paths_by_file_id.get(&file_id)?.clone(),
+        start: u32::from(range.start()),
+        end: u32::from(range.end()),
+    })
 }
 
 impl WorkspaceIndex {
@@ -1799,13 +2018,19 @@ impl WorkspaceIndex {
         root_path: &str,
         manifest_path: &Path,
         manifest_cache: &mut ManifestCache,
+        worker_threads: usize,
     ) -> Result<Self> {
         let workspace = build_project_workspace(root_path, manifest_path, manifest_cache)?;
+        let worker_threads = if worker_threads == 0 {
+            num_cpus::get()
+        } else {
+            worker_threads
+        };
         let load_config = LoadCargoConfig {
             load_out_dirs_from_check: false,
             with_proc_macro_server: ProcMacroServerChoice::None,
             prefill_caches: false,
-            num_worker_threads: 1,
+            num_worker_threads: worker_threads,
             proc_macro_processes: 1,
         };
         let extra_env = rustc_hash::FxHashMap::default();
@@ -1886,7 +2111,7 @@ impl WorkspaceIndex {
 }
 
 impl WorkspaceCatalog {
-    fn load(root_path: &str) -> Result<Self> {
+    fn load(root_path: &str, worker_threads: usize) -> Result<Self> {
         let mut manifest_cache = ManifestCache::new(root_path)?;
         let manifest_paths = manifest_cache.manifest_paths.clone();
         let mut workspaces = Vec::new();
@@ -1906,6 +2131,7 @@ impl WorkspaceCatalog {
                 root_path,
                 &workspace_manifest_path,
                 &mut manifest_cache,
+                worker_threads,
             ) {
                 Ok(workspace) => {
                     let workspace_id = workspaces.len();
@@ -1957,17 +2183,19 @@ fn to_absolute_path(root_path: &str, file_path: &str) -> String {
 }
 
 fn relative_path(root_path: &str, file_path: &str) -> String {
-    file_path
-        .strip_prefix(root_path)
-        .map(|path| path.strip_prefix('/').unwrap_or(path))
-        .unwrap_or(file_path)
-        .to_string()
+    relative_path_if_under_root(root_path, file_path).unwrap_or_else(|| file_path.to_string())
 }
 
 fn relative_path_if_under_root(root_path: &str, file_path: &str) -> Option<String> {
-    file_path
-        .strip_prefix(root_path)
-        .map(|path| path.strip_prefix('/').unwrap_or(path).to_string())
+    let root = Path::new(root_path);
+    let normalized_root = normalize_existing_path(root).unwrap_or_else(|| root.to_path_buf());
+    let file = Path::new(file_path);
+    let normalized_file = normalize_existing_path(file).unwrap_or_else(|| file.to_path_buf());
+
+    normalized_file
+        .strip_prefix(&normalized_root)
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
 }
 
 fn canonical_root_path(root_path: &str) -> String {
@@ -2523,7 +2751,13 @@ fn resolve_local_package(
         })
         .unwrap_or_default();
     let dependencies = resolve_local_dependency_candidates(&parsed, descriptor, manifest_cache)?;
-    let targets = collect_target_specs(&parsed.manifest, &parsed.root_dir, &package_name, &edition);
+    let targets = collect_target_specs(
+        &parsed.manifest,
+        &parsed.root_dir,
+        &manifest_cache.root_path,
+        &package_name,
+        &edition,
+    );
 
     Ok(LocalWorkspacePackage {
         package_id: package_id_for(&parsed.manifest_path, &package_name, &version),
@@ -2800,21 +3034,27 @@ fn parse_target_platform(target: &str) -> Option<String> {
 fn collect_target_specs(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
+    repo_root: &Path,
     package_name: &str,
     package_edition: &str,
 ) -> Vec<LocalTargetSpec> {
     let mut targets = Vec::new();
     let default_lib_name = normalize_crate_name(package_name);
 
-    if let Some(lib_target) =
-        collect_lib_target(manifest, package_root, package_edition, &default_lib_name)
-    {
+    if let Some(lib_target) = collect_lib_target(
+        manifest,
+        package_root,
+        repo_root,
+        package_edition,
+        &default_lib_name,
+    ) {
         targets.push(lib_target);
     }
 
     collect_bin_targets(
         manifest,
         package_root,
+        repo_root,
         package_edition,
         package_name,
         &mut targets,
@@ -2823,6 +3063,7 @@ fn collect_target_specs(
         manifest,
         manifest.example.as_ref(),
         package_root,
+        repo_root,
         package_edition,
         "examples",
         "example",
@@ -2832,6 +3073,7 @@ fn collect_target_specs(
         manifest,
         manifest.test.as_ref(),
         package_root,
+        repo_root,
         package_edition,
         "tests",
         "test",
@@ -2841,12 +3083,19 @@ fn collect_target_specs(
         manifest,
         manifest.bench.as_ref(),
         package_root,
+        repo_root,
         package_edition,
         "benches",
         "bench",
         &mut targets,
     );
-    collect_build_target(manifest, package_root, package_edition, &mut targets);
+    collect_build_target(
+        manifest,
+        package_root,
+        repo_root,
+        package_edition,
+        &mut targets,
+    );
 
     dedupe_targets(targets)
 }
@@ -2854,20 +3103,18 @@ fn collect_target_specs(
 fn collect_lib_target(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
+    repo_root: &Path,
     package_edition: &str,
     default_lib_name: &str,
 ) -> Option<LocalTargetSpec> {
     let lib = manifest.lib.as_ref();
     let path = lib
         .and_then(|lib| {
-            lib.path
-                .as_ref()
-                .map(|path| package_root.join(path.0.clone()))
+            lib.path.as_ref().and_then(|path| {
+                repo_local_existing_file(package_root.join(path.0.clone()), repo_root)
+            })
         })
-        .or_else(|| {
-            let inferred = package_root.join("src/lib.rs");
-            inferred.is_file().then_some(inferred)
-        })?;
+        .or_else(|| repo_local_existing_file(package_root.join("src/lib.rs"), repo_root))?;
     let name = lib
         .and_then(|lib| lib.name.clone())
         .unwrap_or_else(|| default_lib_name.to_string());
@@ -2893,6 +3140,7 @@ fn collect_lib_target(
 fn collect_bin_targets(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
+    repo_root: &Path,
     package_edition: &str,
     package_name: &str,
     targets: &mut Vec<LocalTargetSpec>,
@@ -2903,6 +3151,7 @@ fn collect_bin_targets(
             let Some((name, path)) = resolve_explicit_target_path(
                 bin,
                 package_root,
+                repo_root,
                 package_name,
                 "src/bin",
                 Some("src/main.rs"),
@@ -2935,8 +3184,8 @@ fn collect_bin_targets(
         .and_then(|package| package.autobins)
         .unwrap_or(true)
     {
-        let main_rs = package_root.join("src/main.rs");
-        if main_rs.is_file() {
+        if let Some(main_rs) = repo_local_existing_file(package_root.join("src/main.rs"), repo_root)
+        {
             let dedupe_key = format!("bin:{}:{}", package_name, main_rs.display());
             if seen.insert(dedupe_key) {
                 targets.push(LocalTargetSpec {
@@ -2954,6 +3203,9 @@ fn collect_bin_targets(
         }
 
         for (name, path) in infer_directory_targets(&package_root.join("src/bin")) {
+            let Some(path) = repo_local_existing_file(path, repo_root) else {
+                continue;
+            };
             let dedupe_key = format!("bin:{}:{}", name, path.display());
             if seen.insert(dedupe_key) {
                 targets.push(LocalTargetSpec {
@@ -2972,10 +3224,15 @@ fn collect_bin_targets(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "target collection keeps explicit Cargo-derived inputs separate"
+)]
 fn collect_directory_target_specs(
     manifest: &cargo_manifest::TomlManifest,
     explicit_targets: Option<&Vec<cargo_manifest::TomlTarget>>,
     package_root: &Path,
+    repo_root: &Path,
     package_edition: &str,
     default_dir: &str,
     kind: &'static str,
@@ -2984,9 +3241,14 @@ fn collect_directory_target_specs(
     let mut seen = HashSet::new();
     if let Some(explicit_targets) = explicit_targets {
         for target in explicit_targets {
-            let Some((name, path)) =
-                resolve_explicit_target_path(target, package_root, default_dir, default_dir, None)
-            else {
+            let Some((name, path)) = resolve_explicit_target_path(
+                target,
+                package_root,
+                repo_root,
+                default_dir,
+                default_dir,
+                None,
+            ) else {
                 continue;
             };
             let dedupe_key = format!("{kind}:{name}:{}", path.display());
@@ -3019,6 +3281,9 @@ fn collect_directory_target_specs(
 
     if autodiscover {
         for (name, path) in infer_directory_targets(&package_root.join(default_dir)) {
+            let Some(path) = repo_local_existing_file(path, repo_root) else {
+                continue;
+            };
             let dedupe_key = format!("{kind}:{name}:{}", path.display());
             if seen.insert(dedupe_key) {
                 targets.push(LocalTargetSpec {
@@ -3040,6 +3305,7 @@ fn collect_directory_target_specs(
 fn collect_build_target(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
+    repo_root: &Path,
     package_edition: &str,
     targets: &mut Vec<LocalTargetSpec>,
 ) {
@@ -3047,17 +3313,18 @@ fn collect_build_target(
         .package()
         .and_then(|package| package.build.as_ref());
     let build_path = match build {
-        Some(cargo_manifest::TomlPackageBuild::SingleScript(path)) => Some(package_root.join(path)),
-        Some(cargo_manifest::TomlPackageBuild::MultipleScript(_)) => None,
-        Some(cargo_manifest::TomlPackageBuild::Auto(true)) => Some(package_root.join("build.rs")),
-        Some(cargo_manifest::TomlPackageBuild::Auto(false)) => None,
-        None => {
-            let build_rs = package_root.join("build.rs");
-            build_rs.is_file().then_some(build_rs)
+        Some(cargo_manifest::TomlPackageBuild::SingleScript(path)) => {
+            repo_local_existing_file(package_root.join(path), repo_root)
         }
+        Some(cargo_manifest::TomlPackageBuild::MultipleScript(_)) => None,
+        Some(cargo_manifest::TomlPackageBuild::Auto(true)) => {
+            repo_local_existing_file(package_root.join("build.rs"), repo_root)
+        }
+        Some(cargo_manifest::TomlPackageBuild::Auto(false)) => None,
+        None => repo_local_existing_file(package_root.join("build.rs"), repo_root),
     };
 
-    let Some(build_path) = build_path.filter(|path| path.is_file()) else {
+    let Some(build_path) = build_path else {
         return;
     };
     targets.push(LocalTargetSpec {
@@ -3086,6 +3353,7 @@ fn manifest_autodiscover(
 fn resolve_explicit_target_path(
     target: &cargo_manifest::TomlTarget,
     package_root: &Path,
+    repo_root: &Path,
     default_name: &str,
     default_dir: &str,
     fallback_main: Option<&str>,
@@ -3100,26 +3368,38 @@ fn resolve_explicit_target_path(
     })?;
 
     if let Some(path) = target.path.as_ref() {
-        return Some((name, package_root.join(path.0.clone())));
+        return repo_local_existing_file(package_root.join(path.0.clone()), repo_root)
+            .map(|path| (name, path));
     }
 
-    if let Some(main) = fallback_main {
-        let main_path = package_root.join(main);
-        if name == default_name && main_path.is_file() {
-            return Some((name, main_path));
-        }
+    if let Some(main) = fallback_main
+        && name == default_name
+        && let Some(main_path) = repo_local_existing_file(package_root.join(main), repo_root)
+    {
+        return Some((name, main_path));
     }
 
-    let file_path = package_root.join(default_dir).join(format!("{name}.rs"));
-    if file_path.is_file() {
+    if let Some(file_path) = repo_local_existing_file(
+        package_root.join(default_dir).join(format!("{name}.rs")),
+        repo_root,
+    ) {
         return Some((name, file_path));
     }
-    let nested_main = package_root.join(default_dir).join(&name).join("main.rs");
-    if nested_main.is_file() {
+    if let Some(nested_main) = repo_local_existing_file(
+        package_root.join(default_dir).join(&name).join("main.rs"),
+        repo_root,
+    ) {
         return Some((name, nested_main));
     }
 
     None
+}
+
+fn repo_local_existing_file(path: PathBuf, repo_root: &Path) -> Option<PathBuf> {
+    let normalized = normalize_existing_path(&path)?;
+    let normalized_root =
+        normalize_existing_path(repo_root).unwrap_or_else(|| repo_root.to_path_buf());
+    (normalized.is_file() && normalized.starts_with(&normalized_root)).then_some(normalized)
 }
 
 fn infer_directory_targets(directory: &Path) -> Vec<(String, PathBuf)> {
@@ -3327,6 +3607,46 @@ fn rename_field(dependency: &ResolvedDependencyCandidate) -> Option<String> {
         .filter(|rename| rename != &dependency.target_package_name)
 }
 
-fn ranges_overlap(lhs_start: u32, lhs_end: u32, rhs_start: u32, rhs_end: u32) -> bool {
-    lhs_start < rhs_end && rhs_start < lhs_end
+#[cfg(test)]
+mod tests {
+    use super::{relative_path_if_under_root, repo_local_existing_file};
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn relative_path_if_under_root_rejects_same_prefix_sibling() {
+        let temp = tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        let sibling_root = temp.path().join("repo2");
+        fs::create_dir_all(repo_root.join("src")).unwrap();
+        fs::create_dir_all(sibling_root.join("src")).unwrap();
+        let sibling_file = sibling_root.join("src/lib.rs");
+        fs::write(&sibling_file, "pub fn helper() {}\n").unwrap();
+
+        assert_eq!(
+            relative_path_if_under_root(
+                repo_root.to_string_lossy().as_ref(),
+                sibling_file.to_string_lossy().as_ref(),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn repo_local_existing_file_only_accepts_files_under_repo_root() {
+        let temp = tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        let outside_root = temp.path().join("outside");
+        fs::create_dir_all(repo_root.join("src")).unwrap();
+        fs::create_dir_all(&outside_root).unwrap();
+
+        let inside_file = repo_root.join("src/lib.rs");
+        let outside_file = outside_root.join("lib.rs");
+        fs::write(&inside_file, "pub fn inside() {}\n").unwrap();
+        fs::write(&outside_file, "pub fn outside() {}\n").unwrap();
+
+        let inside = repo_local_existing_file(inside_file, &repo_root).unwrap();
+        assert!(inside.ends_with("repo/src/lib.rs"));
+        assert_eq!(repo_local_existing_file(outside_file, &repo_root), None);
+    }
 }

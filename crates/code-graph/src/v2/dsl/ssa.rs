@@ -19,6 +19,13 @@ pub(crate) struct BlockId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct PhiId(pub usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ResolvedSite<'a> {
+    pub path: &'a str,
+    pub start: u32,
+    pub end: u32,
+}
+
 /// SSA value — parser-local, no graph dependency.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum SsaValue<'a> {
@@ -28,6 +35,8 @@ pub(crate) enum SsaValue<'a> {
     ImportRef(u32),
     /// A type FQN for nested member lookup (self/this, type annotations).
     Type(&'a str),
+    /// A resolved definition site, potentially outside the current file.
+    ResolvedSite(ResolvedSite<'a>),
     /// Deferred name resolution — chased at write time via copy propagation.
     Alias(&'a str),
     /// Dead end — parameter, literal, or otherwise unresolvable.
@@ -74,7 +83,10 @@ impl SsaValue<'_> {
             SsaValue::ImportRef(i) => Some(ParseValue::ImportRef(*i)),
             SsaValue::Type(t) => Some(ParseValue::Type(t.to_string())),
             SsaValue::Opaque => Some(ParseValue::Opaque),
-            SsaValue::Alias(_) | SsaValue::Marker | SsaValue::Phi(_) => None,
+            SsaValue::ResolvedSite(_)
+            | SsaValue::Alias(_)
+            | SsaValue::Marker
+            | SsaValue::Phi(_) => None,
         }
     }
 
@@ -467,6 +479,7 @@ impl<'a> SsaEngine<'a> {
             SsaValue::LocalDef(_)
             | SsaValue::ImportRef(_)
             | SsaValue::Type(_)
+            | SsaValue::ResolvedSite(_)
             | SsaValue::Alias(_) => {
                 return ReachingDefs {
                     values: smallvec::smallvec![value.clone()],

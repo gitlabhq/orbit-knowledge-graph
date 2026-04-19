@@ -159,16 +159,9 @@ pub async fn run_yaml_suite(yaml: &str) {
                 .iter()
                 .map(|f| format!("{root}/{}", f.path))
                 .collect();
-            let run = || {
-                dispatch_by_tag(tag, &files, &root, &tracer)
-                    .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
-                    .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"))
-            };
-            let output = if let Some(pool) = &pool {
-                pool.install(run)
-            } else {
-                run()
-            };
+            let output = dispatch_by_tag(tag, &files, &root, &PipelineConfig::default())
+                .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
+                .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
             output_to_datasets(output)
         }
     };

@@ -464,7 +464,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool
         }
 
         let result = if use_v2 {
-            index_repo_v2(&git, &store, &ontology).await
+            index_repo_v2(&git, &store, &ontology, threads).await
         } else {
             index_repo(&git, &config, &store, &ontology).await
         };
@@ -581,15 +581,18 @@ async fn index_repo_v2(
     git: &workspace::GitInfo,
     store: &workspace::Workspace,
     ontology: &Ontology,
+    worker_threads: usize,
 ) -> Result<RepositoryIndexingResult> {
     let start_time = std::time::Instant::now();
     let key = git.repo_path.to_string_lossy().to_string();
     let root_path = key.clone();
 
     // Run v2 pipeline
-    let pipeline = code_graph::v2::Pipeline::new(code_graph::v2::PipelineConfig::default());
-    let tracer = code_graph::v2::trace::Tracer::new(false);
-    let v2_result = pipeline.run(std::path::Path::new(&root_path), &tracer);
+    let pipeline = code_graph::v2::Pipeline::new(code_graph::v2::PipelineConfig {
+        worker_threads,
+        ..Default::default()
+    });
+    let v2_result = pipeline.run(std::path::Path::new(&root_path));
 
     if !v2_result.errors.is_empty() {
         for err in &v2_result.errors {

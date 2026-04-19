@@ -18,8 +18,12 @@ fixtures:
       use crate::generated::Generated;
       use crate::inner::{helper as inner_helper, self as inner_mod};
       use crate::inner::nested::*;
+      pub(crate) use crate::inner::helper as crate_helper;
       pub use crate::inner::{Worker, make_worker};
       extern crate core as rust_core;
+      extern "C" {
+          fn c_signal();
+      }
 
       pub const ROOT_CONST: usize = 1;
       pub static ROOT_STATIC: &str = "hi";
@@ -63,13 +67,24 @@ fixtures:
           }
       }
 
+      pub extern "C" fn exported_c() {}
+
       pub fn use_everything() {
           inner_helper();
           let _generated = Generated;
           let _ = inner_mod::nested::ping as fn();
+          let _ = crate_helper as fn();
           let _ = rust_core::mem::size_of::<usize>();
           let _ = make_worker();
           local_macro!();
+      }
+
+      pub fn call_local_extern() {
+          exported_c();
+      }
+
+      pub unsafe fn call_foreign_extern() {
+          c_signal();
       }
 
 tests:
@@ -159,10 +174,11 @@ tests:
   - name: "group import aliases are retained"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'src/lib.rs' AND (i.alias = 'inner_helper' OR i.alias = 'inner_mod')
+      WHERE i.file_path = 'src/lib.rs'
+        AND (i.alias = 'inner_helper' OR i.alias = 'inner_mod' OR i.alias = 'crate_helper')
       RETURN i.alias AS alias
     assert:
-      - { column_values: { field: alias, values: ['inner_helper', 'inner_mod'] } }
+      - { column_values: { field: alias, values: ['crate_helper', 'inner_helper', 'inner_mod'] } }
 
   - name: "wildcard imports retain their source path"
     query: |
@@ -172,3 +188,29 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { path: 'crate::inner::nested' } }
+
+  - name: "restricted visibility uses stay private in import metadata"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs' AND i.alias = 'crate_helper'
+      RETURN i.import_type AS type, i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { type: 'AliasedUse', path: 'crate::inner::helper' } }
+
+  - name: "local extern functions are captured and callable"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_local_extern' AND callee.name = 'exported_c'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'exported_c', type: 'Function' } }
+
+  - name: "foreign extern declarations do not create bogus local call edges"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_foreign_extern'
+      RETURN callee.name AS name
+    assert:
+      - { row_count: 0 }

@@ -179,6 +179,11 @@ impl CodeGraph {
             .iter()
             .map(|d| GraphDef::from_canonical(d, &mut self.strings))
             .collect();
+        let file_range_index = self
+            .indexes
+            .definition_ranges
+            .entry(relative_path.clone())
+            .or_default();
 
         for (i, gdef) in graph_defs.iter().enumerate() {
             let id = DefId(def_base + i as u32);
@@ -197,6 +202,7 @@ impl CodeGraph {
                 let parent = &fqn_str[..sep_pos];
                 self.indexes.nested.insert(parent, name_str, def_node);
             }
+            file_range_index.insert(gdef.range, def_node);
 
             self.graph.add_edge(
                 file_node,
@@ -497,6 +503,53 @@ impl CodeGraph {
 
     pub fn def_in_file(&self, def_idx: NodeIndex, file_path: &str) -> bool {
         self.graph[def_idx].path() == file_path
+    }
+
+    pub fn file_node_for_path(&self, file_path: &str) -> Option<NodeIndex> {
+        self.indexes.file_index.as_ref()?.get(file_path).copied()
+    }
+
+    pub fn enclosing_definition_for_range(
+        &self,
+        file_path: &str,
+        start: u32,
+        end: u32,
+    ) -> Option<NodeIndex> {
+        self.indexes
+            .definition_ranges
+            .get(file_path)?
+            .find_enclosing(start, end)
+    }
+
+    pub fn definition_for_range(&self, file_path: &str, start: u32, end: u32) -> Option<NodeIndex> {
+        self.indexes
+            .definition_ranges
+            .get(file_path)?
+            .find_enclosing_or_overlapping(start, end)
+    }
+
+    pub fn add_call_edge(&mut self, source_node: NodeIndex, target_node: NodeIndex) {
+        let (source_node_kind, source_def_kind) = self.graph[source_node]
+            .def_id()
+            .map(|id| (NodeKind::Definition, Some(self.defs[id.0 as usize].kind)))
+            .unwrap_or((NodeKind::File, None));
+        let target_def_kind = self.graph[target_node]
+            .def_id()
+            .map(|id| self.defs[id.0 as usize].kind);
+
+        self.graph.add_edge(
+            source_node,
+            target_node,
+            GraphEdge {
+                relationship: Relationship {
+                    edge_kind: EdgeKind::Calls,
+                    source_node: source_node_kind,
+                    target_node: NodeKind::Definition,
+                    source_def_kind,
+                    target_def_kind,
+                },
+            },
+        );
     }
 
     pub fn def(&self, idx: NodeIndex) -> &GraphDef {

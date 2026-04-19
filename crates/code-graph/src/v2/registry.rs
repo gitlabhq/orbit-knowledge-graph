@@ -15,7 +15,7 @@ use crate::v2::langs::generic::kotlin::{KotlinDsl, KotlinRules};
 use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use crate::v2::pipeline::{
-    FileInput, GenericPipeline, LanguagePipeline, PipelineError, PipelineOutput,
+    FileInput, GenericPipeline, LanguagePipeline, PipelineConfig, PipelineError, PipelineOutput,
 };
 
 // ── Macro ───────────────────────────────────────────────────────
@@ -56,10 +56,10 @@ macro_rules! register_v2_pipelines {
             language: Language,
             files: &[FileInput],
             root_path: &str,
-            tracer: &crate::v2::trace::Tracer,
+            config: &PipelineConfig,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             Some(match language {
-                $(Language::$variant => <$($pipeline)*>::process_files(files, root_path, tracer),)*
+                $(Language::$variant => <$($pipeline)*>::process_files(files, root_path, config),)*
                 _ => return None,
             })
         }
@@ -70,10 +70,10 @@ macro_rules! register_v2_pipelines {
             tag: &str,
             files: &[FileInput],
             root_path: &str,
-            tracer: &crate::v2::trace::Tracer,
+            config: &PipelineConfig,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             Some(match tag {
-                $($tag => <$($pipeline)*>::process_files(files, root_path, tracer),)*
+                $($tag => <$($pipeline)*>::process_files(files, root_path, config),)*
                 _ => return None,
             })
         }

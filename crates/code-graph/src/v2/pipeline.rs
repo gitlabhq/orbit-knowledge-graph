@@ -65,13 +65,14 @@ pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
-        tracer: &crate::v2::trace::Tracer,
+        config: &PipelineConfig,
     ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
 pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
+    pub worker_threads: usize,
 }
 
 impl Default for PipelineConfig {
@@ -79,6 +80,7 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             respect_gitignore: true,
+            worker_threads: 0,
         }
     }
 }
@@ -148,7 +150,8 @@ impl Pipeline {
             eprintln!("[v2] processing {language}: {file_count} files");
             let t_lang = std::time::Instant::now();
 
-            match crate::v2::registry::dispatch_language(*language, files, &root_str, tracer) {
+            match crate::v2::registry::dispatch_language(*language, files, &root_str, &self.config)
+            {
                 Some(Ok(PipelineOutput::Graph(graph))) => {
                     eprintln!(
                         "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
@@ -265,7 +268,7 @@ where
     fn process_files(
         files: &[FileInput],
         root_path: &str,
-        tracer: &crate::v2::trace::Tracer,
+        _config: &PipelineConfig,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let spec = P::spec();
         let rules = R::rules();
@@ -555,11 +558,14 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let tracer = crate::v2::trace::Tracer::new(false);
-        let output =
-            crate::v2::registry::dispatch_language(language, &[path.to_string()], "/", &tracer)
-                .unwrap_or_else(|| panic!("Language {language} not supported"))
-                .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
+        let output = crate::v2::registry::dispatch_language(
+            language,
+            &[path.to_string()],
+            "/",
+            &PipelineConfig::default(),
+        )
+        .unwrap_or_else(|| panic!("Language {language} not supported"))
+        .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
         match output {
             PipelineOutput::Graph(g) => *g,
             PipelineOutput::Batches(_) => panic!("expected Graph output"),
