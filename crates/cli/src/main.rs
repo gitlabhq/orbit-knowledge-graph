@@ -7,8 +7,10 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use code_graph::legacy::linker::analysis::types::GraphData;
 use code_graph::legacy::linker::indexer::{
-    IndexingConfig, RepositoryGraphStats, RepositoryIndexer, RepositoryIndexingResult,
+    ErroredFile as LegacyErroredFile, IndexingConfig, RepositoryIndexer,
+    SkippedFile as LegacySkippedFile,
 };
 use code_graph::legacy::linker::loading::DirectoryFileSource;
 use ontology::Ontology;
@@ -19,6 +21,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -68,6 +71,26 @@ struct GraphStats {
 struct ProcessingStats {
     skipped_files: usize,
     errored_files: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct IndexGraphStats {
+    directories: usize,
+    files: usize,
+    definitions: usize,
+    imported_symbols: usize,
+    relationships: usize,
+    relationship_types: HashMap<String, usize>,
+    definition_types: HashMap<String, usize>,
+}
+
+struct IndexRunResult {
+    total_processing_time: Duration,
+    skipped_files: Vec<LegacySkippedFile>,
+    errored_files: Vec<LegacyErroredFile>,
+    graph_data: Option<GraphData>,
+    graph_stats: Option<IndexGraphStats>,
+    database_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -509,7 +532,7 @@ async fn index_repo(
     config: &IndexingConfig,
     store: &workspace::Workspace,
     ontology: &Ontology,
-) -> Result<RepositoryIndexingResult> {
+) -> Result<IndexRunResult> {
     // v1 pipeline — unchanged
     let key = git.repo_path.to_string_lossy().to_string();
     let repo_name = git
@@ -574,7 +597,14 @@ async fn index_repo(
         result.database_path = Some(db_path.display().to_string());
     }
 
-    Ok(result)
+    Ok(IndexRunResult {
+        total_processing_time: result.total_processing_time,
+        skipped_files: result.skipped_files,
+        errored_files: result.errored_files,
+        graph_data: result.graph_data,
+        graph_stats: None,
+        database_path: result.database_path,
+    })
 }
 
 async fn index_repo_v2(
@@ -582,7 +612,7 @@ async fn index_repo_v2(
     store: &workspace::Workspace,
     ontology: &Ontology,
     worker_threads: usize,
-) -> Result<RepositoryIndexingResult> {
+) -> Result<IndexRunResult> {
     let start_time = std::time::Instant::now();
     let key = git.repo_path.to_string_lossy().to_string();
     let root_path = key.clone();
@@ -649,29 +679,17 @@ async fn index_repo_v2(
     )?;
 
     // Return a minimal v1-compatible result for stats output
-    Ok(RepositoryIndexingResult {
+    Ok(IndexRunResult {
         total_processing_time: start_time.elapsed(),
-        repository_name: git
-            .repo_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default(),
-        repository_path: key,
         skipped_files: vec![],
         errored_files: vec![],
-        errors: v2_result
-            .errors
-            .iter()
-            .map(|e| (e.file_path.clone(), e.error.clone()))
-            .collect(),
         graph_data: None,
         graph_stats: Some(graph_stats),
         database_path: Some(db_path.display().to_string()),
-        database_loaded: true,
     })
 }
 
-fn summarize_v2_graphs(graphs: &[code_graph::v2::linker::CodeGraph]) -> RepositoryGraphStats {
+fn summarize_v2_graphs(graphs: &[code_graph::v2::linker::CodeGraph]) -> IndexGraphStats {
     let mut relationship_types = HashMap::new();
     let mut definition_types = HashMap::new();
     let mut directories = 0;
@@ -700,7 +718,7 @@ fn summarize_v2_graphs(graphs: &[code_graph::v2::linker::CodeGraph]) -> Reposito
         }
     }
 
-    RepositoryGraphStats {
+    IndexGraphStats {
         directories,
         files,
         definitions,
@@ -714,7 +732,7 @@ fn summarize_v2_graphs(graphs: &[code_graph::v2::linker::CodeGraph]) -> Reposito
 fn build_index_output(
     repo_name: &str,
     path: &str,
-    result: &RepositoryIndexingResult,
+    result: &IndexRunResult,
     show_stats: bool,
 ) -> IndexOutput {
     let (graph, rel_counts, def_counts) =

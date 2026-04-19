@@ -29,7 +29,6 @@ use crate::legacy::linker::parsing::processor::FileProcessor;
 pub use crate::legacy::linker::parsing::processor::{
     ErroredFile, FileProcessingResult, ProcessingStage, ProcessingStats, SkippedFile,
 };
-use std::collections::HashMap;
 
 type ParseFilesResult = (
     Vec<FileProcessingResult>,
@@ -70,20 +69,8 @@ pub struct RepositoryIndexingResult {
     pub errored_files: Vec<ErroredFile>,
     pub errors: Vec<(String, String)>,
     pub graph_data: Option<GraphData>,
-    pub graph_stats: Option<RepositoryGraphStats>,
     pub database_path: Option<String>,
     pub database_loaded: bool,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct RepositoryGraphStats {
-    pub directories: usize,
-    pub files: usize,
-    pub definitions: usize,
-    pub imported_symbols: usize,
-    pub relationships: usize,
-    pub relationship_types: HashMap<String, usize>,
-    pub definition_types: HashMap<String, usize>,
 }
 
 #[derive(Debug)]
@@ -210,7 +197,6 @@ impl RepositoryIndexer {
             errored_files,
             errors,
             graph_data: Some(graph_data),
-            graph_stats: None,
             database_path: None,
             database_loaded: false,
         };
