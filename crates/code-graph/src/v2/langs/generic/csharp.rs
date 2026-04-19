@@ -62,9 +62,9 @@ impl DslLanguage for CSharpDsl {
 mod tests {
     use super::*;
 
-    fn parse(code: &str) -> crate::v2::dsl::engine::ParsedDefs {
+    fn analyze(code: &str) -> crate::v2::dsl::engine::FileAnalysis {
         CSharpDsl::spec()
-            .parse_defs_only(
+            .analyze(
                 code.as_bytes(),
                 "Test.cs",
                 crate::v2::config::Language::CSharp,
@@ -74,10 +74,10 @@ mod tests {
 
     #[test]
     fn class_with_methods() {
-        let result = parse(
+        let result = analyze(
             "namespace MyApp {\n    public class Controller {\n        public void Index() {}\n    }\n}\n",
         );
-        assert!(result.definitions.len() >= 2);
-        assert!(result.definitions.iter().any(|d| d.name == "Controller"));
+        assert!(result.defs.len() >= 2);
+        assert!(result.defs.iter().any(|d| d.name == "Controller"));
     }
 }

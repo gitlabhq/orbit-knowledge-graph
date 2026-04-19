@@ -271,9 +271,9 @@ impl HasRules for JavaRules {
 mod tests {
     use super::*;
 
-    fn parse(code: &str) -> crate::v2::dsl::engine::ParsedDefs {
+    fn analyze(code: &str) -> crate::v2::dsl::engine::FileAnalysis {
         JavaDsl::spec()
-            .parse_defs_only(
+            .analyze(
                 code.as_bytes(),
                 "Test.java",
                 crate::v2::config::Language::Java,
@@ -283,39 +283,37 @@ mod tests {
 
     #[test]
     fn class_with_methods() {
-        let result = parse(
+        let result = analyze(
             "public class Calculator {\n    public int add(int a, int b) {\n        return a + b;\n    }\n}\n",
         );
-        assert_eq!(result.definitions.len(), 2);
-        assert_eq!(result.definitions[0].name, "Calculator");
-        assert_eq!(result.definitions[0].kind, DefKind::Class);
-        assert_eq!(result.definitions[1].name, "add");
-        assert_eq!(result.definitions[1].fqn.to_string(), "Calculator.add");
+        assert_eq!(result.defs.len(), 2);
+        assert_eq!(result.defs[0].name, "Calculator");
+        assert_eq!(result.defs[0].kind, DefKind::Class);
+        assert_eq!(result.defs[1].name, "add");
+        assert_eq!(result.defs[1].fqn.to_string(), "Calculator.add");
     }
 
     #[test]
     fn package_scoping() {
-        let result =
-            parse("package com.example;\n\npublic class Service {\n    public void run() {}\n}\n");
-        let service = result
-            .definitions
-            .iter()
-            .find(|d| d.name == "Service")
-            .unwrap();
+        let result = analyze(
+            "package com.example;\n\npublic class Service {\n    public void run() {}\n}\n",
+        );
+        let service = result.defs.iter().find(|d| d.name == "Service").unwrap();
         assert_eq!(service.fqn.to_string(), "com.example.Service");
     }
 
     #[test]
     fn super_types_extracted() {
-        let result = parse("public class Dog extends Animal implements Serializable {\n}\n");
-        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
+        let result = analyze("public class Dog extends Animal implements Serializable {\n}\n");
+        let dog = result.defs.iter().find(|d| d.name == "Dog").unwrap();
         let meta = dog.metadata.as_ref().expect("Dog should have metadata");
         assert!(!meta.super_types.is_empty());
     }
 
     #[test]
     fn imports_extracted() {
-        let result = parse("import java.util.List;\nimport java.util.*;\n\npublic class Test {}\n");
+        let result =
+            analyze("import java.util.List;\nimport java.util.*;\n\npublic class Test {}\n");
         assert!(result.imports.len() >= 2);
     }
 }

@@ -14,10 +14,26 @@ use crate::utils::node_to_range;
 
 use super::types::{LanguageSpec, Rule};
 
-/// Result of a defs-only parse. Just definitions and imports.
-pub struct ParsedDefs {
-    pub definitions: Vec<CanonicalDefinition>,
+/// Complete analysis of a single source file — defs, imports, refs, and
+/// inferred return types. Produced by `LanguageSpec::analyze()`.
+///
+/// This is the single output of one parse. The pipeline uses `defs` and
+/// `imports` for graph construction, then `refs` for resolution.
+pub struct FileAnalysis {
+    pub defs: Vec<CanonicalDefinition>,
     pub imports: Vec<CanonicalImport>,
+    pub refs: Vec<AnalyzedRef>,
+    pub inferred_returns: Vec<(u32, String)>,
+}
+
+/// A reference with its SSA reaching definitions already computed.
+/// Ready for cross-file resolution — no re-parsing needed.
+pub struct AnalyzedRef {
+    pub name: String,
+    pub chain: Option<Vec<ExpressionStep>>,
+    pub reaching: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
+    pub enclosing_def: Option<u32>,
+    pub is_return: bool,
 }
 
 struct ScopeMatch {
@@ -30,164 +46,6 @@ struct ScopeMatch {
 }
 
 impl LanguageSpec {
-    /// Parse source for defs+imports only. Used by Phase 1.
-    pub fn parse_defs_only(
-        &self,
-        source: &[u8],
-        file_path: &str,
-        language: Language,
-    ) -> crate::legacy::parser::Result<ParsedDefs> {
-        let source_str = std::str::from_utf8(source)
-            .map_err(|e| crate::legacy::parser::Error::Parse(format!("Invalid UTF-8: {e}")))?;
-
-        let ast = language.parse_ast(source_str);
-        let root = ast.root();
-        let sep = language.fqn_separator();
-
-        let mut defs = Vec::new();
-        let mut imports = Vec::new();
-        let mut scope_stack: Vec<Arc<str>> = Vec::new();
-        let mut import_map = rustc_hash::FxHashMap::default();
-
-        if let Some(f) = self.hooks.module_scope
-            && let Some(module) = f(file_path, sep)
-        {
-            scope_stack.push(Arc::from(module.as_str()));
-        }
-
-        let top_level_depth = scope_stack.len();
-        self.walk_defs_only(
-            &root,
-            &mut scope_stack,
-            top_level_depth,
-            &mut defs,
-            &mut imports,
-            &mut import_map,
-            sep,
-        );
-
-        Ok(ParsedDefs {
-            definitions: defs,
-            imports,
-        })
-    }
-
-    /// Lightweight walk: only scope + import rules. No refs, bindings, or
-    /// control flow. Used by `parse_defs_only` for Phase 1.
-    #[allow(clippy::too_many_arguments)]
-    fn walk_defs_only(
-        &self,
-        node: &Node<StrDoc<SupportLang>>,
-        scope_stack: &mut Vec<Arc<str>>,
-        top_level_depth: usize,
-        defs: &mut Vec<CanonicalDefinition>,
-        imports: &mut Vec<CanonicalImport>,
-        import_map: &mut rustc_hash::FxHashMap<String, String>,
-        sep: &'static str,
-    ) {
-        if stacker::remaining_stack().unwrap_or(usize::MAX)
-            < crate::legacy::parser::MINIMUM_STACK_REMAINING
-        {
-            return;
-        }
-
-        let node_kind = node.kind();
-        let node_kind_ref = node_kind.as_ref();
-        let mut pushed_scope = false;
-
-        if let Some((pkg_kind, ref pkg_extract)) = self.package_node
-            && node_kind_ref == pkg_kind
-            && let Some(name) = pkg_extract.apply(node)
-        {
-            scope_stack.push(Arc::from(name.as_str()));
-        }
-
-        let module_prefix: Option<String> = if top_level_depth > 0 {
-            Some(
-                scope_stack[..top_level_depth]
-                    .iter()
-                    .map(|s| s.as_ref())
-                    .collect::<Vec<_>>()
-                    .join(sep),
-            )
-        } else {
-            None
-        };
-        if let Some(m) = self.evaluate_scope(node, node_kind_ref, |bare, _origin| {
-            if let Some(fqn) = import_map.get(&bare) {
-                return fqn.clone();
-            }
-            if let Some(prefix) = &module_prefix {
-                return format!("{prefix}{sep}{bare}");
-            }
-            bare
-        }) {
-            let is_top_level = scope_stack.len() <= top_level_depth;
-
-            if m.creates_scope {
-                scope_stack.push(Arc::from(m.name.as_str()));
-                pushed_scope = true;
-            }
-
-            let fqn = if m.creates_scope {
-                Fqn::from_parts(
-                    &scope_stack.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
-                    sep,
-                )
-            } else {
-                Fqn::from_scope(scope_stack, &m.name, sep)
-            };
-
-            defs.push(CanonicalDefinition {
-                definition_type: m.label,
-                kind: m.def_kind,
-                name: m.name,
-                fqn,
-                range: canonical_range(&m.range),
-                is_top_level,
-                metadata: m.metadata,
-            });
-        }
-
-        let custom_scope_handled = self
-            .hooks
-            .on_scope
-            .is_some_and(|f| f(node, defs, scope_stack, sep));
-
-        if !custom_scope_handled {
-            let import_count_before = imports.len();
-            let handled = self.hooks.on_import.is_some_and(|f| f(node, imports));
-            if !handled {
-                let ms = scope_stack.first().map(|s| s.as_ref());
-                self.evaluate_imports(node, node_kind_ref, imports, ms, sep);
-            }
-            for imp in &imports[import_count_before..] {
-                if !imp.wildcard && !imp.path.is_empty() {
-                    let name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-                    if !name.is_empty() {
-                        import_map.insert(name.to_string(), format!("{}{}{}", imp.path, sep, name));
-                    }
-                }
-            }
-        }
-
-        for child in node.children() {
-            self.walk_defs_only(
-                &child,
-                scope_stack,
-                top_level_depth,
-                defs,
-                imports,
-                import_map,
-                sep,
-            );
-        }
-
-        if pushed_scope {
-            scope_stack.pop();
-        }
-    }
-
     fn evaluate_scope(
         &self,
         node: &Node<StrDoc<SupportLang>>,
@@ -487,27 +345,18 @@ impl LanguageSpec {
         }
     }
 
-    // ── parse_full_and_resolve: single walk with SSA + inline callback ──
+    // ── analyze: single parse, data out ───────────────────────────
 
-    /// Parse source with SSA, then call `on_ref` for each resolved reference.
-    /// No intermediate collections — each ref is dispatched as soon as its
-    /// reaching defs are computed.
-    pub fn parse_full_and_resolve<F>(
+    /// Parse source once. Returns definitions, imports, analyzed references
+    /// (with SSA reaching defs), and inferred return types.
+    ///
+    /// Single-pass replacement for the former `parse_defs_only` + `parse_full_and_resolve`.
+    pub fn analyze(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
-        mut on_ref: F,
-    ) -> crate::legacy::parser::Result<Vec<(u32, String)>>
-    where
-        F: FnMut(
-            &str,                                        // name
-            Option<&[crate::v2::types::ExpressionStep]>, // chain
-            &[crate::v2::types::ssa::ParseValue],        // reaching defs
-            Option<u32>,                                 // enclosing_def index
-            &[(u32, String)],                            // inferred return types
-        ),
-    {
+    ) -> crate::legacy::parser::Result<FileAnalysis> {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::legacy::parser::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
@@ -529,11 +378,8 @@ impl LanguageSpec {
 
         state.ssa.seal_remaining();
 
+        // Infer return types from bare-call / bare-identifier returns.
         let pending_refs: Vec<_> = state.pending_refs.drain(..).collect();
-
-        // Pass 1: infer return types from bare-call / bare-identifier return refs.
-        // Chain refs (e.g. `return foo.bar()`) are skipped — the ssa_key points
-        // at the chain base, not the terminal call's return type.
         for pending in &pending_refs {
             if !pending.is_return || pending.chain.is_some() {
                 continue;
@@ -563,7 +409,6 @@ impl LanguageSpec {
                     crate::v2::types::ssa::ParseValue::ImportRef(i) => {
                         state.imports.get(i as usize).and_then(|imp| {
                             let name = imp.name.as_deref()?;
-                            // Use import_map to resolve to FQN (e.g. "UserService" → "models.UserService")
                             state
                                 .import_map
                                 .get(name)
@@ -582,8 +427,7 @@ impl LanguageSpec {
             }
         }
 
-        // Collect all inferred return types (from both call returns and
-        // any future sources) into the sidecar for the resolver
+        // Collect inferred return types
         let inferred_returns: Vec<(u32, String)> = state
             .defs
             .iter()
@@ -597,78 +441,86 @@ impl LanguageSpec {
             })
             .collect();
 
-        // Pass 2: dispatch refs to resolver
-        for pending in &pending_refs {
-            let reaching = state
-                .ssa
-                .read_variable_stateless(pending.ssa_key, pending.block);
-            let mut parse_values: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]> =
-                reaching
-                    .values
-                    .iter()
-                    .filter_map(|v| v.to_parse_value())
-                    .collect();
+        // Build analyzed refs with reaching defs
+        let refs: Vec<AnalyzedRef> = pending_refs
+            .iter()
+            .map(|pending| {
+                let reaching = state
+                    .ssa
+                    .read_variable_stateless(pending.ssa_key, pending.block);
+                let mut parse_values: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]> =
+                    reaching
+                        .values
+                        .iter()
+                        .filter_map(|v| v.to_parse_value())
+                        .collect();
 
-            // Instance attr rewrite
-            let mut chain_slice: Option<&[ExpressionStep]> = pending.chain.as_deref();
-            if let Some(chain) = chain_slice
-                && chain.len() >= 3
-                && parse_values
-                    .iter()
-                    .any(|v| matches!(v, crate::v2::types::ssa::ParseValue::Type(_)))
-            {
-                let field_steps: Vec<usize> = chain[1..]
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, s)| {
-                        if matches!(s, ExpressionStep::Field(_)) {
-                            Some(i + 1)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                // Instance attr rewrite: check compound SSA keys for self.field patterns
+                let mut chain_owned: Option<Vec<ExpressionStep>> = pending.chain.clone();
+                if let Some(chain) = &chain_owned
+                    && chain.len() >= 3
+                    && parse_values
+                        .iter()
+                        .any(|v| matches!(v, crate::v2::types::ssa::ParseValue::Type(_)))
+                {
+                    let field_steps: Vec<usize> = chain[1..]
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, s)| {
+                            if matches!(s, ExpressionStep::Field(_)) {
+                                Some(i + 1)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
 
-                for &field_idx in field_steps.iter().rev() {
-                    let mut compound = pending.ssa_key.to_string();
-                    for step in &chain[1..=field_idx] {
-                        if let ExpressionStep::Field(name) = step {
-                            compound.push('.');
-                            compound.push_str(name);
+                    for &field_idx in field_steps.iter().rev() {
+                        let mut compound = pending.ssa_key.to_string();
+                        for step in &chain[1..=field_idx] {
+                            if let ExpressionStep::Field(name) = step {
+                                compound.push('.');
+                                compound.push_str(name);
+                            }
                         }
-                    }
-                    let key = state.arena.alloc_str(&compound);
-                    let r = state.ssa.read_variable_stateless(key, pending.block);
-                    let compound_values: smallvec::SmallVec<
-                        [crate::v2::types::ssa::ParseValue; 2],
-                    > = r.values.iter().filter_map(|v| v.to_parse_value()).collect();
-                    if !compound_values.is_empty()
-                        && !compound_values
-                            .iter()
-                            .all(|v| matches!(v, crate::v2::types::ssa::ParseValue::Opaque))
-                    {
-                        parse_values = compound_values;
-                        let remaining = &chain[field_idx + 1..];
-                        chain_slice = if remaining.len() <= 1 {
-                            None
-                        } else {
-                            Some(remaining)
-                        };
-                        break;
+                        let key = state.arena.alloc_str(&compound);
+                        let r = state.ssa.read_variable_stateless(key, pending.block);
+                        let compound_values: smallvec::SmallVec<
+                            [crate::v2::types::ssa::ParseValue; 2],
+                        > = r.values.iter().filter_map(|v| v.to_parse_value()).collect();
+                        if !compound_values.is_empty()
+                            && !compound_values
+                                .iter()
+                                .all(|v| matches!(v, crate::v2::types::ssa::ParseValue::Opaque))
+                        {
+                            parse_values = compound_values;
+                            let remaining = &chain[field_idx + 1..];
+                            chain_owned = if remaining.len() <= 1 {
+                                None
+                            } else {
+                                Some(remaining.to_vec())
+                            };
+                            break;
+                        }
                     }
                 }
-            }
 
-            on_ref(
-                &pending.name,
-                chain_slice,
-                &parse_values,
-                pending.enclosing_def,
-                &inferred_returns,
-            );
-        }
+                AnalyzedRef {
+                    name: pending.name.clone(),
+                    chain: chain_owned,
+                    reaching: parse_values,
+                    enclosing_def: pending.enclosing_def,
+                    is_return: pending.is_return,
+                }
+            })
+            .collect();
 
-        Ok(inferred_returns)
+        Ok(FileAnalysis {
+            defs: state.defs,
+            imports: state.imports,
+            refs,
+            inferred_returns,
+        })
     }
 
     fn walk_full<'a>(
@@ -1228,8 +1080,8 @@ mod tests {
     use treesitter_visit::extract::field;
     use treesitter_visit::predicate::*;
 
-    fn parse_with(spec: &LanguageSpec, code: &str) -> ParsedDefs {
-        spec.parse_defs_only(code.as_bytes(), "test.py", Language::Python)
+    fn analyze_with(spec: &LanguageSpec, code: &str) -> FileAnalysis {
+        spec.analyze(code.as_bytes(), "test.py", Language::Python)
             .unwrap()
     }
 
@@ -1245,15 +1097,15 @@ mod tests {
             vec![],
             vec![],
         );
-        let result = parse_with(&spec, "class A:\n    def b(self): pass\ndef c(): pass");
+        let result = analyze_with(&spec, "class A:\n    def b(self): pass\ndef c(): pass");
 
-        assert_eq!(result.definitions.len(), 3);
+        assert_eq!(result.defs.len(), 3);
 
-        let b = result.definitions.iter().find(|d| d.name == "b").unwrap();
+        let b = result.defs.iter().find(|d| d.name == "b").unwrap();
         assert_eq!(b.definition_type, "Method");
         assert_eq!(b.fqn.to_string(), "A.b");
 
-        let c = result.definitions.iter().find(|d| d.name == "c").unwrap();
+        let c = result.defs.iter().find(|d| d.name == "c").unwrap();
         assert_eq!(c.definition_type, "Function");
         assert_eq!(c.fqn.to_string(), "c");
     }
@@ -1266,17 +1118,11 @@ mod tests {
             vec![reference("call").name_from(field("function"))],
             vec![],
         );
-        let mut ref_names = Vec::new();
-        spec.parse_full_and_resolve(
-            b"def foo(): pass\nfoo()",
-            "test.py",
-            Language::Python,
-            |name, _chain, _reaching, _enclosing, _inferred| {
-                ref_names.push(name.to_string());
-            },
-        )
-        .unwrap();
+        let result = spec
+            .analyze(b"def foo(): pass\nfoo()", "test.py", Language::Python)
+            .unwrap();
 
+        let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(ref_names.len(), 1);
         assert_eq!(ref_names[0], "foo");
     }
@@ -1295,13 +1141,9 @@ mod tests {
             vec![],
             vec![],
         );
-        let result = parse_with(&spec, "class A:\n    def method(self): pass");
+        let result = analyze_with(&spec, "class A:\n    def method(self): pass");
 
-        let method = result
-            .definitions
-            .iter()
-            .find(|d| d.name == "method")
-            .unwrap();
+        let method = result.defs.iter().find(|d| d.name == "method").unwrap();
         assert_eq!(method.fqn.to_string(), "A.method");
         assert_eq!(method.definition_type, "FlatMethod");
     }
@@ -1318,17 +1160,17 @@ mod tests {
             vec![],
             vec![],
         );
-        let result = parse_with(&spec, "class A:\n    def b(self): pass\ndef c(): pass");
+        let result = analyze_with(&spec, "class A:\n    def b(self): pass\ndef c(): pass");
 
-        assert_eq!(result.definitions.len(), 3);
+        assert_eq!(result.defs.len(), 3);
 
-        let a = result.definitions.iter().find(|d| d.name == "A").unwrap();
+        let a = result.defs.iter().find(|d| d.name == "A").unwrap();
         assert_eq!(a.definition_type, "Class");
 
-        let b = result.definitions.iter().find(|d| d.name == "b").unwrap();
+        let b = result.defs.iter().find(|d| d.name == "b").unwrap();
         assert_eq!(b.definition_type, "Method");
 
-        let c = result.definitions.iter().find(|d| d.name == "c").unwrap();
+        let c = result.defs.iter().find(|d| d.name == "c").unwrap();
         assert_eq!(c.definition_type, "Function");
     }
 }
