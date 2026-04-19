@@ -5,7 +5,7 @@ tests:
   # ── K12: test_kotlin_reference_to_extensions ──
 
   - name: "callToExtensions -> printValue (local extension)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToExtensions'

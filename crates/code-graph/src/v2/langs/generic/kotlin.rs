@@ -24,25 +24,35 @@ pub struct KotlinDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
+fn extract_delegation_specifier(spec: &N<'_>, result: &mut Vec<String>) {
+    let sk = spec.kind();
+    if sk == "delegation_specifier" || sk == "constructor_invocation" {
+        let text = spec
+            .children()
+            .find(|c| c.kind() == "user_type")
+            .map(|n| n.text().to_string())
+            .unwrap_or_else(|| spec.text().to_string());
+        if !text.is_empty() && text != "," {
+            result.push(text);
+        }
+    } else if sk == "user_type" {
+        result.push(spec.text().to_string());
+    }
+}
+
 fn kotlin_super_types(node: &N<'_>) -> Vec<String> {
     let mut result = Vec::new();
     for child in node.children() {
-        if child.kind() == "delegation_specifiers" {
+        let ck = child.kind();
+        if ck == "delegation_specifiers" {
             for spec in child.children() {
-                let sk = spec.kind();
-                if sk == "delegation_specifier" || sk == "constructor_invocation" {
-                    let text = spec
-                        .children()
-                        .find(|c| c.kind() == "user_type")
-                        .map(|n| n.text().to_string())
-                        .unwrap_or_else(|| spec.text().to_string());
-                    if !text.is_empty() && text != "," {
-                        result.push(text);
-                    }
-                } else if sk == "user_type" {
-                    result.push(spec.text().to_string());
-                }
+                extract_delegation_specifier(&spec, &mut result);
             }
+        } else if ck == "delegation_specifier"
+            || ck == "constructor_invocation"
+            || ck == "user_type"
+        {
+            extract_delegation_specifier(&child, &mut result);
         }
     }
     result
@@ -176,6 +186,11 @@ impl DslLanguage for KotlinDsl {
         let kotlin_type = |rule: BindingRule| {
             rule.typed(
                 vec![
+                    // variable_declaration > user_type (for typed bindings)
+                    child_of_kind("variable_declaration")
+                        .then(child_of_kind("user_type"))
+                        .then(child_of_kind("type_identifier")),
+                    // direct user_type child (for parameters)
                     field("user_type").inner("type_arguments", "type_identifier"),
                     field("type"),
                 ],
@@ -183,14 +198,20 @@ impl DslLanguage for KotlinDsl {
             )
         };
         vec![
+            // val/var foo = Foo()
+            // Name is in variable_declaration > simple_identifier
+            // Value is the call_expression / navigation_expression / simple_identifier child
             kotlin_type(
                 binding("property_declaration", BindingKind::Assignment)
-                    .name_from(&["name"])
-                    .value_from("value"),
+                    .name_from_extract(
+                        child_of_kind("variable_declaration")
+                            .then(child_of_kind("simple_identifier")),
+                    )
+                    .value_from_extract(child_of_kind("call_expression")),
             ),
             kotlin_type(
                 binding("variable_declaration", BindingKind::Assignment)
-                    .name_from(&["name"])
+                    .name_from(&["simple_identifier"])
                     .no_value(),
             ),
             kotlin_type(

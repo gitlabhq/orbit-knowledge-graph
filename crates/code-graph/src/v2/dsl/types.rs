@@ -461,7 +461,11 @@ pub struct BindingRule {
     pub kinds: Vec<&'static str>,
     pub binding_kind: crate::v2::types::BindingKind,
     pub name_fields: &'static [&'static str],
+    /// Alternative to name_fields: arbitrary Extract pipeline for name.
+    pub name_extract: Option<Extract>,
     pub value_field: Option<&'static str>,
+    /// Alternative to value_field: arbitrary Extract pipeline for RHS value node.
+    pub value_extract: Option<Extract>,
     pub instance_attr_prefixes: &'static [&'static str],
     /// Type extraction config (TypeFlow). Uses Extract for CST navigation.
     pub type_extract: Option<TypeExtract>,
@@ -477,7 +481,9 @@ pub fn binding(kind: &'static str, binding_kind: crate::v2::types::BindingKind) 
         kinds: vec![kind],
         binding_kind,
         name_fields: &["left"],
+        name_extract: None,
         value_field: Some("right"),
+        value_extract: None,
         instance_attr_prefixes: &[],
         type_extract: None,
     }
@@ -489,8 +495,20 @@ impl BindingRule {
         self
     }
 
+    /// Extract the name using an arbitrary Extract pipeline instead of field chain.
+    pub fn name_from_extract(mut self, extract: Extract) -> Self {
+        self.name_extract = Some(extract);
+        self
+    }
+
     pub fn value_from(mut self, field: &'static str) -> Self {
         self.value_field = Some(field);
+        self
+    }
+
+    /// Extract the RHS value using an arbitrary Extract pipeline instead of field name.
+    pub fn value_from_extract(mut self, extract: Extract) -> Self {
+        self.value_extract = Some(extract);
         self
     }
 
@@ -512,8 +530,11 @@ impl BindingRule {
         self
     }
 
-    /// Extract the binding name from an AST node by walking the field chain.
+    /// Extract the binding name from an AST node.
     pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        if let Some(extract) = &self.name_extract {
+            return extract.apply(node);
+        }
         let current = node.field_chain(self.name_fields)?;
         Some(current.text().to_string())
     }
@@ -534,7 +555,11 @@ impl BindingRule {
     /// Extract the RHS callee name from a binding's value field.
     /// Unwraps call expressions: `Database()` → "Database".
     pub fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
-        let value_node = node.field(self.value_field?)?;
+        let value_node = if let Some(extract) = &self.value_extract {
+            extract.navigate(node)?
+        } else {
+            node.field(self.value_field?)?
+        };
         let vk = value_node.kind();
         let vk_ref = vk.as_ref();
 
