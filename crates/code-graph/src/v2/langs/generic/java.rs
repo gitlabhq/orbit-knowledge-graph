@@ -163,7 +163,11 @@ impl DslLanguage for JavaDsl {
             ident_kinds: &["identifier", "type_identifier"],
             this_kinds: &["this"],
             super_kinds: &["super"],
-            field_access: &[("field_access", "object", "field")],
+            field_access: vec![FieldAccessEntry {
+                kind: "field_access",
+                object: field("object"),
+                member: field("field"),
+            }],
             constructor: &[("object_creation_expression", "type")],
             qualified_type_kinds: &["scoped_type_identifier"],
         })

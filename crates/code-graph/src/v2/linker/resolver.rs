@@ -663,6 +663,26 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
         current_types = next_types;
     }
 
+    // Chain resolved the base but a later step failed — fall back to bare
+    // resolution of the terminal name (same logic as the empty-base path).
+    if ctx.settings.chain_fallback
+        && let Some(last_name) = chain.last().and_then(|s| match s {
+            ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
+            _ => None,
+        })
+    {
+        ctx.tracer.event(TraceEvent::ResolveChainFallback {
+            name: last_name.to_string(),
+        });
+        let fallback = RefData {
+            name: last_name,
+            chain: None,
+            reaching: &[],
+            enclosing_def: r.enclosing_def,
+        };
+        return resolve_bare(ctx, &fallback);
+    }
+
     vec![]
 }
 

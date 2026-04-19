@@ -152,7 +152,11 @@ impl DslLanguage for PythonDsl {
             ident_kinds: &["identifier"],
             this_kinds: &[],
             super_kinds: &[],
-            field_access: &[("attribute", "object", "attribute")],
+            field_access: vec![FieldAccessEntry {
+                kind: "attribute",
+                object: field("object"),
+                member: field("attribute"),
+            }],
             constructor: &[],
             qualified_type_kinds: &[],
         })

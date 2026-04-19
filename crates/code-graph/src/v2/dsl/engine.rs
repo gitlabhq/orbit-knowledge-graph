@@ -389,14 +389,9 @@ impl LanguageSpec {
         }
 
         // Field access (obj.field)
-        for &(fa_kind, obj_field, member_field) in cc.field_access {
-            if kind_ref == fa_kind {
-                let obj = node.field(obj_field);
-                let member = node
-                    .field(member_field)
-                    .or_else(|| node.child_of_kind(member_field));
-
-                if let Some(obj) = obj {
+        for fa in &cc.field_access {
+            if kind_ref == fa.kind {
+                if let Some(obj) = fa.object.navigate(node) {
                     self.build_expression_chain(
                         &obj,
                         chain,
@@ -406,24 +401,8 @@ impl LanguageSpec {
                         sep,
                         tracer,
                     );
-                } else if let Some(ref member_node) = member {
-                    let mr = member_node.range();
-                    if let Some(obj) = node.children().find(|c| c.is_named() && c.range() != mr) {
-                        self.build_expression_chain(
-                            &obj,
-                            chain,
-                            cc,
-                            import_map,
-                            module_prefix,
-                            sep,
-                            tracer,
-                        );
-                    }
                 }
-                if let Some(field) = member {
-                    let name = treesitter_visit::extract::default_name()
-                        .apply(&field)
-                        .unwrap_or_else(|| field.text().to_string());
+                if let Some(name) = fa.member.apply(node) {
                     tracer.event(TraceEvent::ChainStepMatched {
                         node_kind: kind_ref.to_string(),
                         category: "Field".to_string(),

@@ -182,7 +182,11 @@ impl DslLanguage for KotlinDsl {
             ident_kinds: &["simple_identifier"],
             this_kinds: &["this_expression"],
             super_kinds: &["super_expression"],
-            field_access: &[],
+            field_access: vec![FieldAccessEntry {
+                kind: "navigation_expression",
+                object: Extract::one(Child, Named),
+                member: child_of_kind("navigation_suffix").then(default_name()),
+            }],
             constructor: &[],
             qualified_type_kinds: &[],
         })
@@ -242,7 +246,7 @@ impl DslLanguage for KotlinDsl {
                         child_of_kind("variable_declaration")
                             .then(child_of_kind("simple_identifier")),
                     )
-                    .value_from_extract(child_of_kind("call_expression")),
+                    .value_from_extract(text().nth(Child, Named, -1)),
             ),
             kotlin_type(
                 binding("variable_declaration", BindingKind::Assignment)

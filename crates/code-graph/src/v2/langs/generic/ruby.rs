@@ -1,8 +1,9 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{
-    self, BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LanguageHooks, LoopRule,
-    ReferenceRule, ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
+    self, BindingRule, BranchRule, ChainConfig, DslLanguage, FieldAccessEntry, ImportRule,
+    LanguageHooks, LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference,
+    scope, scopes,
 };
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
 use treesitter_visit::Axis::*;
@@ -112,7 +113,11 @@ impl DslLanguage for RubyDsl {
             ident_kinds: &["identifier", "constant"],
             this_kinds: &["self"],
             super_kinds: &["super"],
-            field_access: &[("call", "receiver", "method")],
+            field_access: vec![FieldAccessEntry {
+                kind: "call",
+                object: field("receiver"),
+                member: field("method"),
+            }],
             constructor: &[],
             qualified_type_kinds: &[],
         })

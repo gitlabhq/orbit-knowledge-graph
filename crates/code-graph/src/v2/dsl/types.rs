@@ -173,6 +173,14 @@ pub struct ReferenceRule {
     pub(crate) receiver_extract: Option<Extract>,
 }
 
+/// Describes how to decompose a field-access node into object + member
+/// using treesitter-visit `Extract` pipelines.
+pub struct FieldAccessEntry {
+    pub kind: &'static str,
+    pub object: Extract,
+    pub member: Extract,
+}
+
 /// Per-language configuration for expression chain extraction.
 /// Tells the engine how to recognize identifiers, this/super,
 /// field access, and constructors in the tree-sitter AST.
@@ -183,8 +191,8 @@ pub struct ChainConfig {
     pub this_kinds: &'static [&'static str],
     /// Node kinds that represent `super`.
     pub super_kinds: &'static [&'static str],
-    /// Field access node kinds + (object_field, member_field).
-    pub field_access: &'static [(&'static str, &'static str, &'static str)],
+    /// Field access node kinds, with Extract-based object/member decomposition.
+    pub field_access: Vec<FieldAccessEntry>,
     /// Constructor node kinds + type_field.
     pub constructor: &'static [(&'static str, &'static str)],
     /// Type node kinds inside constructors that are qualified (e.g.
@@ -591,9 +599,9 @@ impl BindingRule {
         // Field access (e.g. EnumClass.ENUM_VALUE_2) → extract the object name
         // as the alias target. The object's type propagates via SSA alias chasing.
         if let Some(cc) = &spec.chain_config {
-            for &(fa_kind, obj_field, _member_field) in cc.field_access {
-                if vk_ref == fa_kind {
-                    if let Some(obj) = value_node.field(obj_field) {
+            for fa in &cc.field_access {
+                if vk_ref == fa.kind {
+                    if let Some(obj) = fa.object.navigate(&value_node) {
                         return Some(obj.text().to_string());
                     }
                 }
