@@ -336,6 +336,50 @@ impl<'r, D: Doc> Node<'r, D> {
         self.has(Axis::Child, Match::Kind(kind))
     }
 
+    /// Return the `n`-th node along `axis` matching `criterion`.
+    /// Positive `n`: 0-based from the start. Negative: -1 = last, -2 = second-to-last, etc.
+    #[must_use]
+    pub fn nth(&self, axis: Axis<'_>, criterion: Match<'_>, n: isize) -> Option<Self> {
+        // For axes that produce iterators, collect matches and index.
+        // Forward-only axes (Parent) just check n==0.
+        match axis {
+            Axis::Child => self.nth_iter(self.children(), criterion, n),
+            Axis::PrevSibling => self.nth_iter(self.prev_all(), criterion, n),
+            Axis::NextSibling => self.nth_iter(self.next_all(), criterion, n),
+            Axis::Ancestor => self.nth_iter(self.parent_chain(), criterion, n),
+            Axis::Descendant => self.nth_iter(self.dfs(), criterion, n),
+            // Single-value axes: only n==0 or n==-1 makes sense
+            Axis::Parent | Axis::Field(_) => {
+                if n == 0 || n == -1 {
+                    self.find(axis, criterion)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn nth_iter(
+        &self,
+        iter: impl Iterator<Item = Self>,
+        criterion: Match<'_>,
+        n: isize,
+    ) -> Option<Self> {
+        if n >= 0 {
+            iter.filter(|c| criterion.test(c)).nth(n as usize)
+        } else {
+            let matches: smallvec::SmallVec<[Self; 8]> =
+                iter.filter(|c| criterion.test(c)).collect();
+            let len = matches.len() as isize;
+            let idx = len + n;
+            if idx >= 0 {
+                matches.into_iter().nth(idx as usize)
+            } else {
+                None
+            }
+        }
+    }
+
     /// Lazy iterator from the immediate parent up to the root.
     pub fn parent_chain(&self) -> impl Iterator<Item = Node<'r, D>> {
         let mut current = self.parent();

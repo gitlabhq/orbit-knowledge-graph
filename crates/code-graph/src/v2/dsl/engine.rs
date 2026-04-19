@@ -6,6 +6,7 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::config::Language;
+use crate::v2::trace::{TraceEvent, Tracer};
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
 };
@@ -219,6 +220,7 @@ impl LanguageSpec {
         import_map: &rustc_hash::FxHashMap<String, String>,
         module_prefix: Option<&str>,
         sep: &str,
+        tracer: &Tracer,
     ) -> Option<(String, crate::utils::Range, Option<Vec<ExpressionStep>>)> {
         let indices = self.ref_dispatch.get(node_kind)?;
         let rule = indices
@@ -243,6 +245,7 @@ impl LanguageSpec {
                     import_map,
                     module_prefix,
                     sep,
+                    tracer,
                 );
                 chain.push(ExpressionStep::Call(name.clone()));
                 if chain.len() > 1 { Some(chain) } else { None }
@@ -255,6 +258,7 @@ impl LanguageSpec {
     /// from innermost (base) to outermost (final call).
     /// All node kind recognition is driven by `ChainConfig`.
     /// Type names in `New` steps are resolved via `import_map`.
+    #[allow(clippy::too_many_arguments)]
     fn build_expression_chain(
         &self,
         node: &Node<StrDoc<SupportLang>>,
@@ -263,24 +267,41 @@ impl LanguageSpec {
         import_map: &rustc_hash::FxHashMap<String, String>,
         module_prefix: Option<&str>,
         sep: &str,
+        tracer: &Tracer,
     ) {
         let kind = node.kind();
         let kind_ref = kind.as_ref();
 
         // Identifier base
         if cc.ident_kinds.contains(&kind_ref) {
-            chain.push(ExpressionStep::Ident(node.text().to_string()));
+            let text = node.text().to_string();
+            tracer.event(TraceEvent::ChainStepMatched {
+                node_kind: kind_ref.to_string(),
+                category: "Ident".to_string(),
+                text: text.clone(),
+            });
+            chain.push(ExpressionStep::Ident(text));
             return;
         }
 
         // this/self
         if cc.this_kinds.contains(&kind_ref) {
+            tracer.event(TraceEvent::ChainStepMatched {
+                node_kind: kind_ref.to_string(),
+                category: "This".to_string(),
+                text: node.text().to_string(),
+            });
             chain.push(ExpressionStep::This);
             return;
         }
 
         // super
         if cc.super_kinds.contains(&kind_ref) {
+            tracer.event(TraceEvent::ChainStepMatched {
+                node_kind: kind_ref.to_string(),
+                category: "Super".to_string(),
+                text: node.text().to_string(),
+            });
             chain.push(ExpressionStep::Super);
             return;
         }
@@ -290,9 +311,6 @@ impl LanguageSpec {
             if kind_ref == ctor_kind {
                 if let Some(type_node) = node.field(type_field) {
                     let tk = type_node.kind();
-                    // Qualified type (e.g. scoped_type_identifier): the type node
-                    // has multiple named children representing segments. Extract
-                    // them as Ident (first, resolved via imports) + Field (rest).
                     if cc.qualified_type_kinds.contains(&tk.as_ref()) {
                         let mut segments = type_node.children().filter(|c| c.is_named());
                         if let Some(first) = segments.next() {
@@ -304,6 +322,11 @@ impl LanguageSpec {
                             } else {
                                 name
                             };
+                            tracer.event(TraceEvent::ChainStepMatched {
+                                node_kind: kind_ref.to_string(),
+                                category: "New(qualified)".to_string(),
+                                text: resolved.clone(),
+                            });
                             chain.push(ExpressionStep::New(resolved));
                             for seg in segments {
                                 chain.push(ExpressionStep::Field(seg.text().to_string()));
@@ -318,6 +341,11 @@ impl LanguageSpec {
                         } else {
                             bare
                         };
+                        tracer.event(TraceEvent::ChainStepMatched {
+                            node_kind: kind_ref.to_string(),
+                            category: "New".to_string(),
+                            text: resolved.clone(),
+                        });
                         chain.push(ExpressionStep::New(resolved));
                     }
                 }
@@ -328,18 +356,22 @@ impl LanguageSpec {
         // Field access (obj.field)
         for &(fa_kind, obj_field, member_field) in cc.field_access {
             if kind_ref == fa_kind {
-                // Named field lookup. Falls back to child-of-kind for grammars
-                // without named fields (e.g. Kotlin navigation_expression).
                 let obj = node.field(obj_field);
                 let member = node
                     .field(member_field)
                     .or_else(|| node.child_of_kind(member_field));
 
                 if let Some(obj) = obj {
-                    self.build_expression_chain(&obj, chain, cc, import_map, module_prefix, sep);
+                    self.build_expression_chain(
+                        &obj,
+                        chain,
+                        cc,
+                        import_map,
+                        module_prefix,
+                        sep,
+                        tracer,
+                    );
                 } else if let Some(ref member_node) = member {
-                    // No named field for the object — use the first named child
-                    // that isn't the member node.
                     let mr = member_node.range();
                     if let Some(obj) = node.children().find(|c| c.is_named() && c.range() != mr) {
                         self.build_expression_chain(
@@ -349,15 +381,19 @@ impl LanguageSpec {
                             import_map,
                             module_prefix,
                             sep,
+                            tracer,
                         );
                     }
                 }
                 if let Some(field) = member {
-                    // Use default_name to extract the identifier from wrapper
-                    // nodes like navigation_suffix (skip the "." punctuation).
                     let name = treesitter_visit::extract::default_name()
                         .apply(&field)
                         .unwrap_or_else(|| field.text().to_string());
+                    tracer.event(TraceEvent::ChainStepMatched {
+                        node_kind: kind_ref.to_string(),
+                        category: "Field".to_string(),
+                        text: name.clone(),
+                    });
                     chain.push(ExpressionStep::Field(name));
                 }
                 return;
@@ -370,9 +406,22 @@ impl LanguageSpec {
             if let Some(extract) = &rule.receiver_extract
                 && let Some(recv) = extract.navigate(node)
             {
-                self.build_expression_chain(&recv, chain, cc, import_map, module_prefix, sep);
+                self.build_expression_chain(
+                    &recv,
+                    chain,
+                    cc,
+                    import_map,
+                    module_prefix,
+                    sep,
+                    tracer,
+                );
             }
             if let Some(name) = rule.extract().apply(node) {
+                tracer.event(TraceEvent::ChainStepMatched {
+                    node_kind: kind_ref.to_string(),
+                    category: "Call".to_string(),
+                    text: name.clone(),
+                });
                 chain.push(ExpressionStep::Call(name));
             }
             return;
@@ -381,6 +430,11 @@ impl LanguageSpec {
         // Fallback: treat as identifier
         let text = node.text().to_string();
         if !text.is_empty() {
+            tracer.event(TraceEvent::ChainStepMatched {
+                node_kind: kind_ref.to_string(),
+                category: "Fallback".to_string(),
+                text: text.clone(),
+            });
             chain.push(ExpressionStep::Ident(text));
         }
     }
@@ -530,6 +584,28 @@ impl LanguageSpec {
             &[(u32, String)],                            // inferred return types
         ),
     {
+        let noop = crate::v2::trace::noop_tracer();
+        self.parse_full_and_resolve_traced(source, file_path, language, &mut on_ref, &noop)
+    }
+
+    /// Like `parse_full_and_resolve` but with an explicit tracer for debugging.
+    pub fn parse_full_and_resolve_traced<F>(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+        on_ref: &mut F,
+        tracer: &Tracer,
+    ) -> crate::legacy::parser::Result<Vec<(u32, String)>>
+    where
+        F: FnMut(
+            &str,                                        // name
+            Option<&[crate::v2::types::ExpressionStep]>, // chain
+            &[crate::v2::types::ssa::ParseValue],        // reaching defs
+            Option<u32>,                                 // enclosing_def index
+            &[(u32, String)],                            // inferred return types
+        ),
+    {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::legacy::parser::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
@@ -538,12 +614,15 @@ impl LanguageSpec {
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena);
+        let mut state = WalkFullState::new(&arena, tracer);
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
         {
             state.scope_stack.push(Arc::from(module.as_str()));
+            tracer.event(TraceEvent::PackageMatched {
+                name: module.clone(),
+            });
         }
         state.top_level_depth = state.scope_stack.len();
 
@@ -597,6 +676,11 @@ impl LanguageSpec {
                 }
             });
             if let Some(rt) = inferred {
+                tracer.event(TraceEvent::ReturnTypeInferred {
+                    def_index: enclosing_idx,
+                    def_fqn: state.defs[enclosing_idx as usize].fqn.as_str().to_string(),
+                    return_type: rt.clone(),
+                });
                 state.defs[enclosing_idx as usize]
                     .metadata
                     .get_or_insert_with(Box::default)
@@ -664,11 +748,17 @@ impl LanguageSpec {
                     let compound_values: smallvec::SmallVec<
                         [crate::v2::types::ssa::ParseValue; 2],
                     > = r.values.iter().filter_map(|v| v.to_parse_value()).collect();
-                    if !compound_values.is_empty()
+                    let found = !compound_values.is_empty()
                         && !compound_values
                             .iter()
-                            .all(|v| matches!(v, crate::v2::types::ssa::ParseValue::Opaque))
-                    {
+                            .all(|v| matches!(v, crate::v2::types::ssa::ParseValue::Opaque));
+                    tracer.event(TraceEvent::InstanceAttrRewrite {
+                        original_key: pending.ssa_key.to_string(),
+                        compound_key: compound.clone(),
+                        found_values: compound_values.iter().map(|v| format!("{v:?}")).collect(),
+                        chain_trimmed: found,
+                    });
+                    if found {
                         parse_values = compound_values;
                         let remaining = &chain[field_idx + 1..];
                         chain_slice = if remaining.len() <= 1 {
@@ -771,6 +861,13 @@ impl LanguageSpec {
             let is_type_scope = m.def_kind.is_type_container();
 
             let def_name = m.name.clone();
+            state.tracer.event(TraceEvent::ScopePush {
+                name: def_name.clone(),
+                kind: format!("{:?}", m.def_kind),
+                label: m.label.to_string(),
+                fqn: fqn.as_str().to_string(),
+                block_id: state.current_block.0,
+            });
             state.defs.push(CanonicalDefinition {
                 definition_type: m.label,
                 kind: m.def_kind,
@@ -779,6 +876,15 @@ impl LanguageSpec {
                 range: canonical_range(&m.range),
                 is_top_level,
                 metadata: m.metadata,
+            });
+            // Emit def discovered with index for cross-referencing
+            let last_def = &state.defs[def_index as usize];
+            state.tracer.event(TraceEvent::DefDiscovered {
+                name: last_def.name.clone(),
+                fqn: last_def.fqn.as_str().to_string(),
+                kind: format!("{:?}", last_def.kind),
+                label: last_def.definition_type.to_string(),
+                is_top_level,
             });
 
             // Write def name to SSA in the parent block so sibling scopes can see it.
@@ -839,6 +945,10 @@ impl LanguageSpec {
                             && let Some(name) =
                                 treesitter_visit::extract::default_name().apply(&sibling)
                         {
+                            state.tracer.event(TraceEvent::SiblingRefAdopted {
+                                name: name.clone(),
+                                def_index,
+                            });
                             let ssa_key = state.arena.alloc_str(&name);
                             state.pending_refs.push(PendingRef {
                                 name,
@@ -900,21 +1010,32 @@ impl LanguageSpec {
             for idx in import_count_before..state.imports.len() {
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
-                if !imp.wildcard && !imp.path.is_empty() {
-                    let effective_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-                    if !effective_name.is_empty() {
-                        state.import_map.insert(
-                            effective_name.to_string(),
-                            format!("{}{}{}", imp.path, sep, effective_name),
-                        );
-                        // Write import to SSA so alias chasing finds it
-                        let ssa_name = state.arena.alloc_str(effective_name);
-                        state.ssa.write_variable(
-                            ssa_name,
-                            state.current_block,
-                            super::ssa::SsaValue::ImportRef(import_idx),
-                        );
-                    }
+                let effective_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+                state.tracer.event(TraceEvent::ImportRecorded {
+                    path: imp.path.clone(),
+                    name: imp.name.as_deref().unwrap_or("").to_string(),
+                    alias: imp.alias.clone(),
+                    wildcard: imp.wildcard,
+                    ssa_name: if !imp.wildcard && !imp.path.is_empty() && !effective_name.is_empty()
+                    {
+                        Some(effective_name.to_string())
+                    } else {
+                        None
+                    },
+                    block_id: state.current_block.0,
+                });
+                if !imp.wildcard && !imp.path.is_empty() && !effective_name.is_empty() {
+                    state.import_map.insert(
+                        effective_name.to_string(),
+                        format!("{}{}{}", imp.path, sep, effective_name),
+                    );
+                    // Write import to SSA so alias chasing finds it
+                    let ssa_name = state.arena.alloc_str(effective_name);
+                    state.ssa.write_variable(
+                        ssa_name,
+                        state.current_block,
+                        super::ssa::SsaValue::ImportRef(import_idx),
+                    );
                 }
             }
 
@@ -950,6 +1071,11 @@ impl LanguageSpec {
                     } else {
                         state.current_block
                     };
+                    state.tracer.event(TraceEvent::BindingWrite {
+                        name: name.clone(),
+                        value: val.trace_display(),
+                        block_id: target_block.0,
+                    });
                     state.ssa.write_variable(ssa_name, target_block, val);
                 }
             }
@@ -1000,9 +1126,24 @@ impl LanguageSpec {
             }
 
             // Reference handling → SSA read → PendingRef
-            if let Some((name, _range, expression)) =
-                self.evaluate_reference(node, nk, &state.import_map, module_prefix.as_deref(), sep)
-            {
+            let ref_result = self.evaluate_reference(
+                node,
+                nk,
+                &state.import_map,
+                module_prefix.as_deref(),
+                sep,
+                state.tracer,
+            );
+            // Trace ref evaluation (only when we have a dispatch entry for this node kind)
+            if self.ref_dispatch.contains_key(nk) {
+                state.tracer.event(TraceEvent::RefEvaluated {
+                    node_kind: nk.to_string(),
+                    matched: ref_result.is_some(),
+                    name: ref_result.as_ref().map(|(n, _, _)| n.clone()),
+                    has_chain: ref_result.as_ref().is_some_and(|(_, _, e)| e.is_some()),
+                });
+            }
+            if let Some((name, _range, expression)) = ref_result {
                 // For chains, read SSA for the base identifier (not the terminal).
                 // For bare refs, read SSA for the name itself.
                 let ssa_key = if let Some(chain) = &expression {
@@ -1028,6 +1169,16 @@ impl LanguageSpec {
                     state.arena.alloc_str(&name)
                 };
 
+                state.tracer.event(TraceEvent::RefQueued {
+                    name: name.clone(),
+                    chain: expression
+                        .as_ref()
+                        .map(|c| c.iter().map(|s| format!("{s:?}")).collect()),
+                    ssa_key: ssa_key.to_string(),
+                    block_id: state.current_block.0,
+                    enclosing_def: state.enclosing_def_stack.last().copied(),
+                    is_return: state.in_return,
+                });
                 state.pending_refs.push(PendingRef {
                     name,
                     chain: expression,
@@ -1050,6 +1201,11 @@ impl LanguageSpec {
         }
 
         if pushed_scope {
+            if let Some(name) = state.scope_stack.last() {
+                state.tracer.event(TraceEvent::ScopePop {
+                    name: name.to_string(),
+                });
+            }
             state.scope_stack.pop();
             state.enclosing_def_stack.pop();
             if let Some(saved) = state.saved_blocks.pop() {
@@ -1067,6 +1223,10 @@ impl LanguageSpec {
     ) {
         let rule = &self.branches[rule_idx];
         let pre_block = state.current_block;
+        state.tracer.event(TraceEvent::BranchEnter {
+            node_kind: node.kind().to_string(),
+            pre_block: pre_block.0,
+        });
 
         // Walk condition in pre-branch block
         if let Some(cond_field) = rule.condition_field
@@ -1094,6 +1254,9 @@ impl LanguageSpec {
                 state.ssa.add_predecessor(arm_block, pre_block);
                 state.ssa.seal_block(arm_block);
                 state.current_block = arm_block;
+                state.tracer.event(TraceEvent::BranchArm {
+                    block_id: arm_block.0,
+                });
 
                 // Walk arm contents
                 for arm_child in child.children() {
@@ -1122,6 +1285,10 @@ impl LanguageSpec {
             state.ssa.add_predecessor(join, pre_block);
         }
         state.ssa.seal_block(join);
+        state.tracer.event(TraceEvent::BranchJoin {
+            block_id: join.0,
+            arm_blocks: end_blocks.iter().map(|b| b.0).collect(),
+        });
         state.current_block = join;
     }
 
@@ -1152,6 +1319,11 @@ impl LanguageSpec {
         state.ssa.add_predecessor(body, header);
         state.ssa.seal_block(body);
         state.current_block = body;
+        state.tracer.event(TraceEvent::LoopEnter {
+            node_kind: node.kind().to_string(),
+            header_block: header.0,
+            body_block: body.0,
+        });
 
         // Walk body contents
         if let Some(body_node) = node.field(rule.body_field) {
@@ -1171,6 +1343,9 @@ impl LanguageSpec {
         let exit = state.ssa.add_block();
         state.ssa.add_predecessor(exit, header);
         state.ssa.seal_block(exit);
+        state
+            .tracer
+            .event(TraceEvent::LoopExit { exit_block: exit.0 });
         state.current_block = exit;
     }
 }
@@ -1202,11 +1377,12 @@ struct WalkFullState<'a> {
     import_map: rustc_hash::FxHashMap<String, String>,
     top_level_depth: usize,
     in_return: bool,
+    tracer: &'a Tracer,
 }
 
 impl<'a> WalkFullState<'a> {
-    fn new(arena: &'a bumpalo::Bump) -> Self {
-        let mut ssa = super::ssa::SsaEngine::new();
+    fn new(arena: &'a bumpalo::Bump, tracer: &'a Tracer) -> Self {
+        let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
         ssa.seal_block(entry);
 
@@ -1223,6 +1399,7 @@ impl<'a> WalkFullState<'a> {
             import_map: rustc_hash::FxHashMap::default(),
             top_level_depth: 0,
             in_return: false,
+            tracer,
         }
     }
 }
