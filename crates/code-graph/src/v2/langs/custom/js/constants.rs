@@ -43,6 +43,21 @@ pub const MANIFEST_FILENAMES: &[&str] = &[
     "jsconfig.json",
 ];
 
+/// Options whose value is an object of executable members
+/// (`methods`, `computed`, `watch`).
+pub const VUE_OPTION_EXECUTABLE_MAPS: &[&str] = &["methods", "computed", "watch"];
+
+/// Options whose value is itself executable (`data`, `setup`, `render`).
+pub const VUE_OPTION_EXECUTABLE_FNS: &[&str] = &["data", "setup", "render"];
+
+/// Non-executable Vue options that still mark a file as a component.
+pub const VUE_OPTION_CONTRACT_KEYS: &[&str] =
+    &["props", "emits", "inject", "provide", "components"];
+
+/// Identifier options that mark an object as a Vue component without
+/// contributing executable members.
+pub const VUE_OPTION_IDENTIFIER_KEYS: &[&str] = &["name"];
+
 pub const VUE_LIFECYCLE_HOOKS: &[&str] = &[
     "beforeCreate",
     "created",

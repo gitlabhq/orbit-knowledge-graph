@@ -1,13 +1,79 @@
+//! Vue options-API detection and def synthesis.
+//!
+//! The public entry point, `extract_vue_options_api`, walks every
+//! `export default { ... }` (or `defineComponent({ ... })`) in the
+//! file and emits a virtual class def plus method / computed / watch /
+//! lifecycle-hook children. All knowledge of the Vue options vocabulary
+//! routes through `constants::VUE_*` so adding a new option is a single-
+//! site edit.
+
 use crate::utils::Range;
 use oxc::ast::AstKind;
 use oxc::ast::ast::{
-    CallExpression, ExportDefaultDeclarationKind, Expression, ObjectExpression, ObjectPropertyKind,
+    CallExpression, ExportDefaultDeclarationKind, Expression, ObjectExpression, ObjectProperty,
+    ObjectPropertyKind,
 };
 use oxc::semantic::AstNodes;
 use std::collections::HashMap;
 
-use super::super::constants::is_vue_lifecycle_hook;
+use super::super::constants::{
+    VUE_OPTION_CONTRACT_KEYS, VUE_OPTION_EXECUTABLE_FNS, VUE_OPTION_EXECUTABLE_MAPS,
+    VUE_OPTION_IDENTIFIER_KEYS, is_vue_lifecycle_hook,
+};
 use super::super::types::{JsDef, JsDefKind, JsInvocationSupport};
+
+/// Classification of a property key on a Vue component options object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VueOption {
+    /// `methods` / `computed` / `watch` — value is an object whose
+    /// members are executable.
+    ExecutableMap(ExecutableMap),
+    /// `data` / `setup` / `render` — value is itself executable.
+    ExecutableFn,
+    /// `props` / `emits` / `inject` / `provide` / `components` —
+    /// contract metadata, not executable but component-identifying.
+    Contract,
+    /// `name` etc. — marks the object as a component but contributes
+    /// no executable members.
+    Identifier,
+    /// Any recognised Vue lifecycle hook
+    /// (see `constants::VUE_LIFECYCLE_HOOKS`).
+    LifecycleHook,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecutableMap {
+    Methods,
+    Computed,
+    Watch,
+}
+
+impl VueOption {
+    fn classify(key: &str) -> Option<Self> {
+        if VUE_OPTION_EXECUTABLE_MAPS.contains(&key) {
+            let kind = match key {
+                "methods" => ExecutableMap::Methods,
+                "computed" => ExecutableMap::Computed,
+                "watch" => ExecutableMap::Watch,
+                _ => unreachable!("VUE_OPTION_EXECUTABLE_MAPS covers these keys"),
+            };
+            return Some(Self::ExecutableMap(kind));
+        }
+        if VUE_OPTION_EXECUTABLE_FNS.contains(&key) {
+            return Some(Self::ExecutableFn);
+        }
+        if VUE_OPTION_CONTRACT_KEYS.contains(&key) {
+            return Some(Self::Contract);
+        }
+        if is_vue_lifecycle_hook(key) {
+            return Some(Self::LifecycleHook);
+        }
+        if VUE_OPTION_IDENTIFIER_KEYS.contains(&key) {
+            return Some(Self::Identifier);
+        }
+        None
+    }
+}
 
 fn vue_component_object<'a>(
     declaration: &'a ExportDefaultDeclarationKind<'a>,
@@ -91,51 +157,23 @@ fn is_contract_value(expression: &Expression<'_>) -> bool {
     )
 }
 
-fn is_executable_vue_option(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool {
-    match property.key.static_name().as_deref() {
-        Some("methods" | "computed" | "watch") => {
-            matches!(
-                property.value.get_inner_expression(),
-                Expression::ObjectExpression(_)
-            )
-        }
-        Some("data" | "setup" | "render") => is_function_like(&property.value),
-        Some(key) if is_vue_lifecycle_hook(key) => is_function_like(&property.value),
+/// Returns `(classification, is_executable, is_contract)` for one property.
+/// `is_executable` and `is_contract` require both a valid classification
+/// *and* a value shape that matches the classification.
+fn classify_property(property: &ObjectProperty<'_>) -> Option<(VueOption, bool, bool)> {
+    let key = property.key.static_name()?;
+    let classification = VueOption::classify(key.as_ref())?;
+    let is_executable = match classification {
+        VueOption::ExecutableMap(_) => matches!(
+            property.value.get_inner_expression(),
+            Expression::ObjectExpression(_)
+        ),
+        VueOption::ExecutableFn | VueOption::LifecycleHook => is_function_like(&property.value),
         _ => false,
-    }
-}
-
-fn is_contract_vue_option(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool {
-    match property.key.static_name().as_deref() {
-        Some("props" | "emits" | "inject" | "provide" | "components") => {
-            is_contract_value(&property.value)
-        }
-        _ => false,
-    }
-}
-
-fn is_known_vue_option_key(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool {
-    matches!(
-        property.key.static_name().as_deref(),
-        Some(
-            "name"
-                | "methods"
-                | "computed"
-                | "watch"
-                | "data"
-                | "setup"
-                | "render"
-                | "props"
-                | "emits"
-                | "inject"
-                | "provide"
-                | "components"
-        )
-    ) || property
-        .key
-        .static_name()
-        .as_deref()
-        .is_some_and(is_vue_lifecycle_hook)
+    };
+    let is_contract =
+        matches!(classification, VueOption::Contract) && is_contract_value(&property.value);
+    Some((classification, is_executable, is_contract))
 }
 
 pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
@@ -159,26 +197,41 @@ pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
         };
 
         let explicit_name = explicit_component_name(obj);
-        let object_properties: Vec<_> = obj
+
+        // Classify every recognised property once. Unrecognised keys
+        // drop out here; downstream iteration only sees classified
+        // options and reuses the executability / contract booleans
+        // derived during classification.
+        struct ClassifiedOption<'a> {
+            property: &'a ObjectProperty<'a>,
+            key: String,
+            classification: VueOption,
+            is_executable: bool,
+            is_contract: bool,
+        }
+        let classified: Vec<ClassifiedOption<'_>> = obj
             .properties
             .iter()
-            .filter_map(|prop| match prop {
-                ObjectPropertyKind::ObjectProperty(property) => Some(property.as_ref()),
-                _ => None,
+            .filter_map(|prop| {
+                let ObjectPropertyKind::ObjectProperty(property) = prop else {
+                    return None;
+                };
+                let property = property.as_ref();
+                let (classification, is_executable, is_contract) = classify_property(property)?;
+                let key = property.key.static_name()?.to_string();
+                Some(ClassifiedOption {
+                    property,
+                    key,
+                    classification,
+                    is_executable,
+                    is_contract,
+                })
             })
             .collect();
-        let has_executable_options = object_properties
-            .iter()
-            .copied()
-            .any(is_executable_vue_option);
-        let has_contract_options = object_properties
-            .iter()
-            .copied()
-            .any(is_contract_vue_option);
-        let has_known_option_keys = object_properties
-            .iter()
-            .copied()
-            .any(is_known_vue_option_key);
+
+        let has_executable_options = classified.iter().any(|o| o.is_executable);
+        let has_contract_options = classified.iter().any(|o| o.is_contract);
+        let has_known_option_keys = !classified.is_empty();
         let allows_contract_only = explicit_name.is_some()
             && has_contract_options
             && (is_wrapped || allow_loose_detection);
@@ -190,6 +243,7 @@ pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
         if !has_executable_options && !allows_contract_only && !is_sfc_options_object {
             continue;
         }
+
         let component_name = explicit_name.unwrap_or_else(|| {
             std::path::Path::new(relative_path)
                 .file_stem()
@@ -210,128 +264,125 @@ pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
             invocation_support: Some(JsInvocationSupport::class()),
         });
 
-        for prop in &obj.properties {
-            let ObjectPropertyKind::ObjectProperty(p) = prop else {
-                continue;
-            };
-            let Some(key_name) = p.key.static_name() else {
-                continue;
-            };
-            let key = key_name.as_ref();
-
-            // methods: { ... } -- extract each child as a Method
-            if key == "methods" {
-                let Expression::ObjectExpression(methods_obj) = &p.value else {
-                    continue;
-                };
-                for method_prop in &methods_obj.properties {
-                    let ObjectPropertyKind::ObjectProperty(mp) = method_prop else {
-                        continue;
-                    };
-                    let Some(method_name) = mp.key.static_name() else {
-                        continue;
-                    };
-                    let method_name = method_name.to_string();
-                    let fqn = format!("{component_name}::{method_name}");
-                    defs.push(JsDef {
-                        name: method_name,
-                        fqn,
-                        kind: JsDefKind::Method {
-                            class_fqn: component_name.clone(),
-                            is_static: false,
-                        },
-                        range: span_to_range(mp.span),
-                        is_exported: false,
-                        type_annotation: None,
-                        invocation_support: Some(JsInvocationSupport::function()),
-                    });
+        for option in &classified {
+            match option.classification {
+                VueOption::ExecutableMap(map) => {
+                    emit_executable_map(option.property, map, &component_name, defs, &span_to_range)
                 }
-            }
-            // computed: { ... } -- extract each child as ComputedProperty
-            else if key == "computed" {
-                let Expression::ObjectExpression(computed_obj) = &p.value else {
-                    continue;
-                };
-                for cp in &computed_obj.properties {
-                    let ObjectPropertyKind::ObjectProperty(mp) = cp else {
-                        continue;
-                    };
-                    let Some(prop_name) = mp.key.static_name() else {
-                        continue;
-                    };
-                    let prop_name = prop_name.to_string();
-                    let fqn = format!("{component_name}::{prop_name}");
-                    defs.push(JsDef {
-                        name: prop_name,
-                        fqn,
-                        kind: JsDefKind::ComputedProperty {
-                            class_fqn: component_name.clone(),
-                        },
-                        range: span_to_range(mp.span),
-                        is_exported: false,
-                        type_annotation: None,
-                        invocation_support: None,
-                    });
-                }
-            }
-            // watch: { ... } -- extract each watcher as Watcher
-            else if key == "watch" {
-                let Expression::ObjectExpression(watch_obj) = &p.value else {
-                    continue;
-                };
-                for watch_prop in &watch_obj.properties {
-                    let ObjectPropertyKind::ObjectProperty(wp) = watch_prop else {
-                        continue;
-                    };
-                    let Some(watcher_name) = wp.key.static_name() else {
-                        continue;
-                    };
-                    let watcher_name = watcher_name.to_string();
-                    let fqn = format!("{component_name}::watch_{watcher_name}");
-                    defs.push(JsDef {
-                        name: format!("watch_{watcher_name}"),
-                        fqn,
-                        kind: JsDefKind::Watcher {
-                            class_fqn: component_name.clone(),
-                        },
-                        range: span_to_range(wp.span),
-                        is_exported: false,
-                        type_annotation: None,
-                        invocation_support: Some(JsInvocationSupport::function()),
-                    });
-                }
-            }
-            // data(), setup(), render() -- extract as Method-style definitions.
-            else if matches!(key, "data" | "setup" | "render") {
-                let fqn = format!("{component_name}::{key}");
-                defs.push(JsDef {
-                    name: key.to_string(),
-                    fqn,
-                    kind: JsDefKind::Method {
-                        class_fqn: component_name.clone(),
-                        is_static: false,
-                    },
-                    range: span_to_range(p.span),
-                    is_exported: false,
-                    type_annotation: None,
-                    invocation_support: Some(JsInvocationSupport::function()),
-                });
-            }
-            // lifecycle hooks -- extract as LifecycleHook
-            else if is_vue_lifecycle_hook(key) {
-                let fqn = format!("{component_name}::{key}");
-                defs.push(JsDef {
-                    name: key.to_string(),
-                    fqn,
-                    kind: JsDefKind::LifecycleHook {
-                        class_fqn: component_name.clone(),
-                    },
-                    range: span_to_range(p.span),
-                    is_exported: false,
-                    type_annotation: None,
-                    invocation_support: Some(JsInvocationSupport::function()),
-                });
+                VueOption::ExecutableFn => emit_executable_fn(
+                    option.property,
+                    &option.key,
+                    &component_name,
+                    defs,
+                    &span_to_range,
+                ),
+                VueOption::LifecycleHook => emit_lifecycle_hook(
+                    option.property,
+                    &option.key,
+                    &component_name,
+                    defs,
+                    &span_to_range,
+                ),
+                VueOption::Contract | VueOption::Identifier => {}
             }
         }
     }
+}
+
+fn emit_executable_map(
+    property: &ObjectProperty<'_>,
+    map: ExecutableMap,
+    component_name: &str,
+    defs: &mut Vec<JsDef>,
+    span_to_range: impl Fn(oxc::span::Span) -> Range,
+) {
+    let Expression::ObjectExpression(members) = &property.value else {
+        return;
+    };
+    for member in &members.properties {
+        let ObjectPropertyKind::ObjectProperty(member) = member else {
+            continue;
+        };
+        let Some(member_name) = member.key.static_name() else {
+            continue;
+        };
+        let member_name = member_name.to_string();
+        let (name, fqn, kind, invocation_support) = match map {
+            ExecutableMap::Methods => (
+                member_name.clone(),
+                format!("{component_name}::{member_name}"),
+                JsDefKind::Method {
+                    class_fqn: component_name.to_string(),
+                    is_static: false,
+                },
+                Some(JsInvocationSupport::function()),
+            ),
+            ExecutableMap::Computed => (
+                member_name.clone(),
+                format!("{component_name}::{member_name}"),
+                JsDefKind::ComputedProperty {
+                    class_fqn: component_name.to_string(),
+                },
+                None,
+            ),
+            ExecutableMap::Watch => (
+                format!("watch_{member_name}"),
+                format!("{component_name}::watch_{member_name}"),
+                JsDefKind::Watcher {
+                    class_fqn: component_name.to_string(),
+                },
+                Some(JsInvocationSupport::function()),
+            ),
+        };
+        defs.push(JsDef {
+            name,
+            fqn,
+            kind,
+            range: span_to_range(member.span),
+            is_exported: false,
+            type_annotation: None,
+            invocation_support,
+        });
+    }
+}
+
+fn emit_executable_fn(
+    property: &ObjectProperty<'_>,
+    key: &str,
+    component_name: &str,
+    defs: &mut Vec<JsDef>,
+    span_to_range: impl Fn(oxc::span::Span) -> Range,
+) {
+    defs.push(JsDef {
+        name: key.to_string(),
+        fqn: format!("{component_name}::{key}"),
+        kind: JsDefKind::Method {
+            class_fqn: component_name.to_string(),
+            is_static: false,
+        },
+        range: span_to_range(property.span),
+        is_exported: false,
+        type_annotation: None,
+        invocation_support: Some(JsInvocationSupport::function()),
+    });
+}
+
+fn emit_lifecycle_hook(
+    property: &ObjectProperty<'_>,
+    key: &str,
+    component_name: &str,
+    defs: &mut Vec<JsDef>,
+    span_to_range: impl Fn(oxc::span::Span) -> Range,
+) {
+    defs.push(JsDef {
+        name: key.to_string(),
+        fqn: format!("{component_name}::{key}"),
+        kind: JsDefKind::LifecycleHook {
+            class_fqn: component_name.to_string(),
+        },
+        range: span_to_range(property.span),
+        is_exported: false,
+        type_annotation: None,
+        invocation_support: Some(JsInvocationSupport::function()),
+    });
 }
