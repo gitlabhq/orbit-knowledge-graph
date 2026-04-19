@@ -1,10 +1,11 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, ExtractList, default_extract, field, metadata, text};
-use crate::v2::dsl::predicates::*;
+use crate::v2::dsl::extractors::{ExtractList, metadata};
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::extract::{Extract, default_name, field, text};
+use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -142,7 +143,7 @@ impl DslLanguage for JavaDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("package_declaration", default_extract()))
+        Some(("package_declaration", default_name()))
     }
 
     fn bindings() -> Vec<BindingRule> {

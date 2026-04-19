@@ -1,12 +1,12 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{
-    Extract, ExtractList, child_of_kind, default_extract, field, metadata, no_extract, text,
-};
-use crate::v2::dsl::predicates::*;
+use crate::v2::dsl::extractors::{ExtractList, metadata};
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::extract::Extract;
+use treesitter_visit::extract::{child_of_kind, default_name, field, no_extract, text};
+use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -123,10 +123,10 @@ impl DslLanguage for KotlinDsl {
             reference("call_expression")
                 .name_from(
                     child_of_kind("navigation_expression")
-                        .then(child_of_kind("navigation_suffix").then(default_extract())),
+                        .then(child_of_kind("navigation_suffix").then(default_name())),
                 )
                 .when(has_child(&["navigation_expression"]))
-                .receiver_first_child_of("navigation_expression"),
+                .receiver_via(child_of_kind("navigation_expression").first_named()),
             // Bare type references: declarations, type casts, is checks
             reference("type_identifier").name_from(text()),
         ]
@@ -164,7 +164,7 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("package_header", default_extract()))
+        Some(("package_header", default_name()))
     }
 
     fn bindings() -> Vec<BindingRule> {

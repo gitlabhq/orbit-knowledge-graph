@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, default_extract, field};
 use crate::v2::dsl::types::*;
 use crate::v2::types::DefKind;
+use treesitter_visit::extract::{Extract, default_name, field};
 
 // ── DSL parser spec ─────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("namespace_declaration", default_extract()))
+        Some(("namespace_declaration", default_name()))
     }
 }
 

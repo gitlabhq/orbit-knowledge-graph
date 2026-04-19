@@ -97,7 +97,7 @@ impl LanguageSpec {
 
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
             && node_kind_ref == pkg_kind
-            && let Some(name) = pkg_extract.extract_name(node)
+            && let Some(name) = pkg_extract.apply(node)
         {
             scope_stack.push(Arc::from(name.as_str()));
         }
@@ -183,7 +183,7 @@ impl LanguageSpec {
             .map(|&i| &self.scopes[i])
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
 
-        let name = rule.extract_name(node)?;
+        let name = rule.extract().apply(node)?;
         Some(ScopeMatch {
             name,
             label: rule.resolve_label(node),
@@ -206,7 +206,7 @@ impl LanguageSpec {
             .iter()
             .map(|&i| &self.refs[i])
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
-        let name = rule.extract_name(node)?;
+        let name = rule.extract().apply(node)?;
 
         // Build expression chain if the rule declares an object field
         // and the spec has a ChainConfig
@@ -215,7 +215,7 @@ impl LanguageSpec {
             .as_ref()
             .zip(self.chain_config.as_ref())
             .and_then(|(extract, cc)| {
-                let receiver_node = extract.resolve(node)?;
+                let receiver_node = extract.navigate(node)?;
                 let mut chain = Vec::new();
                 self.build_expression_chain(&receiver_node, &mut chain, cc, import_map, sep);
                 chain.push(ExpressionStep::Call(name.clone()));
@@ -293,7 +293,8 @@ impl LanguageSpec {
                 if let Some(field) = member {
                     // Use default_name to extract the identifier from wrapper
                     // nodes like navigation_suffix (skip the "." punctuation).
-                    let name = super::extractors::default_name(&field)
+                    let name = treesitter_visit::extract::default_name()
+                        .apply(&field)
                         .unwrap_or_else(|| field.text().to_string());
                     chain.push(ExpressionStep::Field(name));
                 }
@@ -305,11 +306,11 @@ impl LanguageSpec {
         if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
             let rule = &self.refs[rule_idx];
             if let Some(extract) = &rule.receiver_extract
-                && let Some(recv) = extract.resolve(node)
+                && let Some(recv) = extract.navigate(node)
             {
                 self.build_expression_chain(&recv, chain, cc, import_map, sep);
             }
-            if let Some(name) = rule.extract_name(node) {
+            if let Some(name) = rule.extract().apply(node) {
                 chain.push(ExpressionStep::Call(name));
             }
             return;
@@ -345,7 +346,7 @@ impl LanguageSpec {
         let label = rule.resolve_label(node);
 
         if let Some(child_kinds) = rule.multi_child_kinds {
-            let raw_path = rule.extract_name(node).unwrap_or_default();
+            let raw_path = rule.extract().apply(node).unwrap_or_default();
             let base_path = if let Some(resolve) = self.hooks.resolve_import_path
                 && let Some(ms) = module_scope
             {
@@ -402,7 +403,7 @@ impl LanguageSpec {
                     });
                 }
             }
-        } else if let Some(raw_path) = rule.extract_name(node) {
+        } else if let Some(raw_path) = rule.extract().apply(node) {
             let full_path = if let Some(resolve) = self.hooks.resolve_import_path
                 && let Some(ms) = module_scope
             {
@@ -649,7 +650,7 @@ impl LanguageSpec {
         // Package node
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
             && nk == pkg_kind
-            && let Some(name) = pkg_extract.extract_name(node)
+            && let Some(name) = pkg_extract.apply(node)
         {
             state.scope_stack.push(Arc::from(name.as_str()));
         }
@@ -750,7 +751,9 @@ impl LanguageSpec {
                         for sibling in parent.children() {
                             let sk = sibling.kind();
                             if self.hooks.adopt_sibling_refs.contains(&sk.as_ref()) {
-                                if let Some(name) = super::extractors::default_name(&sibling) {
+                                if let Some(name) =
+                                    treesitter_visit::extract::default_name().apply(&sibling)
+                                {
                                     let ssa_key = state.arena.alloc_str(&name);
                                     state.pending_refs.push(PendingRef {
                                         name,
@@ -1153,9 +1156,9 @@ fn find_first_ident(node: &Node<StrDoc<SupportLang>>, ident_kinds: &[&str]) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::dsl::extractors::field;
-    use crate::v2::dsl::predicates::*;
     use crate::v2::dsl::types::*;
+    use treesitter_visit::extract::field;
+    use treesitter_visit::predicate::*;
 
     fn parse_with(spec: &LanguageSpec, code: &str) -> ParsedDefs {
         spec.parse_defs_only(code.as_bytes(), "test.py", Language::Python)

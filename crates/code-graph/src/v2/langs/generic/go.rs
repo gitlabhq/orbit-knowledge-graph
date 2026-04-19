@@ -1,10 +1,10 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{
-    Extract, ExtractList, child_of_kind, field, field_chain, metadata, text,
-};
-use crate::v2::dsl::predicates::*;
+use crate::v2::dsl::extractors::{ExtractList, metadata};
 use crate::v2::dsl::types::*;
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
+use treesitter_visit::extract::Extract;
+use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
+use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};

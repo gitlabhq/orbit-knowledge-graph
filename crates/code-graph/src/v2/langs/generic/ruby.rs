@@ -1,5 +1,5 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{ExtractList, field, metadata, no_extract, text};
+use crate::v2::dsl::extractors::{ExtractList, metadata};
 use crate::v2::dsl::types::{
     self, BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LanguageHooks, LoopRule,
     ReferenceRule, ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
@@ -7,6 +7,7 @@ use crate::v2::dsl::types::{
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::extract::{field, no_extract, text};
 
 use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
