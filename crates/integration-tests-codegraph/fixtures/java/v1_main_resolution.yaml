@@ -145,7 +145,6 @@ tests:
       - { row: { kind: Calls } }
 
   - name: "Main.main -> Foo.bar (this.myParameter.bar())"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -153,7 +152,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
     assert:
       - { row_count: 1 }
-      - { row: { kind: Calls } }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.app.Foo.bar, kind: Calls } }
 
   - name: "Main.main -> Bar.baz (pattern variable instanceof)"
     query: |

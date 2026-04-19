@@ -1076,7 +1076,27 @@ impl LanguageSpec {
                         value: val.trace_display(),
                         block_id: target_block.0,
                     });
-                    state.ssa.write_variable(ssa_name, target_block, val);
+                    state
+                        .ssa
+                        .write_variable(ssa_name, target_block, val.clone());
+
+                    // Class field bindings: also write compound key (e.g. "this.myParameter")
+                    // so that chains like this.myParameter.bar() can resolve via instance
+                    // attr rewrite. Only fires when the binding is directly inside a type
+                    // container scope (not nested inside a method).
+                    if !is_instance_attr
+                        && !self.ssa_config.self_names.is_empty()
+                        && let Some(&enclosing_idx) = state.enclosing_def_stack.last()
+                        && state.defs[enclosing_idx as usize].kind.is_type_container()
+                    {
+                        for &self_name in self.ssa_config.self_names {
+                            let compound = format!("{self_name}.{name}");
+                            let compound_key = state.arena.alloc_str(&compound);
+                            state
+                                .ssa
+                                .write_variable(compound_key, target_block, val.clone());
+                        }
+                    }
                 }
             }
 
