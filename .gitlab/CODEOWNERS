@@ -22,4 +22,4 @@
 /config/ontology/ @michaelusa @bohdanpk @dgruzd
 
 # Proto / API surface
-/crates/gkg-server/proto/ @michaelusa @michaelangeloio
+/crates/gkg-server/proto/ @bohdanpk @michaelangeloio @dgruzd @jgdoyon
