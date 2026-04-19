@@ -49,14 +49,16 @@ impl LanguageSpec {
     fn evaluate_scope(
         &self,
         node: &Node<StrDoc<SupportLang>>,
-        node_kind: &str,
+        actions: &[super::types::ActionRef],
         resolve: impl Fn(String, &Node<StrDoc<SupportLang>>) -> String,
     ) -> Option<ScopeMatch> {
-        let indices = self.scope_dispatch.get(node_kind)?;
-        let rule = indices
+        let rule = actions
             .iter()
             .rev()
-            .map(|&i| &self.scopes[i])
+            .filter_map(|a| match a {
+                super::types::ActionRef::Scope(i) => Some(&self.scopes[*i]),
+                _ => None,
+            })
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
 
         let name = rule.extract().apply(node)?;
@@ -73,15 +75,17 @@ impl LanguageSpec {
     fn evaluate_reference(
         &self,
         node: &Node<StrDoc<SupportLang>>,
-        node_kind: &str,
+        actions: &[super::types::ActionRef],
         import_map: &rustc_hash::FxHashMap<String, String>,
         module_prefix: Option<&str>,
         sep: &str,
     ) -> Option<(String, crate::utils::Range, Option<Vec<ExpressionStep>>)> {
-        let indices = self.ref_dispatch.get(node_kind)?;
-        let rule = indices
+        let rule = actions
             .iter()
-            .map(|&i| &self.refs[i])
+            .filter_map(|a| match a {
+                super::types::ActionRef::Ref(i) => Some(&self.refs[*i]),
+                _ => None,
+            })
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
         let name = rule.extract().apply(node)?;
 
@@ -201,7 +205,12 @@ impl LanguageSpec {
         }
 
         // Call expression with object field (method_invocation, call_expression)
-        if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
+        if let Some(rule_idx) = self.dispatch.get(kind_ref).and_then(|acts| {
+            acts.iter().find_map(|a| match a {
+                super::types::ActionRef::Ref(i) => Some(*i),
+                _ => None,
+            })
+        }) {
             let rule = &self.refs[rule_idx];
             if let Some(extract) = &rule.receiver_extract
                 && let Some(recv) = extract.navigate(node)
@@ -224,17 +233,17 @@ impl LanguageSpec {
     fn evaluate_imports(
         &self,
         node: &Node<StrDoc<SupportLang>>,
-        node_kind: &str,
+        actions: &[super::types::ActionRef],
         imports: &mut Vec<CanonicalImport>,
         module_scope: Option<&str>,
         sep: &str,
     ) {
-        let Some(indices) = self.import_dispatch.get(node_kind) else {
-            return;
-        };
-        let Some(rule) = indices
+        let Some(rule) = actions
             .iter()
-            .map(|&i| &self.imports[i])
+            .filter_map(|a| match a {
+                super::types::ActionRef::Import(i) => Some(&self.imports[*i]),
+                _ => None,
+            })
             .find(|r| r.condition().is_none_or(|c| c.test(node)))
         else {
             return;
@@ -560,8 +569,12 @@ impl LanguageSpec {
             None
         };
 
+        // Single dispatch lookup for all rule types
+        let empty_actions = smallvec::SmallVec::<[super::types::ActionRef; 3]>::new();
+        let actions = self.dispatch.get(nk).unwrap_or(&empty_actions);
+
         // Scope matching → push def + optional SSA self/super writes
-        if let Some(m) = self.evaluate_scope(node, nk, |bare, _origin| {
+        if let Some(m) = self.evaluate_scope(node, actions, |bare, _origin| {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
             }
@@ -692,7 +705,10 @@ impl LanguageSpec {
 
         if !custom_handled {
             // Branch matching → SSA fork/join (handles own children)
-            if let Some(&rule_idx) = self.branch_dispatch.get(nk).and_then(|v| v.first()) {
+            if let Some(rule_idx) = actions.iter().find_map(|a| match a {
+                super::types::ActionRef::Branch(i) => Some(*i),
+                _ => None,
+            }) {
                 self.walk_full_branch(node, rule_idx, state, sep);
                 if pushed_scope {
                     state.scope_stack.pop();
@@ -705,7 +721,10 @@ impl LanguageSpec {
             }
 
             // Loop matching → SSA header/body/exit (handles own children)
-            if let Some(&rule_idx) = self.loop_dispatch.get(nk).and_then(|v| v.first()) {
+            if let Some(rule_idx) = actions.iter().find_map(|a| match a {
+                super::types::ActionRef::Loop(i) => Some(*i),
+                _ => None,
+            }) {
                 self.walk_full_loop(node, rule_idx, state, sep);
                 if pushed_scope {
                     state.scope_stack.pop();
@@ -725,7 +744,7 @@ impl LanguageSpec {
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
                 let ms = state.scope_stack.first().map(|s| s.as_ref());
-                self.evaluate_imports(node, nk, &mut state.imports, ms, sep);
+                self.evaluate_imports(node, actions, &mut state.imports, ms, sep);
             }
             for idx in import_count_before..state.imports.len() {
                 let imp = &state.imports[idx];
@@ -749,7 +768,10 @@ impl LanguageSpec {
             }
 
             // Binding handling → SSA write
-            if let Some(&rule_idx) = self.binding_dispatch.get(nk).and_then(|v| v.first()) {
+            if let Some(rule_idx) = actions.iter().find_map(|a| match a {
+                super::types::ActionRef::Binding(i) => Some(*i),
+                _ => None,
+            }) {
                 let rule = &self.bindings[rule_idx];
                 if let Some(name) = rule.extract_name(node) {
                     let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
@@ -830,9 +852,13 @@ impl LanguageSpec {
             }
 
             // Reference handling → SSA read → PendingRef
-            if let Some((name, _range, expression)) =
-                self.evaluate_reference(node, nk, &state.import_map, module_prefix.as_deref(), sep)
-            {
+            if let Some((name, _range, expression)) = self.evaluate_reference(
+                node,
+                actions,
+                &state.import_map,
+                module_prefix.as_deref(),
+                sep,
+            ) {
                 // For chains, read SSA for the base identifier (not the terminal).
                 // For bare refs, read SSA for the name itself.
                 let ssa_key = if let Some(chain) = &expression {

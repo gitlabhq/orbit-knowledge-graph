@@ -659,35 +659,18 @@ pub struct LanguageHooks {
     pub resolve_import_path: Option<fn(&str, &str, &str) -> Option<String>>,
 }
 
-fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {
-    let mut map: FxHashMap<&'static str, Vec<usize>> = FxHashMap::default();
-    for (i, rule) in rules.iter().enumerate() {
-        for &kind in &rule.kinds {
-            map.entry(kind).or_default().push(i);
-        }
-    }
-    map
-}
+// ── Unified dispatch ────────────────────────────────────────────
 
-fn build_dispatch_ref(rules: &[ReferenceRule]) -> FxHashMap<&'static str, Vec<usize>> {
-    build_dispatch_generic(rules, |r| &r.kinds)
-}
-
-fn build_dispatch_import(rules: &[ImportRule]) -> FxHashMap<&'static str, Vec<usize>> {
-    build_dispatch_generic(rules, |r| &r.kinds)
-}
-
-fn build_dispatch_generic<T>(
-    rules: &[T],
-    get_kinds: impl Fn(&T) -> &[&'static str],
-) -> FxHashMap<&'static str, Vec<usize>> {
-    let mut map: FxHashMap<&'static str, Vec<usize>> = FxHashMap::default();
-    for (i, rule) in rules.iter().enumerate() {
-        for &kind in get_kinds(rule) {
-            map.entry(kind).or_default().push(i);
-        }
-    }
-    map
+/// Tag identifying which rule type an index refers to.
+/// One dispatch table maps node_kind → list of these.
+#[derive(Clone, Copy)]
+pub(crate) enum ActionRef {
+    Scope(usize),
+    Ref(usize),
+    Import(usize),
+    Binding(usize),
+    Branch(usize),
+    Loop(usize),
 }
 
 pub struct LanguageSpec {
@@ -703,14 +686,9 @@ pub struct LanguageSpec {
     pub(crate) hooks: LanguageHooks,
     pub ssa_config: SsaConfig,
 
-    // Dispatch tables: node_kind → indices into the corresponding rule Vec.
-    // Built once at construction, O(1) lookup per node during walk.
-    pub scope_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub ref_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub import_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub binding_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub branch_dispatch: FxHashMap<&'static str, Vec<usize>>,
-    pub loop_dispatch: FxHashMap<&'static str, Vec<usize>>,
+    /// Single dispatch table: node_kind → tagged rule indices.
+    /// Built once at construction, O(1) lookup per node during walk.
+    pub(crate) dispatch: FxHashMap<&'static str, smallvec::SmallVec<[ActionRef; 3]>>,
 }
 
 impl LanguageSpec {
@@ -720,10 +698,7 @@ impl LanguageSpec {
         refs: Vec<ReferenceRule>,
         imports: Vec<ImportRule>,
     ) -> Self {
-        let scope_dispatch = build_dispatch(&scopes);
-        let ref_dispatch = build_dispatch_ref(&refs);
-        let import_dispatch = build_dispatch_import(&imports);
-        Self {
+        let mut spec = Self {
             name,
             scopes,
             refs,
@@ -735,30 +710,27 @@ impl LanguageSpec {
             package_node: None,
             hooks: LanguageHooks::default(),
             ssa_config: SsaConfig::default(),
-            scope_dispatch,
-            ref_dispatch,
-            import_dispatch,
-            binding_dispatch: FxHashMap::default(),
-            branch_dispatch: FxHashMap::default(),
-            loop_dispatch: FxHashMap::default(),
-        }
+            dispatch: FxHashMap::default(),
+        };
+        spec.rebuild_dispatch();
+        spec
     }
 
     pub fn with_bindings(mut self, bindings: Vec<BindingRule>) -> Self {
-        self.binding_dispatch = build_dispatch_generic(&bindings, |b| &b.kinds);
         self.bindings = bindings;
+        self.rebuild_dispatch();
         self
     }
 
     pub fn with_branches(mut self, branches: Vec<BranchRule>) -> Self {
-        self.branch_dispatch = build_dispatch_generic(&branches, |b| &b.kinds);
         self.branches = branches;
+        self.rebuild_dispatch();
         self
     }
 
     pub fn with_loops(mut self, loops: Vec<LoopRule>) -> Self {
-        self.loop_dispatch = build_dispatch_generic(&loops, |l| &l.kinds);
         self.loops = loops;
+        self.rebuild_dispatch();
         self
     }
 
@@ -782,5 +754,42 @@ impl LanguageSpec {
     pub fn with_ssa_config(mut self, config: SsaConfig) -> Self {
         self.ssa_config = config;
         self
+    }
+
+    /// Rebuild the unified dispatch table from all rule vecs.
+    fn rebuild_dispatch(&mut self) {
+        let mut map: FxHashMap<&'static str, smallvec::SmallVec<[ActionRef; 3]>> =
+            FxHashMap::default();
+        for (i, rule) in self.scopes.iter().enumerate() {
+            for &kind in &rule.kinds {
+                map.entry(kind).or_default().push(ActionRef::Scope(i));
+            }
+        }
+        for (i, rule) in self.refs.iter().enumerate() {
+            for &kind in &rule.kinds {
+                map.entry(kind).or_default().push(ActionRef::Ref(i));
+            }
+        }
+        for (i, rule) in self.imports.iter().enumerate() {
+            for &kind in &rule.kinds {
+                map.entry(kind).or_default().push(ActionRef::Import(i));
+            }
+        }
+        for (i, rule) in self.bindings.iter().enumerate() {
+            for &kind in &rule.kinds {
+                map.entry(kind).or_default().push(ActionRef::Binding(i));
+            }
+        }
+        for (i, rule) in self.branches.iter().enumerate() {
+            for &kind in &rule.kinds {
+                map.entry(kind).or_default().push(ActionRef::Branch(i));
+            }
+        }
+        for (i, rule) in self.loops.iter().enumerate() {
+            for &kind in &rule.kinds {
+                map.entry(kind).or_default().push(ActionRef::Loop(i));
+            }
+        }
+        self.dispatch = map;
     }
 }
