@@ -1,0 +1,37 @@
+name: "Kotlin v1 parity — super calls and inner class access"
+fixture_dir: "fixtures/code/kotlin/main/kotlin"
+
+tests:
+  # ── K2: test_kotlin_inheritance_and_super_calls ──
+
+  - name: "Foo.foo -> Bar.bar (super call)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.foo.Foo.foo'
+        AND callee.fqn = 'com.example.foo.Bar.bar'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── K3: test_kotlin_inner_class_calls ──
+
+  - name: "Foo.foo -> Foo.fooInFooBody (same-class call)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.foo.Foo.foo'
+        AND callee.fqn = 'com.example.foo.Foo.fooInFooBody'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "InnerFoo.innerFoo -> Foo.fooInFooBody (inner class accesses enclosing)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.foo.Foo.InnerFoo.innerFoo'
+        AND callee.fqn = 'com.example.foo.Foo.fooInFooBody'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

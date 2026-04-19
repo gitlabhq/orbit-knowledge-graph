@@ -81,6 +81,10 @@ yaml_test!(
 );
 yaml_test!(python_call_resolution, "python_resolution.yaml");
 yaml_test!(python_type_flow, "python/type_flow.yaml");
+yaml_test!(
+    python_v1_interfile_resolution,
+    "python/v1_interfile_resolution.yaml"
+);
 
 // Java
 yaml_test!(java_call_resolution, "java_resolution.yaml");
@@ -99,6 +103,29 @@ yaml_test!(
     kotlin_intrafile_resolution,
     "kotlin/intrafile_resolution.yaml"
 );
+
+// Java v1 parity
+yaml_test!(java_v1_main_resolution, "java/v1_main_resolution.yaml");
+yaml_test!(java_v1_imported_symbols, "java/v1_imported_symbols.yaml");
+yaml_test!(java_v1_same_class_name, "java/v1_same_class_name.yaml");
+yaml_test!(java_v1_deep_nested, "java/v1_deep_nested.yaml");
+yaml_test!(java_v1_stack_safety, "java/v1_stack_safety.yaml");
+
+// Kotlin v1 parity
+yaml_test!(kotlin_v1_main_resolution, "kotlin/v1_main_resolution.yaml");
+yaml_test!(kotlin_v1_super_and_inner, "kotlin/v1_super_and_inner.yaml");
+yaml_test!(kotlin_v1_type_inference, "kotlin/v1_type_inference.yaml");
+yaml_test!(kotlin_v1_nested_classes, "kotlin/v1_nested_classes.yaml");
+yaml_test!(kotlin_v1_same_class_name, "kotlin/v1_same_class_name.yaml");
+yaml_test!(
+    kotlin_v1_operator_functions,
+    "kotlin/v1_operator_functions.yaml"
+);
+yaml_test!(kotlin_v1_enum_methods, "kotlin/v1_enum_methods.yaml");
+yaml_test!(kotlin_v1_extensions, "kotlin/v1_extensions.yaml");
+
+// Ruby v1 parity (v2 pipeline — all skipped until Ruby resolution is implemented)
+yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
 
 // Examples (custom pipelines)
 yaml_test!(ruby_custom_pipeline, "examples/ruby_custom_pipeline.yaml");

@@ -1,0 +1,35 @@
+name: "Kotlin v1 parity — nested class resolution"
+fixture_dir: "fixtures/code/kotlin/main/kotlin"
+
+tests:
+  # ── K8: test_kotlin_reference_resolution_to_nested_classes ──
+
+  - name: "Parent.GrandChild.greet -> Parent.Child.GrandChild.greet"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.nestedclasses.Parent.GrandChild.greet'
+        AND callee.fqn = 'com.example.nestedclasses.Parent.Child.GrandChild.greet'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "main -> Parent.Child.GrandChild.greet (inferred nested type)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.main'
+        AND callee.fqn = 'com.example.nestedclasses.Parent.Child.GrandChild.greet'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "main -> Parent.GrandChild.greet (typed nested type)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.main'
+        AND callee.fqn = 'com.example.nestedclasses.Parent.GrandChild.greet'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
