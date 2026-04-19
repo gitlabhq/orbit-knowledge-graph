@@ -4,8 +4,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 JOB_NAME="e2e-robot-runner"
 RELEASE_NAME="e2e-robot-runner"
 DIAG_DIR="${E2E_DIR}/diagnostics"
-MARKER_DIR=$(mktemp -d)
-trap 'rm -rf "$MARKER_DIR"' EXIT
+TIMEOUT_SECONDS=1800
+POLL_INTERVAL=5
 
 log "E2E Tests (SHA: $E2E_SHA)"
 mkdir -p "$DIAG_DIR"
@@ -27,25 +27,28 @@ helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
   --set "namespaces.gitlab=$NS_GITLAB" \
   --set "namespaces.gkg=$NS_GKG"
 
-# Stream logs in background (retry until pod ready, follow once)
-(while ! $KC logs -f job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null; do
-  { [ -f "${MARKER_DIR}/pass" ] || [ -f "${MARKER_DIR}/fail" ]; } && break
-  sleep 2
-done) &
-LOG_PID=$!
+# Poll job status until terminal condition or timeout. Heartbeat keeps the
+# pipeline trace alive without the complexity (and orphaned-kubectl bugs) of
+# streaming `kubectl logs -f` from a background subshell.
+log "Waiting for tests to complete (timeout: ${TIMEOUT_SECONDS}s)"
+result=timeout
+SECONDS=0
+while [ "$SECONDS" -lt "$TIMEOUT_SECONDS" ]; do
+  # Modern Job objects emit multiple True conditions (SuccessCriteriaMet +
+  # Complete on success; FailureTarget + Failed on failure), so jsonpath
+  # returns a space-joined list. Match Complete/Failed via substring.
+  status=$($KC get job/"$JOB_NAME" -n "$NS_GKG" \
+    -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type} {end}' 2>/dev/null || true)
+  case " $status " in
+    *" Complete "*) result=pass; break ;;
+    *" Failed "*)   result=fail; break ;;
+  esac
+  log "Tests running... (${SECONDS}s elapsed)"
+  sleep "$POLL_INTERVAL"
+done
 
-# Race two kubectl waits — first to fire determines result
-log "Waiting for tests to complete (timeout: 1h)..."
-($KC wait --for=condition=complete job/"$JOB_NAME" -n "$NS_GKG" --timeout=3600s 2>/dev/null \
-  && touch "${MARKER_DIR}/pass") &
-($KC wait --for=condition=failed job/"$JOB_NAME" -n "$NS_GKG" --timeout=3600s 2>/dev/null \
-  && touch "${MARKER_DIR}/fail") &
-
-while [ ! -f "${MARKER_DIR}/pass" ] && [ ! -f "${MARKER_DIR}/fail" ]; do sleep 1; done
-
-kill $LOG_PID 2>/dev/null || true
-jobs -p | xargs kill 2>/dev/null || true
-wait 2>/dev/null || true
+log "Robot Framework output:"
+$KC logs job/"$JOB_NAME" -n "$NS_GKG" --tail=-1 2>&1 || true
 
 # Extract JUnit report from job logs (kubectl cp can't exec into completed pods)
 log "Extracting test report"
@@ -54,12 +57,12 @@ $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null | \
   sed '/---XUNIT_REPORT_/d' \
   > "$DIAG_DIR/junit.xml" || true
 
-if [ -f "${MARKER_DIR}/pass" ]; then
+if [ "$result" = "pass" ]; then
   log "Tests passed"
   exit 0
 fi
 
-log "Tests failed"
+log "Tests $result"
 
 log "Collecting diagnostics to $DIAG_DIR"
 
