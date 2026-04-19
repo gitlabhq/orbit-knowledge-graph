@@ -14,10 +14,6 @@
 # Indexer
 /crates/indexer/ @jgdoyon
 
-# Configuration
-/config/default.yaml @michaelusa @bohdanpk
-/crates/gkg-server-config/ @michaelusa @bohdanpk
-
 # Ontology
 /config/ontology/ @michaelusa @bohdanpk @dgruzd
 
