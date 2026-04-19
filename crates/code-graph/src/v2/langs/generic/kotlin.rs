@@ -114,7 +114,19 @@ impl DslLanguage for KotlinDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            reference("call_expression").receiver("navigation_expression"),
+            // Simple call: create() — name from direct simple_identifier child
+            reference("call_expression")
+                .name_from(child_of_kind("simple_identifier"))
+                .when(!has_child(&["navigation_expression"])),
+            // Chain call: Foo.create() — name from navigation_suffix's identifier.
+            // Receiver: navigation_expression → first named child (the object).
+            reference("call_expression")
+                .name_from(
+                    child_of_kind("navigation_expression")
+                        .then(child_of_kind("navigation_suffix").then(default_extract())),
+                )
+                .when(has_child(&["navigation_expression"]))
+                .receiver_first_child_of("navigation_expression"),
             // Bare type references: declarations, type casts, is checks
             reference("type_identifier").name_from(text()),
         ]
@@ -125,7 +137,7 @@ impl DslLanguage for KotlinDsl {
             ident_kinds: &["simple_identifier"],
             this_kinds: &["this_expression"],
             super_kinds: &["super_expression"],
-            field_access: &[("navigation_expression", "expression", "navigation_suffix")],
+            field_access: &[],
             constructor: &[],
         })
     }

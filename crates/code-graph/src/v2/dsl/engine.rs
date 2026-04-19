@@ -273,11 +273,29 @@ impl LanguageSpec {
         // Field access (obj.field)
         for &(fa_kind, obj_field, member_field) in cc.field_access {
             if kind_ref == fa_kind {
-                if let Some(obj) = node.field(obj_field) {
+                // Named field lookup. Falls back to child-of-kind for grammars
+                // without named fields (e.g. Kotlin navigation_expression).
+                let obj = node.field(obj_field);
+                let member = node
+                    .field(member_field)
+                    .or_else(|| node.child_of_kind(member_field));
+
+                if let Some(obj) = obj {
                     self.build_expression_chain(&obj, chain, cc, import_map, sep);
+                } else if let Some(ref member_node) = member {
+                    // No named field for the object — use the first named child
+                    // that isn't the member node.
+                    let mr = member_node.range();
+                    if let Some(obj) = node.children().find(|c| c.is_named() && c.range() != mr) {
+                        self.build_expression_chain(&obj, chain, cc, import_map, sep);
+                    }
                 }
-                if let Some(field) = node.field(member_field) {
-                    chain.push(ExpressionStep::Field(field.text().to_string()));
+                if let Some(field) = member {
+                    // Use default_name to extract the identifier from wrapper
+                    // nodes like navigation_suffix (skip the "." punctuation).
+                    let name = super::extractors::default_name(&field)
+                        .unwrap_or_else(|| field.text().to_string());
+                    chain.push(ExpressionStep::Field(name));
                 }
                 return;
             }

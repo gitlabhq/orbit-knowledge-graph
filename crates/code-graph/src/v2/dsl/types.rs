@@ -156,8 +156,17 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
 pub enum ReceiverExtract {
     /// Single field name (e.g. `"object"` for Java's method_invocation).
     Field(&'static str),
-    /// Chain of field names (e.g. `["function", "object"]` for Python's call.function.object).
+    /// Chain of field names (e.g. `["function", "object"]` for Python's
+    /// `call.function.object`).
     FieldChain(&'static [&'static str]),
+    /// First child of a given kind (for grammars without named fields,
+    /// e.g. Kotlin `navigation_expression` → first `simple_identifier`).
+    ChildOfKind(&'static str),
+    /// Navigate to a child of a given kind, then to a further child of
+    /// another kind. E.g. `("navigation_expression", "simple_identifier")`
+    /// for Kotlin: find the `navigation_expression` child, then its first
+    /// named child that is *not* `navigation_suffix`.
+    ChildThenFirst(&'static str),
 }
 
 impl ReceiverExtract {
@@ -170,6 +179,11 @@ impl ReceiverExtract {
         match self {
             Self::Field(f) => node.field(f),
             Self::FieldChain(fields) => node.field_chain(fields),
+            Self::ChildOfKind(kind) => node.child_of_kind(kind),
+            Self::ChildThenFirst(kind) => {
+                let child = node.child_of_kind(kind)?;
+                child.children().find(|c| c.is_named())
+            }
         }
     }
 }
@@ -234,6 +248,15 @@ impl ReferenceRule {
     /// e.g. `["function", "object"]` for Python's `call.function.object`.
     pub fn receiver_chain(mut self, fields: &'static [&'static str]) -> Self {
         self.receiver_extract = Some(ReceiverExtract::FieldChain(fields));
+        self
+    }
+
+    /// Locate receiver by finding a child of the given kind, then taking
+    /// its first named child. For grammars without named fields.
+    /// e.g. `"navigation_expression"` for Kotlin: finds the nav expr
+    /// child, then its first named child (the object, not the suffix).
+    pub fn receiver_first_child_of(mut self, kind: &'static str) -> Self {
+        self.receiver_extract = Some(ReceiverExtract::ChildThenFirst(kind));
         self
     }
 }
