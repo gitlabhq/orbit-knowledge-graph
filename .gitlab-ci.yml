@@ -925,67 +925,60 @@ ai:docs:
 
 # E2E Stage
 
-e2e-build:
+e2e:
   stage: e2e
   extends:
     - .job-template
     - .sccache-template
   tags:
     - saas-linux-large-amd64
-  needs: []
-  timeout: 30 minutes
+  timeout: 60 minutes
   services:
     - name: ${DEP_PROXY}docker:29-dind
       alias: docker
   variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    E2E_IMAGE: "${CI_REGISTRY_IMAGE}/gkg-e2e:${CI_COMMIT_SHORT_SHA}"
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      when: manual
-      allow_failure: true
-  script:
-    - cargo build -p gkg-server --locked
-    - cp target/debug/gkg-server .
-    - curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz | tar xz --strip-components=1 -C /usr/local/bin docker/docker
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - docker build -t "$E2E_IMAGE" -f e2e/Dockerfile.e2e .
-    - docker push "$E2E_IMAGE"
-
-e2e:
-  stage: e2e
-  image: ${DEP_PROXY}alpine:3.21
-  tags:
-    - saas-linux-medium-amd64
-  needs:
-    - e2e-build
-  timeout: 30 minutes
-  variables:
     KCTX: gitlab-org/orbit/gkg-e2e-harness:e2e-harness-agent
-    E2E_GKG_IMAGE: "${CI_REGISTRY_IMAGE}/gkg-e2e"
-    E2E_GKG_TAG: "${CI_COMMIT_SHORT_SHA}"
     KUBECTL_VERSION: "1.35.2"
     HELM_VERSION: "3.20.0"
     HELMFILE_VERSION: "1.4.2"
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  needs:
+    - job: docker-manifest
+      optional: true
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
       allow_failure: true
   before_script:
-    - apk add --no-cache bash curl openssl python3
-    - curl -sLO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" && chmod +x kubectl && mv kubectl /usr/local/bin/
-    - curl -sL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar xz && mv linux-amd64/helm /usr/local/bin/ && rm -rf linux-amd64
-    - curl -sL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" | tar xz -C /usr/local/bin
+    - !reference [.sccache-template, before_script]
+    - bash e2e/scripts/install-ci-tools.sh
     - kubectl config use-context "$KCTX"
   script:
     - export E2E_SHA="${CI_COMMIT_SHORT_SHA}"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        # Reuse multi-arch dev image published by docker-manifest.
+        export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg"
+        export E2E_GKG_TAG="${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+      else
+        # MR: build a debug image inline for faster iteration.
+        export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg-e2e"
+        export E2E_GKG_TAG="${CI_COMMIT_SHORT_SHA}"
+        cargo build -p gkg-server --locked
+        cp target/debug/gkg-server .
+        docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
+        docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
+      fi
     - bash e2e/scripts/setup.sh
     - bash e2e/scripts/test.sh
   after_script:
+    - bash e2e/scripts/install-ci-tools.sh
+    - kubectl config use-context "$KCTX"
     - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}" -y
   artifacts:
     when: always

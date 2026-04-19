@@ -1,0 +1,39 @@
+name: "Kotlin v1 parity — type inference from expressions"
+fixture_dir: "fixtures/code/kotlin/main/kotlin"
+
+tests:
+  # ── K4: test_kotlin_type_inference_from_when_expression ──
+
+  - name: "whenTypeInference -> Person.getName (when expression)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'whenTypeInference'
+        AND callee.name = 'getName'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── K5: test_kotlin_type_inference_from_if_expression ──
+
+  - name: "usageOfIfTypeInference -> Person.getName (if expression)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'usageOfIfTypeInference'
+        AND callee.name = 'getName'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── K6: test_kotlin_type_inference_from_try_catch ──
+
+  - name: "tryTypeInference -> Person.getName (try-catch expression)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'tryTypeInference'
+        AND callee.name = 'getName'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

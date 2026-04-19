@@ -43,11 +43,52 @@ fn output_to_datasets(output: PipelineOutput) -> LanceDatasets {
     }
 }
 
+/// Resolve the workspace root (where `Cargo.toml` with `[workspace]` lives).
+fn workspace_root() -> std::path::PathBuf {
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--format-version=1", "--no-deps"])
+        .output()
+        .expect("Failed to run cargo metadata");
+    let meta: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("Failed to parse cargo metadata");
+    std::path::PathBuf::from(meta["workspace_root"].as_str().unwrap())
+}
+
+/// Copy all files from `src_dir` into `dst_dir`, preserving relative paths.
+fn copy_dir_recursive(src_dir: &std::path::Path, dst_dir: &std::path::Path) {
+    for entry in walkdir::WalkDir::new(src_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let rel = entry.path().strip_prefix(src_dir).unwrap();
+        let dst = dst_dir.join(rel);
+        if entry.file_type().is_dir() {
+            std::fs::create_dir_all(&dst).ok();
+        } else {
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::copy(entry.path(), &dst)
+                .unwrap_or_else(|e| panic!("Failed to copy {}: {e}", entry.path().display()));
+        }
+    }
+}
+
 /// Run a YAML test suite from a string. Panics on any error-severity failure.
 pub async fn run_yaml_suite(yaml: &str) {
     let suite: TestSuite = serde_yaml::from_str(yaml).expect("Failed to parse YAML suite");
 
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
+
+    // Copy fixture_dir contents first (if set)
+    if let Some(dir) = &suite.fixture_dir {
+        let root = workspace_root();
+        let src = root.join(dir);
+        assert!(src.is_dir(), "fixture_dir not found: {}", src.display());
+        copy_dir_recursive(&src, tmp.path());
+    }
+
+    // Write inline fixtures (override anything from fixture_dir)
     for fixture in &suite.fixtures {
         let path = tmp.path().join(&fixture.path);
         if let Some(parent) = path.parent() {

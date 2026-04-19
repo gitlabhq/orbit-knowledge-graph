@@ -309,10 +309,10 @@ fn extract_use_list_symbols<'a>(
 
                 for grandchild in child.children() {
                     match grandchild.kind().as_ref() {
-                        node_types::IDENTIFIER | node_types::SCOPED_IDENTIFIER => {
-                            if prefix.is_none() {
-                                prefix = Some(grandchild.text().to_string());
-                            }
+                        node_types::IDENTIFIER | node_types::SCOPED_IDENTIFIER
+                            if prefix.is_none() =>
+                        {
+                            prefix = Some(grandchild.text().to_string());
                         }
                         node_types::USE_LIST => {
                             nested_symbols = extract_use_list_symbols(&grandchild);

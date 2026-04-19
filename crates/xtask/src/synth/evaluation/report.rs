@@ -268,7 +268,7 @@ impl Report {
         output.push_str("|-------|--------|------|----------|\n");
 
         let mut sorted_results = self.results.clone();
-        sorted_results.sort_by(|a, b| b.execution_time.cmp(&a.execution_time));
+        sorted_results.sort_by_key(|r| std::cmp::Reverse(r.execution_time));
 
         for result in &sorted_results {
             let status = if result.success { "✓" } else { "✗" };
