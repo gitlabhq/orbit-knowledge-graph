@@ -268,6 +268,7 @@ impl HasRules for KotlinRules {
             &["this", "self"],
             Some("super"),
         )
+        .with_implicit_sub_scopes(&["Companion"])
         .with_hooks(ResolverHooks {
             call_method: Some("invoke"),
         })

@@ -4,7 +4,7 @@
 //! No intermediate collections — the caller drives iteration.
 
 use crate::v2::types::ssa::ParseValue;
-use crate::v2::types::{EdgeKind, ExpressionStep, NodeKind, Relationship};
+use crate::v2::types::{DefKind, EdgeKind, ExpressionStep, NodeKind, Relationship};
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
 
@@ -182,6 +182,19 @@ impl<'a> ResolveCtx<'a> {
         let mut result = Vec::new();
         self.graph
             .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
+
+        // Fallback: try implicit sub-scopes (e.g. Kotlin Companion objects).
+        // Foo.bar() → Foo.Companion.bar()
+        if result.is_empty() {
+            for &sub in self.rules.implicit_sub_scopes {
+                let sub_scope = format!("{scope_fqn}{}{sub}", self.rules.fqn_separator);
+                self.graph
+                    .lookup_nested_with_hierarchy(&sub_scope, member_name, &mut result);
+                if !result.is_empty() {
+                    break;
+                }
+            }
+        }
 
         // Fallback: find methods whose receiver_type matches scope_fqn.
         // This handles Go methods (`func (s *Service) Run()`) and
@@ -379,11 +392,18 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                             next_types.push(ctx.graph.str(gdef.fqn).to_string());
                         }
                     }
-                    if matches!(step, ExpressionStep::Field(_))
-                        && let Some(meta) = &gdef.metadata
-                        && let Some(ta) = meta.type_annotation
-                    {
-                        next_types.push(ctx.graph.str(ta).to_string());
+                    if matches!(step, ExpressionStep::Field(_)) {
+                        if let Some(meta) = &gdef.metadata
+                            && let Some(ta) = meta.type_annotation
+                        {
+                            next_types.push(ctx.graph.str(ta).to_string());
+                        } else if gdef.kind == DefKind::EnumEntry {
+                            // Enum constant: propagate the parent enum's FQN
+                            let fqn = ctx.graph.str(gdef.fqn);
+                            if let Some((parent, _)) = fqn.rsplit_once(ctx.rules.fqn_separator) {
+                                next_types.push(parent.to_string());
+                            }
+                        }
                     }
                 }
             }
