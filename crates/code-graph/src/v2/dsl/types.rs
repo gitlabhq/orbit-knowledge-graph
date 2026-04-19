@@ -8,6 +8,10 @@ use crate::v2::types::{DefKind, DefinitionMetadata};
 
 use super::extractors::MetadataRule;
 
+/// Signature for import path resolution hooks.
+/// Called with (raw_path, module_scope, separator). Returns resolved path or None.
+pub type ImportPathResolver = fn(&str, &str, &str) -> Option<String>;
+
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 pub type LabelFn = fn(&N<'_>) -> &'static str;
@@ -662,7 +666,7 @@ pub struct LanguageHooks {
     /// Called with (raw_path, module_scope, separator). Returns the
     /// resolved absolute path, or None to keep the raw path.
     /// Handles Python's `from .models import User` → `package.models`.
-    pub resolve_import_path: Option<fn(&str, &str, &str) -> Option<String>>,
+    pub resolve_import_path: Option<ImportPathResolver>,
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {
