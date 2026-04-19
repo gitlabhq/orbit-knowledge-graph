@@ -1,10 +1,12 @@
+use std::path::Path;
+
 use crate::v2::linker::CodeGraph;
 use crate::v2::pipeline::{FileInput, LanguagePipeline, PipelineError, PipelineOutput};
 use rustc_hash::FxHashMap;
 
 use super::extract::{ResolvedJsFile, analyze_files};
 use super::resolve::attach_resolution_edges;
-use super::{JsModuleGraphBuilder, JsPhase1FileInfo};
+use super::{JsModuleGraphBuilder, JsPhase1FileInfo, WorkspaceProbe};
 
 pub struct JsPipeline;
 
@@ -36,14 +38,13 @@ impl LanguagePipeline for JsPipeline {
             });
         }
 
+        // One probe: every manifest/config file JS resolution cares about
+        // is read exactly once here, then shared with the resolver,
+        // evaluator, and tsconfig discovery below.
+        let probe = WorkspaceProbe::load(Path::new(root_path), files);
+
         let (mut graph, modules) = builder.into_parts();
-        attach_resolution_edges(
-            &mut graph,
-            &resolved_files,
-            &file_infos,
-            &modules,
-            root_path,
-        );
+        attach_resolution_edges(&mut graph, &resolved_files, &file_infos, &modules, &probe);
         graph.finalize();
 
         if errors.is_empty() {

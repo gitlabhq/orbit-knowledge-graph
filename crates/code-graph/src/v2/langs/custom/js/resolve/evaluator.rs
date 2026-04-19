@@ -44,27 +44,19 @@ struct ModuleEvalCache {
     total_bytes: u64,
 }
 
-pub(super) fn load_project_aliases(root_dir: &Path) -> Vec<(String, Vec<AliasValue>)> {
+pub(super) fn load_project_aliases(
+    probe: &super::super::WorkspaceProbe,
+) -> Vec<(String, Vec<AliasValue>)> {
+    let root_dir = probe.root_dir();
     let mut cache = ModuleEvalCache::default();
-    [
-        "webpack.config.js",
-        "webpack.config.cjs",
-        "webpack.config.mjs",
-        "webpack.config.ts",
-        "config/webpack.config.js",
-        "config/webpack.config.cjs",
-        "config/webpack.config.mjs",
-        "config/webpack.config.ts",
-    ]
-    .into_iter()
-    .map(|relative| root_dir.join(relative))
-    .find_map(|config_path| {
-        config_path
-            .is_file()
-            .then(|| load_webpack_aliases(root_dir, &config_path, &mut cache))
-            .filter(|aliases| !aliases.is_empty())
-    })
-    .unwrap_or_default()
+    probe
+        .webpack_configs()
+        .iter()
+        .find_map(|config_path| {
+            let aliases = load_webpack_aliases(root_dir, config_path, &mut cache);
+            (!aliases.is_empty()).then_some(aliases)
+        })
+        .unwrap_or_default()
 }
 
 fn load_webpack_aliases(

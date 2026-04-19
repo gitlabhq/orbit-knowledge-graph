@@ -43,6 +43,22 @@ pub const MANIFEST_FILENAMES: &[&str] = &[
     "jsconfig.json",
 ];
 
+/// Filenames whose presence marks a project as Bun-first.
+pub const BUN_SIGNAL_FILES: &[&str] = &["bun.lock", "bun.lockb", "bunfig.toml"];
+
+/// Candidate paths for a webpack config file, in the order the
+/// evaluator probes them.
+pub const WEBPACK_CONFIG_CANDIDATES: &[&str] = &[
+    "webpack.config.js",
+    "webpack.config.cjs",
+    "webpack.config.mjs",
+    "webpack.config.ts",
+    "config/webpack.config.js",
+    "config/webpack.config.cjs",
+    "config/webpack.config.mjs",
+    "config/webpack.config.ts",
+];
+
 /// Options whose value is an object of executable members
 /// (`methods`, `computed`, `watch`).
 pub const VUE_OPTION_EXECUTABLE_MAPS: &[&str] = &["methods", "computed", "watch"];

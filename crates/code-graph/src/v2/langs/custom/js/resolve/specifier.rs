@@ -1,5 +1,5 @@
 use crate::utils::Range;
-use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
+use oxc_resolver::{ResolveOptions, Resolver};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -7,7 +7,7 @@ use super::super::types::{
     ExportedBinding, ImportedName, JsCallEdge, JsCallSite, JsCallTarget, JsResolutionMode,
     JsResolvedCallRelationship,
 };
-use super::super::{JsExportName, JsModuleBinding, JsModuleIndex, JsModuleRecord};
+use super::super::{JsExportName, JsModuleBinding, JsModuleIndex, JsModuleRecord, WorkspaceProbe};
 use super::evaluator::load_project_aliases;
 
 pub struct JsCrossFileResolver {
@@ -20,22 +20,12 @@ const MAX_EXPORT_RESOLUTION_DEPTH: usize = 10;
 type ResolvedBinding = (String, ExportedBinding);
 
 impl JsCrossFileResolver {
-    pub fn new(root_dir: PathBuf, is_bun: bool, has_tsconfig: bool) -> Self {
-        let root_dir = std::fs::canonicalize(&root_dir).unwrap_or(root_dir);
-        let import_resolver = create_resolver(
-            is_bun,
-            has_tsconfig,
-            &root_dir,
-            JsResolutionMode::Import,
-            vec![],
-        );
-        let require_resolver = create_resolver(
-            is_bun,
-            has_tsconfig,
-            &root_dir,
-            JsResolutionMode::Require,
-            vec![],
-        );
+    pub fn new(probe: &WorkspaceProbe) -> Self {
+        // Probe canonicalized root already; reuse it so every subsystem
+        // compares paths against the same absolute form.
+        let root_dir = probe.root_dir().to_path_buf();
+        let import_resolver = create_resolver(probe, &root_dir, JsResolutionMode::Import, vec![]);
+        let require_resolver = create_resolver(probe, &root_dir, JsResolutionMode::Require, vec![]);
         Self {
             import_resolver,
             require_resolver,
@@ -45,23 +35,17 @@ impl JsCrossFileResolver {
 
     /// Apply explicit project alias config when the repository exposes it
     /// through supported config files.
-    pub fn apply_project_resolution_hints(&mut self, is_bun: bool, has_tsconfig: bool) {
-        let aliases = load_project_aliases(&self.root_dir);
+    pub fn apply_project_resolution_hints(&mut self, probe: &WorkspaceProbe) {
+        let aliases = load_project_aliases(probe);
         if !aliases.is_empty() {
             self.import_resolver = create_resolver(
-                is_bun,
-                has_tsconfig,
+                probe,
                 &self.root_dir,
                 JsResolutionMode::Import,
                 aliases.clone(),
             );
-            self.require_resolver = create_resolver(
-                is_bun,
-                has_tsconfig,
-                &self.root_dir,
-                JsResolutionMode::Require,
-                aliases,
-            );
+            self.require_resolver =
+                create_resolver(probe, &self.root_dir, JsResolutionMode::Require, aliases);
         }
     }
 
@@ -401,39 +385,14 @@ fn module_binding<'a>(
     }
 }
 
-/// Discover tsconfig/jsconfig for the resolver.
-///
-/// oxc_resolver's `TsconfigDiscovery::Auto` only searches for `tsconfig.json`,
-/// not `jsconfig.json`. Since `jsconfig.json` is structurally identical and
-/// commonly used by JS-only projects (VS Code, Vite, webpack 5.105+), we
-/// explicitly check for it and use Manual discovery if found.
-///
-/// Resolution priority:
-/// 1. `tsconfig.json` in root or parents -> Auto (oxc_resolver walks parent dirs)
-/// 2. `jsconfig.json` in root -> Manual (oxc_resolver parses it identically)
-/// 3. Neither exists -> Auto (harmless, falls through to ResolveOptions::alias)
-fn discover_tsconfig(root_dir: &Path) -> TsconfigDiscovery {
-    // jsconfig.json is functionally identical to tsconfig.json but Auto doesn't find it
-    let jsconfig = root_dir.join("jsconfig.json");
-    if jsconfig.exists() {
-        return TsconfigDiscovery::Manual(oxc_resolver::TsconfigOptions {
-            config_file: jsconfig,
-            references: oxc_resolver::TsconfigReferences::Auto,
-        });
-    }
-    TsconfigDiscovery::Auto
-}
-
 fn create_resolver(
-    is_bun: bool,
-    has_tsconfig: bool,
+    probe: &WorkspaceProbe,
     root_dir: &Path,
     resolution_mode: JsResolutionMode,
     aliases: Vec<(String, Vec<oxc_resolver::AliasValue>)>,
 ) -> Resolver {
     Resolver::new(base_resolve_options(
-        is_bun,
-        has_tsconfig,
+        probe,
         root_dir,
         resolution_mode,
         aliases,
@@ -441,15 +400,15 @@ fn create_resolver(
 }
 
 fn base_resolve_options(
-    is_bun: bool,
-    has_tsconfig: bool,
-    root_dir: &Path,
+    probe: &WorkspaceProbe,
+    _root_dir: &Path,
     resolution_mode: JsResolutionMode,
     alias: Vec<(String, Vec<oxc_resolver::AliasValue>)>,
 ) -> ResolveOptions {
-    let tsconfig = Some(discover_tsconfig(root_dir));
+    let tsconfig = Some(probe.tsconfig_discovery());
+    let has_tsconfig = probe.has_tsconfig();
 
-    let preferred = if is_bun {
+    let preferred = if probe.is_bun() {
         super::super::constants::RESOLVER_EXTENSIONS_BUN
     } else {
         super::super::constants::RESOLVER_EXTENSIONS

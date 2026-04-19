@@ -3,7 +3,6 @@ mod specifier;
 
 pub use specifier::JsCrossFileResolver;
 
-use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::v2::linker::rules::{ChainMode, ReceiverMode, ResolveStage};
@@ -17,7 +16,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::analyze::invocation::invocation_support_for_graph_def_kind;
 use super::{
     JsCallEdge, JsCallTarget, JsExportName, JsFileAnalysis, JsModuleIndex, JsPhase1FileInfo,
-    JsResolutionMode, JsResolvedCallRelationship, extract::ResolvedJsFile, is_bun_project,
+    JsResolutionMode, JsResolvedCallRelationship, WorkspaceProbe, extract::ResolvedJsFile,
 };
 
 pub fn attach_resolution_edges(
@@ -25,7 +24,7 @@ pub fn attach_resolution_edges(
     analyzed_files: &[ResolvedJsFile],
     file_infos: &FxHashMap<String, JsPhase1FileInfo>,
     modules_index: &JsModuleIndex,
-    root_path: &str,
+    probe: &WorkspaceProbe,
 ) {
     let lookup = GraphLookup::from_graph(graph);
     let mut seen = FxHashSet::default();
@@ -43,13 +42,6 @@ pub fn attach_resolution_edges(
         return;
     }
 
-    let root_dir = Path::new(root_path);
-    let discovered_paths = discovered_paths(root_dir, analyzed_files);
-    let has_tsconfig = ["tsconfig.json", "jsconfig.json"]
-        .iter()
-        .any(|name| root_dir.join(name).is_file());
-    let is_bun = is_bun_project(root_dir, &discovered_paths);
-
     let imported_calls: Vec<(String, Vec<JsCallEdge>)> = analyzed_files
         .iter()
         .filter_map(|file| {
@@ -64,8 +56,8 @@ pub fn attach_resolution_edges(
         })
         .collect();
 
-    let mut resolver = JsCrossFileResolver::new(root_dir.to_path_buf(), is_bun, has_tsconfig);
-    resolver.apply_project_resolution_hints(is_bun, has_tsconfig);
+    let mut resolver = JsCrossFileResolver::new(probe);
+    resolver.apply_project_resolution_hints(probe);
 
     let import_nodes: Vec<_> = graph
         .imports_iter()
@@ -485,21 +477,6 @@ fn add_edge(
     if seen.insert(key) {
         graph.graph.add_edge(source, target, edge);
     }
-}
-
-fn discovered_paths(root_dir: &Path, analyzed_files: &[ResolvedJsFile]) -> Vec<String> {
-    let mut discovered: Vec<String> = analyzed_files
-        .iter()
-        .map(|file| file.relative_path.clone())
-        .collect();
-
-    for manifest in super::constants::MANIFEST_FILENAMES {
-        if root_dir.join(manifest).is_file() {
-            discovered.push((*manifest).to_string());
-        }
-    }
-
-    discovered
 }
 
 #[derive(Default)]

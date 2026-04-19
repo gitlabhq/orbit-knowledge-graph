@@ -33,4 +33,4 @@ pub use types::{
     JsMemberKind, JsModuleInfo, JsPendingLocalCall, JsResolutionMode, JsResolvedCallRelationship,
     OwnedImportEntry,
 };
-pub use workspace::{WorkspacePackage, detect_workspaces, is_bun_project};
+pub use workspace::{WorkspacePackage, WorkspaceProbe};
