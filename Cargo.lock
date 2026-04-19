@@ -11510,6 +11510,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "serde",
+ "smallvec",
  "thiserror 2.0.18",
  "tree-sitter",
  "tree-sitter-c-sharp",

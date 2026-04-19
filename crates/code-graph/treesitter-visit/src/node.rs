@@ -307,6 +307,8 @@ impl<'r, D: Doc> Node<'r, D> {
             Axis::Ancestor => self.parent_chain().find(|a| criterion.test(a)),
             Axis::Descendant => self.find_descendant(|n| criterion.test(n)),
             Axis::Field(f) => self.field(f).filter(|n| criterion.test(n)),
+            Axis::PrevSibling => self.prev_all().find(|n| criterion.test(n)),
+            Axis::NextSibling => self.next_all().find(|n| criterion.test(n)),
         }
     }
 
@@ -360,19 +362,24 @@ pub enum Axis<'a> {
     Descendant,
     /// Named field on the node.
     Field(&'a str),
+    /// Previous siblings (same parent, before this node).
+    PrevSibling,
+    /// Next siblings (same parent, after this node).
+    NextSibling,
 }
 
 /// What to match on a node during traversal.
 #[derive(Clone, Copy)]
 pub enum Match<'a> {
-    /// Exact node kind.
     Kind(&'a str),
-    /// Any of these node kinds.
     AnyKind(&'a [&'a str]),
+    Any,
+    Named,
+    KindEndsWith(&'a str),
+    KindStartsWith(&'a str),
 }
 
 impl Match<'_> {
-    /// Test whether a node satisfies this criterion.
     pub fn test<D: Doc>(&self, node: &Node<'_, D>) -> bool {
         match self {
             Match::Kind(k) => node.kind().as_ref() == *k,
@@ -380,6 +387,10 @@ impl Match<'_> {
                 let kind = node.kind();
                 ks.iter().any(|k| *k == kind.as_ref())
             }
+            Match::Any => true,
+            Match::Named => node.is_named(),
+            Match::KindEndsWith(s) => node.kind().as_ref().ends_with(s),
+            Match::KindStartsWith(s) => node.kind().as_ref().starts_with(s),
         }
     }
 }

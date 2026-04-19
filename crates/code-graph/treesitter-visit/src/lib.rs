@@ -1,11 +1,16 @@
-//! Minimal tree-sitter wrapper for AST parsing and traversal.
+//! Tree-sitter AST parsing, traversal, and extraction toolkit.
 //!
-//! This crate provides a lightweight wrapper around tree-sitter for parsing source code
-//! and traversing the resulting AST.
+//! This crate provides:
+//! - A lightweight wrapper around tree-sitter for parsing source code
+//! - Composable traversal via [`Axis`] + [`Match`] on [`Node`]
+//! - Extraction pipelines ([`extract::Extract`]) for navigating CST paths
+//! - Boolean predicates ([`predicate::Pred`]) for node matching
 
+pub mod extract;
 pub mod language;
 pub mod languages;
 mod node;
+pub mod predicate;
 mod source;
 pub mod tree_sitter;
 
