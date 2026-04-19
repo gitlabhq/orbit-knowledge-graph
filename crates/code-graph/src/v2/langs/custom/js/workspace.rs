@@ -37,14 +37,10 @@ pub fn detect_workspaces(root_dir: &Path, discovered_paths: &[String]) -> Vec<Wo
 /// Check if this is a Bun project by inspecting discovered file paths
 /// and the root package.json content.
 pub fn is_bun_project(root_dir: &Path, discovered_paths: &[String]) -> bool {
-    let has_bun_lock = discovered_paths
+    let has_bun_signal = discovered_paths
         .iter()
-        .any(|p| p == "bun.lock" || p == "bun.lockb");
-    let has_bunfig = discovered_paths.iter().any(|p| p == "bunfig.toml");
-    if has_bun_lock || has_bunfig {
-        return true;
-    }
-    has_bun_types_dep(root_dir)
+        .any(|p| matches!(p.as_str(), "bun.lock" | "bun.lockb" | "bunfig.toml"));
+    has_bun_signal || has_bun_types_dep(root_dir)
 }
 
 fn has_bun_types_dep(root_dir: &Path) -> bool {

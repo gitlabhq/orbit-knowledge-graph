@@ -9,6 +9,7 @@ use oxc::syntax::scope::ScopeFlags;
 use oxc::syntax::symbol::{SymbolFlags, SymbolId};
 use std::collections::HashMap;
 
+use super::super::frameworks::extract_vue_options_api;
 use super::super::types::{
     ExportedBinding, ImportedName, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsFileAnalysis,
     JsImport, JsImportKind, JsInvocationSupport, JsMemberKind, JsModuleInfo, JsResolutionMode,
@@ -18,7 +19,6 @@ use super::cjs::{extract_cjs_exports, extract_cjs_imports};
 use super::invocation::{invocation_support_for_js_def_kind, invocation_support_for_symbol};
 use super::patterns::for_each_static_object_property;
 use super::ssa::extract_ssa_calls;
-use super::vue::extract_vue_options_api;
 
 pub(super) type NodeId = oxc::semantic::NodeId;
 

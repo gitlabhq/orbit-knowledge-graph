@@ -1,3 +1,8 @@
+mod evaluator;
+mod specifier;
+
+pub use specifier::JsCrossFileResolver;
+
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -9,11 +14,10 @@ use crate::v2::types::{
 use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::analysis::invocation::invocation_support_for_graph_def_kind;
+use super::analyze::invocation::invocation_support_for_graph_def_kind;
 use super::{
-    JsCallEdge, JsCallTarget, JsCrossFileResolver, JsExportName, JsFileAnalysis, JsModuleIndex,
-    JsPhase1FileInfo, JsResolutionMode, JsResolvedCallRelationship, is_bun_project,
-    phase1::ResolvedJsFile,
+    JsCallEdge, JsCallTarget, JsExportName, JsFileAnalysis, JsModuleIndex, JsPhase1FileInfo,
+    JsResolutionMode, JsResolvedCallRelationship, extract::ResolvedJsFile, is_bun_project,
 };
 
 pub fn attach_resolution_edges(
@@ -489,17 +493,9 @@ fn discovered_paths(root_dir: &Path, analyzed_files: &[ResolvedJsFile]) -> Vec<S
         .map(|file| file.relative_path.clone())
         .collect();
 
-    for extra in [
-        "bun.lock",
-        "bun.lockb",
-        "bunfig.toml",
-        "package.json",
-        "pnpm-workspace.yaml",
-        "tsconfig.json",
-        "jsconfig.json",
-    ] {
-        if root_dir.join(extra).is_file() {
-            discovered.push(extra.to_string());
+    for manifest in super::constants::MANIFEST_FILENAMES {
+        if root_dir.join(manifest).is_file() {
+            discovered.push((*manifest).to_string());
         }
     }
 

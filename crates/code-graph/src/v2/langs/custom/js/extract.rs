@@ -145,11 +145,9 @@ fn file_backed_module(
     language: Language,
     size: u64,
 ) -> Option<AnalyzedJsFile> {
-    let primary_binding = matches!(
-        extension,
-        "graphql" | "gql" | "svg" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "json"
-    )
-    .then(|| JsModuleBindingInput {
+    let is_file_backed = super::constants::ASSET_EXTENSIONS.contains(&extension)
+        || super::constants::DATA_EXTENSIONS.contains(&extension);
+    let primary_binding = is_file_backed.then(|| JsModuleBindingInput {
         export_name: JsExportName::Primary,
         binding: ExportedBinding {
             local_fqn: "default".to_string(),
@@ -197,25 +195,25 @@ fn source_variants(
     extension: &str,
     source: &str,
 ) -> Result<Vec<(String, String)>, String> {
-    match extension {
-        "vue" | "svelte" | "astro" => extract_scripts(source, extension).map(|blocks| {
-            blocks
-                .into_iter()
-                .map(|block| {
-                    let virtual_ext = if block.source_type.is_typescript() {
-                        "ts"
-                    } else {
-                        "js"
-                    };
-                    (
-                        format!("{relative_path}.{virtual_ext}"),
-                        block.source_text.to_string(),
-                    )
-                })
-                .collect()
-        }),
-        _ => Ok(vec![(relative_path.to_string(), source.to_string())]),
+    if !super::frameworks::has_embedded_scripts(extension) {
+        return Ok(vec![(relative_path.to_string(), source.to_string())]);
     }
+    extract_scripts(source, extension).map(|blocks| {
+        blocks
+            .into_iter()
+            .map(|block| {
+                let virtual_ext = if block.source_type.is_typescript() {
+                    "ts"
+                } else {
+                    "js"
+                };
+                (
+                    format!("{relative_path}.{virtual_ext}"),
+                    block.source_text.to_string(),
+                )
+            })
+            .collect()
+    })
 }
 
 fn extension_for(path: &str) -> String {
@@ -227,9 +225,10 @@ fn extension_for(path: &str) -> String {
 }
 
 fn language_for_extension(extension: &str) -> Language {
-    match extension {
-        "ts" | "tsx" | "mts" | "cts" => Language::TypeScript,
-        _ => Language::JavaScript,
+    if super::constants::is_ts_extension(extension) {
+        Language::TypeScript
+    } else {
+        Language::JavaScript
     }
 }
 
@@ -283,19 +282,24 @@ fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> Canonic
 }
 
 fn canonical_def_kind(kind: &JsDefKind) -> DefKind {
+    // Arms are explicit (no catch-all) so adding a new `JsDefKind`
+    // variant triggers an exhaustiveness error instead of silently
+    // collapsing to a wrong graph `DefKind`.
     match kind {
         JsDefKind::Class => DefKind::Class,
         JsDefKind::Interface => DefKind::Interface,
         JsDefKind::Namespace => DefKind::Module,
         JsDefKind::Function => DefKind::Function,
-        JsDefKind::Method { .. }
-        | JsDefKind::LifecycleHook { .. }
-        | JsDefKind::Watcher { .. }
-        | JsDefKind::Getter { .. }
-        | JsDefKind::Setter { .. } => DefKind::Method,
-        JsDefKind::ComputedProperty { .. } | JsDefKind::Variable => DefKind::Property,
+        JsDefKind::Method { .. } => DefKind::Method,
+        JsDefKind::LifecycleHook { .. } => DefKind::Method,
+        JsDefKind::Watcher { .. } => DefKind::Method,
+        JsDefKind::Getter { .. } => DefKind::Method,
+        JsDefKind::Setter { .. } => DefKind::Method,
+        JsDefKind::ComputedProperty { .. } => DefKind::Property,
+        JsDefKind::Variable => DefKind::Property,
         JsDefKind::EnumMember => DefKind::EnumEntry,
-        JsDefKind::TypeAlias | JsDefKind::Enum => DefKind::Other,
+        JsDefKind::TypeAlias => DefKind::Other,
+        JsDefKind::Enum => DefKind::Other,
     }
 }
 

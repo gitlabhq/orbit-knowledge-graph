@@ -6,24 +6,8 @@ use oxc::ast::ast::{
 use oxc::semantic::AstNodes;
 use std::collections::HashMap;
 
+use super::super::constants::is_vue_lifecycle_hook;
 use super::super::types::{JsDef, JsDefKind, JsInvocationSupport};
-
-const VUE_LIFECYCLE_HOOKS: &[&str] = &[
-    "beforeCreate",
-    "created",
-    "beforeMount",
-    "mounted",
-    "beforeUpdate",
-    "updated",
-    "beforeDestroy",
-    "destroyed",
-    "beforeUnmount",
-    "unmounted",
-    "activated",
-    "deactivated",
-    "errorCaptured",
-    "serverPrefetch",
-];
 
 fn vue_component_object<'a>(
     declaration: &'a ExportDefaultDeclarationKind<'a>,
@@ -107,10 +91,6 @@ fn is_contract_value(expression: &Expression<'_>) -> bool {
     )
 }
 
-fn is_vue_lifecycle_hook(key: &str) -> bool {
-    VUE_LIFECYCLE_HOOKS.contains(&key)
-}
-
 fn is_executable_vue_option(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool {
     match property.key.static_name().as_deref() {
         Some("methods" | "computed" | "watch") => {
@@ -158,7 +138,7 @@ fn is_known_vue_option_key(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool
         .is_some_and(is_vue_lifecycle_hook)
 }
 
-pub(super) fn extract_vue_options_api(
+pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
     nodes: &AstNodes,
     span_to_range: impl Fn(oxc::span::Span) -> Range,
     relative_path: &str,

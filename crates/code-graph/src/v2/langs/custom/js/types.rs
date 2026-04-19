@@ -90,6 +90,13 @@ impl JsModuleInfo {
     }
 }
 
+/// Merge `from` into `into`, keeping the existing entry on collision.
+///
+/// Collisions only happen for SFCs whose `<script>` and `<script setup>`
+/// blocks both declare the same name. We keep the first-seen binding
+/// (deterministic because `extract::source_variants` walks blocks in
+/// source order) and log the dropped entry so regressions surface in
+/// tests rather than silently losing an export.
 fn merge_unique_map<V>(into: &mut HashMap<String, V>, from: HashMap<String, V>, label: &str) {
     for (key, value) in from {
         match into.entry(key) {
@@ -98,6 +105,11 @@ fn merge_unique_map<V>(into: &mut HashMap<String, V>, from: HashMap<String, V>, 
             }
             Entry::Occupied(entry) => {
                 debug_assert!(false, "duplicate {label} merge for key {}", entry.key());
+                log::debug!(
+                    "js pipeline: dropping duplicate {label} '{}' from later script block",
+                    entry.key()
+                );
+                let _ = value;
             }
         }
     }

@@ -937,10 +937,7 @@ fn resolve_local_module_path(context: &AliasEvalContext<'_>, specifier: &str) ->
         return Some(candidate);
     }
 
-    for extension in [
-        "js", "jsx", "cjs", "mjs", "ts", "tsx", "mts", "cts", "json", "graphql", "gql", "vue",
-        "svelte", "astro",
-    ] {
+    for extension in super::super::constants::EVAL_EXTENSIONS {
         let candidate = PathBuf::from(format!("{}.{}", base.to_string_lossy(), extension));
         if let Some(candidate) = canonical_repo_existing_path(context.root_dir, &candidate)
             && candidate.is_file()
@@ -952,23 +949,8 @@ fn resolve_local_module_path(context: &AliasEvalContext<'_>, specifier: &str) ->
     if let Some(base_dir) = canonical_repo_existing_path(context.root_dir, &base)
         && base_dir.is_dir()
     {
-        for file_name in [
-            "index.js",
-            "index.jsx",
-            "index.cjs",
-            "index.mjs",
-            "index.ts",
-            "index.tsx",
-            "index.mts",
-            "index.cts",
-            "index.json",
-            "index.graphql",
-            "index.gql",
-            "index.vue",
-            "index.svelte",
-            "index.astro",
-        ] {
-            let candidate = base_dir.join(file_name);
+        for extension in super::super::constants::EVAL_EXTENSIONS {
+            let candidate = base_dir.join(format!("index.{extension}"));
             if let Some(candidate) = canonical_repo_existing_path(context.root_dir, &candidate)
                 && candidate.is_file()
             {

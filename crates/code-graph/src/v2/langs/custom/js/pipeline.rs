@@ -2,8 +2,8 @@ use crate::v2::linker::CodeGraph;
 use crate::v2::pipeline::{FileInput, LanguagePipeline, PipelineError, PipelineOutput};
 use rustc_hash::FxHashMap;
 
-use super::phase1::{ResolvedJsFile, analyze_files};
-use super::resolver::attach_resolution_edges;
+use super::extract::{ResolvedJsFile, analyze_files};
+use super::resolve::attach_resolution_edges;
 use super::{JsModuleGraphBuilder, JsPhase1FileInfo};
 
 pub struct JsPipeline;

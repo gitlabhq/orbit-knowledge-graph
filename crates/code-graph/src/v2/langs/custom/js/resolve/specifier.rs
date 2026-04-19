@@ -3,12 +3,12 @@ use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::evaluator::load_project_aliases;
-use super::types::{
+use super::super::types::{
     ExportedBinding, ImportedName, JsCallEdge, JsCallSite, JsCallTarget, JsResolutionMode,
     JsResolvedCallRelationship,
 };
-use super::{JsExportName, JsModuleBinding, JsModuleIndex, JsModuleRecord};
+use super::super::{JsExportName, JsModuleBinding, JsModuleIndex, JsModuleRecord};
+use super::evaluator::load_project_aliases;
 
 pub struct JsCrossFileResolver {
     import_resolver: Resolver,
@@ -22,10 +22,20 @@ type ResolvedBinding = (String, ExportedBinding);
 impl JsCrossFileResolver {
     pub fn new(root_dir: PathBuf, is_bun: bool, has_tsconfig: bool) -> Self {
         let root_dir = std::fs::canonicalize(&root_dir).unwrap_or(root_dir);
-        let import_resolver =
-            create_resolver(is_bun, has_tsconfig, &root_dir, JsResolutionMode::Import);
-        let require_resolver =
-            create_resolver(is_bun, has_tsconfig, &root_dir, JsResolutionMode::Require);
+        let import_resolver = create_resolver(
+            is_bun,
+            has_tsconfig,
+            &root_dir,
+            JsResolutionMode::Import,
+            vec![],
+        );
+        let require_resolver = create_resolver(
+            is_bun,
+            has_tsconfig,
+            &root_dir,
+            JsResolutionMode::Require,
+            vec![],
+        );
         Self {
             import_resolver,
             require_resolver,
@@ -38,14 +48,14 @@ impl JsCrossFileResolver {
     pub fn apply_project_resolution_hints(&mut self, is_bun: bool, has_tsconfig: bool) {
         let aliases = load_project_aliases(&self.root_dir);
         if !aliases.is_empty() {
-            self.import_resolver = create_resolver_with_aliases(
+            self.import_resolver = create_resolver(
                 is_bun,
                 has_tsconfig,
                 &self.root_dir,
                 JsResolutionMode::Import,
                 aliases.clone(),
             );
-            self.require_resolver = create_resolver_with_aliases(
+            self.require_resolver = create_resolver(
                 is_bun,
                 has_tsconfig,
                 &self.root_dir,
@@ -73,7 +83,7 @@ impl JsCrossFileResolver {
             'call_loop: for call in calls {
                 let JsCallTarget::ImportedCall {
                     imported_call:
-                        super::types::JsImportedCall {
+                        super::super::types::JsImportedCall {
                             binding,
                             member_path,
                             invocation_kind,
@@ -373,7 +383,7 @@ impl JsCrossFileResolver {
 
 fn binding_supports_invocation(
     binding: &ExportedBinding,
-    invocation_kind: super::types::JsInvocationKind,
+    invocation_kind: super::super::types::JsInvocationKind,
 ) -> bool {
     binding
         .invocation_support
@@ -419,29 +429,14 @@ fn create_resolver(
     has_tsconfig: bool,
     root_dir: &Path,
     resolution_mode: JsResolutionMode,
+    aliases: Vec<(String, Vec<oxc_resolver::AliasValue>)>,
 ) -> Resolver {
     Resolver::new(base_resolve_options(
         is_bun,
         has_tsconfig,
         root_dir,
         resolution_mode,
-        vec![],
-    ))
-}
-
-fn create_resolver_with_aliases(
-    is_bun: bool,
-    has_tsconfig: bool,
-    root_dir: &Path,
-    resolution_mode: JsResolutionMode,
-    alias: Vec<(String, Vec<oxc_resolver::AliasValue>)>,
-) -> Resolver {
-    Resolver::new(base_resolve_options(
-        is_bun,
-        has_tsconfig,
-        root_dir,
-        resolution_mode,
-        alias,
+        aliases,
     ))
 }
 
@@ -454,23 +449,12 @@ fn base_resolve_options(
 ) -> ResolveOptions {
     let tsconfig = Some(discover_tsconfig(root_dir));
 
-    let extensions: Vec<String> = if is_bun {
-        [
-            ".tsx", ".jsx", ".ts", ".mts", ".mjs", ".js", ".cjs", ".cts", ".vue", ".svelte",
-            ".astro", ".graphql", ".gql", ".json",
-        ]
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect()
+    let preferred = if is_bun {
+        super::super::constants::RESOLVER_EXTENSIONS_BUN
     } else {
-        [
-            ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".vue", ".svelte",
-            ".astro", ".graphql", ".gql", ".json",
-        ]
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect()
+        super::super::constants::RESOLVER_EXTENSIONS
     };
+    let extensions: Vec<String> = preferred.iter().map(|ext| format!(".{ext}")).collect();
 
     let extension_alias = if has_tsconfig {
         vec![
