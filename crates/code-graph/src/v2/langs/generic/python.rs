@@ -89,11 +89,16 @@ impl DslLanguage for PythonDsl {
     fn hooks() -> crate::v2::dsl::types::LanguageHooks {
         crate::v2::dsl::types::LanguageHooks {
             module_scope: Some(python_module_from_path),
-            return_kinds: &["return_statement"],
-            adopt_sibling_refs: &["decorator"],
-            resolve_import_path: Some(resolve_python_relative_import),
             ..crate::v2::dsl::types::LanguageHooks::default()
         }
+    }
+
+    fn return_kinds() -> &'static [&'static str] {
+        &["return_statement"]
+    }
+
+    fn resolve_import_path() -> Option<fn(&str, &str, &str) -> Option<String>> {
+        Some(resolve_python_relative_import)
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -107,14 +112,17 @@ impl DslLanguage for PythonDsl {
         let mut rules = vec![
             scope("class_definition", "Class")
                 .def_kind(DefKind::Class)
-                .metadata(class_meta()),
+                .metadata(class_meta())
+                .adopt_siblings(&["decorator"]),
             scope("class_definition", "DecoratedClass")
                 .def_kind(DefKind::Class)
                 .when(parent_is("decorated_definition"))
-                .metadata(class_meta()),
+                .metadata(class_meta())
+                .adopt_siblings(&["decorator"]),
             scope_fn("function_definition", classify_python_function)
                 .def_kind(DefKind::Function)
-                .metadata(func_meta()),
+                .metadata(func_meta())
+                .adopt_siblings(&["decorator"]),
             scope("assignment", "Lambda")
                 .def_kind(DefKind::Lambda)
                 .when(field_kind("right", &["lambda"]))
@@ -128,7 +136,8 @@ impl DslLanguage for PythonDsl {
             vec![
                 scope_fn("function_definition", |_| "Method")
                     .def_kind(DefKind::Method)
-                    .metadata(func_meta()),
+                    .metadata(func_meta())
+                    .adopt_siblings(&["decorator"]),
             ],
         ));
 

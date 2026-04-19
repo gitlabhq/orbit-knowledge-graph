@@ -43,6 +43,7 @@ struct ScopeMatch {
     range: crate::utils::Range,
     creates_scope: bool,
     metadata: Option<Box<DefinitionMetadata>>,
+    adopt_siblings: &'static [&'static str],
 }
 
 impl LanguageSpec {
@@ -69,6 +70,7 @@ impl LanguageSpec {
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
             metadata: rule.extract_metadata(node, &resolve),
+            adopt_siblings: rule.adopt_siblings,
         })
     }
 
@@ -254,7 +256,7 @@ impl LanguageSpec {
 
         if let Some(child_kinds) = rule.multi_child_kinds {
             let raw_path = rule.extract().apply(node).unwrap_or_default();
-            let base_path = if let Some(resolve) = self.hooks.resolve_import_path
+            let base_path = if let Some(resolve) = self.resolve_import_path
                 && let Some(ms) = module_scope
             {
                 resolve(&raw_path, ms, sep).unwrap_or(raw_path)
@@ -311,7 +313,7 @@ impl LanguageSpec {
                 }
             }
         } else if let Some(raw_path) = rule.extract().apply(node) {
-            let full_path = if let Some(resolve) = self.hooks.resolve_import_path
+            let full_path = if let Some(resolve) = self.resolve_import_path
                 && let Some(ms) = module_scope
             {
                 resolve(&raw_path, ms, sep).unwrap_or(raw_path)
@@ -672,11 +674,11 @@ impl LanguageSpec {
                 // Adopt sibling references: when decorators/annotations are
                 // CST siblings of the scope node, emit refs attributed to
                 // this def rather than the parent scope.
-                if !self.hooks.adopt_sibling_refs.is_empty() {
+                if !m.adopt_siblings.is_empty() {
                     if let Some(parent) = node.parent() {
                         for sibling in parent.children() {
                             let sk = sibling.kind();
-                            if self.hooks.adopt_sibling_refs.contains(&sk.as_ref()) {
+                            if m.adopt_siblings.contains(&sk.as_ref()) {
                                 if let Some(name) =
                                     treesitter_visit::extract::default_name().apply(&sibling)
                                 {
@@ -807,7 +809,7 @@ impl LanguageSpec {
             }
 
             // Track return statement context + infer return type from bare identifiers
-            if !self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk) {
+            if !self.return_kinds.is_empty() && self.return_kinds.contains(&nk) {
                 state.in_return = true;
 
                 // For `return x` where x is a bare identifier, read its SSA
@@ -901,7 +903,7 @@ impl LanguageSpec {
         }
 
         // Clear return context after children
-        if !self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk) {
+        if !self.return_kinds.is_empty() && self.return_kinds.contains(&nk) {
             state.in_return = false;
         }
 

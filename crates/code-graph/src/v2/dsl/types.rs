@@ -40,6 +40,11 @@ pub struct ScopeRule {
     name: Extract,
     pub creates_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
+    /// When this scope def is created, scan the parent's children for
+    /// siblings of these kinds and emit refs attributed to the new def.
+    /// Handles decorators/annotations that are CST siblings of the
+    /// decorated function/class definition.
+    pub(crate) adopt_siblings: &'static [&'static str],
 }
 
 impl Rule for ScopeRule {
@@ -87,6 +92,13 @@ impl ScopeRule {
         self
     }
 
+    /// When this scope is entered, adopt sibling nodes of these kinds
+    /// as references attributed to this def.
+    pub fn adopt_siblings(mut self, kinds: &'static [&'static str]) -> Self {
+        self.adopt_siblings = kinds;
+        self
+    }
+
     pub(crate) fn resolve_def_kind(&self) -> DefKind {
         self.def_kind
     }
@@ -116,6 +128,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         name: default_name(),
         creates_scope: true,
         metadata_rule: None,
+        adopt_siblings: &[],
     }
 }
 
@@ -129,6 +142,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         name: default_name(),
         creates_scope: true,
         metadata_rule: None,
+        adopt_siblings: &[],
     }
 }
 
@@ -147,6 +161,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         name: default_name(),
         creates_scope: true,
         metadata_rule: None,
+        adopt_siblings: &[],
     }
 }
 
@@ -427,6 +442,14 @@ pub trait DslLanguage: Send + Sync + Default {
         SsaConfig::default()
     }
 
+    fn return_kinds() -> &'static [&'static str] {
+        &[]
+    }
+
+    fn resolve_import_path() -> Option<fn(&str, &str, &str) -> Option<String>> {
+        None
+    }
+
     fn spec() -> LanguageSpec {
         let mut spec =
             LanguageSpec::new(Self::name(), Self::scopes(), Self::refs(), Self::imports())
@@ -434,7 +457,11 @@ pub trait DslLanguage: Send + Sync + Default {
                 .with_bindings(Self::bindings())
                 .with_branches(Self::branches())
                 .with_loops(Self::loops())
-                .with_ssa_config(Self::ssa_config());
+                .with_ssa_config(Self::ssa_config())
+                .with_return_kinds(Self::return_kinds());
+        if let Some(f) = Self::resolve_import_path() {
+            spec = spec.with_resolve_import_path(f);
+        }
         if let Some(cc) = Self::chain_config() {
             spec = spec.chain(cc);
         }
@@ -633,8 +660,10 @@ pub type ScopeHookFn = fn(
     &'static str,
 ) -> bool;
 
-/// Language-specific escape hatches. All fields default to `None`.
-/// The engine calls each hook if set, otherwise uses default behavior.
+/// Language-specific escape hatches for behavior that can't be expressed
+/// as declarative rules. Only `module_scope`, `on_scope`, and `on_import`
+/// remain — all other hooks have been absorbed into rule types or
+/// `LanguageSpec` fields.
 #[derive(Default)]
 pub struct LanguageHooks {
     /// Derive a module scope from a file path before walking.
@@ -643,20 +672,6 @@ pub struct LanguageHooks {
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
-    /// Node kinds that are return statements. When encountered, the engine
-    /// captures the SSA value of the returned expression and writes it as
-    /// the enclosing function's inferred return type.
-    pub return_kinds: &'static [&'static str],
-    /// When a scope def is created, scan the parent node's children for
-    /// siblings of these kinds and emit reference PendingRefs attributed
-    /// to the new def. Handles decorators/annotations that are CST siblings
-    /// of the decorated function/class definition.
-    pub adopt_sibling_refs: &'static [&'static str],
-    /// Resolve an import path relative to the current module scope.
-    /// Called with (raw_path, module_scope, separator). Returns the
-    /// resolved absolute path, or None to keep the raw path.
-    /// Handles Python's `from .models import User` → `package.models`.
-    pub resolve_import_path: Option<fn(&str, &str, &str) -> Option<String>>,
 }
 
 // ── Unified dispatch ────────────────────────────────────────────
@@ -686,6 +701,15 @@ pub struct LanguageSpec {
     pub(crate) hooks: LanguageHooks,
     pub ssa_config: SsaConfig,
 
+    /// Node kinds that are return statements. The engine tracks return
+    /// context and infers return types from bare identifiers/calls.
+    pub return_kinds: &'static [&'static str],
+
+    /// Resolve an import path relative to the current module scope.
+    /// Called with (raw_path, module_scope, separator). Returns the
+    /// resolved absolute path, or None to keep the raw path.
+    pub resolve_import_path: Option<fn(&str, &str, &str) -> Option<String>>,
+
     /// Single dispatch table: node_kind → tagged rule indices.
     /// Built once at construction, O(1) lookup per node during walk.
     pub(crate) dispatch: FxHashMap<&'static str, smallvec::SmallVec<[ActionRef; 3]>>,
@@ -710,6 +734,8 @@ impl LanguageSpec {
             package_node: None,
             hooks: LanguageHooks::default(),
             ssa_config: SsaConfig::default(),
+            return_kinds: &[],
+            resolve_import_path: None,
             dispatch: FxHashMap::default(),
         };
         spec.rebuild_dispatch();
@@ -753,6 +779,16 @@ impl LanguageSpec {
 
     pub fn with_ssa_config(mut self, config: SsaConfig) -> Self {
         self.ssa_config = config;
+        self
+    }
+
+    pub fn with_return_kinds(mut self, kinds: &'static [&'static str]) -> Self {
+        self.return_kinds = kinds;
+        self
+    }
+
+    pub fn with_resolve_import_path(mut self, f: fn(&str, &str, &str) -> Option<String>) -> Self {
+        self.resolve_import_path = Some(f);
         self
     }
 
